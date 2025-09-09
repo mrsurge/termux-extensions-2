@@ -1,0 +1,29 @@
+<!-- Extension Template: Sessions & Shortcuts -->
+<div class="section-header">
+    <h2 class="section-title">Sessions & Shortcuts</h2>
+    <button id="refresh-btn" class="refresh-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
+        <span>Refresh</span>
+    </button>
+</div>
+<div id="sessions-list">
+    <p style="color: var(--muted-foreground);">Loading sessions...</p>
+</div>
+
+<!-- Modals for this extension -->
+<div id="command-modal" class="modal">
+    <div class="modal-content">
+        <h2>Run Command</h2>
+        <input type="text" id="command-input" class="modal-input" placeholder="Enter command...">
+        <button id="run-command-btn" class="modal-btn btn-primary" style="margin-right: 8px;">Run</button>
+        <button onclick="closeModal('command-modal')" class="modal-btn btn-secondary">Cancel</button>
+    </div>
+</div>
+
+<div id="shortcut-modal" class="modal">
+    <div class="modal-content">
+        <h2>Run Shortcut</h2>
+        <div id="shortcut-list" style="margin-top: 1em;"></div>
+        <button onclick="closeModal('shortcut-modal')" class="modal-btn btn-secondary" style="margin-top: 1em;">Cancel</button>
+    </div>
+</div>

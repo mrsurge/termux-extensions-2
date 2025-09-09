@@ -76,7 +76,6 @@
             background-color: var(--secondary);
             color: var(--foreground);
         }
-        /* Placeholders */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -113,7 +112,7 @@
         .status-dot { width: 8px; height: 8px; border-radius: 50%; }
         .dot-green { background-color: var(--success); }
 
-        /* Sessions Panel */
+        /* Extension-specific styles will be loaded or are defined in their components */
         .session {
             background-color: var(--secondary);
             border: 1px solid var(--border);
@@ -131,7 +130,6 @@
         .menu-item:hover { background-color: var(--muted); }
         .menu-item.destructive { color: var(--destructive); }
         
-        /* Modals */
         .modal { display: none; position: fixed; z-index: 200; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); backdrop-filter: blur(2px); }
         .modal-content { background-color: var(--card); margin: 15% auto; padding: 20px; border: 1px solid var(--border); border-radius: 8px; width: 90%; max-width: 400px; }
         .modal-content h2 { margin-top: 0; color: var(--foreground); }
@@ -144,7 +142,7 @@
 <body>
 
     <div class="main-container">
-        <!-- Placeholder: System Stats -->
+        <!-- System Stats (Part of Core UI) -->
         <div>
             <h2 class="section-title">System</h2>
             <div class="stats-grid">
@@ -161,179 +159,59 @@
             </div>
         </div>
 
-        <!-- Dynamic Sessions List -->
-        <div>
-            <div class="section-header">
-                <h2 class="section-title">Sessions & Shortcuts</h2>
-                <button id="refresh-btn" class="refresh-btn">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
-                    <span>Refresh</span>
-                </button>
-            </div>
-            <div id="sessions-list">
-                <p style="color: var(--muted-foreground);">Loading sessions...</p>
-            </div>
-        </div>
+        <!-- Container for dynamically loaded extensions -->
+        <div id="extensions-container"></div>
+
     </div>
 
-    <!-- Modals -->
-    <div id="command-modal" class="modal">
-        <div class="modal-content">
-            <h2>Run Command</h2>
-            <input type="text" id="command-input" class="modal-input" placeholder="Enter command...">
-            <button id="run-command-btn" class="modal-btn btn-primary" style="margin-right: 8px;">Run</button>
-            <button onclick="closeModal('command-modal')" class="modal-btn btn-secondary">Cancel</button>
-        </div>
-    </div>
+    <script type="module">
+        // --- Main Application Loader ---
+        const extensionsContainer = document.getElementById('extensions-container');
 
-    <div id="shortcut-modal" class="modal">
-        <div class="modal-content">
-            <h2>Run Shortcut</h2>
-            <div id="shortcut-list" style="margin-top: 1em;"></div>
-            <button onclick="closeModal('shortcut-modal')" class="modal-btn btn-secondary" style="margin-top: 1em;">Cancel</button>
-        </div>
-    </div>
+        async function loadExtensions() {
+            try {
+                const response = await fetch('/api/extensions');
+                const extensions = await response.json();
 
-    <script>
-        // The existing JS logic remains largely the same
-        document.addEventListener('DOMContentLoaded', () => {
-            const sessionsList = document.getElementById('sessions-list');
-            let currentSessionId = null;
+                for (const ext of extensions) {
+                    const extDir = ext._ext_dir;
+                    const extContainer = document.createElement('div');
+                    extContainer.id = `extension-${extDir}`;
+                    extContainer.className = 'extension-wrapper';
+                    extensionsContainer.appendChild(extContainer);
 
-            const api = {
-                get: (endpoint) => fetch(endpoint).then(res => res.ok ? res.json() : Promise.reject(res)),
-                post: (endpoint, body) => fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
-                }).then(res => res.ok ? res.json() : Promise.reject(res)),
-                delete: (endpoint) => fetch(endpoint, { method: 'DELETE' }).then(res => res.ok ? res.json() : Promise.reject(res))
-            };
+                    // 1. Fetch and inject the extension's HTML template
+                    const templatePath = `/extensions/${extDir}/${ext.entrypoints.frontend_template}`;
+                    const templateResponse = await fetch(templatePath);
+                    extContainer.innerHTML = await templateResponse.text();
 
-            const renderSessions = (sessions) => {
-                sessionsList.innerHTML = '';
-                if (sessions.length === 0) {
-                    sessionsList.innerHTML = '<p style="color: var(--muted-foreground);">No interactive sessions found.</p>';
-                    return;
-                }
-                sessions.forEach(session => {
-                    const sessionEl = document.createElement('div');
-                    sessionEl.className = 'session';
-                    sessionEl.innerHTML = `
-                        <div class="session-header">
-                            <div class="session-title">SID: ${session.sid}</div>
-                            <button class="menu-btn" data-sid="${session.sid}">&#8942;</button>
-                        </div>
-                        <div class="session-cwd">${session.cwd}</div>
-                        <div class="menu" id="menu-${session.sid}">
-                            <div class="menu-item" data-action="run-shortcut">Run Shortcut...</div>
-                            <div class="menu-item" data-action="run-command">Run Command...</div>
-                            <div class="menu-item destructive" data-action="kill">Kill Session</div>
-                        </div>
-                    `;
-                    sessionsList.appendChild(sessionEl);
-                });
-            };
-
-            const renderShortcuts = (shortcuts) => {
-                const shortcutList = document.getElementById('shortcut-list');
-                shortcutList.innerHTML = '';
-                if (shortcuts.length === 0) {
-                    shortcutList.innerHTML = '<p style="color: var(--muted-foreground);">No shortcuts found in ~/.shortcuts</p>';
-                    return;
-                }
-                shortcuts.forEach(shortcut => {
-                    const shortcutEl = document.createElement('div');
-                    shortcutEl.className = 'menu-item';
-                    shortcutEl.textContent = shortcut.name;
-                    shortcutEl.onclick = () => runShortcut(shortcut.path);
-                    shortcutList.appendChild(shortcutEl);
-                });
-            };
-
-            const refreshSessions = () => {
-                api.get('/api/sessions').then(renderSessions).catch(err => {
-                    sessionsList.innerHTML = '<p style="color: var(--destructive);">Error loading sessions.</p>';
-                    console.error(err);
-                });
-            };
-
-            const openMenu = (sid, button) => {
-                closeAllMenus();
-                const menu = document.getElementById(`menu-${sid}`);
-                menu.style.display = 'block';
-                const rect = button.getBoundingClientRect();
-                menu.style.top = rect.bottom + 'px';
-                menu.style.right = (window.innerWidth - rect.right) + 'px';
-            };
-
-            const closeAllMenus = () => {
-                document.querySelectorAll('.menu').forEach(m => m.style.display = 'none');
-            };
-
-            window.openModal = (modalId, sid) => {
-                currentSessionId = sid;
-                document.getElementById(modalId).style.display = 'block';
-            };
-
-            window.closeModal = (modalId) => {
-                document.getElementById(modalId).style.display = 'none';
-            };
-
-            const runShortcut = (path) => {
-                api.post(`/api/sessions/${currentSessionId}/shortcut`, { path })
-                    .then(() => closeModal('shortcut-modal'))
-                    .catch(err => alert('Failed to run shortcut.'));
-            };
-
-            document.body.addEventListener('click', (e) => {
-                const target = e.target;
-                if (target.classList.contains('menu-btn')) {
-                    openMenu(target.dataset.sid, target);
-                    e.stopPropagation();
-                    return;
-                }
-
-                const menuItem = target.closest('.menu-item');
-                if (menuItem) {
-                    const menu = menuItem.closest('.menu');
-                    const sid = menu.id.replace('menu-', '');
-                    const action = menuItem.dataset.action;
+                    // 2. Dynamically import and initialize the extension's JavaScript module
+                    const scriptPath = `/extensions/${extDir}/${ext.entrypoints.frontend_script}`;
+                    const module = await import(scriptPath);
                     
-                    closeAllMenus();
+                    // Create a scoped API object for the extension
+                    const api = {
+                        get: (endpoint) => fetch(`/api/ext/${extDir}/${endpoint}`).then(res => res.ok ? res.json() : Promise.reject(res)),
+                        post: (endpoint, body) => fetch(`/api/ext/${extDir}/${endpoint}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body)
+                        }).then(res => res.ok ? res.json() : Promise.reject(res)),
+                        delete: (endpoint) => fetch(`/api/ext/${extDir}/${endpoint}`, { method: 'DELETE' }).then(res => res.ok ? res.json() : Promise.reject(res))
+                    };
 
-                    if (action === 'kill') {
-                        if (confirm(`Are you sure you want to kill session ${sid}?`)) {
-                            api.delete(`/api/sessions/${sid}`).then(refreshSessions);
-                        }
-                    } else if (action === 'run-command') {
-                        openModal('command-modal', sid);
-                    } else if (action === 'run-shortcut') {
-                        api.get('/api/shortcuts').then(renderShortcuts);
-                        openModal('shortcut-modal', sid);
-                    }
-                } else if (!target.closest('.menu')) {
-                    closeAllMenus();
+                    module.default(extContainer, api);
                 }
-            });
+            } catch (error) {
+                extensionsContainer.innerHTML = `
+                    <p style="color: var(--destructive);">Error loading extensions.</p>
+                    <pre style="color: var(--muted-foreground); white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; font-size: 0.8em;">${error.stack || error}</pre>
+                `;
+                console.error("Failed to load extensions:", error);
+            }
+        }
 
-            document.getElementById('run-command-btn').addEventListener('click', () => {
-                const command = document.getElementById('command-input').value;
-                if (command && currentSessionId) {
-                    api.post(`/api/sessions/${currentSessionId}/command`, { command })
-                        .then(() => {
-                            closeModal('command-modal');
-                            document.getElementById('command-input').value = '';
-                        })
-                        .catch(err => alert('Failed to run command.'));
-                }
-            });
-
-            document.getElementById('refresh-btn').addEventListener('click', refreshSessions);
-
-            // --- Initial Load ---
-            refreshSessions();
-        });
+        document.addEventListener('DOMContentLoaded', loadExtensions);
     </script>
 </body>
 </html>

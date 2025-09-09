@@ -1,118 +1,75 @@
 #!/usr/bin/env python
 
-print("DEBUG: Script starting...")
-
-import json
 import os
-import subprocess
-from flask import Flask, render_template, jsonify, request
-
-print("DEBUG: Imports successful.")
+import json
+import importlib.util
+from flask import Flask, render_template, jsonify, send_from_directory
 
 app = Flask(__name__)
-print(f"DEBUG: Flask app created. __name__ is: {__name__}")
 
-# Get the absolute path of the project's root directory
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-scripts_dir = os.path.join(project_root, 'scripts')
-print(f"DEBUG: Project root: {project_root}")
+# --- Extension Loader ---
 
-def run_script(script_name, args=None):
-    """Helper function to run a shell script and return its output."""
-    if args is None:
-        args = []
-    script_path = os.path.join(scripts_dir, script_name)
-    try:
-        # Ensure script is executable
-        subprocess.run(['chmod', '+x', script_path], check=True)
-        result = subprocess.run([script_path] + args, capture_output=True, text=True, check=True)
-        return result.stdout, None
-    except subprocess.CalledProcessError as e:
-        return None, e.stderr
-    except FileNotFoundError:
-        return None, f"Script not found: {script_path}"
+def load_extensions():
+    """Scans for extensions, loads their blueprints, and returns their manifests."""
+    extensions = []
+    extensions_dir = os.path.join(os.path.dirname(__file__), 'extensions')
+    if not os.path.exists(extensions_dir):
+        return []
+
+    for ext_name in os.listdir(extensions_dir):
+        ext_path = os.path.join(extensions_dir, ext_name)
+        manifest_path = os.path.join(ext_path, 'manifest.json')
+        
+        if not os.path.isdir(ext_path) or not os.path.exists(manifest_path):
+            continue
+
+        with open(manifest_path, 'r') as f:
+            manifest = json.load(f)
+            # Add extension directory name to manifest data for later use
+            manifest['_ext_dir'] = ext_name
+            extensions.append(manifest)
+
+        # Dynamically load and register the blueprint
+        backend_file = manifest.get('entrypoints', {}).get('backend_blueprint')
+        if backend_file:
+            module_name = f"app.extensions.{ext_name}.{backend_file.replace('.py', '')}"
+            spec = importlib.util.spec_from_file_location(
+                module_name, 
+                os.path.join(ext_path, backend_file)
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            
+            # Find the blueprint object in the loaded module
+            from flask import Blueprint
+            for obj_name in dir(module):
+                obj = getattr(module, obj_name)
+                if isinstance(obj, Blueprint):
+                    app.register_blueprint(obj, url_prefix=f"/api/ext/{ext_name}")
+                    break
+    return extensions
+
+# --- Main Application Routes ---
 
 @app.route('/')
 def index():
     """Serves the main HTML page."""
     return render_template('index.html')
 
-# --- API Endpoints ---
+@app.route('/api/extensions', methods=['GET'])
+def get_extensions():
+    """Returns the list of loaded extension manifests."""
+    return jsonify(loaded_extensions)
 
-@app.route('/api/sessions', methods=['GET'])
-def get_sessions():
-    """Lists all active, interactive sessions."""
-    output, error = run_script('list_sessions.sh')
-    if error:
-        return jsonify({'error': error}), 500
-    try:
-        return jsonify(json.loads(output))
-    except json.JSONDecodeError:
-        return jsonify({'error': 'Failed to decode JSON from script.', 'output': output}), 500
+@app.route('/extensions/<path:ext_dir>/<path:filename>')
+def serve_extension_file(ext_dir, filename):
+    """Serves a static file from a specific extension's directory."""
+    return send_from_directory(os.path.join(app.root_path, 'extensions', ext_dir), filename)
 
-@app.route('/api/shortcuts', methods=['GET'])
-def get_shortcuts():
-    """Lists all available shortcuts."""
-    output, error = run_script('list_shortcuts.sh')
-    if error:
-        return jsonify({'error': error}), 500
-    try:
-        return jsonify(json.loads(output))
-    except json.JSONDecodeError:
-        return jsonify({'error': 'Failed to decode JSON from script.', 'output': output}), 500
-
-@app.route('/api/sessions/<string:sid>/command', methods=['POST'])
-def run_command(sid):
-    """Runs a command in a specific session."""
-    data = request.get_json()
-    if not data or 'command' not in data:
-        return jsonify({'error': 'Missing \'command\' in request body'}), 400
-    
-    command = data['command']
-    _, error = run_script('run_in_session.sh', [sid, command])
-    
-    if error:
-        return jsonify({'error': error}), 500
-    return jsonify({'status': 'success', 'message': f"Command sent to session {sid}."})
-
-@app.route('/api/sessions/<string:sid>/shortcut', methods=['POST'])
-def run_shortcut(sid):
-    """Runs a shortcut script in a specific session."""
-    data = request.get_json()
-    if not data or 'path' not in data:
-        return jsonify({'error': 'Missing \'path\' of the shortcut in request body'}), 400
-
-    shortcut_path = data['path']
-    # We execute the shortcut path directly, it's a command itself
-    _, error = run_script('run_in_session.sh', [sid, shortcut_path])
-
-    if error:
-        return jsonify({'error': error}), 500
-    return jsonify({'status': 'success', 'message': f"Shortcut {os.path.basename(shortcut_path)} sent to session {sid}."})
-
-
-@app.route('/api/sessions/<string:sid>', methods=['DELETE'])
-def kill_session(sid):
-    """Kills a specific session by its PID."""
-    try:
-        # In Unix-like systems, the session ID (sid) is the process ID (PID).
-        pid = int(sid)
-        # Using os.kill to send SIGKILL signal
-        os.kill(pid, 9) # 9 = SIGKILL
-        return jsonify({'status': 'success', 'message': f"Session {sid} killed."})
-    except (ValueError, TypeError):
-        return jsonify({'error': 'Invalid session ID format.'}), 400
-    except ProcessLookupError:
-        return jsonify({'status': 'success', 'message': f"Session {sid} was already terminated."}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-print("DEBUG: Script definitions loaded. Checking __name__...")
 
 if __name__ == '__main__':
-    print("DEBUG: __name__ is '__main__', starting Flask server...")
-    # Use '0.0.0.0' to make the server accessible from the network
-    # Debug mode is on for development
+    print("--- Loading Extensions ---")
+    loaded_extensions = load_extensions()
+    print(f"Loaded {len(loaded_extensions)} extensions.")
+    print("--- Starting Server ---")
     app.run(host='0.0.0.0', port=8080, debug=True)
-else:
-    print("DEBUG: __name__ is NOT '__main__', Flask server will not start.")

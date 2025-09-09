@@ -43,7 +43,97 @@ def get_sessions():
 
 ## 3. Shell Interaction Layer
 
-The interaction between the web server and the live Termux shells is the core of the project. This is handled by a set of robust shell scripts.
+# Project Specification: termux-extensions-2
+
+This document outlines the implemented architecture of the `termux-extensions-2` project.
+
+## 1. Modular Architecture
+
+The framework is built on a modular architecture where features are encapsulated in self-contained **extensions**. The main Flask application is responsible for discovering, loading, and serving these extensions.
+
+### 1.1. Extension Discovery
+
+On startup, the main application scans the `app/extensions/` directory for subdirectories. Each valid extension is identified by the presence of a `manifest.json` file.
+
+**`app/extensions/sessions_and_shortcuts/manifest.json`:**
+```json
+{
+  "name": "Sessions & Shortcuts",
+  "version": "0.1.0",
+  "description": "View and interact with active Termux sessions and run shortcuts.",
+  "author": "Gemini",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  }
+}
+```
+
+### 1.2. Backend Loading
+
+The core backend in `app/main.py` dynamically loads each extension's Python code as a Flask **Blueprint**. This registers the extension's specific API routes under a unique prefix (e.g., `/api/ext/sessions_and_shortcuts`).
+
+**`app/main.py` - Extension Loading Snippet:**
+```python
+def load_extensions():
+    # ...
+    for ext_name in os.listdir(extensions_dir):
+        # ... read manifest ...
+
+        # Dynamically load and register the blueprint
+        backend_file = manifest.get('entrypoints', {}).get('backend_blueprint')
+        if backend_file:
+            # ... importlib code to load module ...
+            
+            # Find the blueprint object in the loaded module
+            from flask import Blueprint
+            for obj_name in dir(module):
+                obj = getattr(module, obj_name)
+                if isinstance(obj, Blueprint):
+                    app.register_blueprint(obj, url_prefix=f"/api/ext/{ext_name}")
+                    break
+    return extensions
+```
+
+### 1.3. Frontend Loading
+
+The main `index.html` page acts as a shell. Its JavaScript fetches a list of available extensions from the `/api/extensions` endpoint. For each extension, it dynamically fetches the HTML template and injects it into the page, then loads the corresponding JavaScript module to make it interactive.
+
+**`app/templates/index.html` - Extension Loader Snippet:**
+```javascript
+async function loadExtensions() {
+    const response = await fetch('/api/extensions');
+    const extensions = await response.json();
+
+    for (const ext of extensions) {
+        // ... create container div ...
+
+        // 1. Fetch and inject the extension's HTML template
+        const templatePath = `/extensions/${ext._ext_dir}/${ext.entrypoints.frontend_template}`;
+        const templateResponse = await fetch(templatePath);
+        extContainer.innerHTML = await templateResponse.text();
+
+        // 2. Dynamically import and initialize the extension's JavaScript module
+        const scriptPath = `/extensions/${ext._ext_dir}/${ext.entrypoints.frontend_script}`;
+        const module = await import(scriptPath);
+        
+        // Create a scoped API object for the extension and initialize
+        const api = { /* ... */ };
+        module.default(extContainer, api);
+    }
+}
+```
+
+## 2. Shell Interaction Layer
+
+The bridge to the Termux environment is a set of shell scripts in the `/scripts` directory.
+
+*   **`init.sh`**: Hooks into interactive shells using `dtach` to make them controllable.
+*   **`list_sessions.sh`**: Scans for metadata files in `~/.cache/te` and produces a JSON list of active sessions.
+*   **`run_in_session.sh`**: Injects a command into a specified session's `dtach` socket.
+*   **`list_shortcuts.sh`**: Scans `~/.shortcuts` for executable files.
+
 
 ### 3.1. Session Hooking (`init.sh`)
 
