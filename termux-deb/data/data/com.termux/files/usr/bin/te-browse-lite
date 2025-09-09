@@ -1,0 +1,78 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# te-browse-lite: List single directory immediate children as JSONL.
+# Logs: $HOME/.cache/te/te-browse-lite.log (set TE_LOG_DISABLE=1 to disable)
+# Spec version 1.0.0
+set -euo pipefail
+IFS=$'\n\t'
+VERSION=1.0.0
+CACHE_DIR="$HOME/.cache/te"; [ -d "$CACHE_DIR" ] || mkdir -p "$CACHE_DIR"
+LOG_FILE="$CACHE_DIR/te-browse-lite.log"
+log(){ [ "${TE_LOG_DISABLE:-0}" = 1 ] && return 0; printf '%s [%s] %s\n' "$(date +'%Y-%m-%dT%H:%M:%S')" "$$" "$*" >>"$LOG_FILE" 2>/dev/null || true; }
+log "start version=$VERSION dir=$dir"
+trap 'rc=$?; log "error_exit rc=$rc scanned=$scanned emitted=$emitted"' ERR
+HARD_CAP=500
+DEFAULT_LIMIT=500
+usage(){ echo "te-browse-lite <ABS_DIR> [--limit N] [--version] [--help]"; }
+if [[ ${1:-} == --version ]]; then echo "$VERSION"; exit 0; fi
+if [[ ${1:-} == --help ]]; then usage; exit 0; fi
+[ $# -ge 1 ] || { usage >&2; exit 1; }
+dir="$1"; shift || true
+limit=$DEFAULT_LIMIT
+if [[ ${1:-} == --limit ]]; then
+  shift; limit=${1:-$DEFAULT_LIMIT}; shift || true
+fi
+if ! [[ $limit =~ ^[0-9]+$ ]]; then limit=$DEFAULT_LIMIT; fi
+if (( limit > HARD_CAP )); then limit=$HARD_CAP; fi
+if [[ ${1:-false} != false ]]; then echo "unknown arg: $1" >&2; exit 1; fi
+if [[ $dir != /* || ! -d $dir || ! -r $dir || ! -x $dir ]]; then echo "invalid dir" >&2; exit 1; fi
+
+json_escape(){ local s="$1" out="" c ord; local i len=${#s}; for((i=0;i<len;i++)); do c=${s:i:1}; case "$c" in '"')out+='\\"';; '\\')out+='\\\\';; $'\n')out+='\\n';; $'\r')out+='\\r';; $'\t')out+='\\t';; *) printf -v ord '%02X' "'${c}" 2>/dev/null||ord=""; if [[ $ord < 20 ]]; then out+="\\u00$ord"; else out+="$c"; fi;; esac; done; printf '%s' "$out"; }
+truncate_name(){ local name="$1"; local max=256; if (( ${#name} > max )); then printf '%s\ttrue\t%s' "${name:0:max}" "${#name}"; else printf '%s\tfalse\t%s' "$name" "${#name}"; fi; }
+
+DEADLINE=$(( $(date +%s) + 2 )) # 1.5s approx
+mapfile -t entries < <(cd "$dir" && ls -1A 2>/dev/null || true)
+# classify
+declare -a DIRS FILES SYMS
+for n in "${entries[@]}"; do
+  [[ $n == . || $n == .. ]] && continue
+  path="$dir/$n"
+  if [[ -d $path ]]; then DIRS+=("$n"); elif [[ -L $path ]]; then SYMS+=("$n"); elif [[ -f $path ]]; then FILES+=("$n"); fi
+  if (( $(date +%s) > DEADLINE )); then log "timeout classify"; printf '{"event":"timeout","scanned":%s,"emitted":0,"cap":%s}\n' "${#entries[@]}" "$limit"; exit 3; fi
+done
+emit(){ printf '%s\n' "$1"; }
+scanned=${#entries[@]}
+emitted=0
+
+emit_entry(){
+  local typ="$1" name="$2" path="$3" extra="$4"
+  read tn truncated orig_len < <(truncate_name "$name")
+  local escn="$(json_escape "$tn")" escp="$(json_escape "$path")"
+  local hidden=false
+  [[ $tn == .* ]] && [[ $tn != . && $tn != .. ]] && hidden=true
+  local line="{\"type\":\"$typ\",\"name\":\"$escn\",\"path\":\"$escp\""
+  if $hidden; then line+=",\"hidden\":true"; fi
+  if [[ $truncated == true ]]; then line+=",\"truncated\":true,\"original_len\":$orig_len"; fi
+  [[ -n $extra ]] && line+="${extra}"
+  line+="}"
+  emit "$line"
+  emitted=$((emitted+1))
+  if (( emitted >= limit )); then log "truncated emitted=$emitted"; emit "{\"event\":\"truncated\",\"scanned\":$scanned,\"emitted\":$emitted,\"cap\":$limit,\"source\":\"live\"}"; exit 0; fi
+  if (( $(date +%s) > DEADLINE )); then log "timeout emit_loop emitted=$emitted"; emit "{\"event\":\"timeout\",\"scanned\":$scanned,\"emitted\":$emitted,\"cap\":$limit}"; exit 3; fi
+}
+
+sort_emit(){
+  local -n ref=$1; local typ=$2
+  mapfile -t sorted < <(printf '%s\n' "${ref[@]}" | LC_ALL=C sort)
+  for n in "${sorted[@]}"; do
+    path="$dir/$n"; extra=""
+    if [[ $typ == symlink ]]; then
+      target=$(readlink "$path" 2>/dev/null || true)
+      if [[ -n $target ]]; then esc_t="$(json_escape "$target")"; read tnt ttr tlen < <(truncate_name "$target"); esc_t=$(json_escape "$tnt"); extra=",\"symlink_target\":\"$esc_t\""; if [[ $ttr == true ]]; then extra+=" ,\"symlink_target_truncated\":true,\"symlink_target_original_len\":$tlen"; fi; fi
+    fi
+    emit_entry "$typ" "$n" "$path" "$extra"
+  done
+}
+sort_emit DIRS dir
+sort_emit FILES file
+sort_emit SYMS symlink
+emit "{\"event\":\"summary\",\"scanned\":$scanned,\"emitted\":$emitted,\"cap\":$limit,\"source\":\"live\"}"; log "summary scanned=$scanned emitted=$emitted"

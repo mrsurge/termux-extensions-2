@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Termux Extensions</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --background: hsl(224, 71%, 4%);
+            --foreground: hsl(213, 31%, 91%);
+            --card: hsl(224, 71%, 7%);
+            --card-foreground: hsl(213, 31%, 91%);
+            --popover: hsl(224, 71%, 7%);
+            --popover-foreground: hsl(213, 31%, 91%);
+            --primary: hsl(217, 91%, 60%);
+            --primary-foreground: hsl(222, 84%, 5%);
+            --secondary: hsl(222, 84%, 11%);
+            --secondary-foreground: hsl(213, 31%, 91%);
+            --muted: hsl(223, 47%, 11%);
+            --muted-foreground: hsl(215, 13%, 65%);
+            --accent: hsl(216, 87%, 52%);
+            --accent-foreground: hsl(222, 84%, 5%);
+            --destructive: hsl(0, 63%, 31%);
+            --destructive-foreground: hsl(210, 40%, 98%);
+            --border: hsl(216, 34%, 17%);
+            --input: hsl(216, 34%, 17%);
+            --ring: hsl(216, 87%, 52%);
+            --success: hsl(142, 69%, 45%);
+            --warning: hsl(38, 92%, 50%);
+        }
+        body {
+            font-family: 'Inter', 'Segoe UI', sans-serif;
+            background-color: var(--background);
+            color: var(--foreground);
+            margin: 0;
+        }
+        .main-container {
+            width: 100%;
+            min-height: 100vh;
+            background-color: var(--background);
+            padding: 16px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .section-title {
+            font-size: 0.9em;
+            font-weight: 600;
+            color: var(--muted-foreground);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0;
+        }
+        .refresh-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--muted-foreground);
+            padding: 4px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .refresh-btn:hover {
+            background-color: var(--secondary);
+            color: var(--foreground);
+        }
+        /* Placeholders */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+        }
+        .stat-card {
+            background-color: var(--secondary);
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+        .stat-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.9em;
+            color: var(--muted-foreground);
+            margin-bottom: 8px;
+        }
+        .stat-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.1em;
+            color: var(--foreground);
+        }
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            border-radius: 9999px;
+            background-color: var(--muted);
+            overflow: hidden;
+        }
+        .progress-fill-cpu { width: 60%; height: 100%; background-color: var(--accent); }
+        .progress-fill-mem { width: 45%; height: 100%; background-color: var(--warning); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .dot-green { background-color: var(--success); }
+
+        /* Sessions Panel */
+        .session {
+            background-color: var(--secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            padding: 12px;
+        }
+        .session-header { display: flex; justify-content: space-between; align-items: center; }
+        .session-title { font-family: 'JetBrains Mono', monospace; font-size: 1em; font-weight: 500; color: var(--primary); }
+        .session-cwd { font-family: 'JetBrains Mono', monospace; color: var(--muted-foreground); font-size: 0.8em; margin-top: 4px; }
+        .menu-btn { background: none; border: none; color: var(--muted-foreground); font-size: 1.5em; cursor: pointer; }
+        .menu-btn:hover { color: var(--foreground); }
+        .menu { display: none; position: absolute; background-color: var(--popover); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.3); z-index: 100; }
+        .menu-item { padding: 0.8em 1.2em; cursor: pointer; font-size: 0.9em; }
+        .menu-item:hover { background-color: var(--muted); }
+        .menu-item.destructive { color: var(--destructive); }
+        
+        /* Modals */
+        .modal { display: none; position: fixed; z-index: 200; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); backdrop-filter: blur(2px); }
+        .modal-content { background-color: var(--card); margin: 15% auto; padding: 20px; border: 1px solid var(--border); border-radius: 8px; width: 90%; max-width: 400px; }
+        .modal-content h2 { margin-top: 0; color: var(--foreground); }
+        .modal-input { width: 100%; padding: 10px; margin: 10px 0; background-color: var(--background); border: 1px solid var(--input); color: var(--foreground); border-radius: 4px; font-family: 'JetBrains Mono', monospace; }
+        .modal-btn { padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+        .btn-primary { background-color: var(--primary); color: var(--primary-foreground); }
+        .btn-secondary { background-color: var(--secondary); color: var(--secondary-foreground); }
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        <!-- Placeholder: System Stats -->
+        <div>
+            <h2 class="section-title">System</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label"><span>CPU</span> <div class="status-dot dot-green"></div></div>
+                    <div class="stat-value">60%</div>
+                    <div class="progress-bar"><div class="progress-fill-cpu"></div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label"><span>Memory</span> <div class="status-dot dot-green"></div></div>
+                    <div class="stat-value">45%</div>
+                    <div class="progress-bar"><div class="progress-fill-mem"></div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dynamic Sessions List -->
+        <div>
+            <div class="section-header">
+                <h2 class="section-title">Sessions & Shortcuts</h2>
+                <button id="refresh-btn" class="refresh-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg>
+                    <span>Refresh</span>
+                </button>
+            </div>
+            <div id="sessions-list">
+                <p style="color: var(--muted-foreground);">Loading sessions...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="command-modal" class="modal">
+        <div class="modal-content">
+            <h2>Run Command</h2>
+            <input type="text" id="command-input" class="modal-input" placeholder="Enter command...">
+            <button id="run-command-btn" class="modal-btn btn-primary" style="margin-right: 8px;">Run</button>
+            <button onclick="closeModal('command-modal')" class="modal-btn btn-secondary">Cancel</button>
+        </div>
+    </div>
+
+    <div id="shortcut-modal" class="modal">
+        <div class="modal-content">
+            <h2>Run Shortcut</h2>
+            <div id="shortcut-list" style="margin-top: 1em;"></div>
+            <button onclick="closeModal('shortcut-modal')" class="modal-btn btn-secondary" style="margin-top: 1em;">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        // The existing JS logic remains largely the same
+        document.addEventListener('DOMContentLoaded', () => {
+            const sessionsList = document.getElementById('sessions-list');
+            let currentSessionId = null;
+
+            const api = {
+                get: (endpoint) => fetch(endpoint).then(res => res.ok ? res.json() : Promise.reject(res)),
+                post: (endpoint, body) => fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                }).then(res => res.ok ? res.json() : Promise.reject(res)),
+                delete: (endpoint) => fetch(endpoint, { method: 'DELETE' }).then(res => res.ok ? res.json() : Promise.reject(res))
+            };
+
+            const renderSessions = (sessions) => {
+                sessionsList.innerHTML = '';
+                if (sessions.length === 0) {
+                    sessionsList.innerHTML = '<p style="color: var(--muted-foreground);">No interactive sessions found.</p>';
+                    return;
+                }
+                sessions.forEach(session => {
+                    const sessionEl = document.createElement('div');
+                    sessionEl.className = 'session';
+                    sessionEl.innerHTML = `
+                        <div class="session-header">
+                            <div class="session-title">SID: ${session.sid}</div>
+                            <button class="menu-btn" data-sid="${session.sid}">&#8942;</button>
+                        </div>
+                        <div class="session-cwd">${session.cwd}</div>
+                        <div class="menu" id="menu-${session.sid}">
+                            <div class="menu-item" data-action="run-shortcut">Run Shortcut...</div>
+                            <div class="menu-item" data-action="run-command">Run Command...</div>
+                            <div class="menu-item destructive" data-action="kill">Kill Session</div>
+                        </div>
+                    `;
+                    sessionsList.appendChild(sessionEl);
+                });
+            };
+
+            const renderShortcuts = (shortcuts) => {
+                const shortcutList = document.getElementById('shortcut-list');
+                shortcutList.innerHTML = '';
+                if (shortcuts.length === 0) {
+                    shortcutList.innerHTML = '<p style="color: var(--muted-foreground);">No shortcuts found in ~/.shortcuts</p>';
+                    return;
+                }
+                shortcuts.forEach(shortcut => {
+                    const shortcutEl = document.createElement('div');
+                    shortcutEl.className = 'menu-item';
+                    shortcutEl.textContent = shortcut.name;
+                    shortcutEl.onclick = () => runShortcut(shortcut.path);
+                    shortcutList.appendChild(shortcutEl);
+                });
+            };
+
+            const refreshSessions = () => {
+                api.get('/api/sessions').then(renderSessions).catch(err => {
+                    sessionsList.innerHTML = '<p style="color: var(--destructive);">Error loading sessions.</p>';
+                    console.error(err);
+                });
+            };
+
+            const openMenu = (sid, button) => {
+                closeAllMenus();
+                const menu = document.getElementById(`menu-${sid}`);
+                menu.style.display = 'block';
+                const rect = button.getBoundingClientRect();
+                menu.style.top = rect.bottom + 'px';
+                menu.style.right = (window.innerWidth - rect.right) + 'px';
+            };
+
+            const closeAllMenus = () => {
+                document.querySelectorAll('.menu').forEach(m => m.style.display = 'none');
+            };
+
+            window.openModal = (modalId, sid) => {
+                currentSessionId = sid;
+                document.getElementById(modalId).style.display = 'block';
+            };
+
+            window.closeModal = (modalId) => {
+                document.getElementById(modalId).style.display = 'none';
+            };
+
+            const runShortcut = (path) => {
+                api.post(`/api/sessions/${currentSessionId}/shortcut`, { path })
+                    .then(() => closeModal('shortcut-modal'))
+                    .catch(err => alert('Failed to run shortcut.'));
+            };
+
+            document.body.addEventListener('click', (e) => {
+                const target = e.target;
+                if (target.classList.contains('menu-btn')) {
+                    openMenu(target.dataset.sid, target);
+                    e.stopPropagation();
+                    return;
+                }
+
+                const menuItem = target.closest('.menu-item');
+                if (menuItem) {
+                    const menu = menuItem.closest('.menu');
+                    const sid = menu.id.replace('menu-', '');
+                    const action = menuItem.dataset.action;
+                    
+                    closeAllMenus();
+
+                    if (action === 'kill') {
+                        if (confirm(`Are you sure you want to kill session ${sid}?`)) {
+                            api.delete(`/api/sessions/${sid}`).then(refreshSessions);
+                        }
+                    } else if (action === 'run-command') {
+                        openModal('command-modal', sid);
+                    } else if (action === 'run-shortcut') {
+                        api.get('/api/shortcuts').then(renderShortcuts);
+                        openModal('shortcut-modal', sid);
+                    }
+                } else if (!target.closest('.menu')) {
+                    closeAllMenus();
+                }
+            });
+
+            document.getElementById('run-command-btn').addEventListener('click', () => {
+                const command = document.getElementById('command-input').value;
+                if (command && currentSessionId) {
+                    api.post(`/api/sessions/${currentSessionId}/command`, { command })
+                        .then(() => {
+                            closeModal('command-modal');
+                            document.getElementById('command-input').value = '';
+                        })
+                        .catch(err => alert('Failed to run command.'));
+                }
+            });
+
+            document.getElementById('refresh-btn').addEventListener('click', refreshSessions);
+
+            // --- Initial Load ---
+            refreshSessions();
+        });
+    </script>
+</body>
+</html>

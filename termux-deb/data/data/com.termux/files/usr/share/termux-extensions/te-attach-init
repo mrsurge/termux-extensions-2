@@ -1,0 +1,58 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# managed by termux-extensions package
+# Inert, interactive-only attach. If dtach is available and not yet active, re-exec under dtach.
+
+# Only attach for interactive shells
+case $- in
+  *i*) : ;;  # interactive
+  *) return 0 2>/dev/null || exit 0 ;;
+esac
+
+# If not under dtach, and dtach exists, wrap this shell in a dtach session
+if [ "${TE_DTACH:-0}" != "1" ] && command -v dtach >/dev/null 2>&1; then
+  run_base="${XDG_RUNTIME_DIR:-$HOME/.local/run}/te"
+  mkdir -p "$run_base" 2>/dev/null || true
+  chmod 0700 "$run_base" 2>/dev/null || true
+  sock="$run_base/$PPID-$$-$RANDOM.sock"
+  export TE_DTACH=1 TE_SOCK="$sock"
+  # Replace current shell with a dtach-managed login bash
+  exec dtach -A "$sock" bash -l
+fi
+
+# From here on, we are either dtach-managed or running without dtach (fallback)
+
+# Choose a stable session id
+# - bash: BASHPID (preferred); otherwise $$
+TE_SID="${BASHPID:-$$}"
+export TE_SID
+
+export TE_DIR="$HOME/.cache/te/$TE_SID"
+mkdir -p "$TE_DIR"
+logf="$HOME/.cache/te/debug.log"
+te_log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >>"$logf"; }
+te_log "attach-init: sid=$TE_SID tty=${TTY:-?} cwd=$(pwd) sock=${TE_SOCK:-}"
+
+# meta + CWD tracking
+{
+  printf 'CWD="%s"\n' "$(pwd)"
+  printf 'SID="%s"\n' "$TE_SID"
+  [ -n "${TE_SOCK:-}" ] && printf 'SOCK="%s"\n' "$TE_SOCK"
+} > "$TE_DIR/meta"
+te_log "attach-init: wrote meta CWD=$(pwd)"
+
+# Always keep prior PROMPT_COMMAND if any; avoid nounset issues
+PROMPT_COMMAND='echo "CWD=$(pwd)" > '"$TE_DIR"'/meta;'"${PROMPT_COMMAND:-}"
+
+# Busy/idle markers
+te_mark_prompt_enter() { : > "$TE_DIR/at_prompt"; }
+te_mark_prompt_leave() { rm -f "$TE_DIR/at_prompt"; }
+te_log "attach-init: hooks installed"
+
+# Cleanup on shell exit
+trap 'rm -rf "$TE_DIR" 2>/dev/null || true' EXIT
+
+# Bash hooks
+if [ -n "${BASH_VERSION:-}" ]; then
+  PROMPT_COMMAND="te_mark_prompt_enter${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+  trap 'te_mark_prompt_leave' DEBUG
+fi

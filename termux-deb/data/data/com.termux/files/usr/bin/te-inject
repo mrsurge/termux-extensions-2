@@ -1,0 +1,51 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Usage: te-inject <sid> -- <command string>
+set -euo pipefail
+
+guess_sid() {
+  local base="$HOME/.cache/te"
+  [ -d "$base" ] || return 1
+  # pick most recently modified meta file's parent dir
+  local m
+  m=$(find "$base" -mindepth 2 -maxdepth 2 -type f -name meta -printf '%T@ %h\n' 2>/dev/null | sort -nr | head -n1 | awk '{print $2}') || true
+  [ -n "$m" ] || return 1
+  basename "$m"
+}
+
+sid="${1:-}"
+if [[ -z "${sid}" || "${sid}" == "--" ]]; then
+  shift || true
+  sid="$(guess_sid || true)"
+fi
+if [[ -z "${sid}" ]]; then echo "no session sid available" >&2; exit 91; fi
+shift || true
+if [[ "${1:-}" == "--" ]]; then shift; fi
+cmd="$*"
+if [[ -z "$cmd" ]]; then echo "usage: te-inject <sid> -- <command>" >&2; exit 2; fi
+
+meta="$HOME/.cache/te/$sid/meta"
+sock=""
+if [[ -f "$meta" ]]; then
+  # shellcheck disable=SC1090
+  source "$meta" >/dev/null 2>&1 || true
+fi
+sock="${SOCK:-}"
+if [[ -z "$sock" ]]; then
+  # Fallback: mirror via te-exec so user still sees output
+  if command -v te-exec >/dev/null 2>&1; then
+    exec te-exec "$sid" -- bash -lc "$cmd"
+  fi
+  echo "no socket for sid=$sid (is this shell wrapped by dtach?)" >&2
+  exit 92
+fi
+if ! command -v dtach >/dev/null 2>&1; then
+  # Fallback to te-exec if available
+  if command -v te-exec >/dev/null 2>&1; then
+    exec te-exec "$sid" -- bash -lc "$cmd"
+  fi
+  echo "dtach not installed" >&2; exit 93
+fi
+
+# Send the command followed by a newline so it runs at the prompt
+printf '%s\n' "$cmd" | dtach -p "$sock"
+exit 0

@@ -1,0 +1,9 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Compatibility shim: run command visibly in target shell using te-exec mirroring
+# Usage: te-keys <sid> [--] <text to run>
+set -euo pipefail
+sid="${1:?sid}"; shift
+if [[ "${1:-}" == "--" ]]; then shift; fi
+cmd="$*"
+if [[ -z "$cmd" ]]; then echo "usage: te-keys <sid> -- <command>" >&2; exit 2; fi
+exec /data/data/com.termux/files/usr/bin/te-exec "$sid" -- /data/data/com.termux/files/usr/bin/bash -lc "$cmd"
