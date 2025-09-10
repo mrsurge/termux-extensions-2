@@ -148,13 +148,13 @@
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-label"><span>CPU</span> <div class="status-dot dot-green"></div></div>
-                    <div class="stat-value">60%</div>
-                    <div class="progress-bar"><div class="progress-fill-cpu"></div></div>
+                    <div id="stat-cpu-value" class="stat-value">--%</div>
+                    <div class="progress-bar"><div id="progress-cpu-fill" class="progress-fill-cpu"></div></div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label"><span>Memory</span> <div class="status-dot dot-green"></div></div>
-                    <div class="stat-value">45%</div>
-                    <div class="progress-bar"><div class="progress-fill-mem"></div></div>
+                    <div id="stat-mem-value" class="stat-value">--%</div>
+                    <div class="progress-bar"><div id="progress-mem-fill" class="progress-fill-mem"></div></div>
                 </div>
             </div>
         </div>
@@ -211,7 +211,32 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', loadExtensions);
+        document.addEventListener('DOMContentLoaded', () => {
+            loadExtensions();
+            refreshSystemStats();
+            setInterval(refreshSystemStats, 5000); // Refresh stats every 5 seconds
+        });
+
+        function refreshSystemStats() {
+            fetch('/api/system_stats')
+                .then(res => res.ok ? res.json() : Promise.reject(res))
+                .then(stats => {
+                    const cpuValue = document.querySelector('#stat-cpu-value');
+                    const memValue = document.querySelector('#stat-mem-value');
+                    const cpuFill = document.querySelector('#progress-cpu-fill');
+                    const memFill = document.querySelector('#progress-mem-fill');
+
+                    if(cpuValue) cpuValue.textContent = `${stats.cpu_usage}%`;
+                    if(memValue) memValue.textContent = `${stats.mem_usage}%`;
+                    if(cpuFill) cpuFill.style.width = `${stats.cpu_usage}%`;
+                    if(memFill) memFill.style.width = `${stats.mem_usage}%`;
+                })
+                .catch(error => {
+                    console.error("Failed to load system stats:", error);
+                    const cpuValue = document.querySelector('#stat-cpu-value');
+                    if(cpuValue) cpuValue.textContent = 'Error';
+                });
+        }
     </script>
 </body>
 </html>

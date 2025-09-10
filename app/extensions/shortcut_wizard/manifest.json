@@ -1,0 +1,11 @@
+{
+  "name": "Shortcut Wizard",
+  "version": "0.1.0",
+  "description": "A graphical wizard to create and edit shell scripts.",
+  "author": "Gemini",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  }
+}

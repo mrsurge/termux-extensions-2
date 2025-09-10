@@ -1,0 +1,134 @@
+<!-- Extension Template: Shortcut Wizard -->
+<div class="section-header">
+    <h2 class="section-title">Shortcut Wizard</h2>
+</div>
+
+<!-- Initial Menu View -->
+<div id="wizard-menu-view">
+    <div class="wizard-menu">
+        <button id="wizard-new-btn" class="wizard-menu-btn">New Shortcut</button>
+        <button id="wizard-edit-btn" class="wizard-menu-btn">Edit Shortcuts</button>
+    </div>
+</div>
+
+<!-- Editor View (hidden by default) -->
+<div id="wizard-editor-view" style="display: none;">
+    <div class="editor-header">
+        <button id="wizard-back-btn" class="back-btn">&larr; Back</button>
+        <h3 id="editor-title">New Shortcut</h3>
+    </div>
+
+    <!-- Filename -->
+    <div class="form-group">
+        <label for="shortcut-filename">Filename</label>
+        <input type="text" id="shortcut-filename" class="form-input" placeholder="my_script.sh">
+    </div>
+
+    <!-- Shebang -->
+    <div class="form-group-checkbox">
+        <input type="checkbox" id="shortcut-shebang" checked>
+        <label for="shortcut-shebang">Include Termux Shebang</label>
+    </div>
+
+    <!-- Environment Variables -->
+    <div class="form-section">
+        <label>Environment Variables</label>
+        <div id="env-vars-container"></div>
+        <button id="add-env-var-btn" class="add-btn">+ Add Variable</button>
+    </div>
+
+    <!-- Command -->
+    <div class="form-section">
+        <label for="shortcut-command">Command</label>
+        <div class="input-with-buttons">
+            <input type="text" id="shortcut-command" class="form-input" placeholder="e.g., ls, git, python">
+            <button class="picker-btn" title="Select from $PATH">$</button>
+            <button class="picker-btn" title="Browse for executable">&#128193;</button>
+        </div>
+    </div>
+
+    <!-- Arguments -->
+    <div class="form-section">
+        <label>Arguments</label>
+        <div id="args-container"></div>
+        <button id="add-arg-btn" class="add-btn">+ Add Argument</button>
+    </div>
+
+    <div class="bottom-actions">
+        <button id="add-command-btn" class="add-btn">+ Add New Command</button>
+        <button id="wizard-save-btn" class="wizard-save-btn">Save Shortcut</button>
+    </div>
+</div>
+
+<!-- Edit List View (hidden by default) -->
+<div id="wizard-edit-list-view" style="display: none;">
+    <div class="editor-header">
+        <button id="wizard-back-btn-from-edit-list" class="back-btn">&larr; Back</button>
+        <h3>Edit Shortcuts</h3>
+        <button id="wizard-toggle-delete-btn" class="delete-toggle-btn">Delete</button>
+    </div>
+    <div id="wizard-edit-list-container"></div>
+    <button id="wizard-delete-selected-btn" class="wizard-delete-btn" style="display: none;">Delete Selected</button>
+</div>
+
+<!-- File Browser Modal -->
+<div id="file-browser-modal" class="modal">
+    <div class="modal-content">
+        <div class="editor-header">
+            <h3 id="file-browser-title">File Browser</h3>
+            <button id="file-browser-select-dir-btn" class="add-dir-btn">Select Current Dir</button>
+            <button onclick="closeModal('file-browser-modal')" class="back-btn">&times;</button>
+        </div>
+        <div id="file-browser-path" class="path-breadcrumb">/path/to/current</div>
+        <div id="file-browser-list" class="file-list-container"></div>
+    </div>
+</div>
+
+<style>
+    .wizard-menu { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    .wizard-menu-btn { background-color: var(--secondary); border: 1px solid var(--border); color: var(--secondary-foreground); padding: 16px; border-radius: 6px; text-align: center; font-size: 1.1em; font-weight: 500; cursor: pointer; transition: background-color 0.2s; }
+    .wizard-menu-btn:hover { background-color: var(--muted); }
+
+    .editor-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+    .editor-header h3 { margin: 0; font-weight: 500; flex-grow: 1; }
+    .back-btn { background: none; border: none; color: var(--muted-foreground); font-size: 1.2em; cursor: pointer; padding: 4px; }
+    .back-btn:hover { color: var(--foreground); }
+
+    .form-section { margin-top: 20px; }
+    .form-group, .form-group-checkbox { margin-bottom: 16px; }
+    .form-group, .form-section { display: flex; flex-direction: column; gap: 8px; }
+    .form-group-checkbox { flex-direction: row; align-items: center; }
+    label { font-size: 0.9em; color: var(--muted-foreground); font-weight: 500; }
+    .form-input { width: 100%; padding: 10px; background-color: var(--background); border: 1px solid var(--input); color: var(--foreground); border-radius: 4px; font-family: 'JetBrains Mono', monospace; box-sizing: border-box; }
+    
+    .input-with-buttons { display: flex; gap: 4px; }
+    .input-with-buttons .form-input { flex-grow: 1; }
+    .picker-btn { padding: 8px; background-color: var(--secondary); border: 1px solid var(--border); color: var(--secondary-foreground); border-radius: 4px; cursor: pointer; }
+    .picker-btn:hover { background-color: var(--muted); }
+
+    .dynamic-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .reorder-handle { display: flex; flex-direction: column; gap: 2px; cursor: grab; }
+    .reorder-btn { background: none; border: none; color: var(--muted-foreground); padding: 0; line-height: 0.5; font-size: 1.2em; cursor: pointer; }
+    .reorder-btn:hover { color: var(--foreground); }
+    .dynamic-row .arg-option { flex-grow: 1; } /* Smaller field */
+    .dynamic-row .arg-value { flex-grow: 2; }  /* Larger field */
+    .dynamic-row .form-input { flex-grow: 1; } /* Default for other rows */
+    .remove-btn { padding: 8px; background: none; border: none; color: var(--destructive); font-weight: bold; font-size: 1.2em; cursor: pointer; }
+    
+    .add-btn { background: none; border: 1px dashed var(--border); color: var(--muted-foreground); padding: 10px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 8px; }
+    .add-btn:hover { background-color: var(--secondary); }
+
+    .wizard-save-btn { background-color: var(--primary); color: var(--primary-foreground); width: 100%; border: none; padding: 12px; font-size: 1em; font-weight: 600; border-radius: 6px; cursor: pointer; margin-top: 24px; }
+
+    .delete-toggle-btn { border: 1px solid var(--border); background: none; color: var(--muted-foreground); padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+    .delete-toggle-btn.active { background-color: var(--destructive); color: var(--destructive-foreground); border-color: var(--destructive); }
+    .wizard-delete-btn { background-color: var(--destructive); color: var(--destructive-foreground); width: 100%; border: none; padding: 12px; font-size: 1em; font-weight: 600; border-radius: 6px; cursor: pointer; margin-top: 16px; }
+
+    .path-breadcrumb { font-family: 'JetBrains Mono', monospace; color: var(--muted-foreground); background-color: var(--background); padding: 8px; border-radius: 4px; margin-bottom: 12px; word-break: break-all; }
+    .file-list-container { min-height: 200px; max-height: 40vh; overflow-y: auto; }
+    .file-item { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 4px; cursor: pointer; }
+    .file-item:hover { background-color: var(--muted); }
+    .file-item .icon { font-size: 1.2em; }
+    .add-dir-btn { background: none; border: 1px solid var(--border); color: var(--muted-foreground); padding: 4px 8px; border-radius: 6px; cursor: pointer; margin-right: auto; margin-left: 16px; }
+    .add-dir-btn:hover { background-color: var(--secondary); color: var(--foreground); }
+</style>

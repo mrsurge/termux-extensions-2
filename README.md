@@ -4,6 +4,12 @@
 
 The core functionality is delivered through a system of "extensions" that leverage standard command-line tools to provide rich, interactive control over your Termux sessions.
 
+## Project Philosophy
+
+While this framework can assist users unfamiliar with shell scripting, its primary audience is **power users**. The core goal is to transcend the inherent limitations of using touchscreen keyboards with a traditional command-line interface. Even with excellent terminal emulators like Termux, typing complex commands and managing multiple sessions on a touch device has reached a plateau of efficiency.
+
+This project aims to break through that plateau by creating a fluid, intuitive, and **touch-friendly interface** for navigating and controlling the Termux multitasking environment. It draws inspiration from the philosophy of frameworks like *Oh My Zsh* and *Oh My Fish*—which enhance the shell experience with smart helpers and plugins—and adapts that spirit to a graphical, touch-centric paradigm.
+
 ## How to Run
 
 1.  **Install Dependencies:**

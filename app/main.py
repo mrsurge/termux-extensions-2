@@ -3,9 +3,27 @@
 import os
 import json
 import importlib.util
-from flask import Flask, render_template, jsonify, send_from_directory
+import subprocess
+from flask import Flask, render_template, jsonify, send_from_directory, request
 
 app = Flask(__name__)
+
+# --- Helper Functions ---
+
+def run_script(script_name, args=None):
+    """Helper function to run a shell script and return its output."""
+    # Correctly locate the scripts directory at the project root
+    project_root = os.path.dirname(app.root_path)
+    scripts_dir = os.path.join(project_root, 'scripts')
+    if args is None: args = []
+    script_path = os.path.join(scripts_dir, script_name)
+    try:
+        subprocess.run(['chmod', '+x', script_path], check=True)
+        result = subprocess.run([script_path] + args, capture_output=True, text=True, check=True)
+        return result.stdout, None
+    except Exception as e:
+        return None, str(e)
+
 
 # --- Extension Loader ---
 
@@ -25,22 +43,16 @@ def load_extensions():
 
         with open(manifest_path, 'r') as f:
             manifest = json.load(f)
-            # Add extension directory name to manifest data for later use
             manifest['_ext_dir'] = ext_name
             extensions.append(manifest)
 
-        # Dynamically load and register the blueprint
         backend_file = manifest.get('entrypoints', {}).get('backend_blueprint')
         if backend_file:
             module_name = f"app.extensions.{ext_name}.{backend_file.replace('.py', '')}"
-            spec = importlib.util.spec_from_file_location(
-                module_name, 
-                os.path.join(ext_path, backend_file)
-            )
+            spec = importlib.util.spec_from_file_location(module_name, os.path.join(ext_path, backend_file))
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             
-            # Find the blueprint object in the loaded module
             from flask import Blueprint
             for obj_name in dir(module):
                 obj = getattr(module, obj_name)
@@ -53,18 +65,68 @@ def load_extensions():
 
 @app.route('/')
 def index():
-    """Serves the main HTML page."""
     return render_template('index.html')
 
-@app.route('/api/extensions', methods=['GET'])
+@app.route('/api/extensions')
 def get_extensions():
-    """Returns the list of loaded extension manifests."""
     return jsonify(loaded_extensions)
+
+@app.route('/api/system_stats')
+def get_system_stats():
+    output, error = run_script('get_system_stats.sh', app.root_path)
+    if error:
+        return jsonify({'error': error}), 500
+    try:
+        return jsonify(json.loads(output))
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Failed to decode JSON from stats script.'}), 500
 
 @app.route('/extensions/<path:ext_dir>/<path:filename>')
 def serve_extension_file(ext_dir, filename):
-    """Serves a static file from a specific extension's directory."""
     return send_from_directory(os.path.join(app.root_path, 'extensions', ext_dir), filename)
+
+@app.route('/api/browse')
+def browse_path():
+    """Browses a given path, defaulting to the user's home directory."""
+    path = request.args.get('path', '~')
+    # Expand the tilde and normalize the path to resolve `..` etc.
+    expanded_path = os.path.normpath(os.path.expanduser(path))
+
+    # Basic security check to prevent path traversal
+    if not os.path.abspath(expanded_path).startswith(os.path.expanduser('~')):
+        return jsonify({'error': 'Access denied'}), 403
+
+    output, error = run_script('browse.sh', [expanded_path])
+    if error:
+        return jsonify({'error': error}), 500
+    try:
+        return jsonify(json.loads(output))
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Failed to decode JSON from browse script.'}), 500
+
+# @app.route('/api/create_directory', methods=['POST'])
+# def create_directory():
+#     """Creates a new directory at a given path."""
+#     data = request.get_json()
+#     if not data or 'path' not in data or 'name' not in data:
+#         return jsonify({'error': 'Path and name are required.'}), 400
+# 
+#     base_path = os.path.expanduser(data['path'])
+#     new_dir_name = data['name']
+# 
+#     # Basic security: ensure we are still within the home directory
+#     if not os.path.abspath(base_path).startswith(os.path.expanduser('~')):
+#         return jsonify({'error': 'Access denied'}), 403
+#     
+#     # Prevent invalid directory names
+#     if '/' in new_dir_name or '..' in new_dir_name:
+#         return jsonify({'error': 'Invalid directory name'}), 400
+# 
+#     try:
+#         os.makedirs(os.path.join(base_path, new_dir_name), exist_ok=True)
+#         return jsonify({'status': 'success'})
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
