@@ -3,34 +3,17 @@
 import json
 import os
 import subprocess
-from flask import Blueprint, jsonify, request
-
-# Get the absolute path of the project's root directory
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-scripts_dir = os.path.join(project_root, 'scripts')
+from flask import Blueprint, jsonify, request, current_app
+from app.utils import run_script
 
 # Create a Blueprint
 sessions_bp = Blueprint('sessions_and_shortcuts', __name__)
-
-def run_script(script_name, args=None):
-    """Helper function to run a shell script and return its output."""
-    if args is None:
-        args = []
-    script_path = os.path.join(scripts_dir, script_name)
-    try:
-        subprocess.run(['chmod', '+x', script_path], check=True)
-        result = subprocess.run([script_path] + args, capture_output=True, text=True, check=True)
-        return result.stdout, None
-    except subprocess.CalledProcessError as e:
-        return None, e.stderr
-    except FileNotFoundError:
-        return None, f"Script not found: {script_path}"
 
 # --- API Endpoints for this extension ---
 
 @sessions_bp.route('/sessions', methods=['GET'])
 def get_sessions():
-    output, error = run_script('list_sessions.sh')
+    output, error = run_script('list_sessions.sh', current_app.root_path)
     if error:
         return jsonify({'error': error}), 500
     try:
@@ -40,7 +23,7 @@ def get_sessions():
 
 @sessions_bp.route('/shortcuts', methods=['GET'])
 def get_shortcuts():
-    output, error = run_script('list_shortcuts.sh')
+    output, error = run_script('list_shortcuts.sh', current_app.root_path)
     if error:
         return jsonify({'error': error}), 500
     try:
@@ -53,7 +36,7 @@ def run_command(sid):
     data = request.get_json()
     if not data or 'command' not in data:
         return jsonify({'error': 'Missing \'command\' in request body'}), 400
-    _, error = run_script('run_in_session.sh', [sid, data['command']])
+    _, error = run_script('run_in_session.sh', current_app.root_path, [sid, data['command']])
     if error:
         return jsonify({'error': error}), 500
     return jsonify({'status': 'success'})
@@ -63,7 +46,7 @@ def run_shortcut(sid):
     data = request.get_json()
     if not data or 'path' not in data:
         return jsonify({'error': 'Missing \'path\' in request body'}), 400
-    _, error = run_script('run_in_session.sh', [sid, data['path']])
+    _, error = run_script('run_in_session.sh', current_app.root_path, [sid, data['path']])
     if error:
         return jsonify({'error': error}), 500
     return jsonify({'status': 'success'})

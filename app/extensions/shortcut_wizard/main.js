@@ -23,12 +23,26 @@ export default function initialize(extensionContainer, api) {
     let inDeleteMode = false;
     let activeArgValueInput = null; // To store the input field that triggered the browser
 
+    // --- Modal Control (specific to this extension's modals) ---
+    const openModal = (modalId) => {
+        document.getElementById(modalId).style.display = 'block';
+    };
+    const closeModal = (modalId) => {
+        document.getElementById(modalId).style.display = 'none';
+    };
+
+    // Add close handlers to all modal close buttons that this extension owns
+    document.querySelectorAll('.modal .back-btn').forEach(btn => {
+        const modalId = btn.closest('.modal').id;
+        btn.onclick = () => closeModal(modalId);
+    });
+
     // --- File Browser Logic ---
     const openFileBrowser = (inputElement) => {
         activeArgValueInput = inputElement;
         const startPath = inputElement.value || '~'; // Use input value or home dir
         browsePath(startPath);
-        window.openModal('file-browser-modal');
+        openModal('file-browser-modal');
     };
 
     const browsePath = (path) => {
@@ -44,7 +58,7 @@ export default function initialize(extensionContainer, api) {
         if (activeArgValueInput) {
             activeArgValueInput.value = currentPath;
         }
-        window.closeModal('file-browser-modal');
+        closeModal('file-browser-modal');
     });
 
     const renderFileBrowser = (path, items) => {
@@ -75,7 +89,7 @@ export default function initialize(extensionContainer, api) {
                     if (activeArgValueInput) {
                         activeArgValueInput.value = item.path;
                     }
-                    window.closeModal('file-browser-modal');
+                    closeModal('file-browser-modal');
                 }
             };
             container.appendChild(itemEl);
