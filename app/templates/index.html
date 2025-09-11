@@ -137,41 +137,80 @@
         .modal-btn { padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
         .btn-primary { background-color: var(--primary); color: var(--primary-foreground); }
         .btn-secondary { background-color: var(--secondary); color: var(--secondary-foreground); }
+
+        .settings-gear { position: fixed; bottom: 16px; right: 16px; font-size: 1.8em; background-color: var(--secondary); color: var(--foreground); border: 1px solid var(--border); width: 50px; height: 50px; border-radius: 50%; cursor: pointer; z-index: 150; }
+        .reorder-list-item { display: flex; align-items: center; gap: 12px; background-color: var(--secondary); padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; }
+        .reorder-list-item-handle { display: flex; flex-direction: column; cursor: grab; color: var(--muted-foreground); }
+        .reorder-list-item-handle button { background: none; border: none; color: inherit; cursor: pointer; padding: 0 4px; }
+        .reorder-list-item-handle button:hover { color: var(--foreground); }
+
+    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: #333; color: #fff; padding: 10px 20px; border-radius: 6px; z-index: 1000; }
     </style>
 </head>
 <body>
 
     <div class="main-container">
-        <!-- System Stats (Part of Core UI) -->
-        <div>
-            <h2 class="section-title">System</h2>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-label"><span>CPU</span> <div class="status-dot dot-green"></div></div>
-                    <div id="stat-cpu-value" class="stat-value">--%</div>
-                    <div class="progress-bar"><div id="progress-cpu-fill" class="progress-fill-cpu"></div></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label"><span>Memory</span> <div class="status-dot dot-green"></div></div>
-                    <div id="stat-mem-value" class="stat-value">--%</div>
-                    <div class="progress-bar"><div id="progress-mem-fill" class="progress-fill-mem"></div></div>
-                </div>
-            </div>
-        </div>
-
         <!-- Container for dynamically loaded extensions -->
         <div id="extensions-container"></div>
 
     </div>
 
+    <!-- Settings Gear Icon -->
+    <button id="settings-gear-btn" class="settings-gear">&#9881;</button>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <div class="editor-header">
+                <h3>Settings</h3>
+                <button onclick="closeSettingsModal()" class="back-btn">&times;</button>
+            </div>
+            <h4>Extension Order</h4>
+            <div id="extension-order-list" class="reorder-list"></div>
+            <button id="save-settings-btn" class="wizard-save-btn">Save Settings</button>
+        </div>
+    </div>
+
     <script type="module">
+        // --- Core UI Primitives ---
+        window.teUI = {
+            toast: (message, duration = 3000) => {
+                const toast = document.createElement('div');
+                toast.className = 'toast';
+                toast.textContent = message;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), duration);
+            }
+        };
+
+        window.teFetch = async (url, options) => {
+            const response = await fetch(url, options);
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok || !body.ok) {
+                throw new Error(body.error || `HTTP ${response.status} - ${response.statusText}`);
+            }
+            return body.data;
+        };
+
         // --- Main Application Loader ---
         const extensionsContainer = document.getElementById('extensions-container');
 
         async function loadExtensions() {
             try {
                 const response = await fetch('/api/extensions');
-                const extensions = await response.json();
+                const result = await response.json();
+                if (!result.ok) throw new Error(result.error);
+                let extensions = result.data;
+
+                // Check for and apply saved order from localStorage
+                const savedOrder = JSON.parse(localStorage.getItem('extensionOrder'));
+                if (savedOrder) {
+                    extensions.sort((a, b) => {
+                        const aId = `extension-${a._ext_dir}`;
+                        const bId = `extension-${b._ext_dir}`;
+                        return savedOrder.indexOf(aId) - savedOrder.indexOf(bId);
+                    });
+                }
 
                 for (const ext of extensions) {
                     const extDir = ext._ext_dir;
@@ -186,21 +225,25 @@
                     extContainer.innerHTML = await templateResponse.text();
 
                     // 2. Dynamically import and initialize the extension's JavaScript module
-                    const scriptPath = `/extensions/${extDir}/${ext.entrypoints.frontend_script}`;
-                    const module = await import(scriptPath);
-                    
-                    // Create a scoped API object for the extension
-                    const api = {
-                        get: (endpoint) => fetch(`/api/ext/${extDir}/${endpoint}`).then(res => res.ok ? res.json() : Promise.reject(res)),
-                        post: (endpoint, body) => fetch(`/api/ext/${extDir}/${endpoint}`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(body)
-                        }).then(res => res.ok ? res.json() : Promise.reject(res)),
-                        delete: (endpoint) => fetch(`/api/ext/${extDir}/${endpoint}`, { method: 'DELETE' }).then(res => res.ok ? res.json() : Promise.reject(res))
-                    };
+                    try {
+                        const scriptPath = `/extensions/${extDir}/${ext.entrypoints.frontend_script}`;
+                        const module = await import(scriptPath);
+                        
+                        // Create a scoped API object for the extension using the new wrapper
+                        const api = {
+                            get: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`),
+                            post: (endpoint, body) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(body)
+                            }),
+                            delete: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, { method: 'DELETE' })
+                        };
 
-                    module.default(extContainer, api);
+                        module.default(extContainer, api);
+                    } catch (e) {
+                        extContainer.innerHTML += `<p style="color: var(--destructive);">Error loading script for ${ext.name}: ${e.message}</p>`;
+                    }
                 }
             } catch (error) {
                 extensionsContainer.innerHTML = `
@@ -211,32 +254,61 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', loadExtensions);
+
+        // --- Settings Modal Logic ---
+        const settingsModal = document.getElementById('settings-modal');
+        const settingsBtn = document.getElementById('settings-gear-btn');
+        const saveSettingsBtn = document.getElementById('save-settings-btn');
+        const orderList = document.getElementById('extension-order-list');
+        let dragSrcEl = null;
+
+        function openSettingsModal() {
+            // Populate the list with current extensions
+            orderList.innerHTML = '';
+            const extensions = Array.from(extensionsContainer.children);
+            extensions.forEach(ext => {
+                const name = ext.id.replace('extension-', '').replace(/_/g, ' ');
+                const item = document.createElement('div');
+                item.className = 'reorder-list-item';
+                item.dataset.extId = ext.id;
+                item.innerHTML = `
+                    <div class="reorder-list-item-handle">
+                        <button class="up-btn">&#9650;</button>
+                        <button class="down-btn">&#9660;</button>
+                    </div>
+                    <span>${name}</span>
+                `;
+                orderList.appendChild(item);
+
+                item.querySelector('.up-btn').addEventListener('click', () => {
+                    if (item.previousElementSibling) {
+                        orderList.insertBefore(item, item.previousElementSibling);
+                    }
+                });
+                item.querySelector('.down-btn').addEventListener('click', () => {
+                    if (item.nextElementSibling) {
+                        orderList.insertBefore(item.nextElementSibling, item);
+                    }
+                });
+            });
+            settingsModal.style.display = 'block';
+        }
+
+        window.closeSettingsModal = () => {
+            settingsModal.style.display = 'none';
+        }
+
+        settingsBtn.addEventListener('click', openSettingsModal);
+        saveSettingsBtn.addEventListener('click', () => {
+            const newOrder = Array.from(orderList.children).map(item => item.dataset.extId);
+            localStorage.setItem('extensionOrder', JSON.stringify(newOrder));
+            closeSettingsModal();
+            // Reload the extensions in the new order
+            extensionsContainer.innerHTML = '';
             loadExtensions();
-            refreshSystemStats();
-            setInterval(refreshSystemStats, 5000); // Refresh stats every 5 seconds
         });
 
-        function refreshSystemStats() {
-            fetch('/api/system_stats')
-                .then(res => res.ok ? res.json() : Promise.reject(res))
-                .then(stats => {
-                    const cpuValue = document.querySelector('#stat-cpu-value');
-                    const memValue = document.querySelector('#stat-mem-value');
-                    const cpuFill = document.querySelector('#progress-cpu-fill');
-                    const memFill = document.querySelector('#progress-mem-fill');
-
-                    if(cpuValue) cpuValue.textContent = `${stats.cpu_usage}%`;
-                    if(memValue) memValue.textContent = `${stats.mem_usage}%`;
-                    if(cpuFill) cpuFill.style.width = `${stats.cpu_usage}%`;
-                    if(memFill) memFill.style.width = `${stats.mem_usage}%`;
-                })
-                .catch(error => {
-                    console.error("Failed to load system stats:", error);
-                    const cpuValue = document.querySelector('#stat-cpu-value');
-                    if(cpuValue) cpuValue.textContent = 'Error';
-                });
-        }
     </script>
 </body>
 </html>

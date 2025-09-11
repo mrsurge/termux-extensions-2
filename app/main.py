@@ -58,23 +58,49 @@ def load_extensions():
 def index():
     return render_template('index.html')
 
+
+
+@app.route('/extensions/<path:ext_dir>/<path:filename>')
+def serve_extension_file(ext_dir, filename):
+    return send_from_directory(os.path.join(app.root_path, 'extensions', ext_dir), filename)
+
 @app.route('/api/extensions')
 def get_extensions():
-    return jsonify(loaded_extensions)
+    return jsonify({"ok": True, "data": loaded_extensions})
 
-@app.route('/api/system_stats')
-def get_system_stats():
-    output, error = run_script('get_system_stats.sh', app.root_path)
+@app.route('/api/run_command', methods=['POST'])
+def run_command_endpoint():
+    """Executes a shell command and returns its stdout."""
+    data = request.get_json()
+    if not data or 'command' not in data:
+        return jsonify({"ok": False, "error": '"command" field is required.'}), 400
+
+    command = data['command']
+
+    try:
+        result = subprocess.run(
+            command, 
+            shell=True, 
+            capture_output=True, 
+            text=True, 
+            check=True
+        )
+        return jsonify({"ok": True, "data": {"stdout": result.stdout}})
+    except subprocess.CalledProcessError as e:
+        return jsonify({"ok": False, "error": 'Command failed', 'stderr': e.stderr}), 500
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route('/api/list_path_executables')
+def list_path_executables():
+    """Lists all unique executables on the user's PATH."""
+    output, error = run_script('list_path_execs.sh', app.root_path)
     if error:
         return jsonify({'error': error}), 500
     try:
         return jsonify(json.loads(output))
     except json.JSONDecodeError:
-        return jsonify({'error': 'Failed to decode JSON from stats script.'}), 500
-
-@app.route('/extensions/<path:ext_dir>/<path:filename>')
-def serve_extension_file(ext_dir, filename):
-    return send_from_directory(os.path.join(app.root_path, 'extensions', ext_dir), filename)
+        return jsonify({'error': 'Failed to decode JSON from list_path_execs script.'}), 500
 
 @app.route('/api/browse')
 def browse_path():
@@ -85,15 +111,15 @@ def browse_path():
 
     # Basic security check to prevent path traversal
     if not os.path.abspath(expanded_path).startswith(os.path.expanduser('~')):
-        return jsonify({'error': 'Access denied'}), 403
+        return jsonify({"ok": False, "error": 'Access denied'}), 403
 
     output, error = run_script('browse.sh', app.root_path, [expanded_path])
     if error:
-        return jsonify({'error': error}), 500
+        return jsonify({"ok": False, "error": error}), 500
     try:
-        return jsonify(json.loads(output))
+        return jsonify({"ok": True, "data": json.loads(output)})
     except json.JSONDecodeError:
-        return jsonify({'error': 'Failed to decode JSON from browse script.'}), 500
+        return jsonify({"ok": False, "error": 'Failed to decode JSON from browse script.'}), 500
 
 # @app.route('/api/create_directory', methods=['POST'])
 # def create_directory():

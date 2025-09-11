@@ -8,6 +8,7 @@
     <div class="wizard-menu">
         <button id="wizard-new-btn" class="wizard-menu-btn">New Shortcut</button>
         <button id="wizard-edit-btn" class="wizard-menu-btn">Edit Shortcuts</button>
+        <button id="wizard-new-raw-btn" class="wizard-menu-btn">New Raw Script</button>
     </div>
 </div>
 
@@ -37,25 +38,12 @@
         <button id="add-env-var-btn" class="add-btn">+ Add Variable</button>
     </div>
 
-    <!-- Command -->
-    <div class="form-section">
-        <label for="shortcut-command">Command</label>
-        <div class="input-with-buttons">
-            <input type="text" id="shortcut-command" class="form-input" placeholder="e.g., ls, git, python">
-            <button class="picker-btn" title="Select from $PATH">$</button>
-            <button class="picker-btn" title="Browse for executable">&#128193;</button>
-        </div>
-    </div>
-
-    <!-- Arguments -->
-    <div class="form-section">
-        <label>Arguments</label>
-        <div id="args-container"></div>
-        <button id="add-arg-btn" class="add-btn">+ Add Argument</button>
-    </div>
+    <!-- Command Blocks Container -->
+    <div id="command-blocks" class="form-section"></div>
 
     <div class="bottom-actions">
         <button id="add-command-btn" class="add-btn">+ Add New Command</button>
+        <button id="add-pipe-btn" class="add-btn">+ Add Pipe (|)</button>
         <button id="wizard-save-btn" class="wizard-save-btn">Save Shortcut</button>
     </div>
 </div>
@@ -80,9 +68,52 @@
             <button onclick="closeModal('file-browser-modal')" class="back-btn">&times;</button>
         </div>
         <div id="file-browser-path" class="path-breadcrumb">/path/to/current</div>
-        <div id="file-browser-list" class="file-list-container"></div>
+    <div id="file-browser-list" class="file-list-container"></div>
     </div>
 </div>
+
+<!-- Simple Editor Modal for non-editable scripts -->
+<div id="simple-editor-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="editor-header">
+            <h3 id="simple-editor-title">View Script</h3>
+            <button id="simple-editor-save-btn" class="add-dir-btn">Save</button>
+            <button onclick="closeModal('simple-editor-modal')" class="back-btn">&times;</button>
+        </div>
+        <div class="form-group">
+            <label for="simple-editor-filename">Filename (saved to ~/.shortcuts)</label>
+            <input type="text" id="simple-editor-filename" class="form-input" placeholder="my_script.sh">
+        </div>
+        <textarea id="simple-editor-text" class="form-input" style="min-height: 40vh; font-family: 'JetBrains Mono', monospace;"></textarea>
+    </div>
+</div>
+
+<!-- PATH Executable Picker Modal -->
+<div id="path-exec-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="editor-header">
+            <h3>Pick Executable from $PATH</h3>
+            <button onclick="closeModal('path-exec-modal')" class="back-btn">&times;</button>
+        </div>
+        <div class="form-group">
+            <input id="path-exec-search" type="text" class="form-input" placeholder="Filter by name...">
+        </div>
+        <div id="path-exec-list" class="file-list-container"></div>
+    </div>
+</div>
+
+<!-- Loading Modal -->
+<div id="loading-modal" class="modal" style="display:none;">
+    <div class="modal-content" style="text-align:center;">
+        <div class="editor-header">
+            <h3>Loading...</h3>
+            <button onclick="closeModal('loading-modal')" class="back-btn">&times;</button>
+        </div>
+        <div style="padding: 16px; color: var(--muted-foreground);">
+            Fetching data, please wait.
+        </div>
+    </div>
+    </div>
 
 <style>
     .wizard-menu { display: grid; grid-template-columns: 1fr; gap: 12px; }
@@ -131,4 +162,12 @@
     .file-item .icon { font-size: 1.2em; }
     .add-dir-btn { background: none; border: 1px solid var(--border); color: var(--muted-foreground); padding: 4px 8px; border-radius: 6px; cursor: pointer; margin-right: auto; margin-left: 16px; }
     .add-dir-btn:hover { background-color: var(--secondary); color: var(--foreground); }
+
+    /* Separators */
+    .block-separator { border: 0; border-top: 1px solid var(--border); margin: 12px 0; opacity: 0.3; }
+    .pipe-separator { border: 0; border-top: 1px dashed var(--accent); margin: 12px 0; position: relative; }
+    .pipe-label { position: absolute; left: 8px; top: -10px; color: var(--accent); font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+    .pipe-remove-btn { position: absolute; right: 0; top: -10px; background: none; border: none; color: var(--destructive); font-weight: bold; cursor: pointer; }
+    /* PATH exec list styles reuse file-list styles */
+    #path-exec-list .file-item .meta { margin-left: auto; font-family: 'JetBrains Mono', monospace; color: var(--muted-foreground); font-size: 0.8em; }
 </style>

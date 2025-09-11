@@ -1,0 +1,35 @@
+<!-- Extension Template: System Stats -->
+<div>
+    <style>
+        /* Extension-scoped tweaks */
+        .grid-2x2 { grid-template-columns: repeat(2, 1fr) !important; }
+        /* Status dot colors if not present globally */
+        .dot-red { background-color: #e11d48; }
+        .stat-subtle { font-size: 0.85em; color: var(--muted-foreground); }
+        .ip-tile { cursor: pointer; user-select: none; }
+    </style>
+    <h2 class="section-title">System</h2>
+    <div class="stats-grid grid-2x2">
+        <div class="stat-card">
+            <div class="stat-label"><span>CPU</span> <div class="status-dot dot-green"></div></div>
+            <div id="stat-cpu-value" class="stat-value">--%</div>
+            <div class="progress-bar"><div id="progress-cpu-fill" class="progress-fill-cpu"></div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label"><span>Memory</span> <div class="status-dot dot-green"></div></div>
+            <div id="stat-mem-value" class="stat-value">--%</div>
+            <div class="progress-bar"><div id="progress-mem-fill" class="progress-fill-mem"></div></div>
+        </div>
+        <div class="stat-card" id="ip-card">
+            <div class="stat-label"><span>IP Address</span> <div class="status-dot dot-green"></div></div>
+            <div id="ip-tile" class="ip-tile" title="Tap to switch, long-press to copy">
+                <div id="stat-ip-device" class="stat-subtle">--</div>
+                <div id="stat-ip-value" class="stat-value">--</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label"><span>Root</span> <div id="root-status-dot" class="status-dot dot-green"></div></div>
+            <div id="stat-root-value" class="stat-value">--</div>
+        </div>
+    </div>
+</div>

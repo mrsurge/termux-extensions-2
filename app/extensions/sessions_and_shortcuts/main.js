@@ -48,7 +48,9 @@ export default function initialize(extensionContainer, api) {
     };
 
     const refreshSessions = () => {
-        api.get('sessions').then(renderSessions).catch(err => {
+        api.get('sessions').then(data => {
+            renderSessions(data);
+        }).catch(err => {
             sessionsList.innerHTML = '<p style="color: var(--destructive);">Error loading sessions.</p>';
             console.error(err);
         });
@@ -67,16 +69,29 @@ export default function initialize(extensionContainer, api) {
         extensionContainer.querySelectorAll('.menu').forEach(m => m.style.display = 'none');
     };
 
-    window.openModal = (modalId, sid) => {
-        currentSessionId = sid;
-        document.getElementById(modalId).style.display = 'block';
+    // Modal helpers (local functions). Keep closeModal exposed for template buttons.
+    const openModal = (modalId, sid) => {
+        if (sid !== undefined && sid !== null) {
+            currentSessionId = sid;
+        }
+        const el = document.getElementById(modalId);
+        if (el) el.style.display = 'block';
     };
 
-    window.closeModal = (modalId) => {
-        document.getElementById(modalId).style.display = 'none';
+    const closeModal = (modalId) => {
+        const el = document.getElementById(modalId);
+        if (el) el.style.display = 'none';
     };
+
+    // Expose for inline HTML onclick compatibility without changing UI.
+    window.closeModal = closeModal;
+    window.openModal = openModal;
 
     const runShortcut = (path) => {
+        if (!currentSessionId) {
+            alert("Please select a session from the list first.");
+            return;
+        }
         api.post(`sessions/${currentSessionId}/shortcut`, { path })
             .then(() => closeModal('shortcut-modal'))
             .catch(err => alert('Failed to run shortcut.'));
@@ -103,7 +118,9 @@ export default function initialize(extensionContainer, api) {
             } else if (action === 'run-command') {
                 openModal('command-modal', sid);
             } else if (action === 'run-shortcut') {
-                api.get('shortcuts').then(renderShortcuts);
+                api.get('shortcuts').then(data => {
+                    renderShortcuts(data);
+                });
                 openModal('shortcut-modal', sid);
             }
         }

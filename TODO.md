@@ -25,18 +25,10 @@
 
 ## Pending
 
-### 1. Core Framework & API Development (Gemini's Tasks)
-- [ ] **Create Agent Instructions:** Write the `AGENT_INSTRUCTIONS.md` file.
-- [ ] **Refactor `run_script`:** Move the duplicated `run_script` function into a shared `app/utils.py` module and update all imports.
-- [ ] **Fix File Browser "Up" Navigation:** Correct the backend and frontend logic to properly handle navigating to parent directories.
+## Pending
+
+### Core Framework Tasks (Gemini's Responsibilities)
+
 - [ ] **Implement `$PATH` Executable API:** Create a new script and a `/api/list_path_executables` endpoint for the Shortcut Wizard to consume.
 - [ ] **Fix Menu Dismissal:** Modify the UI so that the session context menu (`...`) closes when the user clicks anywhere else on the page.
 - [ ] **Implement System Stats:** Debug and fix the System Stats implementation.
-
-### 2. Shortcut Wizard Extension (External Agent's Tasks)
-- [ ] **UI Polish:** Force the first word of text inputs to lowercase.
-- [ ] **Implement Simple Editor:** For non-wizard scripts, open a simple `<textarea>` editor instead of the full wizard.
-- [ ] **Wire up File Browser:** Connect the UI button to the core `/api/browse` endpoint.
-- [ ] **Wire up `$PATH` Picker:** Connect the UI button to the core `/api/list_path_executables` endpoint.
-- [ ] **Implement Multi-Command UI:** Add logic for the "Add Command" button to create new command blocks in the editor.
-- [ ] **Implement Piping Logic:** Update the backend to handle saving multiple commands and joining them with `|` in the final script.

@@ -54,19 +54,36 @@ Lists the contents of a directory.
 
 --- 
 
-### **System Information**
+### **Command Execution**
 
-#### `GET /api/system_stats`
-Gets the current CPU and Memory usage.
+#### `POST /api/run_command`
+Executes a generic shell command and returns its standard output. This is the primary method for extensions to get data from the system.
 
-*   **Query Parameters:** None.
+*   **Body (JSON):**
+    ```json
+    {
+      "command": "your-command-here"
+    }
+    ```
 *   **Success Response (200):**
     ```json
     {
-      "cpu_usage": 60,
-      "mem_usage": 45
+      "stdout": "The output of the command..."
     }
     ```
+*   **Error Response (500):**
+    ```json
+    {
+      "error": "Command failed",
+      "stderr": "The error output of the command..."
+    }
+    ```
+
+---
+
+### **System Information**
+
+*(This section is deprecated. Use `/api/run_command` instead.)*
 
 --- 
 
