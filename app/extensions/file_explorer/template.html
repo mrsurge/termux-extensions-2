@@ -1,0 +1,72 @@
+<!-- Extension Template: File Explorer -->
+<div class="section-header">
+  <div class="fe-toolbar">
+      <button id="fe-home-btn" class="fe-btn">Home</button>
+      <button id="fe-up-btn" class="fe-btn">Up</button>
+      <button id="fe-refresh-btn" class="fe-btn">Refresh</button>
+      <button id="fe-new-folder-btn" class="fe-btn">New Folder</button>
+      <div class="fe-spacer"></div>
+      <label class="fe-inline"><input type="checkbox" id="fe-toggle-hidden"> Show hidden</label>
+      <label class="fe-inline"><input type="checkbox" id="fe-toggle-details"> Detailed</label>
+      <label class="fe-inline">Sort
+        <select id="fe-sort-key" class="fe-select">
+          <option value="name" selected>Name</option>
+          <option value="type">Type</option>
+          <option value="size">Size</option>
+        </select>
+      </label>
+      <button id="fe-sort-dir-btn" class="fe-btn" title="Toggle sort direction">A→Z</button>
+      <button id="fe-select-toggle-btn" class="fe-btn">Select</button>
+  </div>
+</div>
+
+<div id="file-explorer-container">
+    <div id="fe-path" class="path-breadcrumb">~</div>
+    <div id="fe-abs-path" class="fe-abs-path"></div>
+    <div id="fe-selection-bar" class="fe-selection-bar" style="display:none;">
+      <span id="fe-selected-count">0 selected</span>
+      <div class="fe-spacer"></div>
+      <button id="fe-batch-chmod-btn" class="fe-btn">chmod +x</button>
+      <button id="fe-batch-copy-btn" class="fe-btn">Copy paths</button>
+      <button id="fe-batch-delete-btn" class="fe-btn" style="border-color: var(--destructive); color: var(--destructive);">Delete</button>
+    </div>
+    <div id="fe-list" class="file-list-container"></div>
+    <!-- Context Menu (kept inside container to clamp bounds) -->
+    <div id="fe-context-menu" class="fe-context" style="display:none;"></div>
+</div>
+
+<style>
+  .fe-toolbar { display: flex; gap: 8px; align-items: center; }
+  /* Make toolbar horizontally scrollable on small screens */
+  .fe-toolbar { overflow-x: auto; white-space: nowrap; }
+  .fe-btn { background: none; border: 1px solid var(--border); color: var(--muted-foreground); padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+  .fe-btn:hover { background-color: var(--secondary); color: var(--foreground); }
+  #fe-list .file-item { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 4px; cursor: pointer; }
+  #fe-list .file-item:hover { background-color: var(--muted); }
+  #fe-list .file-item .icon { font-size: 1.2em; }
+  #fe-path { font-family: 'JetBrains Mono', monospace; color: var(--muted-foreground); background-color: var(--background); padding: 8px; border-radius: 4px; margin-bottom: 12px; overflow-x: auto; white-space: nowrap; }
+  .fe-abs-path { font-family: 'JetBrains Mono', monospace; color: var(--muted-foreground); padding: 6px 8px; margin-top: -8px; margin-bottom: 12px; overflow-x: auto; white-space: nowrap; opacity: 0.85; }
+  #file-explorer-container { position: relative; }
+  #fe-list { overflow-x: hidden; }
+  .fe-spacer { flex: 1; }
+  .fe-action-btn { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--muted-foreground); padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+  .fe-action-btn:hover { background-color: var(--secondary); color: var(--foreground); }
+  .fe-breadcrumbs { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; font-family: 'JetBrains Mono', monospace; }
+  .fe-crumb { color: var(--primary); cursor: pointer; }
+  .fe-crumb.sep { color: var(--muted-foreground); cursor: default; }
+  .fe-crumb.inactive { color: var(--muted-foreground); cursor: default; }
+  .fe-inline { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); font-size: 0.9em; }
+  .fe-select { background: none; color: var(--foreground); border: 1px solid var(--border); padding: 4px 6px; border-radius: 4px; }
+  .fe-selection-bar { display: flex; align-items: center; gap: 8px; background: var(--secondary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin-bottom: 8px; overflow-x: auto; white-space: nowrap; }
+  .fe-row-right { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+  .fe-row-menu-btn { background: none; border: 1px solid var(--border); color: var(--muted-foreground); padding: 8px; border-radius: 8px; cursor: pointer; min-width: 40px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; }
+  .fe-row-menu-btn:hover { background-color: var(--secondary); color: var(--foreground); }
+  .fe-row-check { width: 16px; height: 16px; }
+  .fe-context { position: absolute; background: var(--popover); color: var(--foreground); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); z-index: 200; min-width: 160px; max-width: calc(100% - 16px); max-height: 60vh; overflow-y: auto; }
+  .fe-context .item { display: block; width: 100%; background: none; border: none; color: inherit; text-align: left; padding: 8px 10px; cursor: pointer; }
+  .fe-context .item:hover { background: var(--muted); }
+  /* Truncate long file names within row bounds */
+  .fe-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fe-path-line { display: block; color: var(--muted-foreground); font-family: 'JetBrains Mono', monospace; font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fe-details-line { display: block; color: var(--muted-foreground); font-size: 0.8em; opacity: 0.9; }
+</style>

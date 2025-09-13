@@ -1,0 +1,19 @@
+# Agent Development Guide: File Explorer
+
+## 1. High-Level Goal
+Your primary role is to build the "File Explorer" extension. This will be a dedicated, full-featured file manager within the UI. It will eventually serve as a central file utility for all other extensions.
+
+## 2. Project Documentation (Required Reading)
+To understand the project's architecture and goals, you must read the following documents before starting:
+*   `/CORE_API_MANUAL.md`: Your primary reference for interacting with the framework.
+*   `/docs/PROJECT_SPECIFICATION.md`: Describes the overall modular architecture.
+*   `/PROPOSALS.md`: Contains the design discussions that have shaped the project.
+
+## 3. CRITICAL: Development Guardrails
+1.  **DO NOT MODIFY CORE FILES.** Your workspace is strictly confined to `/app/extensions/file_explorer/`.
+2.  **USE THE PROVIDED APIs.** All file system interaction must go through the Core APIs.
+
+## 4. Initial Implementation Plan
+1.  In your `template.html`, design the UI for the file explorer. The header/breadcrumb container must have the CSS style `overflow-x: auto;` and `white-space: nowrap;` to prevent long paths from breaking the layout.
+2.  In your `main.js`, implement the core navigation logic. Clicking a directory should call the `GET /api/browse` endpoint with the new path and re-render the file list.
+3.  Implement a "chmod +x" action as a starting point. This will call the `POST /api/run_command` endpoint with the appropriate `chmod` command.

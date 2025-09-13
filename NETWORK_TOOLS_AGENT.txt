@@ -1,0 +1,54 @@
+# Agent Development Guide: Network Tools
+
+## 1. High-Level Goal
+
+Your primary role is to build the "Network Tools" extension. This extension will provide a sophisticated, multi-tabbed graphical interface for a suite of network utilities. The flagship feature will be a Zenmap-style network scanner and topology map, but it will also include sections for other tools like Port Forwarding.
+
+## 2. Project Documentation (Required Reading)
+To understand the project's architecture and goals, you must read the following documents before starting:
+*   `/CORE_API_MANUAL.md`: Your primary reference for interacting with the framework.
+*   `/docs/PROJECT_SPECIFICATION.md`: Describes the overall modular architecture.
+*   `/PROPOSALS.md`: Contains the design discussions that have shaped the project.
+
+## 3. CRITICAL: Development Guardrails
+1.  **DO NOT MODIFY CORE FILES.** Your workspace is strictly confined to `/app/extensions/network_tools/`.
+2.  **USE THE PROVIDED APIs.** All system interaction must go through the Core APIs. You will primarily use the `POST /api/run_command` endpoint.
+
+## 4. New UI Architecture: 2-Axis Tabbed Interface
+
+You must implement a two-axis tabbed interface for this extension.
+
+*   **Horizontal Tabs (Top):** These represent the major "profiles" or toolsets. The initial profiles are:
+    1.  **Zenmap:** For network scanning and topology mapping.
+    2.  **Port Forwarding:** (Placeholder for now)
+    3.  **Net Tools:** For simple `ping` and `traceroute` commands.
+
+*   **Vertical Tabs (Side):** These represent the sub-functions within each profile. For example, within the "Zenmap" profile, you might have vertical tabs for "Scan" and "Topology".
+
+## 5. Feature Implementation Plan
+
+### Task 1: Implement the Tabbed UI
+*   In `template.html`, build the HTML and CSS for the two-axis tabbed interface. The horizontal tabs should be along the top, and the vertical tabs should be along one side (e.g., the left).
+*   In `main.js`, write the JavaScript to handle switching between the different tab panels.
+
+### Task 2: Implement the "Zenmap" Profile
+
+This is the most complex feature.
+
+*   **UI:** Create the input fields for a target (e.g., `192.168.1.0/24`) and any Nmap flags.
+*   **Backend Call:** When the user initiates a scan, you must call the `/api/run_command` endpoint.
+    *   **XML Output:** The command **must** include the `-oX -` flags to force Nmap to output its results as XML to standard output.
+*   **Data Parsing:** The API will return a JSON object containing the raw XML output from Nmap. You will need to write significant JavaScript code to parse this XML string.
+*   **Network Topology Map:**
+    *   You must use a graph visualization library to render the network map. **Vis.js (vis-network)** is the recommended library.
+    *   Your XML parsing logic should extract the hosts and their connections to create the `nodes` and `edges` data structures required by Vis.js.
+*   **Host Details:** When a user clicks on a node in the map, display the detailed information for that host (open ports, services, etc.) in a separate panel.
+
+### Task 3: Implement the "Net Tools" Profile
+*   This will be a simpler interface for basic `ping` and `traceroute` commands.
+*   Create a form with an input for the target host and a dropdown to select the tool.
+*   Use the `/api/run_command` endpoint to execute the command.
+*   Display the raw output in a `<pre>` tag.
+
+### Task 4: "Port Forwarding" Profile
+*   For now, this tab can simply be a placeholder with text indicating that the feature is not yet implemented.

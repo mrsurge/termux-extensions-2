@@ -1,0 +1,112 @@
+<!-- Extension Template: Network Tools -->
+<div class="nt-root">
+  <div class="nt-h-tabs">
+    <button class="nt-tab active" data-tab="zenmap">Zenmap</button>
+    <button class="nt-tab" data-tab="pfwd">Port Forwarding</button>
+    <button class="nt-tab" data-tab="tools">Net Tools</button>
+  </div>
+
+  <!-- Zenmap Profile -->
+  <div class="nt-panel" data-profile="zenmap" style="display: flex;">
+    <div class="nt-v-tabs">
+      <button class="nt-vtab active" data-vtab="scan">Scan</button>
+      <button class="nt-vtab" data-vtab="topology">Topology</button>
+    </div>
+    <div class="nt-body">
+      <!-- Always-visible toolbar for running Zenmap -->
+      <div class="nt-zenmap-toolbar">
+        <label>Target
+          <input id="z-target" class="nt-input mono" placeholder="e.g. 192.168.1.0/24" />
+        </label>
+        <label>Flags
+          <input id="z-flags" class="nt-input mono" placeholder="e.g. -T4 -A" value="-T4 -A" />
+        </label>
+        <button id="z-scan-btn" class="nt-btn nt-primary" title="Run Nmap with flags on target" aria-label="Run Zenmap Scan">Run Zenmap Scan</button>
+        <button id="z-clear-btn" class="nt-btn" title="Clear output">Clear</button>
+      </div>
+
+      <!-- Scan subtab -->
+      <div class="nt-subpanel" data-subtab="scan" style="display: block;">
+        <div id="z-status" class="nt-status"></div>
+        <div class="nt-output">
+          <div class="nt-output-title">Raw XML Output</div>
+          <pre id="z-raw-output" class="mono nt-pre"></pre>
+        </div>
+      </div>
+
+      <!-- Topology subtab -->
+      <div class="nt-subpanel" id="z-topology" data-subtab="topology" style="display: none;">
+        <div class="nt-topology">
+          <div id="z-graph" class="nt-graph"></div>
+          <div id="z-details" class="nt-details">
+            <div class="nt-muted">Run a scan, then select a node.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Port Forwarding Profile (placeholder) -->
+  <div class="nt-panel" data-profile="pfwd" style="display: none;">
+    <div class="nt-empty">
+      <div class="nt-muted">Port Forwarding is not implemented yet.</div>
+    </div>
+  </div>
+
+  <!-- Net Tools Profile -->
+  <div class="nt-panel" data-profile="tools" style="display: none;">
+    <div class="nt-body" style="width: 100%;">
+      <div class="nt-form">
+        <label>Tool
+          <select id="nt-tool" class="nt-input">
+            <option value="ping">ping</option>
+            <option value="traceroute">traceroute</option>
+          </select>
+        </label>
+        <label>Target
+          <input id="nt-target" class="nt-input mono" placeholder="e.g. 8.8.8.8" />
+        </label>
+        <button id="nt-run-btn" class="nt-btn">Run</button>
+      </div>
+      <div class="nt-output">
+        <div class="nt-output-title">Output</div>
+        <pre id="nt-output" class="mono nt-pre"></pre>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .nt-root { display: flex; flex-direction: column; gap: 12px; }
+    .nt-h-tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+    .nt-tab { background: none; border: 1px solid var(--border); color: var(--muted-foreground); padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+    .nt-tab.active { background: var(--secondary); color: var(--foreground); border-color: var(--accent); }
+    .nt-panel { gap: 12px; }
+    .nt-v-tabs { display: flex; flex-direction: column; gap: 6px; width: 140px; flex: 0 0 140px; }
+    .nt-vtab { background: none; border: 1px solid var(--border); color: var(--muted-foreground); padding: 8px 10px; border-radius: 6px; cursor: pointer; text-align: left; }
+    .nt-vtab.active { background: var(--secondary); color: var(--foreground); border-color: var(--accent); }
+    .nt-body { display: flex; gap: 12px; flex: 1; }
+    .nt-subpanel { width: 100%; }
+    .nt-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; }
+    .nt-zenmap-toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; position: sticky; top: 0; background: var(--card); z-index: 1; padding-top: 4px; }
+    .nt-input { background: none; color: var(--foreground); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+    .nt-btn { background: none; border: 1px solid var(--border); color: var(--muted-foreground); padding: 8px 12px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    .nt-btn:hover { background: var(--secondary); color: var(--foreground); }
+    .nt-primary { border-color: var(--accent); color: var(--foreground); background: var(--secondary); }
+    .nt-primary:hover { background: var(--accent); color: var(--primary-foreground); border-color: var(--accent); }
+    .nt-status { color: var(--muted-foreground); margin: 6px 0; }
+    .nt-output { border: 1px solid var(--border); border-radius: 6px; background: var(--card); }
+    .nt-output-title { color: var(--muted-foreground); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    .nt-pre { margin: 0; padding: 10px; max-height: 320px; overflow: auto; white-space: pre-wrap; }
+    .nt-topology { display: grid; grid-template-columns: minmax(200px, 2fr) minmax(160px, 1fr); gap: 12px; }
+    .nt-graph { border: 1px solid var(--border); border-radius: 6px; background: var(--card); min-height: 320px; }
+    .nt-details { border: 1px solid var(--border); border-radius: 6px; background: var(--card); padding: 8px; }
+    .detail-title { font-weight: 600; }
+    .detail-sub { color: var(--muted-foreground); margin-bottom: 8px; }
+    .detail-heading { font-size: 0.9em; color: var(--muted-foreground); margin: 8px 0 6px; }
+    .port-row { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--border); }
+    .port-row:last-child { border-bottom: none; }
+    .muted, .nt-muted { color: var(--muted-foreground); }
+    .nt-empty { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 120px; border: 1px dashed var(--border); border-radius: 6px; }
+  </style>
+</div>

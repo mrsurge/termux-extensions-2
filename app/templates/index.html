@@ -144,6 +144,13 @@
         .reorder-list-item-handle button { background: none; border: none; color: inherit; cursor: pointer; padding: 0 4px; }
         .reorder-list-item-handle button:hover { color: var(--foreground); }
 
+    .extension-wrapper { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 16px; background-color: var(--card); }
+    .extension-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+    .extension-title { font-weight: 600; }
+    .collapse-btn { background: none; border: none; color: var(--muted-foreground); font-size: 1.2em; cursor: pointer; }
+    .extension-content { padding: 12px; }
+    .extension-content.collapsed { display: none; }
+
     .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: #333; color: #fff; padding: 10px 20px; border-radius: 6px; z-index: 1000; }
     </style>
 </head>
@@ -214,36 +221,66 @@
 
                 for (const ext of extensions) {
                     const extDir = ext._ext_dir;
-                    const extContainer = document.createElement('div');
-                    extContainer.id = `extension-${extDir}`;
-                    extContainer.className = 'extension-wrapper';
-                    extensionsContainer.appendChild(extContainer);
+                    const wrapper = document.createElement('div');
+                    wrapper.id = `extension-${extDir}`;
+                    wrapper.className = 'extension-wrapper';
 
-                    // 1. Fetch and inject the extension's HTML template
+                    const header = document.createElement('div');
+                    header.className = 'extension-header';
+
+                    const title = document.createElement('span');
+                    title.className = 'extension-title';
+                    title.textContent = ext.name;
+
+                    const collapseBtn = document.createElement('button');
+                    collapseBtn.className = 'collapse-btn';
+                    collapseBtn.innerHTML = '&#9660;'; // Down arrow
+
+                    header.appendChild(title);
+                    header.appendChild(collapseBtn);
+                    wrapper.appendChild(header);
+
+                    const content = document.createElement('div');
+                    content.className = 'extension-content';
+                    wrapper.appendChild(content);
+
+                    extensionsContainer.appendChild(wrapper);
+
+                    // Load template into content div
                     const templatePath = `/extensions/${extDir}/${ext.entrypoints.frontend_template}`;
-                    const templateResponse = await fetch(templatePath);
-                    extContainer.innerHTML = await templateResponse.text();
+                    fetch(templatePath).then(res => res.text()).then(html => {
+                        content.innerHTML = html;
 
-                    // 2. Dynamically import and initialize the extension's JavaScript module
-                    try {
-                        const scriptPath = `/extensions/${extDir}/${ext.entrypoints.frontend_script}`;
-                        const module = await import(scriptPath);
-                        
-                        // Create a scoped API object for the extension using the new wrapper
-                        const api = {
-                            get: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`),
-                            post: (endpoint, body) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(body)
-                            }),
-                            delete: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, { method: 'DELETE' })
-                        };
+                        // Load script only after HTML is injected
+                        if (ext.entrypoints.frontend_script) {
+                            const scriptPath = `/extensions/${extDir}/${ext.entrypoints.frontend_script}`;
+                            import(scriptPath).then(module => {
+                                const api = {
+                                    get: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`),
+                                    post: (endpoint, body) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+                                    delete: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, { method: 'DELETE' })
+                                };
+                                module.default(content, api);
+                            }).catch(e => {
+                                content.innerHTML += `<p style="color: var(--destructive);">Error loading script: ${e.message}</p>`;
+                            });
+                        }
+                    });
 
-                        module.default(extContainer, api);
-                    } catch (e) {
-                        extContainer.innerHTML += `<p style="color: var(--destructive);">Error loading script for ${ext.name}: ${e.message}</p>`;
+                    // Collapse logic
+                    const collapsedState = JSON.parse(localStorage.getItem('extensionCollapse') || '{}');
+                    if (collapsedState[extDir]) {
+                        content.classList.add('collapsed');
+                        collapseBtn.innerHTML = '&#9650;'; // Up arrow
                     }
+
+                    header.addEventListener('click', () => {
+                        const isCollapsed = content.classList.toggle('collapsed');
+                        collapseBtn.innerHTML = isCollapsed ? '&#9650;' : '&#9660;';
+                        const currentState = JSON.parse(localStorage.getItem('extensionCollapse') || '{}');
+                        currentState[extDir] = isCollapsed;
+                        localStorage.setItem('extensionCollapse', JSON.stringify(currentState));
+                    });
                 }
             } catch (error) {
                 extensionsContainer.innerHTML = `
