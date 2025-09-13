@@ -4,27 +4,32 @@
     <button class="nt-tab active" data-tab="zenmap">Zenmap</button>
     <button class="nt-tab" data-tab="pfwd">Port Forwarding</button>
     <button class="nt-tab" data-tab="tools">Net Tools</button>
+    <button class="nt-tab" data-tab="ifcfg">Ifconfig</button>
   </div>
 
   <!-- Zenmap Profile -->
-  <div class="nt-panel" data-profile="zenmap" style="display: flex;">
-    <div class="nt-v-tabs">
-      <button class="nt-vtab active" data-vtab="scan">Scan</button>
-      <button class="nt-vtab" data-vtab="topology">Topology</button>
-    </div>
-    <div class="nt-body">
-      <!-- Always-visible toolbar for running Zenmap -->
-      <div class="nt-zenmap-toolbar">
+  <div class="nt-panel" data-profile="zenmap">
+    <div class="nt-side">
+      <div class="nt-v-tabs">
+        <button class="nt-vtab active" data-vtab="scan">Scan</button>
+        <button class="nt-vtab" data-vtab="topology">Topology</button>
+      </div>
+      <!-- Sub margin under vertical tabs: controls -->
+      <div class="nt-controls">
         <label>Target
           <input id="z-target" class="nt-input mono" placeholder="e.g. 192.168.1.0/24" />
         </label>
         <label>Flags
           <input id="z-flags" class="nt-input mono" placeholder="e.g. -T4 -A" value="-T4 -A" />
         </label>
-        <button id="z-scan-btn" class="nt-btn nt-primary" title="Run Nmap with flags on target" aria-label="Run Zenmap Scan">Run Zenmap Scan</button>
-        <button id="z-clear-btn" class="nt-btn" title="Clear output">Clear</button>
+        <div class="nt-row">
+          <button id="z-scan-btn" class="nt-btn nt-primary" title="Run Nmap with flags on target" aria-label="Run Zenmap Scan">Run Zenmap</button>
+          <button id="z-pick-target-btn" class="nt-btn" title="Pick target from interfaces">Pick Target</button>
+        </div>
+        <div id="z-target-picker" class="z-picker" style="display:none;"></div>
       </div>
-
+    </div>
+    <div class="nt-main">
       <!-- Scan subtab -->
       <div class="nt-subpanel" data-subtab="scan" style="display: block;">
         <div id="z-status" class="nt-status"></div>
@@ -75,6 +80,42 @@
     </div>
   </div>
 
+  <!-- Ifconfig Profile -->
+  <div class="nt-panel" data-profile="ifcfg" style="display: none;">
+    <div class="nt-body" style="width: 100%;">
+      <div class="nt-form">
+        <button id="ifcfg-refresh-btn" class="nt-btn nt-primary">Refresh</button>
+        <button id="ifcfg-save-btn" class="nt-btn">Save Variables</button>
+        <button id="ifcfg-preview-toggle" class="nt-btn">Show Preview</button>
+      </div>
+      <div id="ifcfg-list" class="ifcfg-list"></div>
+      <div id="ifcfg-var-wrap" class="nt-output" style="margin-top: 8px; display:none;">
+        <div class="nt-output-title">Variable Preview</div>
+        <pre id="ifcfg-var-preview" class="mono nt-pre"></pre>
+      </div>
+    </div>
+    <style>
+      .ifcfg-list { display: flex; flex-direction: column; gap: 8px; }
+      .ifcfg-card { border: 1px solid var(--border); background: var(--card); border-radius: 6px; padding: 8px; }
+      .ifcfg-header { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+      .ifcfg-name { font-weight: 600; }
+      .ifcfg-status { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+      .ifcfg-up { background: var(--success); }
+      .ifcfg-down { background: var(--destructive); }
+      .ifcfg-body { margin-top: 6px; display: none; }
+      .ifcfg-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .ifcfg-label-input { background: none; color: var(--foreground); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+      .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+      .kv .k { color: var(--muted-foreground); }
+      .chip { border: 1px solid var(--border); padding: 2px 6px; border-radius: 9999px; font-family: 'JetBrains Mono', monospace; }
+    </style>
+  </div>
+
+  <!-- Global Clear button (bottom-left of the extension frame) -->
+  <div class="nt-clear-global">
+    <button id="z-clear-btn" class="nt-btn nt-clear-float" title="Clear output">Clear</button>
+  </div>
+
   <style>
     .mono { font-family: 'JetBrains Mono', monospace; }
     .nt-root { display: flex; flex-direction: column; gap: 12px; }
@@ -82,10 +123,30 @@
     .nt-tab { background: none; border: 1px solid var(--border); color: var(--muted-foreground); padding: 6px 10px; border-radius: 6px; cursor: pointer; }
     .nt-tab.active { background: var(--secondary); color: var(--foreground); border-color: var(--accent); }
     .nt-panel { gap: 12px; }
-    .nt-v-tabs { display: flex; flex-direction: column; gap: 6px; width: 140px; flex: 0 0 140px; }
-    .nt-vtab { background: none; border: 1px solid var(--border); color: var(--muted-foreground); padding: 8px 10px; border-radius: 6px; cursor: pointer; text-align: left; }
+    .nt-panel[data-profile="zenmap"] { display: grid; grid-template-columns: minmax(220px, auto) 1fr; align-items: start; }
+    .nt-side { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
+    .nt-v-tabs { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+    .nt-vtab { background: none; border: 1px solid var(--border); color: var(--muted-foreground); padding: 4px 8px; border-radius: 6px; cursor: pointer; text-align: left; width: auto; max-width: 96px; font-size: 0.9em; }
     .nt-vtab.active { background: var(--secondary); color: var(--foreground); border-color: var(--accent); }
-    .nt-body { display: flex; gap: 12px; flex: 1; }
+    .nt-controls { display: flex; flex-direction: column; gap: 8px; }
+    .nt-controls .nt-input { width: auto; box-sizing: border-box; }
+    /* Compact widths for Target and Flags */
+    #z-target { width: 20ch; max-width: 100%; }
+    #z-flags { width: 180px; max-width: 100%; }
+    .nt-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    /* Target picker */
+    .z-picker { border: 1px solid var(--border); border-radius: 6px; background: var(--card); padding: 6px; max-height: 240px; overflow: auto; }
+    .zp-group { margin: 6px 0; }
+    .zp-title { font-weight: 600; color: var(--muted-foreground); margin-bottom: 4px; }
+    .zp-item { display: flex; gap: 8px; align-items: center; padding: 6px; border-radius: 4px; cursor: pointer; }
+    .zp-item:hover { background: var(--secondary); }
+    .zp-ip { font-family: 'JetBrains Mono', monospace; }
+    .zp-chip { border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; font-size: 0.85em; color: var(--muted-foreground); }
+    .zp-btn { cursor: pointer; margin-left: 6px; }
+    .zp-btn:hover { background: var(--muted); color: var(--foreground); }
+    .nt-main { display: block; min-height: 320px; overflow: auto; max-width: 100%; position: relative; }
+    .nt-clear-global { position: sticky; bottom: 8px; left: 0; display: inline-block; }
+    .nt-clear-float { background: var(--secondary); }
     .nt-subpanel { width: 100%; }
     .nt-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; }
     .nt-zenmap-toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; position: sticky; top: 0; background: var(--card); z-index: 1; padding-top: 4px; }
