@@ -1,0 +1,181 @@
+<style>
+  .aria-app { min-height: 100%; display: flex; flex-direction: column; background: var(--background, #020617); color: var(--foreground, #e5e7eb); font-family: 'Inter', system-ui, sans-serif; }
+  .aria-header { padding: 16px 20px; border-bottom: 1px solid var(--border, rgba(148,163,184,0.2)); background: linear-gradient(135deg, rgba(15,23,42,0.9), rgba(30,41,59,0.6)); display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .aria-header h1 { font-size: 22px; font-weight: 600; margin: 0; }
+  .aria-toolbar { padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; border-bottom: 1px solid var(--border, rgba(148,163,184,0.2)); background: var(--card, rgba(15,23,42,0.85)); }
+  .aria-toolbar .aria-spacer { flex: 1 1 auto; }
+  .aria-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 999px; border: 1px solid transparent; cursor: pointer; font-size: 14px; background: rgba(30,41,59,0.85); color: inherit; transition: transform 0.15s ease, border 0.15s ease, background 0.15s ease; }
+  .aria-btn:hover { border-color: var(--primary, #3b82f6); background: rgba(30,41,59,1); transform: translateY(-1px); }
+  .aria-btn.primary { background: var(--primary, #3b82f6); color: var(--primary-foreground, #0f172a); }
+  .aria-btn.primary:hover { background: rgba(59,130,246,0.85); }
+  .aria-btn.ghost { background: transparent; border-color: rgba(148,163,184,0.3); }
+  .aria-btn.destructive { background: rgba(239,68,68,0.12); color: #f87171; border-color: rgba(239,68,68,0.3); }
+  .aria-toolbar select { background: rgba(15,23,42,0.9); color: inherit; border: 1px solid rgba(148,163,184,0.3); border-radius: 8px; padding: 6px 10px; }
+  .aria-summary { font-size: 14px; color: var(--muted-foreground, rgba(148,163,184,0.8)); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .aria-summary strong { color: var(--foreground, #e5e7eb); }
+  .aria-error { display: none; margin: 12px 20px 0; padding: 10px 12px; border-radius: 8px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; font-size: 14px; }
+  .aria-error.show { display: block; }
+  .aria-panels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 16px 20px 32px; flex: 1; overflow-y: auto; }
+  .aria-panel { background: rgba(15,23,42,0.7); border: 1px solid rgba(148,163,184,0.25); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; min-height: 260px; backdrop-filter: blur(10px); box-shadow: inset 0 1px 0 rgba(148,163,184,0.08); }
+  .aria-panel header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .aria-panel h2 { margin: 0; font-size: 16px; font-weight: 600; }
+  .aria-count { background: rgba(59,130,246,0.12); border-radius: 999px; padding: 4px 10px; font-size: 12px; color: rgba(148,163,184,0.9); }
+  .aria-task-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; flex: 1; }
+  .aria-empty { margin-top: 24px; text-align: center; color: var(--muted-foreground, rgba(148,163,184,0.75)); font-size: 14px; }
+  .aria-task { display: flex; gap: 12px; padding: 12px; border-radius: 12px; background: rgba(15,23,42,0.95); border: 1px solid rgba(148,163,184,0.12); position: relative; transition: border 0.15s ease, background 0.15s ease; }
+  .aria-task.selected { border-color: var(--primary, #3b82f6); box-shadow: 0 0 0 1px rgba(59,130,246,0.4); }
+  .aria-task-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; min-width: 96px; }
+  .aria-task-actions .aria-btn { padding: 6px 10px; border-radius: 8px; font-size: 13px; }
+  .aria-task-main { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .aria-task-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+  .aria-task-name { font-weight: 600; font-size: 15px; word-break: break-word; }
+  .aria-status { font-size: 12px; padding: 3px 8px; border-radius: 999px; text-transform: capitalize; background: rgba(148,163,184,0.14); color: rgba(226,232,240,0.9); }
+  .aria-status.active { background: rgba(74,222,128,0.16); color: #4ade80; }
+  .aria-status.paused { background: rgba(250,204,21,0.16); color: #facc15; }
+  .aria-status.error { background: rgba(239,68,68,0.16); color: #f87171; }
+  .aria-progress-bar { position: relative; height: 8px; border-radius: 999px; background: rgba(148,163,184,0.16); overflow: hidden; }
+  .aria-progress-fill { position: absolute; inset: 0; width: 0%; background: linear-gradient(90deg, rgba(59,130,246,0.9), rgba(45,212,191,0.9)); transition: width 0.4s ease; }
+  .aria-progress-meta { font-size: 12px; color: rgba(148,163,184,0.78); display: flex; flex-wrap: wrap; gap: 12px; }
+  .aria-checkbox { display: flex; align-items: flex-start; padding-top: 4px; }
+  .aria-checkbox input { width: 18px; height: 18px; cursor: pointer; }
+  .aria-loading { padding: 24px 20px; text-align: center; color: rgba(148,163,184,0.75); font-size: 14px; }
+  .aria-bulk { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .aria-bulk-count { font-size: 13px; color: rgba(148,163,184,0.85); }
+  .aria-modal-backdrop { position: fixed; inset: 0; background: rgba(2,6,23,0.75); backdrop-filter: blur(6px); display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+  .aria-modal-backdrop.show { display: flex; }
+  .aria-modal { width: min(520px, 100%); background: rgba(15,23,42,0.95); border-radius: 16px; border: 1px solid rgba(148,163,184,0.25); box-shadow: 0 18px 48px rgba(2,6,23,0.4); display: flex; flex-direction: column; max-height: 90vh; }
+  .aria-modal header { padding: 16px 20px; border-bottom: 1px solid rgba(148,163,184,0.15); display: flex; align-items: center; gap: 12px; }
+  .aria-modal header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+  .aria-modal header button { margin-left: auto; }
+  .aria-modal .aria-modal-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+  .aria-field { display: flex; flex-direction: column; gap: 6px; }
+  .aria-field label { font-size: 13px; color: rgba(148,163,184,0.85); }
+  .aria-field input, .aria-field textarea { background: rgba(15,23,42,0.8); border: 1px solid rgba(148,163,184,0.3); border-radius: 10px; padding: 10px 12px; color: inherit; font-size: 14px; }
+  .aria-modal footer { padding: 16px 20px; border-top: 1px solid rgba(148,163,184,0.15); display: flex; justify-content: flex-end; gap: 10px; }
+  .aria-browse-sheet { position: fixed; inset: 0; background: rgba(2,6,23,0.8); display: none; align-items: flex-end; justify-content: center; z-index: 60; }
+  .aria-browse-sheet.show { display: flex; }
+  .aria-browse-panel { width: min(520px, 100%); max-height: 80vh; background: rgba(15,23,42,0.98); border-radius: 16px 16px 0 0; border: 1px solid rgba(148,163,184,0.25); padding: 18px 20px; display: flex; flex-direction: column; gap: 16px; }
+  .aria-browse-path { font-size: 13px; color: rgba(148,163,184,0.8); word-break: break-word; }
+  .aria-browse-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .aria-browse-item { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(148,163,184,0.2); cursor: pointer; display: flex; align-items: center; gap: 10px; background: rgba(15,23,42,0.92); }
+  .aria-browse-item:hover { border-color: var(--primary, #3b82f6); }
+  .aria-browse-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  @media (max-width: 1024px) { .aria-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 720px) { .aria-header, .aria-toolbar { padding: 14px; } .aria-panels { grid-template-columns: 1fr; padding: 14px; } .aria-task { flex-direction: column; } .aria-task-actions { flex-direction: row; justify-content: flex-start; } }
+</style>
+<div class="aria-app">
+  <header class="aria-header">
+    <h1>Aria Downloader</h1>
+    <div class="aria-summary" id="aria-summary">Checking aria2 status…</div>
+    <div class="aria-spacer"></div>
+    <button class="aria-btn primary" id="aria-new">
+      <span>＋</span>
+      <span>New Download</span>
+    </button>
+    <button class="aria-btn" id="aria-refresh">⟳ Refresh</button>
+  </header>
+  <div class="aria-toolbar">
+    <div class="aria-bulk" id="aria-bulk-actions">
+      <span class="aria-bulk-count" id="aria-selection-count">No items selected</span>
+      <button class="aria-btn ghost" id="aria-pause-selected">Pause</button>
+      <button class="aria-btn ghost" id="aria-resume-selected">Resume</button>
+      <button class="aria-btn destructive" id="aria-remove-selected">Remove</button>
+      <button class="aria-btn ghost" id="aria-clear-selection">Clear</button>
+    </div>
+    <div class="aria-spacer"></div>
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px; color: rgba(148,163,184,0.85);">
+      Sort by
+      <select id="aria-sort">
+        <option value="status">Status</option>
+        <option value="name">Name</option>
+        <option value="progress">Progress</option>
+        <option value="speed">Speed</option>
+        <option value="size">Size</option>
+      </select>
+    </label>
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px; color: rgba(148,163,184,0.85);">
+      Order
+      <select id="aria-sort-dir">
+        <option value="desc">Desc</option>
+        <option value="asc">Asc</option>
+      </select>
+    </label>
+    <button class="aria-btn ghost" id="aria-pause-all">Pause All</button>
+    <button class="aria-btn ghost" id="aria-resume-all">Resume All</button>
+    <button class="aria-btn destructive" id="aria-purge">Purge Completed</button>
+  </div>
+  <div class="aria-error" id="aria-error"></div>
+  <div class="aria-loading" id="aria-loading">Loading downloads…</div>
+  <div class="aria-panels" id="aria-panels" hidden>
+    <section class="aria-panel" data-panel="active">
+      <header>
+        <h2>Active</h2>
+        <span class="aria-count" id="aria-count-active">0</span>
+      </header>
+      <ul class="aria-task-list" id="aria-list-active"></ul>
+      <div class="aria-empty" id="aria-empty-active" hidden>No active downloads.</div>
+    </section>
+    <section class="aria-panel" data-panel="waiting">
+      <header>
+        <h2>Waiting</h2>
+        <span class="aria-count" id="aria-count-waiting">0</span>
+      </header>
+      <ul class="aria-task-list" id="aria-list-waiting"></ul>
+      <div class="aria-empty" id="aria-empty-waiting" hidden>No waiting downloads.</div>
+    </section>
+    <section class="aria-panel" data-panel="stopped">
+      <header>
+        <h2>Completed</h2>
+        <span class="aria-count" id="aria-count-stopped">0</span>
+      </header>
+      <ul class="aria-task-list" id="aria-list-stopped"></ul>
+      <div class="aria-empty" id="aria-empty-stopped" hidden>No completed downloads yet.</div>
+    </section>
+  </div>
+</div>
+
+<div class="aria-modal-backdrop" id="aria-new-modal" aria-hidden="true">
+  <div class="aria-modal">
+    <header>
+      <h3>Add Download</h3>
+      <button class="aria-btn ghost" id="aria-new-close">✕</button>
+    </header>
+    <div class="aria-modal-body">
+      <div class="aria-field">
+        <label for="aria-url">Download URL *</label>
+        <input id="aria-url" type="url" placeholder="https://example.com/file.iso" required>
+      </div>
+      <div class="aria-field">
+        <label for="aria-directory">Target Directory</label>
+        <div style="display:flex; gap:8px;">
+          <input id="aria-directory" type="text" placeholder="~/Downloads" style="flex:1;">
+          <button class="aria-btn ghost" id="aria-browse">Browse</button>
+        </div>
+      </div>
+      <div class="aria-field">
+        <label for="aria-filename">Filename</label>
+        <input id="aria-filename" type="text" placeholder="Optional custom name">
+      </div>
+      <div class="aria-field" style="flex-direction:row; align-items:center; gap:10px;">
+        <input id="aria-pause-on-add" type="checkbox">
+        <label for="aria-pause-on-add" style="margin:0;">Add paused</label>
+      </div>
+    </div>
+    <footer>
+      <button class="aria-btn ghost" id="aria-new-cancel">Cancel</button>
+      <button class="aria-btn primary" id="aria-new-submit">Add Download</button>
+    </footer>
+  </div>
+</div>
+
+<div class="aria-browse-sheet" id="aria-browse-sheet" aria-hidden="true">
+  <div class="aria-browse-panel">
+    <div class="aria-browse-path" id="aria-browse-path">~</div>
+    <div class="aria-browse-actions">
+      <button class="aria-btn ghost" id="aria-browse-up">Up one level</button>
+      <button class="aria-btn primary" id="aria-browse-select">Select current directory</button>
+      <button class="aria-btn ghost" id="aria-browse-close">Cancel</button>
+    </div>
+    <div class="aria-browse-list" id="aria-browse-list"></div>
+  </div>
+</div>

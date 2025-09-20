@@ -1,0 +1,74 @@
+# Gemini Agent: Aria Downloader App
+
+## 1. High-Level Goal
+Build the full-page **Aria Downloader** app: a touch-friendly UI for monitoring and controlling aria2 downloads. The app appears in the Apps Launcher and runs at `/app/aria_downloader` inside the shared App Container.
+
+## 2. CRITICAL Guardrails
+1. **Do not touch core framework files.** All work stays inside `/app/apps/aria_downloader/`.
+2. **Preserve API envelope.** Every backend response must be shaped as `{ "ok": boolean, "data"?: any, "error"?: string }`.
+3. **Keep filesystem access inside the user home.** Any files written (e.g., temporary aria2 control data) must live underneath `~`.
+
+## 3. Runtime Contracts
+The app shell injects two helpers just like other full-page apps:
+- `export default function(container, api, host) { ... }`
+- `api.<verb>(endpoint, payload?)` targets `/api/app/aria_downloader/<endpoint>`.
+- `host` exposes `setTitle`, `toast`, `saveState`, `loadState`, and `onBeforeExit`.
+
+Core helpers available globally:
+- `window.teFetch` for Core API calls (e.g., `/api/browse`).
+- `window.teUI.toast(message)` for shell-level toasts if `host.toast` is not enough.
+
+## 4. Backend Expectations (`main.py`)
+Implement the blueprint in `aria_downloader_bp` with endpoints that proxy to the aria2 JSON-RPC interface (default `http://127.0.0.1:6800/jsonrpc`).
+- Read RPC configuration from environment variables:
+  - `ARIA2_RPC_URL` (default `http://127.0.0.1:6800/jsonrpc`).
+  - `ARIA2_RPC_SECRET` (optional; when set, prepend `token:` to it).
+- Use the standard library (`urllib.request`) to post JSON-RPC payloads; avoid adding new dependencies.
+- Provide shared helper `call_rpc(method, *params)` that returns `(result, error)` and maps transport failures to `{ ok: False, error: ... }` responses.
+
+Required endpoints:
+- `GET /status` → Check connectivity; respond with aria2 version and global statistics.
+- `GET /downloads` → Return `{ active, waiting, stopped }`, each an array of simplified task objects (`gid`, `status`, `name`, `totalLength`, `completedLength`, `downloadSpeed`, etc.).
+- `POST /add` → Body `{ url, directory?, filename?, options? }`. Forward to `aria2.addUri` and return the new `gid`.
+- `POST /control` → Body `{ action: "pause"|"resume"|"remove"|"purge"|"pauseAll"|"resumeAll", gids?: [] }`. Map actions to the appropriate aria2 RPC (`aria2.forcePause`, `aria2.unpause`, `aria2.remove`, `aria2.purgeDownloadResult`, `aria2.pauseAll`, `aria2.unpauseAll`). Handle per-gid loops when necessary.
+- `POST /settings` (optional stretch) → Body `{ global?: {...}, perDownload?: {...}, gid? }` to forward to `aria2.changeGlobalOption` or `aria2.changeOption`.
+
+All errors (RPC or validation) must return `ok: False` with human-readable `error` text. Never leak raw stack traces.
+
+## 5. Frontend Requirements (`template.html`, `main.js`)
+1. **Layout Skeleton**
+   - Header with toolbar: New download button, refresh button, speed/eta summary.
+   - Three panels (stack vertically on mobile): Active, Waiting, Completed.
+2. **State Management**
+   - Use `host.setTitle('Aria Downloader')` and keep `host.saveState` with the last filter/sort options.
+   - Poll `/downloads` every ~5s when the view is visible; provide manual Refresh.
+3. **New Download Flow**
+   - Modal or drawer with URL input (required), optional directory picker (via `/api/browse`), filename, and start options (e.g., pause on add).
+   - On submit call `api.post('add', payload)` and surface success/failure with toasts.
+4. **Task Actions**
+   - Each task row should expose buttons/menu for Pause/Resume/Remove.
+   - Show progress bar (based on `completedLength / totalLength`) and speeds.
+   - Support multi-select (checkboxes) for bulk actions routed through `/control`.
+5. **Error & Empty States**
+   - Loading indicator on initial fetch.
+   - Empty copy for each panel when there are no tasks.
+   - Inline error banner plus toast when RPC fails; auto-clear on next successful refresh.
+
+## 6. File Checklist
+- `/app/apps/aria_downloader/manifest.json`
+- `/app/apps/aria_downloader/main.py`
+- `/app/apps/aria_downloader/main.js`
+- `/app/apps/aria_downloader/template.html`
+- `/app/apps/aria_downloader/styles.css` (optional; include via template when you need custom styles)
+
+## 7. Definition of Done
+- `/status` confirms connectivity (graceful failure if aria2 is offline).
+- `/downloads` powers the UI panels with live data and periodic refresh.
+- Users can add downloads, pause/resume/remove tasks, and see feedback.
+- All actions are guarded with confirmation prompts where destructive.
+- No modifications outside `/app/apps/aria_downloader/`.
+
+## 8. Testing & Manual Validation
+- Ensure aria2 daemon is running locally (`aria2c --enable-rpc --rpc-listen-all=false --rpc-allow-origin-all`).
+- From repo root run `TE_SESSION_TYPE="framework" python app/main.py` and navigate to `/app/aria_downloader`.
+- Verify add/pause/resume/remove flows along with polling updates.

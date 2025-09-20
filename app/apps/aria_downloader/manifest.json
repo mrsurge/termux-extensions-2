@@ -1,0 +1,13 @@
+{
+  "name": "Aria Downloader",
+  "id": "aria_downloader",
+  "version": "0.0.1",
+  "description": "Placeholder UI for managing aria2 downloads.",
+  "author": "Gemini",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  },
+  "fullscreen": true
+}
