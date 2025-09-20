@@ -11,8 +11,10 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from flask import Flask, render_template, jsonify, send_from_directory, request
+from app.framework_shells import framework_shells_bp
 
 app = Flask(__name__)
+app.register_blueprint(framework_shells_bp)
 
 # Pre-initialize to avoid NameError if imported differently
 loaded_extensions = []

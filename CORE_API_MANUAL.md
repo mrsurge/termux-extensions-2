@@ -84,6 +84,14 @@ Lists full-page apps registered under `app/apps/`.
 - `GET /extensions/<ext_dir>/<filename>` serves static files from an extension directory.
 - `GET /apps/<app_dir>/<filename>` serves static files from a full-page app directory.
 
+### 3.7 Framework Shells (experimental) — `/api/framework_shells`
+The backend exposes an early-stage API for managing hidden framework shells. At this stage only read operations are available; creation and control endpoints respond with HTTP 501 until the manager is fully implemented.
+
+- **GET `/api/framework_shells`** — Lists recorded framework shells.
+- **GET `/api/framework_shells/<id>`** — Fetches metadata for a specific shell.
+- **POST `/api/framework_shells` / actions** — Reserved for future iterations.
+
+
 ## 4. Per-App / Per-Extension APIs
 
 Each extension or app blueprint mounts under `/api/ext/<extension_name>/` or `/api/app/<app_id>/`. Consult the corresponding `*_AGENT.txt` file for the endpoints you must implement or consume. Always wrap responses using the envelope defined earlier.
