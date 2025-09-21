@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Termux App</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --background: hsl(224, 71%, 4%);
+            --foreground: hsl(213, 31%, 91%);
+            --card: hsl(224, 71%, 7%);
+            --border: hsl(216, 34%, 17%);
+            --primary: hsl(217, 91%, 60%);
+            --secondary: hsl(222, 84%, 11%);
+            --muted-foreground: hsl(215, 13%, 65%);
+        }
+        body { margin: 0; background-color: var(--background); color: var(--foreground); font-family: 'Inter', sans-serif; }
+        .app-shell { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
+        .app-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--card); position: sticky; top: 0; z-index: 5; }
+        .app-title { font-weight: 600; margin-left: 6px; color: var(--foreground); }
+        .spacer { flex: 1; }
+        .app-btn { background: var(--secondary); color: var(--foreground); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+        .app-btn:hover { border-color: var(--primary); }
+        #app-container { flex: 1; overflow: auto; }
+    </style>
+</head>
+<body>
+    <div class="app-shell">
+        <div class="app-toolbar">
+            <button id="btn-home" class="app-btn">Home</button>
+            <button id="btn-reload" class="app-btn">Reload</button>
+            <div class="spacer"></div>
+            <span id="app-title" class="app-title">App</span>
+        </div>
+        <div id="app-container"></div>
+    </div>
+
+    <script type="module" src="/static/js/file_picker.js"></script>
+    <script type="module">
+        const appContainer = document.getElementById('app-container');
+        const appTitleEl = document.getElementById('app-title');
+        const btnHome = document.getElementById('btn-home');
+        const btnReload = document.getElementById('btn-reload');
+        const appId = {{ app_id|tojson }};
+
+        // Minimal teFetch helper for the app shell
+        async function teFetch(url, options) {
+            const response = await fetch(url, options);
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok || !body.ok) {
+                throw new Error(body.error || `HTTP ${response.status} - ${response.statusText}`);
+            }
+            return body.data;
+        }
+
+        function getStateKey() { return `app_state:${appId}`; }
+
+        // Host API exposed to apps
+        const host = {
+            id: appId,
+            saveState: (state) => {
+                try { localStorage.setItem(getStateKey(), JSON.stringify(state)); return true; } catch (e) { console.error(e); return false; }
+            },
+            loadState: (defaultValue = null) => {
+                try {
+                    const raw = localStorage.getItem(getStateKey());
+                    return raw ? JSON.parse(raw) : defaultValue;
+                } catch (e) { console.error(e); return defaultValue; }
+            },
+            clearState: () => { try { localStorage.removeItem(getStateKey()); } catch (e) { console.error(e); } },
+            setTitle: (title) => { document.title = title || 'Termux App'; appTitleEl.textContent = title || 'App'; },
+            onBeforeExit: (handler) => { window.__appBeforeExitHandler = handler; },
+            toast: (msg) => { try { if (window.teUI && window.teUI.toast) window.teUI.toast(msg); } catch (_) {} },
+        };
+
+        async function attemptExit(navigateFn) {
+            try {
+                const handler = window.__appBeforeExitHandler;
+                if (typeof handler === 'function') {
+                    const res = await Promise.resolve(handler());
+                    if (res && typeof res === 'object') {
+                        if (res.cancel) return; // abort navigation
+                        if ('state' in res) host.saveState(res.state);
+                        else host.saveState(res);
+                    } else if (res !== undefined) {
+                        host.saveState(res);
+                    }
+                }
+            } catch (e) {
+                console.error('beforeExit handler error:', e);
+            }
+            navigateFn();
+        }
+
+        window.addEventListener('beforeunload', (e) => {
+            const handler = window.__appBeforeExitHandler;
+            if (typeof handler === 'function') {
+                try { const res = handler(); if (res && res.cancel) { e.preventDefault(); e.returnValue = ''; } } catch (_) {}
+            }
+        });
+
+        btnHome.addEventListener('click', () => attemptExit(() => { window.location.href = '/'; }));
+        btnReload.addEventListener('click', () => attemptExit(() => { window.location.reload(); }));
+
+        async function loadApp() {
+            try {
+                const response = await fetch('/api/apps');
+                const result = await response.json();
+                if (!result.ok) throw new Error(result.error);
+                const appDef = result.data.find(a => a.id === appId);
+                if (!appDef) throw new Error(`App with ID "${appId}" not found.`);
+
+                host.setTitle(appDef.name || 'Termux App');
+
+                const templatePath = `/apps/${appDef._dir}/${appDef.entrypoints.frontend_template}`;
+                const template = await fetch(templatePath).then(res => res.text());
+                appContainer.innerHTML = template;
+
+                if (appDef.entrypoints.frontend_script) {
+                    const scriptPath = `/apps/${appDef._dir}/${appDef.entrypoints.frontend_script}`;
+                    const module = await import(scriptPath);
+                    const api = {
+                        get: (endpoint) => teFetch(`/api/app/${appId}/${endpoint}`),
+                        post: (endpoint, body) => teFetch(`/api/app/${appId}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+                        delete: (endpoint) => teFetch(`/api/app/${appId}/${endpoint}`, { method: 'DELETE' })
+                    };
+                    // Pass host as a 3rd param (backward compatible)
+                    module.default(appContainer, api, host);
+                }
+            } catch (error) {
+                appContainer.innerHTML = `<p style=\"color: red;\">Error loading app: ${error.message}</p>`;
+                console.error("Failed to load app:", error);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadApp);
+    </script>
+</body>
+</html>

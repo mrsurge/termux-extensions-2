@@ -1,0 +1,73 @@
+# Gemini Agent: Distro App
+
+## 1. Mission
+Build the **Distro** full-page app for managing rooted container environments
+(chroot-distro today, proot/other types later). The app lives at
+`/app/apps/distro/` and must orchestrate container lifecycle, mounts, and
+sessions while reusing the shared framework shell API.
+
+## 2. Guardrails
+1. Work **only** inside `/app/apps/distro/` plus related docs under `/docs/`.
+2. Preserve existing framework helpers (`framework_shells`, `/api/browse`, etc.).
+3. Return JSON responses using `{ "ok": true|false, ... }`.
+4. Keep filesystem reads/writes under `$HOME`; honor user-specified mount paths.
+5. Use the shared file picker (`window.teFilePicker`) for path selection in the UI.
+
+## 3. Backend Requirements (`app/apps/distro/main.py`)
+- Load container definitions from `app/apps/distro/config/containers.json` (create if
+  missing). Schema:
+  ```json
+  [
+    {
+      "id": "ubuntu",
+      "type": "chroot-distro",
+      "label": "Ubuntu",
+      "rootfs": "~/chroots/rootfs/ubuntu",
+      "environment": { "CHROOT_DISTRO_PATH": "~/chroots/rootfs" },
+      "mounts": [
+        {"device": "/dev/block/mmcblk1p1", "target": "~/chroot-mnt", "opts": "rw"}
+      ],
+      "auto_start": false
+    }
+  ]
+  ```
+- Implement endpoints under `/api/app/distro`:
+  - `GET /containers` — list configs + live state (`offline|mounted|running|error`).
+  - `POST /containers/<id>/mount` — run mount plan.
+  - `POST /containers/<id>/start` — spawn framework shell running `login` command.
+  - `POST /containers/<id>/stop` — terminate associated framework shell.
+  - `POST /containers/<id>/unmount` — undo mounts.
+  - `POST /containers/<id>/command` — execute `chroot-distro command <id> "..."`.
+  - `GET /containers/<id>/logs` — stream log tail via framework shell API.
+- The backend should call out to helper modules (create `plugins/chroot.py` inside
+  the app directory) that wrap `sudo mount`, `chroot-distro`, etc. Safely handle
+  failures and report human-readable errors.
+
+## 4. Framework Shell Integration
+- Use `app/framework_shells.FrameworkShellManager` via HTTP (`/api/framework_shells`).
+- Persist shell IDs in app state so the UI can correlate running containers.
+- Respect `TE_FRAMEWORK_SHELL_TOKEN` when issuing mutating requests.
+
+## 5. Frontend Requirements (`main.js` + `template.html`)
+- Render container cards showing:
+  - Icon/label
+  - State chip (offline/mounted/running/error)
+  - Key stats (uptime, PID, CPU/RAM when running)
+  - Primary button toggling Start/Stop
+  - Secondary actions menu: Mount, Unmount, Open Shell (Session hand-off), Logs.
+- Provide a details drawer/modal with tabs (`Overview`, `Mounts`, `Advanced`).
+- Use `window.teFilePicker` for selecting custom rootfs/mount paths when editing.
+- Poll `/containers` periodically to refresh state (5s while any running; 30s otherwise).
+
+## 6. Session Hand-Off
+- Integrate Sessions & Shortcuts API to list available sessions and inject
+  `chroot-distro login <id>` on demand. Offer to create a new session via command
+  if none available (e.g., running a predefined shortcut).
+
+## 7. Definition of Done
+- Users can mount/unmount, start/stop, and view status for configured containers.
+- Framework shells keep running containers alive even when the UI is closed.
+- Logs and error states surface clearly with recovery actions.
+- No regressions to other apps/extensions; shared picker works as expected.
+
+Consult `docs/distro_design.md` and `docs/distro_states.md` for deeper context.

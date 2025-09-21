@@ -1,0 +1,105 @@
+<div class="distro-app">
+  <header class="distro-header">
+    <h1 class="distro-title">Distro Manager</h1>
+    <div class="distro-actions-bar"><button class="distro-btn" id="distro-add">Add Container</button><button class="distro-btn" id="distro-refresh">Refresh</button></div>
+  </header>
+
+  <section class="distro-content">
+    <div id="distro-empty" class="distro-empty">No containers configured yet.</div>
+    <div id="distro-cards" class="distro-cards"></div>
+  </section>
+
+<div id="distro-import-modal" class="distro-modal hidden">
+  <div class="distro-modal-body">
+    <header class="distro-modal-header">
+      <h2>Add Container</h2>
+      <button id="distro-import-close" class="distro-modal-close">&times;</button>
+    </header>
+    <form id="distro-import-form" class="distro-form">
+      <label class="distro-field">
+        <span>Container ID</span>
+        <input type="text" id="distro-import-id" required placeholder="ubuntu" />
+      </label>
+      <label class="distro-field">
+        <span>Label</span>
+        <input type="text" id="distro-import-label" placeholder="Ubuntu" />
+      </label>
+      <label class="distro-field">
+        <span>Rootfs path</span>
+        <div class="distro-field-row">
+          <input type="text" id="distro-import-rootfs" placeholder="~/chroot/rootfs/ubuntu" />
+          <button type="button" class="distro-btn" id="distro-import-rootfs-browse">Browse</button>
+        </div>
+      </label>
+      <label class="distro-field">
+        <span>CHROOT_DISTRO_PATH</span>
+        <input type="text" id="distro-import-chroot-path" placeholder="~/chroot/rootfs" />
+      </label>
+      <fieldset class="distro-field">
+        <legend>Mount</legend>
+        <label>
+          <span>Device (e.g., /dev/block/mmcblk1p1)</span>
+          <input type="text" id="distro-import-device" placeholder="/dev/block/mmcblk1p1" />
+        </label>
+        <label>
+          <span>Mount target</span>
+          <div class="distro-field-row">
+            <input type="text" id="distro-import-target" placeholder="~/chroot-mnt" />
+            <button type="button" class="distro-btn" id="distro-import-target-browse">Browse</button>
+          </div>
+        </label>
+        <label>
+          <span>Options</span>
+          <input type="text" id="distro-import-options" placeholder="rw" />
+        </label>
+      </fieldset>
+      <label class="distro-field-check">
+        <input type="checkbox" id="distro-import-autostart" /> Auto-start on framework boot
+      </label>
+      <div class="distro-form-actions">
+        <button type="submit" class="distro-btn primary">Save</button>
+        <button type="button" class="distro-btn" id="distro-import-cancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="distro-logs-modal" class="distro-modal hidden">
+  <div class="distro-modal-body">
+    <header class="distro-modal-header">
+      <h2 id="distro-logs-title">Logs</h2>
+      <button id="distro-logs-close" class="distro-modal-close">&times;</button>
+    </header>
+    <pre id="distro-logs-output" class="distro-logs-output"></pre>
+  </div>
+</div>
+
+<style>
+  .distro-app { padding: 16px; color: var(--foreground); }
+  .distro-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .distro-title { margin: 0; font-size: 1.6rem; font-weight: 600; }
+  .distro-refresh { border: 1px solid var(--border); background: var(--secondary); color: inherit; padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+  .distro-refresh:hover { border-color: var(--primary); }
+  .distro-content { display: flex; flex-direction: column; gap: 16px; }
+  .distro-empty { padding: 24px; border: 1px dashed var(--border); border-radius: 8px; text-align: center; color: var(--muted-foreground); }
+  .distro-cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .distro-card { border: 1px solid var(--border); border-radius: 12px; background: var(--card); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .distro-card h3 { margin: 0; font-size: 1.2rem; }
+  .distro-meta { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted-foreground); }
+  .distro-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .distro-btn { border: 1px solid var(--border); background: var(--secondary); color: inherit; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; }
+  .distro-btn.primary { background: var(--primary); color: var(--primary-foreground); border: none; }
+  .distro-state { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); width: fit-content; }
+  .distro-state-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .distro-state-offline { background: #777; }
+  .distro-state-mounted { background: #f0ad4e; }
+  .distro-state-running { background: #68d391; }
+  .distro-state-error { background: #f56565; }
+
+  .distro-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 1200; }
+  .distro-modal.hidden { display: none; }
+  .distro-modal-body { width: min(700px, 90vw); max-height: 80vh; background: var(--card); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; }
+  .distro-modal-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .distro-modal-close { background: none; border: none; color: inherit; font-size: 1.6rem; cursor: pointer; }
+  .distro-logs-output { margin: 0; padding: 16px; background: rgba(0,0,0,0.35); color: var(--foreground); font-family: 'JetBrains Mono', monospace; overflow: auto; white-space: pre-wrap; }
+</style>
