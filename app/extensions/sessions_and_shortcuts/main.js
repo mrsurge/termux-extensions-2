@@ -276,16 +276,19 @@ function renameSession() {
 }
 
 function selectTab(target) {
+    const visiblePanel = elements.visibleList;
+    const frameworkPanel = elements.frameworkList;
+    if (!visiblePanel || !frameworkPanel) return;
     if (target === 'visible') {
-        elements.tabVisible.classList.add('active');
-        elements.tabFramework.classList.remove('active');
-        elements.visibleList.parentElement.classList.add('active');
-        elements.frameworkList.parentElement.classList.remove('active');
+        elements.tabVisible?.classList.add('active');
+        elements.tabFramework?.classList.remove('active');
+        visiblePanel.classList.add('active');
+        frameworkPanel.classList.remove('active');
     } else {
-        elements.tabFramework.classList.add('active');
-        elements.tabVisible.classList.remove('active');
-        elements.frameworkList.parentElement.classList.add('active');
-        elements.visibleList.parentElement.classList.remove('active');
+        elements.tabFramework?.classList.add('active');
+        elements.tabVisible?.classList.remove('active');
+        frameworkPanel.classList.add('active');
+        visiblePanel.classList.remove('active');
     }
 }
 

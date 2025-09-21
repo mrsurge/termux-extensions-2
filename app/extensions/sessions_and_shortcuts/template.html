@@ -63,6 +63,8 @@
 
 <style>
     .session-tabs { display: flex; gap: 8px; align-items: center; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--muted-foreground); margin-right: 6px; }
+    .status-dot.dot-green { background: var(--success); }
     .session-tab { background: var(--secondary); color: inherit; border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; cursor: pointer; font-size: 0.9rem; }
     .session-tab.active { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
     .session-actions { display: flex; align-items: center; gap: 12px; }

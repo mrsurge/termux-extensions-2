@@ -61,6 +61,15 @@ function inferChrootPath(rootfs) {
   return cleaned.slice(0, idx);
 }
 
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.ok === false) {
+    throw new Error(body.error || `HTTP ${response.status} ${response.statusText}`);
+  }
+  return body.data !== undefined ? body.data : body;
+}
+
 function statusDotClass(state) {
   switch (state) {
     case 'running':
@@ -294,9 +303,10 @@ async function fetchContainers() {
 
 async function fetchSessions() {
   try {
-    const data = await window.teFetch('/api/ext/sessions_and_shortcuts/sessions');
+    const data = await fetchJson('/api/ext/sessions_and_shortcuts/sessions');
     STATE.sessions = Array.isArray(data) ? data : [];
   } catch (err) {
+    console.error('Failed to load sessions', err);
     STATE.sessions = [];
   }
 }
@@ -436,6 +446,10 @@ function closeImportModal() {
 }
 
 function openAttachModal(container) {
+  if (container.state !== 'running') {
+    notify('Start the container before attaching a session');
+    return;
+  }
   currentAttachContainer = container;
   if (!refs.attachModal || !refs.attachList) return;
   refs.attachList.innerHTML = '';
