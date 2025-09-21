@@ -13,6 +13,22 @@
   .aria-toolbar select { background: rgba(15,23,42,0.9); color: inherit; border: 1px solid rgba(148,163,184,0.3); border-radius: 8px; padding: 6px 10px; }
   .aria-summary { font-size: 14px; color: var(--muted-foreground, rgba(148,163,184,0.8)); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   .aria-summary strong { color: var(--foreground, #e5e7eb); }
+  .aria-service { margin: 16px 20px 0; padding: 18px 20px; border-radius: 16px; border: 1px solid rgba(148,163,184,0.25); background: rgba(15,23,42,0.78); backdrop-filter: blur(10px); box-shadow: inset 0 1px 0 rgba(148,163,184,0.08); display: flex; flex-direction: column; gap: 12px; }
+  .aria-service-header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .aria-service-header h2 { margin: 0; font-size: 18px; font-weight: 600; }
+  .aria-shell-status-wrap { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(148,163,184,0.85); }
+  .aria-shell-state { padding: 4px 10px; border-radius: 999px; font-size: 12px; text-transform: capitalize; border: 1px solid transparent; background: rgba(148,163,184,0.15); color: rgba(226,232,240,0.9); }
+  .aria-shell-state.running { background: rgba(34,197,94,0.16); border-color: rgba(34,197,94,0.35); color: #4ade80; }
+  .aria-shell-state.stopped { background: rgba(148,163,184,0.12); border-color: rgba(148,163,184,0.28); }
+  .aria-shell-state.error { background: rgba(239,68,68,0.16); border-color: rgba(239,68,68,0.45); color: #f87171; }
+  .aria-shell-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+  .aria-shell-meta { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: rgba(148,163,184,0.85); }
+  .aria-shell-meta span { display: inline-flex; gap: 6px; align-items: center; }
+  .aria-shell-meta strong { color: var(--foreground, #e5e7eb); font-weight: 500; }
+  .aria-shell-logs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .aria-shell-log { background: rgba(15,23,42,0.9); border: 1px solid rgba(148,163,184,0.18); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .aria-shell-log header { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: rgba(148,163,184,0.65); }
+  .aria-shell-log pre { margin: 0; font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.4; max-height: 160px; overflow: auto; padding: 10px; border-radius: 8px; background: rgba(2,6,23,0.6); color: rgba(226,232,240,0.88); }
   .aria-error { display: none; margin: 12px 20px 0; padding: 10px 12px; border-radius: 8px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; font-size: 14px; }
   .aria-error.show { display: block; }
   .aria-panels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 16px 20px 32px; flex: 1; overflow-y: auto; }
@@ -61,19 +77,58 @@
   .aria-browse-item:hover { border-color: var(--primary, #3b82f6); }
   .aria-browse-actions { display: flex; flex-wrap: wrap; gap: 10px; }
   @media (max-width: 1024px) { .aria-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 720px) { .aria-header, .aria-toolbar { padding: 14px; } .aria-panels { grid-template-columns: 1fr; padding: 14px; } .aria-task { flex-direction: column; } .aria-task-actions { flex-direction: row; justify-content: flex-start; } }
+  @media (max-width: 720px) {
+    .aria-header, .aria-toolbar { padding: 14px; }
+    .aria-service { margin: 14px; }
+    .aria-panels { grid-template-columns: 1fr; padding: 14px; }
+    .aria-task { flex-direction: column; }
+    .aria-task-actions { flex-direction: row; justify-content: flex-start; }
+    .aria-shell-actions { gap: 6px; }
+  }
 </style>
 <div class="aria-app">
   <header class="aria-header">
     <h1>Aria Downloader</h1>
-    <div class="aria-summary" id="aria-summary">Checking aria2 status…</div>
+    <div class="aria-summary" id="aria-summary">Checking aria2 status...</div>
     <div class="aria-spacer"></div>
     <button class="aria-btn primary" id="aria-new">
-      <span>＋</span>
+      <span>+</span>
       <span>New Download</span>
     </button>
-    <button class="aria-btn" id="aria-refresh">⟳ Refresh</button>
+    <button class="aria-btn" id="aria-refresh">Refresh Refresh</button>
   </header>
+
+  <section class="aria-service" id="aria-shell-card">
+    <div class="aria-service-header">
+      <div>
+        <h2>aria2 Service</h2>
+        <div class="aria-shell-status-wrap">
+          Status:
+          <span class="aria-shell-state" id="aria-shell-status">Checking...</span>
+        </div>
+      </div>
+      <div class="aria-shell-actions">
+        <button class="aria-btn primary" id="aria-shell-start">Start</button>
+        <button class="aria-btn ghost" id="aria-shell-restart">Restart</button>
+        <button class="aria-btn ghost" id="aria-shell-stop">Stop</button>
+        <button class="aria-btn destructive" id="aria-shell-kill">Force Kill</button>
+        <button class="aria-btn destructive" id="aria-shell-remove">Remove</button>
+        <button class="aria-btn ghost" id="aria-shell-refresh">Refresh</button>
+      </div>
+    </div>
+    <div class="aria-shell-meta" id="aria-shell-meta"></div>
+    <div class="aria-shell-logs" id="aria-shell-logs" hidden>
+      <div class="aria-shell-log">
+        <header>stdout</header>
+        <pre id="aria-shell-stdout"></pre>
+      </div>
+      <div class="aria-shell-log">
+        <header>stderr</header>
+        <pre id="aria-shell-stderr"></pre>
+      </div>
+    </div>
+  </section>
+
   <div class="aria-toolbar">
     <div class="aria-bulk" id="aria-bulk-actions">
       <span class="aria-bulk-count" id="aria-selection-count">No items selected</span>
@@ -105,7 +160,7 @@
     <button class="aria-btn destructive" id="aria-purge">Purge Completed</button>
   </div>
   <div class="aria-error" id="aria-error"></div>
-  <div class="aria-loading" id="aria-loading">Loading downloads…</div>
+  <div class="aria-loading" id="aria-loading">Loading downloads...</div>
   <div class="aria-panels" id="aria-panels" hidden>
     <section class="aria-panel" data-panel="active">
       <header>
@@ -138,7 +193,7 @@
   <div class="aria-modal">
     <header>
       <h3>Add Download</h3>
-      <button class="aria-btn ghost" id="aria-new-close">✕</button>
+      <button class="aria-btn ghost" id="aria-new-close">x</button>
     </header>
     <div class="aria-modal-body">
       <div class="aria-field">
@@ -149,12 +204,17 @@
         <label for="aria-directory">Target Directory</label>
         <div style="display:flex; gap:8px;">
           <input id="aria-directory" type="text" placeholder="~/Downloads" style="flex:1;">
-          <button class="aria-btn ghost" id="aria-browse">Browse</button>
+          <button class="aria-btn ghost" id="aria-browse" type="button">Browse</button>
         </div>
       </div>
       <div class="aria-field">
         <label for="aria-filename">Filename</label>
         <input id="aria-filename" type="text" placeholder="Optional custom name">
+      </div>
+      <div class="aria-field">
+        <label for="aria-parallel">Parallel connections</label>
+        <input id="aria-parallel" type="number" min="1" max="16" value="1" step="1">
+        <small style="font-size:12px; color:rgba(148,163,184,0.75);">Number of simultaneous connections aria2 should use for this download.</small>
       </div>
       <div class="aria-field" style="flex-direction:row; align-items:center; gap:10px;">
         <input id="aria-pause-on-add" type="checkbox">
@@ -172,9 +232,9 @@
   <div class="aria-browse-panel">
     <div class="aria-browse-path" id="aria-browse-path">~</div>
     <div class="aria-browse-actions">
-      <button class="aria-btn ghost" id="aria-browse-up">Up one level</button>
-      <button class="aria-btn primary" id="aria-browse-select">Select current directory</button>
-      <button class="aria-btn ghost" id="aria-browse-close">Cancel</button>
+      <button class="aria-btn ghost" id="aria-browse-up" type="button">Up one level</button>
+      <button class="aria-btn primary" id="aria-browse-select" type="button">Select current directory</button>
+      <button class="aria-btn ghost" id="aria-browse-close" type="button">Cancel</button>
     </div>
     <div class="aria-browse-list" id="aria-browse-list"></div>
   </div>

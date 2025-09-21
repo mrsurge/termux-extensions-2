@@ -35,6 +35,13 @@ Required endpoints:
 
 All errors (RPC or validation) must return `ok: False` with human-readable `error` text. Never leak raw stack traces.
 
+## 4.1 Framework Shell Integration (Optional)
+- You can launch the aria2 daemon through the new core API instead of manual shells.
+- Use `POST /api/framework_shells` with a command such as `["aria2c", "--enable-rpc", "--rpc-listen-all=false", "--rpc-allow-origin-all"]`.
+- Remember to include the `X-Framework-Key` header if the framework token is configured.
+- The document `docs/aria_downloader_framework_integration.md` lists end-to-end examples.
+
+
 ## 5. Frontend Requirements (`template.html`, `main.js`)
 1. **Layout Skeleton**
    - Header with toolbar: New download button, refresh button, speed/eta summary.

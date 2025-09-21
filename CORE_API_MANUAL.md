@@ -84,12 +84,23 @@ Lists full-page apps registered under `app/apps/`.
 - `GET /extensions/<ext_dir>/<filename>` serves static files from an extension directory.
 - `GET /apps/<app_dir>/<filename>` serves static files from a full-page app directory.
 
-### 3.7 Framework Shells (experimental) — `/api/framework_shells`
-The backend exposes an early-stage API for managing hidden framework shells. At this stage only read operations are available; creation and control endpoints respond with HTTP 501 until the manager is fully implemented.
+### 3.7 Framework Shells — `/api/framework_shells`
+Manage long-lived background shells that inherit `TE_SESSION_TYPE=framework`, keeping them out of the Sessions UI. Mutating requests honour the response envelope and require the optional `X-Framework-Key` header when `TE_FRAMEWORK_SHELL_TOKEN` is configured.
 
-- **GET `/api/framework_shells`** — Lists recorded framework shells.
-- **GET `/api/framework_shells/<id>`** — Fetches metadata for a specific shell.
-- **POST `/api/framework_shells` / actions** — Reserved for future iterations.
+- **GET `/api/framework_shells`** — List all registered shells with status and resource stats.
+- **GET `/api/framework_shells/<id>`** — Detailed metadata; pass `logs=true&tail=200` to include recent log lines.
+- **POST `/api/framework_shells`** — Spawn a new shell. Body example:
+  ```json
+  {
+    "command": ["aria2c", "--enable-rpc"],
+    "cwd": "~/services/aria2",
+    "env": {"ARIA2_SECRET": "..."},
+    "label": "aria2",
+    "autostart": true
+  }
+  ```
+- **POST `/api/framework_shells/<id>/action`** — `{ "action": "stop" | "kill" | "restart" }`.
+- **DELETE `/api/framework_shells/<id>`** — Remove metadata and kill the process (force via `?force=1`).
 
 
 ## 4. Per-App / Per-Extension APIs

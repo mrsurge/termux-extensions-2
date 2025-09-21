@@ -1,14 +1,19 @@
-"""Flask blueprint that proxies Aria Downloader app requests to aria2 JSON-RPC."""
+"""Aria Downloader Flask blueprint with aria2 RPC + framework shell helpers."""
 
 from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+import time
 import urllib.error
 import urllib.request
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from flask import Blueprint, jsonify, request
+
+from app.framework_shells import FrameworkShellManager
+from app.framework_shells import _manager as get_framework_shell_manager
 
 aria_downloader_bp = Blueprint('aria_downloader', __name__)
 
@@ -18,6 +23,18 @@ RPC_TIMEOUT_SECONDS = 10
 
 JsonValue = Any
 RpcResult = Tuple[Optional[JsonValue], Optional[str]]
+
+DEFAULT_ARIA2_COMMAND = [
+    'aria2c',
+    '--enable-rpc',
+    '--rpc-listen-all=false',
+    '--rpc-allow-origin-all',
+]
+DEFAULT_ARIA2_LABEL = 'aria2'
+DEFAULT_SHELL_CWD = '~/services/aria2'
+DEFAULT_LOG_TAIL_LINES = 200
+STATE_DIR = Path(os.path.expanduser('~/.cache/aria_downloader'))
+STATE_FILE = STATE_DIR / 'framework_shell.json'
 
 
 def _rpc_config() -> Tuple[str, Optional[str]]:
@@ -155,6 +172,55 @@ def _json_success(data: Any, status_code: int = 200):
 
 def _json_error(message: str, status_code: int = 500):
     return jsonify({'ok': False, 'error': message}), status_code
+
+
+# ----------------------------------------------------------------------
+# Framework shell helpers
+
+
+def _load_shell_state() -> Optional[Dict[str, Any]]:
+    try:
+        return json.loads(STATE_FILE.read_text())
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        return None
+    except Exception:
+        return None
+
+
+def _save_shell_state(data: Dict[str, Any]) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = STATE_FILE.with_suffix('.tmp')
+    with tmp_path.open('w', encoding='utf-8') as fh:
+        json.dump(data, fh, indent=2)
+    tmp_path.replace(STATE_FILE)
+
+
+def _clear_shell_state() -> None:
+    try:
+        STATE_FILE.unlink()
+    except FileNotFoundError:
+        return
+    except Exception:
+        return
+
+
+def _framework_manager() -> FrameworkShellManager:
+    return get_framework_shell_manager()
+
+
+def _wrap_shell_response(record: Optional[Dict[str, Any]], config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not record:
+        return {'shell': None}
+    payload: Dict[str, Any] = {'record': record, 'tracked': bool(config)}
+    if config:
+        payload['config'] = config
+    return {'shell': payload}
+
+
+# ----------------------------------------------------------------------
+# API endpoints
 
 
 @aria_downloader_bp.get('/')
@@ -306,3 +372,193 @@ def settings():
         return _json_error('No settings provided', 400)
 
     return _json_success({'updated': True})
+
+
+# ----------------------------------------------------------------------
+# Framework shell endpoints
+
+
+def _sanitize_env(env: Dict[str, Any]) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+    sanitized: Dict[str, str] = {}
+    for key, value in env.items():
+        if not isinstance(key, str):
+            return None, 'Environment keys must be strings'
+        sanitized[key] = str(value)
+    return sanitized, None
+
+
+@aria_downloader_bp.get('/shells')
+def list_framework_shells():
+    mgr = _framework_manager()
+    shells = [mgr.describe(record) for record in mgr.list_shells()]
+    return _json_success({'shells': shells})
+
+
+@aria_downloader_bp.get('/shell')
+def get_tracked_shell():
+    state = _load_shell_state()
+    if not state or 'id' not in state:
+        return _json_success({'shell': None})
+
+    include_logs = request.args.get('logs', 'false').lower() in {'1', 'true', 'yes'}
+    shell_id = str(state.get('id'))
+    mgr = _framework_manager()
+    record = mgr.get_shell(shell_id)
+    if not record:
+        _clear_shell_state()
+        return _json_success({'shell': None})
+    tail_lines = DEFAULT_LOG_TAIL_LINES
+    tail_param = request.args.get('tail')
+    if tail_param is not None:
+        try:
+            tail_lines = max(0, int(tail_param))
+        except ValueError:
+            tail_lines = DEFAULT_LOG_TAIL_LINES
+    described = mgr.describe(record, include_logs=include_logs, tail_lines=tail_lines if include_logs else 0)
+    return _json_success(_wrap_shell_response(described, state))
+
+
+@aria_downloader_bp.post('/shell/spawn')
+def spawn_shell():
+    payload = request.get_json(silent=True) or {}
+    force = bool(payload.get('force'))
+    current_state = _load_shell_state()
+    if current_state and not force:
+        return _json_error('An aria2 framework shell is already tracked. Stop or remove it before spawning a new one.', 409)
+    mgr = _framework_manager()
+    if current_state and force:
+        shell_id = current_state.get('id')
+        if shell_id:
+            try:
+                mgr.remove_shell(shell_id, force=True)
+            except Exception:
+                pass
+        _clear_shell_state()
+
+    if 'command' in payload:
+        command = payload.get('command')
+        if isinstance(command, str):
+            command = [command]
+        if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
+            return _json_error('"command" must be a list of strings or a string', 400)
+    else:
+        binary = payload.get('binary', 'aria2c')
+        if not isinstance(binary, str) or not binary.strip():
+            return _json_error('"binary" must be a non-empty string', 400)
+        extra_args = payload.get('args') or []
+        if not isinstance(extra_args, list) or not all(isinstance(arg, str) for arg in extra_args):
+            return _json_error('"args" must be a list of strings', 400)
+        command = [binary, *DEFAULT_ARIA2_COMMAND[1:], *extra_args]
+        command[0] = binary
+        secret = payload.get('secret')
+        if isinstance(secret, str) and secret:
+            command.append(f'--rpc-secret={secret}')
+
+    cwd = payload.get('cwd') or payload.get('directory') or DEFAULT_SHELL_CWD
+    if not isinstance(cwd, str):
+        return _json_error('"cwd" must be a string', 400)
+    env_payload = payload.get('env') or {}
+    if not isinstance(env_payload, dict):
+        return _json_error('"env" must be an object', 400)
+    env, env_error = _sanitize_env(env_payload)
+    if env_error:
+        return _json_error(env_error, 400)
+    label = payload.get('label') if isinstance(payload.get('label'), str) else DEFAULT_ARIA2_LABEL
+    autostart = bool(payload.get('autostart', False))
+
+    try:
+        record = mgr.spawn_shell(command, cwd=cwd, env=env or {}, label=label, autostart=autostart)
+    except ValueError as exc:
+        return _json_error(str(exc), 400)
+    except RuntimeError as exc:
+        return _json_error(str(exc), 409)
+    except Exception as exc:
+        return _json_error(f'Failed to spawn shell: {exc}', 500)
+
+    described = mgr.describe(record)
+    shell_config = {
+        'id': record.id,
+        'label': label,
+        'command': command,
+        'cwd': cwd,
+        'autostart': autostart,
+        'saved_at': time.time(),
+    }
+    if record.created_at is not None:
+        shell_config['created_at'] = record.created_at
+    _save_shell_state(shell_config)
+
+    return _json_success(_wrap_shell_response(described, shell_config), 201)
+
+
+@aria_downloader_bp.post('/shell/action')
+def shell_action():
+    payload = request.get_json(silent=True) or {}
+    action = (payload.get('action') or '').strip().lower()
+    if not action:
+        return _json_error('"action" is required', 400)
+
+    if action == 'adopt':
+        shell_id = payload.get('id')
+        if not isinstance(shell_id, str) or not shell_id:
+            return _json_error('"id" is required when adopting a shell', 400)
+        mgr = _framework_manager()
+        record = mgr.get_shell(shell_id)
+        if not record:
+            return _json_error('Shell not found', 404)
+        described = mgr.describe(record)
+        config = {
+            'id': shell_id,
+            'label': described.get('label') or DEFAULT_ARIA2_LABEL,
+            'command': described.get('command'),
+            'cwd': described.get('cwd'),
+            'autostart': bool(described.get('autostart', False)),
+            'saved_at': time.time(),
+        }
+        _save_shell_state(config)
+        return _json_success(_wrap_shell_response(described, config))
+
+    state = _load_shell_state()
+    if action == 'remove':
+        if not state or 'id' not in state:
+            _clear_shell_state()
+            return _json_success({'shell': None})
+        mgr = _framework_manager()
+        try:
+            mgr.remove_shell(state['id'], force=bool(payload.get('force')))
+        except KeyError:
+            pass
+        except Exception as exc:
+            return _json_error(f'Failed to remove shell: {exc}', 500)
+        _clear_shell_state()
+        return _json_success({'shell': None})
+
+    if not state or 'id' not in state:
+        return _json_error('No aria2 framework shell is currently tracked.', 404)
+
+    shell_id = str(state['id'])
+    mgr = _framework_manager()
+    try:
+        if action in {'stop', 'terminate'}:
+            record = mgr.terminate_shell(shell_id, force=False)
+        elif action in {'kill', 'force'}:
+            record = mgr.terminate_shell(shell_id, force=True)
+        elif action == 'restart':
+            record = mgr.restart_shell(shell_id)
+        else:
+            return _json_error(f'Unsupported action \"{action}\"', 400)
+    except KeyError:
+        _clear_shell_state()
+        return _json_error('Shell not found', 404)
+    except Exception as exc:
+        return _json_error(f'Shell action failed: {exc}', 500)
+
+    if isinstance(state, dict):
+        if action == 'restart' and hasattr(record, 'created_at') and record.created_at is not None:
+            state['created_at'] = record.created_at
+        state['last_action'] = action
+        state['updated_at'] = time.time()
+        _save_shell_state(state)
+
+    described = mgr.describe(record)
+    return _json_success(_wrap_shell_response(described, state))
