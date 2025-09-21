@@ -1,139 +1,296 @@
-// Extension Script: Sessions & Shortcuts
+// Sessions & Shortcuts Extension
 
-// This function will be called by the main app to initialize the extension
-export default function initialize(extensionContainer, api) {
-    let currentSessionId = null;
-    let sessionNames = {};
-    let autoRefreshTimer = null;
+const STATE = {
+    visibleSessions: [],
+    frameworkShells: [],
+    containers: [],
+    sessionNames: {},
+    currentSessionId: null,
+    autoRefreshTimer: null,
+};
+
+let extensionRoot;
+let apiClient;
+
+let elements = {
+    visibleList: null,
+    frameworkList: null,
+    refreshBtn: null,
+    tabVisible: null,
+    tabFramework: null,
+    autoRefreshSelect: null,
+};
+
+const storageKeys = {
+    sessionNames: 'sessionNames',
+    autoRefresh: 'sessions_and_shortcuts_auto_refresh_ms',
+};
+
+function escapeHTML(str) {
+    return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function loadSessionNames() {
     try {
-        sessionNames = JSON.parse(localStorage.getItem('sessionNames') || '{}') || {};
-    } catch (_) { sessionNames = {}; }
+        STATE.sessionNames = JSON.parse(localStorage.getItem(storageKeys.sessionNames) || '{}') || {};
+    } catch (err) {
+        STATE.sessionNames = {};
+    }
+}
 
-    const sessionsList = extensionContainer.querySelector('#sessions-list');
-    
-    const escapeHTML = (s) => s.replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+function saveSessionNames() {
+    try {
+        localStorage.setItem(storageKeys.sessionNames, JSON.stringify(STATE.sessionNames));
+    } catch (err) {
+        console.warn('Failed to persist session names', err);
+    }
+}
 
-    const renderSessions = (sessions) => {
-        sessionsList.innerHTML = '';
-        if (sessions.length === 0) {
-            sessionsList.innerHTML = '<p style="color: var(--muted-foreground);">No interactive sessions found.</p>';
-            return;
-        }
-        sessions.forEach(session => {
-            const sessionEl = document.createElement('div');
-            sessionEl.className = 'session';
-            const name = sessionNames[session.sid];
-            const isIdle = !session.busy;
-            const statusDot = `<span class="status-dot ${isIdle ? 'dot-green' : ''}" style="${isIdle ? '' : 'background-color: var(--destructive);'}; display:inline-block; margin-right:8px;"></span>`;
-            const displayCmd = session.fg_cmdline || session.fg_comm || 'process';
-            const statusText = session.busy ? `Running: ${escapeHTML(displayCmd)}` : 'bash';
-            sessionEl.innerHTML = `
-                <div class="session-header">
-                    <div class="session-title">${statusDot}${name ? escapeHTML(name) + ' • ' : ''}SID: ${session.sid}</div>
-                    <button class="menu-btn" data-sid="${session.sid}">&#8942;</button>
-                </div>
-                <div class="session-cwd">${session.cwd}</div>
-                ${statusText ? `<div class="session-cwd">${statusText}</div>` : ''}
-                <div class="menu" id="menu-${session.sid}">
-                    <div class="menu-item" data-action="run-shortcut">Run Shortcut...</div>
-                    <div class="menu-item" data-action="run-command">Run Command...</div>
-                    <div class="menu-item" data-action="rename">Rename Session...</div>
-                    <div class="menu-item destructive" data-action="kill">Kill Session</div>
-                </div>
-            `;
-            sessionsList.appendChild(sessionEl);
+function containersBySession() {
+    const mapping = {};
+    STATE.containers.forEach((container) => {
+        const attachments = Array.isArray(container.attachments) ? container.attachments : [];
+        attachments.forEach((sid) => {
+            mapping[sid] = mapping[sid] || [];
+            mapping[sid].push(container.label || container.id);
         });
-    };
+    });
+    return mapping;
+}
 
-    const renderShortcuts = (shortcuts) => {
-        const shortcutList = extensionContainer.querySelector('#shortcut-list');
-        shortcutList.innerHTML = '';
-        if (shortcuts.length === 0) {
-            shortcutList.innerHTML = '<p style="color: var(--muted-foreground);">No shortcuts found in ~/.shortcuts</p>';
-            return;
+function containerLabelByShell() {
+    const mapping = {};
+    STATE.containers.forEach((container) => {
+        if (container.shell_id) {
+            mapping[container.shell_id] = container.label || container.id;
         }
-        shortcuts.forEach(shortcut => {
-            const shortcutEl = document.createElement('div');
-            shortcutEl.className = 'menu-item';
-            shortcutEl.textContent = shortcut.name;
-            shortcutEl.onclick = () => runShortcut(shortcut.path);
-            shortcutList.appendChild(shortcutEl);
-        });
-    };
+    });
+    return mapping;
+}
 
-    const refreshSessions = () => {
-        api.get('sessions').then(data => {
-            renderSessions(data);
-        }).catch(err => {
-            sessionsList.innerHTML = '<p style="color: var(--destructive);">Error loading sessions.</p>';
-            console.error(err);
-        });
-    };
+function renderVisibleSessions() {
+    const list = elements.visibleList;
+    if (!list) return;
+    list.innerHTML = '';
+    if (!STATE.visibleSessions.length) {
+        const placeholder = document.createElement('p');
+        placeholder.className = 'session-empty';
+        placeholder.textContent = 'No interactive sessions found.';
+        list.appendChild(placeholder);
+        return;
+    }
 
-    const openMenu = (sid, button) => {
-        closeAllMenus();
-        const menu = extensionContainer.querySelector(`#menu-${sid}`);
-        menu.style.display = 'block';
-        const rect = button.getBoundingClientRect();
-        menu.style.top = rect.bottom + 'px';
-        menu.style.right = (window.innerWidth - rect.right) + 'px';
-    };
+    const containerMap = containersBySession();
 
-    const closeAllMenus = () => {
-        extensionContainer.querySelectorAll('.menu').forEach(m => m.style.display = 'none');
-    };
+    STATE.visibleSessions.forEach((session) => {
+        const card = document.createElement('div');
+        card.className = 'session';
+        const name = STATE.sessionNames[session.sid];
+        const isIdle = !session.busy;
+        const statusDot = `<span class="status-dot ${isIdle ? 'dot-green' : ''}" style="${isIdle ? '' : 'background-color: var(--destructive);'}"></span>`;
+        const displayCmd = session.fg_cmdline || session.fg_comm || 'process';
+        const statusText = session.busy ? `Running: ${escapeHTML(displayCmd)}` : 'bash';
+        const attachments = containerMap[session.sid] || [];
+        const attachmentText = attachments.length ? `Attached: ${attachments.join(', ')}` : '';
 
-    // Modal helpers (local functions). Keep closeModal exposed for template buttons.
-    const openModal = (modalId, sid) => {
-        if (sid !== undefined && sid !== null) {
-            currentSessionId = sid;
+        card.innerHTML = `
+            <div class="session-header">
+                <div class="session-title">${statusDot}${name ? escapeHTML(name) + ' • ' : ''}SID: ${session.sid}</div>
+                <button class="menu-btn" data-sid="${session.sid}">&#8942;</button>
+            </div>
+            <div class="session-cwd">${escapeHTML(session.cwd || '')}</div>
+            <div class="session-cwd">${statusText}</div>
+            ${attachmentText ? `<div class="session-cwd">${escapeHTML(attachmentText)}</div>` : ''}
+            <div class="menu" id="menu-${session.sid}">
+                <div class="menu-item" data-action="run-shortcut">Run Shortcut...</div>
+                <div class="menu-item" data-action="run-command">Run Command...</div>
+                <div class="menu-item" data-action="rename">Rename Session...</div>
+                <div class="menu-item destructive" data-action="kill">Kill Session</div>
+            </div>
+        `;
+        list.appendChild(card);
+    });
+}
+
+function renderFrameworkShells() {
+    const list = elements.frameworkList;
+    if (!list) return;
+    list.innerHTML = '';
+
+    if (!STATE.frameworkShells.length) {
+        const placeholder = document.createElement('p');
+        placeholder.className = 'session-empty';
+        placeholder.textContent = 'No framework shells running.';
+        list.appendChild(placeholder);
+        return;
+    }
+
+    const containerByShell = containerLabelByShell();
+
+    STATE.frameworkShells.forEach((shell) => {
+        const card = document.createElement('div');
+        card.className = 'session framework';
+        const stats = shell.stats || {};
+        const containerLabel = containerByShell[shell.id] || 'Unknown container';
+        const uptime = stats.uptime != null ? `uptime: ${Math.max(0, Math.round(stats.uptime))}s` : '';
+        const cpu = stats.cpu_percent != null ? `cpu: ${stats.cpu_percent.toFixed(1)}%` : '';
+        const mem = stats.memory_rss != null ? `mem: ${(stats.memory_rss / (1024 * 1024)).toFixed(1)} MB` : '';
+        const statLine = [uptime, cpu, mem].filter(Boolean).join(' · ');
+
+        card.innerHTML = `
+            <div class="session-header">
+                <div class="session-title">Framework Shell • ${escapeHTML(containerLabel)}</div>
+                <button class="framework-kill" data-shell="${shell.id}">Kill</button>
+            </div>
+            <div class="session-cwd">ID: ${shell.id}</div>
+            <div class="session-cwd">Command: ${escapeHTML((shell.command || []).join(' '))}</div>
+            ${statLine ? `<div class="session-cwd">${escapeHTML(statLine)}</div>` : ''}
+        `;
+        list.appendChild(card);
+    });
+}
+
+function render() {
+    renderVisibleSessions();
+    renderFrameworkShells();
+}
+
+function closeAllMenus() {
+    extensionRoot.querySelectorAll('.menu').forEach((menu) => {
+        menu.style.display = 'none';
+    });
+}
+
+function openMenu(sid, button) {
+    closeAllMenus();
+    const menu = extensionRoot.querySelector(`#menu-${sid}`);
+    if (!menu) return;
+    menu.style.display = 'block';
+    const rect = button.getBoundingClientRect();
+    menu.style.top = rect.bottom + 'px';
+    menu.style.right = (window.innerWidth - rect.right) + 'px';
+}
+
+function applyAutoRefresh(ms) {
+    if (STATE.autoRefreshTimer) {
+        clearInterval(STATE.autoRefreshTimer);
+        STATE.autoRefreshTimer = null;
+    }
+    if (ms > 0) {
+        STATE.autoRefreshTimer = setInterval(() => refreshAll(), ms);
+    }
+}
+
+function loadAutoRefreshSetting() {
+    try {
+        const value = parseInt(localStorage.getItem(storageKeys.autoRefresh) || '0', 10);
+        return Number.isNaN(value) ? 0 : value;
+    } catch (err) {
+        return 0;
+    }
+}
+
+function saveAutoRefreshSetting(ms) {
+    try {
+        localStorage.setItem(storageKeys.autoRefresh, String(ms));
+    } catch (err) {
+        console.warn('Failed to persist auto-refresh', err);
+    }
+}
+
+async function fetchFrameworkShells() {
+    try {
+        const data = await window.teFetch('/api/framework_shells');
+        return Array.isArray(data) ? data : [];
+    } catch (err) {
+        console.error('Failed to load framework shells', err);
+        return [];
+    }
+}
+
+async function fetchContainers() {
+    try {
+        const data = await window.teFetch('/api/app/distro/containers');
+        return Array.isArray(data) ? data : [];
+    } catch (err) {
+        console.error('Failed to load containers', err);
+        return [];
+    }
+}
+
+async function refreshAll() {
+    try {
+        const [sessions, frameworks, containers] = await Promise.all([
+            apiClient.get('sessions'),
+            fetchFrameworkShells(),
+            fetchContainers(),
+        ]);
+        STATE.visibleSessions = Array.isArray(sessions) ? sessions : [];
+        STATE.frameworkShells = frameworks;
+        STATE.containers = containers;
+        render();
+    } catch (err) {
+        console.error('Failed to refresh sessions', err);
+        const list = elements.visibleList;
+        if (list) {
+            list.innerHTML = '<p class="session-empty" style="color: var(--destructive);">Error loading sessions.</p>';
         }
-        const el = document.getElementById(modalId);
-        if (el) el.style.display = 'block';
-    };
+    }
+}
 
-    const closeModal = (modalId) => {
-        const el = document.getElementById(modalId);
-        if (el) el.style.display = 'none';
-    };
+function runShortcut(path) {
+    if (!STATE.currentSessionId) {
+        alert('Please select a session from the list first.');
+        return;
+    }
+    apiClient.post(`sessions/${STATE.currentSessionId}/shortcut`, { path })
+        .then(() => {
+            closeModal('shortcut-modal');
+            setTimeout(refreshAll, 250);
+        })
+        .catch(() => alert('Failed to run shortcut.'));
+}
 
-    // Expose for inline HTML onclick compatibility without changing UI.
-    window.closeModal = closeModal;
-    window.openModal = openModal;
+function shellQuote(value) {
+    return `'` + String(value).replace(/'/g, `'"'"'`) + `'`;
+}
 
-    const runShortcut = (path) => {
-        if (!currentSessionId) {
-            alert("Please select a session from the list first.");
-            return;
-        }
-        api.post(`sessions/${currentSessionId}/shortcut`, { path })
-            .then(() => {
-                closeModal('shortcut-modal');
-                setTimeout(refreshSessions, 250);
-            })
-            .catch(err => alert('Failed to run shortcut.'));
-    };
+function renameSession() {
+    if (!STATE.currentSessionId) return;
+    const input = extensionRoot.querySelector('#rename-input');
+    const newName = (input.value || '').trim();
+    if (!newName) {
+        alert('Please enter a name.');
+        return;
+    }
+    const cmd = `printf '\\033]2;%s\\007' -- ${shellQuote(newName)}`;
+    apiClient.post(`sessions/${STATE.currentSessionId}/command`, { command: cmd })
+        .then(() => {
+            STATE.sessionNames[STATE.currentSessionId] = newName;
+            saveSessionNames();
+            input.value = '';
+            closeModal('rename-modal');
+            refreshAll();
+        })
+        .catch(() => alert('Failed to rename session.'));
+}
 
-    const shellQuote = (s) => "'" + String(s).replace(/'/g, `'"'"'`) + "'";
+function selectTab(target) {
+    if (target === 'visible') {
+        elements.tabVisible.classList.add('active');
+        elements.tabFramework.classList.remove('active');
+        elements.visibleList.parentElement.classList.add('active');
+        elements.frameworkList.parentElement.classList.remove('active');
+    } else {
+        elements.tabFramework.classList.add('active');
+        elements.tabVisible.classList.remove('active');
+        elements.frameworkList.parentElement.classList.add('active');
+        elements.visibleList.parentElement.classList.remove('active');
+    }
+}
 
-    const renameSession = () => {
-        if (!currentSessionId) return;
-        const input = extensionContainer.querySelector('#rename-input');
-        const newName = (input.value || '').trim();
-        if (!newName) { alert('Please enter a name.'); return; }
-        const cmd = `printf '\\033]2;%s\\007' -- ${shellQuote(newName)}`;
-        api.post(`sessions/${currentSessionId}/command`, { command: cmd })
-            .then(() => {
-                sessionNames[currentSessionId] = newName;
-                try { localStorage.setItem('sessionNames', JSON.stringify(sessionNames)); } catch (_) {}
-                input.value = '';
-                closeModal('rename-modal');
-                refreshSessions();
-            })
-            .catch(() => alert('Failed to rename session.'));
-    };
-
-    extensionContainer.addEventListener('click', (e) => {
+function attachEventListeners() {
+    extensionRoot.addEventListener('click', (e) => {
         const target = e.target;
         if (target.classList.contains('menu-btn')) {
             openMenu(target.dataset.sid, target);
@@ -148,77 +305,134 @@ export default function initialize(extensionContainer, api) {
             closeAllMenus();
 
             if (action === 'kill') {
-                if (confirm(`Are you sure you want to kill session ${sid}?`)) {
-                    api.delete(`sessions/${sid}`).then(refreshSessions);
+                if (confirm(`Kill session ${sid}?`)) {
+                    apiClient.delete(`sessions/${sid}`).then(refreshAll);
                 }
             } else if (action === 'run-command') {
                 openModal('command-modal', sid);
             } else if (action === 'run-shortcut') {
-                api.get('shortcuts').then(data => {
-                    renderShortcuts(data);
-                });
+                apiClient.get('shortcuts').then((data) => renderShortcuts(data));
                 openModal('shortcut-modal', sid);
             } else if (action === 'rename') {
-                const inp = extensionContainer.querySelector('#rename-input');
-                if (inp) { inp.value = sessionNames[sid] || ''; setTimeout(() => inp.focus(), 0); }
+                const input = extensionRoot.querySelector('#rename-input');
+                if (input) {
+                    input.value = STATE.sessionNames[sid] || '';
+                    setTimeout(() => input.focus(), 0);
+                }
                 openModal('rename-modal', sid);
             }
             return;
         }
-        // Clicked somewhere inside the extension but not on a menu item or button: close menus for easier dismissal
+
+        if (target.classList.contains('framework-kill')) {
+            const shellId = target.dataset.shell;
+            if (shellId && confirm(`Kill framework shell ${shellId}?`)) {
+                killFrameworkShell(shellId);
+            }
+            return;
+        }
+
         if (!target.closest('.menu') && !target.classList.contains('menu-btn')) {
             closeAllMenus();
         }
     });
 
-    extensionContainer.querySelector('#run-command-btn').addEventListener('click', () => {
-        const command = extensionContainer.querySelector('#command-input').value;
-        if (command && currentSessionId) {
-            api.post(`sessions/${currentSessionId}/command`, { command })
-                .then(() => {
-                    closeModal('command-modal');
-                    extensionContainer.querySelector('#command-input').value = '';
-                    setTimeout(refreshSessions, 250);
-                })
-                .catch(err => alert('Failed to run command.'));
-        }
-    });
-
-    const renameBtn = extensionContainer.querySelector('#rename-save-btn');
-    if (renameBtn) renameBtn.addEventListener('click', renameSession);
-
-    extensionContainer.querySelector('#refresh-btn').addEventListener('click', refreshSessions);
-
-    // --- Auto Refresh Control ---
-    const autoRefreshSelect = extensionContainer.querySelector('#auto-refresh-select');
-    const storageKey = 'sessions_and_shortcuts_auto_refresh_ms';
-
-    const applyAutoRefresh = (ms) => {
-        if (autoRefreshTimer) {
-            clearInterval(autoRefreshTimer);
-            autoRefreshTimer = null;
-        }
-        const interval = parseInt(ms, 10) || 0;
-        try { localStorage.setItem(storageKey, String(interval)); } catch (_) {}
-        if (autoRefreshSelect && autoRefreshSelect.value !== String(interval)) {
-            autoRefreshSelect.value = String(interval);
-        }
-        if (interval > 0) {
-            autoRefreshTimer = setInterval(refreshSessions, interval);
-        }
-    };
-
-    if (autoRefreshSelect) {
-        autoRefreshSelect.addEventListener('change', (e) => {
-            applyAutoRefresh(e.target.value);
-            // Trigger an immediate refresh when changing interval
-            refreshSessions();
+    const runCommandBtn = extensionRoot.querySelector('#run-command-btn');
+    if (runCommandBtn) {
+        runCommandBtn.addEventListener('click', () => {
+            const commandInput = extensionRoot.querySelector('#command-input');
+            const command = commandInput.value;
+            if (command && STATE.currentSessionId) {
+                apiClient.post(`sessions/${STATE.currentSessionId}/command`, { command })
+                    .then(() => {
+                        closeModal('command-modal');
+                        commandInput.value = '';
+                        setTimeout(refreshAll, 250);
+                    })
+                    .catch(() => alert('Failed to run command.'));
+            }
         });
-        let saved = 0;
-        try { saved = parseInt(localStorage.getItem(storageKey) || '0', 10) || 0; } catch (_) { saved = 0; }
-        autoRefreshSelect.value = String(saved);
-        applyAutoRefresh(saved);
     }
 
-    refreshSessions();
+    const renameBtn = extensionRoot.querySelector('#rename-save-btn');
+    if (renameBtn) renameBtn.addEventListener('click', renameSession);
+}
+
+function renderShortcuts(shortcuts) {
+    const shortcutList = extensionRoot.querySelector('#shortcut-list');
+    if (!shortcutList) return;
+    shortcutList.innerHTML = '';
+    if (!shortcuts.length) {
+        shortcutList.innerHTML = '<p style="color: var(--muted-foreground);">No shortcuts found in ~/.shortcuts</p>';
+        return;
+    }
+    shortcuts.forEach((shortcut) => {
+        const button = document.createElement('button');
+        button.className = 'menu-item';
+        button.textContent = shortcut.name;
+        button.addEventListener('click', () => runShortcut(shortcut.path));
+        shortcutList.appendChild(button);
+    });
+}
+
+function killFrameworkShell(shellId) {
+    fetch(`/api/framework_shells/${shellId}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'kill' }),
+    })
+        .then((res) => res.json())
+        .then((body) => {
+            if (!body.ok) throw new Error(body.error || 'Failed to kill shell');
+            refreshAll();
+        })
+        .catch((err) => alert(err.message || 'Failed to kill shell'));
+}
+
+function openModal(modalId, sid) {
+    if (sid !== undefined && sid !== null) {
+        STATE.currentSessionId = sid;
+    }
+    const el = document.getElementById(modalId);
+    if (el) el.style.display = 'block';
+}
+
+function closeModal(modalId) {
+    const el = document.getElementById(modalId);
+    if (el) el.style.display = 'none';
+}
+
+window.closeModal = closeModal;
+window.openModal = openModal;
+
+export default function initialize(container, apiRef) {
+    extensionRoot = container;
+    apiClient = apiRef;
+
+    elements.visibleList = container.querySelector('#sessions-visible');
+    elements.frameworkList = container.querySelector('#sessions-framework');
+    elements.refreshBtn = container.querySelector('#refresh-btn');
+    elements.tabVisible = container.querySelector('#sas-tab-visible');
+    elements.tabFramework = container.querySelector('#sas-tab-framework');
+    elements.autoRefreshSelect = container.querySelector('#auto-refresh-select');
+
+    loadSessionNames();
+
+    if (elements.refreshBtn) elements.refreshBtn.addEventListener('click', () => refreshAll());
+    if (elements.tabVisible) elements.tabVisible.addEventListener('click', () => selectTab('visible'));
+    if (elements.tabFramework) elements.tabFramework.addEventListener('click', () => selectTab('framework'));
+
+    const savedMs = loadAutoRefreshSetting();
+    if (elements.autoRefreshSelect) {
+        elements.autoRefreshSelect.value = String(savedMs);
+        elements.autoRefreshSelect.addEventListener('change', (event) => {
+            const ms = parseInt(event.target.value, 10) || 0;
+            saveAutoRefreshSetting(ms);
+            applyAutoRefresh(ms);
+        });
+    }
+    applyAutoRefresh(savedMs);
+
+    attachEventListeners();
+    refreshAll();
 }

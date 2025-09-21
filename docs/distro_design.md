@@ -109,3 +109,19 @@ installations. Users provide:
 Submitting writes an entry to `app/apps/distro/config/containers.json` through the
 new `/api/app/distro/containers` endpoints (POST/PUT/DELETE). The same surface can
 be extended to import proot-distro definitions once that plugin lands.
+
+## 11. Session Hand-Off & Attachments
+
+- Backend exposes `POST /containers/<id>/attach`, `POST /containers/<id>/detach`, and
+  `GET /attachments`. Attach sends the login command to the selected Termux session
+  using `scripts/run_in_session.sh` after validating the session is idle.
+- Container state keeps an `attachments` array (session IDs) so the UI can render
+  inline chips and other extensions (e.g., Sessions & Shortcuts) can annotate cards.
+- The start/stop workflow force-unmounts any lingering mounts (`chroot-distro unmount
+  --force --all`) and clears attachments when a container shuts down.
+- The frontend fetches `/api/ext/sessions_and_shortcuts/sessions` alongside
+  `/api/app/distro/containers` so each container card lists currently attached
+  sessions with quick detach actions. A modal lists only idle sessions for new
+  attachments.
+- Sessions & Shortcuts consumes `/api/app/distro/containers` to display container
+  names on session cards and adds a new tab for framework shells (read-only kill).

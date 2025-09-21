@@ -14,8 +14,7 @@ sessions while reusing the shared framework shell API.
 5. Use the shared file picker (`window.teFilePicker`) for path selection in the UI.
 
 ## 3. Backend Requirements (`app/apps/distro/main.py`)
-- Load container definitions from `app/apps/distro/config/containers.json` (create if
-  missing). Schema:
+- Load container definitions from `app/apps/distro/config/containers.json` (create if missing). Schema:
   ```json
   [
     {
@@ -32,13 +31,14 @@ sessions while reusing the shared framework shell API.
   ]
   ```
 - Implement endpoints under `/api/app/distro`:
-  - `GET /containers` — list configs + live state (`offline|mounted|running|error`).
-  - `POST /containers/<id>/mount` — run mount plan.
-  - `POST /containers/<id>/start` — spawn framework shell running `login` command.
-  - `POST /containers/<id>/stop` — terminate associated framework shell.
-  - `POST /containers/<id>/unmount` — undo mounts.
+  - `GET /containers` — list configs + live state (`offline|mounted|running|error`) including attachments.
+  - `POST /containers` / `PUT /containers/<id>` / `DELETE /containers/<id>` — create/update/remove definitions.
+  - `POST /containers/<id>/mount` / `POST /containers/<id>/unmount` — manage mount plans.
+  - `POST /containers/<id>/start` / `POST /containers/<id>/stop` — control framework shells (ensure forced unmount cleanup).
+  - `POST /containers/<id>/attach` / `POST /containers/<id>/detach` — attach/detach sessions via `run_in_session.sh`.
   - `POST /containers/<id>/command` — execute `chroot-distro command <id> "..."`.
   - `GET /containers/<id>/logs` — stream log tail via framework shell API.
+  - `GET /attachments` — return session -> container mapping for other extensions.
 - The backend should call out to helper modules (create `plugins/chroot.py` inside
   the app directory) that wrap `sudo mount`, `chroot-distro`, etc. Safely handle
   failures and report human-readable errors.
@@ -49,20 +49,16 @@ sessions while reusing the shared framework shell API.
 - Respect `TE_FRAMEWORK_SHELL_TOKEN` when issuing mutating requests.
 
 ## 5. Frontend Requirements (`main.js` + `template.html`)
-- Render container cards showing:
-  - Icon/label
-  - State chip (offline/mounted/running/error)
-  - Key stats (uptime, PID, CPU/RAM when running)
-  - Primary button toggling Start/Stop
-  - Secondary actions menu: Mount, Unmount, Open Shell (Session hand-off), Logs.
-- Provide a details drawer/modal with tabs (`Overview`, `Mounts`, `Advanced`).
-- Use `window.teFilePicker` for selecting custom rootfs/mount paths when editing.
-- Poll `/containers` periodically to refresh state (5s while any running; 30s otherwise).
+- Render container cards with state chip, meta info, Start/Stop primary action, and a secondary menu (Mount, Unmount, Attach/Detach sessions, Logs).
+- Surface attached sessions inline on each card (with detach buttons) and automatically refresh when frameworks/sessions change.
+- Provide modals for importing containers, viewing logs, and selecting sessions.
+- Use `window.teFilePicker` for selecting custom rootfs/mount paths.
+- Poll `/api/app/distro/containers` + `/api/ext/sessions_and_shortcuts/sessions` periodically (5s while running, ~15s otherwise).
 
 ## 6. Session Hand-Off
-- Integrate Sessions & Shortcuts API to list available sessions and inject
-  `chroot-distro login <id>` on demand. Offer to create a new session via command
-  if none available (e.g., running a predefined shortcut).
+- Integrate Sessions & Shortcuts by listing idle sessions, attaching via `run_in_session.sh`,
+  and tracking attachments in state so the UI updates automatically.
+- Expose attachment data for other extensions (Sessions & Shortcuts) to annotate cards and tabs.
 
 ## 7. Definition of Done
 - Users can mount/unmount, start/stop, and view status for configured containers.

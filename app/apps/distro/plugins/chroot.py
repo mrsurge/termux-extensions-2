@@ -105,6 +105,9 @@ class ChrootDistroPlugin:
     def unmount_command(self) -> List[str]:
         return ["sudo", "chroot-distro", "unmount", self.container_id]
 
+    def force_unmount_command(self) -> List[str]:
+        return ["sudo", "chroot-distro", "unmount", "--force", "--all", self.container_id]
+
     def exec_command(self, command: str) -> List[str]:
         return ["sudo", "chroot-distro", "command", self.container_id, command]
 

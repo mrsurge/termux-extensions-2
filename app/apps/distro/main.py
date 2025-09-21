@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import shlex
 from pathlib import Path
 from typing import Dict, List
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
 
 from app.framework_shells import FrameworkShellManager
 
@@ -21,6 +22,19 @@ STATE_PATH = BASE_DIR / "state.json"
 framework_shells = FrameworkShellManager()
 
 distro_bp = Blueprint("distro", __name__)
+
+
+def _run_script(script_name: str, args: list[str] | None = None):
+    scripts_dir = Path(current_app.root_path).parent / 'scripts'
+    script_path = scripts_dir / script_name
+    if args is None:
+        args = []
+    try:
+        subprocess.run(['chmod', '+x', str(script_path)], check=True)
+        result = subprocess.run([str(script_path)] + args, capture_output=True, text=True, check=True)
+        return result.stdout, None
+    except Exception as exc:
+        return None, str(exc)
 
 
 # ---------------------------------------------------------------------------
@@ -66,9 +80,18 @@ def _get_state_entry(container_id: str) -> Dict:
     return state["containers"].get(container_id, {})
 
 
-def _set_state_entry(container_id: str, entry: Dict) -> None:
+def _update_container_state(container_id: str, updates: Dict) -> None:
     state = _load_state()
-    state.setdefault("containers", {})[container_id] = entry
+    containers_state = state.setdefault('containers', {})
+    entry = containers_state.get(container_id, {})
+    if not isinstance(entry, dict):
+        entry = {}
+    for key, value in updates.items():
+        if value is None:
+            entry.pop(key, None)
+        else:
+            entry[key] = value
+    containers_state[container_id] = entry
     _save_state(state)
 
 
@@ -184,6 +207,20 @@ def _ensure_unique_id(containers: List[Dict], container_id: str, *, skip_index: 
             raise ValueError('Container ID already exists')
 
 
+def _list_sessions():
+    output, error = _run_script('list_sessions.sh')
+    if error:
+        raise RuntimeError(error)
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f'Failed to parse sessions: {exc}')
+
+
+def _run_in_session(sid: str, command: str):
+    return _run_script('run_in_session.sh', [sid, command])
+
+
 # ---------------------------------------------------------------------------
 # Routes
 
@@ -214,6 +251,7 @@ def _serialize_container(container: Dict) -> Dict:
     }
     payload["state"] = state
     payload["shell_id"] = shell_id
+    payload["attachments"] = saved.get('attachments', []) if isinstance(saved, dict) else []
     if shell_info:
         payload["shell"] = shell_info
     return payload
@@ -342,7 +380,7 @@ def start_container(container_id: str):
         )
     except Exception as exc:
         return _respond_error(str(exc), status=500)
-    _set_state_entry(container_id, {'shell_id': record.id})
+    _update_container_state(container_id, {'shell_id': record.id})
     return jsonify({'ok': True, 'data': _serialize_container(container)})
 
 
@@ -371,8 +409,81 @@ def stop_container(container_id: str):
         plugin.unmount(force=True)
     except Exception:
         pass
-    _clear_state_entry(container_id)
+    _update_container_state(container_id, {'shell_id': None, 'attachments': []})
     return jsonify({'ok': True, 'data': _serialize_container(container)})
+
+@distro_bp.post("/containers/<container_id>/attach")
+def attach_container(container_id: str):
+    container, idx, containers, error = _find_container(container_id)
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    sid = str(payload.get('sid', '')).strip()
+    if not sid:
+        return _respond_error("'sid' is required", status=400)
+    try:
+        plugin = get_plugin(container)
+    except Exception as exc:
+        return _respond_error(str(exc), status=400)
+    try:
+        sessions = _list_sessions()
+    except Exception as exc:
+        return _respond_error(str(exc), status=500)
+    session = next((s for s in sessions if s.get('sid') == sid), None)
+    if not session:
+        return _respond_error('Session not found', status=404)
+    if session.get('busy'):
+        return _respond_error('Session is busy', status=409)
+    env_assign = ' '.join(f"{k}={shlex.quote(v)}" for k, v in (plugin.environment() or {}).items() if v)
+    command_parts = plugin.login_command()
+    command_str = ' '.join(shlex.quote(part) for part in command_parts)
+    full_cmd = f"{env_assign} {command_str}".strip()
+    _, error_msg = _run_in_session(sid, full_cmd)
+    if error_msg:
+        return _respond_error(error_msg, status=500)
+    entry = _get_state_entry(container_id)
+    attachments = entry.get('attachments', []) if isinstance(entry, dict) else []
+    if sid not in attachments:
+        attachments.append(sid)
+    _update_container_state(container_id, {'attachments': attachments})
+
+
+@distro_bp.post("/containers/<container_id>/detach")
+def detach_container(container_id: str):
+    container, idx, containers, error = _find_container(container_id)
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    sid = str(payload.get('sid', '')).strip()
+    if not sid:
+        return _respond_error("'sid' is required", status=400)
+    try:
+        plugin = get_plugin(container)
+    except Exception as exc:
+        return _respond_error(str(exc), status=400)
+    entry = _get_state_entry(container_id)
+    attachments = entry.get('attachments', []) if isinstance(entry, dict) else []
+    if sid in attachments:
+        attachments = [s for s in attachments if s != sid]
+    try:
+        _run_in_session(sid, 'exit')
+    except Exception:
+        pass
+    _update_container_state(container_id, {'attachments': attachments})
+    return jsonify({'ok': True, 'data': _serialize_container(container)})
+
+
+@distro_bp.get("/attachments")
+def list_attachments():
+    state = _load_state()
+    mapping = {}
+    for container_id, entry in state.get('containers', {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for sid in entry.get('attachments', []) or []:
+            mapping.setdefault(sid, []).append(container_id)
+    return jsonify({'ok': True, 'data': mapping})
+
 
 @distro_bp.post("/containers/<container_id>/command")
 def run_container_command(container_id: str):
