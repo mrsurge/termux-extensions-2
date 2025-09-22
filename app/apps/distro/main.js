@@ -115,6 +115,7 @@ function attachmentEntries(container) {
 }
 
 function availableSessions(container) {
+  if (container.state !== 'running') return [];
   const attached = new Set((container.attachments || []).map(String));
   return STATE.sessions.filter((session) => !attached.has(session.sid) && !session.busy);
 }

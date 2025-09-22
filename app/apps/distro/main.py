@@ -241,14 +241,21 @@ def _serialize_container(container: Dict, *, shell_map=None) -> Dict:
     saved = _get_state_entry(container_id)
     shell_id = saved.get("shell_id") if isinstance(saved, dict) else None
     shell_record = _get_shell_record(shell_id)
+    detected = False
     if not shell_record and shell_map is not None:
         record = shell_map.get(f'distro:{container_id}')
         if record:
             shell_record = record
             shell_id = record.id
+            detected = True
             _update_container_state(container_id, {'shell_id': shell_id})
     shell_info = framework_shells.describe(shell_record) if shell_record else None
-    state = _determine_state(plugin, shell_id)
+    if shell_info and shell_info.get('stats', {}).get('alive'):
+        state = 'running'
+    elif detected:
+        state = 'mounted'
+    else:
+        state = _determine_state(plugin, shell_id)
 
     payload = {
         "id": container_id,
