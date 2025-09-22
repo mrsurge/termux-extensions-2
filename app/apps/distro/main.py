@@ -224,7 +224,7 @@ def _run_in_session(sid: str, command: str):
 # ---------------------------------------------------------------------------
 # Routes
 
-def _serialize_container(container: Dict) -> Dict:
+def _serialize_container(container: Dict, *, shell_map=None) -> Dict:
     container_id = container.get("id")
     try:
         plugin = get_plugin(container)
@@ -240,7 +240,14 @@ def _serialize_container(container: Dict) -> Dict:
         return payload
     saved = _get_state_entry(container_id)
     shell_id = saved.get("shell_id") if isinstance(saved, dict) else None
-    shell_info = _describe_shell(shell_id)
+    shell_record = _get_shell_record(shell_id)
+    if not shell_record and shell_map is not None:
+        record = shell_map.get(f'distro:{container_id}')
+        if record:
+            shell_record = record
+            shell_id = record.id
+            _update_container_state(container_id, {'shell_id': shell_id})
+    shell_info = framework_shells.describe(shell_record) if shell_record else None
     state = _determine_state(plugin, shell_id)
 
     payload = {
@@ -313,7 +320,8 @@ def list_containers():
         containers = _load_config()
     except ValueError as exc:
         return _respond_error(str(exc), status=500)
-    data = [_serialize_container(container) for container in containers]
+    shell_map = {record.label: record for record in framework_shells.list_shells()}
+    data = [_serialize_container(container, shell_map=shell_map) for container in containers]
     return jsonify({"ok": True, "data": data})
 
 
