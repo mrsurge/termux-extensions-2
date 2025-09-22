@@ -228,6 +228,43 @@ function renderContainers() {
     }
 
     card.appendChild(attachmentsBlock);
+
+    const availableBlock = document.createElement('div');
+    availableBlock.className = 'distro-available';
+    const availableHeader = document.createElement('div');
+    availableHeader.className = 'distro-available-header';
+    const availableLabel = document.createElement('span');
+    availableLabel.textContent = 'Available Sessions';
+    availableHeader.appendChild(availableLabel);
+    availableBlock.appendChild(availableHeader);
+
+    if (item.state !== 'running') {
+      const note = document.createElement('div');
+      note.className = 'distro-available-empty';
+      note.textContent = 'Start the container to attach a session.';
+      availableBlock.appendChild(note);
+    } else {
+      const available = availableSessions(item);
+      if (!available.length) {
+        const note = document.createElement('div');
+        note.className = 'distro-available-empty';
+        note.textContent = 'No idle sessions available';
+        availableBlock.appendChild(note);
+      } else {
+        available.forEach((session) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'distro-available-item';
+          const title = session.name || `SID ${session.sid}`;
+          const cwd = session.cwd || '';
+          button.innerHTML = `<span class="distro-available-title">${title}</span><span class="distro-available-meta">${cwd}</span>`;
+          button.addEventListener('click', () => attachToSession(item, session.sid));
+          availableBlock.appendChild(button);
+        });
+      }
+    }
+
+    card.appendChild(availableBlock);
     containerEl.appendChild(card);
   });
 }
