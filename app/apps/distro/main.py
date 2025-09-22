@@ -224,7 +224,7 @@ def _run_in_session(sid: str, command: str):
 # ---------------------------------------------------------------------------
 # Routes
 
-def _serialize_container(container: Dict, *, shell_map=None) -> Dict:
+def _serialize_container(container: Dict, *, shell_by_id=None, shell_by_label=None) -> Dict:
     container_id = container.get("id")
     try:
         plugin = get_plugin(container)
@@ -240,16 +240,22 @@ def _serialize_container(container: Dict, *, shell_map=None) -> Dict:
         return payload
     saved = _get_state_entry(container_id)
     shell_id = saved.get("shell_id") if isinstance(saved, dict) else None
-    shell_record = _get_shell_record(shell_id)
+    shell_record = _get_shell_record(shell_id) if shell_id else None
+    shell_info = None
     detected = False
-    if not shell_record and shell_map is not None:
-        record = shell_map.get(f'distro:{container_id}')
-        if record:
-            shell_record = record
-            shell_id = record.id
+    if shell_record and shell_by_id:
+        pair = shell_by_id.get(shell_record.id)
+        if pair:
+            shell_record, shell_info = pair
+    if not shell_record and shell_by_label:
+        pair = shell_by_label.get(f'distro:{container_id}')
+        if pair:
+            shell_record, shell_info = pair
+            shell_id = shell_record.id
             detected = True
-            _update_container_state(container_id, {'shell_id': shell_id})
-    shell_info = framework_shells.describe(shell_record) if shell_record else None
+            _update_container_state(container_id, {'shell_id': shell_id, 'attachments': saved.get('attachments', []) if isinstance(saved, dict) else []})
+    if shell_info is None and shell_record:
+        shell_info = framework_shells.describe(shell_record)
     if shell_info and shell_info.get('stats', {}).get('alive'):
         state = 'running'
     elif detected:
@@ -327,8 +333,15 @@ def list_containers():
         containers = _load_config()
     except ValueError as exc:
         return _respond_error(str(exc), status=500)
-    shell_map = {record.label: record for record in framework_shells.list_shells()}
-    data = [_serialize_container(container, shell_map=shell_map) for container in containers]
+    shell_by_id = {}
+    shell_by_label = {}
+    for record in framework_shells.list_shells():
+        desc = framework_shells.describe(record)
+        shell_by_id[record.id] = (record, desc)
+        label = desc.get('label') or record.label
+        if label:
+            shell_by_label[label] = (record, desc)
+    data = [_serialize_container(container, shell_by_id=shell_by_id, shell_by_label=shell_by_label) for container in containers]
     return jsonify({"ok": True, "data": data})
 
 
