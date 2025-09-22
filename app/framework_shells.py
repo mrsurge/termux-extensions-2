@@ -516,6 +516,10 @@ def framework_shell_action(shell_id: str) -> Any:
             record = mgr.terminate_shell(shell_id, force=False)
         elif action in {"kill", "force"}:
             record = mgr.terminate_shell(shell_id, force=True)
+            try:
+                mgr.remove_shell(shell_id, force=True)
+            except Exception:
+                pass
         elif action == "restart":
             record = mgr.restart_shell(shell_id)
         else:
