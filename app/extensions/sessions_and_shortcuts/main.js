@@ -26,6 +26,53 @@ const storageKeys = {
     autoRefresh: 'sessions_and_shortcuts_auto_refresh_ms',
 };
 
+function loadFrameworkToken() {
+    try {
+        const value = localStorage.getItem('frameworkShellToken');
+        return value ? value : null;
+    } catch (err) {
+        return null;
+    }
+}
+
+function saveFrameworkToken(token) {
+    try {
+        if (token) localStorage.setItem('frameworkShellToken', token);
+        else localStorage.removeItem('frameworkShellToken');
+    } catch (err) {
+        console.warn('Failed to persist framework token', err);
+    }
+}
+
+async function frameworkFetch(url, options = {}, allowPrompt = true) {
+    const headers = Object.assign({}, options.headers || {});
+    const token = loadFrameworkToken();
+    if (token) headers['X-Framework-Key'] = token;
+    const response = await fetch(url, Object.assign({}, options, { headers }));
+    if (response.status === 403 && allowPrompt) {
+        const input = window.prompt('Framework shell token required. Enter token (leave blank to clear):');
+        if (input !== null) {
+            const trimmed = input.trim();
+            saveFrameworkToken(trimmed);
+            return frameworkFetch(url, options, false);
+        }
+    }
+    let body = null;
+    try {
+        body = await response.json();
+    } catch (err) {
+        body = null;
+    }
+    if (!response.ok || (body && body.ok === false)) {
+        const message = (body && body.error) ? body.error : `HTTP ${response.status} ${response.statusText}`;
+        throw new Error(message);
+    }
+    if (body && Object.prototype.hasOwnProperty.call(body, 'data')) {
+        return body.data;
+    }
+    return body;
+}
+
 function escapeHTML(str) {
     return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -378,18 +425,17 @@ function renderShortcuts(shortcuts) {
     });
 }
 
-function killFrameworkShell(shellId) {
-    fetch(`/api/framework_shells/${shellId}/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'kill' }),
-    })
-        .then((res) => res.json())
-        .then((body) => {
-            if (!body.ok) throw new Error(body.error || 'Failed to kill shell');
-            refreshAll();
-        })
-        .catch((err) => alert(err.message || 'Failed to kill shell'));
+async function killFrameworkShell(shellId) {
+    try {
+        await frameworkFetch(`/api/framework_shells/${shellId}/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'kill' }),
+        });
+        refreshAll();
+    } catch (err) {
+        alert(err.message || 'Failed to kill shell');
+    }
 }
 
 function openModal(modalId, sid) {
