@@ -2,6 +2,7 @@
   "name": "Termux Extensions",
   "short_name": "TE2",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#1a1a1a",
   "theme_color": "#4caf50",
@@ -9,6 +10,11 @@
     {
       "src": "/static/icon.png",
       "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icon.png",
+      "sizes": "512x512",
       "type": "image/png"
     }
   ]

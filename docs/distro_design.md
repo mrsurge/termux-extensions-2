@@ -65,6 +65,7 @@ A dedicated backend helper will wrap the chroot-distro CLI:
 - Each running container corresponds to a unique framework shell (`fs_*` id).
 - Metadata links shell id back to container id for state reporting.
 - Logs from the framework shell feed the app’s log viewer.
+- During `GET /containers` the backend rehydrates container state by matching framework shells by id and by their `distro:<id>` label; this keeps cards marked as running with stats even after a restart.
 
 ## 5. Session Hand-Off
 
@@ -112,7 +113,9 @@ be extended to import proot-distro definitions once that plugin lands.
 
 ## 11. Session Hand-Off & Attachments
 
-- Backend exposes `POST /containers/<id>/attach`, `POST /containers/<id>/detach`, and
+- Backend exposes
+- When listing containers the backend inspects Termux sessions via `/api/ext/sessions_and_shortcuts/sessions` to spot active `chroot-distro login <id>` commands. Matching sessions are reattached as "running" and repopulate the container attachments after a restart.
+ `POST /containers/<id>/attach`, `POST /containers/<id>/detach`, and
   `GET /attachments`. Attach sends the login command to the selected Termux session
   using `scripts/run_in_session.sh` after validating the session is idle.
 - Container state keeps an `attachments` array (session IDs) so the UI can render

@@ -188,6 +188,51 @@ def serve_app_file(app_dir, filename):
     return send_from_directory(os.path.join(app.root_path, 'apps', app_dir), filename)
 
 
+# --- PWA: Service Worker ---
+@app.route('/sw.js')
+def service_worker():
+    # Serve the service worker from a deterministic path at the app root scope
+    return send_from_directory(os.path.join(app.root_path, 'static', 'js'), 'sw.js', mimetype='application/javascript')
+
+
+# --- Lazy initialization compatible with Flask 3.x (before_first_request removed) ---
+_initialized = False
+_init_lock = None
+try:
+    import threading as _threading
+    _init_lock = _threading.Lock()
+except Exception:
+    class _DummyLock:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+    _init_lock = _DummyLock()
+
+def _ensure_initialized():
+    global _initialized, loaded_extensions, loaded_apps
+    if _initialized:
+        return
+    with _init_lock:
+        if _initialized:
+            return
+        try:
+            if not loaded_extensions:
+                loaded_extensions = load_extensions()
+        except Exception as e:
+            print(f"Error loading extensions: {e}")
+        try:
+            if not loaded_apps:
+                loaded_apps = load_apps()
+        except Exception as e:
+            print(f"Error loading apps: {e}")
+        _initialized = True
+
+@app.before_request
+def _before_request_init():
+    _ensure_initialized()
+
+
 # @app.route('/api/create_directory', methods=['POST'])
 # def create_directory():
 #     """Creates a new directory at a given path."""
@@ -221,4 +266,5 @@ if __name__ == '__main__':
     loaded_apps = load_apps()
     print(f"Loaded {len(loaded_apps)} apps.")
     print("--- Starting Server ---")
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    # Production-like settings for the built-in server (still not recommended for production)
+    app.run(host='0.0.0.0', port=8080, debug=False)

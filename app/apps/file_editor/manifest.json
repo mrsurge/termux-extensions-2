@@ -1,0 +1,13 @@
+{
+  "name": "File Editor",
+  "id": "file_editor",
+  "version": "0.1.0",
+  "description": "A full-page text editor.",
+  "author": "Gemini",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  },
+  "fullscreen": true
+}

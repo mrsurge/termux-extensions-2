@@ -23,12 +23,43 @@ This project aims to break through that plateau by creating a fluid, intuitive, 
     source scripts/init.sh
     ```
 
-3.  **Run the Server:** In a separate shell that you **do not** want to monitor, run the Flask application. Set the `TE_SESSION_TYPE` variable to `framework` to hide this shell from the UI.
+3.  **Run the Server (dev):** In a separate shell that you **do not** want to monitor, run the Flask application. Set the `TE_SESSION_TYPE` variable to `framework` to hide this shell from the UI.
     ```bash
     TE_SESSION_TYPE="framework" python app/main.py
     ```
 
 4.  **Access the UI:** Open a web browser and navigate to `http://localhost:8080`.
+### Production run (serve to other devices)
+
+To allow other devices on your network to access the UI, run with Gunicorn and bind to all interfaces:
+
+```bash
+# Install requirements (if not already)
+pip install -r requirements.txt
+
+# Run Gunicorn, binding to 0.0.0.0:8080
+TE_SESSION_TYPE="framework" gunicorn -w 2 -k gthread --threads 8 -b 0.0.0.0:8080 wsgi:application
+```
+
+Then open from another device on the same network: `http://<your-device-ip>:8080`
+
+Notes:
+- The built-in Flask server is now non-debug by default and binds to `0.0.0.0` on port 8080, but Gunicorn is recommended for multi-client stability.
+- Adjust workers/threads based on your device resources. On low-memory phones/tablets, `-w 1 --threads 4` might be better.
+
+
+### Install as a Web App (PWA)
+
+On mobile (Android Chrome/Edge, recent Firefox):
+
+- Open `http://localhost:8080` in the browser on the same device.
+- Use the browser menu and select "Install app" or "Add to Home screen".
+- Launch from the home screen icon for a full-screen experience.
+
+Notes:
+
+- A service worker and manifest are included; localhost is treated as a secure context, so installation works without HTTPS.
+- If you previously installed an older version, you may need to remove it and re-install after updating.
 
 ## Key Features
 

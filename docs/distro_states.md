@@ -31,6 +31,8 @@ framework shell API and supporting helper scripts.
 Running containers can expose interactive shells by delegating to the Sessions &
 Shortcuts extension: choose a Termux session and send an attach command
 (e.g. `proot-distro login <name>`). This keeps the background framework shell and
-front-end interactive shell decoupled.
+front-end interactive shell decoupled. When `/containers` is requested the backend also scans
+Termux sessions for active `chroot-distro login <id>` commands so that cards return to
+`running` (with live stats) after a restart even if attachments were active.
 
 These notes provide context for the upcoming app scaffolding and future agent work.

@@ -224,7 +224,7 @@ def _run_in_session(sid: str, command: str):
 # ---------------------------------------------------------------------------
 # Routes
 
-def _serialize_container(container: Dict, *, shell_by_id=None, shell_by_label=None) -> Dict:
+def _serialize_container(container: Dict, *, shell_by_id=None, shell_by_label=None, sessions=None) -> Dict:
     container_id = container.get("id")
     try:
         plugin = get_plugin(container)
@@ -243,6 +243,10 @@ def _serialize_container(container: Dict, *, shell_by_id=None, shell_by_label=No
     shell_record = _get_shell_record(shell_id) if shell_id else None
     shell_info = None
     detected = False
+    # Gather any currently attached sessions discovered from the Sessions & Shortcuts extension
+    sessions = sessions or {}
+    discovered_sessions = sessions.get(container_id) or []
+    discovered_sids = [s.get('sid') for s in discovered_sessions if s.get('sid')]
     if shell_record and shell_by_id:
         pair = shell_by_id.get(shell_record.id)
         if pair:
@@ -257,10 +261,21 @@ def _serialize_container(container: Dict, *, shell_by_id=None, shell_by_label=No
     if shell_info is None and shell_record:
         shell_info = framework_shells.describe(shell_record)
     if shell_info and shell_info.get('stats', {}).get('alive'):
+        # Normal path: framework shell is alive → running
         state = 'running'
+    elif discovered_sids:
+        # Rehydration path: no alive framework shell, but an interactive Termux session
+        # is actively running the container. Treat as running and reconcile attachments.
+        state = 'running'
+        # Merge discovered session IDs into persisted attachments
+        persisted_attachments = saved.get('attachments', []) if isinstance(saved, dict) else []
+        merged = list({*(str(s) for s in persisted_attachments), *(str(s) for s in discovered_sids)})
+        _update_container_state(container_id, {'attachments': merged})
     elif detected:
+        # A framework shell record exists (matched by label) but it's not alive → mounted
         state = 'mounted'
     else:
+        # Fall back to plugin-based mounted/offline detection
         state = _determine_state(plugin, shell_id)
 
     payload = {
@@ -271,7 +286,12 @@ def _serialize_container(container: Dict, *, shell_by_id=None, shell_by_label=No
     }
     payload["state"] = state
     payload["shell_id"] = shell_id
-    payload["attachments"] = saved.get('attachments', []) if isinstance(saved, dict) else []
+    # Use reconciled attachments if we discovered active sessions; otherwise use saved
+    if discovered_sids:
+        persisted_attachments = saved.get('attachments', []) if isinstance(saved, dict) else []
+        payload["attachments"] = list({*(str(s) for s in persisted_attachments), *(str(s) for s in discovered_sids)})
+    else:
+        payload["attachments"] = saved.get('attachments', []) if isinstance(saved, dict) else []
     if shell_info:
         payload["shell"] = shell_info
     return payload
@@ -341,7 +361,26 @@ def list_containers():
         label = desc.get('label') or record.label
         if label:
             shell_by_label[label] = (record, desc)
-    data = [_serialize_container(container, shell_by_id=shell_by_id, shell_by_label=shell_by_label) for container in containers]
+    session_map = {}
+    try:
+        sessions = _list_sessions()
+    except Exception:
+        sessions = []
+    for session in sessions:
+        cmdline = (session.get('fg_cmdline') or '').lower()
+        comm = (session.get('fg_comm') or '').lower()
+        sid = session.get('sid')
+        if not sid:
+            continue
+        for container in containers:
+            cid = container.get('id')
+            if not cid:
+                continue
+            marker = cid.lower()
+            if (('chroot-distro' in cmdline and marker in cmdline) or ('chroot-distro' in comm and marker in comm)):
+                session_map.setdefault(cid, []).append(session)
+                break
+    data = [_serialize_container(container, shell_by_id=shell_by_id, shell_by_label=shell_by_label, sessions=session_map) for container in containers]
     return jsonify({"ok": True, "data": data})
 
 

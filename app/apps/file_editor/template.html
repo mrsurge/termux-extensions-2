@@ -1,0 +1,182 @@
+<style>
+  .fe-root { display: flex; flex-direction: column; height: 100%; }
+  .fe-toolbar { display: flex; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
+  .fe-path { flex: 1; min-width: 120px; padding: 6px 8px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); }
+  .fe-path-display { flex: 1; min-width: 120px; padding: 6px 8px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fe-btn { padding: 6px 10px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; }
+  .fe-btn:hover { border-color: var(--primary, #3b82f6); }
+  .fe-status { margin-left: auto; font-size: 12px; color: var(--muted-foreground, #9ca3af); }
+  .fe-editor { flex: 1; width: 100%; resize: none; border: none; outline: none; padding: 10px; box-sizing: border-box; background: transparent; color: var(--foreground, #e5e7eb); font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 14px; line-height: 20px; }
+  .fe-editor-wrap { position: relative; overflow: hidden; flex: 1; display: flex; min-height: 0; }
+  .fe-bg { position: absolute; inset: 0; pointer-events: none; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0, rgba(255,255,255,0.025) var(--fe-lh, 20px), transparent var(--fe-lh, 20px), transparent calc(var(--fe-lh, 20px) * 2)); background-position: 0 var(--fe-bg-offset, 0px); background-clip: padding-box; }
+  .fe-gutter { width: 4ch; padding: 10px 8px; margin: 0; box-sizing: border-box; overflow: auto; height: 100%; text-align: right; color: var(--muted-foreground, #9ca3af); background: var(--secondary, #0a0d14); border-right: 1px solid var(--border, #333); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 14px; line-height: 1.4; user-select: none; }
+  .fe-gutter.hidden { display: none; }
+  .fe-findbar { display: none; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
+  .fe-findbar.show { display: flex; }
+  .fe-input { padding: 6px 8px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); }
+  .fe-toggle { padding: 6px 8px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; }
+  .fe-toggle.active { border-color: var(--primary, #3b82f6); background: rgba(59,130,246,0.12); }
+  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 14px; }
+  .fe-menu { position: relative; }
+  .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; }
+  .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
+  .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 15; }
+  .fe-dropdown.show { display: block; }
+  .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; cursor: pointer; }
+  .fe-dd-item:hover { background: rgba(255,255,255,0.06); }
+  .fe-kbd { opacity: .6; font-size: 12px; }
+  .fe-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 20; }
+  .fe-modal.show { display: flex; }
+  .fe-modal-card { width: min(800px, 92vw); max-height: 80vh; background: var(--card, #0b0f1a); color: var(--foreground, #e5e7eb); border: 1px solid var(--border, #333); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
+  .fe-modal-header { display: flex; align-items: center; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border, #333); }
+  .fe-modal-body { overflow: auto; }
+  .fe-list { list-style: none; margin: 0; padding: 0; }
+  .fe-list-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .fe-list-item:hover { background: rgba(255,255,255,0.05); }
+  .fe-list-name { flex: 1; }
+  .fe-chip { font-size: 11px; opacity: 0.7; border: 1px solid var(--border, #333); padding: 2px 6px; border-radius: 999px; }
+  .fe-modal-actions { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--border, #333); }
+  .fe-confirm-body { padding: 16px; }
+  .fe-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px; border-top: 1px solid var(--border, #333); }
+  .fe-crumb { position: relative; }
+  .fe-crumb-btn { white-space: nowrap; }
+  .fe-crumb-menu { position: absolute; top: calc(100% + 4px); right: 0; min-width: 200px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 21; }
+  .fe-crumb-menu.show { display: block; }
+  .fe-crumb-item { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .fe-crumb-item:hover { background: rgba(255,255,255,0.06); }
+</style>
+
+<div class="fe-root">
+  <div class="fe-toolbar">
+    <div id="fe-path-display" class="fe-path-display" title="Current file path">Untitled</div>
+    <button id="fe-browse" class="fe-btn" title="Browse">📁</button>
+    <span id="fe-status" class="fe-status"></span>
+  </div>
+  <div class="fe-menubar">
+    <div class="fe-menu" id="menu-file">
+      <button class="fe-menu-btn" id="menu-file-btn">File ▾</button>
+      <div class="fe-dropdown" id="menu-file-dd">
+        <div class="fe-dd-item" id="mi-new"><span>New</span><span class="fe-kbd">Ctrl/Cmd+N</span></div>
+        <div class="fe-dd-item" id="mi-open"><span>Open…</span><span class="fe-kbd">Ctrl/Cmd+O</span></div>
+        <div class="fe-dd-item" id="mi-save"><span>Save</span><span class="fe-kbd">Ctrl/Cmd+S</span></div>
+        <div class="fe-dd-item" id="mi-saveas"><span>Save As…</span><span class="fe-kbd">Ctrl/Cmd+Shift+S</span></div>
+        <div class="fe-dd-item" id="mi-close"><span>Close</span></div>
+        <div class="fe-dd-item" id="mi-quit"><span>Quit (Clear State)</span></div>
+      </div>
+    </div>
+    <div class="fe-menu" id="menu-edit">
+      <button class="fe-menu-btn" id="menu-edit-btn">Edit ▾</button>
+      <div class="fe-dropdown" id="menu-edit-dd">
+        <div class="fe-dd-item" id="mi-undo"><span>Undo</span><span class="fe-kbd">Ctrl/Cmd+Z</span></div>
+        <div class="fe-dd-item" id="mi-redo"><span>Redo</span><span class="fe-kbd">Ctrl/Cmd+Y</span></div>
+        <div class="fe-dd-item" id="mi-cut"><span>Cut</span><span class="fe-kbd">Ctrl/Cmd+X</span></div>
+        <div class="fe-dd-item" id="mi-copy"><span>Copy</span><span class="fe-kbd">Ctrl/Cmd+C</span></div>
+        <div class="fe-dd-item" id="mi-paste"><span>Paste</span><span class="fe-kbd">Ctrl/Cmd+V</span></div>
+        <div class="fe-dd-item" id="mi-selectall"><span>Select All</span><span class="fe-kbd">Ctrl/Cmd+A</span></div>
+      </div>
+    </div>
+    <div class="fe-menu" id="menu-view">
+      <button class="fe-menu-btn" id="menu-view-btn">View ▾</button>
+      <div class="fe-dropdown" id="menu-view-dd">
+        <div class="fe-dd-item" id="mi-toggle-lines"><span>Toggle Line Numbers</span></div>
+        <div class="fe-dd-item" id="mi-toggle-striping"><span>Toggle Line Shading</span></div>
+        <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
+        <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+L</span></div>
+      </div>
+    </div>
+  </div>
+  <div id="fe-findbar" class="fe-findbar">
+    <input id="fe-find" class="fe-input" placeholder="Find" />
+    <input id="fe-replace" class="fe-input" placeholder="Replace" />
+    <button id="fe-find-case" class="fe-toggle" title="Match case">Aa</button>
+    <button id="fe-find-word" class="fe-toggle" title="Whole word">W</button>
+    <button id="fe-find-prev" class="fe-btn">Prev</button>
+    <button id="fe-find-next" class="fe-btn">Next</button>
+    <button id="fe-replace-one" class="fe-btn">Replace</button>
+    <button id="fe-replace-all" class="fe-btn">Replace All</button>
+    <span style="flex:1"></span>
+    <button id="fe-find-close" class="fe-btn">✕</button>
+  </div>
+  <div class="fe-editor-wrap">
+    <div id="fe-bg" class="fe-bg"></div>
+    <pre id="fe-gutter" class="fe-gutter"></pre>
+    <textarea id="editor" class="fe-editor" spellcheck="false" placeholder="Start typing or open a file..."></textarea>
+  </div>
+
+  <div id="fe-modal" class="fe-modal" aria-hidden="true">
+    <div class="fe-modal-card">
+      <div class="fe-modal-header">
+        <strong style="margin-right: 8px;">Open</strong>
+        <span style="flex:1"></span>
+        <div class="fe-crumb">
+          <button id="fe-open-crumb-btn" class="fe-btn fe-crumb-btn">~</button>
+          <div id="fe-open-crumb-menu" class="fe-crumb-menu"></div>
+        </div>
+        <button id="fe-modal-close" class="fe-btn" aria-label="Close">✕</button>
+      </div>
+      <div id="fe-modal-body" class="fe-modal-body">
+        <ul id="fe-list" class="fe-list"></ul>
+      </div>
+      <div class="fe-modal-actions">
+        <button id="fe-up" class="fe-btn">Up</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fe-confirm" class="fe-modal" aria-hidden="true">
+    <div class="fe-modal-card" style="max-width: 520px;">
+      <div class="fe-modal-header">
+        <strong>Unsaved Changes</strong>
+        <span style="flex:1"></span>
+        <button id="fe-confirm-close" class="fe-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="fe-confirm-body">
+        <p>You have unsaved changes. Save them before continuing?</p>
+      </div>
+      <div class="fe-confirm-actions">
+        <button id="fe-discard" class="fe-btn">Discard</button>
+        <button id="fe-save-confirm" class="fe-btn">Save</button>
+        <button id="fe-cancel" class="fe-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fe-goto" class="fe-modal" aria-hidden="true">
+    <div class="fe-modal-card" style="max-width: 420px;">
+      <div class="fe-modal-header">
+        <strong>Go To Line</strong>
+        <span style="flex:1"></span>
+        <button id="fe-goto-close" class="fe-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="fe-confirm-body">
+        <input id="fe-goto-input" type="number" min="1" class="fe-input" placeholder="Line number" style="width: 160px;" />
+      </div>
+      <div class="fe-confirm-actions">
+        <button id="fe-goto-go" class="fe-btn">Go</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fe-saveas" class="fe-modal" aria-hidden="true">
+    <div class="fe-modal-card">
+      <div class="fe-modal-header">
+        <strong>Save As</strong>
+        <span style="flex:1"></span>
+        <div class="fe-crumb">
+          <button id="fe-save-crumb-btn" class="fe-btn fe-crumb-btn">~</button>
+          <div id="fe-save-crumb-menu" class="fe-crumb-menu"></div>
+        </div>
+        <button id="fe-saveas-close" class="fe-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="fe-modal-body">
+        <ul id="fe-saveas-list" class="fe-list"></ul>
+      </div>
+      <div class="fe-modal-actions">
+        <button id="fe-saveas-up" class="fe-btn">Up</button>
+        <input id="fe-filename" class="fe-path" placeholder="filename.txt" style="flex:1" />
+        <button id="fe-saveas-save" class="fe-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+</div>

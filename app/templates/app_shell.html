@@ -4,6 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Termux App</title>
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/static/icon.png">
+    <meta name="theme-color" content="#4caf50">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -37,12 +42,13 @@
     </div>
 
     <script type="module" src="/static/js/file_picker.js"></script>
+    <script id="__app_id_json" type="application/json">{{ app_id|tojson }}</script>
     <script type="module">
         const appContainer = document.getElementById('app-container');
         const appTitleEl = document.getElementById('app-title');
         const btnHome = document.getElementById('btn-home');
         const btnReload = document.getElementById('btn-reload');
-        const appId = {{ app_id|tojson }};
+        const appId = JSON.parse(document.getElementById('__app_id_json').textContent);
 
         // Minimal teFetch helper for the app shell
         async function teFetch(url, options) {
@@ -136,5 +142,15 @@
 
         document.addEventListener('DOMContentLoaded', loadApp);
     </script>
+        <script>
+// Register Service Worker for PWA installability (app shell view)
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(err => {
+            console.error('Service worker registration failed:', err);
+        });
+    });
+}
+        </script>
 </body>
 </html>
