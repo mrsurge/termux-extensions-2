@@ -18,6 +18,12 @@ import subprocess
 import threading
 import time
 import uuid
+import select
+import queue
+import pty
+import fcntl
+import termios
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -75,6 +81,14 @@ class ShellRecord:
         return payload
 
 
+@dataclass
+class PTYState:
+    master_fd: int
+    subscribers: List["queue.Queue[str]"] = field(default_factory=list)
+    stop: threading.Event = field(default_factory=threading.Event)
+    reader: Optional[threading.Thread] = None
+
+
 class FrameworkShellManager:
     """Creates and tracks background framework shells."""
 
@@ -94,6 +108,8 @@ class FrameworkShellManager:
         self.max_shells = max_shells if max_shells is not None else DEFAULT_MAX_SHELLS
         self.auth_token = auth_token or os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
         self._lock = threading.RLock()
+        # In-memory PTY tracking for interactive shells
+        self._pty: Dict[str, PTYState] = {}
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -291,6 +307,151 @@ class FrameworkShellManager:
             self._launch(record)
             return record
 
+    def spawn_shell_pty(
+        self,
+        command: Iterable[str],
+        *,
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+        label: Optional[str] = None,
+        autostart: bool = True,
+    ) -> ShellRecord:
+        """Spawn an interactive shell attached to a PTY and stream its output.
+
+        The PTY master is kept in-memory and fanned out to subscribers; output is also
+        appended to the stdout log for later inspection.
+        """
+        with self._lock:
+            self.sweep()
+            if self.max_shells and self._active_shell_count() >= self.max_shells:
+                raise RuntimeError("Maximum framework shell count reached")
+            shell_id = f"fs_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+            command_list = self._normalize_command(command)
+            cwd_path = self._resolve_cwd(cwd)
+            overrides = dict(env or {})
+            now = time.time()
+            record = ShellRecord(
+                id=shell_id,
+                command=command_list,
+                label=label,
+                cwd=cwd_path,
+                env_overrides=overrides,
+                pid=None,
+                status="pending",
+                created_at=now,
+                updated_at=now,
+                autostart=autostart,
+                stdout_log=str(self.logs_dir / f"{shell_id}.stdout.log"),
+                stderr_log=str(self.logs_dir / f"{shell_id}.stderr.log"),
+            )
+            # Create PTY
+            master_fd, slave_fd = pty.openpty()
+            # Prepare env with framework session markers
+            envp = self._prepare_env(record)
+            envp.setdefault("TERM", "xterm-256color")
+            envp.setdefault("TE_TTY", "pty")
+            # Launch process attached to PTY
+            with open(record.stdout_log, "ab") as _:
+                pass  # ensure file exists
+            try:
+                proc = subprocess.Popen(
+                    command_list,
+                    cwd=cwd_path,
+                    env=envp,
+                    stdin=slave_fd,
+                    stdout=slave_fd,
+                    stderr=slave_fd,
+                    start_new_session=True,
+                    close_fds=True,
+                )
+            finally:
+                try:
+                    os.close(slave_fd)
+                except Exception:
+                    pass
+            record.pid = proc.pid
+            record.status = "running"
+            record.exit_code = None
+            record.updated_at = time.time()
+            self._save_record(record)
+            # Start reader thread to tee PTY master into log and subscribers
+            state = PTYState(master_fd=master_fd)
+            def _reader():
+                log_path = Path(record.stdout_log)
+                with log_path.open("ab") as log_fh:
+                    while not state.stop.is_set():
+                        try:
+                            r, _, _ = select.select([master_fd], [], [], 0.5)
+                            if not r:
+                                continue
+                            data = os.read(master_fd, 4096)
+                            if not data:
+                                time.sleep(0.05)
+                                continue
+                        except OSError:
+                            break
+                        try:
+                            log_fh.write(data)
+                            log_fh.flush()
+                        except Exception:
+                            pass
+                        text = data.decode("utf-8", errors="replace")
+                        # Snapshot subscribers to avoid holding lock during send
+                        subs = list(state.subscribers)
+                        for q in subs:
+                            try:
+                                q.put_nowait(text)
+                            except Exception:
+                                pass
+                # Attempt to close master when stopping
+                try:
+                    os.close(master_fd)
+                except Exception:
+                    pass
+            t = threading.Thread(target=_reader, daemon=True)
+            state.reader = t
+            self._pty[shell_id] = state
+            t.start()
+            return record
+
+    def write_to_pty(self, shell_id: str, data: bytes | str) -> None:
+        with self._lock:
+            state = self._pty.get(shell_id)
+            if not state:
+                raise KeyError("No PTY for this shell")
+            payload = data.encode("utf-8") if isinstance(data, str) else data
+            os.write(state.master_fd, payload)
+
+    def subscribe_output(self, shell_id: str) -> "queue.Queue[str]":
+        with self._lock:
+            state = self._pty.get(shell_id)
+            if not state:
+                raise KeyError("No PTY for this shell")
+            q: "queue.Queue[str]" = queue.Queue()
+            state.subscribers.append(q)
+            return q
+
+    def unsubscribe_output(self, shell_id: str, q: "queue.Queue[str]") -> None:
+        with self._lock:
+            state = self._pty.get(shell_id)
+            if not state:
+                return
+            try:
+                state.subscribers.remove(q)
+            except ValueError:
+                pass
+
+    def resize_pty(self, shell_id: str, cols: int, rows: int) -> None:
+        with self._lock:
+            state = self._pty.get(shell_id)
+            if not state:
+                raise KeyError("No PTY for this shell")
+            winsz = struct.pack("HHHH", max(1, rows), max(1, cols), 0, 0)
+            try:
+                fcntl.ioctl(state.master_fd, termios.TIOCSWINSZ, winsz)
+            except Exception:
+                pass
+
     def terminate_shell(self, shell_id: str, *, force: bool = False, timeout: float = 5.0) -> ShellRecord:
         with self._lock:
             record = self._load_record(shell_id)
@@ -325,6 +486,15 @@ class FrameworkShellManager:
             # final state
             exit_code = self._collect_exit_code(record.pid)
             self._mark_exited(record, exit_code)
+            # cleanup PTY resources if any
+            state = self._pty.pop(shell_id, None)
+            if state:
+                state.stop.set()
+                try:
+                    if state.reader:
+                        state.reader.join(timeout=1.0)
+                except Exception:
+                    pass
             return record
 
     def restart_shell(self, shell_id: str) -> ShellRecord:
@@ -347,6 +517,19 @@ class FrameworkShellManager:
             if record.pid and self._is_pid_alive(record.pid):
                 self.terminate_shell(shell_id, force=force)
             shutil.rmtree(self.metadata_dir / shell_id, ignore_errors=True)
+            # cleanup PTY if any
+            state = self._pty.pop(shell_id, None)
+            if state:
+                state.stop.set()
+                try:
+                    if state.reader:
+                        state.reader.join(timeout=1.0)
+                except Exception:
+                    pass
+                try:
+                    os.close(state.master_fd)
+                except Exception:
+                    pass
             for log_path in (record.stdout_log, record.stderr_log):
                 try:
                     Path(log_path).unlink()

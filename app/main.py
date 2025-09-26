@@ -10,11 +10,15 @@ import subprocess
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from flask import Flask, render_template, jsonify, send_from_directory, request
+from flask import Flask, render_template, jsonify, send_from_directory, send_file, request
 from app.framework_shells import framework_shells_bp
+from flask_sock import Sock
 
 app = Flask(__name__)
 app.register_blueprint(framework_shells_bp)
+# Initialize WebSocket support and expose to modules
+sock = Sock(app)
+app.config["SOCK"] = sock
 
 # Pre-initialize to avoid NameError if imported differently
 loaded_extensions = []
@@ -101,7 +105,7 @@ def load_apps():
             spec = importlib.util.spec_from_file_location(module_name, os.path.join(app_path, backend_file))
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-
+            
             from flask import Blueprint
             for obj_name in dir(module):
                 obj = getattr(module, obj_name)
@@ -109,6 +113,12 @@ def load_apps():
                     app_id = manifest.get('id', app_name)
                     app.register_blueprint(obj, url_prefix=f"/api/app/{app_id}")
                     break
+            # Optionally register WebSocket routes if provided by the app module
+            try:
+                if hasattr(module, 'register_ws_routes'):
+                    module.register_ws_routes(app)
+            except Exception as e:
+                print(f"Error registering WS routes for app {app_name}: {e}")
     return apps
 
 
@@ -185,7 +195,14 @@ def app_shell(app_id):
 
 @app.route('/apps/<path:app_dir>/<path:filename>')
 def serve_app_file(app_dir, filename):
-    return send_from_directory(os.path.join(app.root_path, 'apps', app_dir), filename)
+    full_path = os.path.join(app.root_path, 'apps', app_dir, filename)
+    if not os.path.isfile(full_path):
+        from flask import abort
+        return abort(404)
+    # Ensure JS modules are served with a JS MIME type so dynamic import() works reliably
+    if filename.endswith('.js') or filename.endswith('.mjs'):
+        return send_file(full_path, mimetype='application/javascript')
+    return send_file(full_path)
 
 
 # --- PWA: Service Worker ---

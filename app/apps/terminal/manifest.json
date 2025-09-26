@@ -1,0 +1,11 @@
+{
+  "id": "terminal",
+  "name": "Terminal",
+  "version": "0.1.0",
+  "description": "Embedded terminals powered by framework shells (dtach).",
+  "entrypoints": {
+    "backend_blueprint": "backend.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  }
+}

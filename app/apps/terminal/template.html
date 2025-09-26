@@ -1,0 +1,83 @@
+
+<style>
+  /* Terminal App specific styles */
+  .ta-shell-item {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    background: var(--card);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .ta-shell-item:hover { border-color: var(--accent); }
+  .ta-shell-item.active { border-color: var(--primary); background: rgba(80,120,255,0.08); }
+  .ta-status-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
+  }
+  .ta-dot-alive { background: var(--success); }
+  .ta-dot-dead { background: var(--destructive); }
+  .ta-shell-main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+  .ta-shell-title { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--foreground); }
+  .ta-shell-meta { font-size: 0.8em; color: var(--muted-foreground); display: flex; gap: 10px; flex-wrap: wrap; }
+  .ta-badge { border: 1px solid var(--border); padding: 2px 6px; border-radius: 999px; font-size: 0.75em; color: var(--muted-foreground); }
+  .ta-shell-actions { display: flex; gap: 6px; }
+</style>
+<style>
+  /* View modes and drawer */
+.mode-list #ta-terminal-container { display: none !important; }
+  .mode-terminal #ta-terminal-container { display: flex; flex-direction: column; }
+  .mode-list #ta-list-container { position: static; transform: none; max-height: 70vh; overflow: auto; }
+  .mode-terminal #ta-list-container { position: fixed; top: 0; left: 0; bottom: 0; width: 80%; max-width: 320px; background: var(--card); border-right: 1px solid var(--border); padding: 8px; transform: translateX(-100%); transition: transform 160ms ease; z-index: 300; }
+  .drawer-open #ta-list-container { transform: translateX(0); }
+  #ta-drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 290; }
+  .drawer-open #ta-drawer-overlay { display: block; }
+  .ta-list-scroll { max-height: calc(100vh - 120px); overflow: auto; }
+  /* Keys toolbar */
+  #ta-keys { display: flex; gap: 6px; margin: 6px 0; }
+  #ta-keys .kbtn { font-size: 0.85em; padding: 4px 8px; border: 1px solid var(--border); background: var(--secondary); color: var(--foreground); border-radius: 6px; }
+  #ta-keys .kbtn.toggle { background: var(--accent); color: var(--primary-foreground); }
+</style>
+<div class="terminal-app" style="display:flex; flex-direction:column; gap:12px;">
+<div id="ta-list-container" class="ta-list-container">
+    <div class="section-header">
+      <h3 class="section-title">Terminal App</h3>
+      <div>
+        <button id="ta-btn-new" class="app-btn">New Terminal</button>
+        <button id="ta-btn-refresh" class="app-btn">Refresh</button>
+      </div>
+    </div>
+    <div class="ta-list-scroll">
+      <div style="font-size:0.85em; color:var(--muted-foreground); margin-bottom:8px;">Shells</div>
+      <div id="ta-shell-list"></div>
+    </div>
+  </div>
+
+<div id="ta-terminal-container" style="border:1px solid var(--border); border-radius:6px; background:var(--card); padding:8px; min-height:40vh;">
+    <div id="ta-shell-header" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+      <button id="ta-btn-menu" class="app-btn">&#9776;</button>
+      <span id="ta-shell-title" style="font-weight:600;">No shell selected</span>
+      <span id="ta-shell-status" style="color:var(--muted-foreground);"></span>
+      <div class="spacer"></div>
+      <button id="ta-btn-stop" class="app-btn">Stop</button>
+      <button id="ta-btn-kill" class="app-btn">Kill</button>
+      <button id="ta-btn-remove" class="app-btn">Remove</button>
+    </div>
+
+    <div id="ta-term" style="flex:1 1 auto; border:1px solid var(--border); border-radius:6px; background:var(--background); padding:6px; overflow:hidden;"></div>
+
+    <div id="ta-keys">
+      <button id="k-ctrl" class="kbtn">Ctrl</button>
+      <button id="k-tab" class="kbtn">Tab</button>
+      <button id="k-esc" class="kbtn">Esc</button>
+      <button id="k-left" class="kbtn">&#8592;</button>
+      <button id="k-up" class="kbtn">&#8593;</button>
+      <button id="k-down" class="kbtn">&#8595;</button>
+      <button id="k-right" class="kbtn">&#8594;</button>
+    </div>
+  </div>
+  <div id="ta-drawer-overlay"></div>
+</div>
