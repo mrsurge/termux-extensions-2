@@ -80,11 +80,22 @@ Lists full-page apps registered under `app/apps/`.
   { "ok": true, "data": [ { "name": "File Editor", "id": "file_editor", ... } ] }
   ```
 
-### 3.6 Static Asset Helpers
+### 3.6 Shared State Store — `/api/state`
+Persists small JSON blobs so frontends can survive browser reloads without relying
+on cookies or `localStorage`. The helper in `app/static/js/te_state.js` batches
+requests and caches responses.
+
+- **GET `/api/state?key=foo&key=bar`** — Returns `{ "ok": true, "data": { "foo": ..., "bar": ... } }`.
+- **POST `/api/state`** — Body `{ "key": "namespace.setting", "value": {...}, "merge": false }` persists a value.
+- **DELETE `/api/state?key=foo`** — Removes the keys and responds with `{ "ok": true, "data": { "removed": 1 } }`.
+
+Treat the store as a simple namespaced dictionary; keep payloads small and JSON serialisable.
+
+### 3.7 Static Asset Helpers
 - `GET /extensions/<ext_dir>/<filename>` serves static files from an extension directory.
 - `GET /apps/<app_dir>/<filename>` serves static files from a full-page app directory.
 
-### 3.7 Framework Shells — `/api/framework_shells`
+### 3.8 Framework Shells — `/api/framework_shells`
 Manage long-lived background shells that inherit `TE_SESSION_TYPE=framework`, keeping them out of the Sessions UI. Mutating requests honour the response envelope and require the optional `X-Framework-Key` header when `TE_FRAMEWORK_SHELL_TOKEN` is configured.
 
 - **GET `/api/framework_shells`** — List all registered shells with status and resource stats.

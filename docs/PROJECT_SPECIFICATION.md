@@ -2,6 +2,21 @@
 
 This document outlines the architecture and design of the `termux-extensions-2` project.
 
+## Recent Enhancements
+
+- **Universal Picker:** `window.teFilePicker` now provides breadcrumb navigation,
+  single-tap directory entry, a dedicated home button, and per-mode start-path memory.
+  Every app/extension should reuse it instead of custom file dialogs.
+- **Shared State Store:** Frontend state that must survive reloads uses
+  `window.teState` (backed by `/api/state`) instead of `localStorage`. This powers
+  framework tokens, custom session names, and other persisted settings.
+- **Inline Debug Consoles:** Apps such as the Distro manager surface a toggleable
+  debug panel (pause/resume/clear) so agents can log diagnostics without resorting
+  to browser dev tools.
+- **Distro Lifecycle Helpers:** The backend now exposes `/api/app/distro/containers/<id>/cleanup`
+  to delete stale framework shells, and the start flow reports clear errors when
+  helper binaries are missing.
+
 ## 1. Core Framework
 
 The backend is a Python web server built with the Flask framework. It uses a helper function to execute shell scripts from a dedicated `scripts/` directory, which act as a bridge to the Termux environment.
