@@ -43,6 +43,26 @@ TE_SESSION_TYPE="framework" gunicorn -w 2 -k gthread --threads 8 -b 0.0.0.0:8080
 
 Then open from another device on the same network: `http://<your-device-ip>:8080`
 
+## Testing
+
+The framework now exposes runtime metadata via `TE_RUN_ID` and a metrics endpoint. To verify a deployment:
+
+1. Launch the supervisor entrypoint, which tags the run automatically:
+   ```bash
+   scripts/run_framework.sh
+   ```
+   The script prints the generated `TE_RUN_ID` and keeps the Flask app in the foreground.
+
+2. In a separate shell, confirm the server is reporting metrics:
+   ```bash
+   curl http://localhost:8080/api/framework/runtime/metrics | jq
+   ```
+   The response includes the active `run_id`, supervisor/app PIDs, aggregate CPU usage, RSS totals for all framework-managed shells, and the list of interactive sessions stamped with the current run.
+
+3. Spawn a framework shell (either from the UI or via the API) and re-query the metrics endpoint. The process list and memory totals should reflect the new shell.
+
+If you are iterating on backend changes, restart the supervisor script to issue a fresh `TE_RUN_ID` for the next test cycle. Press `Ctrl+C` in the supervisor window to trigger an orderly shutdown (framework shells and dtach sessions tagged with the run ID are cleaned up automatically).
+
 Notes:
 - The built-in Flask server is now non-debug by default and binds to `0.0.0.0` on port 8080, but Gunicorn is recommended for multi-client stability.
 - Adjust workers/threads based on your device resources. On low-memory phones/tablets, `-w 1 --threads 4` might be better.
@@ -66,6 +86,7 @@ Notes:
 *   **Web-Based UI:** A clean, modern interface accessible from any local browser.
 *   **Session Management:** The Sessions & Shortcuts extension controls active shells, launches shortcuts (now with the universal picker), and renames or kills sessions without leaving the UI.
 *   **Background Framework Shells:** Long-running jobs (aria2, distro helpers, etc.) are tracked with health checks, log tails, a cleanup action, and inline debug consoles.
+*   **Settings App:** A full-page diagnostics hub for runtime metrics, framework shell management, and supervised shutdown controls.
 *   **Universal File/Directory Picker:** A shared modal with breadcrumb navigation, hidden-file toggle, home button, and per-mode start-path memory is available to every app/extension.
 *   **Built-In Diagnostics:** Apps such as the Distro manager ship with inline debug consoles so you can pause, inspect, and clear log streams while reproducing issues.
 *   **Embedded Terminal App:** A full-page app built atop framework shells offers multi-terminal management with xterm.js, WebSocket streaming, and soft-key controls directly in the browser.

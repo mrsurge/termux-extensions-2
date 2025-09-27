@@ -1,0 +1,9 @@
+{
+  "id": "settings",
+  "name": "🎛️ Settings",
+  "description": "Framework diagnostics, launcher ordering, and supervisor controls.",
+  "entrypoints": {
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  }
+}

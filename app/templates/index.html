@@ -145,11 +145,6 @@
         .btn-secondary { background-color: var(--secondary); color: var(--secondary-foreground); }
 
         .settings-gear { position: fixed; bottom: 16px; right: 16px; font-size: 1.8em; background-color: var(--secondary); color: var(--foreground); border: 1px solid var(--border); width: 50px; height: 50px; border-radius: 50%; cursor: pointer; z-index: 150; }
-        .reorder-list-item { display: flex; align-items: center; gap: 12px; background-color: var(--secondary); padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; }
-        .reorder-list-item-handle { display: flex; flex-direction: column; cursor: grab; color: var(--muted-foreground); }
-        .reorder-list-item-handle button { background: none; border: none; color: inherit; cursor: pointer; padding: 0 4px; }
-        .reorder-list-item-handle button:hover { color: var(--foreground); }
-
     .extension-wrapper { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 16px; background-color: var(--card); }
     .extension-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
     .extension-title { font-weight: 600; }
@@ -169,27 +164,6 @@
     </div>
 
     <!-- Settings Gear Icon -->
-    <button id="settings-gear-btn" class="settings-gear">&#9881;</button>
-
-    <!-- Settings Modal -->
-    <div id="settings-modal" class="modal">
-        <div class="modal-content">
-            <div class="editor-header">
-                <h3>Settings</h3>
-                <button onclick="closeSettingsModal()" class="back-btn">&times;</button>
-            </div>
-            <h4>Extension Order</h4>
-            <div id="extension-order-list" class="reorder-list"></div>
-            <div style="margin-top:16px;">
-                <label for="setting-debug-stack" style="display:flex; align-items:center; gap:8px; font-size:0.9em; color:var(--muted-foreground);">
-                    <input type="checkbox" id="setting-debug-stack">
-                    <span>Show detailed error stacks</span>
-                </label>
-            </div>
-            <button id="save-settings-btn" class="wizard-save-btn">Save Settings</button>
-        </div>
-    </div>
-
     <script type="module" src="/static/js/file_picker.js"></script>
     <script type="module">
         // --- Core UI Primitives ---
@@ -369,74 +343,7 @@
             await loadExtensions();
         });
 
-        // --- Settings Modal Logic ---
-        const settingsModal = document.getElementById('settings-modal');
-        const settingsBtn = document.getElementById('settings-gear-btn');
-        const saveSettingsBtn = document.getElementById('save-settings-btn');
-        const orderList = document.getElementById('extension-order-list');
-        const debugStackToggle = document.getElementById('setting-debug-stack');
-        let dragSrcEl = null;
-
-        async function openSettingsModal() {
-            if (!settingsLoaded) {
-                await fetchSettings();
-            }
-            // Populate the list with current extensions
-            orderList.innerHTML = '';
-            const extensions = Array.from(extensionsContainer.children);
-            extensions.forEach(ext => {
-                const name = ext.id.replace('extension-', '').replace(/_/g, ' ');
-                const item = document.createElement('div');
-                item.className = 'reorder-list-item';
-                item.dataset.extId = ext.id;
-                item.innerHTML = `
-                    <div class="reorder-list-item-handle">
-                        <button class="up-btn">&#9650;</button>
-                        <button class="down-btn">&#9660;</button>
-                    </div>
-                    <span>${name}</span>
-                `;
-                orderList.appendChild(item);
-
-                item.querySelector('.up-btn').addEventListener('click', () => {
-                    if (item.previousElementSibling) {
-                        orderList.insertBefore(item, item.previousElementSibling);
-                    }
-                });
-                item.querySelector('.down-btn').addEventListener('click', () => {
-                    if (item.nextElementSibling) {
-                        orderList.insertBefore(item.nextElementSibling, item);
-                    }
-                });
-            });
-            debugStackToggle.checked = !!settingsCache.debugFullStack;
-            settingsModal.style.display = 'block';
-        }
-
-        window.closeSettingsModal = () => {
-            settingsModal.style.display = 'none';
-        }
-
-        settingsBtn.addEventListener('click', () => {
-            openSettingsModal().catch(err => console.error('Failed to open settings modal', err));
-        });
-        saveSettingsBtn.addEventListener('click', async () => {
-            const newOrder = Array.from(orderList.children).map(item => item.dataset.extId);
-            try {
-                await persistSettings({
-                    extensionOrder: newOrder,
-                    debugFullStack: !!debugStackToggle.checked,
-                });
-                window.teUI.toast?.('Settings saved');
-                closeSettingsModal();
-                extensionsContainer.innerHTML = '';
-                await loadExtensions();
-            } catch (err) {
-                console.error('Failed to save settings', err);
-                window.teUI.toast?.('Failed to save settings: ' + (err?.message || err));
-            }
-        });
-
+        // --- Extension Order Modal ---
     </script>
         <script>
 // Register Service Worker for PWA installability

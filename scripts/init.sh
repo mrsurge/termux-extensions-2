@@ -3,6 +3,15 @@
 # termux-extensions v2 - Session Attach Script (v2)
 #
 
+# Ensure session inherits the framework run id if supervisor is active.
+if [ -z "${TE_RUN_ID:-}" ]; then
+  run_id_file="$HOME/.cache/te_framework/run_id"
+  if [ -f "$run_id_file" ]; then
+    TE_RUN_ID="$(cat "$run_id_file" 2>/dev/null | tr -d '\r')"
+    export TE_RUN_ID
+  fi
+fi
+
 # This function contains the core logic for setting up the session metadata.
 # It will be called after the shell is confirmed to be inside a dtach session.
 setup_session_metadata() {
@@ -21,6 +30,7 @@ setup_session_metadata() {
         printf 'SID="%s"\n' "$TE_SID"
         printf 'SESSION_TYPE="%s"\n' "$TE_SESSION_TYPE"
         [ -n "${TE_SOCK:-}" ] && printf 'SOCK="%s"\n' "$TE_SOCK"
+        [ -n "${TE_RUN_ID:-}" ] && printf 'RUN_ID="%s"\n' "$TE_RUN_ID"
       } > "$TE_DIR/meta"
     }
     write_meta

@@ -7,14 +7,18 @@ import subprocess
 import sys
 import threading
 import importlib.util
+import time
+import uuid
+import signal
 from pathlib import Path
+from typing import List
 
 # Add project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from flask import Flask, render_template, jsonify, send_from_directory, send_file, request
-from app.framework_shells import framework_shells_bp
+from app.framework_shells import framework_shells_bp, _manager, FrameworkShellManager
 from flask_sock import Sock
 
 app = Flask(__name__)
@@ -23,6 +27,21 @@ app.register_blueprint(framework_shells_bp)
 sock = Sock(app)
 app.config["SOCK"] = sock
 
+RUN_ID = os.environ.get("TE_RUN_ID")
+if not RUN_ID:
+    RUN_ID = f"run_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+    os.environ["TE_RUN_ID"] = RUN_ID
+else:
+    os.environ.setdefault("TE_RUN_ID", RUN_ID)
+app.config["TE_RUN_ID"] = RUN_ID
+
+APP_STARTED_AT = time.time()
+
+try:  # Optional dependency for richer process metrics
+    import psutil  # type: ignore
+except Exception:  # pragma: no cover - psutil may be unavailable.
+    psutil = None  # type: ignore
+
 # Pre-initialize to avoid NameError if imported differently
 loaded_extensions = []
 loaded_apps = []
@@ -30,6 +49,46 @@ loaded_apps = []
 SETTINGS_FILE = Path(os.path.expanduser('~/.cache/termux_extensions/settings.json'))
 STATE_STORE_FILE = Path(os.path.expanduser('~/.cache/termux_extensions/state_store.json'))
 STATE_STORE_LOCK = threading.RLock()
+
+# Ensure importlib-based imports and spec-based module loads receive the current run id
+# This allows extension/app modules to access TE_RUN_ID at import time (as a global)
+try:
+    _orig_module_from_spec = importlib.util.module_from_spec
+
+    def _module_from_spec_with_runid(spec):
+        mod = _orig_module_from_spec(spec)
+        try:
+            run_id = app.config.get("TE_RUN_ID")
+        except Exception:
+            run_id = None
+        if run_id is not None:
+            # set both attribute and dict entry to make it available during exec_module
+            setattr(mod, 'TE_RUN_ID', run_id)
+            mod.__dict__['TE_RUN_ID'] = run_id
+        return mod
+
+    importlib.util.module_from_spec = _module_from_spec_with_runid
+except Exception:
+    # If anything fails here, fall back to original importlib behavior
+    pass
+
+try:
+    _orig_import_module = importlib.import_module
+
+    def _import_module_with_runid(name, package=None):
+        mod = _orig_import_module(name, package=package)
+        try:
+            run_id = app.config.get("TE_RUN_ID")
+        except Exception:
+            run_id = None
+        if run_id is not None:
+            setattr(mod, 'TE_RUN_ID', run_id)
+            mod.__dict__['TE_RUN_ID'] = run_id
+        return mod
+
+    importlib.import_module = _import_module_with_runid
+except Exception:
+    pass
 
 
 def _load_settings() -> dict:
@@ -72,6 +131,41 @@ def _save_state_store(store: dict) -> None:
             json.dump(store, fh, indent=2, ensure_ascii=False)
         tmp_path.replace(STATE_STORE_FILE)
 
+
+def _parse_meta_file(meta_path: Path) -> dict[str, str]:
+    data: dict[str, str] = {}
+    try:
+        with meta_path.open('r', encoding='utf-8') as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line or '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                cleaned = value.strip().strip('"').strip("'")
+                data[key.strip()] = cleaned
+    except Exception:
+        return {}
+    return data
+
+
+def _collect_interactive_session_stats(run_id: str | None) -> dict[str, object]:
+    cache_dir = Path(os.path.expanduser('~/.cache/te'))
+    total = 0
+    matching = 0
+    matching_sids: List[str] = []
+    if not cache_dir.is_dir():
+        return {"total": 0, "matching_run": 0, "sids": []}
+    for meta_path in cache_dir.glob('*/meta'):
+        meta = _parse_meta_file(meta_path)
+        if meta.get('SESSION_TYPE') != 'interactive':
+            continue
+        total += 1
+        if run_id and meta.get('RUN_ID') != run_id:
+            continue
+        matching += 1
+        sid = meta.get('SID') or meta_path.parent.name
+        matching_sids.append(sid)
+    return {"total": total, "matching_run": matching, "sids": matching_sids}
 
 def _scandir_entries(path: str, include_hidden: bool) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
@@ -428,6 +522,66 @@ def state_handler():
     except Exception as exc:
         return jsonify({"ok": False, "error": f'Failed to persist state: {exc}'}), 500
     return jsonify({"ok": True, "data": {"removed": removed}})
+
+def _terminate_framework_shells(manager: FrameworkShellManager) -> None:
+    for record in list(manager.list_shells()):
+        try:
+            manager.remove_shell(record.id, force=True)
+        except Exception as exc:
+            print(f"Failed to remove shell {record.id}: {exc}")
+
+
+@app.route('/api/framework/runtime/metrics')
+def framework_runtime_metrics():
+    mgr = _manager()
+    run_id = app.config.get("TE_RUN_ID")
+    data = {
+        "run_id": run_id,
+        "supervisor_pid": int(os.environ.get("TE_SUPERVISOR_PID", "0")) or None,
+        "app_pid": os.getpid(),
+        "started_at": APP_STARTED_AT,
+        "uptime": max(0.0, time.time() - APP_STARTED_AT),
+        "framework_shells": mgr.aggregate_resource_stats(),
+        "interactive_sessions": _collect_interactive_session_stats(run_id),
+        "process": None,
+    }
+    if psutil:
+        try:
+            proc = psutil.Process(os.getpid())  # type: ignore[arg-type]
+            with proc.oneshot():
+                data["process"] = {
+                    "cpu_percent": proc.cpu_percent(interval=0.0),
+                    "memory_rss": proc.memory_info().rss,
+                    "num_threads": proc.num_threads(),
+                }
+        except (psutil.NoSuchProcess, psutil.AccessDenied):  # type: ignore[attr-defined]
+            data["process"] = None
+    return jsonify({"ok": True, "data": data})
+
+
+@app.route('/api/framework/runtime/shutdown', methods=['POST'])
+def framework_runtime_shutdown():
+    token = request.headers.get("X-Framework-Key") or request.args.get("token")
+    expected = os.environ.get("TE_FRAMEWORK_SHELL_TOKEN")
+    if expected and token != expected:
+        return jsonify({"ok": False, "error": "Forbidden"}), 403
+
+    mgr = _manager()
+    _terminate_framework_shells(mgr)
+
+    supervisor_pid = int(os.environ.get("TE_SUPERVISOR_PID", "0") or 0)
+    if supervisor_pid:
+        try:
+            os.kill(supervisor_pid, signal.SIGTERM)
+        except OSError:
+            pass
+    else:
+        func = request.environ.get('werkzeug.server.shutdown')
+        if func:
+            func()
+
+    return jsonify({"ok": True, "data": {"message": "Shutdown initiated"}})
+
 
 @app.route('/api/apps')
 def get_apps():

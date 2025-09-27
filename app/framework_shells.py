@@ -10,21 +10,21 @@ services such as aria2 RPC, container helpers, or LLM runtimes.
 from __future__ import annotations
 
 import errno
+import fcntl
 import json
 import os
+import pty
+import queue
+import select
 import shlex
 import shutil
 import signal
+import struct
 import subprocess
 import threading
+import termios
 import time
 import uuid
-import select
-import queue
-import pty
-import fcntl
-import termios
-import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -60,6 +60,10 @@ class ShellRecord:
     stdout_log: str
     stderr_log: str
     exit_code: Optional[int] = None
+    run_id: Optional[str] = None
+    launcher_pid: Optional[int] = None
+    adopted: bool = False
+    uses_pty: bool = False
 
     def to_payload(self, *, include_env: bool = False) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
@@ -76,6 +80,10 @@ class ShellRecord:
             "stderr_log": self.stderr_log,
             "exit_code": self.exit_code,
             "env_keys": sorted(self.env_overrides.keys()),
+            "run_id": self.run_id,
+            "launcher_pid": self.launcher_pid,
+            "adopted": self.adopted,
+            "uses_pty": self.uses_pty,
         }
         if include_env:
             payload["env_overrides"] = dict(self.env_overrides)
@@ -99,6 +107,7 @@ class FrameworkShellManager:
         base_dir: Optional[Path] = None,
         max_shells: Optional[int] = None,
         auth_token: Optional[str] = None,
+        run_id: Optional[str] = None,
     ) -> None:
         self.base_dir = base_dir or DEFAULT_BASE_DIR
         self.metadata_dir = self.base_dir / "meta"
@@ -108,24 +117,130 @@ class FrameworkShellManager:
             directory.mkdir(parents=True, exist_ok=True)
         self.max_shells = max_shells if max_shells is not None else DEFAULT_MAX_SHELLS
         self.auth_token = auth_token or os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
+        self.run_id = run_id or os.getenv("TE_RUN_ID")
+        self.launcher_pid = os.getpid()
+        self.started_at = time.time()
         self._lock = threading.RLock()
-        # In-memory PTY tracking for interactive shells
         self._pty: Dict[str, PTYState] = {}
+        self._adopt_orphaned_shells()
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Adoption and helpers
 
-    def _meta_path(self, shell_id: str) -> Path:
-        return self.metadata_dir / shell_id / "meta.json"
+    def _adopt_orphaned_shells(self) -> None:
+        with self._lock:
+            for record in self._iter_records():
+                if record.pid and not self._is_pid_alive(record.pid):
+                    exit_code = record.exit_code or self._collect_exit_code(record.pid)
+                    self._mark_exited(record, exit_code)
+                    continue
+                if not self.run_id:
+                    continue
+                mutated = False
+                if not record.run_id or record.run_id != self.run_id:
+                    record.run_id = self.run_id
+                    mutated = True
+                if record.launcher_pid != self.launcher_pid:
+                    record.launcher_pid = self.launcher_pid
+                    mutated = True
+                if mutated:
+                    record.adopted = True
+                    self._save_record(record)
+
+    def list_active_pids(self) -> List[int]:
+        with self._lock:
+            pids: List[int] = []
+            for record in self._iter_records():
+                if record.pid and self._is_pid_alive(record.pid):
+                    pids.append(record.pid)
+            return pids
+
+    def aggregate_resource_stats(self) -> Dict[str, Any]:
+        with self._lock:
+            now = time.time()
+            stats: Dict[str, Any] = {
+                "run_id": self.run_id,
+                "launcher_pid": self.launcher_pid,
+                "started_at": self.started_at,
+                "uptime": max(0.0, now - self.started_at),
+                "num_shells": 0,
+                "num_running": 0,
+                "num_adopted": 0,
+                "cpu_percent": 0.0,
+                "memory_rss": 0,
+                "pids": [],
+                "has_psutil": bool(psutil),
+            }
+            running_records: List[ShellRecord] = []
+            adopted_count = 0
+            for record in self._iter_records():
+                stats["num_shells"] += 1
+                if getattr(record, "adopted", False):
+                    adopted_count += 1
+                if record.pid and self._is_pid_alive(record.pid):
+                    stats["num_running"] += 1
+                    stats["pids"].append(record.pid)
+                    running_records.append(record)
+            stats["num_adopted"] = adopted_count
+            if psutil:
+                cpu_total = 0.0
+                rss_total = 0
+                for rec in running_records:
+                    try:
+                        proc = psutil.Process(rec.pid)  # type: ignore[arg-type]
+                        with proc.oneshot():
+                            cpu_total += proc.cpu_percent(interval=0.0)
+                            rss_total += proc.memory_info().rss
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                stats["cpu_percent"] = cpu_total
+                stats["memory_rss"] = rss_total
+            else:
+                for rec in running_records:
+                    try:
+                        ps_output = subprocess.run(
+                            [
+                                "ps",
+                                "-p",
+                                str(rec.pid),
+                                "-o",
+                                "%cpu=,%mem=,rss=",
+                            ],
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
+                        parts = ps_output.stdout.strip().split()
+                        if len(parts) >= 3:
+                            cpu_val = float(parts[0])
+                            rss_kb = float(parts[2])
+                            stats["cpu_percent"] += cpu_val
+                            stats["memory_rss"] += int(rss_kb * 1024)
+                    except Exception:
+                        continue
+            return stats
+
+    # ------------------------------------------------------------------
+    # Record persistence helpers
+
+    def _iter_records(self) -> Iterable[ShellRecord]:
+        for meta in sorted(self.metadata_dir.glob("*/meta.json")):
+            record = self._load_record(meta.parent.name)
+            if record:
+                yield record
 
     def _load_record(self, shell_id: str) -> Optional[ShellRecord]:
-        meta_path = self._meta_path(shell_id)
+        meta_path = self.metadata_dir / shell_id / "meta.json"
         if not meta_path.exists():
             return None
         try:
-            data = json.loads(meta_path.read_text())
+            with meta_path.open("r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception:
+            return None
+        try:
             return ShellRecord(
-                id=data["id"],
+                id=data.get("id", shell_id),
                 command=list(data.get("command") or []),
                 label=data.get("label"),
                 cwd=data.get("cwd", str(HOME_DIR)),
@@ -137,13 +252,17 @@ class FrameworkShellManager:
                 autostart=bool(data.get("autostart", False)),
                 stdout_log=data.get(
                     "stdout_log",
-                    str(self.logs_dir / f"{data.get('id', 'shell')}.stdout.log"),
+                    str(self.logs_dir / f"{data.get('id', shell_id)}.stdout.log"),
                 ),
                 stderr_log=data.get(
                     "stderr_log",
-                    str(self.logs_dir / f"{data.get('id', 'shell')}.stderr.log"),
+                    str(self.logs_dir / f"{data.get('id', shell_id)}.stderr.log"),
                 ),
                 exit_code=data.get("exit_code"),
+                run_id=data.get("run_id"),
+                launcher_pid=data.get("launcher_pid"),
+                adopted=bool(data.get("adopted", False)),
+                uses_pty=bool(data.get("uses_pty", False)),
             )
         except Exception:
             return None
@@ -167,16 +286,180 @@ class FrameworkShellManager:
             "stdout_log": record.stdout_log,
             "stderr_log": record.stderr_log,
             "exit_code": record.exit_code,
+            "run_id": record.run_id,
+            "launcher_pid": record.launcher_pid,
+            "adopted": record.adopted,
+            "uses_pty": record.uses_pty,
         }
         with tmp_path.open("w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)
         tmp_path.replace(meta_path)
 
-    def _iter_records(self) -> Iterable[ShellRecord]:
-        for meta in self.metadata_dir.glob("*/meta.json"):
-            record = self._load_record(meta.parent.name)
-            if record:
-                yield record
+    # ------------------------------------------------------------------
+    # Core helpers
+
+    def _normalize_command(self, command: Iterable[str]) -> List[str]:
+        if isinstance(command, str):  # pragma: no cover - defensive fallback
+            command = shlex.split(command)
+        cmd_list = [str(part) for part in command]
+        if not cmd_list:
+            raise ValueError("command must contain at least one argument")
+        return cmd_list
+
+    def _resolve_cwd(self, cwd: Optional[str]) -> str:
+        target = Path(os.path.expanduser(cwd or str(HOME_DIR))).resolve()
+        if not str(target).startswith(str(HOME_DIR)):
+            raise ValueError("cwd must remain inside the user home directory")
+        if not target.exists():
+            target.mkdir(parents=True, exist_ok=True)
+        return str(target)
+
+    def _prepare_env(self, record: ShellRecord) -> Dict[str, str]:
+        env = os.environ.copy()
+        run_id = record.run_id or os.environ.get("TE_RUN_ID", "")
+        if run_id:
+            env.setdefault("TE_RUN_ID", run_id)
+            env.setdefault("TE_FRAMEWORK_SHELL_RUN_ID", str(run_id))
+        launcher_pid = record.launcher_pid or getattr(self, "launcher_pid", None) or os.getpid()
+        env.setdefault("TE_FRAMEWORK_LAUNCHER_PID", str(launcher_pid))
+        env.setdefault("TE_FRAMEWORK_SHELL_LAUNCHER_PID", str(launcher_pid))
+        env.update(record.env_overrides)
+        env.setdefault("TE_SESSION_TYPE", "framework")
+        env.setdefault("TE_FRAMEWORK_SHELL_ID", record.id)
+        env.setdefault("TE_FRAMEWORK_SHELL_ADOPTED", "1" if getattr(record, "adopted", False) else "0")
+        return env
+
+    def _create_record(
+        self,
+        command: Iterable[str],
+        *,
+        cwd: Optional[str],
+        env: Optional[Dict[str, str]],
+        label: Optional[str],
+        autostart: bool,
+        uses_pty: bool = False,
+    ) -> ShellRecord:
+        shell_id = f"fs_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        command_list = self._normalize_command(command)
+        cwd_path = self._resolve_cwd(cwd)
+        overrides = dict(env or {})
+        run_id = self.run_id or os.environ.get("TE_RUN_ID")
+        if run_id:
+            overrides.setdefault("TE_RUN_ID", run_id)
+        overrides.setdefault("TE_SPAWNED_BY", "framework_shell_manager")
+        now = time.time()
+        return ShellRecord(
+            id=shell_id,
+            command=command_list,
+            label=label,
+            cwd=cwd_path,
+            env_overrides=overrides,
+            pid=None,
+            status="pending",
+            created_at=now,
+            updated_at=now,
+            autostart=autostart,
+            stdout_log=str(self.logs_dir / f"{shell_id}.stdout.log"),
+            stderr_log=str(self.logs_dir / f"{shell_id}.stderr.log"),
+            exit_code=None,
+            run_id=run_id,
+            launcher_pid=self.launcher_pid,
+            adopted=False,
+            uses_pty=uses_pty,
+        )
+
+    def _launch(self, record: ShellRecord) -> ShellRecord:
+        record.uses_pty = False
+        env = self._prepare_env(record)
+        stdout_path = Path(record.stdout_log)
+        stderr_path = Path(record.stderr_log)
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        with stdout_path.open("ab") as stdout_fh, stderr_path.open("ab") as stderr_fh:
+            proc = subprocess.Popen(
+                record.command,
+                cwd=record.cwd,
+                env=env,
+                stdout=stdout_fh,
+                stderr=stderr_fh,
+                start_new_session=True,
+            )
+        record.pid = proc.pid
+        record.status = "running"
+        record.exit_code = None
+        record.updated_at = time.time()
+        self._save_record(record)
+        return record
+
+    def _launch_pty(self, record: ShellRecord) -> ShellRecord:
+        record.uses_pty = True
+        master_fd, slave_fd = pty.openpty()
+        envp = self._prepare_env(record)
+        envp.setdefault("TERM", "xterm-256color")
+        envp.setdefault("TE_TTY", "pty")
+        for path_str in (record.stdout_log, record.stderr_log):
+            Path(path_str).parent.mkdir(parents=True, exist_ok=True)
+            Path(path_str).touch(exist_ok=True)
+        try:
+            proc = subprocess.Popen(
+                record.command,
+                cwd=record.cwd,
+                env=envp,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                start_new_session=True,
+                close_fds=True,
+            )
+        finally:
+            try:
+                os.close(slave_fd)
+            except Exception:
+                pass
+        record.pid = proc.pid
+        record.status = "running"
+        record.exit_code = None
+        record.updated_at = time.time()
+        self._save_record(record)
+
+        state = PTYState(master_fd=master_fd)
+
+        def _reader() -> None:
+            log_path = Path(record.stdout_log)
+            with log_path.open("ab") as log_fh:
+                while not state.stop.is_set():
+                    try:
+                        rlist, _, _ = select.select([master_fd], [], [], 0.5)
+                        if not rlist:
+                            continue
+                        data = os.read(master_fd, 4096)
+                        if not data:
+                            time.sleep(0.05)
+                            continue
+                    except OSError:
+                        break
+                    try:
+                        log_fh.write(data)
+                        log_fh.flush()
+                    except Exception:
+                        pass
+                    text = data.decode("utf-8", errors="replace")
+                    subscribers = list(state.subscribers)
+                    for q in subscribers:
+                        try:
+                            q.put_nowait(text)
+                        except Exception:
+                            pass
+            try:
+                os.close(master_fd)
+            except Exception:
+                pass
+
+        reader_thread = threading.Thread(target=_reader, daemon=True)
+        state.reader = reader_thread
+        self._pty[record.id] = state
+        reader_thread.start()
+        return record
 
     def _is_pid_alive(self, pid: Optional[int]) -> bool:
         if not pid:
@@ -185,8 +468,7 @@ class FrameworkShellManager:
             os.kill(pid, 0)
         except PermissionError:
             return True
-        except OSError as exc:
-            # Treat EPERM as alive (process exists but owned by another user)
+        except OSError as exc:  # includes ProcessLookupError
             if getattr(exc, "errno", None) == errno.EPERM:
                 return True
             return False
@@ -209,52 +491,6 @@ class FrameworkShellManager:
             return None
         return None
 
-    def _resolve_cwd(self, cwd: Optional[str]) -> str:
-        target = Path(os.path.expanduser(cwd or str(HOME_DIR))).resolve()
-        if not str(target).startswith(str(HOME_DIR)):
-            raise ValueError("cwd must remain inside the user home directory")
-        if not target.exists():
-            target.mkdir(parents=True, exist_ok=True)
-        return str(target)
-
-    def _normalize_command(self, command: Iterable[str]) -> List[str]:
-        if isinstance(command, str):  # pragma: no cover - defensive fallback
-            command = shlex.split(command)
-        cmd_list = [str(part) for part in command]
-        if not cmd_list:
-            raise ValueError("command must contain at least one argument")
-        return cmd_list
-
-    def _prepare_env(self, record: ShellRecord) -> Dict[str, str]:
-        env = os.environ.copy()
-        env.update(record.env_overrides)
-        env.setdefault("TE_SESSION_TYPE", "framework")
-        env.setdefault("TE_FRAMEWORK_SHELL_ID", record.id)
-        return env
-
-    def _launch(self, record: ShellRecord) -> ShellRecord:
-        env = self._prepare_env(record)
-        cwd = record.cwd
-        stdout_path = Path(record.stdout_log)
-        stderr_path = Path(record.stderr_log)
-        stdout_path.parent.mkdir(parents=True, exist_ok=True)
-        stderr_path.parent.mkdir(parents=True, exist_ok=True)
-        with stdout_path.open("ab") as stdout_fh, stderr_path.open("ab") as stderr_fh:
-            proc = subprocess.Popen(
-                record.command,
-                cwd=cwd,
-                env=env,
-                stdout=stdout_fh,
-                stderr=stderr_fh,
-                start_new_session=True,
-            )
-        record.pid = proc.pid
-        record.status = "running"
-        record.exit_code = None
-        record.updated_at = time.time()
-        self._save_record(record)
-        return record
-
     def _mark_exited(self, record: ShellRecord, exit_code: Optional[int]) -> None:
         record.pid = None
         record.status = "exited"
@@ -264,6 +500,21 @@ class FrameworkShellManager:
 
     def _active_shell_count(self) -> int:
         return sum(1 for r in self._iter_records() if self._is_pid_alive(r.pid))
+
+    def _stop_pty(self, shell_id: str) -> None:
+        state = self._pty.pop(shell_id, None)
+        if not state:
+            return
+        state.stop.set()
+        try:
+            if state.reader:
+                state.reader.join(timeout=1.0)
+        except Exception:
+            pass
+        try:
+            os.close(state.master_fd)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Public manager API
@@ -291,27 +542,14 @@ class FrameworkShellManager:
             self.sweep()
             if self.max_shells and self._active_shell_count() >= self.max_shells:
                 raise RuntimeError("Maximum framework shell count reached")
-            shell_id = f"fs_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-            command_list = self._normalize_command(command)
-            cwd_path = self._resolve_cwd(cwd)
-            overrides = dict(env or {})
-            now = time.time()
-            record = ShellRecord(
-                id=shell_id,
-                command=command_list,
+            record = self._create_record(
+                command,
+                cwd=cwd,
+                env=env,
                 label=label,
-                cwd=cwd_path,
-                env_overrides=overrides,
-                pid=None,
-                status="pending",
-                created_at=now,
-                updated_at=now,
                 autostart=autostart,
-                stdout_log=str(self.logs_dir / f"{shell_id}.stdout.log"),
-                stderr_log=str(self.logs_dir / f"{shell_id}.stderr.log"),
             )
-            self._launch(record)
-            return record
+            return self._launch(record)
 
     def spawn_shell_pty(
         self,
@@ -322,103 +560,19 @@ class FrameworkShellManager:
         label: Optional[str] = None,
         autostart: bool = True,
     ) -> ShellRecord:
-        """Spawn an interactive shell attached to a PTY and stream its output.
-
-        The PTY master is kept in-memory and fanned out to subscribers; output is also
-        appended to the stdout log for later inspection.
-        """
         with self._lock:
             self.sweep()
             if self.max_shells and self._active_shell_count() >= self.max_shells:
                 raise RuntimeError("Maximum framework shell count reached")
-            shell_id = f"fs_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-            command_list = self._normalize_command(command)
-            cwd_path = self._resolve_cwd(cwd)
-            overrides = dict(env or {})
-            now = time.time()
-            record = ShellRecord(
-                id=shell_id,
-                command=command_list,
+            record = self._create_record(
+                command,
+                cwd=cwd,
+                env=env,
                 label=label,
-                cwd=cwd_path,
-                env_overrides=overrides,
-                pid=None,
-                status="pending",
-                created_at=now,
-                updated_at=now,
                 autostart=autostart,
-                stdout_log=str(self.logs_dir / f"{shell_id}.stdout.log"),
-                stderr_log=str(self.logs_dir / f"{shell_id}.stderr.log"),
+                uses_pty=True,
             )
-            # Create PTY
-            master_fd, slave_fd = pty.openpty()
-            # Prepare env with framework session markers
-            envp = self._prepare_env(record)
-            envp.setdefault("TERM", "xterm-256color")
-            envp.setdefault("TE_TTY", "pty")
-            # Launch process attached to PTY
-            with open(record.stdout_log, "ab") as _:
-                pass  # ensure file exists
-            try:
-                proc = subprocess.Popen(
-                    command_list,
-                    cwd=cwd_path,
-                    env=envp,
-                    stdin=slave_fd,
-                    stdout=slave_fd,
-                    stderr=slave_fd,
-                    start_new_session=True,
-                    close_fds=True,
-                )
-            finally:
-                try:
-                    os.close(slave_fd)
-                except Exception:
-                    pass
-            record.pid = proc.pid
-            record.status = "running"
-            record.exit_code = None
-            record.updated_at = time.time()
-            self._save_record(record)
-            # Start reader thread to tee PTY master into log and subscribers
-            state = PTYState(master_fd=master_fd)
-            def _reader():
-                log_path = Path(record.stdout_log)
-                with log_path.open("ab") as log_fh:
-                    while not state.stop.is_set():
-                        try:
-                            r, _, _ = select.select([master_fd], [], [], 0.5)
-                            if not r:
-                                continue
-                            data = os.read(master_fd, 4096)
-                            if not data:
-                                time.sleep(0.05)
-                                continue
-                        except OSError:
-                            break
-                        try:
-                            log_fh.write(data)
-                            log_fh.flush()
-                        except Exception:
-                            pass
-                        text = data.decode("utf-8", errors="replace")
-                        # Snapshot subscribers to avoid holding lock during send
-                        subs = list(state.subscribers)
-                        for q in subs:
-                            try:
-                                q.put_nowait(text)
-                            except Exception:
-                                pass
-                # Attempt to close master when stopping
-                try:
-                    os.close(master_fd)
-                except Exception:
-                    pass
-            t = threading.Thread(target=_reader, daemon=True)
-            state.reader = t
-            self._pty[shell_id] = state
-            t.start()
-            return record
+            return self._launch_pty(record)
 
     def write_to_pty(self, shell_id: str, data: bytes | str) -> None:
         with self._lock:
@@ -426,7 +580,10 @@ class FrameworkShellManager:
             if not state:
                 raise KeyError("No PTY for this shell")
             payload = data.encode("utf-8") if isinstance(data, str) else data
-            os.write(state.master_fd, payload)
+            try:
+                os.write(state.master_fd, payload)
+            except OSError:
+                raise
 
     def subscribe_output(self, shell_id: str) -> "queue.Queue[str]":
         with self._lock:
@@ -464,43 +621,32 @@ class FrameworkShellManager:
             if not record:
                 raise KeyError("Shell not found")
             if not record.pid or not self._is_pid_alive(record.pid):
-                exit_code = record.exit_code
-                if not exit_code:
-                    exit_code = self._collect_exit_code(record.pid)
+                exit_code = record.exit_code or self._collect_exit_code(record.pid)
                 self._mark_exited(record, exit_code)
+                self._stop_pty(shell_id)
                 return record
             sig = signal.SIGKILL if force else signal.SIGTERM
             try:
                 os.kill(record.pid, sig)
-            except OSError:
-                exit_code = self._collect_exit_code(record.pid)
+            except ProcessLookupError:
+                exit_code = record.exit_code or self._collect_exit_code(record.pid)
                 self._mark_exited(record, exit_code)
+                self._stop_pty(shell_id)
                 return record
             if not force:
-                deadline = time.time() + timeout
+                deadline = time.time() + max(0.0, timeout)
                 while time.time() < deadline:
                     if not self._is_pid_alive(record.pid):
-                        exit_code = self._collect_exit_code(record.pid)
-                        self._mark_exited(record, exit_code)
-                        return record
-                    time.sleep(0.2)
-                # escalate to SIGKILL if still running
-                try:
-                    os.kill(record.pid, signal.SIGKILL)
-                except OSError:
-                    pass
-            # final state
+                        break
+                    time.sleep(0.1)
+                if self._is_pid_alive(record.pid):
+                    try:
+                        os.kill(record.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
             exit_code = self._collect_exit_code(record.pid)
             self._mark_exited(record, exit_code)
-            # cleanup PTY resources if any
-            state = self._pty.pop(shell_id, None)
-            if state:
-                state.stop.set()
-                try:
-                    if state.reader:
-                        state.reader.join(timeout=1.0)
-                except Exception:
-                    pass
+            self._stop_pty(shell_id)
             return record
 
     def restart_shell(self, shell_id: str) -> ShellRecord:
@@ -512,7 +658,11 @@ class FrameworkShellManager:
             now = time.time()
             record.created_at = now
             record.updated_at = now
+            record.exit_code = None
+            record.status = "pending"
             self._save_record(record)
+            if record.uses_pty:
+                return self._launch_pty(record)
             return self._launch(record)
 
     def remove_shell(self, shell_id: str, *, force: bool = False) -> None:
@@ -522,20 +672,8 @@ class FrameworkShellManager:
                 raise KeyError("Shell not found")
             if record.pid and self._is_pid_alive(record.pid):
                 self.terminate_shell(shell_id, force=force)
+            self._stop_pty(shell_id)
             shutil.rmtree(self.metadata_dir / shell_id, ignore_errors=True)
-            # cleanup PTY if any
-            state = self._pty.pop(shell_id, None)
-            if state:
-                state.stop.set()
-                try:
-                    if state.reader:
-                        state.reader.join(timeout=1.0)
-                except Exception:
-                    pass
-                try:
-                    os.close(state.master_fd)
-                except Exception:
-                    pass
             for log_path in (record.stdout_log, record.stderr_log):
                 try:
                     Path(log_path).unlink()
@@ -543,13 +681,18 @@ class FrameworkShellManager:
                     pass
 
     def sweep(self) -> None:
-        """Update metadata for processes that have exited."""
         for record in list(self._iter_records()):
             if record.pid and not self._is_pid_alive(record.pid):
                 exit_code = record.exit_code or self._collect_exit_code(record.pid)
                 self._mark_exited(record, exit_code)
 
-    def describe(self, record: ShellRecord, *, include_logs: bool = False, tail_lines: int = 0) -> Dict[str, Any]:
+    def describe(
+        self,
+        record: ShellRecord,
+        *,
+        include_logs: bool = False,
+        tail_lines: int = 0,
+    ) -> Dict[str, Any]:
         payload = record.to_payload()
         payload["stats"] = self._process_stats(record)
         if include_logs:
@@ -571,7 +714,7 @@ class FrameworkShellManager:
                 stats["uptime"] = max(0.0, time.time() - record.created_at)
                 if psutil:
                     try:
-                        proc = psutil.Process(record.pid)
+                        proc = psutil.Process(record.pid)  # type: ignore[arg-type]
                         with proc.oneshot():
                             stats["cpu_percent"] = proc.cpu_percent(interval=0.0)
                             stats["memory_rss"] = proc.memory_info().rss
@@ -581,7 +724,13 @@ class FrameworkShellManager:
                 else:
                     try:
                         ps_output = subprocess.run(
-                            ["sudo", "ps", "-p", str(record.pid), "-o", "%cpu=,%mem=,rss=,nlwp="],
+                            [
+                                "ps",
+                                "-p",
+                                str(record.pid),
+                                "-o",
+                                "%cpu=,%mem=,rss=,nlwp=",
+                            ],
                             capture_output=True,
                             text=True,
                             check=True,
@@ -622,10 +771,21 @@ def _manager() -> FrameworkShellManager:
     max_shells_setting = cfg.get("TE_FRAMEWORK_SHELL_MAX") or os.getenv("TE_FRAMEWORK_SHELL_MAX")
     max_shells = int(max_shells_setting) if max_shells_setting else None
     token = cfg.get("TE_FRAMEWORK_SHELL_TOKEN") or os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
+    run_id = cfg.get("TE_RUN_ID") or os.getenv("TE_RUN_ID")
     mgr = current_app.config.get("TE_FRAMEWORK_SHELL_MANAGER")
     if not isinstance(mgr, FrameworkShellManager):
-        mgr = FrameworkShellManager(base_dir=base_dir, max_shells=max_shells, auth_token=token)
+        mgr = FrameworkShellManager(
+            base_dir=base_dir,
+            max_shells=max_shells,
+            auth_token=token,
+            run_id=run_id,
+        )
         current_app.config["TE_FRAMEWORK_SHELL_MANAGER"] = mgr
+    else:
+        if run_id and mgr.run_id != run_id:
+            mgr.run_id = run_id
+            mgr.launcher_pid = os.getpid()
+            mgr._adopt_orphaned_shells()
     return mgr
 
 
