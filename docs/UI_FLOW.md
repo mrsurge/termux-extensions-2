@@ -3,47 +3,41 @@
 This document outlines the visual and logical flow of the application, distinguishing between the core framework UI and the components loaded from extensions.
 
 ```
-/ (index.html - Main View)
+/ - (Launcher - `index.html`)
 |
-+-- [CORE FRAMEWORK]
-|   |
-|   +-- System Stats Grid (Static Placeholder)
-|       |-- CPU Usage Card
-|       +-- Memory Usage Card
-|
-+-- <div id="extensions-container"> (Dynamically Populated)
++-- <div id="extensions-container"> (Dynamic cards loaded from `/api/extensions`)
     |
-    +-- << EXTENSION: Shortcut Wizard >>
+    +-- 🎛️ **Settings App (full page)**
+    |   |
+    |   +-- Metrics Card (reads `/api/framework/runtime/metrics`)
+    |   |   |-- Displays run ID, supervisor/app PIDs, uptime, shell/session counts
+    |   +-- Framework Shells Card (calls `/api/framework_shells` + action/delete)
+    |   +-- Launcher Ordering Card (loads `/api/extensions`, persists order via `/api/settings`)
+    |   +-- Shutdown Card (POST `/api/framework/runtime/shutdown`)
+    |
+    +-- **Shortcut Wizard Extension**
     |   |
     |   +-- Main Menu View
-    |   |   |-- [Button] "New Shortcut" --> (Triggers Editor View)
-    |   |   +-- [Button] "Edit Shortcuts" --> (Triggers Edit List View)
+    |   |   |-- "New Shortcut" -> Editor View (collects metadata, saves via API)
+    |   |   +-- "Edit Shortcuts" -> Existing list
     |   |
     |   +-- Editor View (hidden by default)
-    |   |   |-- [Button] "<-- Back" --> (Triggers Main Menu View)
-    |   |   |-- [Input] Filename
-    |   |   |-- [Checkbox] Shebang
-    |   |   |-- [Input] Command
-    |   |   |-- [Textarea] Arguments
-    |   |   +-- [Button] "Save Shortcut" --> (Calls API: /create)
+    |   |   |-- Filename / Command / Arguments inputs
+    |   |   +-- "Save Shortcut" -> POST backend
     |   |
     |   +-- Edit List View (hidden by default)
-    |       |-- [Button] "<-- Back" --> (Triggers Main Menu View)
-    |       +-- (Dynamic list of .sh files...)
+    |       |-- Lists `.sh` files + actions
     |
-    +-- << EXTENSION: Sessions & Shortcuts >>
+    +-- **Sessions & Shortcuts Extension**
         |
-        +-- Session List Container
+        +-- Session List Container (populated from `/api/ext/sessions_and_shortcuts/sessions`)
             |
-            +-- (Dynamic list of sessions...)
+            +-- Session Card
                 |
-                +-- Session Card
-                    |
-                    +-- [Button] "..." (Menu)
-                        |
-                        +-- "Run Shortcut..." --> (Opens Shortcut Modal)
-                        +-- "Run Command..." --> (Opens Command Modal)
-                        +-- "Kill Session" --> (Calls API: /delete)
+                +-- Menu Actions
+                    |-- "Run Shortcut..." (opens modal)
+                    |-- "Run Command..." (opens modal)
+                    |-- "Kill Session" (API DELETE)
 
 [MODALS] (Exist in main index.html but are triggered by extensions)
 |

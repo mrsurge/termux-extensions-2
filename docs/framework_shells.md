@@ -17,12 +17,21 @@ user-visible session lists while remaining easy to manage.
   - `~/.cache/te_framework/meta/<id>/meta.json` — serialized `ShellRecord` data.
   - `~/.cache/te_framework/logs/<id>.stdout.log` and `.stderr.log` — append-only logs.
 - **Lifecycle operations:** spawn, list, describe, graceful terminate, force kill,
-  restart, and full removal (including logs and metadata).
+  restart, and full removal (including logs and metadata). Supervisor shutdown
+  (`POST /api/framework/runtime/shutdown`) cascades through the manager to close
+  every recorded shell before the host process exits.
 - **Resource stats:** When `psutil` is installed the manager reports CPU%, RSS, and
   thread counts; otherwise only basic uptime/alive flags are provided.
 - **Access control:** Mutating endpoints may require the `X-Framework-Key` header if
   `TE_FRAMEWORK_SHELL_TOKEN` is configured. Read operations remain open.
 - **Limits:** `TE_FRAMEWORK_SHELL_MAX` (default 5) caps concurrent running shells.
+- **Run tracking:** Every shell record includes the launcher PID, run ID, and
+  `uses_pty` flag. The supervisor writes the current run ID to
+  `~/.cache/te_framework/run_id` so dtach sessions and other helpers can discover
+  it on restart.
+- **Runtime metrics:** `GET /api/framework/runtime/metrics` aggregates all running
+  shells (and matching interactive sessions) for use in the Settings app or other
+  diagnostics.
 
 ## 3. Core API Surface
 
@@ -56,6 +65,8 @@ All responses honour the `{ "ok": true|false, ... }` envelope.
 
 4. **Removal**
    - Optionally terminates the process, prunes metadata directory, and deletes log files.
+   - Supervisor shutdown automatically removes every shell directory to avoid
+     orphaned metadata between runs.
 
 5. **Sweep**
    - Opportunistically marks shells as `exited` when the process is no longer alive.
@@ -104,4 +115,14 @@ All responses honour the `{ "ok": true|false, ... }` envelope.
 - Richer metrics (I/O, GPU) and WebSocket log streaming.
 - Integration UI for managing framework shells graphically.
 
-These notes reflect the implementation currently available in `app/framework_shells.py`.
+## 8. Operator Controls & UI
+
+- **🎛️ Settings App:** Surfaces the metrics endpoint, lists all framework shells
+  with stop/kill/restart/remove actions, and exposes the supervisor shutdown
+  control. Extension ordering is also managed here via `/api/settings`.
+- **Supervisor script (`scripts/run_framework.sh`):** Preferred entry point; tags
+  the current run, writes the ID to disk, launches `app.supervisor`, and cleans up
+  shells on exit.
+
+These notes reflect the implementation currently available in
+`app/framework_shells.py`, `app/supervisor.py`, and the Settings app.

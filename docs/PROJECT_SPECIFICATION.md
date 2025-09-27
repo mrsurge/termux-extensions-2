@@ -4,22 +4,39 @@ This document outlines the architecture and design of the `termux-extensions-2` 
 
 ## Recent Enhancements
 
-- **Universal Picker:** `window.teFilePicker` now provides breadcrumb navigation,
-  single-tap directory entry, a dedicated home button, and per-mode start-path memory.
-  Every app/extension should reuse it instead of custom file dialogs.
+- **Supervisor wrapper:** All launches go through `scripts/run_framework.sh`, which
+  generates a `TE_RUN_ID`, records it under `~/.cache/te_framework/run_id`, and
+  supervises the Flask process group. Shutdown flows (UI or API) terminate
+  framework shells before the supervisor exits.
+- **Runtime metrics API:** `GET /api/framework/runtime/metrics` surfaces run ID,
+  supervisor/app PIDs, uptime, shell stats, memory, and run-tagged interactive
+  sessions. The Settings app consumes this endpoint.
+- **Settings App (🎛️ Settings):** A dedicated app (`app/apps/settings/`) now hosts
+  diagnostics: live metrics, framework-shell controls (stop/kill/restart/remove),
+  launcher extension ordering, token management, and a supervised shutdown action.
+- **Universal Picker:** `window.teFilePicker` provides breadcrumb navigation,
+  single-tap directory entry, a dedicated home button, and per-mode start-path
+  memory. Every app/extension should reuse it instead of custom file dialogs.
 - **Shared State Store:** Frontend state that must survive reloads uses
   `window.teState` (backed by `/api/state`) instead of `localStorage`. This powers
   framework tokens, custom session names, and other persisted settings.
 - **Inline Debug Consoles:** Apps such as the Distro manager surface a toggleable
   debug panel (pause/resume/clear) so agents can log diagnostics without resorting
   to browser dev tools.
-- **Distro Lifecycle Helpers:** The backend now exposes `/api/app/distro/containers/<id>/cleanup`
-  to delete stale framework shells, and the start flow reports clear errors when
-  helper binaries are missing.
 
 ## 1. Core Framework
 
 The backend is a Python web server built with the Flask framework. It uses a helper function to execute shell scripts from a dedicated `scripts/` directory, which act as a bridge to the Termux environment.
+
+**Launch workflow:**
+- Local development now uses `scripts/run_framework.sh`. The script resolves the
+  project root, assigns a fresh `TE_RUN_ID` when needed, and runs
+  `python -m app.supervisor`. The supervisor stores the run ID under
+  `~/.cache/te_framework/run_id`, records its PID in `TE_SUPERVISOR_PID`, and on
+  exit signals the Flask process group before cleaning up framework shells.
+- Production-style runs continue to use Gunicorn (`wsgi:application`) but should
+  still set `TE_SESSION_TYPE="framework"` and can optionally wrap the command with
+  the supervisor script to gain the same lifecycle behaviour.
 
 **`app/main.py` - Flask App Initialization:**
 ```python
@@ -150,6 +167,26 @@ async function loadExtensions() {
     }
 }
 ```
+
+## 5. Diagnostics & Runtime Management
+
+- **Supervisor lifecycle (`scripts/run_framework.sh`, `app/supervisor.py`)**
+  - Generates a `TE_RUN_ID`, writes it to `~/.cache/te_framework/run_id`, and
+    exposes `TE_SUPERVISOR_PID` so other components can identify the active run.
+  - Launches `app.main` in a new process group. During shutdown all framework
+    shells are terminated before signalling the Flask host.
+- **Runtime metrics API** (`GET /api/framework/runtime/metrics`)
+  - Returns `{ run_id, supervisor_pid, app_pid, uptime, framework_shells,
+    interactive_sessions, process }` for at-a-glance observability. Metrics fall
+    back to `ps` when `psutil` is unavailable.
+- **Shutdown endpoint** (`POST /api/framework/runtime/shutdown`)
+  - Forces an orderly stop: removes framework shells and then signals the
+    supervisor. Honours `TE_FRAMEWORK_SHELL_TOKEN` via the `X-Framework-Key` header.
+- **🎛️ Settings App** (`app/apps/settings/`)
+  - Full-page diagnostics hub: displays metrics, lists framework shells with
+    stop/kill/restart/remove actions, stores the optional framework token, exposes
+    the shutdown control, and lets the user reorder launcher extensions by writing
+    to `/api/settings`.
 
 ## 2. Shell Interaction Layer
 

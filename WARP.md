@@ -12,8 +12,8 @@ Common commands
   - Source in each interactive shell or add to ~/.bashrc:
     - source scripts/init.sh
 - Run the server (development/local)
-  - TE_SESSION_TYPE="framework" python app/main.py
-  - Notes: built-in server binds 0.0.0.0:8080 with debug disabled; run it from a shell you do NOT want monitored (that shell is hidden by TE_SESSION_TYPE=framework).
+  - scripts/run_framework.sh
+  - Wrapper sets `TE_RUN_ID`, records it under `~/.cache/te_framework/run_id`, and launches `python -m app.supervisor` (supervisor tracks `TE_SUPERVISOR_PID` and cleans up all framework shells on shutdown).
 - Run the server (LAN/production-style)
   - TE_SESSION_TYPE="framework" gunicorn -w 2 -k gthread --threads 8 -b 0.0.0.0:8080 wsgi:application
   - Adjust workers/threads to device resources. Access via http://<device-ip>:8080
@@ -32,8 +32,14 @@ Common commands
     - curl -X POST http://localhost:8080/api/framework_shells/<id>/action -H 'Content-Type: application/json' -H "X-Framework-Key: $FS_TOKEN" -d '{"action":"stop"}'
     - curl -X DELETE http://localhost:8080/api/framework_shells/<id> -H "X-Framework-Key: $FS_TOKEN"
 
+- Supervisor & runtime diagnostics
+  - `app/supervisor.py`: wraps the Flask app in a process group, manages the run ID cache, and ensures all framework shells are terminated during shutdown.
+  - `GET /api/framework/runtime/metrics`: aggregated supervisor stats (run id, PIDs, uptime, shell/session counts, RSS). Consumed by the 🎛️ Settings app.
+  - `POST /api/framework/runtime/shutdown`: gracefully terminates all framework shells before signalling the supervisor. Requires `X-Framework-Key` when `TE_FRAMEWORK_SHELL_TOKEN` is configured.
+  - 🎛️ Settings app (`app/apps/settings/`): full-page diagnostics, shell management, launcher extension ordering, and shutdown control.
+
 High-level architecture
-- Backend runtime (Flask)
+- Backend runtime (Flask + supervisor)
   - Entry points
     - app/main.py: Creates the Flask app, registers the framework_shells blueprint, and exposes core endpoints.
     - wsgi.py: Exposes application for Gunicorn (wsgi:application).
