@@ -63,6 +63,16 @@ Notes:
 
 ## Key Features
 
-*   **Web-Based UI:** A clean, modern interface accessible from a web browser.
-*   **Session Management:** The "Sessions & Shortcuts" extension allows for powerful control over active Termux terminals, including running commands and killing sessions.
+*   **Web-Based UI:** A clean, modern interface accessible from any local browser.
+*   **Session Management:** The Sessions & Shortcuts extension controls active shells, launches shortcuts (now with the universal picker), and renames or kills sessions without leaving the UI.
+*   **Background Framework Shells:** Long-running jobs (aria2, distro helpers, etc.) are tracked with health checks, log tails, a cleanup action, and inline debug consoles.
+*   **Universal File/Directory Picker:** A shared modal with breadcrumb navigation, hidden-file toggle, home button, and per-mode start-path memory is available to every app/extension.
+*   **Built-In Diagnostics:** Apps such as the Distro manager ship with inline debug consoles so you can pause, inspect, and clear log streams while reproducing issues.
 *   **Easy Installation:** Designed to be installed as a standard Debian package via `apt`.
+
+## Persistent State Store
+
+Front-end settings that need to survive browser reloads (framework tokens, custom
+session names, picker preferences, etc.) use the shared `/api/state` endpoints via
+`window.teState`. See [`docs/state_store.md`](docs/state_store.md) for details on the
+available helper methods and storage format.

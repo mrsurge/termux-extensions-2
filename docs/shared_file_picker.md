@@ -1,8 +1,9 @@
 # Shared File & Directory Picker
 
 A reusable modal picker is now available across the entire framework. The component
-mirrors the File Editor's browsing experience and is exposed as a global helper so
-apps and extensions can launch it without duplicating UI code.
+mirrors the File Editor's browsing experience, adds one-tap navigation (single click
+enters directories), and exposes a compact API so apps/extensions can launch it
+without duplicating UI code.
 
 ## Usage
 
@@ -19,6 +20,9 @@ const result = await window.teFilePicker.open({
   `{ directory, existed }`) or rejects with an error when the user cancels.
 - Paths are always returned as absolute filesystem paths (e.g.
   `/data/data/com.termux/files/home/Downloads/file.txt`).
+- Start locations are remembered **per mode** (`open`, `directory`, `save`), so
+  the next invocation resumes where the user last picked—unless you override it
+  via `startPath`.
 - Use helpers for common cases:
 
 ```javascript
@@ -50,7 +54,8 @@ if (target && target.existed) {
 ## Behaviour
 
 - Uses `GET /api/browse` under the hood, respecting the "Show hidden files" toggle.
-- Breadcrumb navigation, Up button, and double-click to enter directories.
+- Breadcrumb navigation, Up button, a dedicated **Home** button (`🏠`), and
+  single-click to drill into folders.
 - Save mode exposes a filename input and returns `{ path, directory, existed }`.
 - Selection only enabled when the item matches the requested `mode`.
 - Styled to match the shared dark theme; automatically injected into both the
@@ -84,4 +89,4 @@ async function browseForConfig() {
 ```
 
 This shared component keeps file/directory selection consistent across the
-framework and reduces duplicate UI logic.
+framework, remembers per-mode history, and reduces duplicate UI logic.

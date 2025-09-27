@@ -6,7 +6,9 @@ framework shell infrastructure. These are the working states we intend to model.
 ## States
 - **Offline** – No filesystem mounted, no framework shell running.
 - **Mounted** – Filesystem prepared (bind mounts or helper scripts executed) but no
-  long-lived process active.
+  long-lived process active. The UI now surfaces a debug console to show each
+  `/containers` poll and provides a "Clean old shells" action that removes stale
+  framework shell metadata for the container.
 - **Starting** – Transition while the framework shell launches the container init
   command.
 - **Running** – Framework shell is alive; use `/api/framework_shells` to report PID,
@@ -31,8 +33,11 @@ framework shell API and supporting helper scripts.
 Running containers can expose interactive shells by delegating to the Sessions &
 Shortcuts extension: choose a Termux session and send an attach command
 (e.g. `proot-distro login <name>`). This keeps the background framework shell and
-front-end interactive shell decoupled. When `/containers` is requested the backend also scans
-Termux sessions for active `chroot-distro login <id>` commands so that cards return to
-`running` (with live stats) after a restart even if attachments were active.
+front-end interactive shell decoupled. When `/containers` is requested the backend
+also scans Termux sessions for active `chroot-distro login <id>` commands so that
+cards return to `running` (with live stats) after a restart even if attachments were
+active. If the framework shell exits immediately (e.g. binary missing), the start
+API now inspects the initial log tail and surfaces a targeted error so the UI never
+silently falls back to "mounted".
 
 These notes provide context for the upcoming app scaffolding and future agent work.
