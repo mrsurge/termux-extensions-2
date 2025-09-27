@@ -22,25 +22,53 @@ let elements = {
 };
 
 const storageKeys = {
-    sessionNames: 'sessionNames',
-    autoRefresh: 'sessions_and_shortcuts_auto_refresh_ms',
+    sessionNames: 'sessions_and_shortcuts.sessionNames',
+    autoRefresh: 'sessions_and_shortcuts.autoRefreshMs',
+    frameworkToken: 'sessions_and_shortcuts.frameworkToken',
 };
 
-function loadFrameworkToken() {
+const teStateStore = window.teState || null;
+const persisted = {
+    frameworkToken: null,
+    sessionNames: {},
+    autoRefresh: 0,
+};
+
+const SHORTCUTS_DIR = '/data/data/com.termux/files/home/.shortcuts';
+
+async function preloadPersistentState() {
+    if (!teStateStore) return;
     try {
-        const value = localStorage.getItem('frameworkShellToken');
-        return value ? value : null;
+        await teStateStore.preload([storageKeys.sessionNames, storageKeys.autoRefresh, storageKeys.frameworkToken]);
+        const names = teStateStore.getSync(storageKeys.sessionNames, {});
+        if (names && typeof names === 'object') {
+            persisted.sessionNames = { ...names };
+        }
+        const auto = teStateStore.getSync(storageKeys.autoRefresh, 0);
+        const autoInt = parseInt(auto, 10);
+        persisted.autoRefresh = Number.isNaN(autoInt) ? 0 : autoInt;
+        const token = teStateStore.getSync(storageKeys.frameworkToken, null);
+        persisted.frameworkToken = typeof token === 'string' && token.trim() ? token : null;
     } catch (err) {
-        return null;
+        console.warn('Failed to preload sessions state', err);
     }
 }
 
+function loadFrameworkToken() {
+    return persisted.frameworkToken;
+}
+
 function saveFrameworkToken(token) {
-    try {
-        if (token) localStorage.setItem('frameworkShellToken', token);
-        else localStorage.removeItem('frameworkShellToken');
-    } catch (err) {
-        console.warn('Failed to persist framework token', err);
+    persisted.frameworkToken = token ? token : null;
+    if (!teStateStore) return;
+    if (persisted.frameworkToken) {
+        teStateStore.set(storageKeys.frameworkToken, persisted.frameworkToken).catch((err) => {
+            console.warn('Failed to persist framework token', err);
+        });
+    } else {
+        teStateStore.remove(storageKeys.frameworkToken).catch((err) => {
+            console.warn('Failed to clear framework token', err);
+        });
     }
 }
 
@@ -78,19 +106,15 @@ function escapeHTML(str) {
 }
 
 function loadSessionNames() {
-    try {
-        STATE.sessionNames = JSON.parse(localStorage.getItem(storageKeys.sessionNames) || '{}') || {};
-    } catch (err) {
-        STATE.sessionNames = {};
-    }
+    STATE.sessionNames = { ...(persisted.sessionNames || {}) };
 }
 
 function saveSessionNames() {
-    try {
-        localStorage.setItem(storageKeys.sessionNames, JSON.stringify(STATE.sessionNames));
-    } catch (err) {
+    persisted.sessionNames = { ...STATE.sessionNames };
+    if (!teStateStore) return;
+    teStateStore.set(storageKeys.sessionNames, persisted.sessionNames).catch((err) => {
         console.warn('Failed to persist session names', err);
-    }
+    });
 }
 
 function containersBySession() {
@@ -132,6 +156,7 @@ function renderVisibleSessions() {
     STATE.visibleSessions.forEach((session) => {
         const card = document.createElement('div');
         card.className = 'session';
+        card.dataset.sid = session.sid;
         const name = STATE.sessionNames[session.sid];
         const isIdle = !session.busy;
         const statusDot = `<span class="status-dot ${isIdle ? 'dot-green' : ''}" style="${isIdle ? '' : 'background-color: var(--destructive);'}"></span>`;
@@ -204,7 +229,10 @@ function render() {
 
 function closeAllMenus() {
     extensionRoot.querySelectorAll('.menu').forEach((menu) => {
+        menu.classList.remove('open');
         menu.style.display = 'none';
+        menu.style.top = '';
+        menu.style.right = '';
     });
 }
 
@@ -212,10 +240,15 @@ function openMenu(sid, button) {
     closeAllMenus();
     const menu = extensionRoot.querySelector(`#menu-${sid}`);
     if (!menu) return;
+    const card = button.closest('.session');
+    if (!card) return;
+    const buttonRect = button.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const top = buttonRect.bottom - cardRect.top + 6;
+    menu.style.top = `${top}px`;
+    menu.style.right = '12px';
     menu.style.display = 'block';
-    const rect = button.getBoundingClientRect();
-    menu.style.top = rect.bottom + 'px';
-    menu.style.right = (window.innerWidth - rect.right) + 'px';
+    menu.classList.add('open');
 }
 
 function applyAutoRefresh(ms) {
@@ -229,20 +262,15 @@ function applyAutoRefresh(ms) {
 }
 
 function loadAutoRefreshSetting() {
-    try {
-        const value = parseInt(localStorage.getItem(storageKeys.autoRefresh) || '0', 10);
-        return Number.isNaN(value) ? 0 : value;
-    } catch (err) {
-        return 0;
-    }
+    return Number.isFinite(persisted.autoRefresh) ? persisted.autoRefresh : 0;
 }
 
 function saveAutoRefreshSetting(ms) {
-    try {
-        localStorage.setItem(storageKeys.autoRefresh, String(ms));
-    } catch (err) {
+    persisted.autoRefresh = Number.isFinite(ms) ? ms : 0;
+    if (!teStateStore) return;
+    teStateStore.set(storageKeys.autoRefresh, persisted.autoRefresh).catch((err) => {
         console.warn('Failed to persist auto-refresh', err);
-    }
+    });
 }
 
 async function fetchFrameworkShells() {
@@ -361,8 +389,8 @@ function attachEventListeners() {
             } else if (action === 'run-command') {
                 openModal('command-modal', sid);
             } else if (action === 'run-shortcut') {
-                apiClient.get('shortcuts').then((data) => renderShortcuts(data));
-                openModal('shortcut-modal', sid);
+                STATE.currentSessionId = sid;
+                browseShortcutFile();
             } else if (action === 'rename') {
                 const input = extensionRoot.querySelector('#rename-input');
                 if (input) {
@@ -408,21 +436,28 @@ function attachEventListeners() {
     if (renameBtn) renameBtn.addEventListener('click', renameSession);
 }
 
-function renderShortcuts(shortcuts) {
-    const shortcutList = extensionRoot.querySelector('#shortcut-list');
-    if (!shortcutList) return;
-    shortcutList.innerHTML = '';
-    if (!shortcuts.length) {
-        shortcutList.innerHTML = '<p style="color: var(--muted-foreground);">No shortcuts found in ~/.shortcuts</p>';
+async function browseShortcutFile() {
+    if (!STATE.currentSessionId) {
+        alert('Please select a session first.');
         return;
     }
-    shortcuts.forEach((shortcut) => {
-        const button = document.createElement('button');
-        button.className = 'menu-item';
-        button.textContent = shortcut.name;
-        button.addEventListener('click', () => runShortcut(shortcut.path));
-        shortcutList.appendChild(button);
-    });
+    if (!(window.teFilePicker && typeof window.teFilePicker.openFile === 'function')) {
+        alert('File picker unavailable');
+        return;
+    }
+    try {
+        const result = await window.teFilePicker.openFile({
+            startPath: SHORTCUTS_DIR,
+            title: 'Select Shortcut File',
+            selectLabel: 'Run Shortcut',
+        });
+        if (result && result.path) {
+            runShortcut(result.path);
+        }
+    } catch (err) {
+        console.error('Shortcut picker error', err);
+        alert(err.message || 'Failed to open file picker');
+    }
 }
 
 async function killFrameworkShell(shellId) {
@@ -454,7 +489,7 @@ function closeModal(modalId) {
 window.closeModal = closeModal;
 window.openModal = openModal;
 
-export default function initialize(container, apiRef) {
+export default async function initialize(container, apiRef) {
     extensionRoot = container;
     apiClient = apiRef;
 
@@ -465,6 +500,7 @@ export default function initialize(container, apiRef) {
     elements.tabFramework = container.querySelector('#sas-tab-framework');
     elements.autoRefreshSelect = container.querySelector('#auto-refresh-select');
 
+    await preloadPersistentState();
     loadSessionNames();
 
     if (elements.refreshBtn) elements.refreshBtn.addEventListener('click', () => refreshAll());

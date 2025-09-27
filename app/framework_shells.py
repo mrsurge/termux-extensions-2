@@ -9,6 +9,7 @@ services such as aria2 RPC, container helpers, or LLM runtimes.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shlex
@@ -182,7 +183,12 @@ class FrameworkShellManager:
             return False
         try:
             os.kill(pid, 0)
-        except OSError:
+        except PermissionError:
+            return True
+        except OSError as exc:
+            # Treat EPERM as alive (process exists but owned by another user)
+            if getattr(exc, "errno", None) == errno.EPERM:
+                return True
             return False
         return True
 
@@ -571,6 +577,24 @@ class FrameworkShellManager:
                             stats["memory_rss"] = proc.memory_info().rss
                             stats["num_threads"] = proc.num_threads()
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                else:
+                    try:
+                        ps_output = subprocess.run(
+                            ["sudo", "ps", "-p", str(record.pid), "-o", "%cpu=,%mem=,rss=,nlwp="],
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
+                        parts = ps_output.stdout.strip().split()
+                        if len(parts) >= 4:
+                            cpu = float(parts[0])
+                            rss_kb = float(parts[2])
+                            threads = int(parts[3])
+                            stats["cpu_percent"] = cpu
+                            stats["memory_rss"] = int(rss_kb * 1024)
+                            stats["num_threads"] = threads
+                    except Exception:
                         pass
         return stats
 

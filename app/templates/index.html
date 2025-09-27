@@ -12,6 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script type="module" src="/static/js/te_state.js"></script>
     <style>
         :root {
             --background: hsl(224, 71%, 4%);
@@ -179,6 +180,12 @@
             </div>
             <h4>Extension Order</h4>
             <div id="extension-order-list" class="reorder-list"></div>
+            <div style="margin-top:16px;">
+                <label for="setting-debug-stack" style="display:flex; align-items:center; gap:8px; font-size:0.9em; color:var(--muted-foreground);">
+                    <input type="checkbox" id="setting-debug-stack">
+                    <span>Show detailed error stacks</span>
+                </label>
+            </div>
             <button id="save-settings-btn" class="wizard-save-btn">Save Settings</button>
         </div>
     </div>
@@ -205,6 +212,40 @@
             return body.data;
         };
 
+        const SETTINGS_ENDPOINT = '/api/settings';
+        let settingsCache = {};
+        let settingsLoaded = false;
+
+        async function fetchSettings() {
+            try {
+                settingsCache = await window.teFetch(SETTINGS_ENDPOINT);
+                if (!settingsCache || typeof settingsCache !== 'object') settingsCache = {};
+            } catch (err) {
+                settingsCache = {};
+                console.error('Failed to load settings', err);
+            }
+            if (!settingsCache.extensionCollapse || typeof settingsCache.extensionCollapse !== 'object') {
+                settingsCache.extensionCollapse = {};
+            }
+            settingsLoaded = true;
+            return settingsCache;
+        }
+
+        async function persistSettings(patch) {
+            const merged = { ...(settingsCache || {}), ...(patch || {}) };
+            const saved = await window.teFetch(SETTINGS_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(merged),
+            });
+            settingsCache = saved || {};
+            settingsLoaded = true;
+            if (!settingsCache.extensionCollapse || typeof settingsCache.extensionCollapse !== 'object') {
+                settingsCache.extensionCollapse = {};
+            }
+            return settingsCache;
+        }
+
         // --- Main Application Loader ---
         const extensionsContainer = document.getElementById('extensions-container');
 
@@ -215,13 +256,21 @@
                 if (!result.ok) throw new Error(result.error);
                 let extensions = result.data;
 
-                // Check for and apply saved order from localStorage
-                const savedOrder = JSON.parse(localStorage.getItem('extensionOrder'));
+                // Check for and apply saved order from settings (migrate legacy key if needed)
+                if (!settingsLoaded) {
+                    await fetchSettings();
+                }
+                const savedOrder = Array.isArray(settingsCache.extensionOrder) ? settingsCache.extensionOrder : null;
                 if (savedOrder) {
                     extensions.sort((a, b) => {
                         const aId = `extension-${a._ext_dir}`;
                         const bId = `extension-${b._ext_dir}`;
-                        return savedOrder.indexOf(aId) - savedOrder.indexOf(bId);
+                        const aIdx = savedOrder.indexOf(aId);
+                        const bIdx = savedOrder.indexOf(bId);
+                        if (aIdx === -1 && bIdx === -1) return 0;
+                        if (aIdx === -1) return 1;
+                        if (bIdx === -1) return -1;
+                        return aIdx - bIdx;
                     });
                 }
 
@@ -254,38 +303,54 @@
 
                     // Load template into content div
                     const templatePath = `/extensions/${extDir}/${ext.entrypoints.frontend_template}`;
-                    fetch(templatePath).then(res => res.text()).then(html => {
+                    try {
+                        const templateResponse = await fetch(templatePath);
+                        const html = await templateResponse.text();
                         content.innerHTML = html;
+                    } catch (err) {
+                        content.innerHTML = `<p style="color: var(--destructive);">Failed to load template: ${err.message}</p>`;
+                        continue;
+                    }
 
-                        // Load script only after HTML is injected
-                        if (ext.entrypoints.frontend_script) {
-                            const scriptPath = `/extensions/${extDir}/${ext.entrypoints.frontend_script}`;
-                            import(scriptPath).then(module => {
-                                const api = {
-                                    get: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`),
-                                    post: (endpoint, body) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-                                    delete: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, { method: 'DELETE' })
-                                };
-                                module.default(content, api);
-                            }).catch(e => {
-                                content.innerHTML += `<p style="color: var(--destructive);">Error loading script: ${e.message}</p>`;
-                            });
+                    // Load script only after HTML is injected
+                    if (ext.entrypoints.frontend_script) {
+                        const scriptPath = `/extensions/${extDir}/${ext.entrypoints.frontend_script}`;
+                        try {
+                            const module = await import(scriptPath);
+                            const api = {
+                                get: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`),
+                                post: (endpoint, body) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+                                delete: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, { method: 'DELETE' })
+                            };
+                            const initResult = module.default(content, api);
+                            if (initResult && typeof initResult.then === 'function') {
+                                initResult.catch((err) => {
+                                    content.innerHTML += `<p style="color: var(--destructive);">Extension init failed: ${err.message}</p>`;
+                                });
+                            }
+                        } catch (err) {
+                            content.innerHTML += `<p style="color: var(--destructive);">Error loading script: ${err.message}</p>`;
                         }
-                    });
+                    }
 
                     // Collapse logic
-                    const collapsedState = JSON.parse(localStorage.getItem('extensionCollapse') || '{}');
+                    const collapsedState = (settingsCache && typeof settingsCache.extensionCollapse === 'object') ? settingsCache.extensionCollapse : {};
                     if (collapsedState[extDir]) {
                         content.classList.add('collapsed');
                         collapseBtn.innerHTML = '&#9650;'; // Up arrow
                     }
 
-                    header.addEventListener('click', () => {
+                    header.addEventListener('click', async () => {
                         const isCollapsed = content.classList.toggle('collapsed');
                         collapseBtn.innerHTML = isCollapsed ? '&#9650;' : '&#9660;';
-                        const currentState = JSON.parse(localStorage.getItem('extensionCollapse') || '{}');
+                        const currentState = { ...(settingsCache.extensionCollapse || {}) };
                         currentState[extDir] = isCollapsed;
-                        localStorage.setItem('extensionCollapse', JSON.stringify(currentState));
+                        settingsCache.extensionCollapse = currentState;
+                        try {
+                            await persistSettings({ extensionCollapse: currentState });
+                        } catch (err) {
+                            console.error('Failed to persist collapse state', err);
+                        }
                     });
                 }
             } catch (error) {
@@ -297,16 +362,25 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', loadExtensions);
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (!settingsLoaded) {
+                await fetchSettings();
+            }
+            await loadExtensions();
+        });
 
         // --- Settings Modal Logic ---
         const settingsModal = document.getElementById('settings-modal');
         const settingsBtn = document.getElementById('settings-gear-btn');
         const saveSettingsBtn = document.getElementById('save-settings-btn');
         const orderList = document.getElementById('extension-order-list');
+        const debugStackToggle = document.getElementById('setting-debug-stack');
         let dragSrcEl = null;
 
-        function openSettingsModal() {
+        async function openSettingsModal() {
+            if (!settingsLoaded) {
+                await fetchSettings();
+            }
             // Populate the list with current extensions
             orderList.innerHTML = '';
             const extensions = Array.from(extensionsContainer.children);
@@ -335,6 +409,7 @@
                     }
                 });
             });
+            debugStackToggle.checked = !!settingsCache.debugFullStack;
             settingsModal.style.display = 'block';
         }
 
@@ -342,14 +417,24 @@
             settingsModal.style.display = 'none';
         }
 
-        settingsBtn.addEventListener('click', openSettingsModal);
-        saveSettingsBtn.addEventListener('click', () => {
+        settingsBtn.addEventListener('click', () => {
+            openSettingsModal().catch(err => console.error('Failed to open settings modal', err));
+        });
+        saveSettingsBtn.addEventListener('click', async () => {
             const newOrder = Array.from(orderList.children).map(item => item.dataset.extId);
-            localStorage.setItem('extensionOrder', JSON.stringify(newOrder));
-            closeSettingsModal();
-            // Reload the extensions in the new order
-            extensionsContainer.innerHTML = '';
-            loadExtensions();
+            try {
+                await persistSettings({
+                    extensionOrder: newOrder,
+                    debugFullStack: !!debugStackToggle.checked,
+                });
+                window.teUI.toast?.('Settings saved');
+                closeSettingsModal();
+                extensionsContainer.innerHTML = '';
+                await loadExtensions();
+            } catch (err) {
+                console.error('Failed to save settings', err);
+                window.teUI.toast?.('Failed to save settings: ' + (err?.message || err));
+            }
         });
 
     </script>

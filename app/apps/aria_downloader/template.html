@@ -68,14 +68,6 @@
   .aria-field label { font-size: 13px; color: rgba(148,163,184,0.85); }
   .aria-field input, .aria-field textarea { background: rgba(15,23,42,0.8); border: 1px solid rgba(148,163,184,0.3); border-radius: 10px; padding: 10px 12px; color: inherit; font-size: 14px; }
   .aria-modal footer { padding: 16px 20px; border-top: 1px solid rgba(148,163,184,0.15); display: flex; justify-content: flex-end; gap: 10px; }
-  .aria-browse-sheet { position: fixed; inset: 0; background: rgba(2,6,23,0.8); display: none; align-items: flex-end; justify-content: center; z-index: 60; }
-  .aria-browse-sheet.show { display: flex; }
-  .aria-browse-panel { width: min(520px, 100%); max-height: 80vh; background: rgba(15,23,42,0.98); border-radius: 16px 16px 0 0; border: 1px solid rgba(148,163,184,0.25); padding: 18px 20px; display: flex; flex-direction: column; gap: 16px; }
-  .aria-browse-path { font-size: 13px; color: rgba(148,163,184,0.8); word-break: break-word; }
-  .aria-browse-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-  .aria-browse-item { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(148,163,184,0.2); cursor: pointer; display: flex; align-items: center; gap: 10px; background: rgba(15,23,42,0.92); }
-  .aria-browse-item:hover { border-color: var(--primary, #3b82f6); }
-  .aria-browse-actions { display: flex; flex-wrap: wrap; gap: 10px; }
   @media (max-width: 1024px) { .aria-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 720px) {
     .aria-header, .aria-toolbar { padding: 14px; }
@@ -225,17 +217,5 @@
       <button class="aria-btn ghost" id="aria-new-cancel">Cancel</button>
       <button class="aria-btn primary" id="aria-new-submit">Add Download</button>
     </footer>
-  </div>
-</div>
-
-<div class="aria-browse-sheet" id="aria-browse-sheet" aria-hidden="true">
-  <div class="aria-browse-panel">
-    <div class="aria-browse-path" id="aria-browse-path">~</div>
-    <div class="aria-browse-actions">
-      <button class="aria-btn ghost" id="aria-browse-up" type="button">Up one level</button>
-      <button class="aria-btn primary" id="aria-browse-select" type="button">Select current directory</button>
-      <button class="aria-btn ghost" id="aria-browse-close" type="button">Cancel</button>
-    </div>
-    <div class="aria-browse-list" id="aria-browse-list"></div>
   </div>
 </div>

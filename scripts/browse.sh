@@ -3,12 +3,23 @@
 set -eu
 
 TARGET_DIR=${1:-"$HOME"}
+SHOW_HIDDEN=${2:-0}
 
 # Ensure the target is a valid, accessible directory
 if [ ! -d "$TARGET_DIR" ]; then
     echo '{"error": "Invalid or inaccessible directory"}' >&2
     exit 1
 fi
+
+shopt -s nullglob
+case "$SHOW_HIDDEN" in
+    1|true|TRUE|yes|YES|on|ON|--hidden|--show-hidden)
+        shopt -s dotglob
+        ;;
+    *)
+        shopt -u dotglob
+        ;;
+esac
 
 first=true
 
@@ -21,13 +32,13 @@ json_escape () {
 echo "["
 
 # Process directories first, then files
-# Using `ls -p` appends a `/` to directories
 for item in "$TARGET_DIR"/*/; do
     if [ -d "$item" ]; then
         if [ "$first" = false ]; then echo ","; fi
         first=false
         basename=$(basename "$item")
-        printf '{"name": "%s", "type": "directory", "path": "%s"}' "$(json_escape "$basename")" "$(json_escape "$item")"
+        trimmed="${item%/}"
+        printf '{"name": "%s", "type": "directory", "path": "%s"}' "$(json_escape "$basename")" "$(json_escape "$trimmed")"
     fi
 done
 

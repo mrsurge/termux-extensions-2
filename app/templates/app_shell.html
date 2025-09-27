@@ -41,14 +41,25 @@
         <div id="app-container"></div>
     </div>
 
+    <script type="module" src="/static/js/te_state.js"></script>
     <script type="module" src="/static/js/file_picker.js"></script>
     <script id="__app_id_json" type="application/json">{{ app_id|tojson }}</script>
     <script type="module">
+        const SETTINGS_ENDPOINT = '/api/settings';
+
+        function escapeHtml(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
         const appContainer = document.getElementById('app-container');
         const appTitleEl = document.getElementById('app-title');
         const btnHome = document.getElementById('btn-home');
         const btnReload = document.getElementById('btn-reload');
         const appId = JSON.parse(document.getElementById('__app_id_json').textContent);
+        let debugFullStack = false;
 
         // Minimal teFetch helper for the app shell
         async function teFetch(url, options) {
@@ -60,21 +71,78 @@
             return body.data;
         }
 
+        async function fetchSettings() {
+            try {
+                const data = await teFetch(SETTINGS_ENDPOINT);
+                return data && typeof data === 'object' ? data : {};
+            } catch (err) {
+                console.warn('Failed to load settings', err);
+                return {};
+            }
+        }
+
+        const teStateStore = window.teState || null;
+        const stateCache = new Map();
+
         function getStateKey() { return `app_state:${appId}`; }
+        const stateKey = getStateKey();
+
+        async function ensureStatePreloaded(key) {
+            if (!teStateStore || stateCache.has(key)) return;
+            try {
+                await teStateStore.preload([key]);
+                if (teStateStore.has(key)) {
+                    stateCache.set(key, teStateStore.getSync(key, null));
+                }
+            } catch (err) {
+                console.warn('Failed to preload app state', err);
+            }
+        }
+
+        function getCachedState(key, defaultValue = null) {
+            if (stateCache.has(key)) {
+                const value = stateCache.get(key);
+                return value === undefined ? defaultValue : value;
+            }
+            if (teStateStore && teStateStore.has(key)) {
+                const value = teStateStore.getSync(key, defaultValue);
+                stateCache.set(key, value);
+                return value;
+            }
+            return defaultValue;
+        }
+
+        function persistStateSet(key, value) {
+            if (!teStateStore) return;
+            const op = teStateStore.set(key, value);
+            if (op && typeof op.catch === 'function') {
+                op.catch((err) => console.warn('Failed to persist app state', err));
+            }
+        }
+
+        function persistStateRemove(key) {
+            if (!teStateStore) return;
+            const op = teStateStore.remove(key);
+            if (op && typeof op.catch === 'function') {
+                op.catch((err) => console.warn('Failed to clear app state', err));
+            }
+        }
 
         // Host API exposed to apps
         const host = {
             id: appId,
             saveState: (state) => {
-                try { localStorage.setItem(getStateKey(), JSON.stringify(state)); return true; } catch (e) { console.error(e); return false; }
+                stateCache.set(stateKey, state);
+                persistStateSet(stateKey, state);
+                return true;
             },
             loadState: (defaultValue = null) => {
-                try {
-                    const raw = localStorage.getItem(getStateKey());
-                    return raw ? JSON.parse(raw) : defaultValue;
-                } catch (e) { console.error(e); return defaultValue; }
+                return getCachedState(stateKey, defaultValue);
             },
-            clearState: () => { try { localStorage.removeItem(getStateKey()); } catch (e) { console.error(e); } },
+            clearState: () => {
+                stateCache.delete(stateKey);
+                persistStateRemove(stateKey);
+            },
             setTitle: (title) => { document.title = title || 'Termux App'; appTitleEl.textContent = title || 'App'; },
             onBeforeExit: (handler) => { window.__appBeforeExitHandler = handler; },
             toast: (msg) => { try { if (window.teUI && window.teUI.toast) window.teUI.toast(msg); } catch (_) {} },
@@ -118,7 +186,7 @@
                 if (!appDef) throw new Error(`App with ID "${appId}" not found.`);
 
                 host.setTitle(appDef.name || 'Termux App');
-
+                await ensureStatePreloaded(stateKey);
                 const templatePath = `/apps/${appDef._dir}/${appDef.entrypoints.frontend_template}`;
                 const template = await fetch(templatePath).then(res => res.text());
                 appContainer.innerHTML = template;
@@ -132,15 +200,27 @@
                         delete: (endpoint) => teFetch(`/api/app/${appId}/${endpoint}`, { method: 'DELETE' })
                     };
                     // Pass host as a 3rd param (backward compatible)
-                    module.default(appContainer, api, host);
+                    const initResult = module.default(appContainer, api, host);
+                    if (initResult && typeof initResult.then === 'function') {
+                        await initResult;
+                    }
                 }
             } catch (error) {
-                appContainer.innerHTML = `<p style=\"color: red;\">Error loading app: ${error.message}</p>`;
+                const details = debugFullStack && error?.stack ? error.stack : error.message;
+                appContainer.innerHTML = `<pre style=\"color: red; white-space: pre-wrap;\">Error loading app: ${escapeHtml(details)}</pre>`;
                 console.error("Failed to load app:", error);
             }
         }
 
-        document.addEventListener('DOMContentLoaded', loadApp);
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const settings = await fetchSettings();
+                debugFullStack = !!settings.debugFullStack;
+            } catch (err) {
+                debugFullStack = false;
+            }
+            await loadApp();
+        });
     </script>
         <script>
 // Register Service Worker for PWA installability (app shell view)

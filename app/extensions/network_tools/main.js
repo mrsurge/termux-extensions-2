@@ -1,11 +1,55 @@
 // Extension Script: Network Tools
 
-export default function initialize(extensionContainer, api) {
+export default async function initialize(extensionContainer, api) {
   // --- Utilities ---
   const TERMUX_PREFIX = '/data/data/com.termux/files/usr';
   const shQuote = (s) => "'" + String(s).replace(/'/g, "'\"'\"'") + "'"; // robust single-quote escaping
   const $ = (sel, root = extensionContainer) => root.querySelector(sel);
   const $$ = (sel, root = extensionContainer) => Array.from(root.querySelectorAll(sel));
+
+  const teStateStore = window.teState || null;
+  const stateKeys = {
+    netMap: 'network_tools.interfaceMap',
+    labels: 'network_tools.labels',
+  };
+  let persistedNetMap = null;
+  let persistedLabels = {};
+
+  async function preloadPersistentState() {
+    if (!teStateStore) return;
+    try {
+      await teStateStore.preload([stateKeys.netMap, stateKeys.labels]);
+      const storedMap = teStateStore.getSync(stateKeys.netMap, null);
+      if (storedMap && typeof storedMap === 'object') {
+        persistedNetMap = storedMap;
+      }
+      const storedLabels = teStateStore.getSync(stateKeys.labels, {});
+      if (storedLabels && typeof storedLabels === 'object') {
+        persistedLabels = { ...storedLabels };
+      }
+    } catch (err) {
+      console.warn('Failed to preload network tools state', err);
+    }
+  }
+
+  function persistNetMap(map) {
+    if (!map || typeof map !== 'object') return;
+    persistedNetMap = map;
+    if (!teStateStore) return;
+    teStateStore.set(stateKeys.netMap, map).catch((err) => {
+      console.warn('Failed to persist network map', err);
+    });
+  }
+
+  function persistLabels(labels) {
+    persistedLabels = labels && typeof labels === 'object' ? { ...labels } : {};
+    if (!teStateStore) return;
+    teStateStore.set(stateKeys.labels, persistedLabels).catch((err) => {
+      console.warn('Failed to persist network labels', err);
+    });
+  }
+
+  await preloadPersistentState();
 
   // --- State ---
   let lastXml = '';
@@ -256,14 +300,14 @@ export default function initialize(extensionContainer, api) {
         if (Array.isArray(list)) {
           const map = buildVarMap(list);
           window.teNetMap = map;
+          persistNetMap(map);
           return map;
         }
       }
     } catch (_) {}
-    try {
-      const saved = localStorage.getItem('te.net.map');
-      if (saved) return JSON.parse(saved);
-    } catch (_) {}
+    if (persistedNetMap && typeof persistedNetMap === 'object') {
+      return persistedNetMap;
+    }
     return { ip: {}, ips: {}, mac: {}, meta: {} };
   }
 
@@ -302,7 +346,7 @@ export default function initialize(extensionContainer, api) {
 
   function renderTargetPicker(map) {
     if (!pickerEl) return;
-    const labels = JSON.parse(localStorage.getItem('te.net.labels') || '{}');
+    const labels = persistedLabels;
     const entries = Object.keys(map.ip).sort();
     const html = entries.map(label => {
       const v4 = map.ip[label]?.v4 || null;
@@ -351,7 +395,7 @@ export default function initialize(extensionContainer, api) {
       try {
         const list = await collectIfaces();
         const map = buildVarMap(list);
-        try { localStorage.setItem('te.net.map', JSON.stringify(map)); } catch(_){}
+        persistNetMap(map);
         window.teNetMap = map;
         renderIfcfg(list);
         updateVarPreview(list);
@@ -497,8 +541,7 @@ export default function initialize(extensionContainer, api) {
   }
 
   function ifaceKeyName(iface) {
-    const labels = JSON.parse(localStorage.getItem('te.net.labels') || '{}');
-    return (labels[iface.name] || iface.name);
+    return (persistedLabels[iface.name] || iface.name);
   }
 
   function buildVarMap(list) {
@@ -515,7 +558,7 @@ export default function initialize(extensionContainer, api) {
 
   function renderIfcfg(list) {
     if (!ifListEl) return;
-    const labels = JSON.parse(localStorage.getItem('te.net.labels') || '{}');
+    const labels = persistedLabels;
     ifListEl.innerHTML = list.map(iface => {
       const key = labels[iface.name] || '';
       const up = !!iface.state;
@@ -553,10 +596,10 @@ export default function initialize(extensionContainer, api) {
       const input = card.querySelector('.ifcfg-label-input');
       input.addEventListener('change', () => {
         const name = card.getAttribute('data-if');
-        const labels = JSON.parse(localStorage.getItem('te.net.labels') || '{}');
+        const labels = { ...persistedLabels };
         const val = (input.value || '').trim();
         if (val) labels[name] = val; else delete labels[name];
-        localStorage.setItem('te.net.labels', JSON.stringify(labels));
+        persistLabels(labels);
         updateVarPreview(list);
       });
     });
@@ -586,7 +629,7 @@ export default function initialize(extensionContainer, api) {
     try {
       const list = await collectIfaces();
       const map = buildVarMap(list);
-      localStorage.setItem('te.net.map', JSON.stringify(map));
+      persistNetMap(map);
       window.teNetMap = map;
       window.teUI?.toast?.('Saved network variables');
       renderIfcfg(list);

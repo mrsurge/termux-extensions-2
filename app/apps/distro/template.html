@@ -2,6 +2,7 @@
   <header class="distro-header">
     <h1 class="distro-title">Distro Manager</h1>
     <div class="distro-actions-bar">
+      <button class="distro-btn" id="distro-debug-toggle">Show Debug</button>
       <button class="distro-btn" id="distro-add">Add Container</button>
       <button class="distro-btn" id="distro-refresh">Refresh</button>
     </div>
@@ -10,6 +11,16 @@
   <section class="distro-content">
     <div id="distro-empty" class="distro-empty">No containers configured yet.</div>
     <div id="distro-cards" class="distro-cards"></div>
+  </section>
+
+  <section class="distro-debug-section">
+    <div class="distro-debug-controls hidden" id="distro-debug-controls">
+      <button class="distro-btn" id="distro-debug-pause" type="button">Pause Log</button>
+      <button class="distro-btn" id="distro-debug-clear" type="button">Clear Log</button>
+    </div>
+    <div id="distro-debug-panel" class="distro-debug-panel hidden">
+      <pre id="distro-debug-log" class="distro-debug-log">(debug output hidden)</pre>
+    </div>
   </section>
 </div>
 
@@ -161,4 +172,11 @@
   .distro-attach-title { font-weight: 600; font-size: 0.95rem; }
   .distro-attach-sub { font-size: 0.8rem; color: var(--muted-foreground); }
   .distro-attach-empty { padding: 12px; text-align: center; color: var(--muted-foreground); }
+
+  .distro-debug-section { margin-top: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .distro-debug-controls { display: flex; gap: 8px; margin-bottom: 8px; }
+  .distro-debug-panel { border: 1px solid var(--border); border-radius: 10px; background: rgba(15, 23, 42, 0.6); max-height: 240px; overflow: auto; }
+  .distro-debug-panel.hidden { display: none; }
+  .distro-debug-log { margin: 0; padding: 12px 14px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; line-height: 1.35; color: var(--muted-foreground); overflow: auto; }
+  .distro-debug-log strong { color: var(--foreground); }
 </style>

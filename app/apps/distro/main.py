@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import shlex
+import time
 from pathlib import Path
 from typing import Dict, List
 
@@ -22,6 +23,8 @@ STATE_PATH = BASE_DIR / "state.json"
 framework_shells = FrameworkShellManager()
 
 distro_bp = Blueprint("distro", __name__)
+
+LOG_TAIL_BYTES = 4096
 
 
 def _run_script(script_name: str, args: list[str] | None = None):
@@ -99,6 +102,23 @@ def _clear_state_entry(container_id: str) -> None:
     state = _load_state()
     if state.setdefault("containers", {}).pop(container_id, None) is not None:
         _save_state(state)
+
+
+def _read_log_tail(path: str | None, limit: int = LOG_TAIL_BYTES) -> str:
+    if not path:
+        return ''
+    try:
+        log_path = Path(path)
+        if not log_path.exists():
+            return ''
+        size = log_path.stat().st_size
+        with log_path.open('rb') as fh:
+            if size > limit:
+                fh.seek(-limit, os.SEEK_END)
+            data = fh.read()
+        return data.decode('utf-8', errors='replace')
+    except Exception:
+        return ''
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +280,14 @@ def _serialize_container(container: Dict, *, shell_by_id=None, shell_by_label=No
             _update_container_state(container_id, {'shell_id': shell_id, 'attachments': saved.get('attachments', []) if isinstance(saved, dict) else []})
     if shell_info is None and shell_record:
         shell_info = framework_shells.describe(shell_record)
-    if shell_info and shell_info.get('stats', {}).get('alive'):
+    shell_running = False
+    if shell_info:
+        stats = shell_info.get('stats') or {}
+        if stats.get('alive'):
+            shell_running = True
+        elif shell_info.get('status') == 'running':
+            shell_running = True
+    if shell_running:
         # Normal path: framework shell is alive → running
         state = 'running'
     elif discovered_sids:
@@ -445,6 +472,21 @@ def start_container(container_id: str):
             label=f"distro:{container_id}",
             autostart=bool(container.get('auto_start')),
         )
+        time.sleep(0.2)
+        shell_info = framework_shells.describe(record)
+        if not shell_info.get('stats', {}).get('alive'):
+            stdout_tail = _read_log_tail(record.stdout_log)
+            stderr_tail = _read_log_tail(record.stderr_log)
+            message = 'Container failed to start.'
+            combined = (stdout_tail + '\n' + stderr_tail).lower()
+            if 'chroot-distro' in combined and 'not found' in combined:
+                message = 'chroot-distro binary not found. Ensure the Magisk module is loaded.'
+            try:
+                framework_shells.terminate_shell(record.id, force=True)
+            except Exception:
+                pass
+            _update_container_state(container_id, {'shell_id': None})
+            return _respond_error(message, status=500)
     except Exception as exc:
         return _respond_error(str(exc), status=500)
     _update_container_state(container_id, {'shell_id': record.id})
@@ -538,6 +580,28 @@ def detach_container(container_id: str):
         pass
     _update_container_state(container_id, {'attachments': attachments})
     return jsonify({'ok': True, 'data': _serialize_container(container)})
+
+
+@distro_bp.post("/containers/<container_id>/cleanup")
+def cleanup_container_shells(container_id: str):
+    container, idx, containers, error = _find_container(container_id)
+    if error:
+        return error
+    state_entry = _get_state_entry(container_id)
+    active_shell = state_entry.get('shell_id') if isinstance(state_entry, dict) else None
+    removed: List[str] = []
+    try:
+        for record in framework_shells.list_shells():
+            label = record.label or ''
+            if label != f'distro:{container_id}':
+                continue
+            if record.id == active_shell:
+                continue
+            framework_shells.remove_shell(record.id, force=True)
+            removed.append(record.id)
+    except Exception as exc:
+        return _respond_error(f'Failed to cleanup shells: {exc}', status=500)
+    return jsonify({'ok': True, 'data': {'removed': removed}})
 
 
 @distro_bp.get("/attachments")

@@ -25,6 +25,79 @@ let refs = {
 
 let currentAttachContainer = null;
 
+const DEBUG = {
+  enabled: false,
+  entries: [],
+  max: 200,
+  panel: null,
+  log: null,
+  toggle: null,
+  paused: false,
+};
+
+function debugFormat(value) {
+  if (value === undefined) return '';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (err) {
+    return String(value);
+  }
+}
+
+function debugFlush() {
+  if (!DEBUG.log) return;
+  if (!DEBUG.enabled) {
+    DEBUG.log.textContent = '(debug output hidden)';
+    return;
+  }
+  const text = DEBUG.entries
+    .map((entry) => {
+      const payload = entry.payload !== undefined ? `\n${debugFormat(entry.payload)}` : '';
+      return `[${entry.time}] ${entry.event}${payload}`;
+    })
+    .join('\n\n');
+  DEBUG.log.textContent = text || '(no debug output)';
+  if (!DEBUG.paused) {
+    DEBUG.log.scrollTop = DEBUG.log.scrollHeight;
+  }
+}
+
+function debugLog(event, payload) {
+  const time = new Date().toISOString();
+  DEBUG.entries.push({ time, event, payload });
+  if (DEBUG.entries.length > DEBUG.max) DEBUG.entries.shift();
+  if (DEBUG.enabled && !DEBUG.paused) debugFlush();
+  try {
+    console.debug('[distro]', event, payload);
+  } catch (_) {}
+}
+
+function debugSetEnabled(value) {
+  DEBUG.enabled = !!value;
+  if (DEBUG.panel) DEBUG.panel.classList.toggle('hidden', !DEBUG.enabled);
+  if (DEBUG.controls) DEBUG.controls.classList.toggle('hidden', !DEBUG.enabled);
+  if (DEBUG.toggle) DEBUG.toggle.textContent = DEBUG.enabled ? 'Hide Debug' : 'Show Debug';
+  debugFlush();
+}
+
+function debugSetPaused(value) {
+  DEBUG.paused = !!value;
+  if (!DEBUG.paused) debugFlush();
+}
+
+window.distroDebug = {
+  log: debugLog,
+  setEnabled: debugSetEnabled,
+  setPaused: debugSetPaused,
+  get entries() {
+    return DEBUG.entries.slice();
+  },
+  clear() {
+    DEBUG.entries = [];
+    debugFlush();
+  },
+};
+
 function notify(message) {
   if (host && typeof host.toast === 'function') {
     host.toast(message);
@@ -33,6 +106,7 @@ function notify(message) {
   } else {
     console.log('[distro]', message);
   }
+  debugLog('toast', message);
 }
 
 async function pickDirectory(startPath, title) {
@@ -65,8 +139,10 @@ async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.ok === false) {
+    debugLog('fetchJson:error', { url, status: response.status, body });
     throw new Error(body.error || `HTTP ${response.status} ${response.statusText}`);
   }
+  debugLog('fetchJson:success', { url, data: body.data !== undefined ? body.data : body });
   return body.data !== undefined ? body.data : body;
 }
 
@@ -150,15 +226,12 @@ function renderContainers() {
     title.textContent = item.label;
     header.appendChild(title);
 
-    const menuBtn = document.createElement('button');
-    menuBtn.className = 'distro-menu-btn';
-    menuBtn.textContent = '⋯';
-    menuBtn.addEventListener('click', (ev) => openMenu(item, menuBtn, ev));
-    header.appendChild(menuBtn);
+  const menuWrapper = buildMenu(item);
+  header.appendChild(menuWrapper);
 
-    card.appendChild(header);
+  card.appendChild(header);
 
-    const stateRow = document.createElement('div');
+  const stateRow = document.createElement('div');
     stateRow.className = 'distro-state';
     const dot = document.createElement('span');
     dot.className = `distro-state-dot ${statusDotClass(item.state)}`;
@@ -189,9 +262,6 @@ function renderContainers() {
       primaryBtn.addEventListener('click', () => startContainer(item));
     }
     primaryRow.appendChild(primaryBtn);
-
-    const menu = buildMenu(item);
-    primaryRow.appendChild(menu);
 
     card.appendChild(primaryRow);
 
@@ -273,6 +343,13 @@ function renderContainers() {
 function buildMenu(container) {
   const menuWrapper = document.createElement('div');
   menuWrapper.className = 'distro-menu-wrapper';
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'distro-menu-btn';
+  trigger.textContent = '⋯';
+  menuWrapper.appendChild(trigger);
+
   const menu = document.createElement('div');
   menu.className = 'distro-menu';
   menuWrapper.appendChild(menu);
@@ -297,6 +374,9 @@ function buildMenu(container) {
   if ((container.attachments || []).length) {
     addItem('Detach all sessions', () => detachAll(container));
   }
+  addItem('Clean old shells', () => cleanupShells(container));
+
+  trigger.addEventListener('click', (ev) => openMenu(trigger, menu, ev));
   return menuWrapper;
 }
 
@@ -320,11 +400,9 @@ function closeMenus() {
   });
 }
 
-function openMenu(container, button, event) {
+function openMenu(button, menu, event) {
   event.stopPropagation();
   closeMenus();
-  const menu = button.parentElement.querySelector('.distro-menu');
-  if (!menu) return;
   menu.classList.add('open');
 }
 
@@ -337,14 +415,17 @@ document.addEventListener('click', (event) => {
 async function fetchContainers() {
   const data = await apiRef.get('containers');
   STATE.containers = Array.isArray(data) ? data : [];
+  debugLog('containers', STATE.containers);
 }
 
 async function fetchSessions() {
   try {
     const data = await fetchJson('/api/ext/sessions_and_shortcuts/sessions');
     STATE.sessions = Array.isArray(data) ? data : [];
+    debugLog('sessions', STATE.sessions);
   } catch (err) {
     console.error('Failed to load sessions', err);
+    debugLog('sessions:error', err.message || err);
     STATE.sessions = [];
   }
 }
@@ -361,15 +442,42 @@ async function loadAndRender() {
     await Promise.all([fetchContainers(), fetchSessions()]);
     renderContainers();
     schedulePoll();
+    debugLog('render', {
+      containers: STATE.containers.map((item) => ({
+        id: item.id,
+        state: item.state,
+        shell: item.shell?.stats || null,
+      })),
+    });
   } catch (err) {
     notify(err.message || 'Failed to load containers');
+    debugLog('render:error', err.message || err);
   }
 }
 
 async function callAction(path, body = {}, successMessage) {
+  debugLog('action:request', { path, body, successMessage });
   const response = await apiRef.post(path, body);
   if (successMessage) notify(successMessage);
+  debugLog('action:response', { path, response });
   return response;
+}
+
+async function cleanupShells(container) {
+  try {
+    const data = await callAction(`containers/${container.id}/cleanup`, {}, null);
+    const removed = Array.isArray(data?.removed) ? data.removed : [];
+    const message = removed.length
+      ? `Removed ${removed.length} old shell${removed.length === 1 ? '' : 's'}`
+      : 'No old shells to remove';
+    notify(message);
+    debugLog('cleanup', { container: container.id, removed });
+    await loadAndRender();
+  } catch (err) {
+    const msg = err.message || 'Failed to cleanup shells';
+    notify(msg);
+    debugLog('cleanup:error', msg);
+  }
 }
 
 async function mountContainer(item) {
@@ -568,6 +676,32 @@ export default function init(container, api, hostRef) {
   refs.importForm = document.getElementById('distro-import-form');
   refs.attachModal = document.getElementById('distro-attach-modal');
   refs.attachList = document.getElementById('distro-attach-list');
+  DEBUG.panel = container.querySelector('#distro-debug-panel');
+  DEBUG.log = container.querySelector('#distro-debug-log');
+  DEBUG.toggle = container.querySelector('#distro-debug-toggle');
+  DEBUG.controls = container.querySelector('#distro-debug-controls');
+  DEBUG.pauseBtn = container.querySelector('#distro-debug-pause');
+  DEBUG.clearBtn = container.querySelector('#distro-debug-clear');
+  if (DEBUG.toggle) {
+    DEBUG.toggle.addEventListener('click', () => {
+      if (DEBUG.paused && !DEBUG.enabled) DEBUG.paused = false;
+      debugSetEnabled(!DEBUG.enabled);
+    });
+  }
+  if (DEBUG.pauseBtn) {
+    DEBUG.pauseBtn.addEventListener('click', () => {
+      debugSetPaused(!DEBUG.paused);
+      DEBUG.pauseBtn.textContent = DEBUG.paused ? 'Resume Log' : 'Pause Log';
+    });
+  }
+  if (DEBUG.clearBtn) {
+    DEBUG.clearBtn.addEventListener('click', () => {
+      DEBUG.entries = [];
+      debugFlush();
+    });
+  }
+  debugFlush();
+  debugLog('init', { version: 'distro-debug-202410' });
 
   const refreshBtn = container.querySelector('#distro-refresh');
   const addBtn = container.querySelector('#distro-add');

@@ -1,89 +1,81 @@
 export default function (container, api, host) {
-  // Elements
-  const pathDisplay = container.querySelector('#fe-path-display');
-  const btnBrowse = container.querySelector('#fe-browse');
-  const editor = container.querySelector('#editor');
+  console.log('File Editor app init v20241014a');
+
+  const HOME_DIR = '/data/data/com.termux/files/home';
+  const HOME_PREFIX = HOME_DIR + '/';
+
+  const requireEl = (selector, scope = container) => {
+    const el = scope.querySelector(selector);
+    if (!el) throw new Error(`File Editor missing element ${selector}`);
+    return el;
+  };
+
+  const pathDisplay = requireEl('#fe-path-display');
+  const btnBrowse = requireEl('#fe-browse');
+  const editor = requireEl('#editor');
   const bg = container.querySelector('#fe-bg');
-  const gutter = container.querySelector('#fe-gutter');
-  const statusEl = container.querySelector('#fe-status');
+  const gutter = requireEl('#fe-gutter');
+  const statusEl = requireEl('#fe-status');
 
-  // Open modal elements
-  const modal = container.querySelector('#fe-modal');
-  const modalClose = container.querySelector('#fe-modal-close');
-  const listEl = container.querySelector('#fe-list');
-  const btnUp = container.querySelector('#fe-up');
-  const openCrumbBtn = container.querySelector('#fe-open-crumb-btn');
-  const openCrumbMenu = container.querySelector('#fe-open-crumb-menu');
-
-  // Save As modal elements
-  const saveAsModal = container.querySelector('#fe-saveas');
-  const saveAsClose = container.querySelector('#fe-saveas-close');
-  const saveAsList = container.querySelector('#fe-saveas-list');
-  const saveAsUp = container.querySelector('#fe-saveas-up');
-  const filenameInput = container.querySelector('#fe-filename');
-  const saveAsSaveBtn = container.querySelector('#fe-saveas-save');
-  const saveCrumbBtn = container.querySelector('#fe-save-crumb-btn');
-  const saveCrumbMenu = container.querySelector('#fe-save-crumb-menu');
+  // Universal picker is provided globally via window.teFilePicker
 
   // Menus and confirm modal
-  const menuFileBtn = container.querySelector('#menu-file-btn');
-  const menuFileDD = container.querySelector('#menu-file-dd');
-  const menuEditBtn = container.querySelector('#menu-edit-btn');
-  const menuEditDD = container.querySelector('#menu-edit-dd');
-  const miNew = container.querySelector('#mi-new');
-  const miOpen = container.querySelector('#mi-open');
-  const miSave = container.querySelector('#mi-save');
-  const miSaveAs = container.querySelector('#mi-saveas');
-  const miUndo = container.querySelector('#mi-undo');
-  const miRedo = container.querySelector('#mi-redo');
-  const miCut = container.querySelector('#mi-cut');
-  const miCopy = container.querySelector('#mi-copy');
-  const miPaste = container.querySelector('#mi-paste');
-  const miSelectAll = container.querySelector('#mi-selectall');
+  const menuFileBtn = requireEl('#menu-file-btn');
+  const menuFileDD = requireEl('#menu-file-dd');
+  const menuEditBtn = requireEl('#menu-edit-btn');
+  const menuEditDD = requireEl('#menu-edit-dd');
+  const miNew = requireEl('#mi-new');
+  const miOpen = requireEl('#mi-open');
+  const miSave = requireEl('#mi-save');
+  const miSaveAs = requireEl('#mi-saveas');
+  const miUndo = requireEl('#mi-undo');
+  const miRedo = requireEl('#mi-redo');
+  const miCut = requireEl('#mi-cut');
+  const miCopy = requireEl('#mi-copy');
+  const miPaste = requireEl('#mi-paste');
+  const miSelectAll = requireEl('#mi-selectall');
 
   // View menu and find/goto UI
-  const menuViewBtn = container.querySelector('#menu-view-btn');
-  const menuViewDD = container.querySelector('#menu-view-dd');
-  const miToggleLines = container.querySelector('#mi-toggle-lines');
-  const miToggleStriping = container.querySelector('#mi-toggle-striping');
-  const miFind = container.querySelector('#mi-find');
-  const miGoto = container.querySelector('#mi-goto');
+  const menuViewBtn = requireEl('#menu-view-btn');
+  const menuViewDD = requireEl('#menu-view-dd');
+  const miToggleLines = requireEl('#mi-toggle-lines');
+  const miToggleStriping = requireEl('#mi-toggle-striping');
+  const miFind = requireEl('#mi-find');
+  const miGoto = requireEl('#mi-goto');
 
-  const findbar = container.querySelector('#fe-findbar');
-  const findInput = container.querySelector('#fe-find');
-  const replaceInput = container.querySelector('#fe-replace');
-  const btnFindPrev = container.querySelector('#fe-find-prev');
-  const btnFindNext = container.querySelector('#fe-find-next');
-  const btnReplaceOne = container.querySelector('#fe-replace-one');
-  const btnReplaceAll = container.querySelector('#fe-replace-all');
-  const btnFindClose = container.querySelector('#fe-find-close');
-  const btnFindCase = container.querySelector('#fe-find-case');
-  const btnFindWord = container.querySelector('#fe-find-word');
+  const findbar = requireEl('#fe-findbar');
+  const findInput = requireEl('#fe-find');
+  const replaceInput = requireEl('#fe-replace');
+  const btnFindPrev = requireEl('#fe-find-prev');
+  const btnFindNext = requireEl('#fe-find-next');
+  const btnReplaceOne = requireEl('#fe-replace-one');
+  const btnReplaceAll = requireEl('#fe-replace-all');
+  const btnFindClose = requireEl('#fe-find-close');
+  const btnFindCase = requireEl('#fe-find-case');
+  const btnFindWord = requireEl('#fe-find-word');
 
-  const gotoModal = container.querySelector('#fe-goto');
-  const gotoClose = container.querySelector('#fe-goto-close');
-  const gotoInput = container.querySelector('#fe-goto-input');
-  const gotoGo = container.querySelector('#fe-goto-go');
+  const gotoModal = requireEl('#fe-goto');
+  const gotoClose = requireEl('#fe-goto-close');
+  const gotoInput = requireEl('#fe-goto-input');
+  const gotoGo = requireEl('#fe-goto-go');
 
-  const confirmModal = container.querySelector('#fe-confirm');
-  const confirmClose = container.querySelector('#fe-confirm-close');
-  const btnDiscard = container.querySelector('#fe-discard');
-  const btnSaveConfirm = container.querySelector('#fe-save-confirm');
-  const btnCancel = container.querySelector('#fe-cancel');
+  const confirmModal = requireEl('#fe-confirm');
+  const confirmClose = requireEl('#fe-confirm-close');
+  const btnDiscard = requireEl('#fe-discard');
+  const btnSaveConfirm = requireEl('#fe-save-confirm');
+  const btnCancel = requireEl('#fe-cancel');
 
   // State
   let currentPath = '';
   let currentPathExists = false;
   let lastSavedContent = '';
   let unsaved = false;
-  let openDirPath = '~';
-  let saveDirPath = '~';
-  let saveDirItems = [];
   let showLineNumbers = true;
   let stripeLines = false;
   let findCase = false;
   let findWord = false;
   let lastFind = { query: '', index: -1 };
+  let lastPickerPath = HOME_DIR;
 
   // State helpers
   function persistState(patch) {
@@ -94,22 +86,61 @@ export default function (container, api, host) {
   }
 
   // Utils
+  function simplifyAbsolute(path) {
+    if (!path) return '/';
+    const segments = [];
+    const parts = String(path).split('/');
+    for (const part of parts) {
+      if (!part || part === '.') continue;
+      if (part === '..') {
+        if (segments.length) segments.pop();
+        continue;
+      }
+      segments.push(part);
+    }
+    return '/' + segments.join('/');
+  }
+
+  function toAbsolute(path, base) {
+    if (!path) return simplifyAbsolute(base || HOME_DIR);
+    let value = String(path).trim();
+    if (!value) return simplifyAbsolute(base || HOME_DIR);
+    if (value === '~') return HOME_DIR;
+    if (value.startsWith('~/')) return simplifyAbsolute(HOME_DIR + '/' + value.slice(2));
+    if (value.startsWith('/')) return simplifyAbsolute(value);
+    const origin = toAbsolute(base || HOME_DIR);
+    return simplifyAbsolute(origin.replace(/\/+$/, '') + '/' + value);
+  }
+
   function basename(p) {
-    if (!p || p === '~') return '~';
-    const parts = p.split('/').filter(Boolean);
-    return parts.length ? parts[parts.length - 1] : p;
+    const abs = toAbsolute(p || HOME_DIR);
+    if (abs === '/') return '/';
+    const parts = abs.split('/');
+    return parts[parts.length - 1] || '/';
   }
+
   function parentDir(p) {
-    if (!p || p === '~') return '~';
-    p = p.replace(/\/+$/, '');
-    const idx = p.lastIndexOf('/');
+    const abs = toAbsolute(p || HOME_DIR);
+    if (abs === '/' || abs === '') return '/';
+    if (abs === HOME_DIR) return '/';
+    const trimmed = abs.replace(/\/+$/, '');
+    const idx = trimmed.lastIndexOf('/');
     if (idx <= 0) return '/';
-    return p.slice(0, idx);
+    return trimmed.slice(0, idx) || '/';
   }
+
   function joinPath(dir, name) {
-    if (!dir || dir === '~') return `~/${name}`;
-    if (dir.endsWith('/')) return dir + name;
-    return dir + '/' + name;
+    const base = toAbsolute(dir || HOME_DIR);
+    const cleanName = String(name || '').trim();
+    if (!cleanName) return base;
+    return simplifyAbsolute((base === '/' ? '' : base) + '/' + cleanName);
+  }
+
+  function formatDisplayPath(path) {
+    const abs = toAbsolute(path || HOME_DIR);
+    if (abs === HOME_DIR) return '~';
+    if (abs.startsWith(HOME_PREFIX)) return '~/' + abs.slice(HOME_PREFIX.length);
+    return abs;
   }
 
   function setUnsaved(flag) {
@@ -135,8 +166,14 @@ export default function (container, api, host) {
     }, 400);
   }
   function updatePathDisplay() {
-    pathDisplay.textContent = currentPath || 'Untitled';
-    pathDisplay.title = currentPath || 'Untitled';
+    if (!currentPath) {
+      pathDisplay.textContent = 'Untitled';
+      pathDisplay.title = 'Untitled';
+      return;
+    }
+    const abs = toAbsolute(currentPath, HOME_DIR);
+    pathDisplay.textContent = abs;
+    pathDisplay.title = abs;
   }
   function updateLineHeightVar() {
     const lineHeight = getComputedStyle(editor).lineHeight;
@@ -164,7 +201,8 @@ export default function (container, api, host) {
     try {
       const data = await api.get('read?path=' + encodeURIComponent(path));
       const { path: resolvedPath, content } = data;
-      currentPath = resolvedPath || path;
+      currentPath = toAbsolute(resolvedPath || path, HOME_DIR);
+      lastPickerPath = parentDir(currentPath);
       currentPathExists = true;
       setEditorContent(content, true);
       persistState({ lastPath: currentPath, draft: null, showLineNumbers });
@@ -179,7 +217,7 @@ export default function (container, api, host) {
 
   async function saveFile() {
     if (!currentPath || !currentPathExists) {
-      showSaveAs();
+      await saveAsDialog();
       return;
     }
     statusEl.textContent = 'Saving...';
@@ -196,184 +234,96 @@ export default function (container, api, host) {
     }
   }
 
-  async function fetchBrowse(path) {
-    const url = '/api/browse?path=' + encodeURIComponent(path || '~');
-    const res = await fetch(url);
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok || !body.ok) throw new Error(body.error || `Browse failed (${res.status})`);
-    return body.data;
-  }
-
-  // Open modal behaviors
-  function showOpenModal() { modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false'); }
-  function hideOpenModal() { modal.classList.remove('show'); modal.setAttribute('aria-hidden', 'true'); }
   function showConfirm() { confirmModal.classList.add('show'); confirmModal.setAttribute('aria-hidden', 'false'); }
   function hideConfirm() { confirmModal.classList.remove('show'); confirmModal.setAttribute('aria-hidden', 'true'); }
 
-  function buildCrumbOptions(dir) {
-    const opts = [];
-    if (!dir || dir === '~') return [{ path: '~', label: '~' }];
-    let p = dir.replace(/\/+$/, '');
-    while (p) {
-      const label = basename(p);
-      opts.unshift({ path: p, label: label || '/' });
-      const par = parentDir(p);
-      if (par === p || par === '/') { if (par && par !== p) opts.unshift({ path: par, label: '/' }); break; }
-      p = par;
-      if (p === '/' || p === '') { opts.unshift({ path: '/', label: '/' }); break; }
-    }
-    return opts;
+  function pickerAvailable() {
+    return window.teFilePicker && typeof window.teFilePicker.open === 'function';
   }
-  function updateOpenCrumb(dir) {
-    openCrumbBtn.textContent = basename(dir) || '~';
-    openCrumbMenu.innerHTML = '';
-    const opts = buildCrumbOptions(dir);
-    for (const o of opts) {
-      const d = document.createElement('div');
-      d.className = 'fe-crumb-item';
-      d.textContent = o.label;
-      d.title = o.path;
-      d.addEventListener('click', async () => { openCrumbMenu.classList.remove('show'); await loadOpenDir(o.path); });
-      openCrumbMenu.appendChild(d);
-    }
-  }
-  openCrumbBtn.addEventListener('click', (e) => { e.stopPropagation(); openCrumbMenu.classList.toggle('show'); });
-  document.addEventListener('click', () => openCrumbMenu.classList.remove('show'));
 
-  async function loadOpenDir(path) {
+  async function pickFile(startPath) {
+    if (!pickerAvailable()) {
+      host.toast('File picker unavailable');
+      return null;
+    }
+    const baseStart = startPath || (currentPath ? parentDir(currentPath) : lastPickerPath);
+    const initial = toAbsolute(baseStart, lastPickerPath);
     try {
-      listEl.innerHTML = '<li class="fe-list-item"><span>Loading...</span></li>';
-      const items = await fetchBrowse(path);
-      openDirPath = path;
-      updateOpenCrumb(openDirPath);
-      listEl.innerHTML = '';
-      items.sort((a, b) => { if (a.type !== b.type) return a.type === 'directory' ? -1 : 1; return a.name.localeCompare(b.name); });
-      for (const it of items) {
-        const li = document.createElement('li');
-        li.className = 'fe-list-item';
-        const icon = it.type === 'directory' ? '📁' : '📄';
-        li.innerHTML = `<span>${icon}</span><span class=\"fe-list-name\"></span><span class=\"fe-chip\">${it.type}</span>`;
-        li.querySelector('.fe-list-name').textContent = it.name || it.path;
-        li.addEventListener('click', async () => {
-          if (it.type === 'directory') {
-            await loadOpenDir(it.path);
-          } else {
-            await openFile(it.path);
-            hideOpenModal();
-          }
-        });
-        listEl.appendChild(li);
+      const choice = await window.teFilePicker.openFile({
+        title: 'Open File',
+        startPath: initial,
+        selectLabel: 'Open',
+      });
+      if (choice && choice.path) {
+        lastPickerPath = parentDir(choice.path);
+        return choice.path;
       }
-    } catch (e) {
-      listEl.innerHTML = '';
-      host.toast('Browse error: ' + e.message);
+      return null;
+    } catch (err) {
+      if (err && err.message === 'cancelled') return null;
+      host.toast(err?.message || 'Browse failed');
+      return null;
     }
   }
 
-  // Save As behaviors
-  function showSaveAs() {
-    // Start in current file's directory or openDirPath or home
-    saveDirPath = currentPath ? parentDir(currentPath) : (openDirPath || '~');
-    filenameInput.value = currentPath ? basename(currentPath) : '';
-    saveAsModal.classList.add('show');
-    saveAsModal.setAttribute('aria-hidden', 'false');
-    loadSaveDir(saveDirPath);
-  }
-  function hideSaveAs() { saveAsModal.classList.remove('show'); saveAsModal.setAttribute('aria-hidden', 'true'); }
-  function updateSaveCrumb(dir) {
-    saveCrumbBtn.textContent = basename(dir) || '~';
-    saveCrumbMenu.innerHTML = '';
-    const opts = buildCrumbOptions(dir);
-    for (const o of opts) {
-      const d = document.createElement('div');
-      d.className = 'fe-crumb-item';
-      d.textContent = o.label;
-      d.title = o.path;
-      d.addEventListener('click', async () => { saveCrumbMenu.classList.remove('show'); await loadSaveDir(o.path); });
-      saveCrumbMenu.appendChild(d);
+  async function pickSaveTarget() {
+    if (!pickerAvailable()) {
+      host.toast('File picker unavailable');
+      return null;
     }
-  }
-  saveCrumbBtn.addEventListener('click', (e) => { e.stopPropagation(); saveCrumbMenu.classList.toggle('show'); });
-  document.addEventListener('click', () => saveCrumbMenu.classList.remove('show'));
-
-  async function loadSaveDir(dir) {
+    const baseDir = currentPath ? parentDir(currentPath) : lastPickerPath;
+    const initialDir = toAbsolute(baseDir, lastPickerPath);
     try {
-      saveAsList.innerHTML = '<li class="fe-list-item"><span>Loading...</span></li>';
-      const items = await fetchBrowse(dir);
-      saveDirPath = dir;
-      updateSaveCrumb(saveDirPath);
-      saveDirItems = items;
-      saveAsList.innerHTML = '';
-      items.sort((a, b) => { if (a.type !== b.type) return a.type === 'directory' ? -1 : 1; return a.name.localeCompare(b.name); });
-      for (const it of items) {
-        const li = document.createElement('li');
-        li.className = 'fe-list-item';
-        const icon = it.type === 'directory' ? '📁' : '📄';
-        li.innerHTML = `<span>${icon}</span><span class=\"fe-list-name\"></span><span class=\"fe-chip\">${it.type}</span>`;
-        li.querySelector('.fe-list-name').textContent = it.name || it.path;
-        li.addEventListener('click', async () => {
-          if (it.type === 'directory') {
-            await loadSaveDir(it.path);
-          } else {
-            // Prefill filename from selected file
-            filenameInput.value = it.name || basename(it.path);
-          }
-        });
-        saveAsList.appendChild(li);
-      }
-    } catch (e) {
-      saveAsList.innerHTML = '';
-      host.toast('Browse error: ' + e.message);
+      const result = await window.teFilePicker.saveFile({
+        title: 'Save As',
+        startPath: initialDir,
+        filename: currentPath ? basename(currentPath) : '',
+        selectLabel: 'Save',
+      });
+      return result || null;
+    } catch (err) {
+      if (err && err.message === 'cancelled') return null;
+      host.toast(err?.message || 'Save cancelled');
+      return null;
     }
   }
-  async function doSaveAs() {
-    const name = (filenameInput.value || '').trim();
-    if (!name) { host.toast('Enter a filename'); filenameInput.focus(); return; }
-    const path = joinPath(saveDirPath, name);
-    const exists = (saveDirItems || []).some(it => it.type === 'file' && (it.name === name || basename(it.path) === name));
-    if (exists) {
-      const ok = window.confirm('File exists. Overwrite?');
-      if (!ok) return;
+
+  async function saveAsDialog() {
+    const target = await pickSaveTarget();
+    if (!target || !target.path) return;
+    if (target.existed) {
+      const confirmOverwrite = window.confirm('File exists. Overwrite?');
+      if (!confirmOverwrite) return;
     }
     statusEl.textContent = 'Saving...';
     try {
-      await api.post('write', { path, content: editor.value });
-      currentPath = path;
+      await api.post('write', { path: target.path, content: editor.value });
+      currentPath = target.path;
       currentPathExists = true;
+      lastPickerPath = parentDir(currentPath);
       lastSavedContent = editor.value;
       setUnsaved(false);
       updatePathDisplay();
       persistState({ lastPath: currentPath, showLineNumbers });
       host.toast('Saved');
-      statusEl.textContent = '';
-      hideSaveAs();
     } catch (e) {
-      statusEl.textContent = '';
       host.toast('Save failed: ' + e.message);
+    } finally {
+      statusEl.textContent = '';
     }
   }
 
   // Event bindings
   btnBrowse.addEventListener('click', async () => {
-    try {
-      openDirPath = currentPath ? parentDir(currentPath) : '~';
-      showOpenModal();
-      await loadOpenDir(openDirPath);
-    } catch (e) {
-      hideOpenModal();
-      host.toast('Browse failed: ' + e.message);
+    const path = await pickFile();
+    if (path) {
+      try {
+        await openFile(path);
+      } catch (e) {
+        host.toast('Failed to open file: ' + e.message);
+      }
     }
   });
-  modalClose.addEventListener('click', hideOpenModal);
-  btnUp.addEventListener('click', () => { const up = parentDir(openDirPath); loadOpenDir(up); });
-  modal.addEventListener('click', (e) => { if (e.target === modal) hideOpenModal(); });
-
-  saveAsClose.addEventListener('click', hideSaveAs);
-  saveAsUp.addEventListener('click', () => { const up = parentDir(saveDirPath); loadSaveDir(up); });
-  saveAsModal.addEventListener('click', (e) => { if (e.target === saveAsModal) hideSaveAs(); });
-  saveAsSaveBtn.addEventListener('click', doSaveAs);
-  filenameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSaveAs(); } });
-
   // Track edits and unsaved changes
   editor.addEventListener('input', () => { setUnsaved(editor.value !== lastSavedContent); updateStateDebounced(); updateGutter(); updateLineHeightVar(); updateStripeOffset(); });
   function syncScroll() {
@@ -406,10 +356,13 @@ export default function (container, api, host) {
       setUnsaved(true);
     }
     if (state.lastPath) {
-      openFile(state.lastPath).catch(() => { updatePathDisplay(); });
+      const abs = toAbsolute(state.lastPath, HOME_DIR);
+      lastPickerPath = parentDir(abs);
+      openFile(abs).catch(() => { currentPath = abs; updatePathDisplay(); });
     } else {
       setEditorContent('', false);
       setUnsaved(false);
+      lastPickerPath = HOME_DIR;
       updatePathDisplay();
     }
     if (state.scrollTop) { editor.scrollTop = state.scrollTop; updateStripeOffset(); }
@@ -425,16 +378,26 @@ export default function (container, api, host) {
   // Menu actions
   function focusEditor() { editor.focus(); }
   function exec(cmd) { try { document.execCommand(cmd); } catch (_) {} }
-  miNew.addEventListener('click', () => { closeAllMenus(); if (unsaved) { showConfirm(); return; } currentPath = ''; currentPathExists = false; setEditorContent('', true); updatePathDisplay(); persistState({ lastPath: null, draft: '', showLineNumbers }); });
+  miNew.addEventListener('click', () => {
+    closeAllMenus();
+    if (unsaved) { showConfirm(); return; }
+    currentPath = '';
+    currentPathExists = false;
+    lastPickerPath = HOME_DIR;
+    setEditorContent('', true);
+    updatePathDisplay();
+    persistState({ lastPath: null, draft: '', showLineNumbers });
+  });
   miOpen.addEventListener('click', () => { closeAllMenus(); btnBrowse.click(); });
   miSave.addEventListener('click', () => { closeAllMenus(); saveFile(); });
-  miSaveAs.addEventListener('click', () => { closeAllMenus(); showSaveAs(); });
+  miSaveAs.addEventListener('click', () => { closeAllMenus(); saveAsDialog(); });
   const miClose = container.querySelector('#mi-close');
   const miQuit = container.querySelector('#mi-quit');
   miClose.addEventListener('click', () => {
     closeAllMenus();
     currentPath = '';
     currentPathExists = false;
+    lastPickerPath = HOME_DIR;
     setEditorContent('', true);
     updatePathDisplay();
     try { const cur = host.loadState({}) || {}; host.saveState({ ...cur, lastPath: null, draft: '' }); } catch (_) {}
@@ -444,6 +407,7 @@ export default function (container, api, host) {
     try { host.clearState(); } catch (_) {}
     currentPath = '';
     currentPathExists = false;
+    lastPickerPath = HOME_DIR;
     setEditorContent('', true);
     updatePathDisplay();
     editor.scrollTop = 0;
@@ -637,7 +601,7 @@ export default function (container, api, host) {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
     const k = e.key.toLowerCase();
-    if (k === 's') { e.preventDefault(); if (e.shiftKey) { showSaveAs(); } else { saveFile(); } }
+    if (k === 's') { e.preventDefault(); if (e.shiftKey) { saveAsDialog(); } else { saveFile(); } }
     else if (k === 'o') { e.preventDefault(); btnBrowse.click(); }
     else if (k === 'n') { e.preventDefault(); miNew.click(); }
     else if (k === 'y') { e.preventDefault(); try { document.execCommand('redo'); } catch (_) {} }
@@ -646,5 +610,12 @@ export default function (container, api, host) {
   });
 
   // Global escape closes modals
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideOpenModal(); hideSaveAs(); hideConfirm(); closeAllMenus(); } });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      hideConfirm();
+      hideGoto();
+      hideFindBar();
+      closeAllMenus();
+    }
+  });
 }

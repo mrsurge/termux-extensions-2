@@ -1,10 +1,13 @@
 #!/usr/bin/env python
 
-import os
-import sys
+import errno
 import json
-import importlib.util
+import os
 import subprocess
+import sys
+import threading
+import importlib.util
+from pathlib import Path
 
 # Add project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +26,159 @@ app.config["SOCK"] = sock
 # Pre-initialize to avoid NameError if imported differently
 loaded_extensions = []
 loaded_apps = []
+
+SETTINGS_FILE = Path(os.path.expanduser('~/.cache/termux_extensions/settings.json'))
+STATE_STORE_FILE = Path(os.path.expanduser('~/.cache/termux_extensions/state_store.json'))
+STATE_STORE_LOCK = threading.RLock()
+
+
+def _load_settings() -> dict:
+    try:
+        if SETTINGS_FILE.is_file():
+            with SETTINGS_FILE.open('r', encoding='utf-8') as fh:
+                data = json.load(fh)
+                if isinstance(data, dict):
+                    return data
+    except Exception as exc:
+        print(f"Failed to load settings: {exc}")
+    return {}
+
+
+def _save_settings(payload: dict) -> dict:
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with SETTINGS_FILE.open('w', encoding='utf-8') as fh:
+        json.dump(payload, fh, indent=2, ensure_ascii=False)
+    return payload
+
+
+def _load_state_store() -> dict:
+    with STATE_STORE_LOCK:
+        try:
+            if STATE_STORE_FILE.is_file():
+                with STATE_STORE_FILE.open('r', encoding='utf-8') as fh:
+                    data = json.load(fh)
+                    if isinstance(data, dict):
+                        return data
+        except Exception as exc:
+            print(f"Failed to load state store: {exc}")
+        return {}
+
+
+def _save_state_store(store: dict) -> None:
+    with STATE_STORE_LOCK:
+        STATE_STORE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = STATE_STORE_FILE.with_suffix('.tmp')
+        with tmp_path.open('w', encoding='utf-8') as fh:
+            json.dump(store, fh, indent=2, ensure_ascii=False)
+        tmp_path.replace(STATE_STORE_FILE)
+
+
+def _scandir_entries(path: str, include_hidden: bool) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    with os.scandir(path) as handle:
+        for entry in handle:
+            name = entry.name
+            if not include_hidden and name.startswith('.'):
+                continue
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    entry_type = 'directory'
+                elif entry.is_symlink():
+                    entry_type = 'symlink'
+                else:
+                    entry_type = 'file'
+            except PermissionError:
+                entry_type = 'unknown'
+            full_path = os.path.join(path, name)
+            entries.append({
+                'name': name,
+                'type': entry_type,
+                'path': os.path.abspath(full_path),
+            })
+    entries.sort(key=lambda item: (item['type'] != 'directory', item['name'].lower()))
+    return entries
+
+
+def _scandir_with_sudo(path: str, include_hidden: bool) -> list[dict[str, str]]:
+    script = (
+        'import json, os, sys\n'
+        f"path = {json.dumps(path)}\n"
+        f"include_hidden = { 'True' if include_hidden else 'False' }\n"
+        'entries = []\n'
+        'try:\n'
+        '    with os.scandir(path) as handle:\n'
+        '        for entry in handle:\n'
+        '            name = entry.name\n'
+        '            if not include_hidden and name.startswith(\'.\'):\n'
+        '                continue\n'
+        '            try:\n'
+        '                if entry.is_dir(follow_symlinks=False):\n'
+        "                    entry_type = 'directory'\n"
+        '                elif entry.is_symlink():\n'
+        "                    entry_type = 'symlink'\n"
+        '                else:\n'
+        "                    entry_type = 'file'\n"
+        '            except PermissionError:\n'
+        "                entry_type = 'unknown'\n"
+        '            full_path = os.path.join(path, name)\n'
+        '            entries.append({"name": name, "type": entry_type, "path": os.path.abspath(full_path)})\n'
+        '    entries.sort(key=lambda item: (item["type"] != "directory", item["name"].lower()))\n'
+        '    json.dump(entries, sys.stdout)\n'
+        'except FileNotFoundError:\n'
+        "    sys.stderr.write('Directory not found')\n"
+        '    sys.exit(44)\n'
+        'except PermissionError as exc:\n'
+        "    sys.stderr.write(f'Permission denied: {exc}')\n"
+        '    sys.exit(13)\n'
+        'except Exception as exc:\n'
+        "    sys.stderr.write(str(exc))\n"
+        '    sys.exit(99)\n'
+    )
+    result = subprocess.run(
+        ['sudo', '-n', 'python3', '-c', script],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or 'sudo browse failed'
+        if result.returncode == 44:
+            raise FileNotFoundError(message)
+        if result.returncode == 13:
+            raise PermissionError(message)
+        raise PermissionError(message)
+    try:
+        data = json.loads(result.stdout)
+        if isinstance(data, list):
+            return data
+    except json.JSONDecodeError as exc:
+        raise PermissionError(f'Failed to parse sudo output: {exc}')
+    raise PermissionError('Invalid sudo output')
+
+
+def _resolve_browse_path(raw_path: str, root: str) -> tuple[str | None, str | None]:
+    home_dir = os.path.expanduser('~')
+    target_root = (root or 'home').lower()
+    allow_outside = target_root in {'system', 'absolute'}
+
+    candidate = (raw_path or '~').strip()
+    if not candidate:
+        candidate = '~'
+
+    try:
+        if candidate.startswith('~'):
+            expanded = os.path.expanduser(candidate)
+        elif candidate.startswith('/'):
+            expanded = os.path.abspath(os.path.normpath(candidate))
+        else:
+            expanded = os.path.join(home_dir, candidate)
+        expanded = os.path.abspath(expanded)
+    except Exception as exc:
+        return None, f'Invalid path: {exc}'
+
+    if not allow_outside and not expanded.startswith(home_dir):
+        return None, 'Access denied'
+
+    return expanded, None
 
 def run_script(script_name, app_root_path, args=None):
     """Helper function to run a shell script and return its output."""
@@ -168,20 +324,110 @@ def list_path_executables():
 def browse_path():
     """Browses a given path, defaulting to the user's home directory."""
     path = request.args.get('path', '~')
+    root_param = request.args.get('root', 'home').lower()
     # Expand the tilde and normalize the path to resolve `..` etc.
-    expanded_path = os.path.normpath(os.path.expanduser(path))
+    expanded_path, error_message = _resolve_browse_path(path, root_param)
+    if error_message:
+        status = 403 if error_message == 'Access denied' else 400
+        return jsonify({"ok": False, "error": error_message}), status
+    if not expanded_path:
+        return jsonify({"ok": False, "error": 'Invalid path'}), 400
 
-    # Basic security check to prevent path traversal
-    if not os.path.abspath(expanded_path).startswith(os.path.expanduser('~')):
-        return jsonify({"ok": False, "error": 'Access denied'}), 403
+    hidden_flag = request.args.get('hidden', '').lower()
+    include_hidden = hidden_flag in {'1', 'true', 'yes', 'on'}
 
-    output, error = run_script('browse.sh', app.root_path, [expanded_path])
-    if error:
-        return jsonify({"ok": False, "error": error}), 500
+    used_sudo = False
     try:
-        return jsonify({"ok": True, "data": json.loads(output)})
-    except json.JSONDecodeError:
-        return jsonify({"ok": False, "error": 'Failed to decode JSON from browse script.'}), 500
+        entries = _scandir_entries(expanded_path, include_hidden)
+    except PermissionError:
+        try:
+            entries = _scandir_with_sudo(expanded_path, include_hidden)
+            used_sudo = True
+        except FileNotFoundError as exc:
+            return jsonify({"ok": False, "error": str(exc) or 'Directory not found'}), 404
+        except PermissionError as exc:
+            return jsonify({"ok": False, "error": str(exc) or 'Access denied'}), 403
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc) or 'Failed to browse directory'}), 500
+    except FileNotFoundError:
+        return jsonify({"ok": False, "error": 'Directory not found'}), 404
+    except OSError as exc:
+        if exc.errno == errno.ENOENT:
+            return jsonify({"ok": False, "error": 'Directory not found'}), 404
+        if exc.errno in {errno.EACCES, errno.EPERM}:
+            try:
+                entries = _scandir_with_sudo(expanded_path, include_hidden)
+                used_sudo = True
+            except PermissionError as inner:
+                return jsonify({"ok": False, "error": str(inner) or 'Access denied'}), 403
+        else:
+            return jsonify({"ok": False, "error": f'Unable to browse: {exc}'}), 500
+
+    return jsonify({"ok": True, "data": entries, "meta": {"used_sudo": used_sudo}})
+
+@app.route('/api/settings', methods=['GET', 'POST'])
+def settings_handler():
+    if request.method == 'GET':
+        data = _load_settings()
+        return jsonify({"ok": True, "data": data})
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"ok": False, "error": 'JSON object required'}), 400
+    try:
+        saved = _save_settings(payload)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f'Failed to save settings: {exc}'}), 500
+    return jsonify({"ok": True, "data": saved})
+
+
+@app.route('/api/state', methods=['GET', 'POST', 'DELETE'])
+def state_handler():
+    if request.method == 'GET':
+        keys = request.args.getlist('key')
+        if not keys:
+            return jsonify({"ok": False, "error": 'query parameter "key" is required'}), 400
+        store = _load_state_store()
+        data = {key: store.get(key) for key in keys}
+        return jsonify({"ok": True, "data": data})
+
+    if request.method == 'POST':
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"ok": False, "error": 'JSON object required'}), 400
+        key = payload.get('key')
+        if not isinstance(key, str) or not key.strip():
+            return jsonify({"ok": False, "error": '"key" must be a non-empty string'}), 400
+        merge = bool(payload.get('merge'))
+        value = payload.get('value')
+        store = _load_state_store()
+        if merge and isinstance(value, dict) and isinstance(store.get(key), dict):
+            merged = dict(store.get(key) or {})
+            merged.update(value)
+            store[key] = merged
+        else:
+            store[key] = value
+        try:
+            _save_state_store(store)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": f'Failed to persist state: {exc}'}), 500
+        return jsonify({"ok": True, "data": store.get(key)})
+
+    # DELETE
+    keys = request.args.getlist('key')
+    if not keys:
+        return jsonify({"ok": False, "error": 'query parameter "key" is required'}), 400
+    store = _load_state_store()
+    removed = 0
+    for key in keys:
+        if key in store:
+            removed += 1
+            store.pop(key, None)
+    try:
+        _save_state_store(store)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f'Failed to persist state: {exc}'}), 500
+    return jsonify({"ok": True, "data": {"removed": removed}})
 
 @app.route('/api/apps')
 def get_apps():

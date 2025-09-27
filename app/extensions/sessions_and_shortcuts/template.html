@@ -42,14 +42,6 @@
     </div>
 </div>
 
-<div id="shortcut-modal" class="modal">
-    <div class="modal-content">
-        <h2>Run Shortcut</h2>
-        <div id="shortcut-list" class="shortcut-list"></div>
-        <button onclick="closeModal('shortcut-modal')" class="modal-btn btn-secondary">Cancel</button>
-    </div>
-</div>
-
 <div id="rename-modal" class="modal">
     <div class="modal-content">
         <h2>Rename Session</h2>
@@ -72,11 +64,14 @@
     .session-panel { display: none; }
     .session-panel.active { display: block; }
     .session-empty { color: var(--muted-foreground); font-size: 0.9rem; }
+    .session { position: relative; }
     .session.framework { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: rgba(255,255,255,0.02); }
     .framework-kill { border: 1px solid var(--border); background: var(--destructive); color: var(--destructive-foreground, #fff); padding: 4px 10px; border-radius: 6px; cursor: pointer; }
     .framework-kill:hover { filter: brightness(1.1); }
-    .shortcut-list { display: flex; flex-direction: column; gap: 6px; margin-top: 1em; }
-    .shortcut-list .menu-item { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; cursor: pointer; background: var(--secondary); }
-    .shortcut-list .menu-item:hover { border-color: var(--primary); }
+    .session .menu { position: absolute; top: 36px; right: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 30px rgba(0,0,0,0.35); display: none; padding: 6px 0; min-width: 180px; z-index: 20; }
+    .session .menu.open { display: block; }
+    .session .menu .menu-item { border: none; background: transparent; color: inherit; width: 100%; text-align: left; padding: 8px 14px; font-size: 0.9rem; cursor: pointer; }
+    .session .menu .menu-item:hover { background: rgba(255,255,255,0.05); }
+    .session .menu .menu-item.destructive { color: var(--destructive); }
     .modal-actions { display: flex; gap: 8px; margin-top: 12px; }
 </style>
