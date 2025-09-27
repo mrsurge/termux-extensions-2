@@ -68,6 +68,7 @@ Notes:
 *   **Background Framework Shells:** Long-running jobs (aria2, distro helpers, etc.) are tracked with health checks, log tails, a cleanup action, and inline debug consoles.
 *   **Universal File/Directory Picker:** A shared modal with breadcrumb navigation, hidden-file toggle, home button, and per-mode start-path memory is available to every app/extension.
 *   **Built-In Diagnostics:** Apps such as the Distro manager ship with inline debug consoles so you can pause, inspect, and clear log streams while reproducing issues.
+*   **Embedded Terminal App:** A full-page app built atop framework shells offers multi-terminal management with xterm.js, WebSocket streaming, and soft-key controls directly in the browser.
 *   **Easy Installation:** Designed to be installed as a standard Debian package via `apt`.
 
 ## Persistent State Store
