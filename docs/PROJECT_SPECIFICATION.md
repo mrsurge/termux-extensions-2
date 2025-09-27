@@ -58,13 +58,24 @@ def get_sessions():
 
 ## 3. Shell Interaction Layer
 
-# Project Specification: termux-extensions-2
+The bridge to the Termux environment is a set of shell scripts in the `/scripts`
+directory (**`init.sh`**, **`list_sessions.sh`**, **`run_in_session.sh`**, **`list_shortcuts.sh`**).
+Extensions leverage these helpers rather than executing arbitrary shell commands.
 
-This document outlines the implemented architecture of the `termux-extensions-2` project.
+In addition, frontend components rely on two shared utilities:
 
-## 1. Modular Architecture
+- **`window.teFilePicker`** — the universal picker modal described in
+  `docs/shared_file_picker.md`.
+- **`window.teState`** — the state-store helper described in
+  `docs/state_store.md`.
 
-The framework is built on a modular architecture where features are encapsulated in self-contained **extensions**. The main Flask application is responsible for discovering, loading, and serving these extensions.
+These tools keep UX and persistence consistent across the platform.
+
+## 4. Modular Architecture (Extensions & Apps)
+
+The framework is built on a modular architecture where features are encapsulated in
+self-contained **extensions** (under `app/extensions/`) or full-page **apps** (under
+`app/apps/`). The main Flask application discovers, loads, and serves these modules.
 
 ### 1.1. Extension Discovery
 
