@@ -1,7 +1,7 @@
 {
   "id": "termux_lm",
   "name": "Termux-LM",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "description": "Local and remote LLM management with chat sessions for Termux",
   "entrypoints": {
     "backend_blueprint": "backend.py",

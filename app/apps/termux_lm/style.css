@@ -273,6 +273,57 @@
   justify-content: center;
 }
 
+.tlm-icon-bars {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.tlm-icon-bars::before,
+.tlm-icon-bars::after,
+.tlm-icon-bars span {
+  content: '';
+  display: block;
+  width: 14px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 999px;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  transition: background 0.15s ease;
+}
+
+.tlm-icon-bars::before {
+  top: 9px;
+}
+
+.tlm-icon-bars span {
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.tlm-icon-bars::after {
+  bottom: 9px;
+}
+
+.tlm-card-menu[data-open="true"] .tlm-icon-bars::before,
+.tlm-card-menu[data-open="true"] .tlm-icon-bars span,
+.tlm-card-menu[data-open="true"] .tlm-icon-bars::after {
+  background: var(--primary);
+}
+
+.tlm-icon-bars[aria-hidden="true"] {
+  color: currentColor;
+}
+
+[data-open="true"] > .tlm-menu {
+  display: flex;
+}
+
 .tlm-menu {
   position: absolute;
   top: calc(100% + 6px);
@@ -285,6 +336,10 @@
   flex-direction: column;
   min-width: 180px;
   z-index: 40;
+}
+
+.tlm-menu[hidden] {
+  display: none !important;
 }
 
 .tlm-menu button {
@@ -416,14 +471,19 @@
 
 .tlm-chat-panel {
   position: relative;
+  z-index: 2;
   width: 100%;
   height: 100%;
   display: flex;
   background: var(--background);
+  overflow: hidden;
 }
 
 .tlm-chat-drawer {
-  position: relative;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
   width: min(280px, 80vw);
   border-right: 1px solid var(--border);
   background: var(--card);
@@ -433,11 +493,19 @@
   gap: 12px;
   transform: translateX(-100%);
   transition: transform 150ms ease;
-  z-index: 2;
+  z-index: 3;
 }
 
 .tlm-chat-panel[data-drawer="open"] .tlm-chat-drawer {
   transform: translateX(0);
+  box-shadow: 6px 0 18px rgba(15, 23, 42, 0.25);
+  pointer-events: auto;
+}
+
+.tlm-chat-panel[data-drawer="closed"] .tlm-chat-drawer,
+.tlm-chat-panel:not([data-drawer="open"]) .tlm-chat-drawer {
+  transform: translateX(-102%);
+  pointer-events: none;
 }
 
 .tlm-chat-main {
@@ -446,6 +514,13 @@
   flex-direction: column;
   padding: 16px;
   gap: 12px;
+}
+
+.tlm-chat-overlay-bg {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1;
 }
 
 .tlm-chat-header {
