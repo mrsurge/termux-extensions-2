@@ -8,8 +8,8 @@ Termux-LM is a first-party app within the `termux-extensions-2` framework. It pr
 
 1. **Model management** – Users add/edit/delete model definitions. Local models reference a GGUF on disk; remote models capture API configuration (API key, endpoint, model id, optional reasoning effort).
 2. **Model loading** – Loading a local model spawns a `llama-server` via the framework shell manager. Loading a remote model simply marks it active (no shell), but flags `remote_ready` so the chat UI unlocks immediately.
-3. **Session management** – Each model owns a set of stored chats under `~/.cache/termux_lm/models/<id>/sessions`. Sessions persist messages, run mode, timestamps, and editable titles.
-4. **Chat** – The frontend stream-submits prompts to `/models/<id>/sessions/<session>/chat`. The backend dispatches to llama.cpp or the remote provider and streams responses back to the UI, writing streaming telemetry to `stream.log`.
+3. **Session management** – Each model owns a set of stored chats under `~/.cache/termux_lm/models/<id>/sessions`. Sessions persist messages, run mode, timestamps, and editable titles, and the frontend now re-activates sessions through `/sessions/<id>/activate` whenever a drawer item is selected or renamed so UI state stays in sync with `state.json`.
+4. **Chat** – The frontend stream-submits prompts to `/models/<id>/sessions/<session>/chat`. The backend dispatches to llama.cpp or the remote provider and streams responses back to the UI, writing streaming telemetry to `stream.log`. After each stream the session file is reloaded so the chat log reflects the canonical persisted ordering.
 5. **Diagnostics** – Shell stdout/stderr are exposed through `/shell/log`, allowing the UI to surface llama.cpp startup and runtime logs, even while a chat stream is running.
 
 ---
@@ -156,17 +156,26 @@ def sessions_detail(model_id: str, session_id: str) -> Any:
         return jsonify({"ok": True, "data": updated})
 ```
 
-Frontend rename wiring:
+Frontend session sync snippet:
 
 ```javascript
+async function syncActiveSession(modelId, sessionId, { quiet = false } = {}) {
+  const payload = await API.post(api, `models/${modelId}/sessions/${sessionId}/activate`, {});
+  state.activeModelId = modelId;
+  state.activeSessionId = sessionId;
+  upsertSession(modelId, payload);
+  state.chatMessages = payload.messages ?? [];
+  renderChatMessages();
+}
+
 async function promptRenameSession(session) {
-  const trimmed = prompt('Rename session', session.title || '')?.trim();
-  if (!trimmed) return;
   const updated = await API.post(api, `models/${modelId}/sessions/${session.id}`, { title: trimmed });
-  session.title = updated?.title || trimmed;
-  upsertSession(modelId, session);
-  renderSessionList();
-  host.toast?.('Session renamed');
+  upsertSession(modelId, updated);
+  await hydrateSession(modelId, session.id);
+  if (state.activeSessionId === session.id) {
+    await syncActiveSession(modelId, session.id, { quiet: true });
+    renderChatOverlay();
+  }
 }
 ```
 

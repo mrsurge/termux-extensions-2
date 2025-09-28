@@ -17,9 +17,10 @@ This document captures the current state of the Termux-LM app, design goals, and
 4. Chat overlay slides in when a session is active; remote/local sessions share the same UI, including rename/delete icons.
 
 ## Frontend Implementation Notes
-- **State polling:** `refreshState()` hits `/sessions/active`, populates `remoteReadiness`, hydrates sessions.
+- **State polling:** `refreshState()` hits `/sessions/active`, populates `remoteReadiness`, hydrates sessions, and keeps the active IDs aligned.
 - **Model modal:** toggles between local/remote forms, integrates `teFilePicker` for GGUF selection.
-- **Session drawer:** `renderSessionList()` renders each session with `×` (delete) and `✏️` (rename). Renames prompt the user and call the backend; deletions trim the local state cache.
+- **Session drawer:** `renderSessionList()` renders each session with `×` (delete) and `✏️` (rename). Clicking a session invokes `syncActiveSession()` which calls the backend activation endpoint so prompts always target the right transcript.
+- **Renames:** `promptRenameSession()` persists the new title, hydrates the session JSON, then re-syncs the active session to prevent UI state drift after reordering.
 - **Chat streaming:** `requestStream()` consumes the SSE feed, updating the pending assistant bubble and reloading the session JSON post-stream to remove duplicates.
 - **Whitespace preservation:** chat bubbles use `white-space: pre-wrap`, so streamed markdown/text keeps indentation and newlines.
 

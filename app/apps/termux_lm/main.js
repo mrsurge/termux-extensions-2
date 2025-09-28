@@ -496,10 +496,14 @@ export default function initTermuxLM(root, api, host) {
         run_mode: state.runMode,
       });
       upsertSession(freshModel.id, session);
-      state.activeModelId = freshModel.id;
-      state.activeSessionId = session?.id || null;
+      if (session?.id) {
+        await syncActiveSession(freshModel.id, session.id, { quiet: true });
+      } else {
+        state.activeModelId = freshModel.id;
+        state.activeSessionId = session?.id || null;
+      }
       host.toast?.('Session created');
-      openChatOverlay(freshModel.id, state.activeSessionId);
+      openChatOverlay(freshModel.id, session?.id || null);
     } catch (err) {
       host.toast?.(err.message || 'Failed to start session');
     }
@@ -547,6 +551,31 @@ export default function initTermuxLM(root, api, host) {
       host.toast?.('Session deleted');
     } catch (err) {
       host.toast?.(err.message || 'Failed to delete session');
+    }
+  }
+
+  async function syncActiveSession(modelId, sessionId, { quiet = false } = {}) {
+    if (!modelId || !sessionId) return null;
+    try {
+      const payload = await API.post(api, `models/${encodeURIComponent(modelId)}/sessions/${encodeURIComponent(sessionId)}/activate`, {});
+      const session = payload && typeof payload === 'object' ? { ...payload, id: sessionId } : null;
+      state.activeModelId = modelId;
+      state.activeSessionId = sessionId;
+      if (session?.run_mode) {
+        state.runMode = session.run_mode;
+        syncRunModeRadios();
+        applyRunMode();
+      }
+      if (session) {
+        upsertSession(modelId, session);
+        state.chatMessages = session.messages ? [...session.messages] : [];
+        renderChatMessages();
+      }
+      return session;
+    } catch (err) {
+      console.warn('termux-lm: failed to sync active session', err);
+      if (!quiet) host.toast?.(err.message || 'Failed to activate session');
+      return null;
     }
   }
 
@@ -635,10 +664,14 @@ export default function initTermuxLM(root, api, host) {
         event.stopPropagation();
         promptRenameSession(session);
       });
-      item.addEventListener('click', () => {
-        state.activeSessionId = session.id;
-        state.chatMessages = session.messages ? [...session.messages] : [];
-        renderChatOverlay();
+      item.addEventListener('click', async () => {
+        if (state.activeSessionId === session.id) {
+          openChatOverlay(state.activeModelId, session.id);
+          setDrawerOpen(false);
+          return;
+        }
+        await syncActiveSession(state.activeModelId, session.id, { quiet: true });
+        openChatOverlay(state.activeModelId, session.id);
         setDrawerOpen(false);
       });
       els.chatSessions.appendChild(item);
@@ -681,7 +714,11 @@ export default function initTermuxLM(root, api, host) {
 
     const sessions = state.sessions[state.activeModelId] || [];
     if (sessions.length) {
-      openChatOverlay(state.activeModelId, sessions[0].id);
+      const target = sessions[0];
+      if (target?.id) {
+        await syncActiveSession(state.activeModelId, target.id, { quiet: true });
+      }
+      openChatOverlay(state.activeModelId, target?.id || null);
       return;
     }
 
@@ -740,8 +777,12 @@ export default function initTermuxLM(root, api, host) {
       run_mode: state.runMode,
     });
     upsertSession(model.id, session);
-    state.activeSessionId = session.id;
-    return session.id;
+    if (session?.id) {
+      await syncActiveSession(model.id, session.id, { quiet: true });
+      return session.id;
+    }
+    state.activeSessionId = session?.id || null;
+    return session?.id || null;
   }
 
   function appendMessage(role, content, extras = {}) {
@@ -775,6 +816,7 @@ export default function initTermuxLM(root, api, host) {
       await hydrateSession(modelId, session.id);
       renderSessionList();
       if (state.activeSessionId === session.id) {
+        await syncActiveSession(modelId, session.id, { quiet: true });
         renderChatOverlay();
       }
       host.toast?.('Session renamed');
