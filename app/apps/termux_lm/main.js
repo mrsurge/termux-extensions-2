@@ -325,8 +325,23 @@ export default function initTermuxLM(root, api, host) {
   }
 
   function renderShellStats(stats) {
-    const cpu = typeof stats.cpu === 'number' ? `${stats.cpu.toFixed(1)}% CPU` : null;
-    const rss = typeof stats.rss_mb === 'number' ? `${stats.rss_mb.toFixed(1)} MB RSS` : null;
+    const cpuSource = typeof stats.cpu === 'number'
+      ? stats.cpu
+      : typeof stats.cpu_percent === 'number'
+        ? stats.cpu_percent
+        : null;
+    const cpu = typeof cpuSource === 'number' ? `${cpuSource.toFixed(1)}% CPU` : null;
+
+    let rssValue = null;
+    if (typeof stats.rss_mb === 'number') {
+      rssValue = stats.rss_mb;
+    } else if (typeof stats.memory_rss === 'number') {
+      rssValue = stats.memory_rss / (1024 * 1024);
+    } else if (typeof stats.rss_bytes === 'number') {
+      rssValue = stats.rss_bytes / (1024 * 1024);
+    }
+    const rss = typeof rssValue === 'number' ? `${rssValue.toFixed(1)} MB RSS` : null;
+
     if (!cpu && !rss) return '';
     const items = [cpu, rss].filter(Boolean).map((value) => `<span class="tlm-stat">${value}</span>`);
     return `<div class="tlm-shell-stats">${items.join('<span class="tlm-divider">·</span>')}</div>`;
@@ -632,23 +647,27 @@ export default function initTermuxLM(root, api, host) {
     if (!els.chatInput) return;
     const text = els.chatInput.value.trim();
     if (!text) return;
-    if (!state.activeModelId) {
+    const modelId = state.activeModelId;
+    if (!modelId) {
       host.toast?.('Load a model first');
       return;
     }
-    if (!state.activeSessionId) {
-      const sessionId = await ensureSession();
+    let sessionId = state.activeSessionId;
+    if (!sessionId) {
+      sessionId = await ensureSession();
       if (!sessionId) {
         host.toast?.('Failed to start session');
         return;
       }
     }
 
+    state.activeModelId = modelId;
+    state.activeSessionId = sessionId;
+
     els.chatInput.value = '';
     appendMessage('user', text);
-    await appendMessageRemote(state.activeModelId, state.activeSessionId, 'user', text);
     appendMessage('assistant', '', { pending: true });
-    await streamAssistant(state.activeModelId, state.activeSessionId, text);
+    await streamAssistant(modelId, sessionId, text);
   }
 
   async function ensureSession() {
@@ -663,7 +682,13 @@ export default function initTermuxLM(root, api, host) {
   }
 
   function appendMessage(role, content, extras = {}) {
-    state.chatMessages = [...state.chatMessages, { role, content, ...extras }];
+    const message = { role, content, ...extras };
+    state.chatMessages = [...state.chatMessages, message];
+    const session = getCurrentSession();
+    if (session) {
+      const nextMessages = session.messages ? [...session.messages, message] : [message];
+      session.messages = nextMessages;
+    }
     renderChatMessages();
   }
 
@@ -673,7 +698,11 @@ export default function initTermuxLM(root, api, host) {
         role,
         message,
       });
-      await hydrateSession(modelId, sessionId);
+      const session = state.sessions[modelId]?.find((item) => item.id === sessionId);
+      if (session) {
+        const payload = session.messages ? [...session.messages, { role, content: message }] : [{ role, content: message }];
+        session.messages = payload;
+      }
     } catch (err) {
       console.warn('termux-lm: failed to persist message', err);
     }
@@ -703,12 +732,11 @@ export default function initTermuxLM(root, api, host) {
           host.toast?.(chunk.message || 'Stream error');
         }
       }
-      if (buffer.trim()) {
-        await appendMessageRemote(modelId, sessionId, 'assistant', buffer.trim());
-      }
     } catch (err) {
       console.error('termux-lm: stream failure', err);
       host.toast?.(err.message || 'Stream failed');
+    } finally {
+      await hydrateSession(modelId, sessionId);
     }
   }
 
