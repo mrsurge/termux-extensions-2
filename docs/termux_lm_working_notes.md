@@ -1,87 +1,88 @@
 # Termux-LM Working Notes
 
-This document captures the current state of the Termux-LM app, key design goals, and
-practices for contributors.
+This document captures the current state of the Termux-LM app, design goals, and practices for contributors.
 
 ## Overview
-
 - **App Path:** `app/apps/termux_lm`
-- **Backend Blueprint:** `backend.py` — manages model manifests, llama.cpp shell
-  orchestration, session storage, and chat completions against the llama-server REST
-  API.
-- **Frontend Entrypoint:** `main.js` — drives model cards, modal configuration, run
-  mode selection, session creation, and shell diagnostics.
-- **Template:** `template.html` — defines the Termux-aligned layout for cards, shell
-  log view, modal, and chat overlay.
-- **Styles:** `style.css` — mirrors the broader framework aesthetic (buttons, cards,
-  menus, chat layout).
-- **Cache Layout:** Models and sessions live under `~/.cache/termux_lm/models/<id>/`
-  with `model.json` and `sessions/*.json`. Global active state is tracked in
-  `~/.cache/termux_lm/state.json`.
+- **Backend Blueprint:** `backend.py` — manages model manifests, llama.cpp shell orchestration, session storage, and chat completions (local + remote).
+- **Frontend Entrypoint:** `main.js` — drives model cards, modal configuration, session drawer, chat streaming, and shell diagnostics.
+- **Template:** `template.html` — Termux-themed layout for status header, card grid, run-mode radios, and chat overlay.
+- **Styles:** `style.css` — aligns buttons, cards, drawers, and chat bubbles with the framework aesthetic (`tlm-*` classes).
+- **Cache Layout:** `~/.cache/termux_lm/` stores manifests, sessions, `state.json`, and `stream.log`.
 
-## Current UX Flow
+## UX Flow Recap
+1. Landing shows model cards with status, provider/file name, CPU/RSS for active shells.
+2. Run-mode radios (chat vs open interpreter placeholder) persist via `/sessions/active`.
+3. Shell status panel surfaces stdout/stderr and provides a manual refresh button.
+4. Chat overlay slides in when a session is active; remote/local sessions share the same UI, including rename/delete icons.
 
-1. **Landing:** Model cards are the primary UI. Cards show status, type, filename, and
-   surface model options via a hamburger menu (load/unload, start session, edit,
-   delete). Active models glow green and show CPU/RSS metrics.
-2. **Run Mode:** Toggle (`chat` vs `open_interpreter` placeholder) sits above the card
-   grid; the selection is stored in backend state for new sessions.
-3. **Shell Diagnostics:** Log panel exposes stdout/stderr for the llama.cpp shell and a
-   refresh button for manual updates.
-4. **Chat Sessions:** The chat drawer and view are scaffolded; session creation is
-   wired, with streaming UI to be implemented next.
+## Frontend Implementation Notes
+- **State polling:** `refreshState()` hits `/sessions/active`, populates `remoteReadiness`, hydrates sessions.
+- **Model modal:** toggles between local/remote forms, integrates `teFilePicker` for GGUF selection.
+- **Session drawer:** `renderSessionList()` renders each session with `×` (delete) and `✏️` (rename). Renames prompt the user and call the backend; deletions trim the local state cache.
+- **Chat streaming:** `requestStream()` consumes the SSE feed, updating the pending assistant bubble and reloading the session JSON post-stream to remove duplicates.
+- **Whitespace preservation:** chat bubbles use `white-space: pre-wrap`, so streamed markdown/text keeps indentation and newlines.
 
-## Frontend Notes
+## Backend Implementation Notes
+- **Persistence helpers:** `_write_model_manifest`, `_save_session`, `_append_message` keep JSON atomic and normalized.
+- **Shell management:** `_build_llama_command` constructs `llama-server` CLI; `_terminate_shell` removes stale shells.
+- **Remote helpers:** `_remote_endpoint`, `_remote_headers`, `_remote_payload`, `_remote_stream_completion` implement an OpenAI-compatible pipeline (tested against OpenRouter).
+- **Session rename:** `POST /models/<id>/sessions/<session>` accepts `{ "title": "..." }` and rewrites the JSON; delete removes the file.
+- **Streaming logs:** `_append_stream_log` writes token flow and errors to `~/.cache/termux_lm/stream.log` for debugging.
 
-- **API helpers:** `API_WRAPPER.get/post` wrap `api.get/post` to standardize error
-  handling: backend endpoints return `{ ok, data }` objects.
-- **Model modal:** `openModelModal(mode, model)` populates fields, manages draft state,
-  and integrates the shared file picker (`window.teFilePicker`). When picking a file we
-  temporarily close the dialog to avoid z-index clashes.
-- **Card menu:** `setupMenu` binds actions inside the inline menu. Keep new card
-  features inside this menu to stay consistent.
-- **Active shell stats:** `renderShellStats` consumes `state.shell.stats` (cpu, rss_mb)
-  when available. Ensure backend descriptions keep those metrics up to date.
-- **Run mode radios:** `syncRunModeRadios` mirrors backend state on refresh; keep DOM
-  names in sync (`run-mode`).
-- **Chat placeholder:** Once streaming is ready, reuse `startSession` to open the chat
-  overlay and load session transcripts.
+```python
+# Example: rename endpoint (backend)
+@termux_lm_bp.route("/models/<model_id>/sessions/<session_id>", methods=["GET", "DELETE", "POST"])
+def sessions_detail(model_id: str, session_id: str) -> Any:
+    session = _read_json(_session_path(model_id, session_id))
+    if request.method == 'POST':
+        payload = request.get_json(silent=True) or {}
+        title = payload.get('title')
+        if not isinstance(title, str) or not title.strip():
+            return jsonify({"ok": False, "error": "title is required"}), 400
+        session['title'] = title.strip()
+        updated = _save_session(model_id, session)
+        return jsonify({"ok": True, "data": updated})
+```
 
-## Backend Notes
+## Manual Testing Checklist (updated)
+- Add local & remote models; verify manifest JSON.
+- Load/unload local models; confirm shell card glow + CPU/RSS update and stdout log refresh.
+- Load remote models; ensure cards display "Ready", chat overlay opens without shell.
+- Create, rename, delete sessions; check `sessions/*.json` for updated titles and message transcripts.
+- Send chat messages (local): confirm streaming tokens and shell log output.
+- Send chat messages (remote): confirm streamed tokens and no connection errors.
+- Inspect `stream.log` after both runs to confirm start/token/done entries.
 
-- **Persistence helpers:** `_write_model_manifest`, `_save_session`, `_load_state`
-  handle atomic JSON writes. Respect these helpers when extending data stored per
-  model/session.
-- **Shell orchestration:** `_build_llama_command` builds the llama-server CLI,
-  `_terminate_shell` safely tears down framework shells. Loading a local model spawns a
-  shell; remote models skip shell creation but maintain consistent state.
-- **Chat API:** `sessions_chat` currently posts to llama-server with `stream=false`. A
-  future enhancement will add streaming via server-sent events or websockets.
-- **Active State Endpoint:** `/sessions/active` returns the active model/session/run
-  mode and the shell description (including `stats` and recent logs). The frontend uses
-  this to hydrate status badges and shell diagnostics.
+## Quick Commands
+```bash
+# Run framework
+./run_framework.sh
 
-## Testing & Debugging
+# Tail stream log
+tail -f ~/.cache/termux_lm/stream.log
 
-- **Run the framework:** `./run_framework.sh` (from repo root) starts the Flask host
-  and framework supervisor.
-- **Manual checks:**
-  - Add/edit/delete models through the modal.
-  - Load a local GGUF model; observe the green card glow and CPU/RSS stats.
-  - Create a session via the menu; confirm the backend writes `sessions/<id>.json`.
-  - Inspect shell logs for llama-server startup output.
-- **Logs:** Framework shell metrics are available via `state.shell.stats`. If logs or
-  metrics appear stale, trigger `/shell/log` (wired to the refresh button) and ensure
-  the backend’s shell manager includes `include_logs=True`.
+# Inspect active shell
+toolbox/run_framework_shell.sh list
+```
 
-## Pending Work
+## TODO Backlog (see detailed list in overview)
+- Streamline model modal flow
+- Add system prompt support per session
+- Automate llama.cpp apt install/bootstrap
+- Integrate Hugging Face URIs via Aria2
+- Wire up Open Interpreter mode
+- Add retrieval/web search integrations
+- Improve transcript sorting/export/log rotation
 
-- **Chat UI:** Implement session drawer population, chat transcript rendering, and
-  llama-server streaming in `main.js` once backend streaming is confirmed.
-- **Model menu enhancements:** Add confirmation dialogs or inline status updates as
-  more model actions appear.
-- **Settings sync:** Persist run-mode preference or recently used models via the host
-  state store if needed.
+## Termux llama.cpp Installation
+```bash
+pkg update
+pkg install llama-cpp
+# Optional GPU backend for Snapdragon devices
+pkg install llama-cpp-backend-opencl
+```
+Run `llama-server --help` to verify installation, then point Termux-LM to your GGUF model.
 
-Keep this document updated as the app evolves so future passes have an up-to-date map
-of the Termux-LM code path.
+---
+Keep this file alongside `docs/termux_lm_overview.md` for quick pointers while developing.

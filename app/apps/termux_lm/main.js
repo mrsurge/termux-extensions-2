@@ -770,9 +770,13 @@ export default function initTermuxLM(root, api, host) {
       const updated = await API.post(api, `models/${encodeURIComponent(modelId)}/sessions/${encodeURIComponent(session.id)}`, {
         title: trimmed,
       });
-      session.title = updated?.title || trimmed;
-      upsertSession(modelId, session);
+      const refreshed = updated && typeof updated === 'object' ? updated : { ...session, title: trimmed };
+      upsertSession(modelId, refreshed);
+      await hydrateSession(modelId, session.id);
       renderSessionList();
+      if (state.activeSessionId === session.id) {
+        renderChatOverlay();
+      }
       host.toast?.('Session renamed');
     } catch (err) {
       host.toast?.(err.message || 'Failed to rename session');

@@ -6,11 +6,11 @@ Termux-LM is a first-party app within the `termux-extensions-2` framework. It pr
 
 ## High-Level Flow
 
-1. **Model management** – Users add/edit/delete model definitions. Local models reference a GGUF on disk; remote models capture API configuration.
-2. **Model loading** – Loading a local model spawns a `llama-server` via the framework shell manager. Loading a remote model simply marks it active (no shell).
-3. **Session management** – Each model owns a set of stored chats under `~/.cache/termux_lm/models/<id>/sessions`. Sessions persist messages and metadata.
-4. **Chat** – The frontend stream-submits prompts to `/models/<id>/sessions/<session>/chat`. The backend dispatches to llama.cpp or the remote provider and streams responses back to the UI.
-5. **Diagnostics** – Shell stdout/stderr are exposed through `/shell/log`, allowing the UI to surface llama.cpp startup and runtime logs.
+1. **Model management** – Users add/edit/delete model definitions. Local models reference a GGUF on disk; remote models capture API configuration (API key, endpoint, model id, optional reasoning effort).
+2. **Model loading** – Loading a local model spawns a `llama-server` via the framework shell manager. Loading a remote model simply marks it active (no shell), but flags `remote_ready` so the chat UI unlocks immediately.
+3. **Session management** – Each model owns a set of stored chats under `~/.cache/termux_lm/models/<id>/sessions`. Sessions persist messages, run mode, timestamps, and editable titles.
+4. **Chat** – The frontend stream-submits prompts to `/models/<id>/sessions/<session>/chat`. The backend dispatches to llama.cpp or the remote provider and streams responses back to the UI, writing streaming telemetry to `stream.log`.
+5. **Diagnostics** – Shell stdout/stderr are exposed through `/shell/log`, allowing the UI to surface llama.cpp startup and runtime logs, even while a chat stream is running.
 
 ---
 
@@ -104,6 +104,7 @@ state = {
 ### Remote-Specific UI Logic
 - Helper `isRemoteModel` is used in load/chat guards so remote models are treated as instantly available once `remote_ready` is reported.
 - When loading/unloading, the frontend stores `remoteReady` from the backend payload so remote cards display the correct status badge.
+- Session rename/delete controls appear in the drawer; rename prompts users and persists via the session detail endpoint.
 
 ### Host Integration
 Uses the framework host API (`host.toast`, `host.setTitle`, `host.onBeforeExit`) and shared file picker (`window.teFilePicker`) for user feedback and file selection.
@@ -130,11 +131,58 @@ Sections:
 ---
 
 ## Known Limitations / TODOs
-1. Remote load state – backend reports `remote_ready` in load responses, but the running framework build still needs to plumb this into refresh/poll results for the frontend to unlock chats consistently.
+1. Remote load state – the backend publishes `remote_ready`, but we still rely on polling. Consider pushing readiness in real time.
 2. Modal close UX – after saving edits the dialog remains open; the UI waits for a refresh cycle before showing updated data.
-3. Remote chat verification – remote streaming path is scaffolded but hasn’t been exercised end-to-end with a live provider (OpenRouter/OpenAI). Error handling and retries will need additional polish.
+3. Remote chat verification – remote streaming works end-to-end, but we need richer error surfacing/retry logic for flaky providers.
 4. Cache hygiene – no automatic rotation of transcripts or log truncation yet.
 5. Run mode placeholder – open interpreter mode is disabled (UI hides the form, shows placeholder copy).
+6. Session ordering – we keep insertion order. Sorting by last activity would improve navigation.
+
+### Reference Snippets
+
+Backend rename handler:
+
+```python
+@termux_lm_bp.route("/models/<model_id>/sessions/<session_id>", methods=["GET", "DELETE", "POST"])
+def sessions_detail(model_id: str, session_id: str) -> Any:
+    session = _read_json(_session_path(model_id, session_id))
+    if request.method == 'POST':
+        payload = request.get_json(silent=True) or {}
+        title = payload.get('title')
+        if not isinstance(title, str) or not title.strip():
+            return jsonify({"ok": False, "error": "title is required"}), 400
+        session['title'] = title.strip()
+        updated = _save_session(model_id, session)
+        return jsonify({"ok": True, "data": updated})
+```
+
+Frontend rename wiring:
+
+```javascript
+async function promptRenameSession(session) {
+  const trimmed = prompt('Rename session', session.title || '')?.trim();
+  if (!trimmed) return;
+  const updated = await API.post(api, `models/${modelId}/sessions/${session.id}`, { title: trimmed });
+  session.title = updated?.title || trimmed;
+  upsertSession(modelId, session);
+  renderSessionList();
+  host.toast?.('Session renamed');
+}
+```
+
+Remote streaming loop (backend excerpt):
+
+```python
+def _remote_stream_completion(model, session, prompt):
+    url = _remote_endpoint(model)
+    headers = _remote_headers(model)
+    payload = _remote_payload(model, session, stream=True, prompt=prompt)
+    response = urllib.request.urlopen(urllib.request.Request(url, json.dumps(payload).encode(), headers, 'POST'), timeout=600)
+    with response:
+        for block in _stream_sse(response):
+            if block.get('type') == 'token':
+                yield {"type": "token", "content": block['content']}
+```
 
 ---
 
@@ -146,4 +194,43 @@ Sections:
 - **Chat (remote)**: with a remote model configured, confirm POST/stream responses flow; check logs or developer tools for payload details.
 - **Logs**: hit “Refresh Log” and ensure stdout/stderr appear.
 
-This document should give future contributors the necessary mental model of the Termux-LM code paths and the areas that still need attention.
+---
+
+## TODO Backlog
+
+1. **Streamline the model card config flow** – reduce modal steps, pre-fill defaults, add validation tooltips.
+2. **Incorporate a method for system prompting** – expose a per-session/system prompt field persisted with chats.
+3. **Automate llama.cpp installation/configuration** – add helpers that install Termux packages (`llama-cpp`, `llama-cpp-backend-opencl`) and seed default manifests.
+4. **Hugging Face URI integration** – allow GGUF selection via HF URIs and hand off downloads to the Aria2 framework app.
+5. **Open Interpreter integration** – wire the alternate run-mode, including automated pip/apt dependency installs and UI toggles.
+6. **RPC/RAG/web search** – add provider hooks for retrieval-augmented generation and search integrations.
+7. **Additional polish** – telemetry, transcript export, better logging, and accessibility review.
+
+---
+
+## Installing llama.cpp via Termux APT
+
+The framework expects `llama-server` to be present. On a Termux device:
+
+```bash
+pkg update
+pkg install llama-cpp
+```
+
+For Snapdragon devices with OpenCL acceleration:
+
+```bash
+pkg install llama-cpp-backend-opencl
+```
+
+After installation, confirm the binary is on PATH:
+
+```bash
+llama-server --help
+```
+
+Configure Termux-LM to point at your GGUF file (e.g. `~/models/gemma-3-270m-it-F16.gguf`) and the shell manager will launch `llama-server` automatically when you load the model.
+
+---
+
+This document should give future contributors the necessary mental model of the Termux-LM code paths, provide reference snippets, and outline the next set of enhancements.
