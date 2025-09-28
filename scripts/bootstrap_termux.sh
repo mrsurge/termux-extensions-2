@@ -54,7 +54,6 @@ install_termux_packages() {
 
 install_python_requirements() {
   echo "[bootstrap] Installing Python requirements…"
-  pip install --upgrade pip
   pip install --user -r "$REQUIREMENTS_FILE"
 }
 
