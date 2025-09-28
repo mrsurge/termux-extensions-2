@@ -10,6 +10,7 @@ BIN_DIR="$HOME/bin"
 REQUIREMENTS_FILE="$PROJECT_ROOT/requirements.txt"
 INIT_SCRIPT="$SCRIPTS_DIR/init.sh"
 RUN_SCRIPT="$SCRIPTS_DIR/run_framework.sh"
+LINK_NAME="start-te"
 
 check_shell() {
   if [[ -z "${BASH_VERSION:-}" ]];
@@ -72,7 +73,7 @@ ensure_bashrc_hook() {
 link_run_script() {
   mkdir -p "$BIN_DIR"
   chmod +x "$RUN_SCRIPT"
-  local target="$BIN_DIR/run_framework.sh"
+  local target="$BIN_DIR/$LINK_NAME"
   if [[ -L "$target" || -e "$target" ]]; then
     if [[ $(readlink -f "$target") != "$RUN_SCRIPT" ]]; then
       echo "[bootstrap] Replacing existing $target"
@@ -94,7 +95,7 @@ main() {
   link_run_script
 
   echo
-  echo "Bootstrap complete. Open a new Termux session (or source ~/.bashrc) then run:\n  run_framework.sh"
+  echo "Bootstrap complete. Open a new Termux session (or source ~/.bashrc) then run:\n  $LINK_NAME"
 }
 
 main "$@"

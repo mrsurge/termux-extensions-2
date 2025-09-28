@@ -22,12 +22,12 @@ cd termux-extensions-2
 ./scripts/bootstrap_termux.sh
 ```
 
-The script (see [`docs/termux_lm_setup_termux.md`](docs/termux_lm_setup_termux.md)) checks that you are running `bash`, installs required Termux packages (including `llama-cpp`), installs Python requirements, ensures `scripts/init.sh` is sourced from `~/.bashrc`, and links `run_framework.sh` into `~/bin/`.
+The script (see [`docs/termux_lm_setup_termux.md`](docs/termux_lm_setup_termux.md)) checks that you are running `bash`, installs required Termux packages (including `llama-cpp`), installs Python requirements, ensures `scripts/init.sh` is sourced from `~/.bashrc`, and links a `start-te` helper into `~/bin/`.
 
 After the bootstrap completes, open a new shell (so `.bashrc` reloads) and launch the supervisor:
 
 ```bash
-run_framework.sh
+start-te
 ```
 
 Then browse to `http://localhost:8080` from the device (or another host on your LAN if you bind externally).
