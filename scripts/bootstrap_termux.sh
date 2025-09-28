@@ -6,7 +6,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS_DIR="$PROJECT_ROOT/scripts"
-BIN_DIR="$HOME/bin"
+BIN_DIR="${PREFIX:-$HOME}/bin"
 REQUIREMENTS_FILE="$PROJECT_ROOT/requirements.txt"
 INIT_SCRIPT="$SCRIPTS_DIR/init.sh"
 RUN_SCRIPT="$SCRIPTS_DIR/run_framework.sh"
