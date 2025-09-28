@@ -1,0 +1,587 @@
+:root {
+  /* relies on framework-wide CSS variables */
+}
+
+.tlm-app {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  color: var(--foreground);
+  background: transparent;
+}
+
+.tlm-header,
+.tlm-section {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tlm-header {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.tlm-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.tlm-subtitle {
+  margin: 6px 0 0;
+  font-size: 0.95rem;
+  color: var(--muted-foreground);
+  max-width: 60ch;
+}
+
+.tlm-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tlm-btn {
+  background: var(--secondary);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.tlm-btn:hover {
+  border-color: var(--primary);
+}
+
+.tlm-btn.primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+}
+
+.tlm-btn.primary:hover {
+  filter: brightness(1.05);
+}
+
+.tlm-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted-foreground);
+}
+
+.tlm-btn.ghost:hover {
+  color: var(--foreground);
+}
+
+.tlm-btn-wide {
+  width: 100%;
+  justify-content: center;
+  font-weight: 600;
+  padding: 10px;
+}
+
+.tlm-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.tlm-section-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.tlm-section-hint {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+  max-width: 60ch;
+}
+
+.tlm-runmode-options {
+  display: inline-flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tlm-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  cursor: pointer;
+}
+
+.tlm-radio input {
+  accent-color: var(--primary);
+}
+
+.tlm-shell-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+  color: var(--muted-foreground);
+}
+
+.tlm-shell-logs {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.tlm-log-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tlm-log-card header {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+}
+
+.tlm-log-card pre {
+  margin: 0;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.tlm-card-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.tlm-model-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--background);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.tlm-model-card:hover {
+  border-color: var(--accent);
+}
+
+.tlm-model-card[data-active="true"] {
+  border-color: var(--success);
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35), 0 4px 22px rgba(34, 197, 94, 0.22);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.tlm-model-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tlm-model-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.tlm-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+}
+
+.tlm-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.tlm-status-dot[data-status="active"] { background: var(--success); }
+.tlm-status-dot[data-status="loading"] { background: var(--warning); }
+.tlm-status-dot[data-status="idle"] { background: var(--border); }
+
+.tlm-model-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--muted-foreground);
+}
+
+.tlm-model-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tlm-empty {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+
+.tlm-card-menu {
+  position: relative;
+}
+
+.tlm-btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.tlm-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.35);
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  z-index: 40;
+}
+
+.tlm-menu button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+  padding: 10px 14px;
+  font: inherit;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tlm-menu button:hover {
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.tlm-menu button.destructive {
+  color: #f87171;
+}
+
+.tlm-shell-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+}
+
+.tlm-divider {
+  opacity: 0.6;
+}
+
+.tlm-modal::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.tlm-modal {
+  border: none;
+  border-radius: 12px;
+  padding: 0;
+  width: min(480px, 90vw);
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.tlm-modal.tlm-modal-hidden {
+  visibility: hidden;
+}
+
+.tlm-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+}
+
+.tlm-modal-body header,
+.tlm-modal-body footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tlm-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tlm-type-toggle {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.tlm-type-toggle .tlm-btn[data-active="true"] {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(80, 120, 255, 0.1);
+}
+
+.tlm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.tlm-field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.tlm-field-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.tlm-field input,
+.tlm-field textarea {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--foreground);
+  padding: 6px 10px;
+  font: inherit;
+}
+
+.tlm-chat-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  z-index: 400;
+}
+
+.tlm-chat-overlay[data-open="true"] {
+  display: block;
+}
+
+.tlm-chat-overlay-bg {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.tlm-chat-panel {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  background: var(--background);
+}
+
+.tlm-chat-drawer {
+  position: relative;
+  width: min(280px, 80vw);
+  border-right: 1px solid var(--border);
+  background: var(--card);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transform: translateX(-100%);
+  transition: transform 150ms ease;
+  z-index: 2;
+}
+
+.tlm-chat-panel[data-drawer="open"] .tlm-chat-drawer {
+  transform: translateX(0);
+}
+
+.tlm-chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 12px;
+}
+
+.tlm-chat-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.tlm-chat-heading h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.tlm-chat-log {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--card);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tlm-chat-bubble {
+  padding: 8px 12px;
+  border-radius: 8px;
+  max-width: 80%;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.tlm-chat-user {
+  margin-left: auto;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.tlm-chat-assistant {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+.tlm-chat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tlm-chat-form textarea {
+  min-height: 60px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.tlm-chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.tlm-chat-empty {
+  text-align: center;
+  color: var(--muted-foreground);
+}
+
+.tlm-token-readout {
+  font-size: 0.85rem;
+  color: var(--muted-foreground);
+}
+
+.tlm-session-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tlm-session-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--background);
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.tlm-session-item:hover {
+  border-color: var(--accent);
+}
+
+.tlm-session-item[data-active="true"] {
+  border-color: var(--primary);
+  background: rgba(80, 120, 255, 0.08);
+}
+
+.tlm-chat-overlay[data-open="true"][data-mode="open_interpreter"] .tlm-chat-drawer,
+.tlm-chat-overlay[data-open="true"][data-mode="open_interpreter"] .tlm-chat-drawer-toggle {
+  display: none;
+}
+
+.tlm-chat-overlay[data-open="true"][data-mode="open_interpreter"] .tlm-chat-log,
+.tlm-chat-overlay[data-open="true"][data-mode="open_interpreter"] .tlm-chat-form {
+  display: none;
+}
+
+.tlm-chat-overlay[data-open="true"][data-mode="open_interpreter"] [data-role="oi-placeholder"] {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  background: var(--card);
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 720px) {
+  .tlm-header,
+  .tlm-section {
+    padding: 14px;
+  }
+
+  .tlm-shell-logs {
+    grid-template-columns: 1fr;
+  }
+
+  .tlm-chat-main {
+    padding: 12px;
+  }
+}
