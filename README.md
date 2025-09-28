@@ -10,25 +10,50 @@ While this framework can assist users unfamiliar with shell scripting, its prima
 
 This project aims to break through that plateau by creating a fluid, intuitive, and **touch-friendly interface** for navigating and controlling the Termux multitasking environment. It draws inspiration from the philosophy of frameworks like *Oh My Zsh* and *Oh My Fish*—which enhance the shell experience with smart helpers and plugins—and adapts that spirit to a graphical, touch-centric paradigm.
 
-## How to Run
+## Quick Start
 
-1.  **Install Dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+The framework now ships with a bootstrap helper tailored for Termux devices. On a fresh Termux install you can get up and running with:
 
-2.  **Hook a Shell:** For each terminal session you want to monitor, you must source the `init.sh` script. This can be done manually for each session or by adding it to your `~/.bashrc` file.
-    ```bash
-    # Manually source for the current session
-    source scripts/init.sh
-    ```
+```bash
+pkg update
+pkg install git
+git clone https://github.com/mrsurge/termux-extensions-2.git
+cd termux-extensions-2
+./scripts/bootstrap_termux.sh
+```
 
-3.  **Run the Server (dev):** In a separate shell that you **do not** want to monitor, run the Flask application. Set the `TE_SESSION_TYPE` variable to `framework` to hide this shell from the UI.
-    ```bash
-    TE_SESSION_TYPE="framework" python app/main.py
-    ```
+The script (see [`docs/termux_lm_setup_termux.md`](docs/termux_lm_setup_termux.md)) checks that you are running `bash`, installs required Termux packages (including `llama-cpp`), installs Python requirements, ensures `scripts/init.sh` is sourced from `~/.bashrc`, and links `run_framework.sh` into `~/bin/`.
 
-4.  **Access the UI:** Open a web browser and navigate to `http://localhost:8080`.
+After the bootstrap completes, open a new shell (so `.bashrc` reloads) and launch the supervisor:
+
+```bash
+run_framework.sh
+```
+
+Then browse to `http://localhost:8080` from the device (or another host on your LAN if you bind externally).
+
+### Manual setup
+
+If you prefer a manual install, follow these steps instead:
+
+1. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Hook monitored shells**
+   ```bash
+   source scripts/init.sh
+   ```
+   Add the above line to `~/.bashrc` to make new shells register automatically.
+
+3. **Run the server (dev)**
+   ```bash
+   TE_SESSION_TYPE="framework" python app/main.py
+   ```
+
+4. **Access the UI**
+   Navigate to `http://localhost:8080` in a browser.
 ### Production run (serve to other devices)
 
 To allow other devices on your network to access the UI, run with Gunicorn and bind to all interfaces:
