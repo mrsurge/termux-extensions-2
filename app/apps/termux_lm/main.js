@@ -43,6 +43,8 @@ export default function initTermuxLM(root, api, host) {
     modalDraft: {},
     drawerOpen: false,
     activeMenu: null,
+    remoteReady: false,
+    remoteReadiness: {},
   };
 
   const els = mapElements(root);
@@ -222,6 +224,10 @@ export default function initTermuxLM(root, api, host) {
       state.activeSessionId = payload?.active_session_id || null;
       state.runMode = payload?.run_mode || state.runMode;
       state.shell = payload?.shell || null;
+      state.remoteReadiness = payload?.remote_ready_map || {};
+      if (state.activeModelId && payload?.model_type === 'remote') {
+        state.remoteReadiness[state.activeModelId] = payload.remote_ready ?? false;
+      }
       syncRunModeRadios();
       updateActiveModelLabel();
       if (state.activeModelId) {
@@ -257,6 +263,28 @@ export default function initTermuxLM(root, api, host) {
     return model?.name || model?.display_name || model?.id || 'Model';
   }
 
+  function getModel(modelId) {
+    if (!modelId) return null;
+    return state.models.find((item) => item.id === modelId) || null;
+  }
+
+  function isRemoteModel(model) {
+    return model?.type === 'remote';
+  }
+
+  function isModelReady(model) {
+    if (!model) return false;
+    if (isRemoteModel(model)) {
+      const ready = state.remoteReadiness[model.id];
+      if (typeof ready === 'boolean') return ready;
+      return Boolean(model.remote_ready);
+    }
+    const shell = state.shell;
+    if (!shell || !shell.stats || shell.stats.alive !== true) return false;
+    if (typeof shell.label === 'string' && shell.label.includes(model.id)) return true;
+    return shell.stats.alive === true;
+  }
+
   function filename(path) {
     if (!path) return '';
     return String(path).split('/').filter(Boolean).pop() || path;
@@ -277,9 +305,23 @@ export default function initTermuxLM(root, api, host) {
     const fragment = document.createDocumentFragment();
     state.models.forEach((model) => {
       const isActive = model.id === state.activeModelId;
-      const alive = Boolean(state.shell?.stats?.alive && isActive);
-      const status = isActive ? (alive ? 'Running' : 'Starting…') : 'Idle';
-      const statusVariant = isActive ? (alive ? 'active' : 'loading') : 'idle';
+      const remote = model?.type === 'remote';
+      const remoteReady = Boolean(state.remoteReadiness[model.id] ?? model.remote_ready);
+      const shellMatches = typeof state.shell?.label === 'string' && state.shell.label.includes(model.id);
+      const shellAlive = Boolean(state.shell?.stats?.alive && shellMatches);
+      const alive = remote ? (isActive && remoteReady) : (isActive && shellAlive);
+      const status = isActive
+        ? alive
+          ? 'Running'
+          : remote && remoteReady
+            ? 'Ready'
+            : 'Starting…'
+        : 'Idle';
+      const statusVariant = isActive
+        ? alive || (remote && remoteReady)
+          ? 'active'
+          : 'loading'
+        : 'idle';
 
       const card = document.createElement('article');
       card.className = 'tlm-model-card';
@@ -435,21 +477,29 @@ export default function initTermuxLM(root, api, host) {
 
   async function startSession(model) {
     try {
+      if (!model) {
+        host.toast?.('No model selected');
+        return;
+      }
+
       if (state.activeModelId !== model.id) {
         await loadModel(model.id);
       }
-      if (!state.shell?.stats?.alive) {
-        host.toast?.('Model shell not ready yet');
+
+      const freshModel = getModel(model.id) || model;
+      if (!isModelReady(freshModel)) {
+        host.toast?.('Model is still loading');
         return;
       }
-      const session = await API.post(api, `models/${encodeURIComponent(model.id)}/sessions`, {
+
+      const session = await API.post(api, `models/${encodeURIComponent(freshModel.id)}/sessions`, {
         run_mode: state.runMode,
       });
-      upsertSession(model.id, session);
-      state.activeModelId = model.id;
+      upsertSession(freshModel.id, session);
+      state.activeModelId = freshModel.id;
       state.activeSessionId = session?.id || null;
       host.toast?.('Session created');
-      openChatOverlay(model.id, state.activeSessionId);
+      openChatOverlay(freshModel.id, state.activeSessionId);
     } catch (err) {
       host.toast?.(err.message || 'Failed to start session');
     }
@@ -515,8 +565,13 @@ export default function initTermuxLM(root, api, host) {
 
   function openChatOverlay(modelId, sessionId) {
     if (!els.chatOverlay) return;
-    if (!state.shell?.stats?.alive) {
+    const model = modelId ? getModel(modelId) : getModel(state.activeModelId);
+    if (!model) {
       host.toast?.('Load a model before starting a chat');
+      return;
+    }
+    if (!isModelReady(model)) {
+      host.toast?.('Model is still loading');
       return;
     }
     if (modelId) state.activeModelId = modelId;
@@ -567,13 +622,18 @@ export default function initTermuxLM(root, api, host) {
       item.dataset.sessionId = session.id;
       item.dataset.active = session.id === state.activeSessionId ? 'true' : 'false';
       item.innerHTML = `
-        <span>${escapeHTML(session.title || session.id)}</span>
-        <button type="button" data-role="delete-session" title="Delete session">x</button>
+        <button type="button" class="tlm-session-icon" data-role="delete-session" title="Delete session">×</button>
+        <span class="tlm-session-title">${escapeHTML(session.title || session.id)}</span>
+        <button type="button" class="tlm-session-icon" data-role="rename-session" title="Rename session">✏️</button>
       `;
       item.querySelector('[data-role="delete-session"]').addEventListener('click', (event) => {
         event.stopPropagation();
         const ok = confirm('Delete this session?');
         if (ok) deleteSession(state.activeModelId, session.id);
+      });
+      item.querySelector('[data-role="rename-session"]').addEventListener('click', (event) => {
+        event.stopPropagation();
+        promptRenameSession(session);
       });
       item.addEventListener('click', () => {
         state.activeSessionId = session.id;
@@ -608,35 +668,34 @@ export default function initTermuxLM(root, api, host) {
   }
 
   async function handleStartChat() {
-    if (!state.activeModelId) {
-      const firstModel = state.models[0];
-      if (!firstModel) {
-        host.toast?.('Add a model first');
-        return;
-      }
-      await startSession(firstModel);
-      return;
-    }
-
-    if (!state.shell?.stats?.alive) {
+    const model = getModel(state.activeModelId);
+    if (!model) {
       host.toast?.('Load a model before starting a chat');
       return;
     }
 
-    const sessions = state.sessions[state.activeModelId] || [];
-    openChatOverlay(state.activeModelId, sessions[0]?.id || null);
-    if (!sessions.length) {
-      const model = state.models.find((item) => item.id === state.activeModelId);
-      if (model) {
-        await startSession(model);
-      }
+    if (!isModelReady(model)) {
+      host.toast?.('Model is still loading');
+      return;
     }
+
+    const sessions = state.sessions[state.activeModelId] || [];
+    if (sessions.length) {
+      openChatOverlay(state.activeModelId, sessions[0].id);
+      return;
+    }
+
+    await startSession(model);
   }
 
   async function createSessionFromDrawer() {
-    const model = state.models.find((item) => item.id === state.activeModelId);
+    const model = getModel(state.activeModelId);
     if (!model) {
       host.toast?.('No active model');
+      return;
+    }
+    if (!isModelReady(model)) {
+      host.toast?.('Model is still loading');
       return;
     }
     await startSession(model);
@@ -671,8 +730,12 @@ export default function initTermuxLM(root, api, host) {
   }
 
   async function ensureSession() {
-    const model = state.models.find((item) => item.id === state.activeModelId);
+    const model = getModel(state.activeModelId);
     if (!model) return null;
+    if (!isModelReady(model)) {
+      host.toast?.('Model is still loading');
+      return null;
+    }
     const session = await API.post(api, `models/${encodeURIComponent(model.id)}/sessions`, {
       run_mode: state.runMode,
     });
@@ -690,6 +753,30 @@ export default function initTermuxLM(root, api, host) {
       session.messages = nextMessages;
     }
     renderChatMessages();
+  }
+
+  async function promptRenameSession(session) {
+    const modelId = state.activeModelId;
+    if (!modelId || !session?.id) return;
+    const current = session.title || '';
+    const nextTitle = prompt('Rename session', current);
+    if (nextTitle === null) return;
+    const trimmed = nextTitle.trim();
+    if (!trimmed) {
+      host.toast?.('Title cannot be empty');
+      return;
+    }
+    try {
+      const updated = await API.post(api, `models/${encodeURIComponent(modelId)}/sessions/${encodeURIComponent(session.id)}`, {
+        title: trimmed,
+      });
+      session.title = updated?.title || trimmed;
+      upsertSession(modelId, session);
+      renderSessionList();
+      host.toast?.('Session renamed');
+    } catch (err) {
+      host.toast?.(err.message || 'Failed to rename session');
+    }
   }
 
   async function appendMessageRemote(modelId, sessionId, role, message) {
@@ -825,6 +912,9 @@ export default function initTermuxLM(root, api, host) {
   function populateModal(model) {
     if (!els.modalForm) return;
     els.modalForm.reset();
+    if (state.modalMode === 'edit' && model?.id) {
+      state.modalDraft = { ...model };
+    }
     const values = model || {};
     Object.entries(values).forEach(([key, value]) => {
       const field = els.modalForm.elements.namedItem(key);
@@ -909,10 +999,25 @@ export default function initTermuxLM(root, api, host) {
     const formData = new FormData(els.modalForm);
     const payload = Object.fromEntries(formData.entries());
     payload.type = state.pendingModelType;
+    const editing = state.modalMode === 'edit' && state.modalDraft?.id;
+    if (editing) {
+      payload.id = state.modalDraft.id;
+    }
+    if (payload.type === 'remote') {
+      payload.remote_model = payload.remote_model?.trim() || '';
+      payload.reasoning_effort = payload.reasoning_effort ? Number(payload.reasoning_effort) : undefined;
+      if (!payload.remote_model) {
+        host.toast?.('Remote model identifier required');
+        return;
+      }
+      if (Number.isNaN(payload.reasoning_effort)) {
+        payload.reasoning_effort = undefined;
+      }
+    }
 
     try {
       let record;
-      if (state.modalMode === 'edit' && payload.id) {
+      if (editing && payload.id) {
         record = await API.post(api, `models/${encodeURIComponent(payload.id)}`, payload);
         state.models = state.models.map((item) => (item.id === record.id ? record : item));
       } else {

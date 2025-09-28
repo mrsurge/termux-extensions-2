@@ -552,6 +552,7 @@
   max-width: 80%;
   font-size: 0.95rem;
   line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .tlm-chat-user {
@@ -615,6 +616,10 @@
   cursor: pointer;
   font-size: 0.9rem;
   transition: border-color 0.15s ease, background 0.15s ease;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .tlm-session-item:hover {
@@ -624,6 +629,27 @@
 .tlm-session-item[data-active="true"] {
   border-color: var(--primary);
   background: rgba(80, 120, 255, 0.08);
+}
+
+.tlm-session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tlm-session-icon {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+}
+
+.tlm-session-icon:hover,
+.tlm-session-icon:focus {
+  color: var(--primary);
 }
 
 .tlm-chat-overlay[data-open="true"][data-mode="open_interpreter"] .tlm-chat-drawer,

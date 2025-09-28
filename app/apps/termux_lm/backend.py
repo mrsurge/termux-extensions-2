@@ -84,6 +84,8 @@ def _write_model_manifest(model: Dict[str, Any]) -> Dict[str, Any]:
         "provider": model.get("provider"),
         "api_key": model.get("api_key"),
         "endpoint": model.get("endpoint"),
+        "remote_model": model.get("remote_model"),
+        "reasoning_effort": model.get("reasoning_effort"),
         "context_window": model.get("context_window") or 4096,
         "threads": model.get("threads"),
         "gpu_layers": model.get("gpu_layers"),
@@ -105,11 +107,15 @@ def _load_model(model_id: str) -> Dict[str, Any] | None:
 
 
 def _load_models() -> List[Dict[str, Any]]:
+    state = _load_state()
+    remote_ready_map = state.get("remote_ready_map") or {}
     manifests: List[Dict[str, Any]] = []
     for manifest_path in MODELS_DIR.glob("*/model.json"):
         model_id = manifest_path.parent.name
         data = _load_model(model_id)
         if data:
+            if data.get("type") == "remote":
+                data["remote_ready"] = bool(remote_ready_map.get(model_id))
             manifests.append(data)
     return sorted(manifests, key=lambda item: item.get("updated_at", 0), reverse=True)
 
@@ -120,11 +126,20 @@ def _load_state() -> Dict[str, Any]:
     state.setdefault("active_session_id", None)
     state.setdefault("run_mode", "chat")
     state.setdefault("shell_id", None)
+    state.setdefault("remote_ready_map", {})
     return state
 
 
 def _save_state(state: Dict[str, Any]) -> None:
     _write_json(STATE_PATH, state)
+
+
+def _set_remote_ready(state: Dict[str, Any], model_id: str | None, value: bool) -> None:
+    if not model_id:
+        return
+    remote_map = state.get("remote_ready_map") or {}
+    remote_map[model_id] = bool(value)
+    state["remote_ready_map"] = remote_map
 
 
 def _cleanup_state(manager, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -242,10 +257,17 @@ def _state_payload(manager, state: Dict[str, Any]) -> Dict[str, Any]:
         else:
             state["shell_id"] = None
             _save_state(state)
+    model_id = state.get("active_model_id")
+    model = _load_model(model_id) if model_id else None
+    remote_map = state.get("remote_ready_map") or {}
+    current_remote_ready = bool(remote_map.get(model_id)) if model and model.get("type") == "remote" else False
     return {
         "active_model_id": state.get("active_model_id"),
         "active_session_id": state.get("active_session_id"),
         "run_mode": state.get("run_mode", "chat"),
+        "model_type": model.get("type") if model else None,
+        "remote_ready": current_remote_ready,
+        "remote_ready_map": remote_map,
         "shell": shell_payload,
     }
 
@@ -259,7 +281,7 @@ def _llama_chat_completion(model: Dict[str, Any], session: Dict[str, Any], promp
     messages.append({"role": "user", "content": prompt})
     payload = json.dumps({
         "model": model.get("name") or model.get("id"),
-        "messages": messages,
+        "messages": session.get("messages") or [],
         "stream": False,
     }).encode("utf-8")
 
@@ -302,7 +324,7 @@ def _llama_stream_completion(
     payload = json.dumps(
         {
             "model": model.get("name") or model.get("id"),
-            "messages": messages,
+            "messages": session.get("messages") or [],
             "stream": True,
         }
     ).encode("utf-8")
@@ -368,6 +390,146 @@ def _sse(payload: Dict[str, Any], event: Optional[str] = None) -> str:
     if event:
         return f"event: {event}\ndata: {data}\n\n"
     return f"data: {data}\n\n"
+
+
+def _remote_endpoint(model: Dict[str, Any]) -> str:
+    endpoint = (model.get("endpoint") or "").strip()
+    if not endpoint:
+        raise RuntimeError("remote model missing endpoint")
+    base = endpoint.rstrip("/")
+    if base.endswith("/chat/completions"):
+        return base
+    if base.endswith("/v1"):
+        return base + "/chat/completions"
+    return base + "/v1/chat/completions"
+
+
+def _remote_headers(model: Dict[str, Any]) -> Dict[str, str]:
+    api_key = (model.get("api_key") or "").strip()
+    if not api_key:
+        raise RuntimeError("remote model missing api_key")
+    headers: Dict[str, str] = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    provider = (model.get("provider") or "").strip().lower()
+    if provider == "openrouter" or "openrouter" in (model.get("endpoint") or "").lower():
+        headers.setdefault("HTTP-Referer", "https://termux.app")
+        headers.setdefault("X-Title", "Termux-LM")
+    return headers
+
+
+def _remote_payload(
+    model: Dict[str, Any],
+    session: Dict[str, Any],
+    stream: bool,
+    prompt: str,
+) -> Dict[str, Any]:
+    messages = list(session.get("messages") or [])
+    payload: Dict[str, Any] = {
+        "model": model.get("remote_model") or model.get("name") or model.get("id"),
+        "messages": messages,
+        "stream": stream,
+    }
+    effort = model.get("reasoning_effort")
+    if isinstance(effort, str) and effort.strip():
+        try:
+            effort = int(effort.strip())
+        except ValueError:
+            effort = None
+    if isinstance(effort, (int, float)) and effort > 0:
+        payload["reasoning"] = {"effort": int(effort)}
+    return payload
+
+
+def _remote_chat_completion(model: Dict[str, Any], session: Dict[str, Any], prompt: str) -> str:
+    url = _remote_endpoint(model)
+    headers = _remote_headers(model)
+    payload = _remote_payload(model, session, stream=False, prompt=prompt)
+    payload["messages"].append({"role": "user", "content": prompt})
+    data = json.dumps(payload).encode("utf-8")
+    request_obj = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request_obj, timeout=120) as response:
+            body = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"HTTP {exc.code}: {detail}")
+    except Exception as exc:  # pragma: no cover - network failure path
+        raise RuntimeError(str(exc))
+
+    try:
+        data = json.loads(body)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to decode remote response: {exc}")
+
+    choices = data.get("choices")
+    if not choices:
+        raise RuntimeError("remote provider returned no choices")
+    message = choices[0].get("message") or choices[0].get("delta") or {}
+    content = message.get("content")
+    if not isinstance(content, str):
+        raise RuntimeError("remote provider response missing content")
+    return content
+
+
+def _remote_stream_completion(
+    model: Dict[str, Any],
+    session: Dict[str, Any],
+    prompt: str,
+) -> Iterable[Dict[str, Any]]:
+    url = _remote_endpoint(model)
+    headers = _remote_headers(model)
+    payload = _remote_payload(model, session, stream=True, prompt=prompt)
+    payload["messages"].append({"role": "user", "content": prompt})
+    data = json.dumps(payload).encode("utf-8")
+    request_obj = urllib.request.Request(url, data=data, headers=headers, method="POST")
+
+    try:
+        response = urllib.request.urlopen(request_obj, timeout=600)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"HTTP {exc.code}: {detail}")
+    except Exception as exc:
+        raise RuntimeError(str(exc))
+
+    decoder = lambda chunk: chunk.decode("utf-8", errors="ignore")
+    buffer = ""
+    try:
+        with response:
+            while True:
+                raw = response.readline()
+                if not raw:
+                    break
+                piece = decoder(raw)
+                buffer += piece
+                while "\n\n" in buffer:
+                    block, buffer = buffer.split("\n\n", 1)
+                    line = block.strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload_str = line[5:].strip()
+                    if not payload_str:
+                        continue
+                    if payload_str == "[DONE]":
+                        yield {"type": "done"}
+                        continue
+                    try:
+                        data = json.loads(payload_str)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = data.get("choices")
+                    if not isinstance(choices, list) or not choices:
+                        continue
+                    delta = choices[0].get("delta") or choices[0].get("message") or {}
+                    content = delta.get("content")
+                    if isinstance(content, str) and content:
+                        yield {"type": "token", "content": content}
+    finally:
+        try:
+            response.close()
+        except Exception:
+            pass
 
 
 # ----------------------------------------------------------------------------
@@ -438,7 +600,7 @@ def delete_model(model_id: str) -> Any:
         state["active_model_id"] = None
         state["active_session_id"] = None
         state["shell_id"] = None
-        _save_state(state)
+    _save_state(state)
 
     return jsonify({"ok": True, "data": {"deleted": model_id}})
 
@@ -476,6 +638,10 @@ def load_model(model_id: str) -> Any:
         state["shell_id"] = None
 
     state["active_model_id"] = model_id
+    if model.get("type") == "remote":
+        _set_remote_ready(state, model_id, True)
+    else:
+        _set_remote_ready(state, model_id, False)
     _save_state(state)
 
     payload = _state_payload(manager, state)
@@ -493,6 +659,7 @@ def unload_model(model_id: str) -> Any:
         state["active_model_id"] = None
         state["active_session_id"] = None
         state["shell_id"] = None
+        _set_remote_ready(state, model_id, False)
         _save_state(state)
     payload = _state_payload(manager, state)
     return jsonify({"ok": True, "data": payload})
@@ -521,7 +688,7 @@ def sessions_index(model_id: str) -> Any:
     return jsonify({"ok": True, "data": session})
 
 
-@termux_lm_bp.route("/models/<model_id>/sessions/<session_id>", methods=["GET", "DELETE"])
+@termux_lm_bp.route("/models/<model_id>/sessions/<session_id>", methods=["GET", "DELETE", "POST"])
 def sessions_detail(model_id: str, session_id: str) -> Any:
     path = _session_path(model_id, session_id)
     session = _read_json(path)
@@ -533,6 +700,16 @@ def sessions_detail(model_id: str, session_id: str) -> Any:
 
     if request.method == 'GET':
         return jsonify({"ok": True, "data": session})
+
+    if request.method == 'POST':
+        payload = request.get_json(silent=True) or {}
+        title = payload.get("title")
+        if not isinstance(title, str) or not title.strip():
+            return jsonify({"ok": False, "error": "title is required"}), 400
+        session["title"] = title.strip()
+        session["id"] = session_id
+        updated = _save_session(model_id, session)
+        return jsonify({"ok": True, "data": updated})
 
     # DELETE
     path.unlink(missing_ok=True)
@@ -591,11 +768,16 @@ def sessions_chat(model_id: str, session_id: str) -> Any:
     if not user_added:
         return jsonify({"ok": False, "error": "failed to record message"}), 500
 
+    is_remote = model.get("type") == "remote"
+
     if not stream:
         try:
-            assistant = _llama_chat_completion(model, user_added, clean_prompt)
+            if is_remote:
+                assistant = _remote_chat_completion(model, user_added, clean_prompt)
+            else:
+                assistant = _llama_chat_completion(model, user_added, clean_prompt)
         except RuntimeError as exc:
-            current_app.logger.error("termux_lm: llama completion failed: %s", exc)
+            current_app.logger.error("termux_lm: chat completion failed: %s", exc)
             return jsonify({"ok": False, "error": str(exc)}), 500
 
         updated = _append_message(model_id, session_id, "assistant", assistant)
@@ -608,7 +790,8 @@ def sessions_chat(model_id: str, session_id: str) -> Any:
         assistant_chunks: List[str] = []
         _append_stream_log(model_id, session_id, f"start:{clean_prompt}")
         try:
-            for event in _llama_stream_completion(model, user_added, clean_prompt):
+            iterator = _remote_stream_completion(model, user_added, clean_prompt) if is_remote else _llama_stream_completion(model, user_added, clean_prompt)
+            for event in iterator:
                 if event.get("type") == "token":
                     token = event.get("content", "")
                     if token:
@@ -619,7 +802,7 @@ def sessions_chat(model_id: str, session_id: str) -> Any:
                     _append_stream_log(model_id, session_id, "done")
                     yield _sse({"type": "done"})
         except RuntimeError as exc:
-            current_app.logger.error("termux_lm: llama streaming failed: %s", exc)
+            current_app.logger.error("termux_lm: streaming failed: %s", exc)
             _append_stream_log(model_id, session_id, f"error:{exc}")
             yield _sse({"type": "error", "message": str(exc)})
             return
