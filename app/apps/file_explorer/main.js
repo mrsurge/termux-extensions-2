@@ -994,8 +994,12 @@ export default function initFileExplorer(root, api, host) {
         if (response.target_type === 'directory') {
           loadDirectory(response.target);
         } else if (response.target_type === 'file') {
-          // Open target file in editor
-          window.location.href = `/app/file_editor?file=${encodeURIComponent(response.target)}`;
+          if (isArchive(response.target)) {
+            await launchArchiveManager({ path: response.target, name: response.target.split('/').pop() || response.target });
+          } else {
+            // Open target file in editor
+            window.location.href = `/app/file_editor?file=${encodeURIComponent(response.target)}`;
+          }
         } else if (response.target_type === 'symlink') {
           toast(host, 'Target is another symlink. Following...');
           // Follow chain of symlinks
@@ -1025,6 +1029,10 @@ export default function initFileExplorer(root, api, host) {
     } else if (state.selected.type === 'directory') {
       loadDirectory(state.selected.path);
     } else {
+      if (isArchive(state.selected.name)) {
+        await launchArchiveManager(state.selected);
+        return;
+      }
       // Check if file can be edited
       if (!isEditableFile(state.selected.name)) {
         toast(host, 'This file type cannot be opened in the text editor');
@@ -1043,19 +1051,46 @@ export default function initFileExplorer(root, api, host) {
 
   async function openSelectedInEditor() {
     if (!state.selected) return;
-    const entry = state.selected;
-    if (entry.type === 'symlink') {
-      await followSymlink(entry);
-      return;
-    }
-    if (entry.type !== 'file') {
+
+    let targetPath = state.selected.path;
+    let targetName = state.selected.name;
+
+    if (state.selected.type === 'directory') {
       toast(host, 'Select a file to open in the editor');
       return;
     }
 
-    let size = Number(entry.size);
-    if (!Number.isFinite(size) || size <= 0) {
-      const meta = await fetchProperties(entry);
+    if (state.selected.type === 'symlink') {
+      try {
+        const info = await api.get(`resolve_symlink?path=${encodeURIComponent(state.selected.path)}`);
+        if (!info.target_exists) {
+          toast(host, 'Symlink target does not exist');
+          return;
+        }
+        if (info.target_type === 'directory') {
+          toast(host, 'Symlink points to a directory');
+          return;
+        }
+        if (info.target_type === 'symlink') {
+          toast(host, 'Symlink chain not supported for editor');
+          return;
+        }
+        targetPath = info.target;
+        targetName = info.target.split('/').pop() || info.target;
+      } catch (error) {
+        toast(host, error?.message || 'Failed to resolve symlink');
+        return;
+      }
+    }
+
+    if (isArchive(targetName)) {
+      toast(host, 'Open archives with the Archive Manager');
+      return;
+    }
+
+    let size = Number(state.selected.size);
+    if (state.selected.type === 'symlink' || !Number.isFinite(size) || size <= 0) {
+      const meta = await fetchProperties({ path: targetPath });
       if (!meta) return;
       size = Number(meta.size);
     }
@@ -1064,7 +1099,7 @@ export default function initFileExplorer(root, api, host) {
       return;
     }
 
-    openInEditor(entry.path);
+    openInEditor(targetPath);
   }
 
   async function extractArchive(entry) {
@@ -1082,8 +1117,21 @@ export default function initFileExplorer(root, api, host) {
       if (!dest || !dest.path) return;
 
       toast(host, 'Extracting archive…');
-      await api.post('extract', { source: entry.path, directory: dest.path });
-      toast(host, `Extracted "${entry.name}" to ${dest.path}`);
+      const response = await fetch('/api/app/archive_manager/archives/expand', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          archive_path: entry.path,
+          destination: dest.path,
+          options: { overwrite: 'rename', password: null },
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.ok === false) {
+        const message = body?.error || `Extraction failed (HTTP ${response.status})`;
+        throw new Error(message);
+      }
+      toast(host, `Archive extracted to ${dest.path}`);
 
       if (dest.path === state.currentPath) {
         await loadDirectory(state.currentPath);
@@ -1102,6 +1150,42 @@ export default function initFileExplorer(root, api, host) {
       return;
     }
     extractArchive(entry);
+  }
+
+  async function launchArchiveManager(targetEntry, options = {}) {
+    const archivePath = typeof targetEntry === 'string' ? targetEntry : targetEntry?.path;
+    if (!archivePath) {
+      toast(host, 'Archive path missing');
+      return;
+    }
+    const payload = {
+      archive_path: archivePath,
+      filesystem_path: state.currentPath,
+      show_hidden: !!(ui.toggleHidden && ui.toggleHidden.checked),
+    };
+    if (options.internal) payload.internal = options.internal;
+    if (options.destination) payload.destination = options.destination;
+
+    try {
+      closeAllMenus();
+      const response = await fetch('/api/app/archive_manager/archives/launch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.ok === false) {
+        const message = body?.error || `Failed to open archive (HTTP ${response.status})`;
+        throw new Error(message);
+      }
+      const data = body.data || {};
+      if (!data.app_url) {
+        throw new Error('Archive Manager did not provide a launch URL');
+      }
+      window.location.href = data.app_url;
+    } catch (error) {
+      toast(host, error?.message || 'Unable to open archive');
+    }
   }
 
   let propertiesContext = null;

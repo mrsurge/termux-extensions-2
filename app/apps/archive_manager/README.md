@@ -5,7 +5,7 @@ filesystem and archive contents using the Termux `7zz` binary. The backend also
 exposes endpoints other apps can reuse for compression and extraction tasks.
 
 ## Requirements
-- Termux package `p7zip` (provides the `7zz` executable) must be installed and
+- Official 7zip package for Termux (provides the `7zz` executable) must be installed and
   on the `PATH`.
 - All filesystem operations are restricted to the user home directory.
 
