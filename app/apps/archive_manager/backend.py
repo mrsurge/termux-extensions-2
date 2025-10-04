@@ -9,6 +9,8 @@ from urllib.parse import urlencode
 
 from flask import Blueprint, jsonify, request
 
+from app.jobs import register_job_handler
+
 archive_manager_bp = Blueprint("archive_manager_app", __name__)
 
 HOME_DIR = Path(os.path.expanduser("~")).resolve()
@@ -521,6 +523,51 @@ def expand_archive():
         "stdout": result.stdout,
         "stderr": result.stderr,
     })
+
+
+@register_job_handler("extract_archive")
+def job_extract_archive(ctx, params):
+    """Background job handler for archive extraction."""
+    raw_archive_path = params.get("archive_path")
+    items = params.get("items") or []
+    destination_raw = params.get("destination")
+    options = params.get("options") or {}
+
+    if not isinstance(raw_archive_path, str) or not raw_archive_path.strip():
+        raise ValueError("archive_path is required")
+    if destination_raw and not isinstance(destination_raw, str):
+        raise ValueError("destination must be a string")
+    if items and not isinstance(items, list):
+        raise ValueError("items must be a list")
+
+    archive_path = _resolve_user_path(raw_archive_path, must_exist=True)
+    destination = _resolve_user_path(destination_raw or str(archive_path.parent), must_exist=False)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    normalized_items: List[str] = []
+    for item in items:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("Invalid item entry")
+        normalized_items.append(item.strip().lstrip('/'))
+
+    ctx.set_message(f"Extracting {archive_path.name}…")
+    cmd = _build_extract_command(archive_path, normalized_items, destination, options)
+    result = _run_7zz(cmd, cwd=archive_path.parent)
+
+    truncated_stdout = result.stdout if len(result.stdout) <= 2000 else result.stdout[:2000] + "…"
+    truncated_stderr = result.stderr if len(result.stderr) <= 2000 else result.stderr[:2000] + "…"
+
+    ctx.finish(
+        message=f"Extracted to {destination}",
+        result={
+            "archive_path": str(archive_path),
+            "destination": str(destination),
+            "stdout": truncated_stdout,
+            "stderr": truncated_stderr,
+        },
+    )
+
+
 @archive_manager_bp.route("/archives/test", methods=["POST"])
 def test_archive():
     payload = request.get_json(silent=True) or {}

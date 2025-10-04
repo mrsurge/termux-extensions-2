@@ -19,10 +19,12 @@ sys.path.insert(0, project_root)
 
 from flask import Flask, render_template, jsonify, send_from_directory, send_file, request
 from app.framework_shells import framework_shells_bp, _manager, FrameworkShellManager
+from app.jobs import jobs_bp
 from flask_sock import Sock
 
 app = Flask(__name__)
 app.register_blueprint(framework_shells_bp)
+app.register_blueprint(jobs_bp, url_prefix="/api")
 # Initialize WebSocket support and expose to modules
 sock = Sock(app)
 app.config["SOCK"] = sock

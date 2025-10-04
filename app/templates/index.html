@@ -152,7 +152,6 @@
     .extension-content { padding: 12px; }
     .extension-content.collapsed { display: none; }
 
-    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: #333; color: #fff; padding: 10px 20px; border-radius: 6px; z-index: 1000; }
     </style>
 </head>
 <body>
@@ -164,19 +163,9 @@
     </div>
 
     <!-- Settings Gear Icon -->
+    <script type="module" src="/static/js/te_ui.js"></script>
     <script type="module" src="/static/js/file_picker.js"></script>
     <script type="module">
-        // --- Core UI Primitives ---
-        window.teUI = {
-            toast: (message, duration = 3000) => {
-                const toast = document.createElement('div');
-                toast.className = 'toast';
-                toast.textContent = message;
-                document.body.appendChild(toast);
-                setTimeout(() => toast.remove(), duration);
-            }
-        };
-
         window.teFetch = async (url, options) => {
             const response = await fetch(url, options);
             const body = await response.json().catch(() => ({}));

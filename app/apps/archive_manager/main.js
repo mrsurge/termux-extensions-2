@@ -1,3 +1,5 @@
+import { createJobPoller, cancelJob, deleteJob } from '/static/js/jobs_client.js';
+
 const DEFAULT_STATE = {
   mode: 'filesystem',
   cwd: '~',
@@ -253,6 +255,178 @@ function useToast(host, message, duration = 2500) {
   } else {
     console.log('[toast]', message);
   }
+}
+
+async function createJobRequest(type, params) {
+  const response = await fetch('/api/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, params }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body?.ok === false) {
+    throw new Error(body?.error || `HTTP ${response.status}`);
+  }
+  return body.data || body;
+}
+
+const JobStatus = {
+  PENDING: 'pending',
+  RUNNING: 'running',
+  SUCCEEDED: 'succeeded',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled',
+};
+
+const TERMINAL_STATUSES = new Set([
+  JobStatus.SUCCEEDED,
+  JobStatus.FAILED,
+  JobStatus.CANCELLED,
+]);
+
+const jobTracker = {
+  poller: null,
+  jobs: new Map(),
+};
+
+function ensureJobPoller(state) {
+  if (!jobTracker.poller) {
+    jobTracker.poller = createJobPoller({
+      onUpdate: (jobs) => handleJobUpdates(state, jobs),
+      onError: (err) => console.error('[archive jobs]', err),
+    });
+  }
+  if (!jobTracker.poller.isRunning()) {
+    jobTracker.poller.start();
+  }
+}
+
+function maybeStopJobPoller() {
+  if (jobTracker.poller && jobTracker.poller.isRunning() && jobTracker.jobs.size === 0) {
+    jobTracker.poller.stop();
+  }
+}
+
+function trackExtractionJob(state, job, meta) {
+  const info = {
+    meta,
+    lastStatus: job.status,
+    cleaned: false,
+  };
+  jobTracker.jobs.set(job.id, info);
+  updateJobNotification(state, job, info);
+  ensureJobPoller(state);
+}
+
+function handleJobUpdates(state, jobs) {
+  if (!Array.isArray(jobs)) return;
+  const jobMap = new Map(jobs.map((job) => [job.id, job]));
+  for (const [jobId, info] of jobTracker.jobs.entries()) {
+    const job = jobMap.get(jobId);
+    if (!job) {
+      window.teUI?.dismiss?.(jobId);
+      jobTracker.jobs.delete(jobId);
+      continue;
+    }
+    updateJobNotification(state, job, info);
+  }
+  maybeStopJobPoller();
+}
+
+function updateJobNotification(state, job, info) {
+  const meta = info.meta;
+  const title = meta.archiveName ? `Extract ${meta.archiveName}` : 'Extract archive';
+  let message = meta.destination ? `→ ${meta.destination}` : 'Running';
+  let variant = 'info';
+  const actions = [];
+
+  if (job.message) {
+    message = job.message;
+  }
+  if (job.status === JobStatus.SUCCEEDED) {
+    variant = 'success';
+    message = job.message || `Extracted to ${meta.destination}`;
+  } else if (job.status === JobStatus.FAILED) {
+    variant = 'error';
+    message = job.error || 'Extraction failed';
+  } else if (job.status === JobStatus.CANCELLED) {
+    variant = 'warning';
+    message = job.message || 'Extraction cancelled';
+  }
+
+  if (job.status === JobStatus.RUNNING || job.status === JobStatus.PENDING) {
+    actions.push({
+      label: 'Cancel',
+      onClick: async () => {
+        try {
+          await cancelJob(job.id);
+          useToast(state.host, 'Cancellation requested.');
+        } catch (error) {
+          useToast(state.host, error?.message || 'Failed to cancel job.');
+        }
+      },
+    });
+  }
+
+  const progress = job.progress && typeof job.progress === 'object' ? job.progress : undefined;
+
+  if (window.teUI && typeof window.teUI.notify === 'function') {
+    window.teUI.notify({
+      id: job.id,
+      title,
+      message,
+      variant,
+      status: job.status,
+      progress,
+      actions,
+      onDismiss: () => {
+        jobTracker.jobs.delete(job.id);
+        if (TERMINAL_STATUSES.has(job.status)) {
+          deleteJob(job.id).catch(() => {});
+        }
+        maybeStopJobPoller();
+      },
+    });
+  }
+
+  if (info.lastStatus !== job.status && TERMINAL_STATUSES.has(job.status)) {
+    scheduleJobCleanup(state, job, info);
+  }
+
+  info.lastStatus = job.status;
+}
+
+function scheduleJobCleanup(state, job, info) {
+  if (info.cleaned) return;
+  info.cleaned = true;
+
+  const meta = info.meta;
+  let toastMessage = job.message;
+  if (!toastMessage) {
+    if (job.status === JobStatus.SUCCEEDED) {
+      toastMessage = meta.destination
+        ? `Extracted to ${meta.destination}`
+        : 'Extraction completed.';
+    } else if (job.status === JobStatus.FAILED) {
+      toastMessage = job.error || 'Extraction failed.';
+    } else {
+      toastMessage = 'Extraction cancelled.';
+    }
+  }
+  useToast(state.host, toastMessage, 3500);
+
+  if (job.status === JobStatus.SUCCEEDED) {
+    if (state.mode === 'filesystem' && state.cwd === meta.destination) {
+      state.refresh();
+    }
+  }
+
+  setTimeout(() => {
+    window.teUI?.dismiss?.(job.id);
+    jobTracker.jobs.delete(job.id);
+    deleteJob(job.id).catch(() => {});
+    maybeStopJobPoller();
+  }, 4000);
 }
 
 function transformEntries(state, data) {
@@ -513,17 +687,24 @@ export default async function init(root, api, host) {
       return;
     }
     try {
-      await state.client.extractArchive({
+      const job = await createJobRequest('extract_archive', {
         archive_path: state.archivePath,
         items,
         destination: destinationPath,
         options: {},
       });
-      useToast(host, 'Extraction completed.');
+      const archiveName = state.archivePath ? state.archivePath.split('/').pop() || state.archivePath : 'archive';
+      trackExtractionJob(state, job, {
+        archivePath: state.archivePath,
+        archiveName,
+        destination: destinationPath,
+        itemCount: items.length,
+      });
+      useToast(host, 'Extraction started.');
       state.clearSelection();
       persistState(host, state);
     } catch (error) {
-      useToast(host, error?.message || 'Extraction failed.');
+      useToast(host, error?.message || 'Failed to start extraction.');
     }
   };
 

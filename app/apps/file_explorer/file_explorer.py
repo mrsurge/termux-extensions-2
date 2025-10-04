@@ -85,7 +85,7 @@ def _scandir_with_sudo(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
     script = (
         "import json, os, sys, pwd, grp\n"
         f"path = {json.dumps(str(path))}\n"
-        f"show_hidden = {json.dumps(bool(show_hidden))}\n"
+        f"show_hidden = {repr(bool(show_hidden))}\n"
         "entries = []\n"
         "try:\n"
         "    with os.scandir(path) as iterator:\n"
