@@ -22,8 +22,8 @@ export default function(container) {
 
       const icon = document.createElement('div');
       icon.className = 'app-icon';
-      // Fallback icon: first letter of name or generic emoji
-      const label = (app.icon_emoji) ? app.icon_emoji : ((app.name || app.id || '?').trim()[0] || '📦');
+      // Use icon_emoji if available, otherwise fallback to first letter
+      const label = app.icon_emoji || ((app.name || app.id || '?').trim()[0] || '📦');
       icon.textContent = label;
 
       const title = document.createElement('div');

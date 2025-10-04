@@ -1,0 +1,154 @@
+<style>
+.am-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100%;
+}
+.am-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--card, #111827);
+  border-bottom: 1px solid var(--border, #1f2937);
+}
+.am-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.am-toolbar button,
+.am-toolbar .am-toggle,
+.am-toolbar select {
+  background: var(--secondary, #1f2937);
+  color: var(--foreground, #f9fafb);
+  border: 1px solid var(--border, #374151);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+.am-toolbar button:hover,
+.am-toolbar .am-toggle:hover,
+.am-toolbar select:hover {
+  border-color: var(--primary, #3b82f6);
+}
+.am-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.am-breadcrumbs {
+  padding: 8px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.9rem;
+  color: var(--muted-foreground, #94a3b8);
+}
+.am-crumb {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.am-crumb.current {
+  cursor: default;
+  font-weight: 600;
+  color: var(--foreground, #f9fafb);
+}
+.am-content {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 12px 16px;
+  display: flex;
+  flex-direction: column;
+}
+.am-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.am-card {
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 12px;
+  background: var(--card, #111827);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.am-card.selected {
+  border-color: var(--primary, #3b82f6);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35);
+}
+.am-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.am-card-meta {
+  font-size: 0.8rem;
+  color: var(--muted-foreground, #94a3b8);
+}
+.am-placeholder {
+  padding: 32px 0;
+  text-align: center;
+  color: var(--muted-foreground, #94a3b8);
+}
+.am-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.am-actions button {
+  padding: 6px 10px;
+}
+.am-hidden {
+  display: none !important;
+}
+</style>
+
+<div class="am-app" data-role="archive-app">
+  <div class="am-toolbar">
+    <div class="am-toolbar-row am-toolbar-primary">
+      <button type="button" data-action="new-archive">New Archive</button>
+      <button type="button" data-action="extract" disabled>Extract Selected</button>
+      <button type="button" data-action="add-to-archive" disabled>Add to Archive</button>
+      <span class="am-toggle">
+        <input type="checkbox" id="am-show-hidden" />
+        <label for="am-show-hidden">Show hidden</label>
+      </span>
+      <button type="button" data-action="pick-target">Pick Destination</button>
+      <button type="button" data-action="exit-archive" class="am-exit-archive am-hidden">Back to Filesystem</button>
+    </div>
+  </div>
+
+  <nav class="am-breadcrumbs" data-role="breadcrumbs">
+    <span class="am-crumb current" data-path="/">/</span>
+  </nav>
+
+  <section class="am-content">
+    <div class="am-grid" data-role="entry-grid"></div>
+    <div class="am-placeholder" data-role="empty-state">Select a directory or archive to begin.</div>
+  </section>
+</div>
+
+<template id="am-entry-card">
+  <article class="am-card">
+    <div class="am-card-header">
+      <span class="am-card-title"></span>
+      <input type="checkbox" class="am-card-select" />
+    </div>
+    <div class="am-card-meta" data-role="meta"></div>
+    <div class="am-actions">
+      <button type="button" data-action="open">Open</button>
+    </div>
+  </article>
+</template>

@@ -1,6 +1,7 @@
 {
   "id": "termux_lm",
   "name": "Termux-LM",
+  "icon_emoji": "🤖",
   "version": "0.1.0",
   "description": "Local and remote LLM management with chat sessions for Termux",
   "entrypoints": {

@@ -47,6 +47,57 @@ const ARCHIVE_EXTENSIONS = new Set([
   '.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.rar'
 ]);
 
+const OWNER_BITS = { read: 0o400, write: 0o200, exec: 0o100 };
+const GROUP_BITS = { read: 0o040, write: 0o020, exec: 0o010 };
+const OTHER_BITS = { read: 0o004, write: 0o002, exec: 0o001 };
+const MAX_EDITOR_SIZE = 256 * 1024; // 256 KB threshold
+
+function permissionsToMode(perms) {
+  if (!perms) return 0;
+  let mode = 0;
+  const owner = perms.owner || {};
+  const group = perms.group || {};
+  const others = perms.others || {};
+  if (owner.read) mode |= OWNER_BITS.read;
+  if (owner.write) mode |= OWNER_BITS.write;
+  if (owner.exec) mode |= OWNER_BITS.exec;
+  if (group.read) mode |= GROUP_BITS.read;
+  if (group.write) mode |= GROUP_BITS.write;
+  if (group.exec) mode |= GROUP_BITS.exec;
+  if (others.read) mode |= OTHER_BITS.read;
+  if (others.write) mode |= OTHER_BITS.write;
+  if (others.exec) mode |= OTHER_BITS.exec;
+  return mode;
+}
+
+function modeToPermissions(mode) {
+  const value = Number.isFinite(mode) ? mode : parseInt(`${mode}`, 8);
+  const safe = Number.isFinite(value) ? value : 0;
+  const has = (flag) => (safe & flag) === flag;
+  return {
+    owner: {
+      read: has(OWNER_BITS.read),
+      write: has(OWNER_BITS.write),
+      exec: has(OWNER_BITS.exec),
+    },
+    group: {
+      read: has(GROUP_BITS.read),
+      write: has(GROUP_BITS.write),
+      exec: has(GROUP_BITS.exec),
+    },
+    others: {
+      read: has(OTHER_BITS.read),
+      write: has(OTHER_BITS.write),
+      exec: has(OTHER_BITS.exec),
+    },
+  };
+}
+
+function joinPath(dir, name) {
+  if (!dir || dir === '/') return `/${name}`;
+  return `${dir.replace(/\/+$/, '')}/${name}`;
+}
+
 function isArchive(filename) {
   if (!filename) return false;
   const name = filename.toLowerCase();
@@ -97,6 +148,37 @@ function formatDate(mtime) {
   }
 }
 
+function modeToString(mode, type) {
+  if (!Number.isFinite(mode)) return '----------';
+  
+  // File type character
+  let str = '';
+  if (type === 'directory') str = 'd';
+  else if (type === 'symlink') str = 'l';
+  else str = '-';
+  
+  // Permission bits
+  const perms = [
+    (mode & 0o400) ? 'r' : '-',
+    (mode & 0o200) ? 'w' : '-',
+    (mode & 0o100) ? 'x' : '-',
+    (mode & 0o040) ? 'r' : '-',
+    (mode & 0o020) ? 'w' : '-',
+    (mode & 0o010) ? 'x' : '-',
+    (mode & 0o004) ? 'r' : '-',
+    (mode & 0o002) ? 'w' : '-',
+    (mode & 0o001) ? 'x' : '-',
+  ];
+  
+  return str + perms.join('');
+}
+
+function formatOwnership(owner, group) {
+  const o = owner || '?';
+  const g = group || '?';
+  return `${o}:${g}`;
+}
+
 function toast(host, message) {
   if (!message) return;
   if (host && typeof host.toast === 'function') {
@@ -136,24 +218,91 @@ export default function initFileExplorer(root, api, host) {
     btnNewFolder: container.querySelector('[data-action="new-folder"]'),
     btnNewFile: container.querySelector('[data-action="new-file"]'),
     btnOpen: container.querySelector('[data-action="open"]'),
+    btnOpenEditor: container.querySelector('[data-action="open-editor"]'),
+    btnExtractArchive: container.querySelector('[data-action="extract-archive"]'),
+    btnProperties: container.querySelector('[data-action="properties"]'),
     btnRename: container.querySelector('[data-action="rename"]'),
     btnDelete: container.querySelector('[data-action="delete"]'),
     btnCopy: container.querySelector('[data-action="copy"]'),
     btnMove: container.querySelector('[data-action="move"]'),
     btnToggleView: container.querySelector('[data-action="toggle-view"]'),
     toggleHidden: container.querySelector('[data-action="toggle-hidden"]'),
+    selectAll: container.querySelector('[data-action="select-all"]'),
+    selectionCount: container.querySelector('.fx-selection-count'),
     sortSelect: container.querySelector('[data-action="sort-by"]'),
     btnSortDir: container.querySelector('[data-action="sort-dir"]'),
+    propertiesModal: container.querySelector('[data-modal="properties"]'),
+    propertiesOverlay: container.querySelector('[data-role="properties-overlay"]'),
+    propertiesPath: container.querySelector('[data-role="properties-path"]'),
+    propertiesNameInput: container.querySelector('[data-role="properties-name"]'),
+    propertiesRecurse: container.querySelector('[data-role="properties-recurse"]'),
+    propertiesOwnerInput: container.querySelector('[data-role="properties-owner-input"]'),
+    propertiesGroupInput: container.querySelector('[data-role="properties-group-input"]'),
+    propertiesOwnerCurrent: container.querySelector('[data-role="properties-owner-current"]'),
+    propertiesGroupCurrent: container.querySelector('[data-role="properties-group-current"]'),
+    propertiesClose: container.querySelector('[data-action="properties-close"]'),
+    propertiesCancel: container.querySelector('[data-action="properties-cancel"]'),
+    propertiesApply: container.querySelector('[data-action="properties-apply"]'),
+    propertiesPermOwnerRead: container.querySelector('[data-role="perm-owner-read"]'),
+    propertiesPermOwnerWrite: container.querySelector('[data-role="perm-owner-write"]'),
+    propertiesPermOwnerExec: container.querySelector('[data-role="perm-owner-exec"]'),
+    propertiesPermGroupRead: container.querySelector('[data-role="perm-group-read"]'),
+    propertiesPermGroupWrite: container.querySelector('[data-role="perm-group-write"]'),
+    propertiesPermGroupExec: container.querySelector('[data-role="perm-group-exec"]'),
+    propertiesPermOthersRead: container.querySelector('[data-role="perm-others-read"]'),
+    propertiesPermOthersWrite: container.querySelector('[data-role="perm-others-write"]'),
+    propertiesPermOthersExec: container.querySelector('[data-role="perm-others-exec"]'),
   };
+
+  const PROPERTIES_APPLY_DEFAULT_LABEL = ui.propertiesApply ? ui.propertiesApply.textContent : 'Apply';
+
+  function applyPermissionsToInputs(perms) {
+    const normalized = perms || {};
+    const owner = normalized.owner || {};
+    const group = normalized.group || {};
+    const others = normalized.others || {};
+    if (ui.propertiesPermOwnerRead) ui.propertiesPermOwnerRead.checked = !!owner.read;
+    if (ui.propertiesPermOwnerWrite) ui.propertiesPermOwnerWrite.checked = !!owner.write;
+    if (ui.propertiesPermOwnerExec) ui.propertiesPermOwnerExec.checked = !!owner.exec;
+    if (ui.propertiesPermGroupRead) ui.propertiesPermGroupRead.checked = !!group.read;
+    if (ui.propertiesPermGroupWrite) ui.propertiesPermGroupWrite.checked = !!group.write;
+    if (ui.propertiesPermGroupExec) ui.propertiesPermGroupExec.checked = !!group.exec;
+    if (ui.propertiesPermOthersRead) ui.propertiesPermOthersRead.checked = !!others.read;
+    if (ui.propertiesPermOthersWrite) ui.propertiesPermOthersWrite.checked = !!others.write;
+    if (ui.propertiesPermOthersExec) ui.propertiesPermOthersExec.checked = !!others.exec;
+  }
+
+  function getPermissionsFromInputs() {
+    return {
+      owner: {
+        read: ui.propertiesPermOwnerRead ? ui.propertiesPermOwnerRead.checked : false,
+        write: ui.propertiesPermOwnerWrite ? ui.propertiesPermOwnerWrite.checked : false,
+        exec: ui.propertiesPermOwnerExec ? ui.propertiesPermOwnerExec.checked : false,
+      },
+      group: {
+        read: ui.propertiesPermGroupRead ? ui.propertiesPermGroupRead.checked : false,
+        write: ui.propertiesPermGroupWrite ? ui.propertiesPermGroupWrite.checked : false,
+        exec: ui.propertiesPermGroupExec ? ui.propertiesPermGroupExec.checked : false,
+      },
+      others: {
+        read: ui.propertiesPermOthersRead ? ui.propertiesPermOthersRead.checked : false,
+        write: ui.propertiesPermOthersWrite ? ui.propertiesPermOthersWrite.checked : false,
+        exec: ui.propertiesPermOthersExec ? ui.propertiesPermOthersExec.checked : false,
+      },
+    };
+  }
 
   const state = {
     currentPath: prefs.path,
     entries: [],
     selected: null,
+    selectedPaths: new Set(), // For batch operations
     view: prefs.view,
     sortBy: prefs.sortBy,
     sortAsc: prefs.sortAsc,
   };
+
+  const menuGroups = Array.from(container.querySelectorAll('.fx-menu-group'));
 
   if (ui.toggleHidden) {
     ui.toggleHidden.checked = prefs.showHidden;
@@ -195,20 +344,89 @@ export default function initFileExplorer(root, api, host) {
 
   function clearSelection() {
     state.selected = null;
+    state.selectedPaths.clear();
     container.querySelectorAll('.fx-item.selected, .fx-tile.selected').forEach((el) => {
       el.classList.remove('selected');
     });
+    container.querySelectorAll('.fx-checkbox input[type="checkbox"]').forEach((cb) => {
+      cb.checked = false;
+    });
+    if (ui.selectAll) ui.selectAll.checked = false;
+    updateSelectionCount();
+    updateActionButtons();
+  }
+  
+  function updateSelectionCount() {
+    const count = state.selectedPaths.size;
+    if (ui.selectionCount) {
+      if (count > 0) {
+        ui.selectionCount.textContent = `${count} selected`;
+        ui.selectionCount.style.display = 'inline';
+      } else {
+        ui.selectionCount.style.display = 'none';
+      }
+    }
+  }
+  
+  function toggleItemSelection(path, checked) {
+    if (checked) {
+      state.selectedPaths.add(path);
+    } else {
+      state.selectedPaths.delete(path);
+    }
+    updateSelectionCount();
+    updateActionButtons();
+    
+    // Update select all checkbox state
+    if (ui.selectAll) {
+      const total = state.entries.length;
+      const selected = state.selectedPaths.size;
+      ui.selectAll.checked = selected > 0 && selected === total;
+      ui.selectAll.indeterminate = selected > 0 && selected < total;
+    }
+  }
+  
+  function selectAllItems(checked) {
+    if (checked) {
+      // Select all items
+      state.entries.forEach(entry => {
+        state.selectedPaths.add(entry.path);
+      });
+      container.querySelectorAll('.fx-checkbox input[type="checkbox"]').forEach((cb) => {
+        cb.checked = true;
+      });
+    } else {
+      // Deselect all items
+      state.selectedPaths.clear();
+      container.querySelectorAll('.fx-checkbox input[type="checkbox"]').forEach((cb) => {
+        cb.checked = false;
+      });
+    }
+    updateSelectionCount();
     updateActionButtons();
   }
 
   function updateActionButtons() {
     const hasSelection = !!state.selected;
-    // Enable open button for files and symlinks (symlinks will be followed)
+    const hasBatchSelection = state.selectedPaths.size > 0;
+    const hasSingleSelection = state.selectedPaths.size === 1;
+    
+    // Open and properties only work with single selection
     if (ui.btnOpen) ui.btnOpen.disabled = !hasSelection;
-    if (ui.btnRename) ui.btnRename.disabled = !hasSelection;
-    if (ui.btnDelete) ui.btnDelete.disabled = !hasSelection;
-    if (ui.btnCopy) ui.btnCopy.disabled = !hasSelection;
-    if (ui.btnMove) ui.btnMove.disabled = !hasSelection;
+    const canOpenInEditor = hasSelection && state.selected.type === 'file' && isEditableFile(state.selected.name);
+    if (ui.btnOpenEditor) ui.btnOpenEditor.disabled = !canOpenInEditor;
+    const canExtract = hasSelection && state.selected.type === 'file' && isArchive(state.selected.name);
+    if (ui.btnExtractArchive) ui.btnExtractArchive.disabled = !canExtract;
+    if (ui.btnProperties) ui.btnProperties.disabled = !hasSelection;
+    
+    // Rename only works with single selection (either click or checkbox)
+    if (ui.btnRename) ui.btnRename.disabled = !(hasSelection || hasSingleSelection);
+    
+    // Copy, Move, Delete work with batch selections
+    if (ui.btnDelete) ui.btnDelete.disabled = !(hasSelection || hasBatchSelection);
+    if (ui.btnCopy) ui.btnCopy.disabled = !(hasSelection || hasBatchSelection);
+    if (ui.btnMove) ui.btnMove.disabled = !(hasSelection || hasBatchSelection);
+    
     if (ui.btnToggleView) {
       ui.btnToggleView.textContent = state.view === 'list' ? 'Grid View' : 'List View';
     }
@@ -219,6 +437,45 @@ export default function initFileExplorer(root, api, host) {
     if (ui.gridWrapper) ui.gridWrapper.style.display = state.view === 'grid' ? 'block' : 'none';
     updateActionButtons();
     persistState();
+  }
+
+  function closeAllMenus() {
+    menuGroups.forEach((group) => group.removeAttribute('data-open'));
+  }
+
+  const menuActions = {
+    'file:new-folder': () => createFolder(),
+    'file:new-file': () => createNewFile(),
+    'file:open': () => openSelected(),
+    'file:open-editor': () => openSelectedInEditor(),
+    'file:extract': () => extractSelectedArchive(),
+    'edit:properties': () => openSelectedProperties(),
+    'edit:rename': () => renameSelected(),
+    'edit:delete': () => deleteSelected(),
+    'edit:copy': () => copySelected(),
+    'edit:move': () => moveSelected(),
+    'view:grid': () => {
+      state.view = 'grid';
+      applyView();
+    },
+    'view:list': () => {
+      state.view = 'list';
+      applyView();
+    },
+  };
+
+  function handleMenuCommand(command) {
+    if (!command) return;
+    const action = menuActions[command];
+    if (!action) return;
+    try {
+      const result = action();
+      if (result && typeof result.then === 'function') {
+        result.catch(() => {});
+      }
+    } catch (error) {
+      toast(host, error?.message || 'Unable to complete action');
+    }
   }
 
   function renderBreadcrumbs() {
@@ -347,13 +604,23 @@ export default function initFileExplorer(root, api, host) {
       // Add archive badge if applicable
       const archiveBadge = isArchiveFile ? '<span class="fx-archive-badge">📦 Archive</span>' : '';
       
+      // Format permissions and ownership
+      const permStr = modeToString(entry.mode, entry.type);
+      const ownerStr = formatOwnership(entry.owner, entry.group);
+
       row.innerHTML = `
+        <span class="fx-checkbox">
+          <input type="checkbox" data-path="${entry.path}" aria-label="Select ${entry.name}">
+        </span>
         <span class="fx-icon">${TYPE_ICON[entry.type] || TYPE_ICON.unknown}</span>
-        <span class="fx-name">${nameDisplay}${archiveBadge}</span>
+        <div class="fx-name-group">
+          <span class="fx-name">${nameDisplay}</span>
+          ${archiveBadge}
+        </div>
+        <span class="fx-permissions">${permStr}</span>
+        <span class="fx-owner">${ownerStr}</span>
         <span class="fx-size">${isDir ? '' : formatSize(entry.size)}</span>
         <span class="fx-date">${formatDate(entry.mtime)}</span>
-        <button class="fx-menu-toggle">⋯</button>
-        <div class="fx-dropdown-menu"></div>
       `;
 
       // Create tile for grid view
@@ -362,156 +629,28 @@ export default function initFileExplorer(root, api, host) {
       if (isSymlink) tile.classList.add('fx-symlink');
       tile.innerHTML = `
         <div class="fx-icon-lg">${TYPE_ICON[entry.type] || TYPE_ICON.unknown}</div>
-        <div class="fx-name-tile">${nameDisplay}</div>
-        <button class="fx-menu-toggle">⋯</button>
-        <div class="fx-dropdown-menu"></div>
+        <div class="fx-name-tile">${nameDisplay}${archiveBadge}</div>
       `;
-
-      // Create menu items based on file type
-      const createMenuItems = (menuEl) => {
-        menuEl.innerHTML = '';
+      // Add checkbox event listener
+      const checkbox = row.querySelector('.fx-checkbox input[type="checkbox"]');
+      if (checkbox) {
+        checkbox.addEventListener('change', (e) => {
+          e.stopPropagation();
+          toggleItemSelection(entry.path, e.target.checked);
+        });
         
-        // Open/Follow actions
-        if (isDir) {
-          const openItem = document.createElement('button');
-          openItem.className = 'fx-menu-item';
-          openItem.innerHTML = '<span class="fx-menu-icon">📁</span> Open';
-          openItem.addEventListener('click', (e) => {
-            e.stopPropagation();
-            menuEl.classList.remove('active');
-            loadDirectory(entry.path);
-          });
-          menuEl.appendChild(openItem);
-        } else if (isSymlink) {
-          const followItem = document.createElement('button');
-          followItem.className = 'fx-menu-item';
-          followItem.innerHTML = '<span class="fx-menu-icon">🔗</span> Follow Link';
-          followItem.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            menuEl.classList.remove('active');
-            await followSymlink(entry);
-          });
-          menuEl.appendChild(followItem);
-        } else if (isFile) {
-          if (isEditable) {
-            const editItem = document.createElement('button');
-            editItem.className = 'fx-menu-item';
-            editItem.innerHTML = '<span class="fx-menu-icon">✏️</span> Open with Text Editor';
-            editItem.addEventListener('click', (e) => {
-              e.stopPropagation();
-              menuEl.classList.remove('active');
-              openInEditor(entry.path);
-            });
-            menuEl.appendChild(editItem);
-          }
-          
-          if (isArchiveFile) {
-            const extractItem = document.createElement('button');
-            extractItem.className = 'fx-menu-item';
-            extractItem.innerHTML = '<span class="fx-menu-icon">📤</span> Extract Archive';
-            extractItem.addEventListener('click', async (e) => {
-              e.stopPropagation();
-              menuEl.classList.remove('active');
-              await extractArchive(entry);
-            });
-            menuEl.appendChild(extractItem);
-          }
+        // Restore checked state if item was previously selected
+        if (state.selectedPaths.has(entry.path)) {
+          checkbox.checked = true;
         }
-        
-        // Divider
-        const divider = document.createElement('div');
-        divider.className = 'fx-menu-divider';
-        menuEl.appendChild(divider);
-        
-        // File operations
-        const copyItem = document.createElement('button');
-        copyItem.className = 'fx-menu-item';
-        copyItem.innerHTML = '<span class="fx-menu-icon">📋</span> Copy';
-        copyItem.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          menuEl.classList.remove('active');
-          state.selected = entry;
-          await copySelected();
-        });
-        menuEl.appendChild(copyItem);
-        
-        const moveItem = document.createElement('button');
-        moveItem.className = 'fx-menu-item';
-        moveItem.innerHTML = '<span class="fx-menu-icon">✂️</span> Move';
-        moveItem.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          menuEl.classList.remove('active');
-          state.selected = entry;
-          await moveSelected();
-        });
-        menuEl.appendChild(moveItem);
-        
-        const renameItem = document.createElement('button');
-        renameItem.className = 'fx-menu-item';
-        renameItem.innerHTML = '<span class="fx-menu-icon">🏷️</span> Rename';
-        renameItem.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          menuEl.classList.remove('active');
-          state.selected = entry;
-          await renameSelected();
-        });
-        menuEl.appendChild(renameItem);
-        
-        // Divider before delete
-        const divider2 = document.createElement('div');
-        divider2.className = 'fx-menu-divider';
-        menuEl.appendChild(divider2);
-        
-        const deleteItem = document.createElement('button');
-        deleteItem.className = 'fx-menu-item danger';
-        deleteItem.innerHTML = '<span class="fx-menu-icon">🗑️</span> Delete';
-        deleteItem.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          menuEl.classList.remove('active');
-          state.selected = entry;
-          await deleteSelected();
-        });
-        menuEl.appendChild(deleteItem);
-      };
+      }
       
-      // Setup menu toggles
-      const rowMenuBtn = row.querySelector('.fx-menu-toggle');
-      const rowMenu = row.querySelector('.fx-dropdown-menu');
-      const tileMenuBtn = tile.querySelector('.fx-menu-toggle');
-      const tileMenu = tile.querySelector('.fx-dropdown-menu');
-      
-      createMenuItems(rowMenu);
-      createMenuItems(tileMenu);
-      
-      // Menu toggle handlers
-      rowMenuBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const wasActive = rowMenu.classList.contains('active');
-        // Close all other menus
-        container.querySelectorAll('.fx-dropdown-menu.active').forEach(m => m.classList.remove('active'));
-        container.querySelectorAll('.fx-menu-toggle.active').forEach(b => b.classList.remove('active'));
-        if (!wasActive) {
-          rowMenu.classList.add('active');
-          rowMenuBtn.classList.add('active');
+      const handleSelect = (e) => {
+        // Don't select if clicking on checkbox
+        if (e.target.type === 'checkbox' || e.target.closest('.fx-checkbox')) {
+          return;
         }
-      });
-      
-      tileMenuBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const wasActive = tileMenu.classList.contains('active');
-        // Close all other menus
-        container.querySelectorAll('.fx-dropdown-menu.active').forEach(m => m.classList.remove('active'));
-        container.querySelectorAll('.fx-menu-toggle.active').forEach(b => b.classList.remove('active'));
-        if (!wasActive) {
-          tileMenu.classList.add('active');
-          tileMenuBtn.classList.add('active');
-        }
-      });
-      
-      const handleSelect = () => {
-        // Close any open menus when selecting
-        container.querySelectorAll('.fx-dropdown-menu.active').forEach(m => m.classList.remove('active'));
-        container.querySelectorAll('.fx-menu-toggle.active').forEach(b => b.classList.remove('active'));
+        closeAllMenus();
         selectEntry(entry, { row, tile });
       };
 
@@ -549,6 +688,7 @@ export default function initFileExplorer(root, api, host) {
 
   async function loadDirectory(targetPath) {
     const normalized = targetPath || state.currentPath || HOME_DIR;
+    closeAllMenus();
     clearSelection();
     setLoading();
     try {
@@ -650,6 +790,43 @@ export default function initFileExplorer(root, api, host) {
   }
 
   async function deleteSelected() {
+    // Check if we have batch selection
+    if (state.selectedPaths.size > 0) {
+      const count = state.selectedPaths.size;
+      const confirmed = confirm(`Delete ${count} selected item${count > 1 ? 's' : ''}? This cannot be undone.`);
+      if (!confirmed) return;
+      
+      let succeeded = 0;
+      let failed = 0;
+      const errors = [];
+      
+      // Process each selected item
+      for (const path of state.selectedPaths) {
+        try {
+          await api.post('delete', { path });
+          succeeded++;
+        } catch (error) {
+          failed++;
+          errors.push(`${path}: ${error?.message || 'Failed'}`);
+        }
+      }
+      
+      // Show results
+      if (succeeded > 0 && failed === 0) {
+        toast(host, `Successfully deleted ${succeeded} item${succeeded > 1 ? 's' : ''}`);
+      } else if (succeeded > 0 && failed > 0) {
+        toast(host, `Deleted ${succeeded} item${succeeded > 1 ? 's' : ''}, ${failed} failed`);
+        console.error('Delete errors:', errors);
+      } else {
+        toast(host, `Failed to delete ${failed} item${failed > 1 ? 's' : ''}`);
+      }
+      
+      clearSelection();
+      await loadDirectory(state.currentPath);
+      return;
+    }
+    
+    // Single selection fallback
     if (!state.selected) return;
     const confirmed = confirm(`Delete "${state.selected.name}"? This cannot be undone.`);
     if (!confirmed) return;
@@ -663,6 +840,60 @@ export default function initFileExplorer(root, api, host) {
   }
 
   async function copySelected() {
+    // Check if we have batch selection
+    if (state.selectedPaths.size > 0) {
+      if (!window.teFilePicker || typeof window.teFilePicker.openDirectory !== 'function') {
+        toast(host, 'File picker unavailable');
+        return;
+      }
+      
+      const count = state.selectedPaths.size;
+      try {
+        const choice = await window.teFilePicker.openDirectory({ 
+          title: `Copy ${count} item${count > 1 ? 's' : ''} to...`, 
+          startPath: state.currentPath 
+        });
+        if (!choice || !choice.path) return;
+        
+        let succeeded = 0;
+        let failed = 0;
+        const errors = [];
+        
+        // Process each selected item
+        for (const sourcePath of state.selectedPaths) {
+          try {
+            const filename = sourcePath.split('/').pop();
+            const destPath = `${choice.path}/${filename}`;
+            await api.post('copy', { source: sourcePath, dest: destPath });
+            succeeded++;
+          } catch (error) {
+            failed++;
+            errors.push(`${sourcePath}: ${error?.message || 'Failed'}`);
+          }
+        }
+        
+        // Show results
+        if (succeeded > 0 && failed === 0) {
+          toast(host, `Successfully copied ${succeeded} item${succeeded > 1 ? 's' : ''} to ${choice.path}`);
+        } else if (succeeded > 0 && failed > 0) {
+          toast(host, `Copied ${succeeded} item${succeeded > 1 ? 's' : ''}, ${failed} failed`);
+          console.error('Copy errors:', errors);
+        } else {
+          toast(host, `Failed to copy ${failed} item${failed > 1 ? 's' : ''}`);
+        }
+        
+        clearSelection();
+        if (choice.path === state.currentPath || parentPath(choice.path) === state.currentPath) {
+          await loadDirectory(state.currentPath);
+        }
+      } catch (error) {
+        if (error && error.message === 'cancelled') return;
+        toast(host, error?.message || 'Copy failed');
+      }
+      return;
+    }
+    
+    // Single selection fallback
     if (!state.selected) return;
     if (!window.teFilePicker || typeof window.teFilePicker.saveFile !== 'function') {
       toast(host, 'File picker unavailable');
@@ -689,6 +920,56 @@ export default function initFileExplorer(root, api, host) {
   }
 
   async function moveSelected() {
+    // Check if we have batch selection
+    if (state.selectedPaths.size > 0) {
+      if (!window.teFilePicker || typeof window.teFilePicker.openDirectory !== 'function') {
+        toast(host, 'File picker unavailable');
+        return;
+      }
+      
+      const count = state.selectedPaths.size;
+      try {
+        const choice = await window.teFilePicker.openDirectory({ 
+          title: `Move ${count} item${count > 1 ? 's' : ''} to...`, 
+          startPath: state.currentPath 
+        });
+        if (!choice || !choice.path) return;
+        
+        let succeeded = 0;
+        let failed = 0;
+        const errors = [];
+        
+        // Process each selected item
+        for (const sourcePath of state.selectedPaths) {
+          try {
+            await api.post('move', { source: sourcePath, dest: choice.path });
+            succeeded++;
+          } catch (error) {
+            failed++;
+            errors.push(`${sourcePath}: ${error?.message || 'Failed'}`);
+          }
+        }
+        
+        // Show results
+        if (succeeded > 0 && failed === 0) {
+          toast(host, `Successfully moved ${succeeded} item${succeeded > 1 ? 's' : ''} to ${choice.path}`);
+        } else if (succeeded > 0 && failed > 0) {
+          toast(host, `Moved ${succeeded} item${succeeded > 1 ? 's' : ''}, ${failed} failed`);
+          console.error('Move errors:', errors);
+        } else {
+          toast(host, `Failed to move ${failed} item${failed > 1 ? 's' : ''}`);
+        }
+        
+        clearSelection();
+        await loadDirectory(state.currentPath);
+      } catch (error) {
+        if (error && error.message === 'cancelled') return;
+        toast(host, error?.message || 'Move failed');
+      }
+      return;
+    }
+    
+    // Single selection fallback
     if (!state.selected) return;
     if (!window.teFilePicker || typeof window.teFilePicker.openDirectory !== 'function') {
       toast(host, 'File picker unavailable');
@@ -737,7 +1018,7 @@ export default function initFileExplorer(root, api, host) {
 
   async function openSelected() {
     if (!state.selected) return;
-    
+
     if (state.selected.type === 'symlink') {
       // Follow symlink to its target
       await followSymlink(state.selected);
@@ -759,18 +1040,313 @@ export default function initFileExplorer(root, api, host) {
     // Open file directly in the file_editor app
     window.location.href = `/app/file_editor?file=${encodeURIComponent(filePath)}`;
   }
-  
-  async function extractArchive(entry) {
-    // Placeholder for archive extraction
-    // TODO: Implement actual extraction logic
-    toast(host, `Archive extraction for "${entry.name}" - Feature coming soon!`);
-    
-    // Future implementation would:
-    // 1. Call backend extraction endpoint
-    // 2. Let user choose extraction location
-    // 3. Show progress
-    // 4. Refresh directory when done
+
+  async function openSelectedInEditor() {
+    if (!state.selected) return;
+    const entry = state.selected;
+    if (entry.type === 'symlink') {
+      await followSymlink(entry);
+      return;
+    }
+    if (entry.type !== 'file') {
+      toast(host, 'Select a file to open in the editor');
+      return;
+    }
+
+    let size = Number(entry.size);
+    if (!Number.isFinite(size) || size <= 0) {
+      const meta = await fetchProperties(entry);
+      if (!meta) return;
+      size = Number(meta.size);
+    }
+    if (Number.isFinite(size) && size > MAX_EDITOR_SIZE) {
+      toast(host, 'File is too large to open in the editor');
+      return;
+    }
+
+    openInEditor(entry.path);
   }
+
+  async function extractArchive(entry) {
+    if (!entry) return;
+    if (!window.teFilePicker || typeof window.teFilePicker.openDirectory !== 'function') {
+      toast(host, 'File picker unavailable');
+      return;
+    }
+    try {
+      const dest = await window.teFilePicker.openDirectory({
+        title: 'Extract Archive To…',
+        startPath: state.currentPath,
+        selectLabel: 'Extract Here',
+      });
+      if (!dest || !dest.path) return;
+
+      toast(host, 'Extracting archive…');
+      await api.post('extract', { source: entry.path, directory: dest.path });
+      toast(host, `Extracted "${entry.name}" to ${dest.path}`);
+
+      if (dest.path === state.currentPath) {
+        await loadDirectory(state.currentPath);
+      }
+    } catch (error) {
+      if (error && error.message === 'cancelled') return;
+      toast(host, error?.message || 'Extraction failed');
+    }
+  }
+
+  function extractSelectedArchive() {
+    if (!state.selected) return;
+    const entry = state.selected;
+    if (entry.type !== 'file' || !isArchive(entry.name)) {
+      toast(host, 'Select an archive to extract');
+      return;
+    }
+    extractArchive(entry);
+  }
+
+  let propertiesContext = null;
+
+  function setPropertiesModalOpen(open) {
+    if (!ui.propertiesModal) return;
+    if (open) {
+      ui.propertiesModal.dataset.open = 'true';
+      ui.propertiesModal.setAttribute('aria-hidden', 'false');
+    } else {
+      delete ui.propertiesModal.dataset.open;
+      ui.propertiesModal.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function openPropertiesModal(entry, metadata) {
+    if (!ui.propertiesModal || !entry) return;
+
+    const resolvedPath = metadata?.path || entry.path;
+    let modeValue = metadata?.mode_int;
+    if (!Number.isFinite(modeValue)) {
+      const modeString = metadata?.mode_octal || metadata?.mode || null;
+      const parsed = modeString ? parseInt(`${modeString}`.replace(/^0o/, ''), 8) : NaN;
+      modeValue = Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    const permissions = metadata?.permissions
+      ? JSON.parse(JSON.stringify(metadata.permissions))
+      : modeToPermissions(modeValue);
+
+    propertiesContext = {
+      entry: { ...entry },
+      metadata: {
+        ...(metadata || {}),
+        path: resolvedPath,
+        is_directory: metadata?.is_directory ?? entry.type === 'directory',
+        is_symlink: metadata?.is_symlink ?? entry.type === 'symlink',
+        mode_int: modeValue,
+        mode_octal: metadata?.mode_octal || modeValue.toString(8).padStart(3, '0'),
+        owner: metadata?.owner ?? '',
+        group: metadata?.group ?? '',
+        permissions,
+      },
+    };
+
+    if (ui.propertiesPath) {
+      ui.propertiesPath.textContent = resolvedPath;
+      ui.propertiesPath.title = `Permissions: ${propertiesContext.metadata.mode_octal}`;
+    }
+    if (ui.propertiesNameInput) {
+      ui.propertiesNameInput.value = metadata?.name || entry.name;
+      ui.propertiesNameInput.select?.();
+    }
+    const ownerValue = metadata?.owner ? String(metadata.owner) : '';
+    const groupValue = metadata?.group ? String(metadata.group) : '';
+    if (ui.propertiesOwnerInput) ui.propertiesOwnerInput.value = ownerValue;
+    if (ui.propertiesGroupInput) ui.propertiesGroupInput.value = groupValue;
+    if (ui.propertiesOwnerCurrent) ui.propertiesOwnerCurrent.textContent = ownerValue || '—';
+    if (ui.propertiesGroupCurrent) ui.propertiesGroupCurrent.textContent = groupValue || '—';
+    if (ui.propertiesRecurse) {
+      const allowRecursive = !!(propertiesContext.metadata?.is_directory && !propertiesContext.metadata?.is_symlink);
+      ui.propertiesRecurse.checked = false;
+      ui.propertiesRecurse.disabled = !allowRecursive;
+    }
+
+    applyPermissionsToInputs(permissions);
+
+    if (ui.propertiesApply) {
+      ui.propertiesApply.disabled = false;
+      ui.propertiesApply.textContent = PROPERTIES_APPLY_DEFAULT_LABEL;
+    }
+
+    setPropertiesModalOpen(true);
+    if (ui.propertiesNameInput) {
+      setTimeout(() => ui.propertiesNameInput?.focus({ preventScroll: true }), 40);
+    }
+  }
+
+  function closePropertiesModal() {
+    propertiesContext = null;
+    setPropertiesModalOpen(false);
+    if (ui.propertiesApply) {
+      ui.propertiesApply.disabled = false;
+      ui.propertiesApply.textContent = PROPERTIES_APPLY_DEFAULT_LABEL;
+    }
+    if (ui.propertiesRecurse) {
+      ui.propertiesRecurse.checked = false;
+      ui.propertiesRecurse.disabled = false;
+    }
+    if (ui.propertiesOwnerInput) ui.propertiesOwnerInput.value = '';
+    if (ui.propertiesGroupInput) ui.propertiesGroupInput.value = '';
+    if (ui.propertiesOwnerCurrent) ui.propertiesOwnerCurrent.textContent = '—';
+    if (ui.propertiesGroupCurrent) ui.propertiesGroupCurrent.textContent = '—';
+  }
+
+  async function fetchProperties(entry) {
+    try {
+      const payload = await api.get(`properties?path=${encodeURIComponent(entry.path)}`);
+      return payload;
+    } catch (error) {
+      toast(host, error?.message || 'Failed to fetch properties');
+      return null;
+    }
+  }
+
+  async function showProperties(entry) {
+    if (!entry) {
+      toast(host, 'Select an item to view properties');
+      return;
+    }
+    const data = await fetchProperties(entry);
+    if (!data) return;
+
+    openPropertiesModal(entry, data);
+  }
+
+  async function openSelectedProperties() {
+    if (!state.selected) {
+      toast(host, 'Select an item to view properties');
+      return;
+    }
+    await showProperties(state.selected);
+  }
+
+  async function applyPropertiesChanges() {
+    if (!propertiesContext) {
+      closePropertiesModal();
+      return;
+    }
+
+    const applyBtn = ui.propertiesApply;
+    if (applyBtn) {
+      applyBtn.disabled = true;
+      applyBtn.textContent = 'Applying…';
+    }
+
+    const { entry, metadata } = propertiesContext;
+    const originalPath = metadata?.path || entry.path;
+    const originalName = metadata?.name || entry.name;
+    const parentDir = parentPath(originalPath);
+    const newNameRaw = ui.propertiesNameInput ? ui.propertiesNameInput.value.trim() : originalName;
+    const newName = newNameRaw || originalName;
+    const renameChanged = newName !== originalName;
+
+    const recursive = !!(ui.propertiesRecurse && ui.propertiesRecurse.checked && metadata?.is_directory && !metadata?.is_symlink);
+    const newPermissions = getPermissionsFromInputs();
+    const newModeValue = permissionsToMode(newPermissions);
+    const originalModeValue = metadata?.mode_int ?? permissionsToMode(metadata?.permissions || modeToPermissions(0));
+    const modeChanged = newModeValue !== originalModeValue;
+    const ownerInput = ui.propertiesOwnerInput ? ui.propertiesOwnerInput.value.trim() : '';
+    const groupInput = ui.propertiesGroupInput ? ui.propertiesGroupInput.value.trim() : '';
+    const originalOwner = metadata?.owner ? String(metadata.owner) : '';
+    const originalGroup = metadata?.group ? String(metadata.group) : '';
+    const ownerChanged = !!(ownerInput && ownerInput !== originalOwner);
+    const groupChanged = !!(groupInput && groupInput !== originalGroup);
+
+    let currentPath = originalPath;
+    let hadChange = false;
+
+    try {
+      if (renameChanged) {
+        await api.post('rename', { path: originalPath, name: newName });
+        currentPath = joinPath(parentDir, newName);
+        propertiesContext.entry.name = newName;
+        propertiesContext.entry.path = currentPath;
+        propertiesContext.metadata.name = newName;
+        propertiesContext.metadata.path = currentPath;
+        if (ui.propertiesPath) ui.propertiesPath.textContent = currentPath;
+        hadChange = true;
+        toast(host, `Renamed to "${newName}"`);
+      }
+
+      if (modeChanged) {
+        const modeStr = newModeValue.toString(8).padStart(3, '0');
+        await api.post('chmod', {
+          path: currentPath,
+          mode: modeStr,
+          recursive,
+        });
+        propertiesContext.metadata.mode_int = newModeValue;
+        propertiesContext.metadata.mode_octal = modeStr;
+        propertiesContext.metadata.permissions = newPermissions;
+        if (ui.propertiesPath) ui.propertiesPath.title = `Permissions: ${modeStr}`;
+        hadChange = true;
+        toast(host, `Permissions updated to ${modeStr}${recursive ? ' (recursive)' : ''}`);
+      }
+
+      if (ownerChanged || groupChanged) {
+        await api.post('chown', {
+          path: currentPath,
+          user: ownerChanged ? ownerInput : '',
+          group: groupChanged ? groupInput : '',
+        });
+        if (ownerChanged) {
+          propertiesContext.metadata.owner = ownerInput;
+          if (ui.propertiesOwnerInput) ui.propertiesOwnerInput.value = ownerInput;
+          if (ui.propertiesOwnerCurrent) ui.propertiesOwnerCurrent.textContent = ownerInput || '—';
+        }
+        if (groupChanged) {
+          propertiesContext.metadata.group = groupInput;
+          if (ui.propertiesGroupInput) ui.propertiesGroupInput.value = groupInput;
+          if (ui.propertiesGroupCurrent) ui.propertiesGroupCurrent.textContent = groupInput || '—';
+        }
+        hadChange = true;
+        toast(host, 'Ownership updated');
+      }
+
+      if (!hadChange) {
+        toast(host, 'No changes to apply');
+        return;
+      }
+
+      await loadDirectory(state.currentPath);
+      closePropertiesModal();
+    } catch (error) {
+      toast(host, error?.message || 'Failed to apply properties');
+    } finally {
+      if (ui.propertiesApply) {
+        ui.propertiesApply.disabled = false;
+        ui.propertiesApply.textContent = PROPERTIES_APPLY_DEFAULT_LABEL;
+      }
+    }
+  }
+
+  menuGroups.forEach((group) => {
+    const toggle = group.querySelector('[data-menu-toggle]');
+    const commands = group.querySelectorAll('[data-command]');
+    if (toggle) {
+      toggle.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const isOpen = group.hasAttribute('data-open');
+        closeAllMenus();
+        if (!isOpen) {
+          group.setAttribute('data-open', 'true');
+        }
+      });
+    }
+    commands.forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        closeAllMenus();
+        handleMenuCommand(btn.dataset.command);
+      });
+    });
+  });
 
   if (ui.btnUp) {
     ui.btnUp.addEventListener('click', () => {
@@ -781,10 +1357,17 @@ export default function initFileExplorer(root, api, host) {
   if (ui.btnNewFolder) ui.btnNewFolder.addEventListener('click', createFolder);
   if (ui.btnNewFile) ui.btnNewFile.addEventListener('click', createNewFile);
   if (ui.btnOpen) ui.btnOpen.addEventListener('click', openSelected);
+  if (ui.btnOpenEditor) ui.btnOpenEditor.addEventListener('click', openSelectedInEditor);
+  if (ui.btnExtractArchive) ui.btnExtractArchive.addEventListener('click', extractSelectedArchive);
+  if (ui.btnProperties) ui.btnProperties.addEventListener('click', openSelectedProperties);
   if (ui.btnRename) ui.btnRename.addEventListener('click', renameSelected);
   if (ui.btnDelete) ui.btnDelete.addEventListener('click', deleteSelected);
   if (ui.btnCopy) ui.btnCopy.addEventListener('click', copySelected);
   if (ui.btnMove) ui.btnMove.addEventListener('click', moveSelected);
+  if (ui.propertiesOverlay) ui.propertiesOverlay.addEventListener('click', closePropertiesModal);
+  if (ui.propertiesClose) ui.propertiesClose.addEventListener('click', closePropertiesModal);
+  if (ui.propertiesCancel) ui.propertiesCancel.addEventListener('click', closePropertiesModal);
+  if (ui.propertiesApply) ui.propertiesApply.addEventListener('click', applyPropertiesChanges);
   if (ui.btnToggleView) {
     ui.btnToggleView.addEventListener('click', () => {
       state.view = state.view === 'list' ? 'grid' : 'list';
@@ -794,6 +1377,11 @@ export default function initFileExplorer(root, api, host) {
   if (ui.toggleHidden) {
     ui.toggleHidden.addEventListener('change', () => {
       loadDirectory(state.currentPath);
+    });
+  }
+  if (ui.selectAll) {
+    ui.selectAll.addEventListener('change', (e) => {
+      selectAllItems(e.target.checked);
     });
   }
   if (ui.sortSelect) {
@@ -813,15 +1401,28 @@ export default function initFileExplorer(root, api, host) {
     });
   }
 
-  // Add click-outside handler to close menus
-  document.addEventListener('click', (e) => {
-    // Close menus if clicking outside of any menu or toggle button
-    if (!e.target.closest('.fx-dropdown-menu') && !e.target.closest('.fx-menu-toggle')) {
-      container.querySelectorAll('.fx-dropdown-menu.active').forEach(m => m.classList.remove('active'));
-      container.querySelectorAll('.fx-menu-toggle.active').forEach(b => b.classList.remove('active'));
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.fx-menu-group')) {
+      closeAllMenus();
     }
   });
-  
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      const anyMenuOpen = menuGroups.some((group) => group.hasAttribute('data-open'));
+      if (anyMenuOpen) {
+        event.preventDefault();
+        closeAllMenus();
+        return;
+      }
+      if (ui.propertiesModal?.dataset.open === 'true') {
+        event.preventDefault();
+        closePropertiesModal();
+      }
+    }
+  });
+
+  setPropertiesModalOpen(false);
+
   applyView();
   loadDirectory(state.currentPath);
 

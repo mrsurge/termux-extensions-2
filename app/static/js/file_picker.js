@@ -77,12 +77,6 @@ const CSS = `
   flex-direction: column;
   gap: 12px;
 }
-.te-fp-path {
-  font-family: 'JetBrains Mono', Consolas, 'Roboto Mono', monospace;
-  font-size: 0.82rem;
-  color: var(--muted-foreground, #94a3b8);
-  word-break: break-all;
-}
 .te-fp-breadcrumbs {
   display: flex;
   align-items: center;
@@ -215,7 +209,6 @@ const TEMPLATE = `
         <button class="te-fp-close" aria-label="Close picker">&times;</button>
       </div>
       <div class="te-fp-body">
-        <div class="te-fp-path"></div>
         <div class="te-fp-breadcrumbs"></div>
         <div class="te-fp-options">
           <label class="te-fp-toggle-hidden">
@@ -233,6 +226,7 @@ const TEMPLATE = `
         <div class="te-fp-footer">
           <div class="te-fp-footer-left">
             <button class="te-fp-btn-up">Up one level</button>
+            <button class="te-fp-btn-newfolder te-fp-hidden">New Folder</button>
             <button class="te-fp-btn-current">Select current directory</button>
           </div>
           <div class="te-fp-footer-right">
@@ -371,7 +365,27 @@ function toDisplayPath(absPath) {
 function parentPath(path) {
   const abs = simplifyAbsolute(path || DEFAULT_START);
   if (abs === '/' || abs === '') return '/';
-  if (abs === HOME_DIR) return '/';
+  
+  // Special handling for Termux paths
+  const TERMUX_FILES = '/data/data/com.termux/files';
+  const TERMUX_BASE = '/data/data/com.termux';
+  
+  // If we're at HOME_DIR, go up to /data/data/com.termux/files
+  if (abs === HOME_DIR) {
+    return TERMUX_FILES;
+  }
+  
+  // If we're at /data/data/com.termux/files, go up to /data/data/com.termux
+  if (abs === TERMUX_FILES) {
+    return TERMUX_BASE;
+  }
+  
+  // If we're at /data/data/com.termux, go up to /data/data
+  if (abs === TERMUX_BASE) {
+    return '/data/data';
+  }
+  
+  // Normal parent directory logic
   const trimmed = abs.replace(/\/+$/, '');
   const idx = trimmed.lastIndexOf('/');
   if (idx <= 0) return '/';
@@ -478,6 +492,11 @@ function updateButtons() {
   const allowCurrent = !isSave && state.allowSelectCurrent;
   elements.btnCurrent.classList.toggle('te-fp-hidden', !allowCurrent);
   elements.btnCurrent.disabled = !allowCurrent;
+  
+  // Show new folder button only in save mode
+  if (elements.btnNewFolder) {
+    elements.btnNewFolder.classList.toggle('te-fp-hidden', !isSave);
+  }
   if (isSave) {
     const hasName = !!(state.filename && state.filename.trim());
     elements.btnSelect.disabled = !hasName;
@@ -522,12 +541,7 @@ function setFilename(name) {
   updateButtons();
 }
 
-function updatePathIndicator(path) {
-  if (!elements || !elements.path) return;
-  const abs = simplifyAbsolute(path || DEFAULT_START);
-  elements.path.textContent = abs;
-  elements.path.title = abs;
-}
+// Path indicator removed - using breadcrumbs only
 
 function renderBreadcrumbs(path) {
   const crumbs = formatBreadcrumbs(path);
@@ -549,7 +563,6 @@ function renderBreadcrumbs(path) {
     }
     elements.breadcrumbs.appendChild(span);
   });
-  updatePathIndicator(path);
 }
 
 function renderEntries(entries) {
@@ -608,7 +621,6 @@ async function requestBrowse(absPath, includeHidden) {
 
 async function navigate(targetPath) {
   const normalized = toAbsolute(targetPath, state.currentPath || prefs.lastPath || DEFAULT_START);
-  updatePathIndicator(normalized);
   const previousPath = state.currentPath;
   try {
     state.currentPath = normalized;
@@ -627,7 +639,6 @@ async function navigate(targetPath) {
     elements.list.innerHTML = `<div class="te-fp-loading" style="color:#f87171;">${escapeHtml(message)}</div>`;
     window.teUI.toast(message);
     state.currentPath = previousPath || DEFAULT_START;
-    updatePathIndicator(state.currentPath);
     renderBreadcrumbs(state.currentPath);
     updateButtons();
   }
@@ -687,13 +698,13 @@ function init() {
     title: rootEl.querySelector('.te-fp-title'),
     close: rootEl.querySelector('.te-fp-close'),
     home: rootEl.querySelector('.te-fp-home'),
-    path: rootEl.querySelector('.te-fp-path'),
     breadcrumbs: rootEl.querySelector('.te-fp-breadcrumbs'),
     hiddenToggle: rootEl.querySelector('.te-fp-hidden-checkbox'),
     saveRow: rootEl.querySelector('.te-fp-save-row'),
     filenameInput: rootEl.querySelector('.te-fp-input-name'),
     list: rootEl.querySelector('.te-fp-list'),
     btnUp: rootEl.querySelector('.te-fp-btn-up'),
+    btnNewFolder: rootEl.querySelector('.te-fp-btn-newfolder'),
     btnCurrent: rootEl.querySelector('.te-fp-btn-current'),
     btnCancel: rootEl.querySelector('.te-fp-btn-cancel'),
     btnSelect: rootEl.querySelector('.te-fp-btn-select'),
@@ -715,6 +726,42 @@ function init() {
       finish(state.selected);
     }
   });
+  
+  // Add new folder handler
+  if (elements.btnNewFolder) {
+    elements.btnNewFolder.addEventListener('click', async () => {
+      const name = prompt('New folder name:');
+      if (!name || !name.trim()) return;
+      
+      const folderName = name.trim();
+      if (folderName.includes('/') || folderName.includes('\\')) {
+        window.teUI.toast('Invalid folder name');
+        return;
+      }
+      
+      try {
+        const params = new URLSearchParams({
+          path: state.currentPath,
+          name: folderName
+        });
+        const response = await fetch('/api/app/file_explorer/mkdir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: state.currentPath, name: folderName })
+        });
+        
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || 'Failed to create folder');
+        }
+        
+        window.teUI.toast(`Created folder "${folderName}"`);
+        await navigate(state.currentPath); // Refresh current directory
+      } catch (err) {
+        window.teUI.toast(err.message || 'Failed to create folder');
+      }
+    });
+  }
   elements.overlay.addEventListener('click', (ev) => {
     if (ev.target === elements.overlay) cancel();
   });
@@ -790,7 +837,6 @@ function open(options = {}) {
     prefs.lastPath = start;
     state.currentPath = start;
     if (state.persistKey) setStoredStart(state.persistKey, start);
-    updatePathIndicator(start);
     updateButtons();
     navigate(start);
     if (state.mode === 'save' && elements.filenameInput) {

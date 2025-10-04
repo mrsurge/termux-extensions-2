@@ -7,9 +7,8 @@
 }
 .fx-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
-  align-items: center;
   padding: 10px 12px;
   background: var(--card, #111827);
   border-bottom: 1px solid var(--border, #1f2937);
@@ -42,16 +41,82 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
-.fx-toolbar-left {
+.fx-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.fx-toolbar-quick {
+  justify-content: flex-start;
+}
+.fx-quick-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-.fx-toolbar-right {
+.fx-delete-btn {
   margin-left: auto;
+  padding: 6px 10px;
+}
+.fx-delete-btn.danger {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.5);
+}
+.fx-delete-btn.danger:hover {
+  border-color: #ef4444;
+}
+.fx-toolbar-menus {
+  justify-content: space-between;
+  gap: 12px;
+}
+.fx-menubar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fx-menu-group {
+  position: relative;
+}
+.fx-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fx-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--card, #111827);
+  border: 1px solid var(--border, #374151);
+  border-radius: 8px;
+  padding: 6px 0;
+  min-width: 160px;
+  display: none;
+  flex-direction: column;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+  z-index: 200;
+}
+.fx-menu-group[data-open="true"] .fx-menu-dropdown {
+  display: flex;
+}
+.fx-menu-dropdown button {
+  background: transparent;
+  border: none;
+  color: var(--foreground, #f9fafb);
+  padding: 8px 14px;
+  text-align: left;
+  width: 100%;
+  font-size: 0.9rem;
+}
+.fx-menu-dropdown button:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+.fx-toolbar-view {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-left: auto;
 }
 .fx-toggle {
   display: inline-flex;
@@ -106,11 +171,12 @@
 }
 .fx-item {
   display: grid;
-  grid-template-columns: 2.5rem minmax(12rem, 1fr) 8rem 16rem;
-  gap: 12px;
+  grid-template-columns: 36px 36px minmax(180px, 2fr) 110px minmax(120px, 1fr) 90px 150px;
+  gap: 8px;
   padding: 10px 16px;
   align-items: center;
   border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  position: relative;
 }
 .fx-item:last-child {
   border-bottom: none;
@@ -120,10 +186,48 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fx-item .fx-size,
-.fx-item .fx-date {
+.fx-name-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.fx-name-group .fx-name {
+  flex: 1;
+}
+.fx-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fx-checkbox input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--primary, #3b82f6);
+}
+.fx-permissions {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--muted-foreground, #94a3b8);
+  white-space: nowrap;
+}
+.fx-owner {
   font-size: 0.85rem;
   color: var(--muted-foreground, #94a3b8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0; /* Allow shrinking */
+}
+.fx-size {
+  font-size: 0.85rem;
+  color: var(--muted-foreground, #94a3b8);
+  text-align: right;
+  white-space: nowrap;
+}
+.fx-date {
+  font-size: 0.85rem;
+  color: var(--muted-foreground, #94a3b8);
+  white-space: nowrap;
 }
 .fx-grid-view-content {
   display: grid;
@@ -168,82 +272,149 @@
   color: var(--foreground, #f9fafb);
 }
 
-/* Expandable menu styles */
-.fx-item-wrapper,
-.fx-tile-wrapper {
-  position: relative;
+.fx-modal {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 400;
 }
-.fx-menu-toggle {
+.fx-modal[data-open="true"] {
+  display: flex;
+}
+.fx-modal-overlay {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(6px);
+}
+.fx-modal-dialog {
+  position: relative;
+  background: var(--card, #111827);
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 16px;
+  padding: 20px;
+  width: min(520px, 92vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+}
+.fx-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.fx-modal-header h2 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+.fx-properties-path {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  color: var(--muted-foreground, #94a3b8);
+  word-break: break-all;
+}
+.fx-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--muted-foreground, #94a3b8);
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+.fx-modal-close:hover {
+  color: var(--foreground, #f9fafb);
+}
+.fx-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.fx-properties-section h3 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+}
+.fx-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.fx-field input[type="text"],
+.fx-field select,
+.fx-field textarea {
   background: var(--secondary, #1f2937);
   border: 1px solid var(--border, #374151);
-  border-radius: 6px;
-  padding: 4px 8px;
-  cursor: pointer;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--foreground, #f9fafb);
+}
+.fx-field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+}
+.fx-field-label {
+  font-size: 0.85rem;
+  color: var(--muted-foreground, #94a3b8);
+}
+.fx-field-hint {
+  font-size: 0.75rem;
+  color: var(--muted-foreground, #94a3b8);
+  margin: -6px 0 8px;
+}
+.fx-ownership-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.fx-permissions-grid {
+  display: grid;
+  grid-template-columns: 1fr repeat(3, minmax(60px, auto));
+  gap: 8px 12px;
+  align-items: center;
+}
+.fx-permissions-header {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground, #94a3b8);
+}
+.fx-permissions-label {
   font-size: 0.9rem;
-  z-index: 2;
-  opacity: 0.8;
-  transition: opacity 0.2s ease, background 0.2s ease;
 }
-.fx-item:hover .fx-menu-toggle,
-.fx-tile:hover .fx-menu-toggle,
-.fx-menu-toggle.active {
-  opacity: 1;
+.fx-permission {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
 }
-.fx-menu-toggle:hover {
+.fx-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.fx-modal-footer button {
+  background: var(--secondary, #1f2937);
+  color: var(--foreground, #f9fafb);
+  border: 1px solid var(--border, #374151);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.fx-modal-footer button.primary {
   background: var(--primary, #3b82f6);
   border-color: var(--primary, #3b82f6);
 }
-.fx-dropdown-menu {
-  position: absolute;
-  top: 36px;
-  right: 8px;
-  background: var(--card, #111827);
-  border: 1px solid var(--border, #374151);
-  border-radius: 8px;
-  padding: 4px;
-  display: none;
-  z-index: 100;
-  min-width: 180px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-.fx-dropdown-menu.active {
-  display: block;
-}
-.fx-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  color: var(--foreground, #f9fafb);
-  background: transparent;
-  border: none;
-  width: 100%;
-  text-align: left;
-  transition: background 0.2s ease;
-}
-.fx-menu-item:hover {
-  background: rgba(59, 130, 246, 0.2);
-}
-.fx-menu-item.danger {
-  color: #ef4444;
-}
-.fx-menu-item.danger:hover {
-  background: rgba(239, 68, 68, 0.2);
-}
-.fx-menu-divider {
-  height: 1px;
-  background: var(--border, #374151);
-  margin: 4px 8px;
-}
-.fx-menu-icon {
-  width: 20px;
-  text-align: center;
+.fx-modal-footer button.primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Archive indicator */
@@ -260,42 +431,145 @@
   margin-left: 8px;
 }
 
-@media (max-width: 640px) {
+/* Mobile portrait - with second row for details */
+@media (orientation: portrait) and (max-width: 768px) {
   .fx-item {
-    grid-template-columns: 2rem 1fr;
+    grid-template-columns: 32px 32px 1fr;
+    grid-template-rows: auto auto;
+    align-items: flex-start;
+  }
+  .fx-item .fx-checkbox {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+  .fx-item .fx-icon {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+  .fx-item .fx-name-group {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  /* Second row for details in portrait */
+  .fx-item .fx-permissions,
+  .fx-item .fx-owner {
+    display: none; /* Hide these in portrait to save space */
   }
   .fx-item .fx-size,
   .fx-item .fx-date {
-    display: none;
+    grid-column: 3;
+    grid-row: 2;
+    display: inline-block;
+    margin-right: 12px;
+    margin-top: 4px;
+    font-size: 0.8rem;
+  }
+}
+
+/* Mobile landscape - show details on second row */
+@media (orientation: landscape) and (max-width: 1024px) {
+  .fx-item {
+    grid-template-columns: 32px 32px 1fr 80px 140px;
+    grid-template-rows: auto auto;
+    padding: 8px 12px;
+  }
+  .fx-item .fx-checkbox {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .fx-item .fx-icon {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .fx-item .fx-name-group {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .fx-item .fx-size {
+    grid-column: 4;
+    grid-row: 1;
+  }
+  .fx-item .fx-date {
+    grid-column: 5;
+    grid-row: 1;
+  }
+  .fx-item .fx-permissions {
+    grid-column: 2 / 4;
+    grid-row: 2;
+    margin-top: 4px;
+  }
+  .fx-item .fx-owner {
+    grid-column: 4 / 6;
+    grid-row: 2;
+    margin-top: 4px;
   }
 }
 </style>
 
 <div class="fx-app" data-app-root>
   <div class="fx-toolbar">
-    <div class="fx-toolbar-left">
-      <button type="button" data-action="up">Up</button>
-      <button type="button" data-action="new-folder">New Folder</button>
-      <button type="button" data-action="new-file">New File</button>
-      <button type="button" data-action="open" disabled>Open</button>
-      <button type="button" data-action="rename" disabled>Rename</button>
-      <button type="button" data-action="delete" disabled>Delete</button>
-      <button type="button" data-action="copy" disabled>Copy</button>
-      <button type="button" data-action="move" disabled>Move</button>
+    <div class="fx-toolbar-row fx-toolbar-quick">
+      <div class="fx-quick-actions">
+        <label class="fx-toggle" style="margin-right: 8px;">
+          <input type="checkbox" data-action="select-all">
+          <span>Select All</span>
+        </label>
+        <span class="fx-selection-count" style="margin-right: 12px; color: var(--primary, #3b82f6); display: none;"></span>
+        <button type="button" data-action="up">Up</button>
+        <button type="button" data-action="new-folder">New Folder</button>
+        <button type="button" data-action="open" disabled>Open</button>
+        <button type="button" data-action="copy" disabled>Copy</button>
+        <button type="button" data-action="move" disabled>Move</button>
+        <button type="button" data-action="rename" disabled>Rename</button>
+      </div>
+      <button type="button" class="fx-delete-btn danger" data-action="delete" disabled aria-label="Delete">🗑️</button>
     </div>
-    <div class="fx-toolbar-right">
-      <label class="fx-toggle">
-        <input type="checkbox" data-action="toggle-hidden">
-        <span>Show hidden</span>
-      </label>
-      <select class="fx-sort-select" data-action="sort-by">
-        <option value="name">Sort: Name</option>
-        <option value="size">Sort: Size</option>
-        <option value="date">Sort: Date</option>
-        <option value="type">Sort: Type</option>
-      </select>
-      <button type="button" class="fx-sort-dir" data-action="sort-dir" title="Toggle sort direction">↓</button>
-      <button type="button" data-action="toggle-view">Grid View</button>
+    <div class="fx-toolbar-row fx-toolbar-menus">
+      <div class="fx-menubar">
+        <div class="fx-menu-group" data-menu="file">
+          <button type="button" class="fx-menu-button" data-menu-toggle="file">File ▾</button>
+          <div class="fx-menu-dropdown" data-menu-panel="file">
+            <button type="button" data-command="file:new-folder">New Folder</button>
+            <button type="button" data-command="file:new-file">New File</button>
+            <button type="button" data-command="file:open">Open</button>
+            <button type="button" data-command="file:open-editor">Open in Editor</button>
+            <button type="button" data-command="file:extract">Extract</button>
+          </div>
+        </div>
+        <div class="fx-menu-group" data-menu="edit">
+          <button type="button" class="fx-menu-button" data-menu-toggle="edit">Edit ▾</button>
+          <div class="fx-menu-dropdown" data-menu-panel="edit">
+            <button type="button" data-command="edit:properties">Properties</button>
+            <button type="button" data-command="edit:rename">Rename</button>
+            <button type="button" data-command="edit:delete">Delete</button>
+            <button type="button" data-command="edit:copy">Copy</button>
+            <button type="button" data-command="edit:move">Move</button>
+          </div>
+        </div>
+        <div class="fx-menu-group" data-menu="view">
+          <button type="button" class="fx-menu-button" data-menu-toggle="view">View ▾</button>
+          <div class="fx-menu-dropdown" data-menu-panel="view">
+            <button type="button" data-command="view:grid">Icons</button>
+            <button type="button" data-command="view:list">List</button>
+          </div>
+        </div>
+      </div>
+      <div class="fx-toolbar-view">
+        <label class="fx-toggle">
+          <input type="checkbox" data-action="toggle-hidden">
+          <span>Show hidden</span>
+        </label>
+        <select class="fx-sort-select" data-action="sort-by">
+          <option value="name">Sort: Name</option>
+          <option value="size">Sort: Size</option>
+          <option value="date">Sort: Date</option>
+          <option value="type">Sort: Type</option>
+        </select>
+        <button type="button" class="fx-sort-dir" data-action="sort-dir" title="Toggle sort direction">↓</button>
+        <button type="button" data-action="toggle-view">Grid View</button>
+      </div>
     </div>
   </div>
   <div class="fx-breadcrumbs" data-role="breadcrumbs"></div>
@@ -305,6 +579,69 @@
     </div>
     <div class="fx-grid-view">
       <div class="fx-grid-view-content" data-role="grid"></div>
+    </div>
+  </div>
+  <div class="fx-modal" data-modal="properties" aria-hidden="true">
+    <div class="fx-modal-overlay" data-role="properties-overlay"></div>
+    <div class="fx-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="fx-properties-title">
+      <div class="fx-modal-header">
+        <div>
+          <h2 id="fx-properties-title">Properties</h2>
+          <p class="fx-properties-path" data-role="properties-path"></p>
+        </div>
+        <button type="button" class="fx-modal-close" data-action="properties-close" aria-label="Close properties">×</button>
+      </div>
+      <div class="fx-modal-body">
+        <section class="fx-properties-section">
+          <h3>General</h3>
+          <label class="fx-field">
+            <span class="fx-field-label">Name</span>
+            <input type="text" data-role="properties-name" autocomplete="off">
+          </label>
+          <div class="fx-ownership-grid">
+            <label class="fx-field">
+              <span class="fx-field-label">Owner</span>
+              <input type="text" data-role="properties-owner-input" autocomplete="off" placeholder="(unchanged)">
+              <span class="fx-field-hint">Current: <span data-role="properties-owner-current">—</span></span>
+            </label>
+            <label class="fx-field">
+              <span class="fx-field-label">Group</span>
+              <input type="text" data-role="properties-group-input" autocomplete="off" placeholder="(unchanged)">
+              <span class="fx-field-hint">Current: <span data-role="properties-group-current">—</span></span>
+            </label>
+          </div>
+          <p class="fx-field-hint">Leave owner or group blank to keep current values.</p>
+          <label class="fx-field fx-field-inline">
+            <input type="checkbox" data-role="properties-recurse">
+            <span>Apply to contents (recursive)</span>
+          </label>
+        </section>
+        <section class="fx-properties-section">
+          <h3>Permissions</h3>
+          <div class="fx-permissions-grid" data-role="properties-permissions">
+            <div class="fx-permissions-header"></div>
+            <div class="fx-permissions-header">Read</div>
+            <div class="fx-permissions-header">Write</div>
+            <div class="fx-permissions-header">Execute</div>
+            <div class="fx-permissions-label">Owner</div>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-owner-read"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-owner-write"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-owner-exec"> <span></span></label>
+            <div class="fx-permissions-label">Group</div>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-group-read"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-group-write"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-group-exec"> <span></span></label>
+            <div class="fx-permissions-label">Others</div>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-others-read"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-others-write"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-others-exec"> <span></span></label>
+          </div>
+        </section>
+      </div>
+      <div class="fx-modal-footer">
+        <button type="button" data-action="properties-cancel">Cancel</button>
+        <button type="button" class="primary" data-action="properties-apply">Apply</button>
+      </div>
     </div>
   </div>
 </div>

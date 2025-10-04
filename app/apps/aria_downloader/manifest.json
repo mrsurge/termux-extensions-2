@@ -1,6 +1,7 @@
 {
   "name": "Aria Downloader",
   "id": "aria_downloader",
+  "icon_emoji": "⬇️",
   "version": "0.0.1",
   "description": "Placeholder UI for managing aria2 downloads.",
   "author": "Gemini",

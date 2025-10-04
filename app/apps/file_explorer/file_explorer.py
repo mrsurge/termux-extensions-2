@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import grp
 import json
 import os
+import pwd
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
@@ -40,10 +43,27 @@ def _scandir_entries(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
                 entry_type = 'unknown'
             size = None
             mtime = None
+            mode = None
+            uid = None
+            gid = None
+            owner = None
+            group = None
             try:
-                stat = entry.stat(follow_symlinks=False)
-                size = stat.st_size
-                mtime = int(stat.st_mtime)
+                stat_info = entry.stat(follow_symlinks=False)
+                size = stat_info.st_size
+                mtime = int(stat_info.st_mtime)
+                mode = stat_info.st_mode
+                uid = stat_info.st_uid
+                gid = stat_info.st_gid
+                # Try to get owner and group names
+                try:
+                    owner = pwd.getpwuid(uid).pw_name
+                except (KeyError, AttributeError):
+                    owner = str(uid)
+                try:
+                    group = grp.getgrgid(gid).gr_name
+                except (KeyError, AttributeError):
+                    group = str(gid)
             except Exception:
                 pass
             entries.append(
@@ -53,6 +73,9 @@ def _scandir_entries(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
                     'path': os.path.join(str(path), name),
                     'size': size,
                     'mtime': mtime,
+                    'mode': mode,
+                    'owner': owner,
+                    'group': group,
                 }
             )
     return entries
@@ -60,7 +83,7 @@ def _scandir_entries(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
 
 def _scandir_with_sudo(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
     script = (
-        "import json, os, sys\n"
+        "import json, os, sys, pwd, grp\n"
         f"path = {json.dumps(str(path))}\n"
         f"show_hidden = {json.dumps(bool(show_hidden))}\n"
         "entries = []\n"
@@ -81,10 +104,24 @@ def _scandir_with_sudo(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
         "                entry_type = 'unknown'\n"
         "            size = None\n"
         "            mtime = None\n"
+        "            mode = None\n"
+        "            owner = None\n"
+        "            group = None\n"
         "            try:\n"
-        "                stat = entry.stat(follow_symlinks=False)\n"
-        "                size = stat.st_size\n"
-        "                mtime = int(stat.st_mtime)\n"
+        "                stat_info = entry.stat(follow_symlinks=False)\n"
+        "                size = stat_info.st_size\n"
+        "                mtime = int(stat_info.st_mtime)\n"
+        "                mode = stat_info.st_mode\n"
+        "                uid = stat_info.st_uid\n"
+        "                gid = stat_info.st_gid\n"
+        "                try:\n"
+        "                    owner = pwd.getpwuid(uid).pw_name\n"
+        "                except:\n"
+        "                    owner = str(uid)\n"
+        "                try:\n"
+        "                    group = grp.getgrgid(gid).gr_name\n"
+        "                except:\n"
+        "                    group = str(gid)\n"
         "            except Exception:\n"
         "                pass\n"
         "            entries.append({\n"
@@ -92,7 +129,10 @@ def _scandir_with_sudo(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
         "                'type': entry_type,\n"
         "                'path': os.path.join(path, name),\n"
         "                'size': size,\n"
-        "                'mtime': mtime\n"
+        "                'mtime': mtime,\n"
+        "                'mode': mode,\n"
+        "                'owner': owner,\n"
+        "                'group': group\n"
         "            })\n"
         "    json.dump(entries, sys.stdout)\n"
         "except FileNotFoundError:\n"
@@ -129,6 +169,48 @@ def _run_sudo(argv: List[str]) -> None:
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip() or 'Permission denied'
         raise PermissionError(message)
+
+
+def _mode_to_permissions(mode: int) -> Dict[str, Dict[str, bool]]:
+    value = stat.S_IMODE(mode)
+    def has(flag: int) -> bool:
+        return (value & flag) == flag
+
+    return {
+        'owner': {
+            'read': has(stat.S_IRUSR),
+            'write': has(stat.S_IWUSR),
+            'exec': has(stat.S_IXUSR),
+        },
+        'group': {
+            'read': has(stat.S_IRGRP),
+            'write': has(stat.S_IWGRP),
+            'exec': has(stat.S_IXGRP),
+        },
+        'others': {
+            'read': has(stat.S_IROTH),
+            'write': has(stat.S_IWOTH),
+            'exec': has(stat.S_IXOTH),
+        },
+    }
+
+
+def _chmod_recursive_local(target: str, mode_value: int) -> None:
+    if os.path.islink(target):
+        os.chmod(target, mode_value)
+        return
+    for root, dirs, files in os.walk(target):
+        for name in dirs:
+            path = os.path.join(root, name)
+            if os.path.islink(path):
+                continue
+            os.chmod(path, mode_value)
+        for name in files:
+            path = os.path.join(root, name)
+            if os.path.islink(path):
+                continue
+            os.chmod(path, mode_value)
+    os.chmod(target, mode_value)
 
 
 @file_explorer_bp.route('/list', methods=['GET'])
@@ -339,6 +421,56 @@ def resolve_symlink():
         return _json_err(str(exc), 500)
 
 
+@file_explorer_bp.route('/properties', methods=['GET'])
+def get_properties():
+    raw_path = request.args.get('path')
+    if not raw_path:
+        return _json_err('Path is required', 400)
+
+    abs_path = os.path.abspath(os.path.expanduser(raw_path))
+    if not os.path.exists(abs_path) and not os.path.islink(abs_path):
+        return _json_err('Path not found', 404)
+
+    try:
+        stat_result = os.lstat(abs_path)
+    except FileNotFoundError:
+        return _json_err('Path not found', 404)
+    except PermissionError as exc:
+        return _json_err(str(exc) or 'Permission denied', 403)
+    except Exception as exc:
+        return _json_err(str(exc), 500)
+
+    mode_value = stat.S_IMODE(stat_result.st_mode)
+    perms = _mode_to_permissions(mode_value)
+
+    try:
+        owner_name = pwd.getpwuid(stat_result.st_uid).pw_name
+    except KeyError:
+        owner_name = stat_result.st_uid
+
+    try:
+        group_name = grp.getgrgid(stat_result.st_gid).gr_name
+    except KeyError:
+        group_name = stat_result.st_gid
+
+    info: Dict[str, Any] = {
+        'path': abs_path,
+        'name': os.path.basename(abs_path) or abs_path,
+        'type': 'directory' if os.path.isdir(abs_path) else 'symlink' if os.path.islink(abs_path) else 'file' if os.path.isfile(abs_path) else 'unknown',
+        'is_directory': os.path.isdir(abs_path),
+        'is_symlink': os.path.islink(abs_path),
+        'size': stat_result.st_size,
+        'mtime': int(stat_result.st_mtime),
+        'mode_octal': format(mode_value, '03o'),
+        'mode_int': mode_value,
+        'permissions': perms,
+        'owner': owner_name,
+        'group': group_name,
+    }
+
+    return _json_ok(info)
+
+
 @file_explorer_bp.route('/chmod', methods=['POST'])
 def chmod_path():
     data = request.get_json(silent=True) or {}
@@ -351,16 +483,65 @@ def chmod_path():
         mode_value = int(mode_str, 8)
     except Exception:
         return _json_err('Invalid mode format', 400)
+    recursive = bool(data.get('recursive'))
     try:
-        os.chmod(target_abs, mode_value)
+        if recursive and os.path.isdir(target_abs) and not os.path.islink(target_abs):
+            _chmod_recursive_local(target_abs, mode_value)
+        else:
+            os.chmod(target_abs, mode_value)
     except PermissionError:
         try:
-            _run_sudo(['chmod', oct(mode_value)[2:], target_abs])
+            args = ['chmod']
+            if recursive:
+                args.append('-R')
+            args.extend([format(mode_value, '03o'), target_abs])
+            _run_sudo(args)
         except PermissionError as exc:
             return _json_err(str(exc) or 'Permission denied', 403)
     except Exception as exc:
         return _json_err(str(exc), 500)
-    return _json_ok({'path': target_abs, 'mode': oct(mode_value)})
+    return _json_ok({'path': target_abs, 'mode': format(mode_value, '03o'), 'recursive': recursive})
+
+
+@file_explorer_bp.route('/extract', methods=['POST'])
+def extract_archive():
+    data = request.get_json(silent=True) or {}
+    source = data.get('source')
+    directory = data.get('directory')
+    if not source or not directory:
+        return _json_err('Source and destination are required', 400)
+
+    source_abs = os.path.abspath(os.path.expanduser(source))
+    dest_abs = os.path.abspath(os.path.expanduser(directory))
+
+    if not os.path.isfile(source_abs):
+        return _json_err('Source archive not found', 404)
+    if not os.path.isdir(dest_abs):
+        return _json_err('Destination must be an existing directory', 400)
+
+    try:
+        shutil.unpack_archive(source_abs, dest_abs)
+    except shutil.ReadError:
+        return _json_err('Unsupported or invalid archive format', 400)
+    except PermissionError:
+        script = (
+            'import shutil\n'
+            f'source = {json.dumps(source_abs)}\n'
+            f'dest = {json.dumps(dest_abs)}\n'
+            'shutil.unpack_archive(source, dest)\n'
+        )
+        try:
+            _run_sudo(['python3', '-c', script])
+        except PermissionError as exc:
+            return _json_err(str(exc) or 'Permission denied', 403)
+        except Exception as exc:
+            return _json_err(str(exc), 500)
+    except FileNotFoundError:
+        return _json_err('Source archive not found', 404)
+    except Exception as exc:
+        return _json_err(str(exc), 500)
+
+    return _json_ok({'extracted': source_abs, 'into': dest_abs})
 
 
 @file_explorer_bp.route('/chown', methods=['POST'])
