@@ -6,11 +6,8 @@ import time
 import uuid
 import urllib.error
 import urllib.request
-import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
-import re
-import threading as _threading
 
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
@@ -25,8 +22,6 @@ LOG_PATH = CACHE_ROOT / "stream.log"
 
 CACHE_ROOT.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
-
-from .open_interpreter import ensure_interpreter_shell
 
 
 # ----------------------------------------------------------------------------
@@ -538,68 +533,8 @@ def _remote_stream_completion(
 
 
 # ----------------------------------------------------------------------------
-# Hugging Face Search Helpers
+# API endpoints
 # ----------------------------------------------------------------------------
-
-HF_CACHE_PATH = CACHE_ROOT / "hf_models.json"
-_hf_model_cache: List[Dict[str, Any]] | None = None
-_hf_cache_lock =_threading.Lock()
-
-def _get_hf_models(query: str) -> List[Dict[str, Any]]:
-    """Performs a normal keyword search against the Hugging Face Hub API."""
-    safe_query = urllib.parse.quote(query)
-    url = f"https://huggingface.co/api/models?search={safe_query}&filter=gguf&full=true&limit=50"
-    try:
-        with urllib.request.urlopen(url, timeout=10) as response:
-            if response.status != 200:
-                raise RuntimeError(f"HF API returned status {response.status}")
-            data = json.load(response)
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch from Hugging Face Hub: {e}")
-
-    results = []
-    search_terms = {term.lower() for term in query.split()}
-    
-    for model in data:
-        repo_id = model.get("id", "")
-        author = model.get("author", "")
-        model_name = repo_id.split("/")[-1] if repo_id else ""
-        
-        combined_text = f"{repo_id} {author} {model_name}".lower()
-        if not all(term in combined_text for term in search_terms):
-            continue
-
-        for sibling in model.get("siblings", []):
-            filename = sibling.get("rfilename")
-            if not filename or not filename.lower().endswith(".gguf"):
-                continue
-            
-            quant_match = re.search(r"[._](Q[0-9]_K_S|Q[0-9]_K_M|Q[0-9]_K_L|Q[0-9]_K|Q[0-9]_\d|F[0-9]{2,3})[._]", filename, re.IGNORECASE)
-            quant = quant_match.group(1) if quant_match else "Unknown"
-
-            results.append({
-                "repo_id": repo_id,
-                "author": author,
-                "model_name": model_name,
-                "file": filename,
-                "quant": quant,
-                "size": sibling.get("size", 0),
-            })
-    return results
-
-
-@termux_lm_bp.route("/hf/search", methods=["GET"])
-def termux_lm_hf_search() -> Any:
-    query = request.args.get("q", "").strip()
-    try:
-        if query:
-            data = _get_hf_models(query)
-        else:
-            data = []
-        return jsonify({"ok": True, "data": data})
-    except Exception as e:
-        current_app.logger.error(f"Hugging Face search failed: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @termux_lm_bp.route("/models", methods=["GET"])
@@ -893,30 +828,6 @@ def active_state() -> Any:
     state = _cleanup_state(manager, _load_state())
     payload = _state_payload(manager, state)
     return jsonify({"ok": True, "data": payload})
-
-
-# ----------------------------------------------------------------------------
-# Open Interpreter — server lifecycle only (no backend bridge)
-# ----------------------------------------------------------------------------
-
-@termux_lm_bp.route("/interpreter/start", methods=["POST"])
-def start_interpreter() -> Any:
-    manager = get_framework_shell_manager()
-    state = _cleanup_state(manager, _load_state())
-    model_id = state.get("active_model_id")
-    if not model_id:
-        return jsonify({"ok": False, "error": "No active model"}), 400
-    model = _load_model(model_id)
-    if not model:
-        return jsonify({"ok": False, "error": "Active model not found"}), 404
-
-    try:
-        result = ensure_interpreter_shell(manager, model)
-    except Exception as exc:
-        current_app.logger.error("termux_lm: failed to ensure OI shell: %s", exc)
-        return jsonify({"ok": False, "error": f"Failed to start interpreter: {exc}"}), 500
-
-    return jsonify({"ok": True, "data": {"shell": result.get("record")}})
 
 
 @termux_lm_bp.route("/shell/log", methods=["GET"])

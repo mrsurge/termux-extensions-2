@@ -1,0 +1,11 @@
+{
+  "id": "file_explorer",
+  "name": "File Explorer",
+  "icon_emoji": "📁",
+  "description": "Browse, manage, and organize files across the Termux sandbox (with sudo helpers when needed).",
+  "entrypoints": {
+    "backend_blueprint": "file_explorer.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  }
+}

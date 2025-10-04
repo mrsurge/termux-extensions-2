@@ -351,15 +351,39 @@ export default function (container, api, host) {
     setStriping(!!state.stripeLines);
     findCase = !!state.findCase; btnFindCase.classList.toggle('active', findCase);
     findWord = !!state.findWord; btnFindWord.classList.toggle('active', findWord);
-    if (state.draft) {
+    
+    // Check for file parameter in URL (from file-explorer or direct link)
+    const urlParams = new URLSearchParams(window.location.search);
+    const fileFromUrl = urlParams.get('file');
+    
+    if (fileFromUrl) {
+      // Priority 1: Load file from URL parameter
+      const abs = toAbsolute(fileFromUrl, HOME_DIR);
+      lastPickerPath = parentDir(abs);
+      openFile(abs).catch((e) => {
+        host.toast('Failed to open file: ' + e.message);
+        currentPath = '';
+        updatePathDisplay();
+        // Fall back to empty editor if file can't be opened
+        setEditorContent('', false);
+        setUnsaved(false);
+      });
+    } else if (state.draft) {
+      // Priority 2: Restore unsaved draft
       setEditorContent(state.draft, false);
       setUnsaved(true);
-    }
-    if (state.lastPath) {
+      if (state.lastPath) {
+        currentPath = toAbsolute(state.lastPath, HOME_DIR);
+        currentPathExists = false; // Draft may not match saved file
+        updatePathDisplay();
+      }
+    } else if (state.lastPath) {
+      // Priority 3: Reopen last file
       const abs = toAbsolute(state.lastPath, HOME_DIR);
       lastPickerPath = parentDir(abs);
       openFile(abs).catch(() => { currentPath = abs; updatePathDisplay(); });
     } else {
+      // Priority 4: Start with empty editor
       setEditorContent('', false);
       setUnsaved(false);
       lastPickerPath = HOME_DIR;

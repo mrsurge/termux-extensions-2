@@ -49,10 +49,6 @@ export default function initTermuxLM(root, api, host) {
 
   const els = mapElements(root);
   const cleanup = [];
-  // Disable Open Interpreter Chat until server detected
-  if (els.openInterpreterButton) {
-    els.openInterpreterButton.disabled = true;
-  }
   startAutoRefresh();
 
   bindEvents();
@@ -74,9 +70,6 @@ export default function initTermuxLM(root, api, host) {
       refreshButton: container.querySelector('[data-action="refresh-models"]'),
       runModeRadios: container.querySelectorAll('input[name="run-mode"]'),
       startChatButton: container.querySelector('[data-action="start-chat"]'),
-      startInterpreterButton: container.querySelector('[data-action="start-interpreter"]'),
-      openInterpreterButton: container.querySelector('[data-action="open-interpreter"]'),
-      oiStatus: container.querySelector('[data-role="oi-status"]'),
       shellStdout: container.querySelector('[data-role="shell-stdout"]'),
       shellStderr: container.querySelector('[data-role="shell-stderr"]'),
       activeModelLabel: container.querySelector('[data-role="active-model-label"]'),
@@ -105,22 +98,7 @@ export default function initTermuxLM(root, api, host) {
       newSessionButton: container.querySelector('[data-action="new-session"]'),
       overlayBg: container.querySelector('[data-shell-overlay]'),
       tokenReadout: container.querySelector('[data-role="token-readout"]'),
-      // OI Console (overlay)
-      oiOverlay: container.querySelector('[data-oi]'),
-      oiOverlayBg: container.querySelector('[data-oi-overlay]'),
-      oiLog: container.querySelector('[data-role="oi-log"]'),
-      oiForm: container.querySelector('[data-role="oi-form"]'),
-      oiInput: container.querySelector('[data-role="oi-input"]'),
-      oiSend: container.querySelector('[data-role="oi-send"]'),
-      oiApprove: container.querySelector('[data-action="oi-approve"]'),
-      oiAuth: container.querySelector('[data-action="oi-auth"]'),
-      oiBack: container.querySelector('[data-action="oi-back"]'),
-      searchSection: container.querySelector('[data-form-section="search"]'),
-      hfQuery: container.querySelector('[data-role="hf-query"]'),
-      hfResults: container.querySelector('[data-role="hf-results"]'),
-      searchHfButton: container.querySelector('[data-action="search-hf"]'),
-      hfSearchModal: container.querySelector('[data-modal="hf-search"]'),
-      closeSearchModalButton: container.querySelector('[data-action="close-search-modal"]'),
+      oiPlaceholder: container.querySelector('[data-role="oi-placeholder"]'),
     };
 
     container.classList.add('tlm-app');
@@ -133,7 +111,6 @@ export default function initTermuxLM(root, api, host) {
         .then(() => {
           renderModelCards();
           updateShellLogs();
-          updateOIStatus();
         })
         .catch((err) => console.debug('termux-lm: refresh tick failed', err));
     }, 6000);
@@ -183,12 +160,6 @@ export default function initTermuxLM(root, api, host) {
     if (els.startChatButton) {
       els.startChatButton.addEventListener('click', handleStartChat);
     }
-    if (els.startInterpreterButton) {
-      els.startInterpreterButton.addEventListener('click', handleStartInterpreter);
-    }
-    if (els.openInterpreterButton) {
-      els.openInterpreterButton.addEventListener('click', toggleOIConsole);
-    }
 
     if (els.chatForm) {
       els.chatForm.addEventListener('submit', sendChatMessage);
@@ -216,188 +187,6 @@ export default function initTermuxLM(root, api, host) {
           closeChatOverlay();
         }
       });
-    }
-
-    if (els.hfQuery) {
-      els.hfQuery.addEventListener('input', debounce(handleHfSearch, 300));
-    }
-
-    // OI Console bindings
-    if (els.oiForm) {
-      els.oiForm.addEventListener('submit', handleOISend);
-    }
-    if (els.oiApprove) {
-      els.oiApprove.addEventListener('click', handleOIApprove);
-    }
-    if (els.oiAuth) {
-      els.oiAuth.addEventListener('click', handleOIAuth);
-    }
-    if (els.oiBack) {
-      els.oiBack.addEventListener('click', () => showOIConsole(false));
-    }
-    if (els.oiOverlayBg) {
-      els.oiOverlayBg.addEventListener('click', (event) => {
-        if (!els.oiOverlay?.querySelector('.tlm-oi-panel')?.contains(event.target)) {
-          showOIConsole(false);
-        }
-      });
-    }
-
-    if (els.searchHfButton) {
-      els.searchHfButton.addEventListener('click', openSearchModal);
-    }
-
-    if (els.closeSearchModalButton) {
-      els.closeSearchModalButton.addEventListener('click', closeSearchModal);
-    }
-  }
-
-  function openSearchModal() {
-    if (els.hfSearchModal) openDialog(els.hfSearchModal);
-  }
-
-  function closeSearchModal() {
-    if (els.hfSearchModal) closeDialog(els.hfSearchModal);
-  }
-
-  function debounce(fn, delay) {
-    let timeoutId;
-    return (...args) => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => fn(...args), delay);
-    };
-  }
-
-  async function handleHfSearch() {
-    if (!els.hfQuery || !els.hfResults) return;
-    const query = els.hfQuery.value.trim();
-
-    try {
-      els.hfResults.innerHTML = '<div class="tlm-loading">Searching...</div>';
-      let results = [];
-      if (query) {
-        results = await API.get(api, `hf/search?q=${encodeURIComponent(query)}`);
-      } else {
-        results = [];
-      }
-      renderHfResults(results);
-    } catch (err) {
-      els.hfResults.innerHTML = `<div class="tlm-error">${escapeHTML(err.message)}</div>`;
-      host.toast?.(err.message || 'Failed to search Hugging Face');
-    }
-  }
-
-  function renderHfResults(results) {
-    if (!els.hfResults) return;
-    els.hfResults.innerHTML = '';
-    if (!results || !results.length) {
-      els.hfResults.innerHTML = '<div class="tlm-empty">No models found.</div>';
-      return;
-    }
-
-    const fragment = document.createDocumentFragment();
-    results.forEach(model => {
-      const card = document.createElement('article');
-      card.className = 'tlm-model-card tlm-hf-card';
-      
-      const sizeMB = model.size / (1024 * 1024);
-      const sizeDisplay = model.size > 0 
-        ? (sizeMB > 1024 ? `${(sizeMB / 1024).toFixed(2)} GB` : `${sizeMB.toFixed(2)} MB`)
-        : 'N/A';
-
-      card.innerHTML = `
-        <h3>${escapeHTML(model.model_name)}</h3>
-        <div class="tlm-model-meta" style="flex-direction: row; align-items: center; gap: 8px; margin-top: 0.5rem; font-size: 0.8rem;">
-          <span>by ${escapeHTML(model.author)}</span>
-          <span class="tlm-divider">·</span>
-          <span>Quant: ${escapeHTML(model.quant)}</span>
-          <span class="tlm-divider">·</span>
-          <span>Size: ${sizeDisplay}</span>
-        </div>
-        <button class="tlm-btn primary" data-action="download-model" style="margin-top: 1rem;">Download</button>
-      `;
-
-      const downloadBtn = card.querySelector('[data-action="download-model"]');
-      downloadBtn.addEventListener('click', () => handleDownloadClick(model.repo_id, model.file));
-
-      fragment.appendChild(card);
-    });
-    els.hfResults.appendChild(fragment);
-  }
-
-  async function handleDownloadClick(repo, file) {
-    closeSearchModal(); // Close the search modal before opening the file picker
-    try {
-      const target = await window.teFilePicker.saveFile({
-        title: 'Save Model As',
-        startPath: '~/models',
-        filename: file,
-      });
-
-      if (!target?.path) return; // User cancelled
-
-      host.toast?.('Preparing download...');
-
-      // 1. Ensure Aria2 daemon is running using absolute paths and fetch
-      const ARIA_API_BASE = '/api/app/aria_downloader';
-
-      try {
-        let shellRunning = false;
-        try {
-          const shellResponse = await fetch(`${ARIA_API_BASE}/shell`);
-          const shellStatus = await shellResponse.json();
-          if (shellStatus.ok && shellStatus.data?.shell?.record?.stats?.alive) {
-            shellRunning = true;
-          }
-        } catch (e) {
-          // Ignore error, assume shell is not running
-        }
-
-        if (!shellRunning) {
-          host.toast?.('Starting download service...');
-          const spawnResponse = await fetch(`${ARIA_API_BASE}/shell/spawn`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ autostart: true, force: true }),
-          });
-          const spawnResult = await spawnResponse.json();
-          if (!spawnResult.ok) {
-            throw new Error(spawnResult.error || 'Failed to start download service');
-          }
-        }
-
-        // 2. Add the download
-        const hfUrl = `https://huggingface.co/${repo}/resolve/main/${file}`;
-        const addResponse = await fetch(`${ARIA_API_BASE}/add`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: hfUrl,
-            directory: target.directory,
-            filename: target.name,
-          }),
-        });
-        const addResult = await addResponse.json();
-        if (!addResult.ok) {
-          throw new Error(addResult.error || 'Failed to add download to queue');
-        }
-
-        // 3. Redirect to Aria Downloader app
-        host.toast?.('Download started! Redirecting...');
-        window.location.href = '/app/aria_downloader';
-
-      } catch (err) {
-        // This will now catch errors from the fetch calls too
-        if (err.message !== 'cancelled') {
-          host.toast?.(err.message || 'Failed to start download');
-          console.error('Download failed', err);
-        }
-      }
-    } catch (err) {
-        if (err.message !== 'cancelled') {
-            host.toast?.(err.message || 'File picker failed');
-            console.error('File picker failed', err);
-        }
     }
   }
 
@@ -443,11 +232,6 @@ export default function initTermuxLM(root, api, host) {
       updateActiveModelLabel();
       if (state.activeModelId) {
         await hydrateSessions(state.activeModelId);
-        // If the server's activeSessionId points to a non-existent session (e.g., remount), clear it
-        const list = state.sessions[state.activeModelId] || [];
-        if (state.activeSessionId && !list.some((s) => s.id === state.activeSessionId)) {
-          state.activeSessionId = null;
-        }
       }
     } catch (err) {
       console.warn('termux-lm: failed to refresh state', err);
@@ -767,7 +551,16 @@ export default function initTermuxLM(root, api, host) {
   }
 
   function applyRunMode() {
-    // No-op now that run mode UI is removed
+    if (!els.chatOverlay) return;
+    els.chatOverlay.dataset.mode = state.runMode;
+    if (state.runMode === 'chat') {
+      if (els.chatForm) els.chatForm.hidden = false;
+      if (els.oiPlaceholder) els.oiPlaceholder.hidden = true;
+    } else {
+      if (els.chatForm) els.chatForm.hidden = true;
+      if (els.oiPlaceholder) els.oiPlaceholder.hidden = false;
+      setDrawerOpen(false);
+    }
   }
 
   function openChatOverlay(modelId, sessionId) {
@@ -918,15 +711,13 @@ export default function initTermuxLM(root, api, host) {
       host.toast?.('Load a model first');
       return;
     }
-
-    // Ensure the session exists on the server; if not, create a new one transparently
-    let sessionId;
-    try {
-      sessionId = await getOrCreateValidSession(modelId, state.activeSessionId);
-    } catch (e) {
-      console.error('termux-lm: failed to ensure valid session', e);
-      host.toast?.('Failed to start session');
-      return;
+    let sessionId = state.activeSessionId;
+    if (!sessionId) {
+      sessionId = await ensureSession();
+      if (!sessionId) {
+        host.toast?.('Failed to start session');
+        return;
+      }
     }
 
     state.activeModelId = modelId;
@@ -949,38 +740,6 @@ export default function initTermuxLM(root, api, host) {
       run_mode: state.runMode,
     });
     upsertSession(model.id, session);
-    state.activeSessionId = session.id;
-    return session.id;
-  }
-
-  // Verify the session exists on the server; if missing (404), create a new one
-  async function getOrCreateValidSession(modelId, sessionId) {
-    const model = getModel(modelId);
-    if (!model) throw new Error('No model');
-    if (!isModelReady(model)) throw new Error('Model is still loading');
-
-    if (sessionId) {
-      try {
-        const resp = await fetch(`${apiBase}models/${encodeURIComponent(modelId)}/sessions/${encodeURIComponent(sessionId)}`);
-        if (resp.ok) {
-          return sessionId;
-        }
-        if (resp.status !== 404) {
-          // Unknown server error; surface it
-          const text = await resp.text();
-          console.warn('termux-lm: session existence check failed', resp.status, text);
-        }
-      } catch (err) {
-        console.warn('termux-lm: session existence check error', err);
-      }
-    }
-
-    // Create a fresh session
-    const session = await API.post(api, `models/${encodeURIComponent(modelId)}/sessions`, {
-      run_mode: state.runMode,
-    });
-    upsertSession(modelId, session);
-    state.activeModelId = modelId;
     state.activeSessionId = session.id;
     return session.id;
   }
@@ -1290,355 +1049,6 @@ export default function initTermuxLM(root, api, host) {
       host.toast?.('Model deleted');
     } catch (err) {
       host.toast?.(err.message || 'Failed to delete model');
-    }
-  }
-
-  // --- Open Interpreter Console helpers ---
-
-  async function handleStartInterpreter() {
-    const model = getModel(state.activeModelId);
-    if (!model) {
-      host.toast?.('Load a model before starting the interpreter');
-      return;
-    }
-    if (!isModelReady(model)) {
-      host.toast?.('Model is still loading');
-      return;
-    }
-    try {
-      await API.post(api, 'interpreter/start', {});
-      host.toast?.('Interpreter server started');
-      updateOIStatus();
-    } catch (err) {
-      host.toast?.(err.message || 'Failed to start interpreter');
-    }
-  }
-
-  // --- OI direct WebSocket client ---
-  const oi = { ws: null, connected: false, authed: false, assistantEl: null, codeEl: null, consoleEl: null };
-
-  function showOIConsole(open) {
-    if (!els.oiOverlay) return;
-    els.oiOverlay.dataset.open = open ? 'true' : 'false';
-    if (open) {
-      clearOILog();
-      connectOIWS();
-    } else {
-      disconnectOIWS();
-    }
-  }
-
-  function toggleOIConsole() {
-    if (!els.oiOverlay) return;
-    const isOpen = els.oiOverlay.dataset.open === 'true';
-    showOIConsole(!isOpen);
-  }
-
-  function clearOILog() {
-    if (els.oiLog) {
-      els.oiLog.innerHTML = '';
-    }
-    oi.assistantEl = null;
-    oi.codeEl = null;
-    oi.consoleEl = null;
-  }
-
-  // Generic line append helper with styling
-  function appendLine(variant, text) {
-    if (!els.oiLog) return;
-    const div = document.createElement('div');
-    div.className = 'tlm-oi-line' + (variant ? ` tlm-oi-${variant}` : '');
-    div.textContent = String(text ?? '');
-    els.oiLog.appendChild(div);
-    els.oiLog.scrollTop = els.oiLog.scrollHeight;
-  }
-
-  // Assistant message handling without per-token newlines
-  function beginAssistantLine() {
-    if (!els.oiLog) return;
-    if (!oi.assistantEl) {
-      const div = document.createElement('div');
-      div.className = 'tlm-oi-line tlm-oi-assistant';
-      els.oiLog.appendChild(div);
-      oi.assistantEl = div;
-    }
-  }
-  function endAssistantLine() {
-    if (oi.assistantEl) {
-      oi.assistantEl = null;
-      els.oiLog.scrollTop = els.oiLog.scrollHeight;
-    }
-  }
-  function appendAssistantToken(content) {
-    if (!els.oiLog) return;
-    beginAssistantLine();
-    oi.assistantEl.textContent += String(content || '');
-    els.oiLog.scrollTop = els.oiLog.scrollHeight;
-  }
-
-  // Code block handling (stream tokens into a single code element)
-  function beginCodeBlock() {
-    if (!els.oiLog) return;
-    if (!oi.codeEl) {
-      const div = document.createElement('div');
-      div.className = 'tlm-oi-line tlm-oi-code';
-      els.oiLog.appendChild(div);
-      oi.codeEl = div;
-    }
-  }
-  function endCodeBlock() {
-    if (oi.codeEl) {
-      oi.codeEl = null;
-      els.oiLog.scrollTop = els.oiLog.scrollHeight;
-    }
-  }
-  function appendCodeToken(content) {
-    if (!els.oiLog) return;
-    beginCodeBlock();
-    oi.codeEl.textContent += String(content || '');
-    els.oiLog.scrollTop = els.oiLog.scrollHeight;
-  }
-
-  // Console block handling (stream console output into a single element)
-  function beginConsoleBlock() {
-    if (!els.oiLog) return;
-    if (!oi.consoleEl) {
-      const div = document.createElement('div');
-      div.className = 'tlm-oi-line tlm-oi-console';
-      els.oiLog.appendChild(div);
-      oi.consoleEl = div;
-    }
-  }
-  function endConsoleBlock() {
-    if (oi.consoleEl) {
-      oi.consoleEl = null;
-      els.oiLog.scrollTop = els.oiLog.scrollHeight;
-    }
-  }
-  function appendConsoleToken(content) {
-    if (!els.oiLog) return;
-    beginConsoleBlock();
-    oi.consoleEl.textContent += String(content || '');
-    els.oiLog.scrollTop = els.oiLog.scrollHeight;
-  }
-
-  // Insert user's prompt inline as its own styled line with "> " prefix
-  function appendUserLine(text) {
-    if (!els.oiLog) return;
-    if (oi.assistantEl) endAssistantLine();
-    appendLine('user', `> ${String(text || '')}`);
-  }
-
-  function appendOIFrame(frame) {
-    try {
-      const eventData = frame?.data ?? frame;
-      if (eventData && typeof eventData === 'object') {
-        const role = eventData.role;
-        const type = eventData.type;
-        const fmt = eventData.format;
-        const content = eventData.content;
-
-        // Suppress control markers like the active console line indicator
-        if (role === 'computer' && type === 'console' && fmt === 'active_line') {
-          return;
-        }
-
-        // Suppress start/end markers for code and console blocks
-        if (role === 'assistant' && type === 'code') {
-          if (eventData.start === true) {
-            beginCodeBlock();
-            return;
-          }
-          if (eventData.end === true) {
-            endCodeBlock();
-            appendLine('approve', 'do you approve?');
-            return;
-          }
-          if (typeof content === 'string' && content) {
-            appendCodeToken(content);
-            return;
-          }
-        }
-
-        // Console output with block handling
-        if (role === 'computer' && type === 'console') {
-          if (eventData.start === true) {
-            beginConsoleBlock();
-            return;
-          }
-          if (eventData.end === true) {
-            endConsoleBlock();
-            return;
-          }
-          if (fmt === 'output' && content) {
-            appendConsoleToken(String(content));
-            return;
-          }
-        }
-
-        // Assistant streaming: no newline per token
-        if (role === 'assistant' && type === 'message') {
-          if (eventData.start === true) {
-            beginAssistantLine();
-            return;
-          }
-          if (eventData.end === true) {
-            endAssistantLine();
-            return;
-          }
-          if (typeof content === 'string' && content) {
-            appendAssistantToken(content);
-            return;
-          }
-        }
-
-        // Server status line
-        if (role === 'server' && type === 'status') {
-          const text = typeof content === 'string' ? content : JSON.stringify(eventData);
-          appendLine('status', text === 'complete' ? '***' : text);
-          return;
-        }
-      }
-      // Fallback for unknown frames
-      appendLine('', JSON.stringify(eventData));
-    } catch (err) {
-      appendLine('', String(frame));
-    }
-  }
-
-  function connectOIWS() {
-    try {
-      oi.ws = new WebSocket('ws://127.0.0.1:8000/');
-      oi.ws.onopen = () => {
-        oi.connected = true;
-        if (els.oiSend) els.oiSend.disabled = !oi.authed;
-        if (els.oiApprove) els.oiApprove.disabled = !oi.authed;
-      };
-      oi.ws.onmessage = (event) => {
-        let data;
-        try { data = JSON.parse(event.data); } catch (e) { data = { raw: event.data }; }
-        appendOIFrame(data);
-      };
-      oi.ws.onclose = () => {
-        oi.connected = false;
-        oi.authed = false;
-        if (els.oiSend) els.oiSend.disabled = true;
-        if (els.oiApprove) els.oiApprove.disabled = true;
-      };
-      oi.ws.onerror = () => {
-        host.toast?.('OI connection error');
-      };
-    } catch (err) {
-      host.toast?.('Failed to open OI WS');
-    }
-  }
-
-  function disconnectOIWS() {
-    try { oi.ws?.close(); } catch (e) {}
-    oi.ws = null;
-    oi.connected = false;
-    oi.authed = false;
-  }
-
-  async function handleOISend(event) {
-    event.preventDefault();
-    const text = (els.oiInput?.value || '').trim();
-    if (!text) return;
-    if (!oi.connected || !oi.ws) {
-      host.toast?.('Not connected to OI');
-      return;
-    }
-    if (!oi.authed) {
-      host.toast?.('Click Auth first');
-      return;
-    }
-    try {
-      // Insert user prompt inline immediately
-      appendUserLine(text);
-      // Clear input early for responsive UX
-      els.oiInput.value = '';
-      const frames = [
-        { role: 'user', start: true },
-        { role: 'user', type: 'message', content: text },
-        { role: 'user', end: true },
-      ];
-      frames.forEach(f => oi.ws.send(JSON.stringify(f)));
-    } catch (err) {
-      host.toast?.('Failed to send');
-    }
-  }
-
-  async function handleOIApprove() {
-    if (!oi.connected || !oi.ws) {
-      host.toast?.('Not connected to OI');
-      return;
-    }
-    if (!oi.authed) {
-      host.toast?.('Click Auth first');
-      return;
-    }
-    try {
-      const frames = [
-        { role: 'user', type: 'command', start: true },
-        { role: 'user', type: 'command', content: 'go' },
-        { role: 'user', type: 'command', end: true },
-      ];
-      frames.forEach(f => oi.ws.send(JSON.stringify(f)));
-    } catch (err) {
-      host.toast?.('Failed to approve');
-    }
-  }
-
-  function handleOIAuth() {
-    if (!oi.connected || !oi.ws) {
-      host.toast?.('Not connected to OI');
-      return;
-    }
-    try {
-      oi.ws.send(JSON.stringify({ auth: true }));
-      oi.authed = true;
-      if (els.oiSend) els.oiSend.disabled = false;
-      if (els.oiApprove) els.oiApprove.disabled = false;
-    } catch (err) {
-      host.toast?.('Auth failed');
-    }
-  }
-
-  async function updateOIStatus() {
-    if (!els.oiStatus) return;
-    try {
-      const resp = await fetch('/api/framework_shells');
-      const payload = await resp.json();
-      let statusHTML = '<span class="tlm-status-dot" data-status="idle"></span> Open Interpreter Inactive';
-      let enableChat = false;
-      if (payload && payload.ok !== false && Array.isArray(payload.data)) {
-        const shells = payload.data;
-        const modelId = state.activeModelId;
-        const prefix = modelId ? `oi:${modelId}` : 'oi:';
-        const matches = shells.filter(sh => typeof sh.label === 'string' && sh.label.startsWith(prefix) && sh.stats?.alive);
-        if (matches.length > 0) {
-          const shell = matches[0];
-          const pid = shell.pid || shell.stats?.pid;
-          const cpuVal = (typeof shell.stats?.cpu_percent === 'number') ? shell.stats.cpu_percent : (typeof shell.stats?.cpu === 'number' ? shell.stats.cpu : null);
-          const cpuStr = (cpuVal !== null) ? `${cpuVal.toFixed(1)}% CPU` : '';
-          const rssBytes = shell.stats?.memory_rss ?? shell.stats?.rss_bytes ?? 0;
-          let memStr = '';
-          if (rssBytes > 0) {
-            const mbytes = rssBytes / (1024 * 1024);
-            memStr = (mbytes >= 1024) ? `${(mbytes/1024).toFixed(1)} GB` : (mbytes >= 10 ? `${Math.round(mbytes)} MB` : `${mbytes.toFixed(1)} MB`);
-            memStr += ' RAM';
-          }
-          const stateText = shell.status ? (shell.status[0].toUpperCase() + shell.status.slice(1)) : 'Running';
-          statusHTML = `<span class=\"tlm-status-dot\" data-status=\"active\"></span> Open Interpreter ${stateText} – PID ${pid}${cpuStr ? `, ${cpuStr}` : ''}${memStr ? `, ${memStr}` : ''}`;
-          enableChat = true;
-        }
-      }
-      els.oiStatus.innerHTML = statusHTML;
-      if (els.openInterpreterButton) {
-        els.openInterpreterButton.disabled = !enableChat;
-      }
-    } catch (err) {
-      console.warn('termux-lm: failed to update OI status', err);
     }
   }
 

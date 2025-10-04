@@ -1,0 +1,7 @@
+{
+  "name": "File Explorer",
+  "id": "file_explorer",
+  "entrypoints": {
+    "backend_blueprint": "file_explorer.py"
+  }
+}

@@ -6,7 +6,6 @@
     </div>
     <div class="tlm-header-actions">
       <button class="tlm-btn ghost" data-action="refresh-models">Refresh</button>
-      <button class="tlm-btn" data-action="search-hf">Search HF</button>
       <button class="tlm-btn primary" data-action="add-model">Add Model</button>
     </div>
   </header>
@@ -33,19 +32,6 @@
       </article>
     </div>
     <button class="tlm-btn primary tlm-btn-wide" data-action="start-chat">Start Chat</button>
-
-    <button class="tlm-btn primary tlm-btn-wide" data-action="start-interpreter">
-      Start Interpreter Server
-    </button>
-
-    <button class="tlm-btn tlm-btn-wide" data-action="open-interpreter">
-      Open Interpreter Chat
-    </button>
-
-    <div class="tlm-status" data-role="oi-status">
-      <span class="tlm-status-dot" data-status="idle"></span>
-      Open Interpreter Inactive
-    </div>
   </section>
 
   <section class="tlm-section tlm-models">
@@ -60,6 +46,24 @@
     </div>
   </section>
 
+  <section class="tlm-section tlm-runmode" data-role="runmode">
+    <div class="tlm-section-header">
+      <div>
+        <h2 class="tlm-section-title">Run Mode</h2>
+        <p class="tlm-section-hint">Pick how the active model should run when a session starts.</p>
+      </div>
+    </div>
+    <div class="tlm-runmode-options">
+      <label class="tlm-radio">
+        <input type="radio" name="run-mode" value="chat" checked>
+        <span>Chat Interface</span>
+      </label>
+      <label class="tlm-radio">
+        <input type="radio" name="run-mode" value="open_interpreter">
+        <span>Open Interpreter (placeholder)</span>
+      </label>
+    </div>
+  </section>
 
   <dialog class="tlm-modal" data-modal="model-form">
     <form method="dialog" class="tlm-modal-body" data-role="model-form">
@@ -125,6 +129,7 @@
           <label class="tlm-field">
             <span>Reasoning Effort</span>
             <input name="reasoning_effort" type="number" min="0" step="1" placeholder="0">
+          </label>
         </section>
       </div>
       <footer>
@@ -132,48 +137,6 @@
         <button class="tlm-btn primary" type="submit">Save</button>
       </footer>
     </form>
-  </dialog>
-
-  <div class="tlm-oi-overlay" data-oi hidden>
-    <div class="tlm-oi-panel">
-<header class="tlm-oi-header">
-        <button class="tlm-btn ghost" type="button" data-action="oi-back">Back</button>
-        <h2 class="tlm-oi-title">Open Interpreter Console</h2>
-        <div style="margin-left:auto; display:flex; gap:8px;">
-          <button class="tlm-btn" type="button" data-action="oi-auth">Auth</button>
-        </div>
-      </header>
-      <div class="tlm-oi-log" data-role="oi-log"></div>
-      <form class="tlm-oi-form" data-role="oi-form">
-        <textarea data-role="oi-input" rows="3" placeholder="Send a message..." autocomplete="off"></textarea>
-        <div class="tlm-chat-actions">
-          <button class="tlm-btn" type="button" data-action="oi-approve">Approve Code</button>
-          <button class="tlm-btn primary" type="submit" data-role="oi-send">Send</button>
-        </div>
-      </form>
-    </div>
-    <div class="tlm-oi-overlay-bg" data-oi-overlay></div>
-  </div>
-
-  <dialog class="tlm-modal" data-modal="hf-search">
-    <div class="tlm-modal-body">
-        <header>
-            <h3>Search HuggingFace</h3>
-            <button class="tlm-btn ghost" type="button" data-action="close-search-modal">Close</button>
-        </header>
-        <div class="tlm-modal-content">
-            <section class="tlm-form-section" data-form-section="search">
-                <label class="tlm-field">
-                    <span>Search Models</span>
-                    <input type="search" data-role="hf-query" placeholder="Type to search..." autocomplete="off">
-                </label>
-
-                <div class="tlm-hf-results" data-role="hf-results">
-                    <!-- Results injected as cards -->
-                </div>
-            </section>
-        </div>
-    </div>
   </dialog>
 
   <div class="tlm-chat-overlay" data-shell hidden>

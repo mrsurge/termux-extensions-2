@@ -1,0 +1,310 @@
+<style>
+.fx-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100%;
+}
+.fx-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--card, #111827);
+  border-bottom: 1px solid var(--border, #1f2937);
+}
+.fx-toolbar button,
+.fx-toolbar .fx-toggle,
+.fx-toolbar .fx-sort-select {
+  background: var(--secondary, #1f2937);
+  color: var(--foreground, #f9fafb);
+  border: 1px solid var(--border, #374151);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+.fx-sort-select {
+  min-width: 100px;
+}
+.fx-sort-dir {
+  padding: 6px 8px !important;
+  font-size: 1.1rem !important;
+  min-width: 32px;
+}
+.fx-toolbar button:hover,
+.fx-toolbar .fx-toggle:hover {
+  border-color: var(--primary, #3b82f6);
+}
+.fx-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.fx-toolbar-left {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fx-toolbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.fx-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+}
+.fx-toggle input[type="checkbox"] {
+  accent-color: var(--primary, #3b82f6);
+}
+.fx-breadcrumbs {
+  padding: 8px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.9rem;
+  color: var(--muted-foreground, #94a3b8);
+}
+.fx-crumb {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.fx-crumb.current {
+  cursor: default;
+  font-weight: 600;
+  color: var(--foreground, #f9fafb);
+}
+.fx-crumb-sep {
+  opacity: 0.6;
+}
+.fx-content {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fx-list-view,
+.fx-grid-view {
+  background: var(--card, #111827);
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 12px;
+  padding: 6px 0;
+}
+.fx-grid-view {
+  display: none;
+  padding: 12px;
+}
+.fx-item {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(12rem, 1fr) 8rem 16rem;
+  gap: 12px;
+  padding: 10px 16px;
+  align-items: center;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+.fx-item:last-child {
+  border-bottom: none;
+}
+.fx-item .fx-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-item .fx-size,
+.fx-item .fx-date {
+  font-size: 0.85rem;
+  color: var(--muted-foreground, #94a3b8);
+}
+.fx-grid-view-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+.fx-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 12px;
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.fx-icon {
+  font-size: 1.1rem;
+  text-align: center;
+}
+.fx-icon-lg {
+  font-size: 2.1rem;
+}
+.fx-name-tile {
+  text-align: center;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+.fx-item.selected,
+.fx-tile.selected {
+  background: rgba(59, 130, 246, 0.16);
+  border-color: var(--primary, #3b82f6);
+}
+.fx-empty,
+.fx-loading {
+  padding: 18px;
+  text-align: center;
+  font-size: 0.95rem;
+  color: var(--muted-foreground, #94a3b8);
+}
+.fx-loading {
+  color: var(--foreground, #f9fafb);
+}
+
+/* Expandable menu styles */
+.fx-item-wrapper,
+.fx-tile-wrapper {
+  position: relative;
+}
+.fx-menu-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--secondary, #1f2937);
+  border: 1px solid var(--border, #374151);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  z-index: 2;
+  opacity: 0.8;
+  transition: opacity 0.2s ease, background 0.2s ease;
+}
+.fx-item:hover .fx-menu-toggle,
+.fx-tile:hover .fx-menu-toggle,
+.fx-menu-toggle.active {
+  opacity: 1;
+}
+.fx-menu-toggle:hover {
+  background: var(--primary, #3b82f6);
+  border-color: var(--primary, #3b82f6);
+}
+.fx-dropdown-menu {
+  position: absolute;
+  top: 36px;
+  right: 8px;
+  background: var(--card, #111827);
+  border: 1px solid var(--border, #374151);
+  border-radius: 8px;
+  padding: 4px;
+  display: none;
+  z-index: 100;
+  min-width: 180px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.fx-dropdown-menu.active {
+  display: block;
+}
+.fx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--foreground, #f9fafb);
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  transition: background 0.2s ease;
+}
+.fx-menu-item:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+.fx-menu-item.danger {
+  color: #ef4444;
+}
+.fx-menu-item.danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+.fx-menu-divider {
+  height: 1px;
+  background: var(--border, #374151);
+  margin: 4px 8px;
+}
+.fx-menu-icon {
+  width: 20px;
+  text-align: center;
+}
+
+/* Archive indicator */
+.fx-archive-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: rgba(168, 85, 247, 0.2);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #c084fc;
+  margin-left: 8px;
+}
+
+@media (max-width: 640px) {
+  .fx-item {
+    grid-template-columns: 2rem 1fr;
+  }
+  .fx-item .fx-size,
+  .fx-item .fx-date {
+    display: none;
+  }
+}
+</style>
+
+<div class="fx-app" data-app-root>
+  <div class="fx-toolbar">
+    <div class="fx-toolbar-left">
+      <button type="button" data-action="up">Up</button>
+      <button type="button" data-action="new-folder">New Folder</button>
+      <button type="button" data-action="new-file">New File</button>
+      <button type="button" data-action="open" disabled>Open</button>
+      <button type="button" data-action="rename" disabled>Rename</button>
+      <button type="button" data-action="delete" disabled>Delete</button>
+      <button type="button" data-action="copy" disabled>Copy</button>
+      <button type="button" data-action="move" disabled>Move</button>
+    </div>
+    <div class="fx-toolbar-right">
+      <label class="fx-toggle">
+        <input type="checkbox" data-action="toggle-hidden">
+        <span>Show hidden</span>
+      </label>
+      <select class="fx-sort-select" data-action="sort-by">
+        <option value="name">Sort: Name</option>
+        <option value="size">Sort: Size</option>
+        <option value="date">Sort: Date</option>
+        <option value="type">Sort: Type</option>
+      </select>
+      <button type="button" class="fx-sort-dir" data-action="sort-dir" title="Toggle sort direction">↓</button>
+      <button type="button" data-action="toggle-view">Grid View</button>
+    </div>
+  </div>
+  <div class="fx-breadcrumbs" data-role="breadcrumbs"></div>
+  <div class="fx-content">
+    <div class="fx-list-view">
+      <div class="fx-items" data-role="list"></div>
+    </div>
+    <div class="fx-grid-view">
+      <div class="fx-grid-view-content" data-role="grid"></div>
+    </div>
+  </div>
+</div>
