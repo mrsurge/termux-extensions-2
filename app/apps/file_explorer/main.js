@@ -179,15 +179,321 @@ function formatOwnership(owner, group) {
   return `${o}:${g}`;
 }
 
+const jobsClient = window.jobsClient || {};
+const JobStatus = {
+  PENDING: 'pending',
+  RUNNING: 'running',
+  SUCCEEDED: 'succeeded',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled',
+};
+
+const TERMINAL_STATUSES = new Set([
+  JobStatus.SUCCEEDED,
+  JobStatus.FAILED,
+  JobStatus.CANCELLED,
+]);
+
+const jobTracker = {
+  poller: null,
+  stream: null,
+  jobs: new Map(),
+};
+
 function toast(host, message) {
   if (!message) return;
-  if (host && typeof host.toast === 'function') {
-    host.toast(message);
-  } else if (window.teUI && typeof window.teUI.toast === 'function') {
+  if (window.teUI && typeof window.teUI.toast === 'function') {
     window.teUI.toast(message);
-  } else {
-    console.log('[toast]', message);
+    return;
   }
+  console.log('[toast]', message);
+}
+
+function hasJobSupport() {
+  return typeof jobsClient.createJobPoller === 'function'
+    || typeof jobsClient.createJobStream === 'function';
+}
+
+function ensureJobPoller(state) {
+  if (!hasJobSupport()) return;
+  if (!jobTracker.poller) {
+    jobTracker.poller = jobsClient.createJobPoller({
+      onUpdate: (jobs) => handleJobUpdates(state, jobs, { partial: false }),
+      onError: (err) => console.error('[file-explorer jobs poller]', err),
+    });
+  }
+  if (!jobTracker.poller.isRunning()) {
+    jobTracker.poller.start();
+  }
+}
+
+function ensureJobSubscription(state) {
+  if (!hasJobSupport()) return;
+  const streamSupported = typeof window !== 'undefined'
+    && typeof window.EventSource === 'function'
+    && typeof jobsClient.createJobStream === 'function';
+
+  if (streamSupported) {
+    const running = jobTracker.stream && typeof jobTracker.stream.isRunning === 'function'
+      ? jobTracker.stream.isRunning()
+      : false;
+    if (!running) {
+      jobTracker.stream = jobsClient.createJobStream({
+        onUpdate: (jobs, options = {}) => handleJobUpdates(state, jobs, options),
+        onError: (err) => {
+          console.error('[file-explorer jobs stream]', err);
+          if (jobTracker.stream) jobTracker.stream.stop();
+          jobTracker.stream = null;
+          ensureJobPoller(state);
+        },
+      });
+      if (jobTracker.stream) {
+        jobTracker.stream.start();
+        if (typeof jobTracker.stream.isRunning === 'function' && jobTracker.stream.isRunning()) {
+          return;
+        }
+      }
+    } else {
+      return;
+    }
+  }
+
+  if (!jobTracker.poller || !jobTracker.poller.isRunning()) {
+    ensureJobPoller(state);
+  }
+}
+
+function maybeStopJobFeed() {
+  if (jobTracker.jobs.size > 0) return;
+  if (jobTracker.stream && typeof jobTracker.stream.stop === 'function') {
+    jobTracker.stream.stop();
+    jobTracker.stream = null;
+  }
+  if (jobTracker.poller && jobTracker.poller.isRunning()) {
+    jobTracker.poller.stop();
+    jobTracker.poller = null;
+  }
+}
+
+function resolveTemplate(template, job, meta, fallback) {
+  if (typeof template === 'function') {
+    try {
+      const value = template(job, meta);
+      if (value) return value;
+    } catch (error) {
+      console.error('[file-explorer jobs] template error', error);
+    }
+  } else if (typeof template === 'string' && template.trim()) {
+    return template;
+  }
+  return fallback;
+}
+
+function trackJob(state, job, meta = {}) {
+  if (!hasJobSupport()) return;
+  const metaPayload = { type: job.type, ...meta };
+  jobTracker.jobs.set(job.id, {
+    meta: metaPayload,
+    lastStatus: job.status,
+    cleaned: false,
+  });
+  updateJobNotification(state, job, jobTracker.jobs.get(job.id));
+  ensureJobSubscription(state);
+}
+
+function trackArchiveExtractionJob(state, job, meta = {}) {
+  const archiveName = meta.archiveName || (meta.archivePath ? meta.archivePath.split('/').pop() : 'archive');
+  trackJob(state, job, {
+    type: 'archive-extract',
+    title: `Extract ${archiveName}`,
+    ...meta,
+  });
+}
+
+function trackBulkOperationJob(state, job, meta = {}) {
+  trackJob(state, job, { ...meta, type: meta.type || job.type });
+}
+
+function handleJobUpdates(state, jobs, options = {}) {
+  if (!Array.isArray(jobs) || jobs.length === 0) return;
+  const partial = options?.partial === true;
+  const jobMap = new Map(jobs.map((job) => [job.id, job]));
+
+  if (partial) {
+    for (const job of jobs) {
+      const info = jobTracker.jobs.get(job.id);
+      if (!info) continue;
+      updateJobNotification(state, job, info);
+    }
+  } else {
+    for (const [jobId, info] of jobTracker.jobs.entries()) {
+      const job = jobMap.get(jobId);
+      if (!job) {
+        window.teUI?.dismiss?.(jobId);
+        jobTracker.jobs.delete(jobId);
+        continue;
+      }
+      updateJobNotification(state, job, info);
+    }
+    maybeStopJobFeed();
+  }
+}
+
+function updateJobNotification(state, job, info) {
+  const meta = info.meta || {};
+  const failureCount = Array.isArray(job.result?.failed) ? job.result.failed.length : 0;
+  const successCount = Array.isArray(job.result?.succeeded) ? job.result.succeeded.length : 0;
+
+  const defaultTitle = meta.title
+    || (meta.type === 'archive-extract'
+      ? `Extract ${meta.archiveName || (meta.archivePath ? meta.archivePath.split('/').pop() : 'archive')}`
+      : meta.type === 'bulk-copy'
+        ? 'Copy items'
+        : meta.type === 'bulk-move'
+          ? 'Move items'
+          : job.type || 'Background task');
+
+  const runningFallback = meta.destination ? `→ ${meta.destination}` : 'Working…';
+  let message = job.message || resolveTemplate(meta.runningMessage, job, meta, meta.description || runningFallback);
+  let variant = 'info';
+  const actions = [];
+
+  if (job.status === JobStatus.SUCCEEDED) {
+    const successFallback = failureCount
+      ? (successCount ? `${successCount} completed, ${failureCount} failed.` : 'Operation completed with errors.')
+      : meta.destination
+        ? `Completed → ${meta.destination}`
+        : 'Completed.';
+    variant = failureCount > 0 ? (successCount > 0 ? 'warning' : 'error') : 'success';
+    message = job.message || resolveTemplate(meta.successMessage, job, meta, successFallback);
+  } else if (job.status === JobStatus.FAILED) {
+    variant = 'error';
+    message = job.error || resolveTemplate(meta.failureMessage, job, meta, 'Job failed.');
+  } else if (job.status === JobStatus.CANCELLED) {
+    variant = 'warning';
+    message = job.message || resolveTemplate(meta.cancelMessage, job, meta, 'Job cancelled.');
+  }
+
+  if (job.status === JobStatus.RUNNING || job.status === JobStatus.PENDING) {
+    actions.push({
+      label: 'Cancel',
+      onClick: async () => {
+        if (typeof jobsClient.cancelJob !== 'function') return;
+        try {
+          await jobsClient.cancelJob(job.id);
+          toast(state.host, 'Cancellation requested.');
+        } catch (err) {
+          toast(state.host, err?.message || 'Failed to cancel job.');
+        }
+      },
+    });
+  }
+
+  const progress = job.progress && typeof job.progress === 'object' ? job.progress : undefined;
+
+  if (window.teUI && typeof window.teUI.notify === 'function') {
+    window.teUI.notify({
+      id: job.id,
+      title: defaultTitle,
+      message,
+      variant,
+      status: job.status,
+      progress,
+      actions,
+      onDismiss: () => {
+        jobTracker.jobs.delete(job.id);
+        if (TERMINAL_STATUSES.has(job.status) && typeof jobsClient.deleteJob === 'function') {
+          jobsClient.deleteJob(job.id).catch(() => {});
+        }
+        maybeStopJobFeed();
+      },
+    });
+  }
+
+  if (info.lastStatus !== job.status && TERMINAL_STATUSES.has(job.status)) {
+    scheduleJobCleanup(state, job, info);
+  }
+
+  info.lastStatus = job.status;
+}
+
+function scheduleJobCleanup(state, job, info) {
+  if (info.cleaned) return;
+  info.cleaned = true;
+
+  const meta = info.meta || {};
+  const failureCount = Array.isArray(job.result?.failed) ? job.result.failed.length : 0;
+  const successCount = Array.isArray(job.result?.succeeded) ? job.result.succeeded.length : 0;
+
+  let toastMessage;
+  if (job.status === JobStatus.SUCCEEDED) {
+    const fallback = job.message
+      || (failureCount
+        ? (successCount ? `${successCount} completed, ${failureCount} failed.` : 'Operation completed with errors.')
+        : meta.destination
+          ? `Completed → ${meta.destination}`
+          : 'Operation completed.');
+    toastMessage = resolveTemplate(meta.successToast ?? meta.successMessage, job, meta, fallback);
+  } else if (job.status === JobStatus.FAILED) {
+    toastMessage = resolveTemplate(meta.failureToast ?? meta.failureMessage, job, meta, job.error || 'Job failed.');
+  } else {
+    toastMessage = resolveTemplate(meta.cancelToast ?? meta.cancelMessage, job, meta, job.message || 'Job cancelled.');
+  }
+
+  if (toastMessage) {
+    toast(state.host, toastMessage);
+  }
+
+  if (job.status === JobStatus.SUCCEEDED) {
+    const refreshTargets = new Set();
+    if (Array.isArray(meta.refreshOnSuccess)) {
+      meta.refreshOnSuccess.forEach((value) => {
+        if (typeof value === 'string' && value) refreshTargets.add(value);
+      });
+    }
+    if (typeof meta.destination === 'string' && meta.destination) {
+      refreshTargets.add(meta.destination);
+    }
+    if (job.result?.destination) {
+      refreshTargets.add(job.result.destination);
+    }
+    if (Array.isArray(job.result?.succeeded)) {
+      job.result.succeeded.forEach((entry) => {
+        if (entry?.destination) refreshTargets.add(entry.destination);
+        if (entry?.source_parent) refreshTargets.add(entry.source_parent);
+      });
+    }
+
+    if (typeof state.refresh === 'function') {
+      for (const target of refreshTargets) {
+        if (target === state.currentPath) {
+          state.refresh();
+        }
+      }
+    }
+  }
+
+  setTimeout(() => {
+    window.teUI?.dismiss?.(job.id);
+    jobTracker.jobs.delete(job.id);
+    if (TERMINAL_STATUSES.has(job.status) && typeof jobsClient.deleteJob === 'function') {
+      jobsClient.deleteJob(job.id).catch(() => {});
+    }
+    maybeStopJobFeed();
+  }, 4000);
+}
+
+async function createJobRequest(type, params) {
+  const response = await fetch('/api/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, params }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body?.ok === false) {
+    throw new Error(body?.error || `HTTP ${response.status}`);
+  }
+  return body.data || body;
 }
 
 export default function initFileExplorer(root, api, host) {
@@ -846,21 +1152,53 @@ export default function initFileExplorer(root, api, host) {
         toast(host, 'File picker unavailable');
         return;
       }
-      
-      const count = state.selectedPaths.size;
+
+      const sources = Array.from(state.selectedPaths);
+      const count = sources.length;
       try {
         const choice = await window.teFilePicker.openDirectory({ 
           title: `Copy ${count} item${count > 1 ? 's' : ''} to...`, 
           startPath: state.currentPath 
         });
         if (!choice || !choice.path) return;
-        
+
+        let jobStarted = false;
+        if (hasJobSupport()) {
+          try {
+            const job = await createJobRequest('bulk_copy', {
+              sources,
+              destination: choice.path,
+            });
+            trackBulkOperationJob(state, job, {
+              type: 'bulk-copy',
+              title: `Copy ${count} item${count > 1 ? 's' : ''}`,
+              destination: choice.path,
+              runningMessage: `Copying → ${choice.path}`,
+              successMessage: (jobInfo) => jobInfo?.message || `Copied to ${choice.path}`,
+              failureMessage: (jobInfo) => jobInfo?.error || 'Copy failed.',
+              cancelMessage: 'Copy cancelled.',
+              successToast: (jobInfo) => jobInfo?.message || `Copied to ${choice.path}`,
+              failureToast: (jobInfo) => jobInfo?.error || 'Copy failed.',
+              cancelToast: 'Copy cancelled.',
+              refreshOnSuccess: [choice.path].filter(Boolean),
+            });
+            toast(host, 'Copy started.');
+            clearSelection();
+            jobStarted = true;
+          } catch (error) {
+            console.error('[file-explorer] bulk_copy job failed', error);
+            toast(host, error?.message || 'Failed to start copy job');
+          }
+        }
+
+        if (jobStarted) return;
+
         let succeeded = 0;
         let failed = 0;
         const errors = [];
-        
-        // Process each selected item
-        for (const sourcePath of state.selectedPaths) {
+
+        // Process each selected item synchronously as a fallback
+        for (const sourcePath of sources) {
           try {
             const filename = sourcePath.split('/').pop();
             const destPath = `${choice.path}/${filename}`;
@@ -871,8 +1209,7 @@ export default function initFileExplorer(root, api, host) {
             errors.push(`${sourcePath}: ${error?.message || 'Failed'}`);
           }
         }
-        
-        // Show results
+
         if (succeeded > 0 && failed === 0) {
           toast(host, `Successfully copied ${succeeded} item${succeeded > 1 ? 's' : ''} to ${choice.path}`);
         } else if (succeeded > 0 && failed > 0) {
@@ -881,7 +1218,7 @@ export default function initFileExplorer(root, api, host) {
         } else {
           toast(host, `Failed to copy ${failed} item${failed > 1 ? 's' : ''}`);
         }
-        
+
         clearSelection();
         if (choice.path === state.currentPath || parentPath(choice.path) === state.currentPath) {
           await loadDirectory(state.currentPath);
@@ -908,11 +1245,49 @@ export default function initFileExplorer(root, api, host) {
         selectLabel: 'Copy',
       });
       if (!pickerResult || !pickerResult.path) return;
+      const destPath = pickerResult.path;
+      const destParent = parentPath(destPath);
+
+      let jobStarted = false;
+      if (hasJobSupport()) {
+        try {
+          const job = await createJobRequest('bulk_copy', {
+            sources: [state.selected.path],
+            destination: destParent || null,
+            destinations: { [state.selected.path]: destPath },
+          });
+          trackBulkOperationJob(state, job, {
+            type: 'bulk-copy',
+            title: `Copy ${state.selected.name}`,
+            destination: destParent || destPath,
+            runningMessage: `Copying → ${destPath}`,
+            successMessage: (jobInfo) => jobInfo?.message || `Copied to ${destPath}`,
+            failureMessage: (jobInfo) => jobInfo?.error || 'Copy failed.',
+            cancelMessage: 'Copy cancelled.',
+            successToast: (jobInfo) => jobInfo?.message || `Copied to ${destPath}`,
+            failureToast: (jobInfo) => jobInfo?.error || 'Copy failed.',
+            cancelToast: 'Copy cancelled.',
+            refreshOnSuccess: [destParent, state.currentPath].filter(Boolean),
+          });
+          toast(host, 'Copy started.');
+          jobStarted = true;
+        } catch (error) {
+          console.error('[file-explorer] single copy job failed', error);
+          toast(host, error?.message || 'Failed to start copy job');
+        }
+      }
+
+      if (jobStarted) {
+        clearSelection();
+        return;
+      }
+
       await api.post('copy', { source: state.selected.path, dest: pickerResult.path });
       toast(host, `Copied "${state.selected.name}" to ${pickerResult.path}`);
-      if (parentPath(pickerResult.path) === state.currentPath) {
+      if (destParent === state.currentPath) {
         await loadDirectory(state.currentPath);
       }
+      clearSelection();
     } catch (error) {
       if (error && error.message === 'cancelled') return;
       toast(host, error?.message || 'Copy failed');
@@ -926,21 +1301,52 @@ export default function initFileExplorer(root, api, host) {
         toast(host, 'File picker unavailable');
         return;
       }
-      
-      const count = state.selectedPaths.size;
+
+      const sources = Array.from(state.selectedPaths);
+      const count = sources.length;
       try {
         const choice = await window.teFilePicker.openDirectory({ 
           title: `Move ${count} item${count > 1 ? 's' : ''} to...`, 
           startPath: state.currentPath 
         });
         if (!choice || !choice.path) return;
-        
+
+        let jobStarted = false;
+        if (hasJobSupport()) {
+          try {
+            const job = await createJobRequest('bulk_move', {
+              sources,
+              destination: choice.path,
+            });
+            trackBulkOperationJob(state, job, {
+              type: 'bulk-move',
+              title: `Move ${count} item${count > 1 ? 's' : ''}`,
+              destination: choice.path,
+              runningMessage: `Moving → ${choice.path}`,
+              successMessage: (jobInfo) => jobInfo?.message || `Moved to ${choice.path}`,
+              failureMessage: (jobInfo) => jobInfo?.error || 'Move failed.',
+              cancelMessage: 'Move cancelled.',
+              successToast: (jobInfo) => jobInfo?.message || `Moved to ${choice.path}`,
+              failureToast: (jobInfo) => jobInfo?.error || 'Move failed.',
+              cancelToast: 'Move cancelled.',
+              refreshOnSuccess: [state.currentPath, choice.path].filter(Boolean),
+            });
+            toast(host, 'Move started.');
+            clearSelection();
+            jobStarted = true;
+          } catch (error) {
+            console.error('[file-explorer] bulk_move job failed', error);
+            toast(host, error?.message || 'Failed to start move job');
+          }
+        }
+
+        if (jobStarted) return;
+
         let succeeded = 0;
         let failed = 0;
         const errors = [];
-        
-        // Process each selected item
-        for (const sourcePath of state.selectedPaths) {
+
+        for (const sourcePath of sources) {
           try {
             await api.post('move', { source: sourcePath, dest: choice.path });
             succeeded++;
@@ -949,8 +1355,7 @@ export default function initFileExplorer(root, api, host) {
             errors.push(`${sourcePath}: ${error?.message || 'Failed'}`);
           }
         }
-        
-        // Show results
+
         if (succeeded > 0 && failed === 0) {
           toast(host, `Successfully moved ${succeeded} item${succeeded > 1 ? 's' : ''} to ${choice.path}`);
         } else if (succeeded > 0 && failed > 0) {
@@ -959,7 +1364,7 @@ export default function initFileExplorer(root, api, host) {
         } else {
           toast(host, `Failed to move ${failed} item${failed > 1 ? 's' : ''}`);
         }
-        
+
         clearSelection();
         await loadDirectory(state.currentPath);
       } catch (error) {
@@ -1116,25 +1521,48 @@ export default function initFileExplorer(root, api, host) {
       });
       if (!dest || !dest.path) return;
 
-      toast(host, 'Extracting archive…');
-      const response = await fetch('/api/app/archive_manager/archives/expand', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      if (hasJobSupport()) {
+        const job = await createJobRequest('extract_archive', {
           archive_path: entry.path,
+          items: [],
           destination: dest.path,
           options: { overwrite: 'rename', password: null },
-        }),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok || body.ok === false) {
-        const message = body?.error || `Extraction failed (HTTP ${response.status})`;
-        throw new Error(message);
-      }
-      toast(host, `Archive extracted to ${dest.path}`);
-
-      if (dest.path === state.currentPath) {
-        await loadDirectory(state.currentPath);
+        });
+        trackArchiveExtractionJob(state, job, {
+          archivePath: entry.path,
+          archiveName: entry.name,
+          destination: dest.path,
+          itemCount: 0,
+          runningMessage: dest.path ? `Extracting → ${dest.path}` : 'Extracting…',
+          successMessage: () => `Extracted to ${dest.path}`,
+          failureMessage: 'Extraction failed.',
+          cancelMessage: 'Extraction cancelled.',
+          successToast: () => `Extracted to ${dest.path}`,
+          failureToast: (jobInfo) => jobInfo?.error || 'Extraction failed.',
+          cancelToast: 'Extraction cancelled.',
+          refreshOnSuccess: [dest.path],
+        });
+        toast(host, 'Extraction started.');
+      } else {
+        toast(host, 'Extracting archive…');
+        const response = await fetch('/api/app/archive_manager/archives/expand', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            archive_path: entry.path,
+            destination: dest.path,
+            options: { overwrite: 'rename', password: null },
+          }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || body.ok === false) {
+          const message = body?.error || `Extraction failed (HTTP ${response.status})`;
+          throw new Error(message);
+        }
+        toast(host, `Archive extracted to ${dest.path}`);
+        if (dest.path === state.currentPath) {
+          await loadDirectory(state.currentPath);
+        }
       }
     } catch (error) {
       if (error && error.message === 'cancelled') return;

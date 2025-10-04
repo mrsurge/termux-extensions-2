@@ -21,7 +21,7 @@ if (!window.teUI) window.teUI = {};
       }
       .te-toast-container {
         position: fixed;
-        bottom: 20px;
+        top: 20px;
         left: 50%;
         transform: translateX(-50%);
         display: flex;
@@ -30,6 +30,7 @@ if (!window.teUI) window.teUI = {};
         gap: 8px;
         z-index: 2000;
         pointer-events: none;
+        max-width: min(90vw, 420px);
       }
       .te-toast {
         background: var(--te-toast-bg);
@@ -143,8 +144,20 @@ if (!window.teUI) window.teUI = {};
     if (!el) {
       el = document.createElement('div');
       el.id = id;
-      el.className = className;
       document.body.appendChild(el);
+    }
+    el.className = className;
+    if (id === TOAST_CONTAINER_ID) {
+      Object.assign(el.style, {
+        top: '20px',
+        left: '50%',
+        right: '',
+        bottom: '',
+        transform: 'translateX(-50%)',
+        position: 'fixed',
+        pointerEvents: 'none',
+        display: '',
+      });
     }
     return el;
   };

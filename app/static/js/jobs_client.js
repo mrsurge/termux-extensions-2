@@ -62,6 +62,73 @@ async function defaultFetch(url, options) {
   return body;
 }
 
+export function createJobStream({
+  jobId,
+  onUpdate = () => {},
+  onError = (err) => console.error('[jobs stream]', err),
+} = {}) {
+  if (typeof window === 'undefined' || typeof window.EventSource !== 'function') {
+    return null;
+  }
+
+  let source = null;
+  let active = false;
+
+  const buildUrl = () => {
+    const base = '/api/jobs/events';
+    if (!jobId) return base;
+    return `${base}?job_id=${encodeURIComponent(jobId)}`;
+  };
+
+  return {
+    start() {
+      if (active) return;
+      const url = buildUrl();
+      try {
+        source = new EventSource(url);
+      } catch (error) {
+        onError(error);
+        source = null;
+        return;
+      }
+      active = true;
+
+      source.onmessage = (event) => {
+        if (!event?.data) return;
+        try {
+          const payload = JSON.parse(event.data);
+          if (Array.isArray(payload?.jobs)) {
+            onUpdate(payload.jobs, { partial: payload?.partial !== false });
+          } else if (Array.isArray(payload)) {
+            onUpdate(payload, { partial: true });
+          }
+        } catch (error) {
+          console.error('[jobs stream] parse error', error);
+        }
+      };
+
+      source.onerror = (event) => {
+        onError(event);
+        if (source) {
+          source.close();
+          source = null;
+        }
+        active = false;
+      };
+    },
+    stop() {
+      if (source) {
+        source.close();
+        source = null;
+      }
+      active = false;
+    },
+    isRunning() {
+      return active;
+    },
+  };
+}
+
 export async function fetchJob(jobId, fetcher) {
   const response = await (fetcher || defaultFetch)(`/api/jobs/${encodeURIComponent(jobId)}`);
   return response.data || response;
@@ -77,4 +144,14 @@ export async function deleteJob(jobId, fetcher) {
   const fn = fetcher || defaultFetch;
   const response = await fn(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
   return response.data || response;
+}
+
+if (typeof window !== 'undefined') {
+  window.jobsClient = Object.assign(window.jobsClient || {}, {
+    createJobPoller,
+    createJobStream,
+    fetchJob,
+    cancelJob,
+    deleteJob,
+  });
 }

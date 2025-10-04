@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request
 
 from app.jobs import JobCancelled, register_job_handler
 from shutil import which
+from tqdm import tqdm
 
 archive_manager_bp = Blueprint("archive_manager_app", __name__)
 
@@ -564,18 +565,25 @@ def job_extract_archive(ctx, params):
             raise ValueError("Invalid item entry")
         normalized_items.append(item.strip().lstrip('/'))
 
+    ctx.set_progress(completed=0, total=100, detail="0%")
     ctx.set_message(f"Extracting {archive_path.name}…")
+    # Use tqdm to forward progress to the job context
+    progress_pattern = re.compile(r'^\s*(\d+)%(?:\s+(\d+))?')
     base_cmd = _build_extract_command(archive_path, normalized_items, destination, options)
-    flags = []
-    if not any(arg.startswith("-bsp") for arg in base_cmd):
-        flags.append("-bsp1")
-    if not any(arg.startswith("-bso") for arg in base_cmd):
-        flags.append("-bso0")
-    seven = _select_7zz()
-    full_cmd = [seven, *base_cmd, *flags]
+    seven = which('7z')
+    append_snld = False
+    if not seven:
+        seven = _select_7zz()
+        append_snld = True
+    else:
+        binary_name = Path(seven).name.lower()
+        append_snld = binary_name not in {'7z'}
 
-    stdout_lines: List[str] = []
-    last_percent = 0
+    if append_snld and '-snld' not in base_cmd:
+        base_cmd.insert(2, '-snld')
+
+    full_cmd = [seven, *base_cmd]
+
     proc = subprocess.Popen(
         full_cmd,
         stdout=subprocess.PIPE,
@@ -585,44 +593,111 @@ def job_extract_archive(ctx, params):
         cwd=str(archive_path.parent),
     )
     ctx.attach_process(proc)
+
+    progress_bar = tqdm(total=100, unit='%', leave=False, mininterval=0, disable=True)
+    last_percent = 0
+    log_lines: List[str] = []
+    await_detail = False
+    buffer = ''
+
     try:
         if proc.stdout:
-            for line in proc.stdout:
-                stdout_lines.append(line)
+            while True:
+                chunk = proc.stdout.read(1)
+                if chunk == '' and proc.poll() is not None:
+                    break
+                if chunk == '':
+                    continue
                 ctx.check_cancelled()
-                match = _PERCENT_RE.search(line)
-                if match:
-                    pct = max(0, min(100, int(match.group(1))))
-                    if pct != last_percent:
-                        ctx.set_progress(completed=pct, total=100, detail=f"{pct}%")
-                        ctx.set_message(f"Extracting {archive_path.name}: {pct}%")
-                        last_percent = pct
+
+                if chunk == '\b':
+                    buffer = buffer[:-1]
+                    continue
+
+                buffer += chunk
+                if len(buffer) > 512:
+                    buffer = buffer[-512:]
+
+                inline_match = progress_pattern.search(buffer)
+                if inline_match:
+                    percent = int(inline_match.group(1))
+                    if percent > last_percent:
+                        bytes_processed = inline_match.group(2)
+                        bytes_value = int(bytes_processed) if bytes_processed else None
+                        delta = percent - last_percent
+                        if delta > 0:
+                            progress_bar.update(delta)
+                        last_percent = percent
+                        if bytes_value is not None:
+                            detail = f"{percent}% ({bytes_value:,} bytes)"
+                            ctx.set_progress(completed=percent, total=100, detail=detail)
+                        else:
+                            ctx.set_progress(completed=percent, total=100, detail=f"{percent}%")
+                        ctx.set_message(f"Extracting {archive_path.name}: {percent}%")
+                        await_detail = True
+
+                if '\r' in buffer or '\n' in buffer:
+                    parts = re.split('[\r\n]', buffer)
+                    buffer = parts.pop()
+
+                    for part in parts:
+                        stripped = part.strip()
+                        if not stripped:
+                            continue
+
+                        match = progress_pattern.match(stripped)
+                        if match:
+                            percent = int(match.group(1))
+                            bytes_processed = match.group(2)
+                            bytes_value = int(bytes_processed) if bytes_processed is not None else None
+
+                            delta = percent - last_percent
+                            if delta > 0:
+                                progress_bar.update(delta)
+                            last_percent = max(last_percent, percent)
+                            if bytes_value is not None:
+                                detail = f"{percent}% ({bytes_value:,} bytes)"
+                                ctx.set_progress(completed=percent, total=100, detail=detail)
+                            else:
+                                ctx.set_progress(completed=percent, total=100, detail=f"{percent}%")
+                            ctx.set_message(f"Extracting {archive_path.name}: {percent}%")
+                            await_detail = True
+                        elif stripped and not stripped.upper().startswith('WARNING:'):
+                            if await_detail:
+                                ctx.set_message(f"Extracting {archive_path.name} → {stripped}")
+                                await_detail = False
+                            else:
+                                log_lines.append(stripped)
+                        elif stripped:
+                            log_lines.append(stripped)
+
         proc.wait()
         ctx.check_cancelled()
     except JobCancelled:
         raise
     finally:
+        progress_bar.close()
         ctx.detach_process()
         if proc.stdout:
             proc.stdout.close()
 
     if proc.returncode != 0:
-        message = ''.join(stdout_lines).strip()
-        raise RuntimeError(message or f"7zz exited with code {proc.returncode}")
+        summary = log_lines[-1] if log_lines else ''
+        suffix = f" (exit code {proc.returncode})"
+        message = f"Extracting {archive_path.name} finished with an error{suffix}"
+        if summary:
+            message = f"{message}: {summary}"
+        raise RuntimeError(message)
 
     if last_percent < 100:
         ctx.set_progress(completed=100, total=100, detail="100%")
-
-    stdout_combined = ''.join(stdout_lines)
-    truncated_stdout = stdout_combined if len(stdout_combined) <= 2000 else stdout_combined[:2000] + "…"
-
     ctx.finish(
         message=f"Extracted to {destination}",
         result={
             "archive_path": str(archive_path),
             "destination": str(destination),
-            "stdout": truncated_stdout,
-            "stderr": "",
+            "stdout": '',
+            "stderr": '',
         },
     )
 

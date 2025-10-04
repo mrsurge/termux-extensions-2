@@ -8,9 +8,11 @@ import shutil
 import stat
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from flask import Blueprint, jsonify, request
+
+from app.jobs import JobCancelled, register_job_handler
 
 file_explorer_bp = Blueprint("file_explorer_app", __name__)
 
@@ -562,6 +564,414 @@ def chown_path():
         except PermissionError as exc:
             return _json_err(str(exc) or 'Permission denied', 403)
     return _json_ok({'path': target_abs, 'owner': user or 'unchanged', 'group': group or 'unchanged'})
+
+
+# ---------------------------------------------------------------------------
+# Background job helpers
+# ---------------------------------------------------------------------------
+
+
+COPY_CHUNK_SIZE = 1024 * 1024  # 1 MiB per chunk
+
+
+def _normalize_sources(raw_sources: List[Any]) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
+    """Normalize raw source paths into absolute paths.
+
+    Returns a tuple of (valid_sources, errors) so the caller can report
+    unresolved inputs back to the user rather than aborting the whole job.
+    """
+
+    valid: List[Dict[str, str]] = []
+    errors: List[Dict[str, str]] = []
+    for entry in raw_sources:
+        if not isinstance(entry, str) or not entry.strip():
+            errors.append({'source': str(entry), 'error': 'Invalid source path'})
+            continue
+        abs_path = os.path.abspath(os.path.expanduser(entry))
+        if not os.path.exists(abs_path):
+            errors.append({'source': entry, 'error': 'Source not found'})
+            continue
+        valid.append({'raw': entry, 'source': abs_path, 'name': os.path.basename(abs_path) or abs_path})
+    return valid, errors
+
+
+def _measure_sources(paths: List[str], ctx) -> Tuple[int, int]:
+    """Return (total_bytes, total_files) for the given paths."""
+
+    total_bytes = 0
+    total_files = 0
+    for path in paths:
+        ctx.check_cancelled()
+        if os.path.islink(path):
+            total_files += 1
+            continue
+        if os.path.isdir(path):
+            for root, _, files in os.walk(path):
+                ctx.check_cancelled()
+                for filename in files:
+                    file_path = os.path.join(root, filename)
+                    total_files += 1
+                    if os.path.islink(file_path):
+                        continue
+                    try:
+                        total_bytes += os.path.getsize(file_path)
+                    except OSError:
+                        continue
+        elif os.path.isfile(path):
+            total_files += 1
+            try:
+                total_bytes += os.path.getsize(path)
+            except OSError:
+                continue
+        else:
+            total_files += 1
+    return total_bytes, total_files
+
+
+def _emit_progress(ctx, state: Dict[str, Any], detail: str) -> None:
+    bytes_total = int(state.get('bytes_total') or 0)
+    if bytes_total > 0:
+        completed = min(int(state.get('bytes_done', 0)), bytes_total)
+        total = bytes_total
+    else:
+        total = max(int(state.get('sources_total') or 1), 1)
+        completed = min(int(state.get('sources_done', 0)), total)
+    ctx.set_progress(completed=completed, total=total, detail=detail)
+
+
+def _copy_symlink(ctx, source: str, destination: str, state: Dict[str, Any], detail: str) -> None:
+    ctx.check_cancelled()
+    parent = os.path.dirname(destination) or '.'
+    os.makedirs(parent, exist_ok=True)
+    if os.path.lexists(destination):
+        raise FileExistsError(destination)
+    target = os.readlink(source)
+    os.symlink(target, destination)
+    _emit_progress(ctx, state, detail)
+
+
+def _copy_file_contents(ctx, source: str, destination: str, state: Dict[str, Any], detail: str) -> None:
+    ctx.check_cancelled()
+    parent = os.path.dirname(destination) or '.'
+    os.makedirs(parent, exist_ok=True)
+    with open(source, 'rb') as reader, open(destination, 'wb') as writer:
+        while True:
+            chunk = reader.read(COPY_CHUNK_SIZE)
+            if not chunk:
+                break
+            writer.write(chunk)
+            state['bytes_done'] = state.get('bytes_done', 0) + len(chunk)
+            _emit_progress(ctx, state, detail)
+            ctx.check_cancelled()
+    try:
+        shutil.copystat(source, destination, follow_symlinks=False)
+    except (PermissionError, OSError):
+        pass
+
+
+def _copy_directory(ctx, source: str, destination: str, state: Dict[str, Any], label: str) -> None:
+    if os.path.exists(destination):
+        raise FileExistsError(destination)
+    os.makedirs(destination, exist_ok=True)
+    try:
+        shutil.copystat(source, destination, follow_symlinks=False)
+    except (PermissionError, OSError):
+        pass
+
+    for root, dirs, files in os.walk(source):
+        ctx.check_cancelled()
+        rel_root = os.path.relpath(root, source)
+        dest_root = destination if rel_root in {'.', ''} else os.path.join(destination, rel_root)
+        os.makedirs(dest_root, exist_ok=True)
+        try:
+            shutil.copystat(root, dest_root, follow_symlinks=False)
+        except (PermissionError, OSError):
+            pass
+
+        # Handle directory symlinks explicitly; os.walk will not descend into them.
+        for dirname in list(dirs):
+            src_dir = os.path.join(root, dirname)
+            dest_dir = os.path.join(dest_root, dirname)
+            if os.path.islink(src_dir):
+                rel_name = os.path.relpath(src_dir, source).replace(os.sep, '/')
+                detail = f"{label}/{rel_name}" if rel_name not in {'.', ''} else label
+                _copy_symlink(ctx, src_dir, dest_dir, state, detail)
+
+        for filename in files:
+            src_file = os.path.join(root, filename)
+            dest_file = os.path.join(dest_root, filename)
+            rel_name = os.path.relpath(src_file, source).replace(os.sep, '/')
+            detail = f"{label}/{rel_name}" if rel_name not in {'.', ''} else label
+            if os.path.islink(src_file):
+                _copy_symlink(ctx, src_file, dest_file, state, detail)
+            else:
+                _copy_file_contents(ctx, src_file, dest_file, state, detail)
+
+
+def _copy_entry(ctx, source: str, destination: str, state: Dict[str, Any], label: str) -> None:
+    if os.path.islink(source):
+        _copy_symlink(ctx, source, destination, state, label)
+    elif os.path.isdir(source):
+        _copy_directory(ctx, source, destination, state, label)
+    else:
+        detail = label
+        _copy_file_contents(ctx, source, destination, state, detail)
+
+
+def _safe_remove_path(path: str) -> None:
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _format_bulk_message(action: str, successes: List[Dict[str, Any]], errors: List[Dict[str, Any]], destination: str) -> str:
+    success_count = len(successes)
+    error_count = len(errors)
+    if success_count and error_count:
+        return f"{action} {success_count} item{'s' if success_count != 1 else ''} to {destination} ({error_count} failed)"
+    if success_count:
+        return f"{action} {success_count} item{'s' if success_count != 1 else ''} to {destination}"
+    if error_count:
+        return f"{action} failed for {error_count} item{'s' if error_count != 1 else ''}"
+    return f"No items {action.lower()}"
+
+
+@register_job_handler('bulk_copy')
+def job_bulk_copy(ctx, params: Dict[str, Any]) -> None:
+    raw_sources = params.get('sources') or []
+    destination_raw = params.get('destination')
+    destinations_param = params.get('destinations') or {}
+    if not isinstance(raw_sources, list) or not raw_sources:
+        raise ValueError('sources must be a non-empty list')
+    if destination_raw is not None and (not isinstance(destination_raw, str) or not destination_raw.strip()):
+        raise ValueError('destination must be a directory path if provided')
+
+    dest_overrides: Dict[str, str] = {}
+    if isinstance(destinations_param, dict):
+        iterator = destinations_param.items()
+    elif isinstance(destinations_param, list):
+        iterator = []
+        for entry in destinations_param:
+            if isinstance(entry, dict) and 'source' in entry and 'target' in entry:
+                iterator.append((entry['source'], entry['target']))
+    else:
+        iterator = []
+
+    for source_key, target_path in iterator:
+        if not isinstance(source_key, str) or not isinstance(target_path, str):
+            continue
+        normalized_target = os.path.abspath(os.path.expanduser(target_path))
+        parent_dir = os.path.dirname(normalized_target)
+        if not parent_dir:
+            continue
+        if not os.path.isdir(parent_dir):
+            raise ValueError(f'Destination directory not found for {target_path}')
+        dest_overrides[source_key] = normalized_target
+
+    dest_dir_abs = None
+    if isinstance(destination_raw, str) and destination_raw.strip():
+        dest_dir_abs = os.path.abspath(os.path.expanduser(destination_raw))
+        if not os.path.isdir(dest_dir_abs):
+            raise ValueError('Destination directory not found')
+
+    sources, errors = _normalize_sources(raw_sources)
+    if not sources and errors:
+        raise RuntimeError('No valid sources to copy')
+    if not sources:
+        raise ValueError('No valid sources provided')
+
+    total_bytes, _ = _measure_sources([item['source'] for item in sources], ctx)
+    state: Dict[str, Any] = {
+        'bytes_total': total_bytes,
+        'bytes_done': 0,
+        'sources_total': len(sources),
+        'sources_done': 0,
+    }
+
+    ctx.set_message(f"Copying {len(sources)} item{'s' if len(sources) != 1 else ''}…")
+    _emit_progress(ctx, state, 'Preparing copy…')
+
+    successes: List[Dict[str, Any]] = []
+
+    for item in sources:
+        ctx.check_cancelled()
+        source_path = item['source']
+        display_name = item['name']
+        override_path = dest_overrides.get(item['raw']) or dest_overrides.get(item['source'])
+        if override_path:
+            destination_path = override_path
+            destination_parent = os.path.dirname(destination_path)
+            if not os.path.isdir(destination_parent):
+                errors.append({'source': item['raw'], 'error': 'Destination directory not found'})
+                continue
+        else:
+            if not dest_dir_abs:
+                errors.append({'source': item['raw'], 'error': 'No destination directory provided'})
+                continue
+            destination_path = os.path.join(dest_dir_abs, display_name)
+        detail = f"Copying {display_name}"
+
+        if destination_path == source_path:
+            errors.append({'source': item['raw'], 'error': 'Destination matches source'})
+            continue
+        if os.path.isdir(source_path):
+            try:
+                common_root = os.path.commonpath([destination_path, source_path])
+            except ValueError:
+                common_root = ''
+            if common_root == source_path:
+                errors.append({'source': item['raw'], 'error': 'Destination is inside the source'})
+                continue
+        if os.path.exists(destination_path):
+            errors.append({'source': item['raw'], 'error': 'Target already exists'})
+            continue
+
+        ctx.set_message(f"Copying {display_name}…")
+
+        success = False
+        try:
+            _copy_entry(ctx, source_path, destination_path, state, detail)
+            successes.append({
+                'source': source_path,
+                'destination': destination_path,
+                'source_parent': os.path.dirname(source_path),
+            })
+            success = True
+        except JobCancelled:
+            _safe_remove_path(destination_path)
+            raise
+        except FileExistsError:
+            _safe_remove_path(destination_path)
+            errors.append({'source': item['raw'], 'error': 'Target already exists'})
+        except Exception as exc:  # pylint: disable=broad-except
+            _safe_remove_path(destination_path)
+            errors.append({'source': item['raw'], 'error': str(exc) or 'Copy failed'})
+
+        if success:
+            state['sources_done'] += 1
+        detail_message = f"Copied {display_name}" if success else f"Copy failed: {display_name}"
+        _emit_progress(ctx, state, detail_message)
+
+    if dest_dir_abs:
+        destination_label = dest_dir_abs
+    elif successes:
+        destination_label = os.path.dirname(successes[0]['destination']) or successes[0]['destination']
+    else:
+        destination_label = destination_raw or 'destination'
+
+    message = _format_bulk_message('Copied', successes, errors, destination_label)
+    result = {
+        'destination': dest_dir_abs or destination_label,
+        'succeeded': successes,
+        'failed': errors,
+        'total_bytes': total_bytes,
+    }
+
+    if successes:
+        if state.get('bytes_total'):
+            state['bytes_done'] = state['bytes_total']
+        else:
+            state['sources_done'] = state['sources_total']
+        _emit_progress(ctx, state, 'Copy finished')
+        ctx.finish(message=message, result=result)
+    elif errors:
+        raise RuntimeError(message)
+    else:
+        ctx.finish(message='Nothing to copy', result=result)
+
+
+@register_job_handler('bulk_move')
+def job_bulk_move(ctx, params: Dict[str, Any]) -> None:
+    raw_sources = params.get('sources') or []
+    destination_raw = params.get('destination')
+    if not isinstance(raw_sources, list) or not raw_sources:
+        raise ValueError('sources must be a non-empty list')
+    if not isinstance(destination_raw, str) or not destination_raw.strip():
+        raise ValueError('destination must be a directory path')
+
+    dest_dir_abs = os.path.abspath(os.path.expanduser(destination_raw))
+    if not os.path.isdir(dest_dir_abs):
+        raise ValueError('Destination directory not found')
+
+    sources, errors = _normalize_sources(raw_sources)
+    if not sources and errors:
+        raise RuntimeError('No valid sources to move')
+    if not sources:
+        raise ValueError('No valid sources provided')
+
+    state: Dict[str, Any] = {
+        'bytes_total': 0,
+        'bytes_done': 0,
+        'sources_total': len(sources),
+        'sources_done': 0,
+    }
+
+    ctx.set_message(f"Moving {len(sources)} item{'s' if len(sources) != 1 else ''}…")
+    _emit_progress(ctx, state, 'Preparing move…')
+
+    successes: List[Dict[str, Any]] = []
+
+    for item in sources:
+        ctx.check_cancelled()
+        source_path = item['source']
+        display_name = item['name']
+        destination_path = os.path.join(dest_dir_abs, display_name)
+        detail = f"Moving {display_name}"
+
+        if destination_path == source_path:
+            errors.append({'source': item['raw'], 'error': 'Destination matches source'})
+            continue
+        if os.path.exists(destination_path):
+            errors.append({'source': item['raw'], 'error': 'Target already exists'})
+            continue
+
+        ctx.set_message(f"Moving {display_name}…")
+
+        try:
+            os.replace(source_path, destination_path)
+        except PermissionError:
+            try:
+                _run_sudo(['mv', source_path, destination_path])
+            except PermissionError as exc:
+                errors.append({'source': item['raw'], 'error': str(exc) or 'Move failed'})
+                continue
+        except OSError:
+            try:
+                shutil.move(source_path, destination_path)
+            except Exception as exc:  # pylint: disable=broad-except
+                errors.append({'source': item['raw'], 'error': str(exc) or 'Move failed'})
+                continue
+        except Exception as exc:  # pylint: disable=broad-except
+            errors.append({'source': item['raw'], 'error': str(exc) or 'Move failed'})
+            continue
+
+        state['sources_done'] += 1
+        _emit_progress(ctx, state, detail)
+        successes.append({
+            'source': source_path,
+            'destination': destination_path,
+            'source_parent': os.path.dirname(source_path),
+        })
+
+    message = _format_bulk_message('Moved', successes, errors, dest_dir_abs)
+    result = {
+        'destination': dest_dir_abs,
+        'succeeded': successes,
+        'failed': errors,
+    }
+
+    if successes:
+        state['sources_done'] = state['sources_total']
+        _emit_progress(ctx, state, 'Move finished')
+        ctx.finish(message=message, result=result)
+    elif errors:
+        raise RuntimeError(message)
+    else:
+        ctx.finish(message='Nothing to move', result=result)
 
 
 # Expose blueprint under a predictable attribute name for discovery

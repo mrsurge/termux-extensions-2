@@ -7,9 +7,10 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from queue import Empty, Queue
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 __all__ = ["jobs_bp", "register_job_handler"]
 
@@ -147,14 +148,17 @@ class JobContext:
     def set_message(self, message: str) -> None:
         self.job.message = message
         self.manager.save_state_async()
+        self.manager.notify_job_update(self.job)
 
     def set_progress(self, completed: Optional[int] = None, total: Optional[int] = None, detail: Optional[str] = None) -> None:
         self.job.update_progress(completed=completed, total=total, detail=detail)
         self.manager.save_state_async()
+        self.manager.notify_job_update(self.job)
 
     def finish(self, message: Optional[str] = None, result: Optional[Dict[str, Any]] = None) -> None:
         self.job.mark_succeeded(result=result, message=message)
         self.manager.save_state_async()
+        self.manager.notify_job_update(self.job)
 
     def attach_process(self, proc: subprocess.Popen) -> None:
         self.job._process = proc
@@ -182,6 +186,7 @@ class JobManager:
         self._jobs: Dict[str, Job] = {}
         self._lock = threading.RLock()
         self._save_lock = threading.Lock()
+        self._listeners: List[Tuple[Queue, Optional[Set[str]]]] = []
         self._load_state()
 
     # --- persistence -------------------------------------------------------
@@ -214,6 +219,46 @@ class JobManager:
             tmp.write_text(json.dumps(snapshot, indent=2))
             tmp.replace(_JOBS_FILE)
 
+    # --- listeners ---------------------------------------------------------
+    def add_listener(self, queue: Queue, job_ids: Optional[Iterable[str]] = None) -> Tuple[Queue, Optional[Set[str]]]:
+        job_filter = set(job_ids) if job_ids else None
+        listener: Tuple[Queue, Optional[Set[str]]] = (queue, job_filter)
+        with self._lock:
+            self._listeners.append(listener)
+            snapshot = [
+                job.to_public_dict()
+                for job in self._jobs.values()
+                if job_filter is None or job.id in job_filter
+            ]
+        if snapshot:
+            try:
+                queue.put_nowait({"jobs": snapshot, "partial": False})
+            except Exception:
+                pass
+        return listener
+
+    def remove_listener(self, listener: Tuple[Queue, Optional[Set[str]]]) -> None:
+        with self._lock:
+            if listener in self._listeners:
+                self._listeners.remove(listener)
+
+    def _broadcast_job(self, job: Job, *, partial: bool = True) -> None:
+        payload = {"jobs": [job.to_public_dict()], "partial": partial}
+        with self._lock:
+            listeners = [
+                queue
+                for queue, job_filter in self._listeners
+                if job_filter is None or job.id in job_filter
+            ]
+        for queue in listeners:
+            try:
+                queue.put_nowait(payload)
+            except Exception:
+                pass
+
+    def notify_job_update(self, job: Job, *, partial: bool = True) -> None:
+        self._broadcast_job(job, partial=partial)
+
     # --- CRUD --------------------------------------------------------------
     def create_job(self, job_type: str, params: Dict[str, Any]) -> Job:
         if job_type not in _JOB_HANDLERS:
@@ -224,6 +269,7 @@ class JobManager:
             self._spawn(job)
             self._prune_finished(max_items=200)
         self.save_state_async()
+        self.notify_job_update(job)
         return job
 
     def list_jobs(self) -> Dict[str, Job]:
@@ -261,18 +307,23 @@ class JobManager:
         if not handler:
             job.mark_failed("No handler registered")
             self.save_state_async()
+            self.notify_job_update(job)
             return
         job.mark_running()
         self.save_state_async()
+        self.notify_job_update(job)
         ctx = JobContext(job, self)
         try:
             handler(ctx, job.params)
             if job.status == JobStatus.RUNNING:
                 job.mark_succeeded(message=job.message)
+                self.notify_job_update(job)
         except JobCancelled:
             job.mark_cancelled(job.message or "Job cancelled")
+            self.notify_job_update(job)
         except Exception as exc:  # pylint: disable=broad-except
             job.mark_failed(str(exc) or "Job failed")
+            self.notify_job_update(job)
         finally:
             job._process = None
             self.save_state_async()
@@ -351,3 +402,28 @@ def delete_job_route(job_id: str):
     if not removed:
         return jsonify({"ok": False, "error": "Job is running or not found"}), 400
     return jsonify({"ok": True, "data": None})
+
+
+@jobs_bp.route("/jobs/events", methods=["GET"])
+def jobs_events_stream():
+    job_id = request.args.get("job_id")
+    job_ids = [job_id] if job_id else None
+    queue: Queue = Queue()
+    listener = manager.add_listener(queue, job_ids)
+
+    def generate():
+        try:
+            while True:
+                try:
+                    payload = queue.get(timeout=25)
+                except Empty:
+                    yield ": keep-alive\n\n"
+                    continue
+                yield f"data: {json.dumps(payload)}\n\n"
+        finally:
+            manager.remove_listener(listener)
+
+    response = Response(stream_with_context(generate()), mimetype="text/event-stream")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
