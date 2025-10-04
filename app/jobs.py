@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import threading
 import time
 import uuid
@@ -45,6 +46,7 @@ class Job:
     finished_at: Optional[float] = None
     _cancel_requested: bool = field(default=False, init=False, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
+    _process: Optional[subprocess.Popen] = field(default=None, init=False, repr=False)
 
     def to_public_dict(self) -> Dict[str, Any]:
         return {
@@ -81,6 +83,12 @@ class Job:
     def request_cancel(self) -> None:
         with self._lock:
             self._cancel_requested = True
+            proc = self._process
+        if proc and proc.poll() is None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
     def cancel_requested(self) -> bool:
         with self._lock:
@@ -147,6 +155,12 @@ class JobContext:
     def finish(self, message: Optional[str] = None, result: Optional[Dict[str, Any]] = None) -> None:
         self.job.mark_succeeded(result=result, message=message)
         self.manager.save_state_async()
+
+    def attach_process(self, proc: subprocess.Popen) -> None:
+        self.job._process = proc
+
+    def detach_process(self) -> None:
+        self.job._process = None
 
 
 JobHandler = Callable[[JobContext, Dict[str, Any]], None]
@@ -260,6 +274,7 @@ class JobManager:
         except Exception as exc:  # pylint: disable=broad-except
             job.mark_failed(str(exc) or "Job failed")
         finally:
+            job._process = None
             self.save_state_async()
 
     def _prune_finished(self, *, max_items: int) -> None:

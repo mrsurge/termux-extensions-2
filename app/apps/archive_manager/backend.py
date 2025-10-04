@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +10,8 @@ from urllib.parse import urlencode
 
 from flask import Blueprint, jsonify, request
 
-from app.jobs import register_job_handler
+from app.jobs import JobCancelled, register_job_handler
+from shutil import which
 
 archive_manager_bp = Blueprint("archive_manager_app", __name__)
 
@@ -28,6 +30,9 @@ ARCHIVE_EXTENSIONS = {
     ".rar",
 }
 
+SEVEN_Z_CANDIDATES = ("7zz", "7z", "7za", "7zr")
+_PERCENT_RE = re.compile(r"(\d+)%")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -44,6 +49,14 @@ def _json_err(message: str, status: int = 400):
 def _looks_like_archive(path: Path) -> bool:
     lower = path.name.lower()
     return any(lower.endswith(ext) for ext in ARCHIVE_EXTENSIONS)
+
+
+def _select_7zz() -> str:
+    for candidate in SEVEN_Z_CANDIDATES:
+        path = which(candidate)
+        if path:
+            return path
+    raise RuntimeError("7zz executable not found. Install the p7zip package on Termux.")
 
 
 def _format_timestamp(ts: Optional[float]) -> Optional[str]:
@@ -206,7 +219,8 @@ def _list_archive_children(records: Iterable[Dict[str, str]], internal: str, sho
 
 
 def _run_7zz(args: Iterable[str], *, cwd: Optional[Path] = None) -> subprocess.CompletedProcess[str]:
-    cmd = ["7zz", *args]
+    seven = _select_7zz()
+    cmd = [seven, *args]
     try:
         result = subprocess.run(
             cmd,
@@ -551,11 +565,56 @@ def job_extract_archive(ctx, params):
         normalized_items.append(item.strip().lstrip('/'))
 
     ctx.set_message(f"Extracting {archive_path.name}…")
-    cmd = _build_extract_command(archive_path, normalized_items, destination, options)
-    result = _run_7zz(cmd, cwd=archive_path.parent)
+    base_cmd = _build_extract_command(archive_path, normalized_items, destination, options)
+    flags = []
+    if not any(arg.startswith("-bsp") for arg in base_cmd):
+        flags.append("-bsp1")
+    if not any(arg.startswith("-bso") for arg in base_cmd):
+        flags.append("-bso0")
+    seven = _select_7zz()
+    full_cmd = [seven, *base_cmd, *flags]
 
-    truncated_stdout = result.stdout if len(result.stdout) <= 2000 else result.stdout[:2000] + "…"
-    truncated_stderr = result.stderr if len(result.stderr) <= 2000 else result.stderr[:2000] + "…"
+    stdout_lines: List[str] = []
+    last_percent = 0
+    proc = subprocess.Popen(
+        full_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        cwd=str(archive_path.parent),
+    )
+    ctx.attach_process(proc)
+    try:
+        if proc.stdout:
+            for line in proc.stdout:
+                stdout_lines.append(line)
+                ctx.check_cancelled()
+                match = _PERCENT_RE.search(line)
+                if match:
+                    pct = max(0, min(100, int(match.group(1))))
+                    if pct != last_percent:
+                        ctx.set_progress(completed=pct, total=100, detail=f"{pct}%")
+                        ctx.set_message(f"Extracting {archive_path.name}: {pct}%")
+                        last_percent = pct
+        proc.wait()
+        ctx.check_cancelled()
+    except JobCancelled:
+        raise
+    finally:
+        ctx.detach_process()
+        if proc.stdout:
+            proc.stdout.close()
+
+    if proc.returncode != 0:
+        message = ''.join(stdout_lines).strip()
+        raise RuntimeError(message or f"7zz exited with code {proc.returncode}")
+
+    if last_percent < 100:
+        ctx.set_progress(completed=100, total=100, detail="100%")
+
+    stdout_combined = ''.join(stdout_lines)
+    truncated_stdout = stdout_combined if len(stdout_combined) <= 2000 else stdout_combined[:2000] + "…"
 
     ctx.finish(
         message=f"Extracted to {destination}",
@@ -563,7 +622,7 @@ def job_extract_archive(ctx, params):
             "archive_path": str(archive_path),
             "destination": str(destination),
             "stdout": truncated_stdout,
-            "stderr": truncated_stderr,
+            "stderr": "",
         },
     )
 
