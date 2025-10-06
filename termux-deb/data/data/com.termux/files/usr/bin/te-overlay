@@ -1,0 +1,14 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Usage: te-overlay [show|hide|toggle|stop]
+set -euo pipefail
+action="${1:-toggle}"
+case "$action" in
+  show)   act="com.termux.extensions.ACTION_SHOW" ;;
+  hide)   act="com.termux.extensions.ACTION_HIDE" ;;
+  toggle) act="com.termux.extensions.ACTION_TOGGLE" ;;
+  stop)   act="com.termux.extensions.ACTION_STOP" ;;
+  *) echo "usage: te-overlay [show|hide|toggle|stop]" >&2; exit 2 ;;
+esac
+am broadcast --user 0 -n com.termux.extensions/.ControlReceiver -a "$act" >/dev/null 2>&1 || true
+exit 0
+

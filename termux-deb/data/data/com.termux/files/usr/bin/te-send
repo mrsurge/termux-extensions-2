@@ -1,0 +1,11 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Usage: te-send <sid> "<command...>" (mirrors text to session output)
+set -euo pipefail
+logf="$HOME/.cache/te/debug.log"; te_log(){ printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >>"$logf"; }
+sid="${1:?sid}"; shift
+cmd="$*"
+fifo="$HOME/.cache/te/$sid/in.fifo"
+[ -p "$fifo" ] || { echo "no fifo" >&2; exit 92; }
+printf '%s\n' "$cmd" > "$fifo"
+te_log "te-send: sid=$sid sent='${cmd:0:120}'"
+

@@ -1,0 +1,37 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Visible-in-shell exec: te-exec <sid> [--policy allow|prompt_only] -- <argv...>
+set -euo pipefail
+logf="$HOME/.cache/te/debug.log"; te_log(){ printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >>"$logf"; }
+sid="${1:?sid}"; shift
+policy="allow"
+if [[ "${1:-}" == "--policy" ]]; then
+  policy="${2:?policy}"; shift 2
+fi
+if [[ "${1:-}" == "--" ]]; then shift; fi
+if [[ $# -lt 1 ]]; then echo "usage: te-exec <sid> [--policy allow|prompt_only] -- <argv...>" >&2; exit 2; fi
+
+# Determine the session's cwd from /proc and mirror output to its TTY (fd=1)
+tty_out="/proc/$sid/fd/1"
+cwd_link="/proc/$sid/cwd"
+if [[ -L "$cwd_link" ]]; then
+  # -P follows symlink; avoid errors if proc entry vanished
+  cd -P "$cwd_link" 2>/dev/null || true
+fi
+
+# Try to mirror into the session's stdout; fall back to normal stdout
+exec 3>/dev/null
+if exec 3>"$tty_out" 2>/dev/null; then
+  te_log "te-exec: sid=$sid mirror=tty cwd=$(pwd) argv=$*"
+  # Announce
+  printf '[te] run:' | cat >&3; for a in "$@"; do printf ' %q' "$a" | cat >&3; done; printf '\n' | cat >&3
+  # Stream output to the session terminal
+  set +e
+  "$@" 2>&1 | while IFS= read -r line; do printf '%s\n' "$line" | cat >&3; done
+  status=${PIPESTATUS[0]}
+  set -e
+  printf '[te] exit: %s\n' "$status" | cat >&3
+  exit "$status"
+else
+  te_log "te-exec: sid=$sid mirror=none cwd=$(pwd) argv=$*"
+  exec "$@"
+fi

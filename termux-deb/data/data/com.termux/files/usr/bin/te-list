@@ -1,0 +1,30 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Prints JSON lines: {sid,pid,cmd,cwd,rss,idle,user_busy,inj_busy,hooked,name,sock}
+set -euo pipefail
+logdir="$HOME/.cache/te"; [ -d "$logdir" ] || mkdir -p "$logdir"
+logf="$logdir/debug.log"
+te_log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >>"$logf"; }
+
+base="$HOME/.cache/te"; [ -d "$base" ] || { te_log "te-list: base missing ($base), 0 sessions"; exit 0; }
+tmp_ps="${TMPDIR:-$PREFIX/tmp}/te.ps.$$"
+ps -A -o pid=,comm=,rss= >"$tmp_ps" 2>/dev/null || true
+count=0
+while IFS= read -r d; do
+  sid="$(basename "$d")"
+  [ -r "/proc/$sid/cmdline" ] || continue
+  cmd="$(tr '\0' ' ' </proc/$sid/cmdline | sed 's/["\\]/\\&/g')"
+  cwd=""; sock=""
+  if [ -r "$d/meta" ]; then . "$d/meta" 2>/dev/null || true; fi
+  [ -n "${CWD:-}" ] && cwd="$CWD"
+  [ -n "${SOCK:-}" ] && sock="$SOCK"
+  hooked=$([ -r "$d/meta" ] && echo true || echo false)
+  rss="$(awk -v p="$sid" '$1==p{print $3}' "$tmp_ps" 2>/dev/null || echo 0)"
+  idle=$([ -f "$d/at_prompt" ] && echo true || echo false)
+  inj_busy=false
+  user_busy=$([ "$idle" = "false" ] && echo true || echo false)
+  name=""; [ -r "$d/name" ] && name="$(cat "$d/name" 2>/dev/null | sed 's/["\\]/\\&/g')"
+  echo "{\"sid\":$sid,\"pid\":$sid,\"cmd\":\"$cmd\",\"cwd\":\"${cwd:-}\",\"rss\":$rss,\"idle\":$idle,\"user_busy\":$user_busy,\"inj_busy\":$inj_busy,\"hooked\":$hooked,\"name\":\"$name\",\"sock\":\"$sock\"}"
+  count=$((count+1))
+done < <(find "$base" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -n) || true
+rm -f "$tmp_ps" 2>/dev/null || true
+te_log "te-list: enumerated $count sessions"

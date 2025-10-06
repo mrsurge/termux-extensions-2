@@ -1,0 +1,19 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Exit: 0 OK | 90 busy injected | 92 stale/invalid (USER_ACTIVE temporarily disabled)
+set -euo pipefail
+logf="$HOME/.cache/te/debug.log"; te_log(){ printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >>"$logf"; }
+sid="${1:?sid}"; policy="${2:-allow}"
+d="$HOME/.cache/te/$sid"
+[ -d "$d" ] && [ -r "/proc/$sid/cmdline" ] || { te_log "collide: sid=$sid STALE(no dir/proc)"; echo '{"status":"STALE"}'; exit 92; }
+tr '\0' '\n' </proc/$sid/cmdline | grep -qE '(bash|zsh)' || { te_log "collide: sid=$sid STALE(not shell)"; echo '{"status":"STALE"}'; exit 92; }
+
+# Busy due to injected job lock
+exec 9>"$d/busy.lock" || true
+if ! flock -n 9; then
+  te_log "collide: sid=$sid BUSY_INJECTED"; echo '{"status":"BUSY_INJECTED"}'; exit 90
+fi
+flock -u 9
+
+# USER_ACTIVE check disabled for now
+te_log "collide: sid=$sid OK"
+echo '{"status":"OK"}'; exit 0

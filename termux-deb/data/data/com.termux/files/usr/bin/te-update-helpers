@@ -1,0 +1,33 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Update helpers from a local .deb. Usage: te-update-helpers [path-to-deb]
+set -euo pipefail
+log(){ printf '[te-update] %s\n' "$*"; }
+
+deb="${1:-}"
+if [[ -z "$deb" ]]; then
+  files=()
+  for p in "$HOME"/termux-extensions_*.deb "$HOME"/Downloads/termux-extensions_*.deb "$HOME"/download/termux-extensions_*.deb "$HOME"/termux-deb/termux-extensions_*.deb; do
+    [[ -f "$p" ]] && files+=("$p") || true
+  done
+  if [[ ${#files[@]} -gt 0 ]]; then
+    deb=$(printf '%s\n' "${files[@]}" | sort -V | tail -n1)
+  else
+    log "no .deb found in HOME or Downloads. Provide a path: te-update-helpers /path/to/termux-extensions_X.deb"
+    exit 2
+  fi
+fi
+
+if [[ ! -f "$deb" ]]; then log "file not found: $deb"; exit 2; fi
+log "installing: $deb"
+if command -v apt >/dev/null 2>&1; then
+  if ! apt install -y "$deb"; then
+    log "apt failed; trying dpkg -i"
+    dpkg -i "$deb"
+  fi
+else
+  dpkg -i "$deb"
+fi
+hash -r || true
+log "done"
+exit 0
+

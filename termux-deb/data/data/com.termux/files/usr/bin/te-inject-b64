@@ -1,0 +1,28 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Usage: te-inject-b64 <sid> -- <base64-payload>
+set -euo pipefail
+sid="${1:?sid}"; shift
+if [[ "${1:-}" == "--" ]]; then shift; fi
+payload="$*"
+if [[ -z "$payload" ]]; then echo "usage: te-inject-b64 <sid> -- <base64>" >&2; exit 2; fi
+
+meta="$HOME/.cache/te/$sid/meta"
+sock=""
+if [[ -f "$meta" ]]; then
+  # shellcheck disable=SC1090
+  source "$meta" >/dev/null 2>&1 || true
+fi
+sock="${SOCK:-}"
+if [[ -z "$sock" ]]; then
+  echo "no socket for sid=$sid (is this shell wrapped by dtach?)" >&2
+  exit 92
+fi
+if ! command -v dtach >/dev/null 2>&1; then
+  echo "dtach not installed" >&2; exit 93
+fi
+
+# Build a safe one-liner that decodes and runs the payload via stdin
+one="base64 -d <<<\"$payload\" | bash -s; echo \"[te] exit:$?\""
+
+printf '%s\n' "$one" | dtach -p "$sock"
+exit 0

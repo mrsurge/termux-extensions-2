@@ -1,0 +1,10 @@
+{
+  "id": "settings",
+  "name": "Settings",
+  "icon_emoji": "🎛️",
+  "description": "Framework diagnostics, launcher ordering, and supervisor controls.",
+  "entrypoints": {
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  }
+}

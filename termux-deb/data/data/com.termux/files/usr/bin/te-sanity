@@ -1,0 +1,124 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Quick installer verification for termux-extensions helper scripts
+# Usage: te-sanity [--verbose] [--fix-hooks] [--set-allow]
+set -euo pipefail
+
+VERBOSE=0
+FIX_HOOKS=0
+SET_ALLOW=0
+for a in "$@"; do
+  case "$a" in
+    --verbose) VERBOSE=1 ;;
+    --fix-hooks) FIX_HOOKS=1 ;;
+    --set-allow) SET_ALLOW=1 ;;
+    *) echo "unknown arg: $a" >&2; exit 2 ;;
+  esac
+done
+
+te_echo() { printf '%s\n' "$*"; }
+te_ok()   { printf '[OK] %s\n' "$*"; }
+te_warn() { printf '[WARN] %s\n' "$*"; }
+te_fail() { printf '[FAIL] %s\n' "$*"; }
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+HOME="${HOME:-/data/data/com.termux/files/home}"
+PATH_CHECK=0
+
+te_echo "termux-extensions sanity check"
+te_echo "PREFIX=$PREFIX"
+te_echo "HOME=$HOME"
+te_echo "PATH=$PATH"
+
+# 1) PATH contains PREFIX/bin
+case ":$PATH:" in
+  *":$PREFIX/bin:"*) te_ok "PATH contains $PREFIX/bin"; PATH_CHECK=1 ;;
+  *) te_warn "PATH missing $PREFIX/bin" ;;
+esac
+
+# 2) Files present and executable
+need_exec=(
+  "$PREFIX/bin/te-list"
+  "$PREFIX/bin/te-send"
+  "$PREFIX/bin/te-exec"
+  "$PREFIX/bin/te-collide-check"
+  "$HOME/.local/bin/te-attach-init"
+)
+all_exec=1
+for f in "${need_exec[@]}"; do
+  if [ -x "$f" ]; then te_ok "exec present: $f"; else te_fail "missing or not executable: $f"; all_exec=0; fi
+done
+
+# 3) allow-external-apps
+prop_file="$HOME/.termux/termux.properties"
+allow_val=""
+if [ -f "$prop_file" ]; then
+  allow_val=$(grep -E '^\s*allow-external-apps\s*=\s*(true|false)\s*$' "$prop_file" | tail -n1 | sed -E 's/.*=\s*//') || true
+  if [ "$allow_val" = "true" ]; then te_ok "allow-external-apps=true"; else te_warn "allow-external-apps not true (value='$allow_val')"; fi
+else
+  te_warn "~/.termux/termux.properties not found"
+fi
+if [ $SET_ALLOW -eq 1 ]; then
+  mkdir -p "$HOME/.termux"
+  if grep -q '^allow-external-apps' "$prop_file" 2>/dev/null; then
+    sed -i 's/^allow-external-apps.*/allow-external-apps=true/' "$prop_file"
+  else
+    printf 'allow-external-apps=true\n' >> "$prop_file"
+  fi
+  te_ok "set allow-external-apps=true; reloading settings"
+  command -v termux-reload-settings >/dev/null 2>&1 && termux-reload-settings || te_warn "termux-reload-settings not found"
+fi
+
+# 4) Shell hooks in rc
+hook_line='case $- in *i*) [ -x "$HOME/.local/bin/te-attach-init" ] && . "$HOME/.local/bin/te-attach-init" ;; esac'
+found_hook=0
+for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.bash_profile"; do
+  [ -f "$rc" ] || continue
+  if grep -Fq "$hook_line" "$rc"; then te_ok "hook in $(basename "$rc")"; found_hook=1; fi
+done
+if [ $found_hook -eq 0 ]; then
+  te_warn "attach-init hook not found in .bashrc/.zshrc"
+  if [ $FIX_HOOKS -eq 1 ]; then
+    printf '%s\n' "$hook_line" >> "$HOME/.bashrc"
+    printf '%s\n' "$hook_line" >> "$HOME/.zshrc"
+    if ! grep -Fq 'source ~/.bashrc' "$HOME/.bash_profile" 2>/dev/null; then
+      printf 'if [ -f ~/.bashrc ]; then . ~/.bashrc; fi\n' >> "$HOME/.bash_profile"
+    fi
+    te_ok "hook appended to .bashrc and .zshrc"
+  fi
+fi
+
+# 5) Ensure log dir exists
+mkdir -p "$HOME/.cache/te"
+logf="$HOME/.cache/te/debug.log"
+touch "$logf" 2>/dev/null || true
+te_ok "log: $logf"
+
+# 6) te-list availability and output
+if command -v te-list >/dev/null 2>&1; then
+  te_ok "command -v te-list"
+  set +e
+  out=$(te-list 2>/dev/null)
+  ec=$?
+  set -e
+  if [ $ec -ne 0 ]; then
+    te_fail "te-list exit=$ec"
+  else
+    lines=$(printf '%s\n' "$out" | sed -n '1,3p')
+    count=$(printf '%s\n' "$out" | sed -n '$=')
+    te_ok "te-list ok (${count:-0} lines). Preview:"; printf '%s\n' "$lines"
+  fi
+else
+  te_fail "te-list not on PATH"
+fi
+
+# 7) Active session presence
+sess_count=$(find "$HOME/.cache/te" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+if [ "${sess_count:-0}" -gt 0 ]; then
+  te_ok "sessions detected: $sess_count"
+else
+  te_warn "no sessions found; open a new Termux shell to attach (source te-attach-init)"
+fi
+
+te_echo ""
+te_echo "Done. To tail logs: tail -f $logf"
+exit 0

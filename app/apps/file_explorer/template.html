@@ -1,0 +1,848 @@
+<style>
+.fx-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100%;
+}
+.fx-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--card, #111827);
+  border-bottom: 1px solid var(--border, #1f2937);
+}
+.fx-toolbar button,
+.fx-toolbar .fx-toggle {
+  background: var(--secondary, #1f2937);
+  color: var(--foreground, #f9fafb);
+  border: 1px solid var(--border, #374151);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+.fx-toolbar button:hover,
+.fx-toolbar .fx-toggle:hover {
+  border-color: var(--primary, #3b82f6);
+}
+.fx-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.fx-mobile-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: none;
+  align-items: center;
+  justify-content: space-around;
+  gap: 12px;
+  padding: 10px 12px calc(env(safe-area-inset-bottom, 0px) + 10px);
+  background: var(--card, #111827);
+  border-top: 1px solid var(--border, #1f2937);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35);
+  z-index: 320;
+}
+.fx-mobile-footer button {
+  background: var(--secondary, #1f2937);
+  color: var(--foreground, #f9fafb);
+  border: 1px solid var(--border, #374151);
+  border-radius: 12px;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+  padding: 0;
+}
+.fx-mobile-footer button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.fx-mobile-footer .fx-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: var(--secondary, #1f2937);
+  border: 1px solid var(--border, #374151);
+  border-radius: 12px;
+  height: 44px;
+}
+.fx-mobile-footer .fx-toggle span {
+  font-size: 0.85rem;
+}
+.fx-mobile-footer .fx-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}
+.fx-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.fx-toolbar-quick {
+  justify-content: flex-start;
+}
+.fx-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fx-delete-btn {
+  margin-left: auto;
+  padding: 6px 10px;
+}
+.fx-delete-btn.danger {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.5);
+}
+.fx-delete-btn.danger:hover {
+  border-color: #ef4444;
+}
+.fx-toolbar-menus {
+  justify-content: space-between;
+  gap: 12px;
+}
+.fx-menubar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fx-menu-group {
+  position: relative;
+}
+.fx-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fx-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--card, #111827);
+  border: 1px solid var(--border, #374151);
+  border-radius: 8px;
+  padding: 6px 0;
+  min-width: 160px;
+  display: none;
+  flex-direction: column;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+  z-index: 200;
+}
+.fx-menu-group[data-open="true"] .fx-menu-dropdown {
+  display: flex;
+}
+.fx-menu-dropdown button {
+  background: transparent;
+  border: none;
+  color: var(--foreground, #f9fafb);
+  padding: 8px 14px;
+  width: 100%;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+}
+.fx-menu-dropdown button:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+.fx-menu-dropdown button.fx-menu-item-checked::before {
+  content: '✓';
+  color: var(--primary, #3b82f6);
+}
+.fx-menu-separator {
+  height: 1px;
+  margin: 6px 0;
+  background: rgba(148, 163, 184, 0.25);
+}
+.fx-menu-dropdown button::before {
+  content: '';
+  width: 1em;
+  display: inline-flex;
+  justify-content: center;
+}
+.fx-menu-dropdown button.fx-menu-item-checked::before {
+  content: '✓';
+}
+.fx-menu-dropdown button.fx-menu-item-checked {
+  color: var(--primary, #3b82f6);
+}
+.fx-toolbar-view {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.fx-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+}
+.fx-toggle input[type="checkbox"] {
+  accent-color: var(--primary, #3b82f6);
+}
+.fx-breadcrumbs-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+}
+.fx-breadcrumbs {
+  padding: 8px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.9rem;
+  color: var(--muted-foreground, #94a3b8);
+  flex: 1;
+}
+.fx-crumb {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.fx-home-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: 8px 12px;
+  color: var(--muted-foreground, #94a3b8);
+  transition: all 0.2s ease;
+}
+.fx-home-btn:hover {
+  color: var(--primary, #3b82f6);
+  transform: scale(1.1);
+}
+.fx-crumb.current {
+  cursor: default;
+  font-weight: 600;
+  color: var(--foreground, #f9fafb);
+}
+.fx-crumb-sep {
+  opacity: 0.6;
+}
+.fx-content {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fx-list-view,
+.fx-grid-view {
+  background: var(--card, #111827);
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 12px;
+  padding: 6px 0;
+}
+.fx-grid-view {
+  display: none;
+  padding: 12px;
+}
+.fx-item {
+  display: grid;
+  grid-template-columns: 36px 36px minmax(180px, 2fr) 110px minmax(120px, 1fr) 90px 150px;
+  gap: 8px;
+  padding: 10px 16px;
+  align-items: center;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  position: relative;
+}
+.fx-item:last-child {
+  border-bottom: none;
+}
+.fx-item .fx-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-name-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.fx-name-group .fx-name {
+  flex: 1;
+}
+.fx-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fx-checkbox input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--primary, #3b82f6);
+}
+.fx-permissions {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--muted-foreground, #94a3b8);
+  white-space: nowrap;
+}
+.fx-owner {
+  font-size: 0.85rem;
+  color: var(--muted-foreground, #94a3b8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0; /* Allow shrinking */
+}
+.fx-size {
+  font-size: 0.85rem;
+  color: var(--muted-foreground, #94a3b8);
+  text-align: right;
+  white-space: nowrap;
+}
+.fx-date {
+  font-size: 0.85rem;
+  color: var(--muted-foreground, #94a3b8);
+  white-space: nowrap;
+}
+.fx-grid-view-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+.fx-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 12px;
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.fx-icon {
+  font-size: 1.1rem;
+  text-align: center;
+}
+.fx-icon-lg {
+  font-size: 2.1rem;
+}
+.fx-name-tile {
+  text-align: center;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+.fx-item.selected,
+.fx-tile.selected {
+  background: rgba(59, 130, 246, 0.16);
+  border-color: var(--primary, #3b82f6);
+}
+.fx-empty,
+.fx-loading {
+  padding: 18px;
+  text-align: center;
+  font-size: 0.95rem;
+  color: var(--muted-foreground, #94a3b8);
+}
+.fx-loading {
+  color: var(--foreground, #f9fafb);
+}
+
+.fx-modal {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 400;
+}
+.fx-modal[data-open="true"] {
+  display: flex;
+}
+.fx-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(6px);
+}
+.fx-modal-dialog {
+  position: relative;
+  background: var(--card, #111827);
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 16px;
+  padding: 20px;
+  width: min(520px, 92vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+}
+.fx-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.fx-modal-header h2 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+.fx-properties-path {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  color: var(--muted-foreground, #94a3b8);
+  word-break: break-all;
+}
+.fx-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--muted-foreground, #94a3b8);
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+.fx-modal-close:hover {
+  color: var(--foreground, #f9fafb);
+}
+.fx-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.fx-properties-section h3 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+}
+.fx-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.fx-field input[type="text"],
+.fx-field select,
+.fx-field textarea {
+  background: var(--secondary, #1f2937);
+  border: 1px solid var(--border, #374151);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--foreground, #f9fafb);
+}
+.fx-field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+}
+.fx-field-label {
+  font-size: 0.85rem;
+  color: var(--muted-foreground, #94a3b8);
+}
+.fx-field-hint {
+  font-size: 0.75rem;
+  color: var(--muted-foreground, #94a3b8);
+  margin: -6px 0 8px;
+}
+.fx-ownership-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.fx-permissions-grid {
+  display: grid;
+  grid-template-columns: 1fr repeat(3, minmax(60px, auto));
+  gap: 8px 12px;
+  align-items: center;
+}
+.fx-permissions-header {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground, #94a3b8);
+}
+.fx-permissions-label {
+  font-size: 0.9rem;
+}
+.fx-permission {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+.fx-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.fx-modal-footer button {
+  background: var(--secondary, #1f2937);
+  color: var(--foreground, #f9fafb);
+  border: 1px solid var(--border, #374151);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.fx-modal-footer button.primary {
+  background: var(--primary, #3b82f6);
+  border-color: var(--primary, #3b82f6);
+}
+.fx-modal-footer button.primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.fx-bookmark-editor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 40vh;
+    overflow-y: auto;
+    padding-right: 8px;
+}
+.fx-bookmark-editor-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    background: var(--secondary, #1f2937);
+    border-radius: 8px;
+}
+.fx-bookmark-editor-item input[type="checkbox"] {
+    accent-color: var(--primary, #3b82f6);
+}
+.fx-bookmark-editor-item .name {
+    flex: 1;
+    cursor: pointer;
+}
+.fx-bookmark-editor-item .path {
+    font-size: 0.8rem;
+    color: var(--muted-foreground, #94a3b8);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 150px;
+}
+.fx-bookmark-editor-item .handle {
+    cursor: grab;
+}
+
+@media (max-width: 820px) {
+  .fx-toolbar-quick .fx-mobile-hide {
+    display: none;
+  }
+
+  .fx-mobile-footer {
+    display: flex;
+  }
+}
+
+@media (min-width: 821px) {
+  .fx-mobile-footer {
+    display: none;
+  }
+}
+
+/* Archive indicator */
+.fx-archive-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: rgba(168, 85, 247, 0.2);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #c084fc;
+  margin-left: 8px;
+}
+
+/* Mobile portrait - with second row for details */
+@media (orientation: portrait) and (max-width: 768px) {
+  .fx-item {
+    grid-template-columns: 32px 32px 1fr;
+    grid-template-rows: auto auto;
+    align-items: flex-start;
+  }
+  .fx-content {
+    padding-bottom: 90px;
+  }
+  .fx-item .fx-checkbox {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+  .fx-item .fx-icon {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+  .fx-item .fx-name-group {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  /* Second row for details in portrait */
+  .fx-item .fx-permissions,
+  .fx-item .fx-owner {
+    display: none; /* Hide these in portrait to save space */
+  }
+  .fx-item .fx-size,
+  .fx-item .fx-date {
+    grid-column: 3;
+    grid-row: 2;
+    display: inline-block;
+    margin-right: 12px;
+    margin-top: 4px;
+    font-size: 0.8rem;
+  }
+}
+
+/* Mobile landscape - show details on second row */
+@media (orientation: landscape) and (max-width: 1024px) {
+  .fx-item {
+    grid-template-columns: 32px 32px 1fr 80px 140px;
+    grid-template-rows: auto auto;
+    padding: 8px 12px;
+  }
+  .fx-item .fx-checkbox {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .fx-item .fx-icon {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .fx-item .fx-name-group {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .fx-item .fx-size {
+    grid-column: 4;
+    grid-row: 1;
+  }
+  .fx-item .fx-date {
+    grid-column: 5;
+    grid-row: 1;
+  }
+  .fx-item .fx-permissions {
+    grid-column: 2 / 4;
+    grid-row: 2;
+    margin-top: 4px;
+  }
+  .fx-item .fx-owner {
+    grid-column: 4 / 6;
+    grid-row: 2;
+    margin-top: 4px;
+  }
+}
+</style>
+
+<div class="fx-app" data-app-root>
+  <div class="fx-toolbar">
+    <div class="fx-toolbar-row fx-toolbar-quick">
+      <div class="fx-quick-actions">
+        <label class="fx-toggle fx-mobile-hide" style="margin-right: 8px;">
+          <input type="checkbox" data-action="select-all">
+          <span>Select All</span>
+        </label>
+        <span class="fx-selection-count" style="margin-right: 12px; color: var(--primary, #3b82f6); display: none;"></span>
+        <button type="button" class="fx-mobile-hide" data-action="up">Up</button>
+        <button type="button" class="fx-mobile-hide" data-action="new-folder">New Folder</button>
+        <button type="button" class="fx-mobile-hide" data-action="open" disabled>Open</button>
+        <button type="button" class="fx-mobile-hide" data-action="copy" disabled>Copy</button>
+        <button type="button" class="fx-mobile-hide" data-action="move" disabled>Move</button>
+      </div>
+    </div>
+    <div class="fx-toolbar-row fx-toolbar-menus">
+      <div class="fx-menubar">
+        <div class="fx-menu-group" data-menu="file">
+          <button type="button" class="fx-menu-button" data-menu-toggle="file">File ▾</button>
+          <div class="fx-menu-dropdown" data-menu-panel="file">
+            <button type="button" data-command="file:new-folder">New Folder</button>
+            <button type="button" data-command="file:new-file">New File</button>
+            <button type="button" data-command="file:open">Open</button>
+            <button type="button" data-command="file:open-editor">Open in Editor</button>
+            <button type="button" data-command="file:extract">Extract</button>
+          </div>
+        </div>
+        <div class="fx-menu-group" data-menu="edit">
+          <button type="button" class="fx-menu-button" data-menu-toggle="edit">Edit ▾</button>
+          <div class="fx-menu-dropdown" data-menu-panel="edit">
+            <button type="button" data-command="edit:properties">Properties</button>
+            <button type="button" data-command="edit:rename">Rename</button>
+            <button type="button" data-command="edit:delete">Delete</button>
+            <button type="button" data-command="edit:copy">Copy</button>
+            <button type="button" data-command="edit:move">Move</button>
+          </div>
+        </div>
+        <div class="fx-menu-group" data-menu="view">
+          <button type="button" class="fx-menu-button" data-menu-toggle="view">View ▾</button>
+          <div class="fx-menu-dropdown" data-menu-panel="view">
+            <button type="button" data-command="view:grid">Icons</button>
+            <button type="button" data-command="view:list">List</button>
+            <div class="fx-menu-separator"></div>
+            <button type="button" data-command="view:toggle-hidden" data-checkable="true">Show hidden</button>
+            <button type="button" data-command="view:sort-name" data-checkable="true">Sort by Name</button>
+            <button type="button" data-command="view:sort-size" data-checkable="true">Sort by Size</button>
+            <button type="button" data-command="view:sort-date" data-checkable="true">Sort by Date</button>
+            <button type="button" data-command="view:sort-type" data-checkable="true">Sort by Type</button>
+          </div>
+        </div>
+        <div class="fx-menu-group" data-menu="bookmarks">
+            <button type="button" class="fx-menu-button" data-menu-toggle="bookmarks">🔖</button>
+            <div class="fx-menu-dropdown" data-menu-panel="bookmarks">
+                <div data-role="bookmarks-list"></div>
+                <div class="fx-menu-separator"></div>
+                <div style="display: flex; justify-content: center; align-items: center; gap: 12px; padding: 4px 0;">
+                    <button type="button" data-command="bookmarks:add" style="font-size: 0.7rem;">✚</button>
+                    <span style="color: var(--border, #374151);">|</span>
+                    <button type="button" data-command="bookmarks:edit" style="font-size: 0.7rem;">✏️</button>
+                </div>
+            </div>
+        </div>
+        <button type="button" class="fx-menu-button fx-sort-dir-btn" data-action="toggle-sort-direction" aria-label="Toggle sort order">↑</button>
+      </div>
+      <button type="button" class="fx-delete-btn danger" data-action="delete" disabled aria-label="Delete">🗑️</button>
+    </div>
+  </div>
+  <div class="fx-breadcrumbs-container">
+    <div class="fx-breadcrumbs" data-role="breadcrumbs"></div>
+    <button type="button" class="fx-home-btn" data-action="go-home" title="Go to Home">🏠</button>
+  </div>
+  <div class="fx-content">
+    <div class="fx-list-view">
+      <div class="fx-items" data-role="list"></div>
+    </div>
+    <div class="fx-grid-view">
+      <div class="fx-grid-view-content" data-role="grid"></div>
+    </div>
+  </div>
+  <div class="fx-modal" data-modal="properties" aria-hidden="true">
+    <div class="fx-modal-overlay" data-role="properties-overlay"></div>
+    <div class="fx-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="fx-properties-title">
+      <div class="fx-modal-header">
+        <div>
+          <h2 id="fx-properties-title">Properties</h2>
+          <p class="fx-properties-path" data-role="properties-path"></p>
+        </div>
+        <button type="button" class="fx-modal-close" data-action="properties-close" aria-label="Close properties">×</button>
+      </div>
+      <div class="fx-modal-body">
+        <section class="fx-properties-section">
+          <h3>General</h3>
+          <label class="fx-field">
+            <span class="fx-field-label">Name</span>
+            <input type="text" data-role="properties-name" autocomplete="off">
+          </label>
+          <div class="fx-ownership-grid">
+            <label class="fx-field">
+              <span class="fx-field-label">Owner</span>
+              <input type="text" data-role="properties-owner-input" autocomplete="off" placeholder="(unchanged)">
+              <span class="fx-field-hint">Current: <span data-role="properties-owner-current">—</span></span>
+            </label>
+            <label class="fx-field">
+              <span class="fx-field-label">Group</span>
+              <input type="text" data-role="properties-group-input" autocomplete="off" placeholder="(unchanged)">
+              <span class="fx-field-hint">Current: <span data-role="properties-group-current">—</span></span>
+            </label>
+          </div>
+          <p class="fx-field-hint">Leave owner or group blank to keep current values.</p>
+          <label class="fx-field fx-field-inline">
+            <input type="checkbox" data-role="properties-recurse">
+            <span>Apply to contents (recursive)</span>
+          </label>
+        </section>
+        <section class="fx-properties-section">
+          <h3>Permissions</h3>
+          <div class="fx-permissions-grid" data-role="properties-permissions">
+            <div class="fx-permissions-header"></div>
+            <div class="fx-permissions-header">Read</div>
+            <div class="fx-permissions-header">Write</div>
+            <div class="fx-permissions-header">Execute</div>
+            <div class="fx-permissions-label">Owner</div>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-owner-read"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-owner-write"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-owner-exec"> <span></span></label>
+            <div class="fx-permissions-label">Group</div>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-group-read"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-group-write"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-group-exec"> <span></span></label>
+            <div class="fx-permissions-label">Others</div>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-others-read"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-others-write"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-others-exec"> <span></span></label>
+          </div>
+        </section>
+      </div>
+      <div class="fx-modal-footer">
+        <button type="button" data-action="properties-cancel">Cancel</button>
+        <button type="button" class="primary" data-action="properties-apply">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="fx-modal" data-modal="edit-bookmarks" aria-hidden="true">
+    <div class="fx-modal-overlay" data-role="edit-bookmarks-overlay"></div>
+    <div class="fx-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="fx-edit-bookmarks-title">
+        <div class="fx-modal-header">
+            <h2 id="fx-edit-bookmarks-title">Edit Bookmarks</h2>
+            <button type="button" class="fx-modal-close" data-action="edit-bookmarks-close" aria-label="Close">×</button>
+        </div>
+        <div class="fx-modal-body">
+            <div class="fx-bookmark-editor-list" data-role="edit-bookmarks-list"></div>
+        </div>
+        <div class="fx-modal-footer">
+            <button type="button" class="danger" data-action="edit-bookmarks-delete-selected">Delete Selected</button>
+            <button type="button" data-action="edit-bookmarks-close">Close</button>
+        </div>
+    </div>
+  </div>
+
+  <div class="fx-modal" data-modal="bookmark-form" aria-hidden="true">
+      <div class="fx-modal-overlay" data-role="bookmark-form-overlay"></div>
+      <div class="fx-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="fx-bookmark-form-title">
+          <div class="fx-modal-header">
+              <h2 id="fx-bookmark-form-title">Bookmark</h2>
+              <button type="button" class="fx-modal-close" data-action="bookmark-form-close" aria-label="Close">×</button>
+          </div>
+          <div class="fx-modal-body">
+              <label class="fx-field">
+                  <span class="fx-field-label">Name</span>
+                  <input type="text" data-role="bookmark-form-name" autocomplete="off">
+              </label>
+              <label class="fx-field">
+                  <span class="fx-field-label">Path</span>
+                  <input type="text" data-role="bookmark-form-path" autocomplete="off">
+              </label>
+          </div>
+          <div class="fx-modal-footer">
+              <button type="button" data-action="bookmark-form-cancel">Cancel</button>
+              <button type="button" class="primary" data-action="bookmark-form-save">Save</button>
+          </div>
+      </div>
+  </div>
+
+</div>
+
+<div class="fx-mobile-footer" data-role="mobile-footer">
+  <label class="fx-toggle" data-action="select-all">
+    <input type="checkbox">
+    <span>Select All</span>
+  </label>
+  <button type="button" data-action="up" title="Up">⬆️</button>
+  <button type="button" data-action="new-folder" title="New Folder">📁</button>
+  <button type="button" data-action="open" disabled title="Open">📂</button>
+  <button type="button" data-action="copy" disabled title="Copy">⿻</button>
+  <button type="button" data-action="move" disabled title="Move">
+    <img src="/static/move.png" alt="Move" style="width: 20px; height: 20px;" />
+  </button>
+</div>

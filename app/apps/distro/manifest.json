@@ -1,0 +1,14 @@
+{
+  "name": "Distro",
+  "id": "distro",
+  "version": "0.0.1",
+  "description": "Manage proot/chroot container environments.",
+  "author": "Gemini",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  },
+  "fullscreen": true,
+  "icon_emoji": "🖥️"
+}

@@ -1,0 +1,19 @@
+[
+  {
+    "id": "ubuntu",
+    "type": "chroot-distro",
+    "label": "Ubuntu (SD)",
+    "rootfs": "/data/data/com.termux/files/chroot-exec-mnt/rootfs/ubuntu",
+    "environment": {
+      "CHROOT_DISTRO_PATH": "/data/data/com.termux/files/chroot-exec-mnt/rootfs"
+    },
+    "mounts": [
+      {
+        "device": "/dev/block/mmcblk1p1",
+        "target": "/data/data/com.termux/files/chroot-exec-mnt",
+        "options": "rw"
+      }
+    ],
+    "auto_start": false
+  }
+]

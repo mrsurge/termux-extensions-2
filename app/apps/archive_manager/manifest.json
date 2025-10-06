@@ -1,0 +1,11 @@
+{
+  "id": "archive_manager",
+  "name": "Archive Manager",
+  "icon_emoji": "🗜️",
+  "description": "Browse and manage archives using 7-Zip (7zz) with Termux integration.",
+  "entrypoints": {
+    "frontend_template": "template.html",
+    "frontend_script": "main.js",
+    "backend_blueprint": "backend.py"
+  }
+}
