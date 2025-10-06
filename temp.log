@@ -1,0 +1,45 @@
+/data/data/com.termux/files/usr/bin/python: Error while finding module specification for 'app.app_worker' (ModuleNotFoundError: No module named 'app')
+/data/data/com.termux/files/usr/bin/python: Error while finding module specification for 'app.app_worker' (ModuleNotFoundError: No module named 'app')
+ * Serving Flask app 'app_worker'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:38845
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [06/Oct/2025 15:32:39] "GET /list?path=/data/data/com.termux/files/home/testing-grounds&hidden=0 HTTP/1.1" 200 -
+127.0.0.1 - - [06/Oct/2025 15:34:00] "GET /list?path=/data/data/com.termux/files/home/testing-grounds&hidden=0 HTTP/1.1" 200 -
+127.0.0.1 - - [06/Oct/2025 15:34:02] "GET /list?path=/data/data/com.termux/files/home/testing-grounds&hidden=0 HTTP/1.1" 200 -
+127.0.0.1 - - [06/Oct/2025 15:34:22] "GET /list?path=/data/data/com.termux/files/home/testing-grounds/app&hidden=0 HTTP/1.1" 200 -
+ * Serving Flask app 'app_worker'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:49523
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [06/Oct/2025 15:35:52] "GET /list?path=/data/data/com.termux/files/home/testing-grounds/app&hidden=0 HTTP/1.1" 200 -
+ * Serving Flask app 'app_worker'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:37029
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [06/Oct/2025 15:58:02] "GET /shell?logs=1&tail=120 HTTP/1.1" 200 -
+127.0.0.1 - - [06/Oct/2025 15:58:02] "[35m[1mGET /status HTTP/1.1[0m" 502 -
+127.0.0.1 - - [06/Oct/2025 15:58:02] "[35m[1mGET /downloads HTTP/1.1[0m" 502 -
+127.0.0.1 - - [06/Oct/2025 15:58:26] "GET /shell?logs=1&tail=120 HTTP/1.1" 200 -
+127.0.0.1 - - [06/Oct/2025 15:58:26] "[35m[1mGET /downloads HTTP/1.1[0m" 502 -
+127.0.0.1 - - [06/Oct/2025 15:58:27] "[35m[1mGET /downloads HTTP/1.1[0m" 502 -
+127.0.0.1 - - [06/Oct/2025 15:58:27] "GET /shell HTTP/1.1" 200 -
+127.0.0.1 - - [06/Oct/2025 15:58:28] "[35m[1mGET /downloads HTTP/1.1[0m" 502 -
+127.0.0.1 - - [06/Oct/2025 15:58:28] "GET /shell?logs=1&tail=120 HTTP/1.1" 200 -
+ * Serving Flask app 'app_worker'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:42621
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [06/Oct/2025 15:58:34] "GET /list?path=/data/data/com.termux/files/home/testing-grounds/app&hidden=0 HTTP/1.1" 200 -
+127.0.0.1 - - [06/Oct/2025 16:02:02] "[33mGET /app/file_explorer HTTP/1.1[0m" 404 -
+127.0.0.1 - - [06/Oct/2025 16:02:02] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+127.0.0.1 - - [06/Oct/2025 16:02:11] "[33mGET / HTTP/1.1[0m" 404 -
+127.0.0.1 - - [06/Oct/2025 16:02:55] "[33mGET /file_explorer HTTP/1.1[0m" 404 -
+127.0.0.1 - - [06/Oct/2025 16:03:05] "[33mGET /index.html HTTP/1.1[0m" 404 -
+127.0.0.1 - - [06/Oct/2025 16:03:07] "[33mGET /index.html HTTP/1.1[0m" 404 -
+127.0.0.1 - - [06/Oct/2025 16:03:34] "[33mGET /index.html HTTP/1.1[0m" 404 -
+127.0.0.1 - - [06/Oct/2025 16:03:35] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
