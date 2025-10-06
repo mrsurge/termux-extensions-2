@@ -7,6 +7,8 @@ import subprocess
 import sys
 import threading
 import importlib.util
+import traceback
+import traceback
 import time
 import uuid
 import signal
@@ -17,7 +19,8 @@ from typing import List
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from flask import Flask, render_template, jsonify, send_from_directory, send_file, request
+from flask import Flask, render_template, jsonify, send_from_directory, send_file, request, current_app, Response
+import requests
 from app.framework_shells import framework_shells_bp, _manager, FrameworkShellManager
 from app.jobs import jobs_bp
 from app.utils.bookmarks import bookmarks_bp
@@ -317,15 +320,28 @@ def load_extensions():
         if backend_file:
             module_name = f"app.extensions.{ext_name}.{backend_file.replace('.py', '')}"
             spec = importlib.util.spec_from_file_location(module_name, os.path.join(ext_path, backend_file))
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            
-            from flask import Blueprint
-            for obj_name in dir(module):
-                obj = getattr(module, obj_name)
-                if isinstance(obj, Blueprint):
-                    app.register_blueprint(obj, url_prefix=f"/api/ext/{ext_name}")
-                    break
+            try:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)  # may raise anything
+            except BaseException as e:
+                manifest['__load_error__'] = f"{type(e).__name__}: {e}"
+                manifest['__load_trace__'] = traceback.format_exc()[-2048:]
+            else:
+                from flask import Blueprint
+                try:
+                    for obj_name in dir(module):
+                        obj = getattr(module, obj_name)
+                        if isinstance(obj, Blueprint):
+                            if ext_name == 'apps':
+                                app.register_blueprint(obj, url_prefix='')
+                            else:
+                                app.register_blueprint(obj, url_prefix=f"/api/ext/{ext_name}")
+                            break
+                    else:
+                        manifest['__load_warning__'] = 'No Flask Blueprint found in backend module'
+                except BaseException as e:
+                    manifest['__load_error__'] = f"Blueprint registration failed: {type(e).__name__}: {e}"
+                    manifest['__load_trace__'] = traceback.format_exc()[-2048:]
     return extensions
 
 # --- Main Application Routes ---
@@ -353,26 +369,7 @@ def load_apps():
             manifest['_dir'] = app_name
             apps.append(manifest)
 
-        backend_file = manifest.get('entrypoints', {}).get('backend_blueprint')
-        if backend_file:
-            module_name = f"app.apps.{app_name}.{backend_file.replace('.py', '')}"
-            spec = importlib.util.spec_from_file_location(module_name, os.path.join(app_path, backend_file))
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            
-            from flask import Blueprint
-            for obj_name in dir(module):
-                obj = getattr(module, obj_name)
-                if isinstance(obj, Blueprint):
-                    app_id = manifest.get('id', app_name)
-                    app.register_blueprint(obj, url_prefix=f"/api/app/{app_id}")
-                    break
-            # Optionally register WebSocket routes if provided by the app module
-            try:
-                if hasattr(module, 'register_ws_routes'):
-                    module.register_ws_routes(app)
-            except Exception as e:
-                print(f"Error registering WS routes for app {app_name}: {e}")
+
     return apps
 
 
@@ -382,7 +379,7 @@ def serve_extension_file(ext_dir, filename):
 
 @app.route('/api/extensions')
 def get_extensions():
-    return jsonify({"ok": True, "data": loaded_extensions})
+    return jsonify({"ok": True, "data": current_app.config.get('LOADED_EXTENSIONS', [])})
 
 @app.route('/api/run_command', methods=['POST'])
 def run_command_endpoint():
@@ -587,27 +584,6 @@ def framework_runtime_shutdown():
     return jsonify({"ok": True, "data": {"message": "Shutdown initiated"}})
 
 
-@app.route('/api/apps')
-def get_apps():
-    return jsonify({"ok": True, "data": loaded_apps})
-
-@app.route('/app/<app_id>')
-def app_shell(app_id):
-    """Renders a generic shell for a single-page app."""
-    # We can pass the app_id to the template if it needs to fetch its own details
-    return render_template('app_shell.html', app_id=app_id)
-
-@app.route('/apps/<path:app_dir>/<path:filename>')
-def serve_app_file(app_dir, filename):
-    full_path = os.path.join(app.root_path, 'apps', app_dir, filename)
-    if not os.path.isfile(full_path):
-        from flask import abort
-        return abort(404)
-    # Ensure JS modules are served with a JS MIME type so dynamic import() works reliably
-    if filename.endswith('.js') or filename.endswith('.mjs'):
-        return send_file(full_path, mimetype='application/javascript')
-    return send_file(full_path)
-
 
 # --- PWA: Service Worker ---
 @app.route('/sw.js')
@@ -640,11 +616,13 @@ def _ensure_initialized():
         try:
             if not loaded_extensions:
                 loaded_extensions = load_extensions()
+                app.config['LOADED_EXTENSIONS'] = loaded_extensions
         except Exception as e:
             print(f"Error loading extensions: {e}")
         try:
             if not loaded_apps:
                 loaded_apps = load_apps()
+                app.config['LOADED_APPS'] = loaded_apps
         except Exception as e:
             print(f"Error loading apps: {e}")
         _initialized = True
@@ -679,12 +657,49 @@ def _before_request_init():
 #         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/app/<app_id>/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
+def proxy_app_request(app_id, subpath):
+    running_apps = current_app.config.get('RUNNING_APPS', {})
+    app_info = running_apps.get(app_id)
+
+    if not app_info or not app_info.get('port'):
+        return jsonify({"ok": False, "error": "App not running or port not found"}), 404
+
+    port = app_info['port']
+    url = f"http://127.0.0.1:{port}/{subpath}"
+    
+    params = request.args.copy()
+    
+    headers = {key: value for key, value in request.headers if key.lower() != 'host'}
+
+    try:
+        resp = requests.request(
+            method=request.method,
+            url=url,
+            headers=headers,
+            params=params,
+            data=request.get_data(),
+            cookies=request.cookies,
+            allow_redirects=False,
+            stream=True,
+            timeout=30
+        )
+
+        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        resp_headers = [(name, value) for name, value in resp.raw.headers.items() if name.lower() not in excluded_headers]
+
+        return Response(resp.iter_content(chunk_size=10*1024), resp.status_code, resp_headers)
+    except requests.exceptions.RequestException as e:
+        return jsonify({"ok": False, "error": f"Failed to connect to app worker: {e}"}), 502
+
 if __name__ == '__main__':
     print("--- Loading Extensions ---")
     loaded_extensions = load_extensions()
+    app.config['LOADED_EXTENSIONS'] = loaded_extensions
     print(f"Loaded {len(loaded_extensions)} extensions.")
     print("--- Loading Apps ---")
     loaded_apps = load_apps()
+    app.config['LOADED_APPS'] = loaded_apps
     print(f"Loaded {len(loaded_apps)} apps.")
     print("--- Starting Server ---")
     # Production-like settings for the built-in server (still not recommended for production)

@@ -224,6 +224,23 @@
             await loadApp();
         });
     </script>
+    <script>
+    (() => {
+      const appId = "{{ app_id }}";
+      const group = `app:${appId}:${Date.now()}`;
+      window.__teAppGroup = group;
+      async function terminateGroup() {
+        try {
+          await fetch("/api/framework_shells/terminate_group", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ group })
+          });
+        } catch {}
+      }
+      window.addEventListener("pagehide", terminateGroup, { once: true });
+    })();
+    </script>
         <script>
 // Register Service Worker for PWA installability (app shell view)
 if ('serviceWorker' in navigator) {

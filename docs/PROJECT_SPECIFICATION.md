@@ -113,31 +113,13 @@ On startup, the main application scans the `app/extensions/` directory for subdi
 }
 ```
 
-### 1.2. Backend Loading
+### 1.2. Backend Loading: Extensions vs. Apps
 
-The core backend in `app/main.py` dynamically loads each extension's Python code as a Flask **Blueprint**. This registers the extension's specific API routes under a unique prefix (e.g., `/api/ext/sessions_and_shortcuts`).
+The framework now distinguishes between loading "extensions" (UI components in the main launcher) and "apps" (full-page applications with potential backends).
 
-**`app/main.py` - Extension Loading Snippet:**
-```python
-def load_extensions():
-    # ...
-    for ext_name in os.listdir(extensions_dir):
-        # ... read manifest ...
+*   **Extensions:** The loading mechanism for extensions remains the same. The core backend in `app/main.py` dynamically loads each extension's Python code as a Flask **Blueprint** and registers it under the `/api/ext/{extension_name}` prefix.
 
-        # Dynamically load and register the blueprint
-        backend_file = manifest.get('entrypoints', {}).get('backend_blueprint')
-        if backend_file:
-            # ... importlib code to load module ...
-            
-            # Find the blueprint object in the loaded module
-            from flask import Blueprint
-            for obj_name in dir(module):
-                obj = getattr(module, obj_name)
-                if isinstance(obj, Blueprint):
-                    app.register_blueprint(obj, url_prefix=f"/api/ext/{ext_name}")
-                    break
-    return extensions
-```
+*   **Apps:** App backends are **not** loaded at startup. The `load_apps` function in `app/main.py` only scans the `app/apps/` directory to discover manifests and populate the list of available apps for the launcher. The actual backend process is launched on-demand.
 
 ### 1.3. Frontend Loading
 
@@ -167,6 +149,29 @@ async function loadExtensions() {
     }
 }
 ```
+
+### 1.4. On-Demand App Backend Architecture
+
+To ensure resource efficiency and process isolation, app backends are launched on-demand in their own framework shells.
+
+**1. User Action:** The flow begins when a user clicks an app icon in the launcher.
+
+**2. Frontend Request:** The frontend JavaScript first sends a `POST` request to a special endpoint, `/api/apps/<app_id>/start`.
+
+**3. Backend Orchestration:**
+    *   The `apps` extension receives this request.
+    *   It checks if a framework shell for this app is already running.
+    *   If not, it spawns a new framework shell. The command for this shell is `python -m app.app_worker`, which runs a generic worker process.
+    *   Crucially, the `PYTHONPATH` for this new process is explicitly set to include the project root, and the `cwd` is also set to the project root. This ensures the worker can find the necessary modules.
+    *   The worker is assigned a free port and its information (shell ID, port) is stored.
+
+**4. Reverse Proxy:**
+    *   All API requests for a running app (e.g., `/api/app/<app_id>/some/route`) are intercepted by a generic reverse proxy in the main `app/main.py`.
+    *   The proxy looks up the app's assigned port and forwards the request to the correct worker process.
+
+**5. Cleanup:**
+    *   When an app's browser tab is closed, a `pagehide` event triggers a call to `/api/framework_shells/terminate_group`, which cleanly shuts down the app's dedicated framework shell and its worker process.
+    *   The `FrameworkShellManager` now uses `os.killpg` to ensure the entire process group is terminated, preventing orphaned processes.
 
 ## 5. Diagnostics & Runtime Management
 

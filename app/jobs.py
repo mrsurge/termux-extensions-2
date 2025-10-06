@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
-__all__ = ["jobs_bp", "register_job_handler"]
+__all__ = ["jobs_bp", "register_job_handler", "JobCancelled"]
 
 _JOBS_DIR = Path.home() / ".cache" / "termux_extensions"
 _JOBS_FILE = _JOBS_DIR / "jobs.json"

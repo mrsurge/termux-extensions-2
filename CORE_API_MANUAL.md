@@ -118,6 +118,19 @@ Manage long-lived background shells that inherit `TE_SESSION_TYPE=framework`, ke
 
 Each extension or app blueprint mounts under `/api/ext/<extension_name>/` or `/api/app/<app_id>/`. Consult the corresponding `*_AGENT.txt` file for the endpoints you must implement or consume. Always wrap responses using the envelope defined earlier.
 
+### 4.1. App Launcher Extension (`/api/apps`)
+
+The App Launcher extension provides the main grid of applications and orchestrates their on-demand loading.
+
+- **`GET /api/apps`**: Lists all discovered app manifests.
+- **`POST /api/apps/<app_id>/start`**: Ensures the backend for the specified app is running. If not, it spawns the app's backend worker in a new framework shell. Returns the connection info (port, shell ID) for the worker.
+- **`GET /app/<app_id>`**: Renders the main HTML shell for a single-page application.
+- **`GET /apps/<app_dir>/<filename>`**: Serves static assets for a specific app.
+
+### 4.2. App Backend Proxy
+
+All API requests for a specific app backend are routed through a generic proxy. For an app with the ID `my_app`, a request to `/api/app/my_app/my/route` will be forwarded by the main server to the app's dedicated worker process. App developers should define their routes relative to the root of their blueprint (e.g., `@bp.route('/my/route')`).
+
 ## 5. Testing Notes
 
 - Run the framework locally with `TE_SESSION_TYPE="framework" python app/main.py` and browse to `http://localhost:8080`.

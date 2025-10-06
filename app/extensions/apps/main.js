@@ -33,9 +33,14 @@ export default function(container) {
       card.appendChild(icon);
       card.appendChild(title);
 
-      card.addEventListener('click', () => {
+      card.addEventListener('click', async () => {
         try {
           if (!app.id) throw new Error('App missing id');
+          
+          window.teUI?.toast?.(`Starting ${app.name || app.id}...`);
+
+          await window.teFetch(`/api/apps/${app.id}/start`, { method: 'POST' });
+
           // Navigate to the full-screen app shell route
           window.location.href = `/app/${app.id}`;
         } catch (e) {

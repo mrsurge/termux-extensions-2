@@ -108,6 +108,7 @@ Notes:
 
 ## Key Features
 
+*   **On-Demand App Backends:** Application backends are launched in their own isolated processes on-demand, ensuring efficient resource usage and stability.
 *   **Web-Based UI:** A clean, modern interface accessible from any local browser.
 *   **Session Management:** The Sessions & Shortcuts extension controls active shells, launches shortcuts (now with the universal picker), and renames or kills sessions without leaving the UI.
 *   **Background Framework Shells:** Long-running jobs (aria2, distro helpers, etc.) are tracked with health checks, log tails, a cleanup action, and inline debug consoles.

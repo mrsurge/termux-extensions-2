@@ -627,7 +627,7 @@ class FrameworkShellManager:
                 return record
             sig = signal.SIGKILL if force else signal.SIGTERM
             try:
-                os.kill(record.pid, sig)
+                os.killpg(record.pid, sig)
             except ProcessLookupError:
                 exit_code = record.exit_code or self._collect_exit_code(record.pid)
                 self._mark_exited(record, exit_code)
@@ -760,6 +760,8 @@ class FrameworkShellManager:
 
 # ----------------------------------------------------------------------
 # Flask blueprint
+
+from app.utils.shell_groups import terminate_group
 
 framework_shells_bp = Blueprint("framework_shells", __name__)
 
@@ -896,3 +898,21 @@ def framework_shell_action(shell_id: str) -> Any:
     except Exception as exc:
         return jsonify({"ok": False, "error": f"Shell action failed: {exc}"}), 500
     return jsonify({"ok": True, "data": mgr.describe(record)})
+
+
+@framework_shells_bp.route("/api/framework_shells/terminate_group", methods=["POST"])
+def terminate_shell_group() -> Any:
+    error = _check_mutation_auth()
+    if error:
+        return jsonify({"ok": False, "error": error}), 403
+    payload = request.get_json(silent=True) or {}
+    group = payload.get("group")
+    if not isinstance(group, str) or not group:
+        return jsonify({"ok": False, "error": "group must be a non-empty string"}), 400
+    mgr = _manager()
+    try:
+        count = terminate_group(mgr, group)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"Failed to terminate group: {exc}"}), 500
+    return jsonify({"ok": True, "data": {"terminated_count": count}})
+

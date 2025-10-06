@@ -2,7 +2,7 @@
 
 ## 1. Motivation
 
-Services such as aria2 RPC daemons, container helpers, or local LLM runtimes need
+Services such as on-demand application backends, aria2 RPC daemons, container helpers, or local LLM runtimes need
 long-lived processes but should not consume the finite interactive shells surfaced
 by the Sessions extension. Framework shells provide a core-managed way to spawn and
 observe background jobs tagged with `TE_SESSION_TYPE=framework`, keeping them out of
@@ -55,8 +55,8 @@ All responses honour the `{ "ok": true|false, ... }` envelope.
    - Persists metadata and returns the running `ShellRecord`.
 
 2. **Terminate / Kill**
-   - Sends `SIGTERM` when asked to `stop`; escalates to `SIGKILL` if the process
-     fails to exit within a short timeout (or immediately when `kill`).
+   - Sends `SIGTERM` to the entire process group using `os.killpg` when asked to `stop`. This ensures that the main process and all of its children (e.g., a python worker and a `tee` logger) are terminated together, preventing orphans.
+   - Escalates to `SIGKILL` if the process group fails to exit within a short timeout (or immediately when `kill`).
    - Updates metadata with exit code (positive = exit status, negative = signal).
 
 3. **Restart**
