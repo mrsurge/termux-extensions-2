@@ -1,17 +1,41 @@
-# app/libs/app_lifecycle.py
-
 import time
 import threading
 from typing import Dict, List, Optional
-from app.framework_shells import FrameworkShellManager, _manager as get_framework_shell_manager
 
 # A simple in-memory store for the state of running apps.
-# In a larger application, this might be backed by a more robust store.
 _running_apps: Dict[str, Dict] = {}
 _lock = threading.RLock()
 
-# --- Public API for the Library ---
+# --- Lifecycle Configuration ---
+APP_TTL_SECONDS = 1800  # 30 minutes
+CLEANUP_INTERVAL_SECONDS = 60  # 1 minute
 
+# --- Background Cleanup Thread ---
+def _background_cleanup():
+    """Periodically checks for and terminates old, unlocked apps."""
+    from app.framework_shells import _manager as get_framework_shell_manager
+    while True:
+        time.sleep(CLEANUP_INTERVAL_SECONDS)
+        manager = get_framework_shell_manager()
+        with _lock:
+            now = time.time()
+            stale_apps = []
+            for shell_id, app_info in list(_running_apps.items()):
+                if not app_info.get("locked"):
+                    age = now - app_info.get("created_at", now)
+                    if age > APP_TTL_SECONDS:
+                        stale_apps.append(shell_id)
+            
+            if stale_apps:
+                print(f"[AppLifecycle] Cleaning up {len(stale_apps)} stale app(s)...")
+                for shell_id in stale_apps:
+                    terminate_app(manager, shell_id)
+
+# Start the background thread when the module is loaded.
+_cleanup_thread = threading.Thread(target=_background_cleanup, daemon=True)
+_cleanup_thread.start()
+
+# --- Public API for the Library ---
 def register_app(app_id: str, shell_id: str, port: int):
     """
     Called by the app launcher when a new app worker shell is spawned.
@@ -32,12 +56,11 @@ def unregister_app(shell_id: str):
     with _lock:
         _running_apps.pop(shell_id, None)
 
-def get_running_apps() -> List[Dict]:
+def get_running_apps(manager) -> List[Dict]:
     """
     Returns a list of all tracked running apps with their current stats.
     This will be used by the 'Recents' UI.
     """
-    manager = get_framework_shell_manager()
     apps_with_stats = []
     with _lock:
         # Iterate over a copy of the items to avoid issues if the dict changes
@@ -68,12 +91,11 @@ def set_lock_state(shell_id: str, locked: bool) -> Optional[Dict]:
             return _running_apps[shell_id]
         return None
 
-def terminate_app(shell_id: str) -> bool:
+def terminate_app(manager, shell_id: str) -> bool:
     """
     The unified function to terminate an app. It finds the shell and uses the
     FrameworkShellManager to stop it.
     """
-    manager = get_framework_shell_manager()
     try:
         # We use force=True to ensure the entire process group is killed.
         manager.terminate_shell(shell_id, force=True)

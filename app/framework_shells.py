@@ -31,6 +31,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from flask import Blueprint, current_app, jsonify, request
 
+
+
 try:  # Optional dependency for richer process metrics.
     import psutil  # type: ignore
 except Exception:  # pragma: no cover - psutil may be unavailable.
@@ -539,9 +541,26 @@ class FrameworkShellManager:
         autostart: bool = False,
     ) -> ShellRecord:
         with self._lock:
+            from app.libs import app_lifecycle
             self.sweep()
             if self.max_shells and self._active_shell_count() >= self.max_shells:
-                raise RuntimeError("Maximum framework shell count reached")
+                # Attempt to clean up the oldest unlocked app
+                running_apps = app_lifecycle.get_running_apps(self)
+                unlocked_apps = [app for app in running_apps if not app.get("locked")]
+                if unlocked_apps:
+                    oldest_app = unlocked_apps[0] # get_running_apps is sorted by age
+                    print(f"[FrameworkShells] Max shells reached. Terminating oldest unlocked app: {oldest_app.get('app_id')}")
+                    app_lifecycle.terminate_app(self, oldest_app["shell_id"])
+                    # Give a moment for termination to process
+                    time.sleep(0.5)
+                    # Re-check count
+                    if self._active_shell_count() < self.max_shells:
+                        pass # A slot is now free
+                    else:
+                        raise RuntimeError("Maximum framework shell count reached and could not free a slot.")
+                else:
+                    raise RuntimeError("Maximum framework shell count reached and all running apps are locked.")
+
             record = self._create_record(
                 command,
                 cwd=cwd,
@@ -561,9 +580,22 @@ class FrameworkShellManager:
         autostart: bool = True,
     ) -> ShellRecord:
         with self._lock:
+            from app.libs import app_lifecycle
             self.sweep()
             if self.max_shells and self._active_shell_count() >= self.max_shells:
-                raise RuntimeError("Maximum framework shell count reached")
+                # Attempt to clean up the oldest unlocked app
+                running_apps = app_lifecycle.get_running_apps(self)
+                unlocked_apps = [app for app in running_apps if not app.get("locked")]
+                if unlocked_apps:
+                    oldest_app = unlocked_apps[0]
+                    print(f"[FrameworkShells] Max shells reached. Terminating oldest unlocked app: {oldest_app.get('app_id')}")
+                    app_lifecycle.terminate_app(self, oldest_app["shell_id"])
+                    time.sleep(0.5)
+                    if self._active_shell_count() >= self.max_shells:
+                        raise RuntimeError("Maximum framework shell count reached and could not free a slot.")
+                else:
+                    raise RuntimeError("Maximum framework shell count reached and all running apps are locked.")
+
             record = self._create_record(
                 command,
                 cwd=cwd,

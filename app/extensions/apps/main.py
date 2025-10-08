@@ -3,6 +3,7 @@ import json
 from flask import Blueprint, jsonify, render_template, send_from_directory, current_app
 from app.utils.app_manager import ensure_app_running
 from app.libs import app_lifecycle
+from app.framework_shells import _manager as get_framework_shell_manager
 
 # This blueprint is managed by the dynamic loader in app/main.py
 # It is registered under the url_prefix /api/ext/apps
@@ -23,14 +24,15 @@ def quit_app(app_id: str):
     """
     A new, specific endpoint for quitting an app.
     """
-    running_apps = app_lifecycle.get_running_apps()
+    manager = get_framework_shell_manager()
+    running_apps = app_lifecycle.get_running_apps(manager)
     app_to_quit = next((app for app in running_apps if app.get("app_id") == app_id), None)
 
     if not app_to_quit:
         return jsonify({"ok": False, "error": "App is not running or already terminated."}), 404
 
     shell_id = app_to_quit["shell_id"]
-    terminated = app_lifecycle.terminate_app(shell_id)
+    terminated = app_lifecycle.terminate_app(manager, shell_id)
 
     if terminated:
         return jsonify({"ok": True, "data": {"message": f"App {app_id} terminated."}})
@@ -40,7 +42,8 @@ def quit_app(app_id: str):
 @apps_bp.route('/api/apps/<app_id>/lock', methods=['POST'])
 def lock_app(app_id: str):
     """Sets the lock state for an app to true."""
-    running_apps = app_lifecycle.get_running_apps()
+    manager = get_framework_shell_manager()
+    running_apps = app_lifecycle.get_running_apps(manager)
     app_to_lock = next((app for app in running_apps if app.get("app_id") == app_id), None)
     if not app_to_lock:
         return jsonify({"ok": False, "error": "App not running."}), 404
@@ -51,7 +54,8 @@ def lock_app(app_id: str):
 @apps_bp.route('/api/apps/<app_id>/unlock', methods=['POST'])
 def unlock_app(app_id: str):
     """Sets the lock state for an app to false."""
-    running_apps = app_lifecycle.get_running_apps()
+    manager = get_framework_shell_manager()
+    running_apps = app_lifecycle.get_running_apps(manager)
     app_to_unlock = next((app for app in running_apps if app.get("app_id") == app_id), None)
     if not app_to_unlock:
         return jsonify({"ok": False, "error": "App not running."}), 404
@@ -62,7 +66,8 @@ def unlock_app(app_id: str):
 @apps_bp.route('/api/apps/running', methods=['GET'])
 def get_running_apps():
     """Returns a list of all currently running app shells with stats."""
-    running_apps = app_lifecycle.get_running_apps()
+    manager = get_framework_shell_manager()
+    running_apps = app_lifecycle.get_running_apps(manager)
     # We need to augment this with data from the main app manifests (like name and icon)
     all_apps = {app['id']: app for app in current_app.config.get('LOADED_APPS', [])}
     

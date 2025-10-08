@@ -84,6 +84,12 @@
             margin-top: 4px;
         }
 
+        .recents-card.locked {
+            border-color: var(--success);
+            box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35);
+            background: rgba(34, 197, 94, 0.1);
+        }
+
     </style>
 </head>
 <body>
@@ -310,6 +316,9 @@
                         runningApps.forEach(app => {
                             const card = document.createElement('div');
                             card.className = 'recents-card';
+                            if (app.locked) {
+                                card.classList.add('locked');
+                            }
                             card.dataset.appId = app.app_id;
                             card.style.cursor = 'pointer';
                             card.innerHTML = `
