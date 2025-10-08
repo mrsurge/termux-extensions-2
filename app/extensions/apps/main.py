@@ -1,90 +1,80 @@
 import os
 import json
-import socket
-import time
-from pathlib import Path
 from flask import Blueprint, jsonify, render_template, send_from_directory, current_app
-from app.framework_shells import _manager as get_framework_shell_manager
+from app.utils.app_manager import ensure_app_running
+from app.libs import app_lifecycle
 
 # This blueprint is managed by the dynamic loader in app/main.py
 # It is registered under the url_prefix /api/ext/apps
 apps_bp = Blueprint('apps', __name__)
 
-def find_free_port():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('', 0))
-        return s.getsockname()[1]
+
 
 @apps_bp.route('/api/apps/<app_id>/start', methods=['POST'])
 def start_app(app_id):
-    if 'RUNNING_APPS' not in current_app.config:
-        current_app.config['RUNNING_APPS'] = {}
+    try:
+        app_info = ensure_app_running(app_id)
+        return jsonify({"ok": True, "data": app_info})
+    except (ValueError, RuntimeError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
-    if app_id in current_app.config['RUNNING_APPS']:
-        # App is already running
-        return jsonify({"ok": True, "data": current_app.config['RUNNING_APPS'][app_id]})
+@apps_bp.route('/api/apps/<app_id>/quit', methods=['POST'])
+def quit_app(app_id: str):
+    """
+    A new, specific endpoint for quitting an app.
+    """
+    running_apps = app_lifecycle.get_running_apps()
+    app_to_quit = next((app for app in running_apps if app.get("app_id") == app_id), None)
 
-    # Find the app's manifest
-    app_manifest = None
-    for app_data in current_app.config.get('LOADED_APPS', []):
-        if app_data.get('id') == app_id:
-            app_manifest = app_data
-            break
+    if not app_to_quit:
+        return jsonify({"ok": False, "error": "App is not running or already terminated."}), 404
+
+    shell_id = app_to_quit["shell_id"]
+    terminated = app_lifecycle.terminate_app(shell_id)
+
+    if terminated:
+        return jsonify({"ok": True, "data": {"message": f"App {app_id} terminated."}})
+    else:
+        return jsonify({"ok": False, "error": "Failed to terminate app."}), 500
+
+@apps_bp.route('/api/apps/<app_id>/lock', methods=['POST'])
+def lock_app(app_id: str):
+    """Sets the lock state for an app to true."""
+    running_apps = app_lifecycle.get_running_apps()
+    app_to_lock = next((app for app in running_apps if app.get("app_id") == app_id), None)
+    if not app_to_lock:
+        return jsonify({"ok": False, "error": "App not running."}), 404
     
-    if not app_manifest:
-        return jsonify({"ok": False, "error": "App not found"}), 404
+    updated_app = app_lifecycle.set_lock_state(app_to_lock["shell_id"], True)
+    return jsonify({"ok": True, "data": updated_app})
 
-    backend_module = app_manifest.get('entrypoints', {}).get('backend_blueprint')
-    if not backend_module:
-        # No backend, nothing to start
-        return jsonify({"ok": True, "data": {"message": "No backend to start"}})
-
-    port = find_free_port()
-    backend_module_path = os.path.join(current_app.root_path, 'apps', app_manifest['_dir'], backend_module)
-
-    project_root = os.path.join(current_app.root_path, '..')
-    env = {
-        "PYTHONPATH": f"{os.environ.get('PYTHONPATH', '')}:{project_root}"
-    }
-    command = [
-        "python",
-        "-m",
-        "app.app_worker",
-        "--app-id", app_id,
-        "--port", str(port),
-        "--backend-module", backend_module_path
-    ]
-
-    manager = get_framework_shell_manager()
-    shell = manager.spawn_shell(command, label=f"app-worker:{app_id}", cwd=project_root, env=env)
-
-    # Wait a moment and check if the shell is still alive
-    time.sleep(1.5)
-    updated_shell = manager.get_shell(shell.id)
+@apps_bp.route('/api/apps/<app_id>/unlock', methods=['POST'])
+def unlock_app(app_id: str):
+    """Sets the lock state for an app to false."""
+    running_apps = app_lifecycle.get_running_apps()
+    app_to_unlock = next((app for app in running_apps if app.get("app_id") == app_id), None)
+    if not app_to_unlock:
+        return jsonify({"ok": False, "error": "App not running."}), 404
     
-    if not updated_shell or updated_shell.status != 'running':
-        # The shell died, try to get the error log
-        error_log_path = Path(shell.stderr_log)
-        error_output = ""
-        if error_log_path.exists():
-            error_output = error_log_path.read_text().strip()
+    updated_app = app_lifecycle.set_lock_state(app_to_unlock["shell_id"], False)
+    return jsonify({"ok": True, "data": updated_app})
+
+@apps_bp.route('/api/apps/running', methods=['GET'])
+def get_running_apps():
+    """Returns a list of all currently running app shells with stats."""
+    running_apps = app_lifecycle.get_running_apps()
+    # We need to augment this with data from the main app manifests (like name and icon)
+    all_apps = {app['id']: app for app in current_app.config.get('LOADED_APPS', [])}
+    
+    augmented_apps = []
+    for app in running_apps:
+        manifest_data = all_apps.get(app.get('app_id'))
+        if manifest_data:
+            app['name'] = manifest_data.get('name')
+            app['icon_emoji'] = manifest_data.get('icon_emoji')
+        augmented_apps.append(app)
         
-        # Clean up the failed shell
-        try:
-            manager.remove_shell(shell.id)
-        except Exception:
-            pass # Ignore cleanup errors
-
-        return jsonify({
-            "ok": False, 
-            "error": "App worker failed to start.",
-            "details": error_output
-        }), 500
-
-    app_info = {"port": port, "shell_id": shell.id}
-    current_app.config['RUNNING_APPS'][app_id] = app_info
-
-    return jsonify({"ok": True, "data": app_info})
+    return jsonify({"ok": True, "data": augmented_apps})
 
 @apps_bp.route('/api/apps')
 def get_apps():

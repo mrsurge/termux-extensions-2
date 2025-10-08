@@ -1,3 +1,5 @@
+**OBSOLETE PLEASE DISREGARD.**
+
 # Step 6 — Generic Apps Extension Integration (Manifest → Shell → Assets → Lifecycle)
 
 **Backend blueprint:** `app/extensions/apps/main.py`

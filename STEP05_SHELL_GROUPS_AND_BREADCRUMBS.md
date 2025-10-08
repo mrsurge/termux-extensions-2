@@ -1,3 +1,5 @@
+**OBSOLETE PLEASE DISREGARD.**
+
 # Step 5 — Shell Groups, Roles & Breadcrumbs
 
 **New file:** `app/utils/shell_groups.py`

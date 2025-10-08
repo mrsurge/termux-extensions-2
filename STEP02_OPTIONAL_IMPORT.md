@@ -1,3 +1,5 @@
+**OBSOLETE PLEASE DISREGARD.**
+
 # Step 2 — Optional / Conditional Imports Inside Endpoints
 
 **New file:** `app/utils/optional_import.py`

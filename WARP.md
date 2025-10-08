@@ -23,6 +23,5 @@ This provides significant benefits in resource efficiency, stability, and proces
 
 5.  **Process Cleanup:**
     *   The `FrameworkShellManager` has been updated to use `os.killpg` instead of `os.kill`. This ensures that when a shell is terminated (either manually or via the supervisor), the signal is sent to the entire process group, cleanly terminating the worker and any of its children to prevent orphans.
-    *   Furthermore, when an app's browser tab is closed, a `pagehide` event now triggers an API call to terminate the app's specific process group, automatically freeing up its resources.
 
 This new architecture makes the framework more scalable and robust, laying the groundwork for more complex applications in the future.

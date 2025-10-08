@@ -170,7 +170,6 @@ To ensure resource efficiency and process isolation, app backends are launched o
     *   The proxy looks up the app's assigned port and forwards the request to the correct worker process.
 
 **5. Cleanup:**
-    *   When an app's browser tab is closed, a `pagehide` event triggers a call to `/api/framework_shells/terminate_group`, which cleanly shuts down the app's dedicated framework shell and its worker process.
     *   The `FrameworkShellManager` now uses `os.killpg` to ensure the entire process group is terminated, preventing orphaned processes.
 
 ## 5. Diagnostics & Runtime Management

@@ -24,6 +24,7 @@ import requests
 from app.framework_shells import framework_shells_bp, _manager, FrameworkShellManager
 from app.jobs import jobs_bp
 from app.utils.bookmarks import bookmarks_bp
+from app.utils.app_manager import ensure_app_running
 from flask_sock import Sock
 
 app = Flask(__name__)
@@ -293,6 +294,21 @@ def run_script(script_name, app_root_path, args=None):
         return result.stdout, None
     except Exception as e:
         return None, str(e)
+
+def load_services():
+    """Scans for services in app/libs and imports them to register job handlers."""
+    libs_dir = os.path.join(os.path.dirname(__file__), 'libs')
+    if not os.path.exists(libs_dir):
+        return
+
+    for filename in os.listdir(libs_dir):
+        if filename.endswith('.py') and not filename.startswith('__'):
+            module_name = f"app.libs.{filename.replace('.py', '')}"
+            try:
+                importlib.import_module(module_name)
+                print(f"Loaded service: {module_name}")
+            except Exception as e:
+                print(f"Error loading service {module_name}: {e}")
 
 
 # --- Extension Loader ---
@@ -614,6 +630,10 @@ def _ensure_initialized():
         if _initialized:
             return
         try:
+            load_services()
+        except Exception as e:
+            print(f"Error loading services: {e}")
+        try:
             if not loaded_extensions:
                 loaded_extensions = load_extensions()
                 app.config['LOADED_EXTENSIONS'] = loaded_extensions
@@ -659,11 +679,14 @@ def _before_request_init():
 
 @app.route('/api/app/<app_id>/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
 def proxy_app_request(app_id, subpath):
-    running_apps = current_app.config.get('RUNNING_APPS', {})
-    app_info = running_apps.get(app_id)
+    try:
+        app_info = ensure_app_running(app_id)
+    except (ValueError, RuntimeError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
     if not app_info or not app_info.get('port'):
-        return jsonify({"ok": False, "error": "App not running or port not found"}), 404
+        # This can happen if the app has no backend
+        return jsonify({"ok": False, "error": "App has no backend or is not running."}), 404
 
     port = app_info['port']
     url = f"http://127.0.0.1:{port}/{subpath}"
@@ -693,6 +716,8 @@ def proxy_app_request(app_id, subpath):
         return jsonify({"ok": False, "error": f"Failed to connect to app worker: {e}"}), 502
 
 if __name__ == '__main__':
+    print("--- Loading Services ---")
+    load_services()
     print("--- Loading Extensions ---")
     loaded_extensions = load_extensions()
     app.config['LOADED_EXTENSIONS'] = loaded_extensions

@@ -1,3 +1,5 @@
+**OBSOLETE PLEASE DISREGARD.**
+
 # Step 4 — Job Isolation & Subprocess Attachment
 
 Use Jobs for risky/long tasks. Always attach the subprocess so cancel/cleanup works; job failure is contained.

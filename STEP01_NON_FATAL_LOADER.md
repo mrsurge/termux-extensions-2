@@ -1,3 +1,5 @@
+**OBSOLETE PLEASE DISREGARD.**
+
 # Step 1 — Make Dynamic App/Extension Loading Non‑Fatal
 
 **Goal:** A bad app/extension import should NOT take down Flask. Mark the manifest with an error and keep serving.

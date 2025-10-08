@@ -28,6 +28,62 @@
         .app-btn { background: var(--secondary); color: var(--foreground); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
         .app-btn:hover { border-color: var(--primary); }
         #app-container { flex: 1; overflow: auto; }
+
+        .app-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(3px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        .app-modal-content {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            width: min(500px, 90vw);
+            max-height: 70vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .app-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--border);
+        }
+        .app-modal-header h3 { margin: 0; }
+        .app-modal-body {
+            padding: 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .recents-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--secondary);
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .recents-icon { font-size: 1.5rem; }
+        .recents-info { flex: 1; }
+        .recents-name { font-weight: 600; }
+        .recents-stats {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--muted-foreground);
+            display: flex;
+            gap: 12px;
+            margin-top: 4px;
+        }
+
     </style>
 </head>
 <body>
@@ -35,11 +91,25 @@
         <div class="app-toolbar">
             <button id="btn-home" class="app-btn">Home</button>
             <button id="btn-reload" class="app-btn">Reload</button>
+            <button id="btn-recents" class="app-btn">Recents</button>
+            <button id="btn-lock" class="app-btn">Lock</button>
+            <button id="btn-quit" class="app-btn">Quit</button>
             <div class="spacer"></div>
             <span id="app-title" class="app-title">App</span>
         </div>
         <div id="app-container"></div>
     </div>
+
+    <div id="recents-modal" class="app-modal" style="display: none;">
+        <div class="app-modal-content">
+            <div class="app-modal-header">
+                <h3>Recent Apps</h3>
+                <button id="recents-close-btn" class="app-btn">&times;</button>
+            </div>
+            <div id="recents-list" class="app-modal-body"></div>
+        </div>
+    </div>
+
 
     <script type="module" src="/static/js/te_state.js"></script>
     <script type="module" src="/static/js/te_ui.js"></script>
@@ -176,8 +246,105 @@
             }
         });
 
+        const btnQuit = document.getElementById('btn-quit');
+        const btnLock = document.getElementById('btn-lock');
+        const btnRecents = document.getElementById('btn-recents');
+        const recentsModal = document.getElementById('recents-modal');
+        const recentsList = document.getElementById('recents-list');
+        const recentsCloseBtn = document.getElementById('recents-close-btn');
+
+
+        let isLocked = false; // Assume default is unlocked
+
         btnHome.addEventListener('click', () => attemptExit(() => { window.location.href = '/'; }));
         btnReload.addEventListener('click', () => attemptExit(() => { window.location.reload(); }));
+
+        if (btnQuit) {
+            btnQuit.addEventListener('click', () => {
+                fetch(`/api/apps/${appId}/quit`, {
+                    method: "POST",
+                }).catch(err => console.error('Failed to send quit signal:', err));
+                // Navigate home immediately
+                window.location.href = '/';
+            });
+        }
+
+        if (btnLock) {
+            btnLock.addEventListener('click', () => {
+                isLocked = !isLocked;
+                const endpoint = isLocked ? 'lock' : 'unlock';
+                fetch(`/api/apps/${appId}/${endpoint}`, { method: 'POST' })
+                    .then(res => res.json())
+                    .then(body => {
+                        if (body.ok) {
+                            host.toast(`App ${isLocked ? 'locked' : 'unlocked'}`);
+                            btnLock.textContent = isLocked ? 'Unlock' : 'Lock';
+                        } else {
+                            host.toast(`Error: ${body.error}`);
+                            isLocked = !isLocked; // Revert state on failure
+                        }
+                    })
+                    .catch(err => {
+                        host.toast(`Error: ${err.message}`);
+                        isLocked = !isLocked; // Revert state on failure
+                    });
+            });
+        }
+
+        if (btnRecents) {
+            const formatUptime = (seconds) => {
+                if (seconds < 60) return `${Math.floor(seconds)}s`;
+                if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+                return `${Math.floor(seconds / 3600)}h`;
+            };
+            const formatRam = (bytes) => {
+                if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+                return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+            };
+
+            btnRecents.addEventListener('click', async () => {
+                try {
+                    const runningApps = await teFetch('/api/apps/running');
+                    recentsList.innerHTML = '';
+                    if (runningApps && runningApps.length > 0) {
+                        runningApps.forEach(app => {
+                            const card = document.createElement('div');
+                            card.className = 'recents-card';
+                            card.dataset.appId = app.app_id;
+                            card.style.cursor = 'pointer';
+                            card.innerHTML = `
+                                <div class="recents-icon">${app.icon_emoji || '⚙️'}</div>
+                                <div class="recents-info">
+                                    <div class="recents-name">${app.name || app.app_id}</div>
+                                    <div class="recents-stats">
+                                        <span>Uptime: ${formatUptime(app.uptime)}</span>
+                                        <span>CPU: ${app.cpu.toFixed(1)}%</span>
+                                        <span>RAM: ${formatRam(app.ram)}</span>
+                                    </div>
+                                </div>
+                            `;
+                            card.addEventListener('click', () => {
+                                const targetAppId = card.dataset.appId;
+                                if (targetAppId) {
+                                    recentsModal.style.display = 'none';
+                                    window.location.href = `/app/${targetAppId}`;
+                                }
+                            });
+                            recentsList.appendChild(card);
+                        });
+                    } else {
+                        recentsList.innerHTML = '<p style="color: var(--muted-foreground);">No other apps are running.</p>';
+                    }
+                    recentsModal.style.display = 'flex';
+                } catch (err) {
+                    host.toast(`Error: ${err.message}`);
+                }
+            });
+
+            recentsCloseBtn.addEventListener('click', () => {
+                recentsModal.style.display = 'none';
+            });
+        }
 
         async function loadApp() {
             try {
@@ -224,23 +391,7 @@
             await loadApp();
         });
     </script>
-    <script>
-    (() => {
-      const appId = "{{ app_id }}";
-      const group = `app:${appId}:${Date.now()}`;
-      window.__teAppGroup = group;
-      async function terminateGroup() {
-        try {
-          await fetch("/api/framework_shells/terminate_group", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ group })
-          });
-        } catch {}
-      }
-      window.addEventListener("pagehide", terminateGroup, { once: true });
-    })();
-    </script>
+
         <script>
 // Register Service Worker for PWA installability (app shell view)
 if ('serviceWorker' in navigator) {

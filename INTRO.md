@@ -1,3 +1,5 @@
+**OBSOLETE PLEASE DISREGARD.**
+
 # Dynamic App Loading & Failure Containment — Implementation Guide (final)
 
 This pack hardens your framework so **broken app modules never crash the server**, and heavy/fragile deps **load on demand** with safe fallbacks. It’s generic and manifest‑driven (works for all apps under `app/apps/*/manifest.json`).
