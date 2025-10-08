@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from app.framework_shells import FrameworkShellManager
+from app.libs.framework_shells import FrameworkShellManager
 
 OI_LABEL_TEMPLATE = "oi:{model_id}"
 

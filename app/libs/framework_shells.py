@@ -107,7 +107,8 @@ class FrameworkShellManager:
         self,
         *,
         base_dir: Optional[Path] = None,
-        max_shells: Optional[int] = None,
+        max_app_shells: Optional[int] = None,
+        max_service_shells: Optional[int] = None,
         auth_token: Optional[str] = None,
         run_id: Optional[str] = None,
     ) -> None:
@@ -117,7 +118,8 @@ class FrameworkShellManager:
         self.sockets_dir = self.base_dir / "sockets"
         for directory in (self.metadata_dir, self.logs_dir, self.sockets_dir):
             directory.mkdir(parents=True, exist_ok=True)
-        self.max_shells = max_shells if max_shells is not None else DEFAULT_MAX_SHELLS
+        self.max_app_shells = max_app_shells if max_app_shells is not None else 5
+        self.max_service_shells = max_service_shells if max_service_shells is not None else 5
         self.auth_token = auth_token or os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
         self.run_id = run_id or os.getenv("TE_RUN_ID")
         self.launcher_pid = os.getpid()
@@ -500,8 +502,8 @@ class FrameworkShellManager:
         record.updated_at = time.time()
         self._save_record(record)
 
-    def _active_shell_count(self) -> int:
-        return sum(1 for r in self._iter_records() if self._is_pid_alive(r.pid))
+    def _active_shell_count(self, app_shell: bool = False) -> int:
+        return sum(1 for r in self._iter_records() if r.status == "running" and (r.label or "").startswith("app-worker:") == app_shell)
 
     def _stop_pty(self, shell_id: str) -> None:
         state = self._pty.pop(shell_id, None)
@@ -543,23 +545,24 @@ class FrameworkShellManager:
         with self._lock:
             from app.libs import app_lifecycle
             self.sweep()
-            if self.max_shells and self._active_shell_count() >= self.max_shells:
-                # Attempt to clean up the oldest unlocked app
-                running_apps = app_lifecycle.get_running_apps(self)
-                unlocked_apps = [app for app in running_apps if not app.get("locked")]
-                if unlocked_apps:
-                    oldest_app = unlocked_apps[0] # get_running_apps is sorted by age
-                    print(f"[FrameworkShells] Max shells reached. Terminating oldest unlocked app: {oldest_app.get('app_id')}")
-                    app_lifecycle.terminate_app(self, oldest_app["shell_id"])
-                    # Give a moment for termination to process
-                    time.sleep(0.5)
-                    # Re-check count
-                    if self._active_shell_count() < self.max_shells:
-                        pass # A slot is now free
+            is_app_worker = (label or "").startswith("app-worker:")
+            limit = self.max_app_shells if is_app_worker else self.max_service_shells
+            if limit and self._active_shell_count(app_shell=is_app_worker) >= limit:
+                if is_app_worker:
+                    # Attempt to clean up the oldest unlocked app
+                    running_apps = app_lifecycle.get_running_apps(self)
+                    unlocked_apps = [app for app in running_apps if not app.get("locked")]
+                    if unlocked_apps:
+                        oldest_app = unlocked_apps[0]
+                        print(f"[FrameworkShells] Max app shells reached. Terminating oldest unlocked app: {oldest_app.get('app_id')}")
+                        app_lifecycle.terminate_app(self, oldest_app["shell_id"])
+                        time.sleep(0.5)
+                        if self._active_shell_count(app_shell=True) >= self.max_app_shells:
+                            raise RuntimeError("Maximum app shell count reached and could not free a slot.")
                     else:
-                        raise RuntimeError("Maximum framework shell count reached and could not free a slot.")
+                        raise RuntimeError("Maximum app shell count reached and all running apps are locked.")
                 else:
-                    raise RuntimeError("Maximum framework shell count reached and all running apps are locked.")
+                     raise RuntimeError(f"Maximum service shell count ({self.max_service_shells}) reached.")
 
             record = self._create_record(
                 command,
@@ -582,19 +585,23 @@ class FrameworkShellManager:
         with self._lock:
             from app.libs import app_lifecycle
             self.sweep()
-            if self.max_shells and self._active_shell_count() >= self.max_shells:
-                # Attempt to clean up the oldest unlocked app
-                running_apps = app_lifecycle.get_running_apps(self)
-                unlocked_apps = [app for app in running_apps if not app.get("locked")]
-                if unlocked_apps:
-                    oldest_app = unlocked_apps[0]
-                    print(f"[FrameworkShells] Max shells reached. Terminating oldest unlocked app: {oldest_app.get('app_id')}")
-                    app_lifecycle.terminate_app(self, oldest_app["shell_id"])
-                    time.sleep(0.5)
-                    if self._active_shell_count() >= self.max_shells:
-                        raise RuntimeError("Maximum framework shell count reached and could not free a slot.")
+            is_app_worker = (label or "").startswith("app-worker:")
+            limit = self.max_app_shells if is_app_worker else self.max_service_shells
+            if limit and self._active_shell_count(app_shell=is_app_worker) >= limit:
+                if is_app_worker:
+                    running_apps = app_lifecycle.get_running_apps(self)
+                    unlocked_apps = [app for app in running_apps if not app.get("locked")]
+                    if unlocked_apps:
+                        oldest_app = unlocked_apps[0]
+                        print(f"[FrameworkShells] Max app shells reached. Terminating oldest unlocked app: {oldest_app.get('app_id')}")
+                        app_lifecycle.terminate_app(self, oldest_app["shell_id"])
+                        time.sleep(0.5)
+                        if self._active_shell_count(app_shell=True) >= self.max_app_shells:
+                            raise RuntimeError("Maximum app shell count reached and could not free a slot.")
+                    else:
+                        raise RuntimeError("Maximum app shell count reached and all running apps are locked.")
                 else:
-                    raise RuntimeError("Maximum framework shell count reached and all running apps are locked.")
+                    raise RuntimeError(f"Maximum service shell count ({self.max_service_shells}) reached.")
 
             record = self._create_record(
                 command,
@@ -793,7 +800,7 @@ class FrameworkShellManager:
 # ----------------------------------------------------------------------
 # Flask blueprint
 
-from app.utils.shell_groups import terminate_group
+from app.libs.shell_groups import terminate_group
 
 framework_shells_bp = Blueprint("framework_shells", __name__)
 
@@ -802,15 +809,18 @@ def _manager() -> FrameworkShellManager:
     cfg = current_app.config
     base_dir_setting = cfg.get("TE_FRAMEWORK_SHELL_DIR") or os.getenv("TE_FRAMEWORK_SHELL_DIR")
     base_dir = Path(base_dir_setting) if base_dir_setting else None
-    max_shells_setting = cfg.get("TE_FRAMEWORK_SHELL_MAX") or os.getenv("TE_FRAMEWORK_SHELL_MAX")
-    max_shells = int(max_shells_setting) if max_shells_setting else None
+    max_app_shells_setting = cfg.get("TE_MAX_APP_SHELLS") or os.getenv("TE_MAX_APP_SHELLS")
+    max_service_shells_setting = cfg.get("TE_MAX_SERVICE_SHELLS") or os.getenv("TE_MAX_SERVICE_SHELLS")
+    max_app_shells = int(max_app_shells_setting) if max_app_shells_setting else 5
+    max_service_shells = int(max_service_shells_setting) if max_service_shells_setting else 5
     token = cfg.get("TE_FRAMEWORK_SHELL_TOKEN") or os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
     run_id = cfg.get("TE_RUN_ID") or os.getenv("TE_RUN_ID")
     mgr = current_app.config.get("TE_FRAMEWORK_SHELL_MANAGER")
     if not isinstance(mgr, FrameworkShellManager):
         mgr = FrameworkShellManager(
             base_dir=base_dir,
-            max_shells=max_shells,
+            max_app_shells=max_app_shells,
+            max_service_shells=max_service_shells,
             auth_token=token,
             run_id=run_id,
         )

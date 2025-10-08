@@ -29,7 +29,7 @@ def _ensure_run_id() -> str:
 
 def _cleanup_framework_shells() -> None:
     try:
-        from app.framework_shells import FrameworkShellManager
+        from app.libs.framework_shells import FrameworkShellManager
 
         manager = FrameworkShellManager()
         for record in list(manager.list_shells()):

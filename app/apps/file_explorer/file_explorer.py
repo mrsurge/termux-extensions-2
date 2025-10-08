@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Tuple
 
 from flask import Blueprint, jsonify, request
 
-from app.jobs import JobCancelled, register_job_handler
+from app.libs.jobs import JobCancelled, register_job_handler
 
 file_explorer_bp = Blueprint("file_explorer_app", __name__)
 

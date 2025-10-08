@@ -1,9 +1,9 @@
 import os
 import json
 from flask import Blueprint, jsonify, render_template, send_from_directory, current_app
-from app.utils.app_manager import ensure_app_running
+from app.libs.app_manager import ensure_app_running
 from app.libs import app_lifecycle
-from app.framework_shells import _manager as get_framework_shell_manager
+from app.libs.framework_shells import _manager as get_framework_shell_manager
 
 # This blueprint is managed by the dynamic loader in app/main.py
 # It is registered under the url_prefix /api/ext/apps

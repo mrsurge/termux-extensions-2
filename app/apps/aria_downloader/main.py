@@ -12,8 +12,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from flask import Blueprint, jsonify, request
 
-from app.framework_shells import FrameworkShellManager
-from app.framework_shells import _manager as get_framework_shell_manager
+from app.libs.framework_shells import FrameworkShellManager
+from app.libs.framework_shells import _manager as get_framework_shell_manager
 
 aria_downloader_bp = Blueprint('aria_downloader', __name__)
 

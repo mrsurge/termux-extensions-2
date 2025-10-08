@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.jobs import register_job_handler
-from app.utils.archiver import extract_streaming_with_progress
+from app.libs.jobs import register_job_handler
+from app.libs.archiver import extract_streaming_with_progress
 
 # This helper is duplicated from archive_manager/backend.py.
 # TODO: Move to a shared utility module.

@@ -157,9 +157,12 @@
       <button data-action="save-lifecycle-settings">Save</button>
     </header>
     <div class="shutdown-form">
-      <label for="max-shells">Max Framework Shells</label>
-      <input id="max-shells" type="number" min="1" step="1" placeholder="5">
-      <p class="hint">The maximum number of concurrent framework shells (including app workers) allowed to run.</p>
+      <label for="max-service-shells">Max Service Shells</label>
+      <input id="max-service-shells" type="number" min="1" step="1" placeholder="5">
+      <p class="hint">Max number of persistent services (e.g., containers, daemons). Does not include app workers.</p>
+      <label for="max-app-shells">Max App Shells</label>
+      <input id="max-app-shells" type="number" min="1" step="1" placeholder="5">
+      <p class="hint">Max number of concurrent app workers. Oldest unlocked apps will be terminated to make room.</p>
       <label for="app-ttl">App TTL (minutes)</label>
       <input id="app-ttl" type="number" min="0" step="1" placeholder="30">
       <p class="hint">How long an unlocked app can run before being automatically terminated. Set to 0 to disable.</p>

@@ -14,7 +14,7 @@ import threading as _threading
 
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
-from app.framework_shells import _manager as get_framework_shell_manager
+from app.libs.framework_shells import _manager as get_framework_shell_manager
 
 termux_lm_bp = Blueprint("termux_lm", __name__)
 

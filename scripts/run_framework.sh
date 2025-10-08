@@ -88,6 +88,9 @@ fi
 
 cd "$REPO_ROOT"
 
+# Clean up stale python cache files
+find . -type d -name "__pycache__" -exec rm -rf {} +
+
 supervisor_running() {
   local pid
   pid=$(pgrep -f "python -m app.supervisor" || true)

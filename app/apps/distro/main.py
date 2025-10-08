@@ -12,7 +12,7 @@ from typing import Dict, List
 
 from flask import Blueprint, jsonify, request, current_app
 
-from app.framework_shells import FrameworkShellManager
+from app.libs.framework_shells import FrameworkShellManager
 
 from .plugins import get_plugin
 

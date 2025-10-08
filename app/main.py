@@ -21,10 +21,11 @@ sys.path.insert(0, project_root)
 
 from flask import Flask, render_template, jsonify, send_from_directory, send_file, request, current_app, Response
 import requests
-from app.framework_shells import framework_shells_bp, _manager, FrameworkShellManager
-from app.jobs import jobs_bp
-from app.utils.bookmarks import bookmarks_bp
-from app.utils.app_manager import ensure_app_running
+from app.libs.framework_shells import framework_shells_bp, _manager, FrameworkShellManager
+from app.libs.jobs import jobs_bp
+from app.libs.bookmarks import bookmarks_bp
+from app.libs.app_manager import ensure_app_running
+from app.libs.app_lifecycle import start_background_tasks
 from flask_sock import Sock
 
 app = Flask(__name__)
@@ -650,6 +651,7 @@ def _ensure_initialized():
 @app.before_request
 def _before_request_init():
     _ensure_initialized()
+    start_background_tasks(app)
 
 
 # @app.route('/api/create_directory', methods=['POST'])

@@ -18,7 +18,7 @@ def main():
 
     try:
         # Add project root to the Python path
-        project_root = Path(__file__).resolve().parents[1]
+        project_root = Path(__file__).resolve().parents[2]
         sys.path.insert(0, str(project_root))
 
         module_name = f"app.apps.{args.app_id}.{Path(args.backend_module).stem}"

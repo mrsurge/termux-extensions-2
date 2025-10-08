@@ -51,7 +51,8 @@ export default function init(root, _api, host) {
   const extensionOrderContainer = root.querySelector('[data-role="extension-order"]');
   const saveExtensionOrderBtn = root.querySelector('[data-action="save-extension-order"]');
   const reloadExtensionsBtn = root.querySelector('[data-action="reload-extensions"]');
-  const maxShellsInput = root.querySelector('#max-shells');
+  const maxServiceShellsInput = root.querySelector('#max-service-shells');
+  const maxAppShellsInput = root.querySelector('#max-app-shells');
   const appTtlInput = root.querySelector('#app-ttl');
   const saveLifecycleBtn = root.querySelector('[data-action="save-lifecycle-settings"]');
 
@@ -346,12 +347,16 @@ export default function init(root, _api, host) {
   });
 
   saveLifecycleBtn?.addEventListener('click', async () => {
-    const maxShells = parseInt(maxShellsInput.value, 10);
+    const maxServiceShells = parseInt(maxServiceShellsInput.value, 10);
+    const maxAppShells = parseInt(maxAppShellsInput.value, 10);
     const appTtlMinutes = parseInt(appTtlInput.value, 10);
 
     const patch = {};
-    if (Number.isInteger(maxShells) && maxShells > 0) {
-        patch.TE_FRAMEWORK_SHELL_MAX = maxShells;
+    if (Number.isInteger(maxServiceShells) && maxServiceShells > 0) {
+        patch.TE_MAX_SERVICE_SHELLS = maxServiceShells;
+    }
+    if (Number.isInteger(maxAppShells) && maxAppShells > 0) {
+        patch.TE_MAX_APP_SHELLS = maxAppShells;
     }
     if (Number.isInteger(appTtlMinutes) && appTtlMinutes >= 0) {
         patch.APP_TTL_SECONDS = appTtlMinutes * 60;
@@ -372,8 +377,11 @@ export default function init(root, _api, host) {
     await loadExtensions().catch(() => {});
 
     const settings = await ensureSettings();
-    if (maxShellsInput) {
-        maxShellsInput.value = settings.TE_FRAMEWORK_SHELL_MAX || '5';
+    if (maxServiceShellsInput) {
+        maxServiceShellsInput.value = settings.TE_MAX_SERVICE_SHELLS || '5';
+    }
+    if (maxAppShellsInput) {
+        maxAppShellsInput.value = settings.TE_MAX_APP_SHELLS || '5';
     }
     if (appTtlInput) {
         const ttlSeconds = settings.APP_TTL_SECONDS || 1800;

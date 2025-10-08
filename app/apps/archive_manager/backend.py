@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 from flask import Blueprint, jsonify, request
 
 
-from app.utils.archiver import extract_streaming_with_progress
+from app.libs.archiver import extract_streaming_with_progress
 
 archive_manager_bp = Blueprint("archive_manager_app", __name__)
 

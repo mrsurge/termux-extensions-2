@@ -3,7 +3,7 @@ import socket
 import time
 from pathlib import Path
 from flask import current_app
-from app.framework_shells import _manager as get_framework_shell_manager
+from app.libs.framework_shells import _manager as get_framework_shell_manager
 from app.libs import app_lifecycle
 
 def find_free_port():
@@ -54,7 +54,7 @@ def ensure_app_running(app_id):
     command = [
         "python",
         "-m",
-        "app.app_worker",
+        "app.libs.app_worker",
         "--app-id", app_id,
         "--port", str(port),
         "--backend-module", backend_module_path

@@ -9,7 +9,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 # Reuse the core framework shells manager/config
-from app.framework_shells import _manager
+from app.libs.framework_shells import _manager
 
 bp = Blueprint("terminal_app", __name__)
 
