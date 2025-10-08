@@ -51,6 +51,9 @@ export default function init(root, _api, host) {
   const extensionOrderContainer = root.querySelector('[data-role="extension-order"]');
   const saveExtensionOrderBtn = root.querySelector('[data-action="save-extension-order"]');
   const reloadExtensionsBtn = root.querySelector('[data-action="reload-extensions"]');
+  const maxShellsInput = root.querySelector('#max-shells');
+  const appTtlInput = root.querySelector('#app-ttl');
+  const saveLifecycleBtn = root.querySelector('[data-action="save-lifecycle-settings"]');
 
   let frameworkToken = '';
   const savedState = typeof host.loadState === 'function' ? host.loadState({}) : null;
@@ -342,7 +345,41 @@ export default function init(root, _api, host) {
     }
   });
 
-  loadMetrics().catch(() => {});
-  loadShells().catch(() => {});
-  loadExtensions().catch(() => {});
+  saveLifecycleBtn?.addEventListener('click', async () => {
+    const maxShells = parseInt(maxShellsInput.value, 10);
+    const appTtlMinutes = parseInt(appTtlInput.value, 10);
+
+    const patch = {};
+    if (Number.isInteger(maxShells) && maxShells > 0) {
+        patch.TE_FRAMEWORK_SHELL_MAX = maxShells;
+    }
+    if (Number.isInteger(appTtlMinutes) && appTtlMinutes >= 0) {
+        patch.APP_TTL_SECONDS = appTtlMinutes * 60;
+    }
+
+    try {
+        await persistSettingsPatch(patch);
+        if (host?.toast) host.toast('Lifecycle settings saved', 2000);
+    } catch (err) {
+        console.error('Failed to save lifecycle settings', err);
+        if (host?.toast) host.toast('Failed to save settings', 3000);
+    }
+  });
+
+  async function loadAndRenderAll() {
+    await loadMetrics().catch(() => {});
+    await loadShells().catch(() => {});
+    await loadExtensions().catch(() => {});
+
+    const settings = await ensureSettings();
+    if (maxShellsInput) {
+        maxShellsInput.value = settings.TE_FRAMEWORK_SHELL_MAX || '5';
+    }
+    if (appTtlInput) {
+        const ttlSeconds = settings.APP_TTL_SECONDS || 1800;
+        appTtlInput.value = Math.floor(ttlSeconds / 60);
+    }
+  }
+
+  loadAndRenderAll();
 }

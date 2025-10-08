@@ -90,6 +90,58 @@
             background: rgba(34, 197, 94, 0.1);
         }
 
+        .recents-card-quit-btn {
+            position: absolute;
+            top: -8px;
+            left: -8px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(80, 120, 255, 0.2);
+            color: var(--primary-foreground);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.5rem;
+            cursor: pointer;
+            z-index: 1;
+        }
+
+        .recents-card-lock-btn {
+            background: rgba(80, 120, 255, 0.2);
+            border: 1px solid var(--border);
+            color: var(--foreground);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        .recents-card.locked .recents-card-lock-btn {
+            background: var(--success);
+            color: var(--primary-foreground);
+        }
+
+        .recents-exit-all-btn {
+            width: 100%;
+            padding: 12px;
+            border-radius: 24px;
+            background: rgba(80, 120, 255, 0.2);
+            color: var(--primary-foreground);
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
     </style>
 </head>
 <body>
@@ -320,8 +372,20 @@
                                 card.classList.add('locked');
                             }
                             card.dataset.appId = app.app_id;
-                            card.style.cursor = 'pointer';
+                            card.dataset.shellId = app.shell_id;
+                            card.style.position = 'relative'; // For positioning the quit button
+
+                            // Add main click listener for app switching
+                            card.addEventListener('click', () => {
+                                const targetAppId = card.dataset.appId;
+                                if (targetAppId) {
+                                    recentsModal.style.display = 'none';
+                                    window.location.href = `/app/${targetAppId}`;
+                                }
+                            });
+
                             card.innerHTML = `
+                                <button class="recents-card-quit-btn" title="Quit App">❌</button>
                                 <div class="recents-icon">${app.icon_emoji || '⚙️'}</div>
                                 <div class="recents-info">
                                     <div class="recents-name">${app.name || app.app_id}</div>
@@ -331,16 +395,60 @@
                                         <span>RAM: ${formatRam(app.ram)}</span>
                                     </div>
                                 </div>
+                                <button class="recents-card-lock-btn" title="Toggle Lock">🔒</button>
                             `;
-                            card.addEventListener('click', () => {
-                                const targetAppId = card.dataset.appId;
-                                if (targetAppId) {
-                                    recentsModal.style.display = 'none';
-                                    window.location.href = `/app/${targetAppId}`;
-                                }
-                            });
                             recentsList.appendChild(card);
                         });
+
+                        // Add event listeners for the new buttons
+                        recentsList.querySelectorAll('.recents-card-quit-btn').forEach(btn => {
+                            btn.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                const card = btn.closest('.recents-card');
+                                const appIdToQuit = card.dataset.appId;
+                                if (appIdToQuit && confirm(`Quit ${appIdToQuit}? This will override any lock.`)) {
+                                    fetch(`/api/apps/${appIdToQuit}/quit`, { method: 'POST' })
+                                        .then(() => card.remove());
+                                }
+                            });
+                        });
+
+                        recentsList.querySelectorAll('.recents-card-lock-btn').forEach(btn => {
+                            btn.addEventListener('click', async (e) => {
+                                e.stopPropagation();
+                                const card = btn.closest('.recents-card');
+                                const appIdToToggle = card.dataset.appId;
+                                const isCurrentlyLocked = card.classList.contains('locked');
+                                const endpoint = isCurrentlyLocked ? 'unlock' : 'lock';
+                                
+                                try {
+                                    await teFetch(`/api/apps/${appIdToToggle}/${endpoint}`, { method: 'POST' });
+                                    // Re-render the list to show the change immediately
+                                    btnRecents.click(); 
+                                } catch (err) {
+                                    host.toast(`Error: ${err.message}`);
+                                }
+                            });
+                        });
+
+                        const exitAllBtn = document.createElement('button');
+                        exitAllBtn.className = 'recents-exit-all-btn';
+                        exitAllBtn.innerHTML = '<span>❌</span> Exit All Apps';
+                        exitAllBtn.addEventListener('click', async () => {
+                            if (!confirm('Are you sure you want to exit all unlocked apps?')) return;
+                            try {
+                                const runningApps = await teFetch('/api/apps/running');
+                                const unlockedApps = runningApps.filter(app => !app.locked);
+                                for (const app of unlockedApps) {
+                                    await fetch(`/api/apps/${app.app_id}/quit`, { method: 'POST' });
+                                }
+                                recentsModal.style.display = 'none';
+                            } catch (err) {
+                                host.toast(`Error: ${err.message}`);
+                            }
+                        });
+                        recentsList.appendChild(exitAllBtn);
+
                     } else {
                         recentsList.innerHTML = '<p style="color: var(--muted-foreground);">No other apps are running.</p>';
                     }

@@ -151,6 +151,21 @@
 </style>
 
 <div class="settings-page">
+  <section class="settings-card" data-section="lifecycle">
+    <header>
+      <h2>Lifecycle Management</h2>
+      <button data-action="save-lifecycle-settings">Save</button>
+    </header>
+    <div class="shutdown-form">
+      <label for="max-shells">Max Framework Shells</label>
+      <input id="max-shells" type="number" min="1" step="1" placeholder="5">
+      <p class="hint">The maximum number of concurrent framework shells (including app workers) allowed to run.</p>
+      <label for="app-ttl">App TTL (minutes)</label>
+      <input id="app-ttl" type="number" min="0" step="1" placeholder="30">
+      <p class="hint">How long an unlocked app can run before being automatically terminated. Set to 0 to disable.</p>
+    </div>
+  </section>
+
   <section class="settings-card" data-section="metrics">
     <header>
       <h2>Framework Runtime</h2>
