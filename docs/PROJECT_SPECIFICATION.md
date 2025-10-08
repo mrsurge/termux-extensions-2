@@ -161,7 +161,7 @@ To ensure resource efficiency and process isolation, app backends are launched o
 **3. Backend Orchestration:**
     *   The `apps` extension receives this request.
     *   It checks if a framework shell for this app is already running.
-    *   If not, it spawns a new framework shell. The command for this shell is `python -m app.app_worker`, which runs a generic worker process.
+    *   If not, it spawns a new framework shell. The command for this shell is `python -m app.libs.app_worker`, which runs a generic worker process.
     *   Crucially, the `PYTHONPATH` for this new process is explicitly set to include the project root, and the `cwd` is also set to the project root. This ensures the worker can find the necessary modules.
     *   The worker is assigned a free port and its information (shell ID, port) is stored.
 

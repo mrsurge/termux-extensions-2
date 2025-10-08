@@ -124,6 +124,10 @@ The App Launcher extension provides the main grid of applications and orchestrat
 
 - **`GET /api/apps`**: Lists all discovered app manifests.
 - **`POST /api/apps/<app_id>/start`**: Ensures the backend for the specified app is running. If not, it spawns the app's backend worker in a new framework shell. Returns the connection info (port, shell ID) for the worker.
+- **`GET /api/apps/running`**: Returns a list of all currently running app shells with their stats (uptime, CPU, RAM).
+- **`POST /api/apps/<app_id>/quit`**: Terminates the specified app's backend worker process.
+- **`POST /api/apps/<app_id>/lock`**: Sets the lock status for the specified app to `true`.
+- **`POST /api/apps/<app_id>/unlock`**: Sets the lock status for the specified app to `false`.
 - **`GET /app/<app_id>`**: Renders the main HTML shell for a single-page application.
 - **`GET /apps/<app_dir>/<filename>`**: Serves static assets for a specific app.
 
