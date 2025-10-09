@@ -2,9 +2,23 @@ from __future__ import annotations
 
 import errno
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 
 from libarchive.public import file_reader
+
+
+def list_archive_entries(archive_path: Path) -> List[Dict]:
+    """List entries in an archive using libarchive."""
+    entries = []
+    with file_reader(str(archive_path)) as archive:
+        for entry in archive:
+            entries.append({
+                "pathname": entry.pathname,
+                "size": entry.size,
+                "mtime": entry.mtime,
+                "mode": entry.perm,
+            })
+    return entries
 
 
 def _ensure_parent(path: Path) -> None:

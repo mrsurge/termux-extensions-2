@@ -1,29 +1,68 @@
-from __future__ import annotations
-
-import os
+import stat
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.libs.jobs import register_job_handler
-from app.libs.archiver import extract_streaming_with_progress
+from app.libs.archiver import extract_streaming_with_progress, list_archive_entries
+from app.utils.paths import _resolve_user_path
 
-# This helper is duplicated from archive_manager/backend.py.
-# TODO: Move to a shared utility module.
-HOME_DIR = Path(os.path.expanduser("~")).resolve()
-def _resolve_user_path(raw: Optional[str], *, must_exist: bool = True) -> Path:
-    if not raw:
-        raw = "~"
-    expanded = os.path.expanduser(raw)
-    candidate = Path(expanded)
-    try:
-        resolved = candidate.resolve(strict=False)
-    except Exception:
-        resolved = candidate.absolute()
-    if not str(resolved).startswith(str(HOME_DIR)):
-        raise PermissionError(f"Access denied: {raw}")
-    if must_exist and not resolved.exists():
-        raise FileNotFoundError(f"Path not found: {resolved}")
-    return resolved
+def browse_archive(archive_path: Path, internal_path: str, show_hidden: bool) -> List[Dict[str, Any]]:
+    """Browse entries within an archive at a specific internal path."""
+    records = list_archive_entries(archive_path)
+    internal_path = internal_path.strip('/')
+    internal_parts = [p for p in internal_path.split('/') if p]
+    children: Dict[str, Dict[str, Any]] = {}
+
+    for record in records:
+        entry_path = record.get("pathname", "").strip()
+        if not entry_path:
+            continue
+
+        normalized = entry_path.replace('\\', '/').strip('/')
+        parts = [p for p in normalized.split('/') if p]
+
+        if internal_parts:
+            if len(parts) <= len(internal_parts) or parts[:len(internal_parts)] != internal_parts:
+                continue
+            relative_parts = parts[len(internal_parts):]
+        else:
+            relative_parts = parts
+
+        if not relative_parts:
+            continue
+
+        top_segment = relative_parts[0]
+        if not show_hidden and top_segment.startswith('.'):
+            continue
+
+        is_directory = stat.S_ISDIR(record.get('mode', 0)) or len(relative_parts) > 1
+        relative_internal = '/'.join((*internal_parts, top_segment))
+
+        child = children.get(top_segment)
+        if child is None:
+            child = {
+                "id": f"{archive_path}::{relative_internal}",
+                "name": top_segment,
+                "type": "directory" if is_directory else "file",
+                "path": str(archive_path),
+                "internal": relative_internal,
+                "size": None,
+                "modified": None,
+            }
+            children[top_segment] = child
+
+        if is_directory and child["type"] != "directory":
+            child["type"] = "directory"
+            child["size"] = None
+
+        if child["type"] == "file":
+            child["size"] = record.get("size")
+            child["modified"] = record.get("mtime")
+
+    results = list(children.values())
+    results.sort(key=lambda item: (item["type"] != "directory", item["name"].lower()))
+    return results
+
 
 @register_job_handler("extract_archive")
 def job_extract_archive(ctx, params):

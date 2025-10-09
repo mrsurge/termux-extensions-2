@@ -206,14 +206,17 @@ function renderEntries(gridEl, placeholderEl, state) {
       state.updateActionButtons();
     });
 
-    // Open button handler
-    const openBtn = node.querySelector('[data-action="open"]');
-    if (openBtn) {
-      openBtn.addEventListener('click', () => {
-        state.handleOpen(entry);
-      });
-    }
-    
+    // Add single-click selection
+    node.addEventListener('click', (e) => {
+      if (e.target.closest('.am-card-select')) {
+        return; // Let checkbox handler manage it
+      }
+      state.selectedIds.clear();
+      state.selectedIds.add(entry.id);
+      renderEntries(gridEl, placeholderEl, state);
+      state.updateActionButtons();
+    });
+
     // Add double-click navigation
     node.addEventListener('dblclick', (e) => {
       // Prevent double-click on checkbox
@@ -531,9 +534,15 @@ export default async function init(root, api, host) {
 
   state.updateActionButtons = () => {
     const hasSelection = state.selectedIds.size > 0;
+    const selectedEntries = Array.from(state.selectedIds).map(id => state.entryMap.get(id)).filter(Boolean);
+    const singleSelection = selectedEntries.length === 1 ? selectedEntries[0] : null;
+
     newArchiveBtn.disabled = !(state.mode === 'filesystem' && hasSelection);
     addBtn.disabled = !(state.mode === 'filesystem' && hasSelection);
-    extractBtn.disabled = !(state.mode === 'archive' && hasSelection);
+
+    const canExtract = (state.mode === 'archive' && hasSelection) ||
+      (state.mode === 'filesystem' && singleSelection && singleSelection.isArchive);
+    extractBtn.disabled = !canExtract;
     if (exitArchiveBtn) {
       if (state.mode === 'archive') {
         exitArchiveBtn.classList.remove('am-hidden');
@@ -664,38 +673,48 @@ export default async function init(root, api, host) {
   };
 
   state.handleExtract = async () => {
-    if (state.mode !== 'archive' || state.selectedIds.size === 0) {
+    const selected = Array.from(state.selectedIds).map((id) => state.entryMap.get(id)).filter(Boolean);
+    if (selected.length === 0) {
+      useToast(host, 'Please select items to extract.');
+      return;
+    }
+
+    const isFilesystemExtract = state.mode === 'filesystem' && selected.length === 1 && selected[0].isArchive;
+    if (state.mode === 'archive' && selected.length === 0) {
       useToast(host, 'Select archive entries to extract.');
       return;
     }
-    const destinationChoice = state.lastPickedTarget
-      ? { path: state.lastPickedTarget }
-      : await pickDestinationDirectory(state);
-    if (!destinationChoice) {
-      const picked = await pickDestinationDirectory(state);
-      if (!picked) return;
-      destinationChoice.path = picked.path;
+    if (!isFilesystemExtract && state.mode !== 'archive') {
+        useToast(host, 'Extraction is only possible from within an archive, or for a single archive file.');
+        return;
     }
+
+    const destinationChoice = await pickDestinationDirectory(state);
+    if (!destinationChoice || !destinationChoice.path) {
+      return; // User cancelled picker
+    }
+
     const destinationPath = destinationChoice.path;
     state.lastPickedTarget = destinationPath;
-    const selected = Array.from(state.selectedIds).map((id) => state.entryMap.get(id)).filter(Boolean);
-    const items = selected
-      .map((entry) => entry.internal)
-      .filter(Boolean);
-    if (!items.length) {
+
+    const archivePath = isFilesystemExtract ? selected[0].path : state.archivePath;
+    const items = isFilesystemExtract ? [] : selected.map((entry) => entry.internal).filter(Boolean);
+    const archiveName = archivePath.split('/').pop() || archivePath;
+
+    if (!isFilesystemExtract && items.length === 0) {
       useToast(host, 'Unable to determine archive paths for selection.');
       return;
     }
+
     try {
       const job = await createJobRequest('extract_archive', {
-        archive_path: state.archivePath,
+        archive_path: archivePath,
         items,
         destination: destinationPath,
         options: {},
       });
-      const archiveName = state.archivePath ? state.archivePath.split('/').pop() || state.archivePath : 'archive';
       trackExtractionJob(state, job, {
-        archivePath: state.archivePath,
+        archivePath: archivePath,
         archiveName,
         destination: destinationPath,
         itemCount: items.length,
@@ -705,15 +724,6 @@ export default async function init(root, api, host) {
       persistState(host, state);
     } catch (error) {
       useToast(host, error?.message || 'Failed to start extraction.');
-    }
-  };
-
-  state.handlePickDestination = async () => {
-    const choice = await pickDestinationDirectory(state);
-    if (choice) {
-      state.lastPickedTarget = choice.path;
-      persistState(host, state);
-      useToast(host, `Destination set to ${choice.path}`);
     }
   };
 
@@ -772,7 +782,7 @@ export default async function init(root, api, host) {
   newArchiveBtn.addEventListener('click', state.handleCreateArchive);
   addBtn.addEventListener('click', state.handleAddToArchive);
   extractBtn.addEventListener('click', state.handleExtract);
-  pickBtn.addEventListener('click', state.handlePickDestination);
+
   if (exitArchiveBtn) {
     exitArchiveBtn.addEventListener('click', state.handleExitArchive);
   }
