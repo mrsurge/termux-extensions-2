@@ -8,24 +8,11 @@
   .fe-btn { padding: 6px 10px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; flex-shrink: 0; align-self: center; }
   .fe-btn:hover { border-color: var(--primary, #3b82f6); }
   .fe-status { font-size: 0.75rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
-  .fe-editor-container { flex: 1; display: flex; min-height: 0; overflow: hidden; }
-  .fe-scrollbar { height: 12px; background: var(--card, #0b0f1a); border-top: 1px solid var(--border, #333); display: none; overflow-x: auto; overflow-y: hidden; }
-  .fe-scrollbar::-webkit-scrollbar { height: 8px; }
-  .fe-scrollbar::-webkit-scrollbar-track { background: rgba(148, 163, 184, 0.1); }
-  .fe-scrollbar::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.4); border-radius: 999px; }
-  .fe-scrollbar-inner { height: 1px; }
-  .cm-editor .cm-scroller {
-    touch-action: pan-x pan-y;
-    -webkit-overflow-scrolling: touch;
-  }
-  /* Zebra striping for line shading */
-  .cm-editor.line-shading .cm-line:nth-child(even) {
-    background: rgba(255, 255, 255, 0.025);
-  }
-  .cm-editor.line-shading .cm-gutters {
-    background: var(--card, #0b0f1a);
-  }
-  /* CodeMirror overrides are now in the JS theme */
+  .fe-editor-container { flex: 1; display: flex; min-height: 0; }
+  .fe-ace-editor { flex: 1; }
+  .fe-ace-editor .ace_content { background-color: #101b33; }
+  .fe-ace-line-shading .ace_scroller .ace_line:nth-child(even) { background: rgba(96, 149, 255, 0.1); }
+  .fe-ace-line-shading .ace_scroller { background-color: #14264d; }
   .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 13px; }
   .fe-menu { position: relative; }
   .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; }
@@ -52,12 +39,6 @@
   .fe-modal-actions { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--border, #333); }
   .fe-confirm-body { padding: 16px; }
   .fe-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px; border-top: 1px solid var(--border, #333); }
-  .fe-crumb { position: relative; }
-  .fe-crumb-btn { white-space: nowrap; }
-  .fe-crumb-menu { position: absolute; top: calc(100% + 4px); right: 0; min-width: 200px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 21; }
-  .fe-crumb-menu.show { display: block; }
-  .fe-crumb-item { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.06); }
-  .fe-crumb-item:hover { background: rgba(255,255,255,0.06); }
 </style>
 
 <div class="fe-root">
@@ -104,12 +85,7 @@
       </div>
     </div>
   </div>
-  <div class="fe-editor-container" id="editor-container">
-    <!-- CodeMirror will be initialized here -->
-  </div>
-  <div class="fe-scrollbar" id="fe-scrollbar" hidden>
-    <div class="fe-scrollbar-inner" id="fe-scrollbar-inner"></div>
-  </div>
+  <div class="fe-editor-container" id="editor-container"></div>
 
   <div id="fe-confirm" class="fe-modal" aria-hidden="true">
     <div class="fe-modal-card" style="max-width: 520px;">
@@ -128,5 +104,4 @@
       </div>
     </div>
   </div>
-
 </div>
