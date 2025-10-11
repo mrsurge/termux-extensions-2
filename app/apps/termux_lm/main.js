@@ -1244,16 +1244,38 @@ export default function initTermuxLM(root, api, host) {
     if (editing) {
       payload.id = state.modalDraft.id;
     }
+
+    if (typeof payload.name === 'string') {
+      payload.name = payload.name.trim();
+      if (!payload.name) {
+        delete payload.name;
+      }
+    }
+
+    if (typeof payload.reasoning_effort === 'string') {
+      const trimmedEffort = payload.reasoning_effort.trim();
+      if (trimmedEffort) {
+        payload.reasoning_effort = trimmedEffort;
+      } else {
+        delete payload.reasoning_effort;
+      }
+    }
+
     if (payload.type === 'remote') {
       payload.remote_model = payload.remote_model?.trim() || '';
-      payload.reasoning_effort = payload.reasoning_effort ? Number(payload.reasoning_effort) : undefined;
+      payload.provider = payload.provider?.trim() || undefined;
+      payload.endpoint = payload.endpoint?.trim() || undefined;
+      payload.api_key = payload.api_key?.trim() || '';
       if (!payload.remote_model) {
         host.toast?.('Remote model identifier required');
         return;
       }
-      if (Number.isNaN(payload.reasoning_effort)) {
-        payload.reasoning_effort = undefined;
+      if (!payload.api_key) {
+        host.toast?.('API key required');
+        return;
       }
+    } else if (typeof payload.path === 'string') {
+      payload.path = payload.path.trim();
     }
 
     try {

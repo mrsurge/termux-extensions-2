@@ -79,7 +79,65 @@ def _read_json(path: Path) -> Dict[str, Any] | None:
     return None
 
 
+def _normalize_reasoning_effort(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        trimmed = value.strip()
+        return trimmed or None
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else str(value)
+    return None
+
+
+def _normalize_model_input(model: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(model)
+    normalized["reasoning_effort"] = _normalize_reasoning_effort(normalized.get("reasoning_effort"))
+
+    name = normalized.get("name")
+    if isinstance(name, str):
+        name = name.strip()
+    else:
+        name = None
+
+    remote_model = normalized.get("remote_model")
+    if isinstance(remote_model, str):
+        remote_model = remote_model.strip()
+        normalized["remote_model"] = remote_model or None
+
+    if normalized.get("type") == "remote":
+        provider = normalized.get("provider")
+        if isinstance(provider, str):
+            normalized["provider"] = provider.strip() or None
+        endpoint = normalized.get("endpoint")
+        if isinstance(endpoint, str):
+            endpoint = endpoint.strip()
+            normalized["endpoint"] = endpoint or None
+        api_key = normalized.get("api_key")
+        if isinstance(api_key, str):
+            normalized["api_key"] = api_key.strip()
+
+    if normalized.get("type") == "local":
+        path = normalized.get("path")
+        if isinstance(path, str):
+            normalized["path"] = path.strip()
+
+    if not name:
+        fallback = remote_model or normalized.get("path") or normalized.get("id")
+        if isinstance(fallback, str):
+            name = fallback.strip()
+        if not name:
+            name = normalized.get("id")
+    normalized["name"] = name
+    return normalized
+
+
 def _write_model_manifest(model: Dict[str, Any]) -> Dict[str, Any]:
+    model = _normalize_model_input(model)
     model_id = model["id"]
     manifest = {
         "id": model_id,
@@ -108,6 +166,7 @@ def _load_model(model_id: str) -> Dict[str, Any] | None:
     manifest = _read_json(_manifest_path(model_id))
     if manifest:
         manifest["id"] = model_id
+        manifest = _normalize_model_input(manifest)
     return manifest
 
 
@@ -436,14 +495,9 @@ def _remote_payload(
         "messages": messages,
         "stream": stream,
     }
-    effort = model.get("reasoning_effort")
-    if isinstance(effort, str) and effort.strip():
-        try:
-            effort = int(effort.strip())
-        except ValueError:
-            effort = None
-    if isinstance(effort, (int, float)) and effort > 0:
-        payload["reasoning"] = {"effort": int(effort)}
+    effort = _normalize_reasoning_effort(model.get("reasoning_effort"))
+    if effort:
+        payload["reasoning"] = {"effort": effort}
     return payload
 
 

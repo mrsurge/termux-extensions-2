@@ -72,12 +72,12 @@
           <button class="tlm-btn" type="button" data-model-type="local" data-active="true">Local llama.cpp</button>
           <button class="tlm-btn" type="button" data-model-type="remote">Remote API</button>
         </div>
+        <label class="tlm-field">
+          <span>Display Name</span>
+          <input name="name" type="text" placeholder="Gemma 2 2B" autocomplete="off">
+        </label>
 
         <section class="tlm-form-section" data-form-section="local">
-          <label class="tlm-field">
-            <span>Display Name</span>
-            <input name="name" type="text" placeholder="Gemma 2 2B" autocomplete="off">
-          </label>
           <label class="tlm-field">
             <span>Model File</span>
             <div class="tlm-field-row">
@@ -124,7 +124,9 @@
           </label>
           <label class="tlm-field">
             <span>Reasoning Effort</span>
-            <input name="reasoning_effort" type="number" min="0" step="1" placeholder="0">
+            <input name="reasoning_effort" type="text" placeholder="low, medium, high" autocomplete="off">
+            <small>Optional textual tier expected by your provider (for example: low, medium, high).</small>
+          </label>
         </section>
       </div>
       <footer>

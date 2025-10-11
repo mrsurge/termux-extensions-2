@@ -94,7 +94,7 @@ state = {
 
 ### Main Flows
 - **Initialisation**: injects `style.css`, maps DOM elements, binds listeners, kicks off a refresh timer (6s) to sync state/logs.
-- **Model modal**: handles create/edit flows, persisting remote fields (`remote_model`, `reasoning_effort`) and reopening draft state.
+- **Model modal**: handles create/edit flows, persisting remote fields (`remote_model`, string `reasoning_effort` tiers) and reopening draft state.
 - **Model cards**: cards show type, status, file/provider, and shell stats when available. Status logic marks remote cards “Ready” when `remoteReady` is true.
 - **Menus**: inline menu actions handle load/unload/start session/edit/delete. Active menu state is tracked to close when tapping outside.
 - **Shell logs**: `updateShellLogs` writes stdout/stderr panes using `/shell/log`.
