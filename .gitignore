@@ -2,4 +2,4 @@ PERSISTENT_APPS_PLAN.md
 conv.chat
 **/__pycache__/
 *.fe-dis*
-GEMINI.md
+#GEMINI.md

@@ -64,6 +64,8 @@ The framework includes a number of features for diagnostics and runtime manageme
 
 ## Agent Operating Instructions
 
+**NUMBER ONE RULE:** I MUST **NEVER EVER FOR ANY REASON UNDER ANY CIRCUMSTANCE UNLESS EXPLICITLY INSTRUCTED TO, USE GIT. THIS COMMAND MUST ALWAYS BE EXPLICIT AND NEVER IMPLIED.**
+
 ### Core Operating Principles & Interaction Workflow
 
 **1. Safety Protocol: Unsandboxed Execution**

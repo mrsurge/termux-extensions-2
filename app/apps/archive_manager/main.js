@@ -13,12 +13,14 @@ const DEFAULT_STATE = {
   lastPickedTarget: null,
   homeDir: null,
   lastFilesystemPath: '~',
+  bookmarks: [],
 };
 
 function createState() {
   const state = structuredClone(DEFAULT_STATE);
   state.selectedIds = new Set();
   state.entryMap = new Map();
+  state.bookmarks = [];
   return state;
 }
 
@@ -245,6 +247,37 @@ function createClient(api) {
     testArchive(body) {
       return api.post('archives/test', body);
     },
+  };
+}
+
+const ARCHIVE_EXTENSIONS = new Set([
+  '.7z', '.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.rar',
+]);
+
+function isArchivePath(path) {
+  if (!path || typeof path !== 'string') return false;
+  const lower = path.toLowerCase();
+  if (lower.endsWith('.tar.gz') || lower.endsWith('.tar.bz2') || lower.endsWith('.tar.xz')) {
+    return true;
+  }
+  const dotIndex = lower.lastIndexOf('.');
+  if (dotIndex === -1) return false;
+  const ext = lower.slice(dotIndex);
+  return ARCHIVE_EXTENSIONS.has(ext);
+}
+
+function parseArchiveBookmark(path) {
+  if (!path || typeof path !== 'string') return null;
+  const separatorIndex = path.indexOf('::');
+  if (separatorIndex === -1) return null;
+  const archive = path.slice(0, separatorIndex).trim();
+  const internal = path.slice(separatorIndex + 2).trim().replace(/^\/+|\/+$/g, '');
+  if (!archive || !isArchivePath(archive)) {
+    return null;
+  }
+  return {
+    archive,
+    internal,
   };
 }
 
@@ -531,6 +564,350 @@ export default async function init(root, api, host) {
   const addBtn = root.querySelector('[data-action="add-to-archive"]');
   const pickBtn = root.querySelector('[data-action="pick-target"]');
   const showHiddenToggle = root.querySelector('#am-show-hidden');
+  const menuGroups = Array.from(root.querySelectorAll('.am-menu-group'));
+  const bookmarkUI = {
+    group: root.querySelector('.am-menu-group[data-menu="bookmarks"]'),
+    toggle: root.querySelector('[data-menu-toggle="bookmarks"]'),
+    list: root.querySelector('[data-role="bookmarks-list"]'),
+    editModal: root.querySelector('[data-modal="edit-bookmarks"]'),
+    editOverlay: root.querySelector('[data-role="edit-bookmarks-overlay"]'),
+    editList: root.querySelector('[data-role="edit-bookmarks-list"]'),
+    editCloseButtons: Array.from(root.querySelectorAll('[data-action="edit-bookmarks-close"]')),
+    editDeleteSelected: root.querySelector('[data-action="edit-bookmarks-delete-selected"]'),
+    formModal: root.querySelector('[data-modal="bookmark-form"]'),
+    formOverlay: root.querySelector('[data-role="bookmark-form-overlay"]'),
+    formTitle: root.querySelector('#am-bookmark-form-title'),
+    formName: root.querySelector('[data-role="bookmark-form-name"]'),
+    formPath: root.querySelector('[data-role="bookmark-form-path"]'),
+    formCancel: root.querySelector('[data-action="bookmark-form-cancel"]'),
+    formSave: root.querySelector('[data-action="bookmark-form-save"]'),
+    formClose: root.querySelector('[data-action="bookmark-form-close"]'),
+  };
+  let bookmarkFormContext = null;
+
+  function closeAllMenus() {
+    menuGroups.forEach((group) => group.removeAttribute('data-open'));
+  }
+
+  function setModalOpen(modal, open) {
+    if (!modal) return;
+    if (open) {
+      modal.dataset.open = 'true';
+      modal.setAttribute('aria-hidden', 'false');
+    } else {
+      delete modal.dataset.open;
+      modal.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function renderBookmarkMenu() {
+    const container = bookmarkUI.list;
+    if (!container) return;
+    container.innerHTML = '';
+    if (!state.bookmarks.length) {
+      const empty = document.createElement('div');
+      empty.textContent = 'No bookmarks';
+      empty.style.padding = '8px 14px';
+      empty.style.color = 'var(--muted-foreground, #94a3b8)';
+      container.appendChild(empty);
+      return;
+    }
+    state.bookmarks.forEach((bookmark) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = bookmark.name || 'Bookmark';
+      btn.title = bookmark.path || '';
+      btn.addEventListener('click', () => {
+        handleBookmarkNavigate(bookmark);
+      });
+      container.appendChild(btn);
+    });
+  }
+
+  async function fetchBookmarks() {
+    try {
+      const response = await fetch('/api/bookmarks');
+      const payload = await response.json();
+      if (!payload.ok) {
+        throw new Error(payload.error || 'Failed to load bookmarks');
+      }
+      state.bookmarks = payload.data || [];
+      renderBookmarkMenu();
+    } catch (error) {
+      useToast(host, error?.message || 'Failed to load bookmarks');
+    }
+  }
+
+  function renderEditBookmarksList() {
+    const list = bookmarkUI.editList;
+    if (!list) return;
+    list.innerHTML = '';
+    if (!state.bookmarks.length) {
+      const empty = document.createElement('div');
+      empty.textContent = 'No bookmarks yet.';
+      empty.style.padding = '8px 10px';
+      empty.style.color = 'var(--muted-foreground, #94a3b8)';
+      list.appendChild(empty);
+      return;
+    }
+    state.bookmarks.forEach((bookmark, index) => {
+      const item = document.createElement('div');
+      item.className = 'am-bookmark-item';
+      item.dataset.index = String(index);
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.path = bookmark.path || '';
+      item.appendChild(checkbox);
+
+      const details = document.createElement('div');
+      details.className = 'details';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'name';
+      nameEl.textContent = bookmark.name || 'Bookmark';
+      const pathEl = document.createElement('div');
+      pathEl.className = 'path';
+      pathEl.textContent = bookmark.path || '';
+      details.appendChild(nameEl);
+      details.appendChild(pathEl);
+      item.appendChild(details);
+
+      const controls = document.createElement('div');
+      controls.className = 'controls';
+
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => {
+        openBookmarkFormModal(bookmark, index);
+      });
+      controls.appendChild(editBtn);
+
+      const upBtn = document.createElement('button');
+      upBtn.type = 'button';
+      upBtn.textContent = '↑';
+      upBtn.disabled = index === 0;
+      upBtn.addEventListener('click', () => moveBookmark(index, -1));
+      controls.appendChild(upBtn);
+
+      const downBtn = document.createElement('button');
+      downBtn.type = 'button';
+      downBtn.textContent = '↓';
+      downBtn.disabled = index === state.bookmarks.length - 1;
+      downBtn.addEventListener('click', () => moveBookmark(index, 1));
+      controls.appendChild(downBtn);
+
+      item.appendChild(controls);
+      list.appendChild(item);
+    });
+  }
+
+  function openEditBookmarksModal() {
+    renderEditBookmarksList();
+    setModalOpen(bookmarkUI.editModal, true);
+  }
+
+  function closeEditBookmarksModal() {
+    setModalOpen(bookmarkUI.editModal, false);
+  }
+
+  function openBookmarkFormModal(bookmark = null, index = -1) {
+    bookmarkFormContext = { bookmark, index };
+    const title = bookmark ? 'Edit Bookmark' : 'Add Bookmark';
+    if (bookmarkUI.formTitle) {
+      bookmarkUI.formTitle.textContent = title;
+    }
+    if (bookmark) {
+      if (bookmarkUI.formName) bookmarkUI.formName.value = bookmark.name || '';
+      if (bookmarkUI.formPath) bookmarkUI.formPath.value = bookmark.path || '';
+    } else {
+      const defaultPath = state.mode === 'archive'
+        ? (state.archivePath || state.cwd || '~')
+        : (state.cwd || '~');
+      const defaultName = state.mode === 'archive'
+        ? ((state.archiveInternal && state.archiveInternal.split('/').pop()) || (state.archivePath ? state.archivePath.split('/').pop() : 'Archive'))
+        : (state.cwd?.split('/').pop() || 'Folder');
+      if (bookmarkUI.formName) bookmarkUI.formName.value = defaultName;
+      if (bookmarkUI.formPath) bookmarkUI.formPath.value = defaultPath;
+    }
+    setModalOpen(bookmarkUI.formModal, true);
+    requestAnimationFrame(() => {
+      bookmarkUI.formName?.focus();
+      if (!bookmark && bookmarkUI.formName && typeof bookmarkUI.formName.select === 'function') {
+        bookmarkUI.formName.select();
+      }
+    });
+  }
+
+  function closeBookmarkFormModal() {
+    bookmarkFormContext = null;
+    setModalOpen(bookmarkUI.formModal, false);
+  }
+
+  async function persistBookmarks(newBookmarks, successMessage) {
+    try {
+      const response = await fetch('/api/bookmarks', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newBookmarks),
+      });
+      const payload = await response.json();
+      if (!payload.ok) {
+        throw new Error(payload.error || 'Failed to save bookmarks');
+      }
+      state.bookmarks = payload.data || [];
+      renderBookmarkMenu();
+      if (bookmarkUI.editModal?.dataset.open === 'true') {
+        renderEditBookmarksList();
+      }
+      if (successMessage) {
+        useToast(host, successMessage);
+      }
+    } catch (error) {
+      useToast(host, error?.message || 'Bookmark update failed');
+      throw error;
+    }
+  }
+
+  async function saveBookmarkForm() {
+    if (!bookmarkFormContext) return;
+    const name = bookmarkUI.formName?.value.trim();
+    const path = bookmarkUI.formPath?.value.trim();
+    if (!name || !path) {
+      useToast(host, 'Name and path are required.');
+      return;
+    }
+    const { index } = bookmarkFormContext;
+    const updated = Array.isArray(state.bookmarks) ? [...state.bookmarks] : [];
+    if (index >= 0 && index < updated.length) {
+      updated[index] = { name, path };
+    } else {
+      updated.push({ name, path });
+    }
+    try {
+      await persistBookmarks(updated, `Bookmark "${name}" saved.`);
+      closeBookmarkFormModal();
+    } catch {
+      // Handled by persistBookmarks
+    }
+  }
+
+  async function deleteSelectedBookmarks() {
+    const list = bookmarkUI.editList;
+    if (!list) return;
+    const selected = Array.from(list.querySelectorAll('input[type="checkbox"]:checked'));
+    if (!selected.length) {
+      useToast(host, 'Select bookmarks to delete.');
+      return;
+    }
+    const toRemove = new Set(selected.map((input) => input.dataset.path || ''));
+    const updated = state.bookmarks.filter((bookmark) => !toRemove.has(bookmark.path));
+    try {
+      await persistBookmarks(updated, `Deleted ${selected.length} bookmark(s).`);
+    } catch {
+      // Handled by persistBookmarks
+    }
+  }
+
+  async function moveBookmark(index, delta) {
+    const newIndex = index + delta;
+    if (newIndex < 0 || newIndex >= state.bookmarks.length) {
+      return;
+    }
+    const updated = [...state.bookmarks];
+    const [moved] = updated.splice(index, 1);
+    updated.splice(newIndex, 0, moved);
+    try {
+      await persistBookmarks(updated, null);
+    } catch {
+      // Handled by persistBookmarks
+    }
+  }
+
+  function handleBookmarkNavigate(bookmark) {
+    closeAllMenus();
+    if (!bookmark || !bookmark.path) {
+      useToast(host, 'Bookmark has no path.');
+      return;
+    }
+    const target = bookmark.path.trim();
+    if (!target) {
+      useToast(host, 'Bookmark path is empty.');
+      return;
+    }
+    const archiveTarget = parseArchiveBookmark(target);
+    if (archiveTarget) {
+      state.lastFilesystemPath = state.cwd || state.lastFilesystemPath || '~';
+      state.mode = 'archive';
+      state.archivePath = archiveTarget.archive;
+      state.archiveInternal = archiveTarget.internal || '';
+      state.clearSelection();
+      state.refresh();
+      return;
+    }
+    state.navigateToFilesystem(target);
+  }
+
+  const menuActions = {
+    'bookmarks:add': () => openBookmarkFormModal(),
+    'bookmarks:edit': () => openEditBookmarksModal(),
+  };
+
+  menuGroups.forEach((group) => {
+    const toggle = group.querySelector('[data-menu-toggle]');
+    if (toggle) {
+      toggle.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const isOpen = group.hasAttribute('data-open');
+        closeAllMenus();
+        if (!isOpen) {
+          group.setAttribute('data-open', 'true');
+        }
+      });
+    }
+    const commands = group.querySelectorAll('[data-command]');
+    commands.forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        closeAllMenus();
+        const action = menuActions[btn.dataset.command];
+        if (action) {
+          action();
+        }
+      });
+    });
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.am-menu-group')) {
+      closeAllMenus();
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      if (menuGroups.some((group) => group.hasAttribute('data-open'))) {
+        closeAllMenus();
+        return;
+      }
+      if (bookmarkUI.editModal?.dataset.open === 'true') {
+        closeEditBookmarksModal();
+        return;
+      }
+      if (bookmarkUI.formModal?.dataset.open === 'true') {
+        closeBookmarkFormModal();
+      }
+    }
+  });
+
+  if (bookmarkUI.editOverlay) bookmarkUI.editOverlay.addEventListener('click', closeEditBookmarksModal);
+  bookmarkUI.editCloseButtons.forEach((btn) => btn.addEventListener('click', closeEditBookmarksModal));
+  if (bookmarkUI.editDeleteSelected) bookmarkUI.editDeleteSelected.addEventListener('click', deleteSelectedBookmarks);
+  if (bookmarkUI.formOverlay) bookmarkUI.formOverlay.addEventListener('click', closeBookmarkFormModal);
+  if (bookmarkUI.formCancel) bookmarkUI.formCancel.addEventListener('click', closeBookmarkFormModal);
+  if (bookmarkUI.formClose) bookmarkUI.formClose.addEventListener('click', closeBookmarkFormModal);
+  if (bookmarkUI.formSave) bookmarkUI.formSave.addEventListener('click', saveBookmarkForm);
+
+  fetchBookmarks();
 
   state.updateActionButtons = () => {
     const hasSelection = state.selectedIds.size > 0;

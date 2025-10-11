@@ -110,6 +110,167 @@
 .am-actions button {
   padding: 6px 10px;
 }
+.am-menu-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.am-menu-group button[data-menu-toggle] {
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.am-menu-group[data-open] button[data-menu-toggle] {
+  background: var(--accent, rgba(59, 130, 246, 0.15));
+}
+.am-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 200px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #1f2937);
+  background: var(--popover, #0f172a);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.45);
+  padding: 8px 0;
+  z-index: 10;
+  display: none;
+}
+.am-menu-group[data-open] .am-menu-dropdown {
+  display: block;
+}
+.am-menu-dropdown button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+}
+.am-menu-dropdown button:hover {
+  background: rgba(59, 130, 246, 0.12);
+}
+.am-bookmark-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+}
+.am-bookmark-actions button {
+  flex: 1;
+  font-size: 0.75rem;
+  padding: 6px;
+}
+.am-modal {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.am-modal[data-open="true"] {
+  display: flex;
+}
+.am-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.6);
+}
+.am-modal-dialog {
+  position: relative;
+  background: var(--card, #111827);
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 14px;
+  padding: 18px;
+  min-width: 280px;
+  max-width: 420px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.am-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.am-modal-header h2 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+.am-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.2rem;
+  color: var(--muted, #94a3b8);
+  cursor: pointer;
+}
+.am-bookmark-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.am-bookmark-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 10px;
+}
+.am-bookmark-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+.am-bookmark-item .details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.am-bookmark-item .name {
+  font-weight: 600;
+  color: var(--foreground, #f9fafb);
+}
+.am-bookmark-item .path {
+  font-size: 0.8rem;
+  color: var(--muted-foreground, #94a3b8);
+}
+.am-bookmark-item .controls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.am-bookmark-item .controls button {
+  padding: 4px;
+  font-size: 0.75rem;
+}
+.am-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.am-modal-actions button {
+  padding: 7px 14px;
+}
+.am-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.am-form-field input {
+  background: var(--secondary, #1f2937);
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--foreground, #f9fafb);
+}
 .am-hidden {
   display: none !important;
 }
@@ -125,6 +286,16 @@
         <input type="checkbox" id="am-show-hidden" />
         <label for="am-show-hidden">Show hidden</label>
       </span>
+      <div class="am-menu-group" data-menu="bookmarks">
+        <button type="button" data-menu-toggle="bookmarks" title="Bookmarks">🔖</button>
+        <div class="am-menu-dropdown">
+          <div data-role="bookmarks-list"></div>
+          <div class="am-bookmark-actions">
+            <button type="button" data-command="bookmarks:add">✚ Add</button>
+            <button type="button" data-command="bookmarks:edit">✏️ Edit</button>
+          </div>
+        </div>
+      </div>
       <button type="button" data-action="exit-archive" class="am-exit-archive am-hidden">Back to Filesystem</button>
     </div>
   </div>
@@ -137,6 +308,43 @@
     <div class="am-grid" data-role="entry-grid"></div>
     <div class="am-placeholder" data-role="empty-state">Select a directory or archive to begin.</div>
   </section>
+</div>
+
+<div class="am-modal" data-modal="edit-bookmarks" aria-hidden="true">
+  <div class="am-modal-overlay" data-role="edit-bookmarks-overlay"></div>
+  <div class="am-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="am-edit-bookmarks-title">
+    <div class="am-modal-header">
+      <h2 id="am-edit-bookmarks-title">Edit Bookmarks</h2>
+      <button type="button" class="am-modal-close" data-action="edit-bookmarks-close" aria-label="Close">×</button>
+    </div>
+    <div class="am-bookmark-list" data-role="edit-bookmarks-list"></div>
+    <div class="am-modal-actions">
+      <button type="button" class="danger" data-action="edit-bookmarks-delete-selected">Delete Selected</button>
+      <button type="button" data-action="edit-bookmarks-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="am-modal" data-modal="bookmark-form" aria-hidden="true">
+  <div class="am-modal-overlay" data-role="bookmark-form-overlay"></div>
+  <div class="am-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="am-bookmark-form-title">
+    <div class="am-modal-header">
+      <h2 id="am-bookmark-form-title">Bookmark</h2>
+      <button type="button" class="am-modal-close" data-action="bookmark-form-close" aria-label="Close">×</button>
+    </div>
+    <div class="am-form-field">
+      <label for="am-bookmark-name">Name</label>
+      <input type="text" id="am-bookmark-name" data-role="bookmark-form-name" autocomplete="off" />
+    </div>
+    <div class="am-form-field">
+      <label for="am-bookmark-path">Path</label>
+      <input type="text" id="am-bookmark-path" data-role="bookmark-form-path" autocomplete="off" />
+    </div>
+    <div class="am-modal-actions">
+      <button type="button" data-action="bookmark-form-cancel">Cancel</button>
+      <button type="button" class="primary" data-action="bookmark-form-save">Save</button>
+    </div>
+  </div>
 </div>
 
 <template id="am-entry-card">
