@@ -22,9 +22,17 @@ function configureAceModules(ace) {
     'ace/mode/css': 'mode-css.js',
     'ace/mode/html': 'mode-html.js',
     'ace/mode/markdown': 'mode-markdown.js',
+    'ace/mode/sh': 'mode-sh.js',
     'ace/mode/python': 'mode-python.js',
     'ace/mode/xml': 'mode-xml.js',
     'ace/theme/terminal': 'theme-terminal.js',
+    'ace/theme/monokai': 'theme-monokai.js',
+    'ace/theme/tomorrow_night': 'theme-tomorrow_night.js',
+    'ace/theme/solarized_light': 'theme-solarized_light.js',
+    'ace/theme/github': 'theme-github.js',
+    'ace/theme/one_dark': 'theme-one_dark.js',
+    'ace/theme/dracula': 'theme-dracula.js',
+    'ace/theme/tomorrow_night_eighties': 'theme-tomorrow_night_eighties.js',
     'ace/ext/language_tools': 'ext-language_tools.js',
     'ace/ext/searchbox': 'ext-searchbox.js',
   };
@@ -45,6 +53,8 @@ function detectLanguageFromFilename(filename) {
     html: 'html', htm: 'html',
     md: 'markdown', markdown: 'markdown',
     py: 'python', pyw: 'python',
+    sh: 'sh', bash: 'sh', zsh: 'sh',
+    ksh: 'sh', csh: 'sh', tcsh: 'sh',
     xml: 'xml', svg: 'xml',
   };
   return map[ext] || null;
@@ -101,6 +111,9 @@ export default async function initFileEditor(container, api, host) {
   const menuEditDD = requireEl('#menu-edit-dd');
   const menuViewBtn = requireEl('#menu-view-btn');
   const menuViewDD = requireEl('#menu-view-dd');
+  const menuThemeBtn = requireEl('#menu-theme-btn');
+  const menuThemeDD = requireEl('#menu-theme-dd');
+  const themeMenuItems = Array.from(menuThemeDD.querySelectorAll('[data-theme]'));
 
   const miNew = requireEl('#mi-new');
   const miOpen = requireEl('#mi-open');
@@ -168,6 +181,7 @@ export default async function initFileEditor(container, api, host) {
   let wordWrap = false;
   let lastPickerPath = HOME_DIR;
   let searchBoxReadyPromise = null;
+  let currentTheme = 'ace/theme/terminal';
 
   function persistState(patch) {
     try {
@@ -194,6 +208,7 @@ export default async function initFileEditor(container, api, host) {
       showLineShading,
       showSyntaxHighlight,
       wordWrap,
+      theme: currentTheme,
       ...extra,
     });
   }
@@ -202,6 +217,20 @@ export default async function initFileEditor(container, api, host) {
     if (!element) return;
     element.classList.toggle('fe-menu-item-checked', !!checked);
     element.setAttribute('aria-checked', checked ? 'true' : 'false');
+  }
+
+  function applyTheme(themeId, { skipPersist } = {}) {
+    const nextTheme = themeId || 'ace/theme/terminal';
+    currentTheme = nextTheme;
+    editor.setTheme(nextTheme);
+    editorEl.classList.toggle('fe-theme-terminal', nextTheme === 'ace/theme/terminal');
+    themeMenuItems.forEach((item) => {
+      const itemTheme = item.getAttribute('data-theme');
+      setMenuChecked(item, itemTheme === nextTheme);
+    });
+    if (!skipPersist) {
+      persistPreferences();
+    }
   }
 
   function ensureSearchBoxLoaded() {
@@ -425,6 +454,7 @@ export default async function initFileEditor(container, api, host) {
     menuFileDD.classList.remove('show');
     menuEditDD.classList.remove('show');
     menuViewDD.classList.remove('show');
+    menuThemeDD.classList.remove('show');
   }
 
   function focusEditor() {
@@ -478,6 +508,7 @@ export default async function initFileEditor(container, api, host) {
       showLineShading,
       showSyntaxHighlight,
       wordWrap,
+      theme: currentTheme,
     };
   });
 
@@ -487,6 +518,7 @@ export default async function initFileEditor(container, api, host) {
     if (open) {
       menuEditDD.classList.remove('show');
       menuViewDD.classList.remove('show');
+      menuThemeDD.classList.remove('show');
     }
   });
 
@@ -496,6 +528,7 @@ export default async function initFileEditor(container, api, host) {
     if (open) {
       menuFileDD.classList.remove('show');
       menuViewDD.classList.remove('show');
+      menuThemeDD.classList.remove('show');
     }
   });
 
@@ -505,10 +538,36 @@ export default async function initFileEditor(container, api, host) {
     if (open) {
       menuFileDD.classList.remove('show');
       menuEditDD.classList.remove('show');
+      menuThemeDD.classList.remove('show');
+    }
+  });
+
+  menuThemeBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const open = menuThemeDD.classList.toggle('show');
+    if (open) {
+      menuFileDD.classList.remove('show');
+      menuEditDD.classList.remove('show');
+      menuViewDD.classList.remove('show');
     }
   });
 
   document.addEventListener('click', () => closeAllMenus());
+
+  themeMenuItems.forEach((item) => {
+    const handleSelect = () => {
+      const themeId = item.getAttribute('data-theme');
+      closeAllMenus();
+      applyTheme(themeId);
+    };
+    item.addEventListener('click', handleSelect);
+    item.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        handleSelect();
+      }
+    });
+  });
 
   miNew.addEventListener('click', () => {
     closeAllMenus();
@@ -674,6 +733,7 @@ export default async function initFileEditor(container, api, host) {
     showLineShading: false,
     showSyntaxHighlight: true,
     wordWrap: false,
+    theme: 'ace/theme/terminal',
   }) || {};
 
   showLineNumbers = state.showLineNumbers !== false;
@@ -688,6 +748,8 @@ export default async function initFileEditor(container, api, host) {
   setMenuChecked(miToggleShading, showLineShading);
   setMenuChecked(miToggleSyntax, showSyntaxHighlight);
   setMenuChecked(miToggleWrap, wordWrap);
+  const themeFromState = (state.theme && typeof state.theme === 'string') ? state.theme : 'ace/theme/terminal';
+  applyTheme(themeFromState, { skipPersist: true });
 
   const params = new URLSearchParams(window.location.search);
   const fileFromUrl = params.get('file');

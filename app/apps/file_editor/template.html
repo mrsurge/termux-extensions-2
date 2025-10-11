@@ -10,9 +10,10 @@
   .fe-status { font-size: 0.75rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
   .fe-editor-container { flex: 1; display: flex; min-height: 0; }
   .fe-ace-editor { flex: 1; }
-  .fe-ace-editor .ace_content { background-color: #101b33; }
-  .fe-ace-line-shading .ace_scroller .ace_line:nth-child(even) { background: rgba(96, 149, 255, 0.1); }
-  .fe-ace-line-shading .ace_scroller { background-color: #14264d; }
+  .fe-ace-editor.fe-theme-terminal .ace_content { background-color: #101b33; }
+  .fe-ace-line-shading .ace_scroller .ace_line:nth-child(even) { background: rgba(0, 0, 0, 0.08); }
+  .fe-ace-editor.fe-theme-terminal.fe-ace-line-shading .ace_scroller .ace_line:nth-child(even) { background: rgba(96, 149, 255, 0.1); }
+  .fe-ace-editor.fe-theme-terminal.fe-ace-line-shading .ace_scroller { background-color: #14264d; }
   .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 13px; }
   .fe-menu { position: relative; }
   .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; }
@@ -82,6 +83,19 @@
         <div class="fe-dd-item" id="mi-toggle-wrap" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Word Wrap</span></div>
         <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
         <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
+      </div>
+    </div>
+    <div class="fe-menu" id="menu-theme">
+      <button class="fe-menu-btn" id="menu-theme-btn">Themes ▾</button>
+      <div class="fe-dropdown" id="menu-theme-dd">
+        <div class="fe-dd-item" data-theme="ace/theme/terminal" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Terminal</span></div>
+        <div class="fe-dd-item" data-theme="ace/theme/monokai" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Monokai</span></div>
+        <div class="fe-dd-item" data-theme="ace/theme/tomorrow_night" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Tomorrow Night</span></div>
+        <div class="fe-dd-item" data-theme="ace/theme/solarized_light" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Solarized Light</span></div>
+        <div class="fe-dd-item" data-theme="ace/theme/github" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>GitHub</span></div>
+        <div class="fe-dd-item" data-theme="ace/theme/one_dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>One Dark</span></div>
+        <div class="fe-dd-item" data-theme="ace/theme/dracula" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Dracula</span></div>
+        <div class="fe-dd-item" data-theme="ace/theme/tomorrow_night_eighties" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Tomorrow Night 80s</span></div>
       </div>
     </div>
   </div>
