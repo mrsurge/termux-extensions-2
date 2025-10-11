@@ -6,16 +6,12 @@
   .fe-btn { padding: 6px 10px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; }
   .fe-btn:hover { border-color: var(--primary, #3b82f6); }
   .fe-status { margin-left: auto; font-size: 12px; color: var(--muted-foreground, #9ca3af); }
-  .fe-editor { flex: 1; width: 100%; resize: none; border: none; outline: none; padding: 10px; box-sizing: border-box; background: transparent; color: var(--foreground, #e5e7eb); font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 14px; line-height: 20px; }
-  .fe-editor-wrap { position: relative; overflow: hidden; flex: 1; display: flex; min-height: 0; }
-  .fe-bg { position: absolute; inset: 0; pointer-events: none; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0, rgba(255,255,255,0.025) var(--fe-lh, 20px), transparent var(--fe-lh, 20px), transparent calc(var(--fe-lh, 20px) * 2)); background-position: 0 var(--fe-bg-offset, 0px); background-clip: padding-box; }
-  .fe-gutter { width: 4ch; padding: 10px 8px; margin: 0; box-sizing: border-box; overflow: auto; height: 100%; text-align: right; color: var(--muted-foreground, #9ca3af); background: var(--secondary, #0a0d14); border-right: 1px solid var(--border, #333); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 14px; line-height: 1.4; user-select: none; }
-  .fe-gutter.hidden { display: none; }
-  .fe-findbar { display: none; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
-  .fe-findbar.show { display: flex; }
-  .fe-input { padding: 6px 8px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); }
-  .fe-toggle { padding: 6px 8px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; }
-  .fe-toggle.active { border-color: var(--primary, #3b82f6); background: rgba(59,130,246,0.12); }
+  .fe-editor-container { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+  /* Zebra striping for line shading */
+  .cm-editor.line-shading .cm-line:nth-child(even) {
+    background: rgba(255, 255, 255, 0.025);
+  }
+  /* CodeMirror overrides are now in the JS theme */
   .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 14px; }
   .fe-menu { position: relative; }
   .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; }
@@ -79,28 +75,16 @@
       <button class="fe-menu-btn" id="menu-view-btn">View ▾</button>
       <div class="fe-dropdown" id="menu-view-dd">
         <div class="fe-dd-item" id="mi-toggle-lines"><span>Toggle Line Numbers</span></div>
-        <div class="fe-dd-item" id="mi-toggle-striping"><span>Toggle Line Shading</span></div>
+        <div class="fe-dd-item" id="mi-toggle-shading"><span>Toggle Line Shading</span></div>
+        <div class="fe-dd-item" id="mi-toggle-syntax"><span>Toggle Syntax Highlighting</span></div>
+        <div class="fe-dd-item" id="mi-toggle-wrap"><span>Toggle Word Wrap</span></div>
         <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
-        <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+L</span></div>
+        <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
       </div>
     </div>
   </div>
-  <div id="fe-findbar" class="fe-findbar">
-    <input id="fe-find" class="fe-input" placeholder="Find" />
-    <input id="fe-replace" class="fe-input" placeholder="Replace" />
-    <button id="fe-find-case" class="fe-toggle" title="Match case">Aa</button>
-    <button id="fe-find-word" class="fe-toggle" title="Whole word">W</button>
-    <button id="fe-find-prev" class="fe-btn">Prev</button>
-    <button id="fe-find-next" class="fe-btn">Next</button>
-    <button id="fe-replace-one" class="fe-btn">Replace</button>
-    <button id="fe-replace-all" class="fe-btn">Replace All</button>
-    <span style="flex:1"></span>
-    <button id="fe-find-close" class="fe-btn">✕</button>
-  </div>
-  <div class="fe-editor-wrap">
-    <div id="fe-bg" class="fe-bg"></div>
-    <pre id="fe-gutter" class="fe-gutter"></pre>
-    <textarea id="editor" class="fe-editor" spellcheck="false" placeholder="Start typing or open a file..."></textarea>
+  <div class="fe-editor-container" id="editor-container">
+    <!-- CodeMirror will be initialized here -->
   </div>
 
   <div id="fe-confirm" class="fe-modal" aria-hidden="true">
@@ -117,22 +101,6 @@
         <button id="fe-discard" class="fe-btn">Discard</button>
         <button id="fe-save-confirm" class="fe-btn">Save</button>
         <button id="fe-cancel" class="fe-btn">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="fe-goto" class="fe-modal" aria-hidden="true">
-    <div class="fe-modal-card" style="max-width: 420px;">
-      <div class="fe-modal-header">
-        <strong>Go To Line</strong>
-        <span style="flex:1"></span>
-        <button id="fe-goto-close" class="fe-btn" aria-label="Close">✕</button>
-      </div>
-      <div class="fe-confirm-body">
-        <input id="fe-goto-input" type="number" min="1" class="fe-input" placeholder="Line number" style="width: 160px;" />
-      </div>
-      <div class="fe-confirm-actions">
-        <button id="fe-goto-go" class="fe-btn">Go</button>
       </div>
     </div>
   </div>

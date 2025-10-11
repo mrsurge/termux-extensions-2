@@ -1,5 +1,8 @@
+// Import CodeMirror bundle
+import * as CM from '/static/vendor/codemirror/codemirror.bundle.js';
+
 export default function (container, api, host) {
-  console.log('File Editor app init v20241014a');
+  console.log('File Editor app init with CodeMirror v20241211');
 
   const HOME_DIR = '/data/data/com.termux/files/home';
   const HOME_PREFIX = HOME_DIR + '/';
@@ -12,10 +15,12 @@ export default function (container, api, host) {
 
   const pathDisplay = requireEl('#fe-path-display');
   const btnBrowse = requireEl('#fe-browse');
-  const editor = requireEl('#editor');
-  const bg = container.querySelector('#fe-bg');
-  const gutter = requireEl('#fe-gutter');
+  const editorContainer = requireEl('#editor-container');
   const statusEl = requireEl('#fe-status');
+  
+  // CodeMirror instance and state
+  let editor = null;
+  let searchPanel = null;
 
   // Universal picker is provided globally via window.teFilePicker
 
@@ -35,29 +40,15 @@ export default function (container, api, host) {
   const miPaste = requireEl('#mi-paste');
   const miSelectAll = requireEl('#mi-selectall');
 
-  // View menu and find/goto UI
+  // View menu UI
   const menuViewBtn = requireEl('#menu-view-btn');
   const menuViewDD = requireEl('#menu-view-dd');
   const miToggleLines = requireEl('#mi-toggle-lines');
-  const miToggleStriping = requireEl('#mi-toggle-striping');
+  const miToggleShading = requireEl('#mi-toggle-shading');
+  const miToggleSyntax = requireEl('#mi-toggle-syntax');
+  const miToggleWrap = requireEl('#mi-toggle-wrap');
   const miFind = requireEl('#mi-find');
   const miGoto = requireEl('#mi-goto');
-
-  const findbar = requireEl('#fe-findbar');
-  const findInput = requireEl('#fe-find');
-  const replaceInput = requireEl('#fe-replace');
-  const btnFindPrev = requireEl('#fe-find-prev');
-  const btnFindNext = requireEl('#fe-find-next');
-  const btnReplaceOne = requireEl('#fe-replace-one');
-  const btnReplaceAll = requireEl('#fe-replace-all');
-  const btnFindClose = requireEl('#fe-find-close');
-  const btnFindCase = requireEl('#fe-find-case');
-  const btnFindWord = requireEl('#fe-find-word');
-
-  const gotoModal = requireEl('#fe-goto');
-  const gotoClose = requireEl('#fe-goto-close');
-  const gotoInput = requireEl('#fe-goto-input');
-  const gotoGo = requireEl('#fe-goto-go');
 
   const confirmModal = requireEl('#fe-confirm');
   const confirmClose = requireEl('#fe-confirm-close');
@@ -71,11 +62,14 @@ export default function (container, api, host) {
   let lastSavedContent = '';
   let unsaved = false;
   let showLineNumbers = true;
-  let stripeLines = false;
-  let findCase = false;
-  let findWord = false;
-  let lastFind = { query: '', index: -1 };
+  let showLineShading = false;
+  let showSyntaxHighlight = true;
+  let wordWrap = false;
   let lastPickerPath = HOME_DIR;
+  let languageCompartment = null;
+  let lineNumberCompartment = null;
+  let syntaxCompartment = null;
+  let wrapCompartment = null;
 
   // State helpers
   function persistState(patch) {
@@ -143,26 +137,129 @@ export default function (container, api, host) {
     return abs;
   }
 
+  // Initialize CodeMirror editor
+  function initCodeMirror() {
+    // Create compartments for dynamic configuration
+    languageCompartment = new CM.Compartment();
+    lineNumberCompartment = new CM.Compartment();
+    syntaxCompartment = new CM.Compartment();
+    wrapCompartment = new CM.Compartment();
+
+    // Basic extensions that are always active
+    const basicExtensions = [
+      CM.history(),
+      CM.drawSelection(),
+      CM.dropCursor(),
+      CM.indentOnInput(),
+      CM.bracketMatching(),
+      CM.highlightActiveLine(),
+      CM.highlightActiveLineGutter(),
+      CM.highlightSelectionMatches(),
+      CM.keymap.of([
+        ...CM.defaultKeymap,
+        ...CM.historyKeymap,
+        ...CM.searchKeymap,
+        { key: 'Tab', run: CM.indentWithTab },
+        { key: 'Mod-s', run: () => { saveFile(); return true; }, preventDefault: true },
+        { key: 'Mod-Shift-s', run: () => { saveAsDialog(); return true; }, preventDefault: true },
+        { key: 'Mod-o', run: () => { btnBrowse.click(); return true; }, preventDefault: true },
+        { key: 'Mod-n', run: () => { miNew.click(); return true; }, preventDefault: true },
+        { key: 'Mod-f', run: CM.openSearchPanel, preventDefault: true },
+        { key: 'Mod-g', run: CM.gotoLine, preventDefault: true },
+        { key: 'Escape', run: () => {
+          if (CM.searchPanelOpen(editor.state)) {
+            CM.closeSearchPanel(editor);
+            return true;
+          }
+          return false;
+        }}
+      ]),
+      CM.search(),
+      CM.EditorView.updateListener.of((update) => {
+        if (update.docChanged) {
+          const content = editor.state.doc.toString();
+          setUnsaved(content !== lastSavedContent);
+          updateStateDebounced();
+        }
+      }),
+      languageCompartment.of([]),
+      lineNumberCompartment.of(showLineNumbers ? CM.lineNumbers() : []),
+      syntaxCompartment.of(showSyntaxHighlight ? CM.syntaxHighlighting(CM.defaultHighlightStyle) : []),
+      wrapCompartment.of(wordWrap ? CM.EditorView.lineWrapping : []),
+      CM.termuxTheme()
+    ];
+
+    // Create the editor state
+    const state = CM.EditorState.create({
+      doc: '',
+      extensions: basicExtensions
+    });
+
+    // Create the editor view
+    editor = new CM.EditorView({
+      state,
+      parent: editorContainer
+    });
+  }
+
+  // Get language support for a file
+  function getLanguageSupport(filename) {
+    const lang = CM.detectLanguage(filename);
+    if (!lang) return [];
+    
+    const langMap = {
+      'javascript': CM.javascript,
+      'json': CM.json,
+      'css': CM.css,
+      'html': CM.html,
+      'markdown': CM.markdown,
+      'python': CM.python,
+      'xml': CM.xml
+    };
+    
+    const langSupport = langMap[lang];
+    return langSupport ? langSupport() : [];
+  }
+
   function setUnsaved(flag) {
     unsaved = !!flag;
     const titleBase = currentPath ? `Text Editor — ${basename(currentPath)}` : 'Text Editor';
     host.setTitle(unsaved ? `${titleBase} *` : titleBase);
     statusEl.textContent = unsaved ? 'Unsaved changes' : '';
   }
+  
   function setEditorContent(value, markSaved = false) {
-    editor.value = value != null ? value : '';
+    if (!editor) return;
+    const content = value != null ? value : '';
+    
+    // Update the editor content
+    editor.dispatch({
+      changes: {
+        from: 0,
+        to: editor.state.doc.length,
+        insert: content
+      }
+    });
+    
     if (markSaved) {
-      lastSavedContent = editor.value;
+      lastSavedContent = content;
       setUnsaved(false);
     } else {
-      setUnsaved(editor.value !== lastSavedContent);
+      setUnsaved(content !== lastSavedContent);
     }
-    updateGutter();
   }
+  
+  function getEditorContent() {
+    return editor ? editor.state.doc.toString() : '';
+  }
+  
   function updateStateDebounced() {
     if (updateStateDebounced._t) clearTimeout(updateStateDebounced._t);
     updateStateDebounced._t = setTimeout(() => {
-      try { host.saveState({ lastPath: currentPath || null, draft: editor.value }); } catch (_) {}
+      try { 
+        const content = getEditorContent();
+        host.saveState({ lastPath: currentPath || null, draft: content }); 
+      } catch (_) {}
     }, 400);
   }
   function updatePathDisplay() {
@@ -175,25 +272,6 @@ export default function (container, api, host) {
     pathDisplay.textContent = abs;
     pathDisplay.title = abs;
   }
-  function updateLineHeightVar() {
-    const lineHeight = getComputedStyle(editor).lineHeight;
-    // Use an integer pixel value to avoid fractional rounding drift across lines
-    const lh = Math.max(1, Math.round(parseFloat(lineHeight) || 20));
-    editor.style.setProperty('--fe-lh', lh + 'px');
-  }
-  function updateStripeOffset() {
-    const lhStr = getComputedStyle(editor).getPropertyValue('--fe-lh') || '20px';
-    const lh = parseInt(lhStr, 10) || 20;
-    const offset = -(editor.scrollTop % lh);
-    (bg || editor).style.setProperty('--fe-bg-offset', offset + 'px');
-  }
-  function setStriping(show) {
-    stripeLines = !!show;
-    if (bg) bg.style.display = stripeLines ? 'block' : 'none';
-    editor.classList.toggle('striped', stripeLines && !bg);
-    updateLineHeightVar();
-    updateStripeOffset();
-  }
 
   async function openFile(path) {
     if (!path) throw new Error('Path is empty');
@@ -205,6 +283,13 @@ export default function (container, api, host) {
       lastPickerPath = parentDir(currentPath);
       currentPathExists = true;
       setEditorContent(content, true);
+      
+      // Update language support based on file extension
+      const langSupport = getLanguageSupport(currentPath);
+      editor.dispatch({
+        effects: languageCompartment.reconfigure(langSupport)
+      });
+      
       persistState({ lastPath: currentPath, draft: null, showLineNumbers });
       updatePathDisplay();
       statusEl.textContent = '';
@@ -222,8 +307,9 @@ export default function (container, api, host) {
     }
     statusEl.textContent = 'Saving...';
     try {
-      await api.post('write', { path: currentPath, content: editor.value });
-      lastSavedContent = editor.value;
+      const content = getEditorContent();
+      await api.post('write', { path: currentPath, content });
+      lastSavedContent = content;
       setUnsaved(false);
       persistState({ lastPath: currentPath, showLineNumbers });
       host.toast('Saved');
@@ -297,13 +383,21 @@ export default function (container, api, host) {
     }
     statusEl.textContent = 'Saving...';
     try {
-      await api.post('write', { path: target.path, content: editor.value });
+      const content = getEditorContent();
+      await api.post('write', { path: target.path, content });
       currentPath = target.path;
       currentPathExists = true;
       lastPickerPath = parentDir(currentPath);
-      lastSavedContent = editor.value;
+      lastSavedContent = content;
       setUnsaved(false);
       updatePathDisplay();
+      
+      // Update language support for new file
+      const langSupport = getLanguageSupport(currentPath);
+      editor.dispatch({
+        effects: languageCompartment.reconfigure(langSupport)
+      });
+      
       persistState({ lastPath: currentPath, showLineNumbers });
       host.toast('Saved');
     } catch (e) {
@@ -324,33 +418,60 @@ export default function (container, api, host) {
       }
     }
   });
-  // Track edits and unsaved changes
-  editor.addEventListener('input', () => { setUnsaved(editor.value !== lastSavedContent); updateStateDebounced(); updateGutter(); updateLineHeightVar(); updateStripeOffset(); });
-  function syncScroll() {
-    // Keep gutter and background in sync without overlapping header
-    gutter.scrollTop = editor.scrollTop;
-    updateStripeOffset();
-  }
-  editor.addEventListener('scroll', syncScroll);
-  window.addEventListener('resize', () => { updateLineHeightVar(); updateStripeOffset(); updateGutter(); });
-  // Persist and restore scroll position
-  editor.addEventListener('scroll', () => { try { const cur = host.loadState({}) || {}; host.saveState({ ...cur, scrollTop: editor.scrollTop }); } catch (_) {} });
+  // Window resize handler if needed
+  window.addEventListener('resize', () => {
+    if (editor) editor.requestMeasure();
+  });
 
   // Before exit handler
   host.onBeforeExit(() => {
-    if (unsaved) { showConfirm(); host.toast('Unsaved changes — Save or Discard before leaving.'); return { cancel: true }; }
-    return { lastPath: currentPath || null, draft: editor.value, showLineNumbers, stripeLines, findCase, findWord };
+    if (unsaved) { 
+      showConfirm(); 
+      host.toast('Unsaved changes — Save or Discard before leaving.'); 
+      return { cancel: true }; 
+    }
+    return { 
+      lastPath: currentPath || null, 
+      draft: getEditorContent(), 
+      showLineNumbers,
+      showLineShading,
+      showSyntaxHighlight,
+      wordWrap
+    };
   });
 
   // Initialization
   (function init() {
     host.setTitle('Text Editor');
-    const state = host.loadState({ lastPath: null, draft: null, showLineNumbers: true, stripeLines: false, findCase: false, findWord: false, scrollTop: 0 }) || { lastPath: null, draft: null, showLineNumbers: true, stripeLines: false, findCase: false, findWord: false, scrollTop: 0 };
-    showLineNumbers = !!state.showLineNumbers;
+    
+    // Initialize CodeMirror
+    initCodeMirror();
+    
+    const state = host.loadState({ 
+      lastPath: null, 
+      draft: null, 
+      showLineNumbers: true,
+      showLineShading: false,
+      showSyntaxHighlight: true,
+      wordWrap: false
+    }) || { 
+      lastPath: null, 
+      draft: null, 
+      showLineNumbers: true,
+      showLineShading: false,
+      showSyntaxHighlight: true,
+      wordWrap: false
+    };
+    
+    showLineNumbers = state.showLineNumbers !== false;
+    showLineShading = !!state.showLineShading;
+    showSyntaxHighlight = state.showSyntaxHighlight !== false;
+    wordWrap = !!state.wordWrap;
+    
     setShowLineNumbers(showLineNumbers);
-    setStriping(!!state.stripeLines);
-    findCase = !!state.findCase; btnFindCase.classList.toggle('active', findCase);
-    findWord = !!state.findWord; btnFindWord.classList.toggle('active', findWord);
+    setLineShading(showLineShading);
+    setSyntaxHighlighting(showSyntaxHighlight);
+    setWordWrap(wordWrap);
     
     // Check for file parameter in URL (from file-explorer or direct link)
     const urlParams = new URLSearchParams(window.location.search);
@@ -376,12 +497,21 @@ export default function (container, api, host) {
         currentPath = toAbsolute(state.lastPath, HOME_DIR);
         currentPathExists = false; // Draft may not match saved file
         updatePathDisplay();
+        
+        // Set language support based on last path
+        const langSupport = getLanguageSupport(currentPath);
+        editor.dispatch({
+          effects: languageCompartment.reconfigure(langSupport)
+        });
       }
     } else if (state.lastPath) {
       // Priority 3: Reopen last file
       const abs = toAbsolute(state.lastPath, HOME_DIR);
       lastPickerPath = parentDir(abs);
-      openFile(abs).catch(() => { currentPath = abs; updatePathDisplay(); });
+      openFile(abs).catch(() => { 
+        currentPath = abs; 
+        updatePathDisplay(); 
+      });
     } else {
       // Priority 4: Start with empty editor
       setEditorContent('', false);
@@ -389,19 +519,36 @@ export default function (container, api, host) {
       lastPickerPath = HOME_DIR;
       updatePathDisplay();
     }
-    if (state.scrollTop) { editor.scrollTop = state.scrollTop; updateStripeOffset(); }
-    updateGutter();
   })();
 
   // Menu behavior
-  function closeAllMenus() { menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); }
-  menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const s = menuFileDD.classList.toggle('show'); if (s) menuEditDD.classList.remove('show'); });
-  menuEditBtn.addEventListener('click', (e) => { e.stopPropagation(); const s = menuEditDD.classList.toggle('show'); if (s) menuFileDD.classList.remove('show'); });
+  function closeAllMenus() { 
+    menuFileDD.classList.remove('show'); 
+    menuEditDD.classList.remove('show'); 
+    menuViewDD.classList.remove('show');
+  }
+  menuFileBtn.addEventListener('click', (e) => { 
+    e.stopPropagation(); 
+    const s = menuFileDD.classList.toggle('show'); 
+    if (s) {
+      menuEditDD.classList.remove('show');
+      menuViewDD.classList.remove('show');
+    }
+  });
+  menuEditBtn.addEventListener('click', (e) => { 
+    e.stopPropagation(); 
+    const s = menuEditDD.classList.toggle('show'); 
+    if (s) {
+      menuFileDD.classList.remove('show');
+      menuViewDD.classList.remove('show');
+    }
+  });
   document.addEventListener('click', () => closeAllMenus());
 
   // Menu actions
-  function focusEditor() { editor.focus(); }
-  function exec(cmd) { try { document.execCommand(cmd); } catch (_) {} }
+  function focusEditor() { 
+    if (editor) editor.focus(); 
+  }
   miNew.addEventListener('click', () => {
     closeAllMenus();
     if (unsaved) { showConfirm(); return; }
@@ -424,7 +571,10 @@ export default function (container, api, host) {
     lastPickerPath = HOME_DIR;
     setEditorContent('', true);
     updatePathDisplay();
-    try { const cur = host.loadState({}) || {}; host.saveState({ ...cur, lastPath: null, draft: '' }); } catch (_) {}
+    try { 
+      const cur = host.loadState({}) || {}; 
+      host.saveState({ ...cur, lastPath: null, draft: '' }); 
+    } catch (_) {}
   });
   miQuit.addEventListener('click', () => {
     closeAllMenus();
@@ -434,185 +584,139 @@ export default function (container, api, host) {
     lastPickerPath = HOME_DIR;
     setEditorContent('', true);
     updatePathDisplay();
-    editor.scrollTop = 0;
-    updateStripeOffset();
+    if (editor) {
+      editor.scrollDOM.scrollTop = 0;
+    }
   });
-  miUndo.addEventListener('click', () => { closeAllMenus(); focusEditor(); exec('undo'); });
-  miRedo.addEventListener('click', () => { closeAllMenus(); focusEditor(); exec('redo'); });
-  miCut.addEventListener('click', () => { closeAllMenus(); focusEditor(); exec('cut'); });
-  miCopy.addEventListener('click', () => { closeAllMenus(); focusEditor(); exec('copy'); });
-  miPaste.addEventListener('click', async () => { closeAllMenus(); focusEditor(); try { if (navigator.clipboard && navigator.clipboard.readText) { const text = await navigator.clipboard.readText(); const start = editor.selectionStart, end = editor.selectionEnd; const val = editor.value; editor.value = val.slice(0, start) + text + val.slice(end); const pos = start + text.length; editor.selectionStart = editor.selectionEnd = pos; editor.dispatchEvent(new Event('input', { bubbles: true })); } else { exec('paste'); } } catch (e) { host.toast('Paste failed: ' + e.message); } });
-  miSelectAll.addEventListener('click', () => { closeAllMenus(); focusEditor(); editor.select(); });
+  miUndo.addEventListener('click', () => { 
+    closeAllMenus(); 
+    focusEditor(); 
+    CM.undo(editor);
+  });
+  miRedo.addEventListener('click', () => { 
+    closeAllMenus(); 
+    focusEditor(); 
+    CM.redo(editor);
+  });
+  miCut.addEventListener('click', () => { 
+    closeAllMenus(); 
+    focusEditor(); 
+    document.execCommand('cut');
+  });
+  miCopy.addEventListener('click', () => { 
+    closeAllMenus(); 
+    focusEditor(); 
+    document.execCommand('copy');
+  });
+  miPaste.addEventListener('click', async () => { 
+    closeAllMenus(); 
+    focusEditor(); 
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        editor.dispatch(editor.state.replaceSelection(text));
+      } else {
+        document.execCommand('paste');
+      }
+    } catch (e) { 
+      host.toast('Paste failed: ' + e.message); 
+    }
+  });
+  miSelectAll.addEventListener('click', () => { 
+    closeAllMenus(); 
+    focusEditor(); 
+    CM.selectAll(editor);
+  });
 
   // View menu behavior
-  menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const s = menuViewDD.classList.toggle('show'); if (s) { menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); } });
+  menuViewBtn.addEventListener('click', (e) => { 
+    e.stopPropagation(); 
+    const s = menuViewDD.classList.toggle('show'); 
+    if (s) { 
+      menuFileDD.classList.remove('show'); 
+      menuEditDD.classList.remove('show'); 
+    } 
+  });
+  
   const closeMenusDoc = () => { menuViewDD.classList.remove('show'); };
   document.addEventListener('click', closeMenusDoc);
+  
   function setShowLineNumbers(show) {
     showLineNumbers = !!show;
-    gutter.classList.toggle('hidden', !showLineNumbers);
-    updateGutter();
-  }
-  miToggleLines.addEventListener('click', () => { setShowLineNumbers(!showLineNumbers); persistState({ showLineNumbers }); });
-  miToggleStriping.addEventListener('click', () => { setStriping(!stripeLines); persistState({ stripeLines }); });
-  function showFindBar() { findbar.classList.add('show'); setTimeout(() => findInput.focus(), 0); }
-  function hideFindBar() { findbar.classList.remove('show'); }
-  miFind.addEventListener('click', () => { closeAllMenus(); showFindBar(); });
-  btnFindClose.addEventListener('click', hideFindBar);
-  miGoto.addEventListener('click', () => { closeAllMenus(); showGoto(); });
-
-  // Find/Replace logic
-  function getSelection() { return { start: editor.selectionStart, end: editor.selectionEnd }; }
-  function setSelection(start, end) { editor.selectionStart = start; editor.selectionEnd = end; editor.focus(); }
-  function isWordChar(ch) { return /[A-Za-z0-9_]/.test(ch || ''); }
-  function matchesWholeWord(text, idx, qLen) {
-    const left = text[idx - 1];
-    const right = text[idx + qLen];
-    return !isWordChar(left) && !isWordChar(right);
-  }
-  function findIndex(text, query, from, dir) {
-    if (!findCase) { text = text.toLowerCase(); query = query.toLowerCase(); }
-    const step = dir === 'prev' ? -1 : 1;
-    let idx = dir === 'prev' ? Math.min(from, text.length - 1) : Math.max(from, 0);
-    if (dir === 'prev') {
-      const before = text.slice(0, idx);
-      idx = before.lastIndexOf(query);
-      if (idx === -1) idx = text.lastIndexOf(query);
-    } else {
-      idx = text.indexOf(query, idx);
-      if (idx === -1) idx = text.indexOf(query, 0);
-    }
-    if (idx === -1) return -1;
-    if (findWord && !matchesWholeWord(text, idx, query.length)) {
-      // Continue searching past this index
-      const nextFrom = dir === 'prev' ? Math.max(idx - 1, 0) : idx + 1;
-      return findIndex(text, query, nextFrom, dir);
-    }
-    return idx;
-  }
-  function findNext() {
-    const q = findInput.value || '';
-    if (!q) return;
-    const text = editor.value;
-    const sel = getSelection();
-    const idx = findIndex(text, q, sel.end, 'next');
-    if (idx !== -1) { setSelection(idx, idx + q.length); lastFind = { query: q, index: idx }; ensureSelectionVisible(); }
-  }
-  function findPrev() {
-    const q = findInput.value || '';
-    if (!q) return;
-    const text = editor.value;
-    const sel = getSelection();
-    const idx = findIndex(text, q, Math.max(sel.start - 1, 0), 'prev');
-    if (idx !== -1) { setSelection(idx, idx + q.length); lastFind = { query: q, index: idx }; ensureSelectionVisible(); }
-  }
-  function ensureSelectionVisible() {
-    // Scroll the textarea to selectionStart by estimating line index
-    try {
-      const selStart = editor.selectionStart;
-      const before = editor.value.slice(0, selStart);
-      const lineIndex = (before.match(/\n/g) || []).length;
-      const lineHeight = getComputedStyle(editor).lineHeight;
-      const lh = parseFloat(lineHeight) || 18;
-      const target = Math.max(0, lineIndex * lh - editor.clientHeight / 2);
-      editor.scrollTop = target;
-      gutter.scrollTop = editor.scrollTop;
-    } catch (_) {}
-  }
-  function selectedMatches(q) {
-    const sel = getSelection();
-    let text = editor.value;
-    let frag = text.slice(sel.start, sel.end);
-    if (!findCase) { frag = frag.toLowerCase(); q = q.toLowerCase(); }
-    if (frag !== q) return false;
-    if (!findWord) return true;
-    const full = findCase ? editor.value : editor.value.toLowerCase();
-    return matchesWholeWord(full, sel.start, q.length);
-  }
-  function replaceOne() {
-    const q = findInput.value || '';
-    if (!q) return;
-    const rep = replaceInput.value || '';
-    if (selectedMatches(q)) {
-      const sel = getSelection();
-      editor.setRangeText(rep, sel.start, sel.end, 'end');
-      editor.dispatchEvent(new Event('input', { bubbles: true }));
-      setSelection(sel.start, sel.start + rep.length);
-      ensureSelectionVisible();
-    } else {
-      findNext();
+    if (editor) {
+      editor.dispatch({
+        effects: lineNumberCompartment.reconfigure(showLineNumbers ? CM.lineNumbers() : [])
+      });
     }
   }
-  function replaceAll() {
-    const qRaw = findInput.value || '';
-    if (!qRaw) return;
-    const rep = replaceInput.value || '';
-    let text = editor.value;
-    let q = qRaw;
-    let hay = text;
-    if (!findCase) { q = qRaw.toLowerCase(); hay = text.toLowerCase(); }
-    let idx = findIndex(hay, q, 0, 'next');
-    if (idx === -1) return;
-    // Build new string by iterating matches
-    let out = '';
-    let last = 0;
-    while (idx !== -1) {
-      out += text.slice(last, idx) + rep;
-      last = idx + q.length;
-      idx = findIndex(hay, q, last, 'next');
+  
+  function setLineShading(show) {
+    showLineShading = !!show;
+    if (editor) {
+      const editorDom = editor.dom;
+      if (showLineShading) {
+        editorDom.classList.add('line-shading');
+      } else {
+        editorDom.classList.remove('line-shading');
+      }
     }
-    out += text.slice(last);
-    editor.value = out;
-    editor.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  btnFindNext.addEventListener('click', findNext);
-  btnFindPrev.addEventListener('click', findPrev);
-  btnReplaceOne.addEventListener('click', replaceOne);
-  btnReplaceAll.addEventListener('click', replaceAll);
-  findInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) findPrev(); else findNext(); } });
-  replaceInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); replaceOne(); } });
-  btnFindCase.addEventListener('click', () => { findCase = !findCase; btnFindCase.classList.toggle('active', findCase); persistState({ findCase }); });
-  btnFindWord.addEventListener('click', () => { findWord = !findWord; btnFindWord.classList.toggle('active', findWord); persistState({ findWord }); });
-
-  // Goto modal logic
-  function showGoto() { gotoModal.classList.add('show'); gotoModal.setAttribute('aria-hidden', 'false'); setTimeout(() => gotoInput.focus(), 0); }
-  function hideGoto() { gotoModal.classList.remove('show'); gotoModal.setAttribute('aria-hidden', 'true'); }
-  function getOffsetForLine(n) {
-    n = Math.max(1, n);
-    const lines = editor.value.split('\n');
-    let offset = 0;
-    for (let i = 0; i < Math.min(n - 1, lines.length); i++) offset += lines[i].length + 1;
-    return offset;
+  
+  function setSyntaxHighlighting(show) {
+    showSyntaxHighlight = !!show;
+    if (editor) {
+      editor.dispatch({
+        effects: syntaxCompartment.reconfigure(
+          showSyntaxHighlight ? CM.syntaxHighlighting(CM.defaultHighlightStyle) : []
+        )
+      });
+    }
   }
-  function goToLine() {
-    const n = parseInt(gotoInput.value, 10);
-    if (!n || n < 1) return;
-    const offset = getOffsetForLine(n);
-    setSelection(offset, offset);
-    ensureSelectionVisible();
-    hideGoto();
+  
+  function setWordWrap(wrap) {
+    wordWrap = !!wrap;
+    if (editor) {
+      editor.dispatch({
+        effects: wrapCompartment.reconfigure(
+          wordWrap ? CM.EditorView.lineWrapping : []
+        )
+      });
+    }
   }
-  gotoClose.addEventListener('click', hideGoto);
-  gotoGo.addEventListener('click', goToLine);
-  gotoInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); goToLine(); } });
-
-  // Gutter updates
-  function updateGutter() {
-    if (!showLineNumbers) return;
-    // Total lines in buffer
-    const lines = editor.value.split('\n').length || 1;
-    // Ensure the gutter fills at least the visible viewport height
-    const lhStr = getComputedStyle(editor).getPropertyValue('--fe-lh') || getComputedStyle(editor).lineHeight || '18px';
-    const lh = Math.max(1, Math.round(parseFloat(lhStr) || 18));
-    const visible = Math.ceil(editor.clientHeight / lh);
-    const displayLines = Math.max(lines, visible);
-    const digits = String(displayLines).length;
-    gutter.style.width = Math.max(3, digits + 1) + 'ch';
-    let content = '';
-    for (let i = 1; i <= displayLines; i++) content += i + (i === displayLines ? '' : '\n');
-    if (gutter.textContent !== content) gutter.textContent = content;
-    gutter.style.transform = `translateY(${-editor.scrollTop}px)`;
-  }
+  
+  miToggleLines.addEventListener('click', () => { 
+    closeAllMenus();
+    setShowLineNumbers(!showLineNumbers); 
+    persistState({ showLineNumbers, showLineShading, showSyntaxHighlight, wordWrap }); 
+  });
+  
+  miToggleShading.addEventListener('click', () => {
+    closeAllMenus();
+    setLineShading(!showLineShading);
+    persistState({ showLineNumbers, showLineShading, showSyntaxHighlight, wordWrap });
+  });
+  
+  miToggleSyntax.addEventListener('click', () => {
+    closeAllMenus();
+    setSyntaxHighlighting(!showSyntaxHighlight);
+    persistState({ showLineNumbers, showLineShading, showSyntaxHighlight, wordWrap });
+  });
+  
+  miToggleWrap.addEventListener('click', () => {
+    closeAllMenus();
+    setWordWrap(!wordWrap);
+    persistState({ showLineNumbers, showLineShading, showSyntaxHighlight, wordWrap });
+  });
+  
+  miFind.addEventListener('click', () => { 
+    closeAllMenus(); 
+    if (editor) CM.openSearchPanel(editor);
+  });
+  
+  miGoto.addEventListener('click', () => { 
+    closeAllMenus(); 
+    if (editor) CM.gotoLine(editor);
+  });
 
   // Confirm modal actions
   confirmClose.addEventListener('click', hideConfirm);
@@ -620,25 +724,10 @@ export default function (container, api, host) {
   btnDiscard.addEventListener('click', () => { hideConfirm(); setUnsaved(false); });
   btnSaveConfirm.addEventListener('click', async () => { await saveFile(); hideConfirm(); });
 
-  // Keyboard shortcuts
-  document.addEventListener('keydown', (e) => {
-    const mod = e.metaKey || e.ctrlKey;
-    if (!mod) return;
-    const k = e.key.toLowerCase();
-    if (k === 's') { e.preventDefault(); if (e.shiftKey) { saveAsDialog(); } else { saveFile(); } }
-    else if (k === 'o') { e.preventDefault(); btnBrowse.click(); }
-    else if (k === 'n') { e.preventDefault(); miNew.click(); }
-    else if (k === 'y') { e.preventDefault(); try { document.execCommand('redo'); } catch (_) {} }
-    else if (k === 'f') { e.preventDefault(); showFindBar(); }
-    else if (k === 'l') { e.preventDefault(); showGoto(); }
-  });
-
   // Global escape closes modals
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       hideConfirm();
-      hideGoto();
-      hideFindBar();
       closeAllMenus();
     }
   });
