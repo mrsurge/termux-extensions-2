@@ -13,10 +13,13 @@ export default function (container, api, host) {
     return el;
   };
 
-  const pathDisplay = requireEl('#fe-path-display');
+  const fileNameEl = requireEl('#fe-file-name');
+  const filePathEl = requireEl('#fe-file-path');
   const btnBrowse = requireEl('#fe-browse');
   const editorContainer = requireEl('#editor-container');
   const statusEl = requireEl('#fe-status');
+  const horizontalScrollbar = requireEl('#fe-scrollbar');
+  const horizontalScrollbarInner = requireEl('#fe-scrollbar-inner');
   
   // CodeMirror instance and state
   let editor = null;
@@ -70,6 +73,7 @@ export default function (container, api, host) {
   let lineNumberCompartment = null;
   let syntaxCompartment = null;
   let wrapCompartment = null;
+  let isSyncingHorizontal = false;
 
   // State helpers
   function persistState(patch) {
@@ -77,6 +81,16 @@ export default function (container, api, host) {
       const cur = host.loadState({}) || {};
       host.saveState({ ...cur, ...patch });
     } catch (_) {}
+  }
+
+  function persistPreferences(extra = {}) {
+    persistState({
+      showLineNumbers,
+      showLineShading,
+      showSyntaxHighlight,
+      wordWrap,
+      ...extra,
+    });
   }
 
   // Utils
@@ -181,6 +195,9 @@ export default function (container, api, host) {
           setUnsaved(content !== lastSavedContent);
           updateStateDebounced();
         }
+        if (update.docChanged || update.viewportChanged || update.geometryChanged) {
+          requestAnimationFrame(updateHorizontalScrollbar);
+        }
       }),
       languageCompartment.of([]),
       lineNumberCompartment.of(showLineNumbers ? CM.lineNumbers() : []),
@@ -200,32 +217,52 @@ export default function (container, api, host) {
       state,
       parent: editorContainer
     });
+
+    if (editor && editor.scrollDOM) {
+      const scroller = editor.scrollDOM;
+      scroller.style.touchAction = 'pan-x pan-y';
+      scroller.style.overscrollBehavior = 'contain';
+      scroller.style.overflow = 'auto';
+      scroller.style.webkitOverflowScrolling = 'touch';
+      scroller.addEventListener('scroll', () => {
+        if (isSyncingHorizontal || wordWrap) return;
+        syncScrollbarFromEditor();
+      }, { passive: true });
+    }
+
+    if (horizontalScrollbar) {
+      horizontalScrollbar.addEventListener('scroll', () => {
+        if (isSyncingHorizontal || wordWrap) return;
+        syncEditorFromScrollbar();
+      }, { passive: true });
+    }
+
+    updateHorizontalScrollbar();
   }
 
   // Get language support for a file
   function getLanguageSupport(filename) {
     const lang = CM.detectLanguage(filename);
     if (!lang) return [];
-    
+
     const langMap = {
-      'javascript': CM.javascript,
-      'json': CM.json,
-      'css': CM.css,
-      'html': CM.html,
-      'markdown': CM.markdown,
-      'python': CM.python,
-      'xml': CM.xml
+      javascript: CM.javascript,
+      json: CM.json,
+      css: CM.css,
+      html: CM.html,
+      markdown: CM.markdown,
+      python: CM.python,
+      xml: CM.xml,
     };
-    
+
     const langSupport = langMap[lang];
     return langSupport ? langSupport() : [];
   }
 
   function setUnsaved(flag) {
     unsaved = !!flag;
-    const titleBase = currentPath ? `Text Editor — ${basename(currentPath)}` : 'Text Editor';
-    host.setTitle(unsaved ? `${titleBase} *` : titleBase);
-    statusEl.textContent = unsaved ? 'Unsaved changes' : '';
+    host.setTitle('Text Editor');
+    fileNameEl.classList.toggle('fe-unsaved', unsaved);
   }
   
   function setEditorContent(value, markSaved = false) {
@@ -240,6 +277,7 @@ export default function (container, api, host) {
         insert: content
       }
     });
+    updateHorizontalScrollbar();
     
     if (markSaved) {
       lastSavedContent = content;
@@ -258,19 +296,24 @@ export default function (container, api, host) {
     updateStateDebounced._t = setTimeout(() => {
       try { 
         const content = getEditorContent();
-        host.saveState({ lastPath: currentPath || null, draft: content }); 
+        persistPreferences({ lastPath: currentPath || null, draft: content }); 
       } catch (_) {}
     }, 400);
   }
   function updatePathDisplay() {
     if (!currentPath) {
-      pathDisplay.textContent = 'Untitled';
-      pathDisplay.title = 'Untitled';
+      fileNameEl.textContent = 'Untitled';
+      fileNameEl.title = 'Untitled';
+      filePathEl.textContent = 'No file open';
+      filePathEl.title = '';
       return;
     }
     const abs = toAbsolute(currentPath, HOME_DIR);
-    pathDisplay.textContent = abs;
-    pathDisplay.title = abs;
+    const displayPath = formatDisplayPath(abs);
+    fileNameEl.textContent = basename(abs);
+    fileNameEl.title = basename(abs);
+    filePathEl.textContent = displayPath;
+    filePathEl.title = abs;
   }
 
   async function openFile(path) {
@@ -290,8 +333,9 @@ export default function (container, api, host) {
         effects: languageCompartment.reconfigure(langSupport)
       });
       
-      persistState({ lastPath: currentPath, draft: null, showLineNumbers });
+      persistPreferences({ lastPath: currentPath, draft: null });
       updatePathDisplay();
+      updateHorizontalScrollbar();
       statusEl.textContent = '';
     } catch (e) {
       statusEl.textContent = '';
@@ -311,7 +355,7 @@ export default function (container, api, host) {
       await api.post('write', { path: currentPath, content });
       lastSavedContent = content;
       setUnsaved(false);
-      persistState({ lastPath: currentPath, showLineNumbers });
+      persistPreferences({ lastPath: currentPath });
       host.toast('Saved');
       statusEl.textContent = '';
     } catch (e) {
@@ -391,6 +435,7 @@ export default function (container, api, host) {
       lastSavedContent = content;
       setUnsaved(false);
       updatePathDisplay();
+      updateHorizontalScrollbar();
       
       // Update language support for new file
       const langSupport = getLanguageSupport(currentPath);
@@ -398,12 +443,13 @@ export default function (container, api, host) {
         effects: languageCompartment.reconfigure(langSupport)
       });
       
-      persistState({ lastPath: currentPath, showLineNumbers });
+      persistPreferences({ lastPath: currentPath });
       host.toast('Saved');
     } catch (e) {
       host.toast('Save failed: ' + e.message);
     } finally {
       statusEl.textContent = '';
+      updateHorizontalScrollbar();
     }
   }
 
@@ -419,9 +465,12 @@ export default function (container, api, host) {
     }
   });
   // Window resize handler if needed
-  window.addEventListener('resize', () => {
-    if (editor) editor.requestMeasure();
-  });
+window.addEventListener('resize', () => {
+  if (editor) {
+    editor.requestMeasure();
+    updateHorizontalScrollbar();
+  }
+});
 
   // Before exit handler
   host.onBeforeExit(() => {
@@ -557,7 +606,8 @@ export default function (container, api, host) {
     lastPickerPath = HOME_DIR;
     setEditorContent('', true);
     updatePathDisplay();
-    persistState({ lastPath: null, draft: '', showLineNumbers });
+    updateHorizontalScrollbar();
+    persistPreferences({ lastPath: null, draft: '' });
   });
   miOpen.addEventListener('click', () => { closeAllMenus(); btnBrowse.click(); });
   miSave.addEventListener('click', () => { closeAllMenus(); saveFile(); });
@@ -571,10 +621,8 @@ export default function (container, api, host) {
     lastPickerPath = HOME_DIR;
     setEditorContent('', true);
     updatePathDisplay();
-    try { 
-      const cur = host.loadState({}) || {}; 
-      host.saveState({ ...cur, lastPath: null, draft: '' }); 
-    } catch (_) {}
+    updateHorizontalScrollbar();
+    persistPreferences({ lastPath: null, draft: '' });
   });
   miQuit.addEventListener('click', () => {
     closeAllMenus();
@@ -584,6 +632,7 @@ export default function (container, api, host) {
     lastPickerPath = HOME_DIR;
     setEditorContent('', true);
     updatePathDisplay();
+    updateHorizontalScrollbar();
     if (editor) {
       editor.scrollDOM.scrollTop = 0;
     }
@@ -648,8 +697,9 @@ export default function (container, api, host) {
         effects: lineNumberCompartment.reconfigure(showLineNumbers ? CM.lineNumbers() : [])
       });
     }
+    updateViewMenuState();
   }
-  
+
   function setLineShading(show) {
     showLineShading = !!show;
     if (editor) {
@@ -660,8 +710,9 @@ export default function (container, api, host) {
         editorDom.classList.remove('line-shading');
       }
     }
+    updateViewMenuState();
   }
-  
+
   function setSyntaxHighlighting(show) {
     showSyntaxHighlight = !!show;
     if (editor) {
@@ -671,8 +722,9 @@ export default function (container, api, host) {
         )
       });
     }
+    updateViewMenuState();
   }
-  
+
   function setWordWrap(wrap) {
     wordWrap = !!wrap;
     if (editor) {
@@ -681,31 +733,101 @@ export default function (container, api, host) {
           wordWrap ? CM.EditorView.lineWrapping : []
         )
       });
+      if (wordWrap) {
+        editor.scrollDOM.scrollLeft = 0;
+      }
+    }
+    updateViewMenuState();
+    updateHorizontalScrollbar();
+  }
+
+  function setMenuItemChecked(item, active) {
+    if (!item) return;
+    item.classList.toggle('fe-menu-item-checked', !!active);
+    if (item.hasAttribute('aria-checked')) {
+      item.setAttribute('aria-checked', active ? 'true' : 'false');
     }
   }
+
+  function updateViewMenuState() {
+    setMenuItemChecked(miToggleLines, showLineNumbers);
+    setMenuItemChecked(miToggleShading, showLineShading);
+    setMenuItemChecked(miToggleSyntax, showSyntaxHighlight);
+    setMenuItemChecked(miToggleWrap, wordWrap);
+  }
+
+  function updateHorizontalScrollbar() {
+    if (!horizontalScrollbar || !horizontalScrollbarInner || !editor) return;
+    const scroller = editor.scrollDOM;
+    const needsScrollbar = !wordWrap && scroller.scrollWidth > scroller.clientWidth + 1;
+    horizontalScrollbar.hidden = !needsScrollbar;
+    horizontalScrollbar.style.display = needsScrollbar ? 'block' : 'none';
+    if (!needsScrollbar) {
+      horizontalScrollbarInner.style.width = '0px';
+      horizontalScrollbar.scrollLeft = 0;
+      return;
+    }
+    horizontalScrollbarInner.style.width = `${scroller.scrollWidth}px`;
+    if (!isSyncingHorizontal) {
+      isSyncingHorizontal = true;
+      horizontalScrollbar.scrollLeft = scroller.scrollLeft;
+      isSyncingHorizontal = false;
+    }
+  }
+
+  function syncScrollbarFromEditor() {
+    if (!horizontalScrollbar || horizontalScrollbar.hidden || !editor) return;
+    const scroller = editor.scrollDOM;
+    const target = scroller.scrollLeft;
+    if (Math.abs(horizontalScrollbar.scrollLeft - target) <= 1) return;
+    isSyncingHorizontal = true;
+    horizontalScrollbar.scrollLeft = target;
+    isSyncingHorizontal = false;
+  }
+
+  function syncEditorFromScrollbar() {
+    if (!horizontalScrollbar || horizontalScrollbar.hidden || !editor) return;
+    const scroller = editor.scrollDOM;
+    const target = horizontalScrollbar.scrollLeft;
+    if (Math.abs(scroller.scrollLeft - target) <= 1) return;
+    isSyncingHorizontal = true;
+    scroller.scrollLeft = target;
+    isSyncingHorizontal = false;
+  }
+
+  function bindMenuToggle(element, action) {
+    if (!element) return;
+    const handler = () => {
+      closeAllMenus();
+      action();
+    };
+    element.addEventListener('click', handler);
+    element.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        handler();
+      }
+    });
+  }
   
-  miToggleLines.addEventListener('click', () => { 
-    closeAllMenus();
-    setShowLineNumbers(!showLineNumbers); 
-    persistState({ showLineNumbers, showLineShading, showSyntaxHighlight, wordWrap }); 
+  bindMenuToggle(miToggleLines, () => {
+    setShowLineNumbers(!showLineNumbers);
+    persistPreferences();
   });
   
-  miToggleShading.addEventListener('click', () => {
-    closeAllMenus();
+  bindMenuToggle(miToggleShading, () => {
     setLineShading(!showLineShading);
-    persistState({ showLineNumbers, showLineShading, showSyntaxHighlight, wordWrap });
+    persistPreferences();
   });
   
-  miToggleSyntax.addEventListener('click', () => {
-    closeAllMenus();
+  bindMenuToggle(miToggleSyntax, () => {
     setSyntaxHighlighting(!showSyntaxHighlight);
-    persistState({ showLineNumbers, showLineShading, showSyntaxHighlight, wordWrap });
+    persistPreferences();
   });
   
-  miToggleWrap.addEventListener('click', () => {
-    closeAllMenus();
+  bindMenuToggle(miToggleWrap, () => {
     setWordWrap(!wordWrap);
-    persistState({ showLineNumbers, showLineShading, showSyntaxHighlight, wordWrap });
+    persistPreferences();
   });
   
   miFind.addEventListener('click', () => { 

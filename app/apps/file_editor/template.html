@@ -1,24 +1,42 @@
 <style>
   .fe-root { display: flex; flex-direction: column; height: 100%; }
-  .fe-toolbar { display: flex; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
-  .fe-path { flex: 1; min-width: 120px; padding: 6px 8px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); }
-  .fe-path-display { flex: 1; min-width: 120px; padding: 6px 8px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .fe-btn { padding: 6px 10px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; }
+  .fe-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
+  .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .fe-file-name { font-size: 1rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fe-file-name.fe-unsaved::after { content: ' *'; color: var(--primary, #3b82f6); }
+  .fe-file-path { font-size: 0.75rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fe-btn { padding: 6px 10px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; flex-shrink: 0; align-self: center; }
   .fe-btn:hover { border-color: var(--primary, #3b82f6); }
-  .fe-status { margin-left: auto; font-size: 12px; color: var(--muted-foreground, #9ca3af); }
+  .fe-status { font-size: 0.75rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
   .fe-editor-container { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+  .fe-scrollbar { height: 12px; background: var(--card, #0b0f1a); border-top: 1px solid var(--border, #333); display: none; overflow-x: auto; overflow-y: hidden; }
+  .fe-scrollbar::-webkit-scrollbar { height: 8px; }
+  .fe-scrollbar::-webkit-scrollbar-track { background: rgba(148, 163, 184, 0.1); }
+  .fe-scrollbar::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.4); border-radius: 999px; }
+  .fe-scrollbar-inner { height: 1px; }
+  .cm-editor .cm-scroller {
+    touch-action: pan-x pan-y;
+    -webkit-overflow-scrolling: touch;
+  }
   /* Zebra striping for line shading */
   .cm-editor.line-shading .cm-line:nth-child(even) {
     background: rgba(255, 255, 255, 0.025);
   }
+  .cm-editor.line-shading .cm-gutters {
+    background: var(--card, #0b0f1a);
+  }
   /* CodeMirror overrides are now in the JS theme */
-  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 14px; }
+  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 13px; }
   .fe-menu { position: relative; }
   .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; }
   .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
   .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 15; }
   .fe-dropdown.show { display: block; }
-  .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; cursor: pointer; }
+  .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; cursor: pointer; font-size: 0.9rem; align-items: center; }
+  .fe-dd-item[data-checkable="true"] { position: relative; padding-left: 32px; }
+  .fe-dd-item[data-checkable="true"]::before { content: ''; position: absolute; left: 12px; width: 1em; text-align: center; color: var(--primary, #3b82f6); }
+  .fe-dd-item[data-checkable="true"].fe-menu-item-checked::before { content: '✓'; }
+  .fe-dd-item.fe-menu-item-checked { color: var(--primary, #3b82f6); }
   .fe-dd-item:hover { background: rgba(255,255,255,0.06); }
   .fe-kbd { opacity: .6; font-size: 12px; }
   .fe-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 20; }
@@ -44,7 +62,10 @@
 
 <div class="fe-root">
   <div class="fe-toolbar">
-    <div id="fe-path-display" class="fe-path-display" title="Current file path">Untitled</div>
+    <div class="fe-title-block">
+      <div id="fe-file-name" class="fe-file-name" title="Current file">Untitled</div>
+      <div id="fe-file-path" class="fe-file-path" title="Current path">No file open</div>
+    </div>
     <button id="fe-browse" class="fe-btn" title="Browse">📁</button>
     <span id="fe-status" class="fe-status"></span>
   </div>
@@ -74,10 +95,10 @@
     <div class="fe-menu" id="menu-view">
       <button class="fe-menu-btn" id="menu-view-btn">View ▾</button>
       <div class="fe-dropdown" id="menu-view-dd">
-        <div class="fe-dd-item" id="mi-toggle-lines"><span>Toggle Line Numbers</span></div>
-        <div class="fe-dd-item" id="mi-toggle-shading"><span>Toggle Line Shading</span></div>
-        <div class="fe-dd-item" id="mi-toggle-syntax"><span>Toggle Syntax Highlighting</span></div>
-        <div class="fe-dd-item" id="mi-toggle-wrap"><span>Toggle Word Wrap</span></div>
+        <div class="fe-dd-item" id="mi-toggle-lines" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Show Line Numbers</span></div>
+        <div class="fe-dd-item" id="mi-toggle-shading" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Line Shading</span></div>
+        <div class="fe-dd-item" id="mi-toggle-syntax" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Syntax Highlighting</span></div>
+        <div class="fe-dd-item" id="mi-toggle-wrap" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Word Wrap</span></div>
         <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
         <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
       </div>
@@ -85,6 +106,9 @@
   </div>
   <div class="fe-editor-container" id="editor-container">
     <!-- CodeMirror will be initialized here -->
+  </div>
+  <div class="fe-scrollbar" id="fe-scrollbar" hidden>
+    <div class="fe-scrollbar-inner" id="fe-scrollbar-inner"></div>
   </div>
 
   <div id="fe-confirm" class="fe-modal" aria-hidden="true">

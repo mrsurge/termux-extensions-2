@@ -23,7 +23,7 @@
         body { margin: 0; background-color: var(--background); color: var(--foreground); font-family: 'Inter', sans-serif; }
         .app-shell { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
         .app-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--card); position: sticky; top: 0; z-index: 5; }
-        .app-title { font-weight: 600; margin-left: 6px; color: var(--foreground); }
+        .app-title { font-weight: 600; margin-left: 6px; color: var(--foreground); font-size: 0.95rem; max-width: 45vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .spacer { flex: 1; }
         .app-btn { background: var(--secondary); color: var(--foreground); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
         .app-btn:hover { border-color: var(--primary); }
