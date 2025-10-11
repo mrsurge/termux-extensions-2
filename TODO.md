@@ -28,7 +28,8 @@
 - [ ] Wire the “Refresh Log” button to an API call that refetches shell descriptors (`/api/framework_shells` or a dedicated endpoint) and re-renders STDOUT/STDERR without waiting for the polling interval.
 - [ ] Round out the Open Interpreter console UX: persist the websocket URL/port in settings, surface connection errors inline, and add a visible stop/shutdown control.
 - [ ] Tighten Hugging Face search/download flow: expose download progress (poll Aria RPC), allow cancelling queued jobs, and surface path validation errors early.
-- [ ] Normalize the `reasoning_effort` field to behave as a string both in the backend (`_write_model_manifest`, `_remote_payload`) and the frontend modal handling, so remote providers that expect textual tiers (“low”, “medium”, “high”) work.
+- [x] Normalize the `reasoning_effort` field to behave as a string both in the backend (`_write_model_manifest`, `_remote_payload`) and the frontend modal handling, so remote providers that expect textual tiers (“low”, “medium”, “high”) work.
+- [x] Ensure remote model cards display the configured display name in both local and remote contexts.
 - [ ] Add regression/unit tests around model manifests, session persistence, and streaming SSE handling to catch future backend/front-end drift.
 - [ ] Document the full Termux-LM lifecycle (model add → load → session → interpreter) for contributors so follow-up work stays aligned.
 
@@ -46,4 +47,6 @@
   - [ ] Persist CODE_IFRAME_URL and bridge configuration inside the framework settings store instead of ad-hoc JSON files.
   - [ ] Add UI affordances in the new app for selecting the code-server instance, choosing default chat providers, and managing stored credentials/tokens securely.
 - [ ] QA checklist: feature-flag the app, test on mobile/desktop breakpoints, verify same-origin iframe policies, and smoke-test extension install/uninstall flows before general release.
+## 5. Archive Manager Enhancements
 
+- [x] Port the File Explorer bookmark experience (menus, modals, persistence) into the Archive Manager app.
