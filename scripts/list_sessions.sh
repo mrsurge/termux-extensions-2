@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/bin/env bash
 #
 # termux-extensions v2 - List Sessions Script
 #

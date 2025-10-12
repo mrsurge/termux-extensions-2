@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/bin/env bash
 
 HELPER_SCRIPT="/data/data/com.termux/files/home/termux-extensions-2/app/helper_service.py"
 PID_FILE="/data/data/com.termux/files/usr/var/run/te2_helper.pid"

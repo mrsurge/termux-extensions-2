@@ -17,8 +17,6 @@ code_oss_bp = Blueprint(
 )
 
 
-CODE_SERVER_VERSION = "4.104.3-linux-arm64"
-VENDOR_DIRNAME = Path("app") / "static" / "vendor" / "code-server" / CODE_SERVER_VERSION
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 13337
 
@@ -51,13 +49,13 @@ def _seed_state() -> dict:
     }
 
 
-def _vendor_binary() -> Path:
+def _wrapper_script() -> Path:
     # backend.py lives at <repo>/app/apps/code_oss/backend.py>
     repo_root = Path(__file__).resolve().parents[3]
-    binary = repo_root / VENDOR_DIRNAME / "bin" / "code-server"
-    if not binary.exists():
-        raise FileNotFoundError(f"Bundled code-server binary not found at {binary}")
-    return binary
+    script = repo_root / "app" / "apps" / "code_oss" / "bin" / "code-server-wrapper.sh"
+    if not script.exists():
+        raise FileNotFoundError(f"Wrapper script not found at {script}")
+    return script
 
 
 def _runtime_dirs() -> dict[str, Path]:
@@ -101,7 +99,7 @@ def _pick_port() -> int:
 
 def _spawn_shell() -> None:
     manager = _manager()
-    binary = _vendor_binary()
+    binary = _wrapper_script()
     runtime = _runtime_dirs()
     port = _pick_port()
 

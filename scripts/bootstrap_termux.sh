@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/env bash
 set -euo pipefail
 
 # Simple bootstrap helper for the termux-extensions-2 framework.
