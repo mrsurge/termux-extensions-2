@@ -12,8 +12,6 @@ from app.libs.framework_shells import _manager
 code_oss_bp = Blueprint(
     "code_oss_backend",
     __name__,
-    static_folder=str(Path(__file__).resolve().with_name('static')),
-    static_url_path='/api/app/code_oss/assets',
 )
 
 
