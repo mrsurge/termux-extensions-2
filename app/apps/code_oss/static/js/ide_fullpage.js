@@ -94,8 +94,9 @@
       if (!response.ok || !body.ok) {
         throw new Error(body?.error || `HTTP ${response.status}`);
       }
-      const { url } = body.data || {};
-      if (!url) throw new Error('No URL returned from code-server start');
+      const { port } = body.data || {};
+      if (!port) throw new Error('No port returned from code-server start');
+      const url = `http://${window.location.hostname}:${port}`;
       markReady(url);
     } catch (error) {
       showError(error.message || 'Unknown error');
