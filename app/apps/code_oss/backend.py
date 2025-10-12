@@ -15,7 +15,7 @@ code_oss_bp = Blueprint(
 )
 
 
-DEFAULT_HOST = "127.0.0.1"
+DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 13337
 
 TEMPLATE_FULLPAGE = Path(__file__).with_name("templates") / "fullpage.html"
