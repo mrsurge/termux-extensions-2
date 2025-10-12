@@ -35,11 +35,13 @@
 
 ## 4. Code-OSS Full-Page App Integration
 
-- [ ] Promote the “mobile IDE shell” scaffold into an official app module: create an `app/apps/code_oss` package with manifest, blueprint, template, and static bundle entrypoints.
-- [ ] Follow the full-page integration guide:
-  - [ ] Register `/ide` routes (and deep-link variants) that reuse existing auth/session and seed the SPA with user/project context.
-  - [ ] Produce standalone HTML/CSS/JS bundles (`ide_fullpage.html`, `ide_fullpage.js`, `ide_fullpage.css`) via the project’s build pipeline (vite/webpack) instead of the demo Flask server.
-  - [ ] Ensure websocket/job bus integrations mirror the windowed IDE so background tasks and toasts function identically.
+- [x] Promote the “mobile IDE shell” scaffold into an official app module: create an `app/apps/code_oss` package with manifest, blueprint, template, and static bundle entrypoints.
+- [x] Follow the full-page integration guide:
+  - [x] Register `/ide` routes (and deep-link variants) that reuse existing auth/session and seed the SPA with user/project context.
+  - [x] Produce standalone HTML/CSS/JS bundles (`ide_fullpage.html`, `ide_fullpage.js`, `ide_fullpage.css`) via the project’s build pipeline (vite/webpack) instead of the demo Flask server (relocated under app/static/).
+  - [x] Ensure websocket/job bus integrations mirror the windowed IDE so background tasks and toasts function identically.
+  - [ ] Add workspace/project selection UI inside the wrapper.
+  - [ ] Provide a clear navigation/back button when launching the full-page IDE.
 - [ ] Harden the bridge extension:
   - [ ] Replace the CLI TODOs for installing/uninstalling VS Code extensions with actual code-server or `code` invocations plus error reporting.
   - [ ] Expand the `postMessage` protocol to cover panel resizing, theme sync, status bar updates, and chat provider discovery from live extensions.

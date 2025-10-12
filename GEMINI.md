@@ -63,6 +63,13 @@ The framework includes a number of features for diagnostics and runtime manageme
 *   **Settings App:** A dedicated app for diagnostics, framework shell management, and other settings.
 
 ## Agent Operating Instructions
+- **Agent Workflow**
+  1. **Restate & Confirm Understanding**
+  2. **Investigate & Propose Plan**
+  3. **Execute Approved Plan**
+  4. **Subsequent Interactions**
+
+- **Aesthetics and Styling**: Do not modify styling, layouts, themes, or other project aesthetics without the user's explicit consent. There is no implied consent for visual changes.
 
 **NUMBER ONE RULE:** I MUST **NEVER EVER FOR ANY REASON UNDER ANY CIRCUMSTANCE UNLESS EXPLICITLY INSTRUCTED TO, USE GIT. THIS COMMAND MUST ALWAYS BE EXPLICIT AND NEVER IMPLIED.**
 

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Termux IDE</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ide_fullpage.css') }}" />
+</head>
+<body>
+  <div id="ide-root" data-seed='{{ seed_state | tojson }}'>
+    <aside id="ide-drawer" aria-labelledby="ide-drawer-title">
+      <header class="drawer-header">
+        <h2 id="ide-drawer-title">Explorer</h2>
+        <button class="drawer-close" type="button" aria-label="Close Explorer">×</button>
+      </header>
+      <div class="drawer-body">
+        <div id="explorer-content" class="explorer-empty">
+          <p>Loading workspace…</p>
+        </div>
+      </div>
+    </aside>
+    <div id="drawer-backdrop"></div>
+
+    <header class="ide-topbar">
+      <button id="btn-menu" class="icon-btn" aria-label="Toggle Explorer">☰</button>
+      <div class="ide-meta">
+        <span class="ide-title">Code IDE</span>
+        <span id="ide-subtitle" class="ide-subtitle">Preparing…</span>
+      </div>
+      <div class="spacer"></div>
+      <button id="btn-search" class="icon-btn" aria-label="Search">🔎</button>
+      <button id="btn-command" class="icon-btn" aria-label="Command Palette">⌘</button>
+      <button id="btn-settings" class="icon-btn" aria-label="Settings">⚙</button>
+    </header>
+
+    <main class="ide-main">
+      <div id="ide-status" class="ide-status ide-status--working">
+        <div class="spinner" aria-hidden="true"></div>
+        <div class="status-copy">
+          <h1>Starting Code OSS…</h1>
+          <p>You can leave this tab open; the editor will appear when ready.</p>
+        </div>
+      </div>
+      <iframe id="ide-frame" title="Code OSS" frameborder="0" loading="lazy" hidden></iframe>
+    </main>
+
+    <section class="ide-chat">
+      <header class="chat-header">
+        <div class="chat-title">
+          <strong>Assistant Panel</strong>
+          <span id="chat-subtitle">Choose an extension in Settings</span>
+        </div>
+        <button id="btn-chat-refresh" class="icon-btn" aria-label="Refresh chat panel">⟳</button>
+      </header>
+      <div id="chat-placeholder" class="chat-placeholder">
+        <p>No extension selected. Open Settings to pick a chat provider.</p>
+      </div>
+    </section>
+  </div>
+  <script src="{{ url_for('static', filename='js/ide_fullpage.js') }}" defer></script>
+</body>
+</html>

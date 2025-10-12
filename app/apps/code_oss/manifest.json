@@ -1,0 +1,14 @@
+{
+  "name": "Code IDE",
+  "id": "code_oss",
+  "icon_emoji": "💻",
+  "version": "0.1.0",
+  "description": "Launch the Code OSS mobile IDE and access the new full-page experience.",
+  "author": "Gemini",
+  "entrypoints": {
+    "backend_blueprint": "backend.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  },
+  "fullscreen": false
+}
