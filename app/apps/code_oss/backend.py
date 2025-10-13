@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import socket
+import subprocess
 from pathlib import Path
+import os
 from typing import Optional
 
 from flask import Blueprint, current_app, jsonify, request, render_template_string
@@ -19,10 +22,13 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 13337
 
 TEMPLATE_FULLPAGE = Path(__file__).with_name("templates") / "fullpage.html"
+BRIDGE_SRC = Path(__file__).with_name("bridge_extension")
+BRIDGE_PACKAGE = BRIDGE_SRC / "package.json"
 
 _SHELL_STATE: dict[str, Optional[str]] = {
     "shell_id": None,
     "port": None,
+    "project_path": None,
 }
 
 
@@ -58,17 +64,88 @@ def _wrapper_script() -> Path:
 
 def _runtime_dirs() -> dict[str, Path]:
     base = Path.home() / ".cache" / "termux_extensions" / "code_oss"
-    data = base / "user-data"
-    extensions = base / "extensions"
     logs = base / "logs"
-    for path in (data, extensions, logs):
+    base.mkdir(parents=True, exist_ok=True)
+    for path in (logs,):
         path.mkdir(parents=True, exist_ok=True)
     return {
         "base": base,
-        "user_data": data,
-        "extensions": extensions,
         "logs": logs,
     }
+
+
+def _bridge_manifest() -> dict:
+    if not BRIDGE_PACKAGE.exists():
+        return {}
+    try:
+        return json.loads(BRIDGE_PACKAGE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _bridge_vsix_path(manifest: dict) -> Path:
+    name = manifest.get("name") or "mobile-bridge"
+    version = manifest.get("version") or "0.0.0"
+    return BRIDGE_SRC / f"{name}-{version}.vsix"
+
+
+def _bridge_extension_id(manifest: dict) -> str:
+    publisher = manifest.get("publisher") or "termux"
+    name = manifest.get("name") or "mobile-bridge"
+    return f"{publisher}.{name}"
+
+
+def _cli_env() -> dict:
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(Path.home()),
+            "CODE_SERVER_PARENT": "termux_extensions",
+        }
+    )
+    return env
+
+
+def _installed_extensions() -> set[str]:
+    try:
+        result = subprocess.run(
+            [str(_wrapper_script()), "--list-extensions"],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=_cli_env(),
+        )
+    except Exception:  # pragma: no cover - defensive
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def _is_bridge_installed(manifest: Optional[dict] = None) -> bool:
+    manifest = manifest or _bridge_manifest()
+    if not manifest:
+        return False
+    extension_id = _bridge_extension_id(manifest)
+    installed = _installed_extensions()
+    return extension_id in installed
+
+
+def _ensure_bridge_extension(force: bool = False) -> None:
+    manifest = _bridge_manifest()
+    if not manifest:
+        return
+    vsix_path = _bridge_vsix_path(manifest)
+    if not vsix_path.exists():
+        current_app.logger.warning("Bridge VSIX not found at %s", vsix_path)
+        return
+    if not force and _is_bridge_installed(manifest):
+        return
+    command = [str(_wrapper_script()), "--install-extension", str(vsix_path)]
+    if force:
+        command.insert(1, "--force")
+    try:
+        subprocess.run(command, check=True, env=_cli_env())
+    except Exception:  # pragma: no cover - defensive
+        current_app.logger.exception("Failed to install mobile bridge extension via CLI")
 
 
 def _is_shell_running() -> bool:
@@ -100,6 +177,12 @@ def _spawn_shell() -> None:
     binary = _wrapper_script()
     runtime = _runtime_dirs()
     port = _pick_port()
+    project = _SHELL_STATE.get("project_path")
+
+    try:
+        _ensure_bridge_extension()
+    except Exception:  # pragma: no cover - defensive
+        current_app.logger.exception("Failed to ensure mobile bridge extension")
 
     command = [
         str(binary),
@@ -109,11 +192,9 @@ def _spawn_shell() -> None:
         "none",
         "--disable-telemetry",
         "--disable-update-check",
-        "--user-data-dir",
-        str(runtime["user_data"]),
-        "--extensions-dir",
-        str(runtime["extensions"]),
     ]
+    if project:
+        command.append(project)
 
     env = {
         "CODE_SERVER_PARENT": "termux_extensions",
@@ -154,6 +235,7 @@ def _stop_shell() -> bool:
 def status():
     running = _is_shell_running()
     port = _SHELL_STATE.get("port") if running else None
+    manifest = _bridge_manifest()
     return jsonify(
         {
             "ok": True,
@@ -161,6 +243,9 @@ def status():
                 "running": running,
                 "host": DEFAULT_HOST if running else None,
                 "port": port,
+                "project_path": _SHELL_STATE.get("project_path"),
+                "bridge_installed": _is_bridge_installed(manifest),
+                "bridge_version": manifest.get("version") if manifest else None,
             },
         }
     )
@@ -168,15 +253,19 @@ def status():
 
 @code_oss_bp.get("/fullpage")
 def fullpage():
+    seed_state = _seed_state()
+    if not seed_state.get("project_id") and _SHELL_STATE.get("project_path"):
+        seed_state["project_id"] = _SHELL_STATE["project_path"]
+
     try:
         _ensure_running()
     except Exception as exc:  # pragma: no cover
         current_app.logger.exception("Failed to ensure code-server running")
         template_source = TEMPLATE_FULLPAGE.read_text(encoding="utf-8")
-        return render_template_string(template_source, seed_state=_seed_state())
+        return render_template_string(template_source, seed_state=seed_state)
 
     template_source = TEMPLATE_FULLPAGE.read_text(encoding="utf-8")
-    return render_template_string(template_source, seed_state=_seed_state())
+    return render_template_string(template_source, seed_state=seed_state)
 
 
 @code_oss_bp.post("/start")
@@ -189,14 +278,19 @@ def start():
         current_app.logger.exception("Failed to start code-server")
         return jsonify({"ok": False, "error": str(exc)}), 500
 
-    port = int(_SHELL_STATE.get("port"))
+    port = _SHELL_STATE.get("port")
+    url = f"http://{DEFAULT_HOST}:{port}" if port else None
+    manifest = _bridge_manifest()
     return jsonify(
         {
             "ok": True,
             "data": {
                 "host": DEFAULT_HOST,
                 "port": port,
-                "url": f"http://{DEFAULT_HOST}:{port}",
+                "url": url,
+                "project_path": _SHELL_STATE.get("project_path"),
+                "bridge_installed": _is_bridge_installed(manifest),
+                "bridge_version": manifest.get("version") if manifest else None,
             },
         }
     )
@@ -206,3 +300,62 @@ def start():
 def stop():
     stopped = _stop_shell()
     return jsonify({"ok": True, "data": {"stopped": stopped}})
+
+
+@code_oss_bp.post("/project")
+def set_project():
+    payload = request.get_json(silent=True) or {}
+    raw_path = payload.get("path")
+    if not raw_path:
+        return jsonify({"ok": False, "error": "Missing project path"}), 400
+
+    folder = Path(raw_path).expanduser()
+    if not folder.exists():
+        return jsonify({"ok": False, "error": f"Path does not exist: {folder}"}), 404
+    if not folder.is_dir():
+        return jsonify({"ok": False, "error": f"Not a directory: {folder}"}), 400
+
+    _stop_shell()
+    _SHELL_STATE["project_path"] = str(folder)
+
+    try:
+        _ensure_running()
+    except Exception as exc:  # pragma: no cover - defensive
+        current_app.logger.exception("Failed to launch code-server for project")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    port = _SHELL_STATE.get("port")
+    manifest = _bridge_manifest()
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "host": DEFAULT_HOST,
+                "port": port,
+                "project_path": _SHELL_STATE.get("project_path"),
+                "url": f"http://{DEFAULT_HOST}:{port}" if port else None,
+                "bridge_installed": _is_bridge_installed(manifest),
+                "bridge_version": manifest.get("version") if manifest else None,
+            },
+        }
+    )
+
+
+@code_oss_bp.post("/bridge/install")
+def install_bridge():
+    try:
+        _ensure_bridge_extension(force=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        current_app.logger.exception("Failed to install mobile bridge extension")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    manifest = _bridge_manifest()
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "bridge_installed": _is_bridge_installed(manifest),
+                "bridge_version": manifest.get("version") if manifest else None,
+            },
+        }
+    )

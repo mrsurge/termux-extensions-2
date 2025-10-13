@@ -11,7 +11,11 @@
     <aside id="ide-drawer" aria-labelledby="ide-drawer-title">
       <header class="drawer-header">
         <h2 id="ide-drawer-title">Explorer</h2>
-        <button class="drawer-close" type="button" aria-label="Close Explorer">×</button>
+        <div class="drawer-controls">
+          <button id="btn-open-project" class="drawer-action" type="button">Open Project…</button>
+          <span id="bridge-status" class="drawer-status" aria-live="polite">Bridge: checking…</span>
+          <button class="drawer-close" type="button" aria-label="Close Explorer">×</button>
+        </div>
       </header>
       <div class="drawer-body">
         <div id="explorer-content" class="explorer-empty">
@@ -23,6 +27,7 @@
 
     <header class="ide-topbar">
       <button id="btn-menu" class="icon-btn" aria-label="Toggle Explorer">☰</button>
+      <button id="btn-back" class="icon-btn" aria-label="Back to launcher">←</button>
       <div class="ide-meta">
         <span class="ide-title">Code IDE</span>
         <span id="ide-subtitle" class="ide-subtitle">Preparing…</span>
@@ -34,14 +39,43 @@
     </header>
 
     <main class="ide-main">
-      <div id="ide-status" class="ide-status ide-status--working">
-        <div class="spinner" aria-hidden="true"></div>
-        <div class="status-copy">
-          <h1>Starting Code OSS…</h1>
-          <p>You can leave this tab open; the editor will appear when ready.</p>
-        </div>
+      <div class="ide-tabbar" role="tablist" aria-label="IDE view mode">
+        <button id="tab-document" class="ide-tab is-active" role="tab" aria-selected="true" aria-controls="document-view">Document</button>
+        <button id="tab-full" class="ide-tab" role="tab" aria-selected="false" aria-controls="full-ide-view">Full IDE</button>
       </div>
-      <iframe id="ide-frame" title="Code OSS" frameborder="0" loading="lazy" hidden></iframe>
+
+      <section id="document-view" class="ide-pane is-active" role="tabpanel" aria-labelledby="tab-document">
+        <div id="document-frame-target" class="ide-frame-target">
+          <div id="ide-frame-shell" class="ide-frame-shell">
+            <div id="ide-status" class="ide-status ide-status--working">
+              <div class="spinner" aria-hidden="true"></div>
+              <div class="status-copy">
+                <h1>Starting Code OSS…</h1>
+                <p>You can leave this tab open; the editor will appear when ready.</p>
+              </div>
+            </div>
+            <iframe id="ide-frame" class="is-hidden" title="Code OSS" frameborder="0"></iframe>
+          </div>
+        </div>
+        <div class="doc-overlay" aria-hidden="true">
+          <div class="doc-card">
+            <h1>Focused document</h1>
+            <p class="doc-current">Workspace: <span id="doc-current-project">Not selected</span></p>
+            <p class="doc-current">File: <span id="doc-current-path">None selected</span></p>
+            <button id="btn-doc-open-full" class="icon-btn doc-primary" type="button">Switch to Full IDE</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="full-ide-view" class="ide-pane" role="tabpanel" aria-labelledby="tab-full" aria-hidden="true">
+        <div id="full-frame-target" class="ide-frame-target"></div>
+        <div class="full-overlay" aria-hidden="true">
+          <div class="full-card">
+            <h2>Full Code OSS</h2>
+            <p>The complete desktop layout is visible in this tab. Use Document to return to the focused editor view.</p>
+          </div>
+        </div>
+      </section>
     </main>
 
     <section class="ide-chat">
@@ -57,6 +91,8 @@
       </div>
     </section>
   </div>
+  <script type="module" src="/static/js/te_ui.js"></script>
+  <script type="module" src="/static/js/file_picker.js"></script>
   <script src="/apps/code_oss/static/js/ide_fullpage.js" defer></script>
 </body>
 </html>

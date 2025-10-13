@@ -93,8 +93,7 @@ body {
   overflow: hidden;
   min-height: calc(100vh - var(--chat-height) - 120px);
   display: flex;
-  align-items: stretch;
-  justify-content: center;
+  flex-direction: column;
 }
 
 #ide-frame {
@@ -102,11 +101,76 @@ body {
   border: none;
 }
 
+#ide-frame.is-hidden {
+  visibility: hidden;
+}
+
+.ide-tabbar {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(11, 16, 28, 0.9);
+}
+
+.ide-tab {
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg);
+  padding: 8px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.ide-tab:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.ide-tab.is-active {
+  background: var(--accent);
+  color: #0b1120;
+  border-color: transparent;
+}
+
+.ide-pane {
+  display: none;
+  flex: 1;
+  position: relative;
+  min-height: 320px;
+  align-items: stretch;
+}
+
+.ide-pane.is-active {
+  display: flex;
+}
+
+.ide-frame-target {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.ide-frame-shell {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
 .ide-status {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 20px;
   padding: 40px 44px;
+  background: rgba(8, 13, 26, 0.95);
+  z-index: 2;
 }
 
 .ide-status--working {
@@ -131,6 +195,98 @@ body {
 .status-copy p {
   margin: 8px 0 0;
   color: var(--fg-muted);
+}
+
+#ide-frame {
+  flex: 1;
+  border: none;
+  position: relative;
+  z-index: 1;
+}
+
+#ide-frame.is-hidden {
+  visibility: hidden;
+}
+
+.doc-overlay {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  opacity: 0;
+  transform: translateY(-6px);
+  z-index: 3;
+}
+
+.doc-card {
+  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 14px;
+  padding: 14px 16px;
+  max-width: min(320px, 70vw);
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-card h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.doc-card .doc-current {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+}
+
+.doc-card .doc-current span {
+  color: var(--fg);
+}
+
+.doc-primary {
+  align-self: flex-start;
+  background: var(--accent);
+  color: #0b1120;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 999px;
+}
+
+.doc-primary:hover {
+  background: rgba(96, 165, 250, 0.85);
+}
+
+.full-overlay {
+  position: absolute;
+  bottom: 18px;
+  right: 18px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  transform: translateY(6px);
+  z-index: 3;
+}
+
+.full-card {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 12px;
+  padding: 12px 14px;
+  max-width: min(340px, 75vw);
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  pointer-events: auto;
+}
+
+.full-card h2 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+  color: var(--fg);
 }
 
 .ide-chat {
@@ -223,11 +379,47 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
 
 .drawer-header h2 {
   margin: 0;
   font-size: 1rem;
+}
+
+.drawer-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.drawer-status {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+.drawer-status[data-state="installed"] {
+  color: #22c55e;
+}
+
+.drawer-status[data-state="error"] {
+  color: #ef4444;
+}
+
+.drawer-action {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg);
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.drawer-action:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .drawer-close {
@@ -252,26 +444,79 @@ body {
   font-size: 0.9rem;
 }
 
-.explorer-list {
+.explorer-tree {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
-.explorer-item {
-  padding: 8px 10px;
+.explorer-node {
+  margin: 0;
+}
+
+.explorer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   transition: background 0.2s ease;
 }
 
-.explorer-item:hover {
-  background: rgba(255, 255, 255, 0.12);
+.explorer-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.explorer-node.is-active > .explorer-row {
+  background: rgba(96, 165, 250, 0.18);
+  color: var(--fg);
+}
+
+.explorer-node.is-directory > .explorer-row {
+  font-weight: 500;
+}
+
+.explorer-toggle {
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 0.7rem;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.explorer-toggle:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.explorer-toggle-spacer {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+}
+
+.explorer-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorer-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.explorer-node.is-loading .explorer-row {
+  font-style: italic;
+  color: var(--fg-muted);
 }
 
 @keyframes spin {
@@ -310,6 +555,20 @@ body {
     margin-bottom: calc(var(--chat-height) + 18px);
   }
 
+  .ide-tabbar {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .ide-tab {
+    font-size: 0.85rem;
+    padding: 6px 12px;
+  }
+
+  .doc-card {
+    max-width: min(280px, 80vw);
+  }
+
   .ide-chat {
     left: 12px;
     right: 12px;
@@ -325,4 +584,24 @@ body.dim::after {
   background: rgba(0, 0, 0, 0.45);
   pointer-events: none;
   z-index: 12;
+}
+
+#ide-root.mode-document .doc-overlay {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#ide-root.mode-full .doc-overlay {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+#ide-root.mode-full .full-overlay {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#ide-root.mode-document .full-overlay {
+  opacity: 0;
+  transform: translateY(6px);
 }

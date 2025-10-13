@@ -16,6 +16,9 @@
   .status-dot { font-size: 0.8rem; color: var(--primary, #3b82f6); }
   .code-oss-status[data-state="running"] .status-dot { color: #22c55e; }
   .code-oss-status[data-state="error"] .status-dot { color: #ef4444; }
+  .code-oss-bridge-status { font-size: 0.85rem; color: var(--muted-foreground, #94a3b8); }
+  .code-oss-bridge-status[data-state="installed"] { color: #22c55e; }
+  .code-oss-bridge-status[data-state="error"] { color: #ef4444; }
   .code-oss-meta { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: var(--muted-foreground, #94a3b8); }
   .code-oss-meta strong { color: var(--foreground, #e5e7eb); font-weight: 600; }
 </style>
@@ -38,11 +41,14 @@
       <button id="code-oss-launch" class="code-oss-btn">Open Full Page IDE</button>
       <button id="code-oss-stop" class="code-oss-btn code-oss-secondary" disabled>Stop Server</button>
       <button id="code-oss-copy-link" class="code-oss-btn code-oss-secondary">Copy Deep-Link</button>
+      <button id="code-oss-install-bridge" class="code-oss-btn code-oss-secondary">Install Bridge</button>
     </div>
+    <div id="code-oss-bridge-status" class="code-oss-bridge-status" data-state="checking">Bridge extension status: checking…</div>
     <div class="code-oss-meta">
       <div><strong>Runtime target:</strong> code-server (via wrapper)</div>
       <div><strong>Explorer drawer:</strong> tap ☰ inside the IDE to browse and open files.</div>
       <div><strong>Assistant panel:</strong> pick your chat extension from the IDE wrapper settings.</div>
+      <div><strong>Bridge extension:</strong> installs a VS Code helper so the drawer mirrors Code OSS. Use the button above if it shows as missing.</div>
     </div>
   </div>
 </div>

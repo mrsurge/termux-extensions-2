@@ -17,9 +17,23 @@ async function ensureWorkerReady() {
   }
 }
 
-function formatStatus(host, port) {
+function resolveHost(host) {
+  if (!host || host === '0.0.0.0' || host === '127.0.0.1') {
+    return window.location.hostname || '127.0.0.1';
+  }
+  return host;
+}
+
+function formatStatus(host, port, project, bridgeInstalled, bridgeVersion) {
   if (!host || !port) return 'Not running';
-  return `Listening on ${host}:${port}`;
+  const base = `Listening on ${resolveHost(host)}:${port}`;
+  const details = [];
+  if (project) details.push(project);
+  if (bridgeInstalled) {
+    details.push(`Bridge v${bridgeVersion || '?'}`);
+  }
+  if (!details.length) return base;
+  return `${base} • ${details.join(' • ')}`;
 }
 
 export default function initCodeOSS(container, _api, host) {
@@ -31,6 +45,8 @@ export default function initCodeOSS(container, _api, host) {
   const launchBtn = container.querySelector('#code-oss-launch');
   const stopBtn = container.querySelector('#code-oss-stop');
   const copyBtn = container.querySelector('#code-oss-copy-link');
+  const bridgeBtn = container.querySelector('#code-oss-install-bridge');
+  const bridgeStatus = container.querySelector('#code-oss-bridge-status');
 
   if (!statusBox || !launchBtn || !stopBtn || !copyBtn) {
     return;
@@ -42,11 +58,31 @@ export default function initCodeOSS(container, _api, host) {
     if (statusDetail) statusDetail.textContent = detail;
   }
 
+  function updateBridgeState(data = {}) {
+    const installed = !!data.bridge_installed;
+    const version = data.bridge_version;
+    if (bridgeStatus) {
+      bridgeStatus.dataset.state = installed ? 'installed' : data.error ? 'error' : 'missing';
+      if (installed) {
+        bridgeStatus.textContent = version
+          ? `Bridge extension installed (v${version}).`
+          : 'Bridge extension installed.';
+      } else if (data.error) {
+        bridgeStatus.textContent = `Bridge extension error: ${data.error}`;
+      } else {
+        bridgeStatus.textContent = 'Bridge extension not installed.';
+      }
+    }
+    if (bridgeBtn) {
+      bridgeBtn.textContent = installed ? 'Reinstall Bridge' : 'Install Bridge';
+    }
+  }
+
   async function refreshStatus() {
     try {
       const data = await apiCall('/api/app/code_oss/status');
       if (data.running) {
-        setStatus('running', 'Server is running', formatStatus(data.host, data.port));
+        setStatus('running', 'Server is running', formatStatus(data.host, data.port, data.project_path, data.bridge_installed, data.bridge_version));
         launchBtn.disabled = false;
         stopBtn.disabled = false;
       } else {
@@ -54,10 +90,12 @@ export default function initCodeOSS(container, _api, host) {
         launchBtn.disabled = false;
         stopBtn.disabled = true;
       }
+      updateBridgeState(data);
     } catch (error) {
       setStatus('error', 'Status unavailable', error.message || 'Unknown error');
       launchBtn.disabled = false;
       stopBtn.disabled = false;
+      updateBridgeState({ error: error.message });
     }
   }
 
@@ -65,9 +103,10 @@ export default function initCodeOSS(container, _api, host) {
     launchBtn.disabled = true;
     setStatus('checking', 'Starting server…', 'Booting the bundled code-server binary.');
     try {
-      await apiCall('/api/app/code_oss/start', { method: 'POST' });
+      const data = await apiCall('/api/app/code_oss/start', { method: 'POST' });
       host?.toast?.('Code OSS started');
       window.open('/api/app/code_oss/fullpage', '_blank');
+      updateBridgeState(data);
       await refreshStatus();
     } catch (error) {
       launchBtn.disabled = false;
@@ -108,6 +147,35 @@ export default function initCodeOSS(container, _api, host) {
       host?.toast?.('Full-page IDE link copied to clipboard.');
     } catch (error) {
       host?.toast?.(`Unable to copy link: ${error?.message || error}`, { variant: 'error' });
+    }
+  });
+
+  bridgeBtn?.addEventListener('click', async () => {
+    bridgeBtn.disabled = true;
+    const previous = bridgeBtn.textContent;
+    bridgeBtn.textContent = 'Installing…';
+    let succeeded = false;
+    let errorMessage = null;
+    try {
+      const data = await apiCall('/api/app/code_oss/bridge/install', { method: 'POST' });
+      updateBridgeState(data);
+      host?.toast?.('Bridge extension installed.', { variant: 'success' });
+      succeeded = true;
+    } catch (error) {
+      host?.toast?.(`Bridge install failed: ${error.message}`, { variant: 'error' });
+      errorMessage = error.message;
+    } finally {
+      bridgeBtn.disabled = false;
+    }
+    if (succeeded) {
+      try {
+        await refreshStatus();
+      } catch (error) {
+        updateBridgeState({ error: error.message });
+      }
+    } else {
+      bridgeBtn.textContent = previous;
+      updateBridgeState({ error: errorMessage });
     }
   });
 
