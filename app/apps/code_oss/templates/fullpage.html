@@ -46,16 +46,7 @@
 
       <section id="document-view" class="ide-pane is-active" role="tabpanel" aria-labelledby="tab-document">
         <div id="document-frame-target" class="ide-frame-target">
-          <div id="ide-frame-shell" class="ide-frame-shell">
-            <div id="ide-status" class="ide-status ide-status--working">
-              <div class="spinner" aria-hidden="true"></div>
-              <div class="status-copy">
-                <h1>Starting Code OSS…</h1>
-                <p>You can leave this tab open; the editor will appear when ready.</p>
-              </div>
-            </div>
-            <iframe id="ide-frame" class="is-hidden" title="Code OSS" frameborder="0"></iframe>
-          </div>
+          <!-- Code OSS iframe will be moved here in document view -->
         </div>
         <div class="doc-overlay" aria-hidden="true">
           <div class="doc-card">
@@ -68,7 +59,9 @@
       </section>
 
       <section id="full-ide-view" class="ide-pane" role="tabpanel" aria-labelledby="tab-full" aria-hidden="true">
-        <div id="full-frame-target" class="ide-frame-target"></div>
+        <div id="full-frame-target" class="ide-frame-target">
+          <!-- Code OSS iframe will be moved here in full view -->
+        </div>
         <div class="full-overlay" aria-hidden="true">
           <div class="full-card">
             <h2>Full Code OSS</h2>
@@ -90,6 +83,18 @@
         <p>No extension selected. Open Settings to pick a chat provider.</p>
       </div>
     </section>
+    
+    <!-- Shared iframe shell that moves between views -->
+    <div id="ide-frame-shell" class="ide-frame-shell" style="display: none;">
+      <div id="ide-status" class="ide-status ide-status--working">
+        <div class="spinner" aria-hidden="true"></div>
+        <div class="status-copy">
+          <h1>Starting Code OSS…</h1>
+          <p>You can leave this tab open; the editor will appear when ready.</p>
+        </div>
+      </div>
+      <iframe id="ide-frame" class="is-hidden" title="Code OSS" frameborder="0"></iframe>
+    </div>
   </div>
   <script type="module" src="/static/js/te_ui.js"></script>
   <script type="module" src="/static/js/file_picker.js"></script>

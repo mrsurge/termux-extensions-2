@@ -37,12 +37,15 @@ exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const BRIDGE_MESSAGE_FLAG = '_mobileBridge';
+const SHELL_MESSAGE_FLAG = '_mobileShell';
 const chatProviders = [
     { id: 'mobile.chatPlaceholder', label: 'Chat Placeholder' },
     { id: 'workbench.panel.output', label: 'Output' },
     { id: 'workbench.panel.markers.view', label: 'Problems' },
 ];
-const POSTABLE = typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : undefined);
+// Web extensions run in a worker, not in the main window
+const IS_WEB = typeof acquireVsCodeApi === 'function';
+const POSTABLE = typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : undefined);
 function safeFsPath(uri) {
     if (uri.scheme === 'vscode-remote') {
         return uri.path;
@@ -78,7 +81,7 @@ async function readDirectory(uri, depth) {
         }));
     }
     catch (error) {
-        console.error('[mobile-bridge] readDirectory failed', error);
+        console.error('[Mobile Bridge] readDirectory failed', error);
     }
     const directories = entries.filter((entry) => entry.entryType === 'directory').sort((a, b) => a.label.localeCompare(b.label));
     const files = entries.filter((entry) => entry.entryType === 'file').sort((a, b) => a.label.localeCompare(b.label));
@@ -86,12 +89,28 @@ async function readDirectory(uri, depth) {
 }
 function postToParent(payload) {
     try {
-        if (typeof window !== 'undefined' && window.top && window.location) {
-            window.top.postMessage(Object.assign({ [BRIDGE_MESSAGE_FLAG]: true }, payload), window.location.origin);
+        console.log('[Mobile Bridge] Posting message:', payload.type, payload);
+        const message = Object.assign({ [BRIDGE_MESSAGE_FLAG]: true }, payload);
+        
+        // Try different methods to post messages
+        if (typeof self !== 'undefined' && self.parent) {
+            // Web worker context - post to parent
+            self.parent.postMessage(message, '*');
+            console.log('[Mobile Bridge] Posted via self.parent');
+        } else if (typeof window !== 'undefined' && window.parent) {
+            // Window context - post to parent frame
+            window.parent.postMessage(message, '*');
+            console.log('[Mobile Bridge] Posted via window.parent');
+        } else if (POSTABLE && typeof POSTABLE.postMessage === 'function') {
+            // Fallback to global postMessage
+            POSTABLE.postMessage(message, '*');
+            console.log('[Mobile Bridge] Posted via POSTABLE');
+        } else {
+            console.error('[Mobile Bridge] No postMessage method available');
         }
     }
     catch (error) {
-        console.error('[mobile-bridge] failed to post message', error);
+        console.error('[Mobile Bridge] Failed to post message', error);
     }
 }
 function postState() {
@@ -162,10 +181,22 @@ async function openPath(path, opts = {}) {
     }
 }
 function activate(ctx) {
+    console.log('[Mobile Bridge] Extension activated!');
+    console.log('[Mobile Bridge] Workspace folders:', vscode.workspace.workspaceFolders);
+    console.log('[Mobile Bridge] Active editor:', vscode.window.activeTextEditor?.document?.uri?.toString());
+    
+    // Test if we can post messages - send multiple test messages
+    postToParent({ type: 'bridgeActivated', timestamp: Date.now() });
+    postToParent({ type: 'test', message: 'Bridge is working!' });
+    
+    // Show a VS Code notification to confirm activation
+    vscode.window.showInformationMessage('Mobile Bridge Extension Activated v0.4.0');
+    
     postWorkspaceFolders();
     postToParent({ type: 'chatProviders', providers: chatProviders });
     postState();
     postExplorerRoot(1).then(() => {
+        console.log('[Mobile Bridge] Explorer root posted');
         if (vscode.window.activeTextEditor) {
             postActiveEditor(vscode.window.activeTextEditor);
         }
@@ -180,8 +211,10 @@ function activate(ctx) {
     if (POSTABLE && typeof POSTABLE.addEventListener === 'function') {
         POSTABLE.addEventListener('message', async (event) => {
             const data = event.data || {};
-            if (!data || !data._mobileShell)
+            console.log('[Mobile Bridge] Message received:', data);
+            if (!data || !data[SHELL_MESSAGE_FLAG])
                 return;
+            console.log('[Mobile Bridge] Processing message type:', data.type);
             const { type, cmd, args } = data;
             if (type === 'hello') {
                 postToParent({ type: 'chatProviders', providers: chatProviders });
@@ -247,6 +280,22 @@ function activate(ctx) {
                 return;
             case 'refreshChat':
                 return postToParent({ type: 'chatProviders', providers: chatProviders });
+            case 'setDocumentMode':
+                // Enter zen mode to hide all UI except editor
+                console.log('[Mobile Bridge] Entering document mode');
+                await vscode.commands.executeCommand('workbench.action.toggleZenMode');
+                // Make sure zen mode is on
+                const zenModeOn = vscode.workspace.getConfiguration('zenMode').get('restore');
+                if (!zenModeOn) {
+                    await vscode.commands.executeCommand('workbench.action.toggleZenMode');
+                }
+                return;
+            case 'setFullMode':
+                // Exit zen mode to show full UI
+                console.log('[Mobile Bridge] Entering full mode');
+                // Exit zen mode if it's on
+                await vscode.commands.executeCommand('workbench.action.exitZenMode');
+                return;
             default:
                 throw new Error(`Unknown command: ${cmd}`);
         }

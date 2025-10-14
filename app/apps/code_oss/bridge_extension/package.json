@@ -3,7 +3,7 @@
   "displayName": "Termux Mobile Bridge",
   "description": "Bridges the Termux Extensions mobile shell with VS Code Web for explorer and focus sync.",
   "publisher": "termux",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "engines": {
     "vscode": "^1.92.0"
   },
@@ -12,7 +12,8 @@
   ],
   "browser": "./extension.js",
   "extensionKind": [
-    "web"
+    "ui",
+    "workspace"
   ],
   "activationEvents": [
     "*"

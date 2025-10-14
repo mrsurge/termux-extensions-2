@@ -65,12 +65,21 @@ def _wrapper_script() -> Path:
 def _runtime_dirs() -> dict[str, Path]:
     base = Path.home() / ".cache" / "termux_extensions" / "code_oss"
     logs = base / "logs"
+    # Add user-data and extensions directories for persistence
+    user_data = base / "user-data"
+    extensions = base / "extensions"
+    config = base / "config"
+    
     base.mkdir(parents=True, exist_ok=True)
-    for path in (logs,):
+    for path in (logs, user_data, extensions, config):
         path.mkdir(parents=True, exist_ok=True)
+    
     return {
         "base": base,
         "logs": logs,
+        "user_data": user_data,
+        "extensions": extensions,
+        "config": config,
     }
 
 
@@ -108,8 +117,13 @@ def _cli_env() -> dict:
 
 def _installed_extensions() -> set[str]:
     try:
+        runtime = _runtime_dirs()
         result = subprocess.run(
-            [str(_wrapper_script()), "--list-extensions"],
+            [
+                str(_wrapper_script()),
+                "--extensions-dir", str(runtime["extensions"]),
+                "--list-extensions"
+            ],
             check=True,
             capture_output=True,
             text=True,
@@ -139,9 +153,15 @@ def _ensure_bridge_extension(force: bool = False) -> None:
         return
     if not force and _is_bridge_installed(manifest):
         return
-    command = [str(_wrapper_script()), "--install-extension", str(vsix_path)]
+    
+    runtime = _runtime_dirs()
+    command = [
+        str(_wrapper_script()), 
+        "--extensions-dir", str(runtime["extensions"]),
+        "--install-extension", str(vsix_path)
+    ]
     if force:
-        command.insert(1, "--force")
+        command.insert(3, "--force")
     try:
         subprocess.run(command, check=True, env=_cli_env())
     except Exception:  # pragma: no cover - defensive
@@ -192,6 +212,12 @@ def _spawn_shell() -> None:
         "none",
         "--disable-telemetry",
         "--disable-update-check",
+        "--user-data-dir",
+        str(runtime["user_data"]),
+        "--extensions-dir",
+        str(runtime["extensions"]),
+        # Disable workspace trust prompts
+        "--disable-workspace-trust",
     ]
     if project:
         command.append(project)
@@ -300,6 +326,48 @@ def start():
 def stop():
     stopped = _stop_shell()
     return jsonify({"ok": True, "data": {"stopped": stopped}})
+
+
+@code_oss_bp.get("/file")
+def read_file():
+    """Read a file's content for the document viewer."""
+    file_path = request.args.get("path")
+    if not file_path:
+        return jsonify({"ok": False, "error": "Missing path parameter"}), 400
+    
+    try:
+        # Resolve path
+        resolved_path = Path(file_path).expanduser().resolve()
+        
+        # Basic security check - ensure file is under home directory
+        if not str(resolved_path).startswith(str(Path.home())):
+            return jsonify({"ok": False, "error": "Access denied"}), 403
+        
+        if not resolved_path.exists():
+            return jsonify({"ok": False, "error": "File not found"}), 404
+        
+        if not resolved_path.is_file():
+            return jsonify({"ok": False, "error": "Not a file"}), 400
+        
+        # Read file content
+        try:
+            content = resolved_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # Try as binary if text fails
+            content = f"[Binary file - {resolved_path.stat().st_size} bytes]"
+        
+        return jsonify({
+            "ok": True,
+            "data": {
+                "path": str(resolved_path),
+                "content": content,
+                "size": resolved_path.stat().st_size
+            }
+        })
+        
+    except Exception as e:
+        current_app.logger.exception("Failed to read file")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @code_oss_bp.post("/project")

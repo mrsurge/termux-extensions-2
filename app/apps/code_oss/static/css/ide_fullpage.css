@@ -99,10 +99,18 @@ body {
 #ide-frame {
   flex: 1;
   border: none;
+  width: 100%;
+  height: 100%;
 }
 
 #ide-frame.is-hidden {
   visibility: hidden;
+}
+
+/* Document mode: Hide VS Code sidebar and panels for focused editing */
+.mode-document #ide-frame {
+  /* CSS to inject into iframe would go here, but cross-origin restrictions apply */
+  /* We'll need to use postMessage to tell the extension to hide UI elements */
 }
 
 .ide-tabbar {

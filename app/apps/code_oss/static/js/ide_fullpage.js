@@ -125,10 +125,24 @@
     root.classList.toggle('mode-document', view === 'document');
     root.classList.toggle('mode-full', view === 'full');
 
+    // Move the iframe shell to the appropriate container
     if (frameShell) {
-      const target = view === 'document' ? documentFrameTarget : fullFrameTarget;
-      if (target && frameShell.parentElement !== target) {
-        target.appendChild(frameShell);
+      if (view === 'document') {
+        // Only show iframe in document view if a file is actually open
+        if (currentFile) {
+          frameShell.style.display = 'block';
+          documentFrameTarget.appendChild(frameShell);
+          // Tell VS Code to hide UI for focused editing
+          sendCommand('setDocumentMode');
+        } else {
+          // Hide iframe if no document is open
+          frameShell.style.display = 'none';
+        }
+      } else if (view === 'full' && fullFrameTarget) {
+        frameShell.style.display = 'block';
+        fullFrameTarget.appendChild(frameShell);
+        // Tell VS Code to show full UI
+        sendCommand('setFullMode');
       }
     }
 
@@ -215,14 +229,30 @@
   }
 
   function sendCommand(cmd, args = {}) {
-    if (!frameReady || !iframeOrigin || !frame?.contentWindow) return;
+    if (!frameReady || !frame?.contentWindow) return;
     if (cmd === 'openPath' && args?.path) {
       currentFile = args.path;
       updateDocPlaceholder();
       updateSubtitle();
     }
     const payload = { _mobileShell: true, type: 'command', cmd, args };
-    frame.contentWindow.postMessage(payload, iframeOrigin);
+    frame.contentWindow.postMessage(payload, '*');
+  }
+
+  // File will be opened directly in Code OSS frame for live updates
+  function openFileInEditor(path) {
+    currentFile = path;
+    updateDocPlaceholder();
+    updateSubtitle();
+    sendCommand('openPath', { path });
+    
+    // If in document view, show the iframe now that we have a file
+    if (activeView === 'document' && frameShell) {
+      frameShell.style.display = 'block';
+      if (documentFrameTarget && !documentFrameTarget.contains(frameShell)) {
+        documentFrameTarget.appendChild(frameShell);
+      }
+    }
   }
 
   btnSearch?.addEventListener('click', () => sendCommand('openSearch'));
@@ -346,7 +376,9 @@
       } else {
         explorerState.activePath = node.path;
         renderExplorerTree();
-        sendCommand('openPath', { path: node.path });
+        
+        // Always open in the Code OSS frame for live updates
+        openFileInEditor(node.path);
       }
     });
 
@@ -463,6 +495,28 @@
     }
   }
 
+  // Add manual bridge test button (temporary for debugging)
+  const testBridgeBtn = document.createElement('button');
+  testBridgeBtn.textContent = 'Test Bridge';
+  testBridgeBtn.className = 'drawer-action';
+  testBridgeBtn.style.marginLeft = '8px';
+  btnOpenProject?.parentElement?.appendChild(testBridgeBtn);
+  
+  testBridgeBtn.addEventListener('click', () => {
+    console.log('[ide_fullpage] Sending manual hello to bridge');
+    if (frame?.contentWindow) {
+      frame.contentWindow.postMessage({ _mobileShell: true, type: 'hello' }, '*');
+      setTimeout(() => {
+        frame.contentWindow.postMessage({ 
+          _mobileShell: true, 
+          type: 'command', 
+          cmd: 'requestExplorerTree',
+          args: { depth: 2 }
+        }, '*');
+      }, 500);
+    }
+  });
+  
   btnOpenProject?.addEventListener('click', async () => {
     if (!(window.teFilePicker && typeof window.teFilePicker.openDirectory === 'function')) {
       window.alert('Directory picker is unavailable in this environment.');
@@ -521,9 +575,8 @@
     frameReady = true;
     showFrame();
     if (statusCard) statusCard.style.display = 'none';
-    if (iframeOrigin) {
-      frame.contentWindow?.postMessage({ _mobileShell: true, type: 'hello' }, iframeOrigin);
-    }
+    // Send hello to establish communication
+    frame.contentWindow?.postMessage({ _mobileShell: true, type: 'hello' }, '*');
     setTimeout(() => {
       sendCommand('requestExplorerTree');
       if (seed.file_path) {
@@ -547,8 +600,17 @@
   });
 
   window.addEventListener('message', (event) => {
-    if (!iframeOrigin || event.origin !== iframeOrigin) return;
     const data = event.data || {};
+    
+    // DEBUG: Log ALL messages to see what's happening
+    console.log('[ide_fullpage] Message received:', {
+      origin: event.origin,
+      data: data,
+      hasMobileBridge: !!data._mobileBridge,
+      hasMobileShell: !!data._mobileShell,
+      type: data.type
+    });
+    
     if (!data || !data._mobileBridge) return;
 
     switch (data.type) {
@@ -606,6 +668,24 @@
           }
           ensurePathVisible(data.path);
           applyBridgeState({ bridge_installed: true });
+          
+          // Show iframe in document view when file is active
+          if (activeView === 'document' && frameShell) {
+            frameShell.style.display = 'block';
+            if (documentFrameTarget && !documentFrameTarget.contains(frameShell)) {
+              documentFrameTarget.appendChild(frameShell);
+            }
+          }
+        } else {
+          // No active editor
+          currentFile = null;
+          updateDocPlaceholder();
+          updateSubtitle();
+          
+          // Hide iframe in document view when no file is open
+          if (activeView === 'document' && frameShell) {
+            frameShell.style.display = 'none';
+          }
         }
         break;
       }
@@ -619,7 +699,21 @@
         applyBridgeState(data);
         break;
       }
+      case 'bridgeActivated': {
+        console.log('[ide_fullpage] Bridge activated!', data);
+        applyBridgeState({ bridge_installed: true });
+        // Request initial data
+        setTimeout(() => {
+          sendCommand('requestExplorerTree', { depth: 2 });
+        }, 100);
+        break;
+      }
+      case 'test': {
+        console.log('[ide_fullpage] Test message from bridge:', data.message);
+        break;
+      }
       default:
+        console.log('[ide_fullpage] Unknown message type:', data.type);
         break;
     }
   });
