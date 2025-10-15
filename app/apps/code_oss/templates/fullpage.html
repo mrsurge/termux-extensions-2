@@ -36,6 +36,7 @@
       <button id="btn-search" class="icon-btn" aria-label="Search">🔎</button>
       <button id="btn-command" class="icon-btn" aria-label="Command Palette">⌘</button>
       <button id="btn-settings" class="icon-btn" aria-label="Settings">⚙</button>
+      <button id="btn-doc-test-edit" class="icon-btn" aria-label="Apply sample edit">✎</button>
     </header>
 
     <main class="ide-main">
@@ -47,6 +48,9 @@
       <section id="document-view" class="ide-pane is-active" role="tabpanel" aria-labelledby="tab-document">
         <div id="document-frame-target" class="ide-frame-target">
           <!-- Code OSS iframe will be moved here in document view -->
+        </div>
+        <div id="doc-monaco-container" class="doc-monaco-container">
+          <div id="doc-monaco-editor" class="doc-monaco-editor"></div>
         </div>
         <div class="doc-overlay" aria-hidden="true">
           <div class="doc-card">
@@ -98,6 +102,7 @@
   </div>
   <script type="module" src="/static/js/te_ui.js"></script>
   <script type="module" src="/static/js/file_picker.js"></script>
+  <script src="/apps/code_oss/static/vendor/monaco/min/vs/loader.js"></script>
   <script src="/apps/code_oss/static/js/ide_fullpage.js" defer></script>
 </body>
 </html>

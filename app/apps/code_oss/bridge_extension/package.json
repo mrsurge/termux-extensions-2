@@ -3,7 +3,7 @@
   "displayName": "Termux Mobile Bridge",
   "description": "Bridges the Termux Extensions mobile shell with VS Code Web for explorer and focus sync.",
   "publisher": "termux",
-  "version": "0.5.0",
+  "version": "0.7.8",
   "engines": {
     "vscode": "^1.92.0"
   },
@@ -11,19 +11,33 @@
     "Other"
   ],
   "browser": "./extension.js",
-  "extensionKind": [
-    "ui",
-    "workspace"
-  ],
   "activationEvents": [
-    "*"
+    "onStartupFinished",
+    "onCommand:mobile-bridge.manualActivate",
+    "onView:mobileBridgeControlView"
   ],
   "contributes": {
     "views": {
-      "panel": [
+      "explorer": [
         {
-          "id": "mobile.chatPlaceholder",
-          "name": "Chat Placeholder"
+          "id": "mobileBridgeControlView",
+          "name": "Mobile Bridge Control",
+          "when": "true"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "mobile-bridge.manualActivate",
+        "title": "Activate Bridge"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "mobile-bridge.manualActivate",
+          "when": "view == mobileBridgeControlView",
+          "group": "navigation"
         }
       ]
     }

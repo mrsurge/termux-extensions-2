@@ -40,14 +40,19 @@
   - [x] Register `/ide` routes (and deep-link variants) that reuse existing auth/session and seed the SPA with user/project context.
   - [x] Produce standalone HTML/CSS/JS bundles (`ide_fullpage.html`, `ide_fullpage.js`, `ide_fullpage.css`) via the project’s build pipeline (vite/webpack) instead of the demo Flask server (relocated under app/static/).
   - [x] Ensure websocket/job bus integrations mirror the windowed IDE so background tasks and toasts function identically.
-  - [ ] Add workspace/project selection UI inside the wrapper.
-  - [ ] Provide a clear navigation/back button when launching the full-page IDE.
+  - [x] Add workspace/project selection UI inside the wrapper.
+  - [x] Provide a clear navigation/back button when launching the full-page IDE.
 - [ ] Harden the bridge extension:
+  - [x] Route bridge events through the backend `/api/app/code_oss/state` cache with REST polling fallback.
   - [ ] Replace the CLI TODOs for installing/uninstalling VS Code extensions with actual code-server or `code` invocations plus error reporting.
-  - [ ] Expand the `postMessage` protocol to cover panel resizing, theme sync, status bar updates, and chat provider discovery from live extensions.
+  - [ ] Expand the bridge protocol to cover panel resizing, theme sync, status bar updates, and chat provider discovery using the new REST pipeline.
 - [ ] Integrate app settings:
   - [ ] Persist CODE_IFRAME_URL and bridge configuration inside the framework settings store instead of ad-hoc JSON files.
   - [ ] Add UI affordances in the new app for selecting the code-server instance, choosing default chat providers, and managing stored credentials/tokens securely.
+- [ ] Document vs iframe decision:
+  - [ ] Finalise the document-view strategy (standalone Monaco mirror vs full IDE iframe) and implement the chosen approach.
+  - [ ] Ensure explorer tree renders reliably once bridge events are flowing (diff incoming payloads, debounce renders).
+  - [ ] Surface bridge diagnostics and `/state` error history inside the launcher or wrapper UI.
 - [ ] QA checklist: feature-flag the app, test on mobile/desktop breakpoints, verify same-origin iframe policies, and smoke-test extension install/uninstall flows before general release.
 ## 5. Archive Manager Enhancements
 

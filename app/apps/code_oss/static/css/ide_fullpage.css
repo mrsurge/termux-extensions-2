@@ -63,6 +63,14 @@ body {
   background: rgba(255, 255, 255, 0.12);
 }
 
+#btn-doc-test-edit {
+  display: none;
+}
+
+#ide-root.doc-ready #btn-doc-test-edit {
+  display: inline-flex;
+}
+
 .ide-meta {
   display: flex;
   flex-direction: column;
@@ -225,6 +233,22 @@ body {
   opacity: 0;
   transform: translateY(-6px);
   z-index: 3;
+}
+.doc-monaco-container {
+  position: absolute;
+  inset: 12px 18px 18px 18px;
+  border-radius: 12px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  background: rgba(15, 23, 42, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  z-index: 2;
+}
+.doc-monaco-editor {
+  width: 100%;
+  height: 100%;
 }
 
 .doc-card {
@@ -612,4 +636,14 @@ body.dim::after {
 #ide-root.mode-document .full-overlay {
   opacity: 0;
   transform: translateY(6px);
+}
+
+#document-view.has-doc .doc-overlay {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+#document-view.has-doc .doc-monaco-container {
+  opacity: 1;
+  pointer-events: auto;
 }

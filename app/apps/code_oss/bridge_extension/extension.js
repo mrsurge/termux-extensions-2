@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
+vscode.window.showInformationMessage('Mobile Bridge SCRIPT LOADED!');
 const BRIDGE_MESSAGE_FLAG = '_mobileBridge';
 const SHELL_MESSAGE_FLAG = '_mobileShell';
 const chatProviders = [
@@ -46,6 +47,325 @@ const chatProviders = [
 // Web extensions run in a worker, not in the main window
 const IS_WEB = typeof acquireVsCodeApi === 'function';
 const POSTABLE = typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : undefined);
+const DEFAULT_BRIDGE_HOST = (typeof POSTABLE !== 'undefined' && POSTABLE.location && POSTABLE.location.hostname)
+    ? POSTABLE.location.hostname
+    : '127.0.0.1';
+const DEFAULT_BRIDGE_ENDPOINT = `http://${DEFAULT_BRIDGE_HOST}:8080/api/app/code_oss/state`;
+const MAX_BUFFERED_EVENTS = 200;
+const bridgeOptions = {
+    endpoint: null,
+    flushInterval: 300,
+    retryDelay: 1500,
+};
+const pendingEvents = [];
+let flushHandle = null;
+let flushInFlight = false;
+const docRevisionMap = new Map();
+const commandPoll = {
+    timer: null,
+    pending: false,
+    since: 0,
+    interval: 1200,
+    retryDelay: 4000,
+};
+const COMMAND_TYPES = new Set(['apply_edits', 'replace_full']);
+
+function scheduleFlush(delay) {
+    if (!bridgeOptions.endpoint) {
+        return;
+    }
+    if (flushHandle) {
+        return;
+    }
+    const wait = typeof delay === 'number' && !Number.isNaN(delay)
+        ? Math.max(0, delay)
+        : bridgeOptions.flushInterval;
+    flushHandle = setTimeout(() => {
+        flushHandle = null;
+        flushPending().catch((error) => {
+            console.error('[Mobile Bridge] Flush failed', error);
+        });
+    }, wait);
+}
+
+async function flushPending() {
+    if (flushInFlight) {
+        return;
+    }
+    if (!bridgeOptions.endpoint || pendingEvents.length === 0) {
+        return;
+    }
+    flushInFlight = true;
+    const batch = pendingEvents.splice(0, pendingEvents.length);
+    let retryDelay = null;
+    try {
+        const response = await fetch(bridgeOptions.endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ events: batch }),
+            cache: 'no-store',
+        });
+        if (!response.ok) {
+            retryDelay = bridgeOptions.retryDelay;
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const body = await response.json().catch(() => null);
+        const sequence = Number(body?.data?.sequence);
+        if (!Number.isNaN(sequence)) {
+            commandPoll.since = Math.max(commandPoll.since, sequence);
+        }
+    }
+    catch (error) {
+        console.error('[Mobile Bridge] Failed to push bridge events', error);
+        pendingEvents.splice(0, 0, ...batch);
+        retryDelay = retryDelay !== null ? retryDelay : bridgeOptions.retryDelay;
+    }
+    finally {
+        flushInFlight = false;
+    }
+    if (pendingEvents.length > 0) {
+        scheduleFlush(retryDelay !== null ? retryDelay : bridgeOptions.flushInterval);
+    }
+}
+
+function queueBridgeEvent(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return;
+    }
+    const event = Object.assign({ [BRIDGE_MESSAGE_FLAG]: true }, payload);
+    if (!('timestamp' in event)) {
+        event.timestamp = Date.now();
+    }
+    // Use postMessage to send the event directly to the parent window
+    if (POSTABLE && typeof POSTABLE.postMessage === 'function') {
+        POSTABLE.postMessage(event);
+    } else {
+        console.error('[Mobile Bridge] postMessage is not available.');
+    }
+}
+
+function configureBridgeEndpoint(endpoint, options = {}) {
+    let nextEndpoint = endpoint;
+    if (typeof nextEndpoint === 'string') {
+        nextEndpoint = nextEndpoint.trim();
+        if (nextEndpoint && !/^https?:\/\//i.test(nextEndpoint)) {
+            nextEndpoint = `http://${nextEndpoint}`;
+        }
+        if (nextEndpoint.endsWith('/')) {
+            nextEndpoint = nextEndpoint.slice(0, -1);
+        }
+    }
+    if (nextEndpoint) {
+        bridgeOptions.endpoint = nextEndpoint;
+    }
+    else if (!bridgeOptions.endpoint) {
+        bridgeOptions.endpoint = DEFAULT_BRIDGE_ENDPOINT;
+    }
+    if (options && typeof options === 'object') {
+        if (options.flushInterval !== undefined) {
+            const interval = Number(options.flushInterval);
+            if (!Number.isNaN(interval) && interval >= 50) {
+                bridgeOptions.flushInterval = interval;
+            }
+        }
+        if (options.retryDelay !== undefined) {
+            const retry = Number(options.retryDelay);
+            if (!Number.isNaN(retry) && retry >= 100) {
+                bridgeOptions.retryDelay = retry;
+            }
+        }
+    }
+    if (bridgeOptions.endpoint) {
+        queueBridgeEvent({
+            type: 'bridgeState',
+            configured: true,
+            endpoint: bridgeOptions.endpoint,
+            flushInterval: bridgeOptions.flushInterval,
+            retryDelay: bridgeOptions.retryDelay,
+        });
+        scheduleFlush(0);
+        scheduleCommandPoll(200);
+    }
+}
+function scheduleCommandPoll(delay) {
+    if (commandPoll.timer) {
+        clearTimeout(commandPoll.timer);
+        commandPoll.timer = null;
+    }
+    if (!bridgeOptions.endpoint) {
+        return;
+    }
+    const wait = typeof delay === 'number' && !Number.isNaN(delay)
+        ? Math.max(100, delay)
+        : commandPoll.interval;
+    commandPoll.timer = setTimeout(() => {
+        pollCommands().catch((error) => {
+            console.error('[Mobile Bridge] Command poll failed', error);
+            scheduleCommandPoll(commandPoll.retryDelay);
+        });
+    }, wait);
+}
+async function pollCommands() {
+    if (commandPoll.pending || !bridgeOptions.endpoint) {
+        return;
+    }
+    commandPoll.pending = true;
+    let nextDelay = commandPoll.interval;
+    try {
+        const pollUrl = new URL(bridgeOptions.endpoint);
+        pollUrl.searchParams.set('since', String(commandPoll.since));
+        pollUrl.searchParams.set('types', 'apply_edits,replace_full');
+        const response = await fetch(pollUrl.toString(), { method: 'GET', cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const body = await response.json().catch(() => null);
+        const data = body?.data || {};
+        const events = Array.isArray(data.events) ? data.events : [];
+        let highestSeq = commandPoll.since;
+        for (const command of events) {
+            if (!command || typeof command !== 'object') {
+                continue;
+            }
+            if (!COMMAND_TYPES.has(command.type)) {
+                continue;
+            }
+            try {
+                await processBridgeCommand(command);
+            }
+            catch (error) {
+                console.error('[Mobile Bridge] Failed to process command', error);
+                queueBridgeEvent({ type: 'error', error: String(error?.message || error) });
+            }
+            if (typeof command.seq === 'number' && !Number.isNaN(command.seq)) {
+                highestSeq = Math.max(highestSeq, command.seq);
+            }
+        }
+        const sequence = Number(data.sequence);
+        if (!Number.isNaN(sequence)) {
+            highestSeq = Math.max(highestSeq, sequence);
+        }
+        commandPoll.since = highestSeq;
+    }
+    catch (error) {
+        console.error('[Mobile Bridge] Command poll error', error);
+        nextDelay = commandPoll.retryDelay;
+    }
+    finally {
+        commandPoll.pending = false;
+        scheduleCommandPoll(nextDelay);
+    }
+}
+async function processBridgeCommand(command) {
+    const docId = command?.doc_id;
+    const opId = command?.op_id;
+    if (!docId) {
+        return;
+    }
+    const uri = vscode.Uri.parse(docId);
+    let document;
+    try {
+        document = await vscode.workspace.openTextDocument(uri);
+    }
+    catch (error) {
+        queueBridgeEvent({
+            type: 'error',
+            error: `Failed to open document ${docId}: ${String(error?.message || error)}`,
+        });
+        return;
+    }
+    await vscode.window.showTextDocument(document, { preview: false });
+    if (command.type === 'replace_full') {
+        const workspaceEdit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+        workspaceEdit.replace(uri, fullRange, command.text ?? '');
+        await vscode.workspace.applyEdit(workspaceEdit);
+    }
+    else if (command.type === 'apply_edits') {
+        const edits = Array.isArray(command.edits) ? command.edits : [];
+        if (edits.length > 0) {
+            const workspaceEdit = new vscode.WorkspaceEdit();
+            for (const edit of edits) {
+                const start = edit?.start || {};
+                const end = edit?.end || {};
+                const range = new vscode.Range(new vscode.Position(start.l ?? 0, start.c ?? 0), new vscode.Position(end.l ?? 0, end.c ?? 0));
+                workspaceEdit.replace(uri, range, edit?.text ?? '');
+            }
+            await vscode.workspace.applyEdit(workspaceEdit);
+        }
+    }
+    ackCommand(opId, docId, document.version);
+    emitDocState(vscode.window.activeTextEditor);
+}
+function ackCommand(opId, docId, appliedRev) {
+    if (!opId) {
+        return;
+    }
+    queueBridgeEvent({
+        type: 'ack',
+        op_id: opId,
+        doc_id: docId,
+        applied_rev: appliedRev,
+    });
+    scheduleFlush(0);
+}
+function mapEol(eol) {
+    if (eol === vscode.EndOfLine.CRLF) {
+        return '\r\n';
+    }
+    return '\n';
+}
+function emitDocState(editor) {
+    if (!editor) {
+        return;
+    }
+    const doc = editor.document;
+    if (!doc) {
+        return;
+    }
+    const docId = doc.uri.toString();
+    const rev = doc.version;
+    docRevisionMap.set(docId, rev);
+    queueBridgeEvent({
+        type: 'doc_state',
+        doc_id: docId,
+        rev,
+        text: doc.getText(),
+        languageId: doc.languageId,
+        eol: mapEol(doc.eol),
+        dirty: doc.isDirty,
+    });
+    scheduleFlush(200);
+}
+function emitDocChanges(event) {
+    if (!event || !event.document) {
+        return;
+    }
+    const doc = event.document;
+    const docId = doc.uri.toString();
+    const nextRev = doc.version;
+    const baseRev = Math.max(0, nextRev - 1);
+    docRevisionMap.set(docId, nextRev);
+    const changes = (event.contentChanges || []).map((change) => ({
+        start: {
+            l: change.range.start.line,
+            c: change.range.start.character,
+        },
+        end: {
+            l: change.range.end.line,
+            c: change.range.end.character,
+        },
+        text: change.text,
+    }));
+    queueBridgeEvent({
+        type: 'doc_changes',
+        doc_id: docId,
+        base_rev: baseRev,
+        next_rev: nextRev,
+        changes,
+    });
+    scheduleFlush(bridgeOptions.flushInterval);
+}
 function safeFsPath(uri) {
     if (uri.scheme === 'vscode-remote') {
         return uri.path;
@@ -88,30 +408,7 @@ async function readDirectory(uri, depth) {
     return [...directories, ...files];
 }
 function postToParent(payload) {
-    try {
-        console.log('[Mobile Bridge] Posting message:', payload.type, payload);
-        const message = Object.assign({ [BRIDGE_MESSAGE_FLAG]: true }, payload);
-        
-        // Try different methods to post messages
-        if (typeof self !== 'undefined' && self.parent) {
-            // Web worker context - post to parent
-            self.parent.postMessage(message, '*');
-            console.log('[Mobile Bridge] Posted via self.parent');
-        } else if (typeof window !== 'undefined' && window.parent) {
-            // Window context - post to parent frame
-            window.parent.postMessage(message, '*');
-            console.log('[Mobile Bridge] Posted via window.parent');
-        } else if (POSTABLE && typeof POSTABLE.postMessage === 'function') {
-            // Fallback to global postMessage
-            POSTABLE.postMessage(message, '*');
-            console.log('[Mobile Bridge] Posted via POSTABLE');
-        } else {
-            console.error('[Mobile Bridge] No postMessage method available');
-        }
-    }
-    catch (error) {
-        console.error('[Mobile Bridge] Failed to post message', error);
-    }
+    queueBridgeEvent(payload);
 }
 function postState() {
     const sidebarVisible = !!(vscode.window?.visibleViewColumn);
@@ -132,6 +429,7 @@ function postWorkspaceFolders() {
     postToParent({ type: 'workspaceFolders', folders });
 }
 async function postExplorerRoot(depth = 1) {
+    vscode.window.showInformationMessage('[Mobile Bridge] Reading explorer root!');
     const folders = vscode.workspace.workspaceFolders;
     if (!folders || folders.length === 0) {
         postToParent({ type: 'explorerTree', root: true, entries: [] });
@@ -148,6 +446,7 @@ async function postExplorerRoot(depth = 1) {
             children,
         });
     }
+    console.log('[Mobile Bridge] Posting explorerTree data:', { root: true, entries });
     postToParent({ type: 'explorerTree', root: true, entries });
 }
 async function postExplorerChildren(path, depth = 1) {
@@ -180,34 +479,45 @@ async function openPath(path, opts = {}) {
         postToParent({ type: 'error', error: String(error) });
     }
 }
-function activate(ctx) {
-    console.log('[Mobile Bridge] Extension activated!');
-    console.log('[Mobile Bridge] Workspace folders:', vscode.workspace.workspaceFolders);
-    console.log('[Mobile Bridge] Active editor:', vscode.window.activeTextEditor?.document?.uri?.toString());
-    
-    // Test if we can post messages - send multiple test messages
+function runActivationLogic(ctx) {
+    vscode.window.showInformationMessage('Mobile Bridge is activating!');
+    console.log('[Mobile Bridge] Manual activation triggered.');
+
+    configureBridgeEndpoint(bridgeOptions.endpoint || DEFAULT_BRIDGE_ENDPOINT);
+
     postToParent({ type: 'bridgeActivated', timestamp: Date.now() });
     postToParent({ type: 'test', message: 'Bridge is working!' });
-    
-    // Show a VS Code notification to confirm activation
-    vscode.window.showInformationMessage('Mobile Bridge Extension Activated v0.4.0');
-    
+
     postWorkspaceFolders();
     postToParent({ type: 'chatProviders', providers: chatProviders });
     postState();
+    emitDocState(vscode.window.activeTextEditor);
     postExplorerRoot(1).then(() => {
         console.log('[Mobile Bridge] Explorer root posted');
         if (vscode.window.activeTextEditor) {
             postActiveEditor(vscode.window.activeTextEditor);
         }
     });
+
     const refreshExplorerSoon = scheduleExplorerRefresh(() => postExplorerRoot(1));
     ctx.subscriptions.push(vscode.window.onDidChangeActiveTextEditor((editor) => {
         postActiveEditor(editor);
+        emitDocState(editor);
+    }), vscode.workspace.onDidChangeTextDocument((event) => {
+        emitDocChanges(event);
     }), vscode.workspace.onDidChangeWorkspaceFolders(() => {
         postWorkspaceFolders();
         refreshExplorerSoon();
     }), vscode.workspace.onDidCreateFiles(() => refreshExplorerSoon()), vscode.workspace.onDidDeleteFiles(() => refreshExplorerSoon()), vscode.workspace.onDidRenameFiles(() => refreshExplorerSoon()));
+}
+
+function activate(ctx) {
+    console.log('[Mobile Bridge] Extension loaded. Registering manual activation command.');
+
+    ctx.subscriptions.push(vscode.commands.registerCommand('mobile-bridge.manualActivate', () => {
+        runActivationLogic(ctx);
+    }));
+
     if (POSTABLE && typeof POSTABLE.addEventListener === 'function') {
         POSTABLE.addEventListener('message', async (event) => {
             const data = event.data || {};
@@ -217,12 +527,10 @@ function activate(ctx) {
             console.log('[Mobile Bridge] Processing message type:', data.type);
             const { type, cmd, args } = data;
             if (type === 'hello') {
-                postToParent({ type: 'chatProviders', providers: chatProviders });
-                postState();
-                await postExplorerRoot(1);
-                if (vscode.window.activeTextEditor) {
-                    postActiveEditor(vscode.window.activeTextEditor);
+                if (args?.endpoint) {
+                    configureBridgeEndpoint(args.endpoint, args);
                 }
+                // Do not auto-run logic on hello, wait for manual activation
                 return;
             }
             if (type === 'command') {
@@ -236,6 +544,7 @@ function activate(ctx) {
             }
         });
     }
+
     async function handleCommand(cmd, args) {
         switch (cmd) {
             case 'toggleSidebar':
@@ -246,6 +555,9 @@ function activate(ctx) {
                 return vscode.commands.executeCommand('workbench.action.showCommands');
             case 'openSettingsJSON':
                 return vscode.commands.executeCommand('workbench.action.openSettingsJson');
+            case 'configureBridge':
+                configureBridgeEndpoint(args?.endpoint, args || {});
+                return;
             case 'focusExplorer':
                 return vscode.commands.executeCommand('workbench.view.explorer');
             case 'focusTerminalPanel':
@@ -300,5 +612,25 @@ function activate(ctx) {
                 throw new Error(`Unknown command: ${cmd}`);
         }
     }
+    ctx.subscriptions.push({
+        dispose() {
+            if (pendingEvents.length) {
+                void flushPending();
+            }
+        },
+    });
 }
-function deactivate() { }
+async function deactivate() {
+    if (commandPoll.timer) {
+        clearTimeout(commandPoll.timer);
+        commandPoll.timer = null;
+    }
+    if (pendingEvents.length) {
+        try {
+            await flushPending();
+        }
+        catch (error) {
+            console.error('[Mobile Bridge] Failed to flush on deactivate', error);
+        }
+    }
+}

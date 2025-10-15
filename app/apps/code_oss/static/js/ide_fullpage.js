@@ -22,6 +22,7 @@
   const btnSearch = document.getElementById('btn-search');
   const btnCommand = document.getElementById('btn-command');
   const btnSettings = document.getElementById('btn-settings');
+  const btnDocTestEdit = document.getElementById('btn-doc-test-edit');
   const btnChatRefresh = document.getElementById('btn-chat-refresh');
   const btnDrawerClose = document.querySelector('.drawer-close');
   const btnOpenProject = document.getElementById('btn-open-project');
@@ -36,6 +37,17 @@
   const docCurrentProject = document.getElementById('doc-current-project');
   const docCurrentPath = document.getElementById('doc-current-path');
   const chatSubtitle = document.getElementById('chat-subtitle');
+  const docMonacoContainer = document.getElementById('doc-monaco-container');
+  const docMonacoEditorEl = document.getElementById('doc-monaco-editor');
+
+  const monacoBasePath = '/apps/code_oss/static/vendor/monaco/min';
+  let monacoLoaderPromise = null;
+  let monacoInstance = null;
+  let monacoEditor = null;
+  let monacoModel = null;
+  let monacoDocId = null;
+  let pendingMonacoState = null;
+  let pendingMonacoChanges = [];
 
   const viewTabs = {
     document: tabDocument,
@@ -47,6 +59,17 @@
     full: fullView,
   };
 
+  const bridgeStateEndpoint = `${window.location.origin}/api/app/code_oss/state`;
+  const statePoll = {
+    timer: null,
+    pending: false,
+    lastSeq: 0,
+    interval: 1500,
+    retryDelay: 4000,
+    jitter: 400,
+  };
+  let summaryBootstrapped = false;
+
   let iframeOrigin = null;
   let frameReady = false;
   let activeView = 'full';
@@ -54,6 +77,7 @@
 
   let currentProject = seed.project_id || null;
   let currentFile = seed.file_path || null;
+  let currentDocId = null;
   let connectionLabel = null;
   const bridgeState = {
     installed: false,
@@ -66,6 +90,7 @@
     expanded: new Set(),
     activePath: null,
   };
+  const docRevisions = new Map();
 
   function resolveHost(host) {
     if (!host || host === '0.0.0.0' || host === '127.0.0.1') {
@@ -95,10 +120,403 @@
     if (docCurrentPath) {
       docCurrentPath.textContent = currentFile || 'None selected';
     }
+    setDocumentHasContent(!!currentFile);
+  }
+
+  function scheduleStatePoll(delay) {
+    if (statePoll.timer) {
+      clearTimeout(statePoll.timer);
+      statePoll.timer = null;
+    }
+    const base = typeof delay === 'number' && !Number.isNaN(delay)
+      ? delay
+      : statePoll.interval;
+    const jitterSpan = statePoll.jitter > 0
+      ? Math.floor(Math.random() * statePoll.jitter)
+      : 0;
+    const jitter = jitterSpan > 0 && Math.random() < 0.5 ? -jitterSpan : jitterSpan;
+    const wait = Math.max(300, Math.round(base + jitter));
+    statePoll.timer = setTimeout(runStatePoll, wait);
+  }
+
+  function startBridgePolling(initialDelay = 600) {
+    if (statePoll.timer) return;
+    scheduleStatePoll(initialDelay);
+  }
+
+  async function runStatePoll() {
+    if (statePoll.pending) {
+      scheduleStatePoll(statePoll.interval);
+      return;
+    }
+    statePoll.pending = true;
+    let nextDelay = statePoll.interval;
+    try {
+      const params = statePoll.lastSeq ? `?since=${statePoll.lastSeq}` : '';
+      const response = await fetch(`${bridgeStateEndpoint}${params}`, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const body = await response.json();
+      if (body?.ok) {
+        const data = body.data || {};
+        if (!summaryBootstrapped && data.summary) {
+          applyBridgeSummary(data.summary);
+        }
+        if (typeof data.sequence === 'number') {
+          statePoll.lastSeq = data.sequence;
+        }
+        const events = Array.isArray(data.events) ? data.events : [];
+        if (events.length) {
+          events.forEach((evt) => handleBridgeEvent(evt));
+          const lastEvent = events[events.length - 1];
+          if (lastEvent && typeof lastEvent.seq === 'number') {
+            statePoll.lastSeq = lastEvent.seq;
+          }
+        }
+      } else if (body && body.error) {
+        throw new Error(body.error);
+      }
+    } catch (error) {
+      console.error('[ide_fullpage] Failed to poll bridge state', error);
+      nextDelay = statePoll.retryDelay;
+    } finally {
+      statePoll.pending = false;
+      scheduleStatePoll(nextDelay);
+    }
+  }
+
+  function applyBridgeSummary(summary) {
+    if (!summary || summaryBootstrapped) return;
+    const bootstrapEvents = [];
+    if (summary.state) {
+      bootstrapEvents.push({ type: 'state', ...summary.state });
+    }
+    if (summary.workspace_folders && summary.workspace_folders.length) {
+      bootstrapEvents.push({ type: 'workspaceFolders', folders: summary.workspace_folders });
+    }
+    if (summary.explorer_tree && summary.explorer_tree.type) {
+      bootstrapEvents.push(summary.explorer_tree);
+    }
+    if (summary.chat_providers && summary.chat_providers.length) {
+      bootstrapEvents.push({ type: 'chatProviders', providers: summary.chat_providers });
+    }
+    if (summary.active_editor) {
+      bootstrapEvents.push({ type: 'activeEditor', path: summary.active_editor });
+    }
+    if (summary.bridge) {
+      bootstrapEvents.push({ type: 'bridgeState', ...summary.bridge });
+    }
+    if (Array.isArray(summary.errors) && summary.errors.length) {
+      const lastError = summary.errors[summary.errors.length - 1];
+      if (lastError?.message) {
+        console.warn('[ide_fullpage] Bridge reported previous error:', lastError.message);
+      }
+    }
+    bootstrapEvents.forEach((evt) => handleBridgeEvent(evt));
+    summaryBootstrapped = true;
+  }
+
+  function handleBridgeEvent(data) {
+    if (!data || typeof data !== 'object') return;
+
+    switch (data.type) {
+      case 'state': {
+        const dim = !!(data.sidebarVisible || data.panelVisible);
+        document.body.classList.toggle('dim', dim);
+        break;
+      }
+      case 'explorerTree': {
+        const entries = data.entries || [];
+        if (!entries.length && !data.parent) {
+          explorerState.nodes.clear();
+          explorerState.rootPaths = [];
+          explorerState.expanded.clear();
+          explorerPlaceholder('Workspace is empty.');
+          break;
+        }
+        applyBridgeState({ bridge_installed: true });
+        applyExplorerEntries(entries, data.parent || null);
+        if (!data.parent && !currentProject && explorerState.rootPaths.length) {
+          currentProject = explorerState.rootPaths[0];
+          updateDocPlaceholder();
+          updateSubtitle();
+        }
+        renderExplorerTree();
+        if (!data.parent) {
+          root.classList.add('drawer-open');
+        }
+        break;
+      }
+      case 'doc_state': {
+        if (data.doc_id) {
+          currentDocId = data.doc_id;
+          if (typeof data.rev === 'number') {
+            docRevisions.set(data.doc_id, data.rev);
+          }
+          setMonacoDocument(data.doc_id, data.text, data.languageId);
+          setDocumentHasContent(true);
+        }
+        break;
+      }
+      case 'doc_changes': {
+        if (data.doc_id) {
+          if (typeof data.next_rev === 'number') {
+            docRevisions.set(data.doc_id, data.next_rev);
+          }
+          applyMonacoChanges(data.doc_id, data.changes);
+          setDocumentHasContent(true);
+        }
+        break;
+      }
+      case 'ack': {
+        if (data.doc_id && typeof data.applied_rev === 'number') {
+          docRevisions.set(data.doc_id, data.applied_rev);
+        }
+        break;
+      }
+      case 'chatProviders': {
+        if (Array.isArray(data.providers) && data.providers.length) {
+          const active = data.providers.find((provider) => provider.active);
+          chatSubtitle.textContent = active
+            ? `Showing ${active.label || active.id}`
+            : 'No active provider selected';
+        }
+        break;
+      }
+      case 'chatAttachment': {
+        const placeholder = document.getElementById('chat-placeholder');
+        if (placeholder) {
+          placeholder.innerHTML = '';
+          placeholder.appendChild(data.element || document.createTextNode('Extension attached.'));
+        }
+        break;
+      }
+      case 'activeEditor': {
+        if (data.path) {
+          currentFile = data.path;
+          updateDocPlaceholder();
+          updateSubtitle();
+          if (!explorerState.nodes.has(data.path)) {
+            sendCommand('revealPath', { path: data.path });
+          }
+          ensurePathVisible(data.path);
+          applyBridgeState({ bridge_installed: true });
+          setDocumentHasContent(true);
+          
+          // Show iframe in document view when file is active
+          if (activeView === 'document' && frameShell) {
+            frameShell.style.display = 'block';
+            if (documentFrameTarget && !documentFrameTarget.contains(frameShell)) {
+              documentFrameTarget.appendChild(frameShell);
+            }
+          }
+        } else {
+          // No active editor
+          currentFile = null;
+          currentDocId = null;
+          updateDocPlaceholder();
+          updateSubtitle();
+          setDocumentHasContent(false);
+          
+          // Hide iframe in document view when no file is open
+          if (activeView === 'document' && frameShell) {
+            frameShell.style.display = 'none';
+          }
+        }
+        break;
+      }
+      case 'workspaceFolders': {
+        if (!Array.isArray(data.folders) || !data.folders.length) {
+          explorerPlaceholder('Workspace is empty.');
+        }
+        break;
+      }
+      case 'bridgeState': {
+        applyBridgeState(data);
+        break;
+      }
+      case 'bridgeActivated': {
+        console.log('[ide_fullpage] Bridge activated!', data);
+        applyBridgeState({ bridge_installed: true });
+        // Request initial data
+        setTimeout(() => {
+          sendCommand('requestExplorerTree', { depth: 2 });
+        }, 100);
+        break;
+      }
+      case 'test': {
+        console.log('[ide_fullpage] Test message from bridge:', data.message);
+        break;
+      }
+      default:
+        console.log('[ide_fullpage] Unknown message type:', data.type);
+        break;
+    }
   }
 
   updateSubtitle();
   updateDocPlaceholder();
+  ensureMonacoEditor().catch((error) => {
+    console.error('[ide_fullpage] Failed to bootstrap Monaco editor', error);
+  });
+
+  function setDocumentHasContent(hasContent) {
+    const enabled = !!hasContent;
+    documentView?.classList.toggle('has-doc', enabled);
+    root.classList.toggle('doc-ready', enabled);
+    if (btnDocTestEdit) {
+      btnDocTestEdit.disabled = !enabled;
+    }
+  }
+
+  function buildDocIdFromPath(path) {
+    if (!path) return null;
+    if (path.startsWith('file://') || path.startsWith('vscode-')) {
+      return path;
+    }
+    if (path.startsWith('/')) {
+      return `file://${encodeURI(path)}`;
+    }
+    return `file://${encodeURI(path)}`;
+  }
+
+  function ensureMonacoEditor() {
+    if (monacoEditor && monacoInstance) {
+      return Promise.resolve(monacoInstance);
+    }
+    if (!monacoLoaderPromise) {
+      monacoLoaderPromise = new Promise((resolve, reject) => {
+        const configureAndLoad = () => {
+          if (typeof window.require !== 'function') {
+            reject(new Error('AMD loader not available'));
+            return;
+          }
+          window.require.config({ paths: { vs: `${monacoBasePath}/vs` } });
+          window.require(['vs/editor/editor.main'], (monaco) => {
+            try {
+              monacoInstance = monaco;
+              if (!docMonacoEditorEl) {
+                reject(new Error('Missing Monaco editor container'));
+                return;
+              }
+              monacoEditor = monaco.editor.create(docMonacoEditorEl, {
+                value: '',
+                language: 'plaintext',
+                readOnly: true,
+                automaticLayout: true,
+                minimap: { enabled: false },
+                theme: 'vs-dark',
+                scrollbar: { vertical: 'visible', horizontal: 'auto' },
+                fontFamily: 'Fira Code, JetBrains Mono, Menlo, Consolas, monospace',
+                fontSize: 14,
+              });
+              monacoModel = monacoEditor.getModel();
+              applyPendingMonacoQueues();
+              resolve(monaco);
+            } catch (error) {
+              reject(error);
+            }
+          }, (error) => reject(error));
+        };
+        if (typeof window.require === 'function') {
+          configureAndLoad();
+        } else {
+          const script = document.createElement('script');
+          script.src = `${monacoBasePath}/vs/loader.js`;
+          script.async = true;
+          script.onload = configureAndLoad;
+          script.onerror = () => reject(new Error('Failed to load Monaco loader'));
+          document.head.appendChild(script);
+        }
+      });
+    }
+    return monacoLoaderPromise;
+  }
+
+  function applyPendingMonacoQueues() {
+    if (!monacoEditor || !monacoInstance) return;
+    if (pendingMonacoState) {
+      const state = pendingMonacoState;
+      pendingMonacoState = null;
+      internalSetMonacoDocument(state.docId, state.text, state.languageId);
+    }
+    if (pendingMonacoChanges.length) {
+      const queue = pendingMonacoChanges.slice();
+      pendingMonacoChanges = [];
+      queue.forEach(({ docId, changes }) => internalApplyMonacoChanges(docId, changes));
+    }
+  }
+
+  function internalSetMonacoDocument(docId, text, languageId) {
+    if (!monacoInstance || !monacoEditor || !docId) return;
+    const value = typeof text === 'string' ? text : (monacoModel ? monacoModel.getValue() : '');
+    const lang = languageId || 'plaintext';
+    if (!monacoModel || monacoDocId !== docId) {
+      const previousModel = monacoModel;
+      monacoModel = monacoInstance.editor.createModel(value, lang);
+      monacoDocId = docId;
+      monacoEditor.setModel(monacoModel);
+      if (previousModel && previousModel !== monacoModel) {
+        previousModel.dispose();
+      }
+    } else if (typeof text === 'string' && monacoModel.getValue() !== text) {
+      monacoModel.setValue(text);
+    }
+    try {
+      monacoInstance.editor.setModelLanguage(monacoModel, lang);
+    } catch (error) {
+      console.warn('[ide_fullpage] Failed to set Monaco language', lang, error);
+    }
+    applyPendingMonacoQueues();
+  }
+
+  function setMonacoDocument(docId, text, languageId) {
+    if (!docId) return;
+    if (!monacoEditor || !monacoInstance) {
+      pendingMonacoState = { docId, text, languageId };
+      ensureMonacoEditor().catch((error) => {
+        console.error('[ide_fullpage] Failed to load Monaco editor', error);
+      });
+      return;
+    }
+    pendingMonacoState = null;
+    internalSetMonacoDocument(docId, text, languageId);
+  }
+
+  function internalApplyMonacoChanges(docId, changes) {
+    if (!monacoModel || monacoDocId !== docId || !monacoInstance) return;
+    if (!Array.isArray(changes) || !changes.length) return;
+    const edits = [];
+    changes.forEach((change) => {
+      const start = change?.start || {};
+      const end = change?.end || {};
+      const startLine = (start.l ?? 0) + 1;
+      const startColumn = (start.c ?? 0) + 1;
+      const endLine = (end.l ?? 0) + 1;
+      const endColumn = (end.c ?? 0) + 1;
+      edits.push({
+        range: new monacoInstance.Range(startLine, startColumn, endLine, endColumn),
+        text: change?.text ?? '',
+        forceMoveMarkers: true,
+      });
+    });
+    if (edits.length) {
+      monacoModel.applyEdits(edits);
+    }
+  }
+
+  function applyMonacoChanges(docId, changes) {
+    if (!docId || !Array.isArray(changes) || !changes.length) return;
+    if (!monacoEditor || !monacoModel || monacoDocId !== docId) {
+      pendingMonacoChanges.push({ docId, changes });
+      ensureMonacoEditor().catch((error) => {
+        console.error('[ide_fullpage] Failed to load Monaco editor for changes', error);
+      });
+      return;
+    }
+    internalApplyMonacoChanges(docId, changes);
+  }
 
   function hideFrame() {
     if (frame) frame.classList.add('is-hidden');
@@ -245,6 +663,7 @@
     updateDocPlaceholder();
     updateSubtitle();
     sendCommand('openPath', { path });
+    setDocumentHasContent(true);
     
     // If in document view, show the iframe now that we have a file
     if (activeView === 'document' && frameShell) {
@@ -259,6 +678,45 @@
   btnCommand?.addEventListener('click', () => sendCommand('showCommands'));
   btnSettings?.addEventListener('click', () => sendCommand('openSettingsJSON'));
   btnChatRefresh?.addEventListener('click', () => sendCommand('refreshChat'));
+  btnDocTestEdit?.addEventListener('click', async () => {
+    if (btnDocTestEdit.disabled) return;
+    const docId = currentDocId || buildDocIdFromPath(currentFile);
+    if (!docId) {
+      window.alert('No focused document available for edits yet.');
+      return;
+    }
+    const baseRev = docRevisions.get(docId);
+    const timestamp = new Date().toISOString();
+    const payload = {
+      doc_id: docId,
+      base_rev: baseRev,
+      edits: [
+        {
+          start: { l: 0, c: 0 },
+          end: { l: 0, c: 0 },
+          text: `// inserted via mobile wrapper ${timestamp}\n`,
+        },
+      ],
+    };
+    btnDocTestEdit.disabled = true;
+    try {
+      const response = await fetch('/api/app/code_oss/edits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body?.ok) {
+        throw new Error(body?.error || `HTTP ${response.status}`);
+      }
+      console.log('[ide_fullpage] Queued sample edit', body?.data);
+    } catch (error) {
+      console.error('[ide_fullpage] Failed to queue sample edit', error);
+      window.alert(`Failed to queue edit: ${error?.message || error}`);
+    } finally {
+      btnDocTestEdit.disabled = false;
+    }
+  });
 
   function normalizeEntry(raw) {
     if (!raw) return null;
@@ -457,6 +915,9 @@
 
   async function startServer({ headline, detail } = {}) {
     hideFrame();
+    summaryBootstrapped = false;
+    statePoll.lastSeq = 0;
+    scheduleStatePoll(500);
     const shouldAutoSwitch = activeView !== 'document';
     if (!shouldAutoSwitch) {
       // Ensure the frame shell lives inside the document target while reloading.
@@ -505,8 +966,19 @@
   testBridgeBtn.addEventListener('click', () => {
     console.log('[ide_fullpage] Sending manual hello to bridge');
     if (frame?.contentWindow) {
-      frame.contentWindow.postMessage({ _mobileShell: true, type: 'hello' }, '*');
+      const bridgeArgs = {
+        endpoint: bridgeStateEndpoint,
+        flushInterval: statePoll.interval,
+        retryDelay: statePoll.retryDelay,
+      };
+      frame.contentWindow.postMessage({ _mobileShell: true, type: 'hello', args: bridgeArgs }, '*');
       setTimeout(() => {
+        frame.contentWindow.postMessage({
+          _mobileShell: true,
+          type: 'command',
+          cmd: 'configureBridge',
+          args: bridgeArgs,
+        }, '*');
         frame.contentWindow.postMessage({ 
           _mobileShell: true, 
           type: 'command', 
@@ -557,6 +1029,10 @@
       explorerState.activePath = null;
       explorerPlaceholder('Loading workspace…');
 
+      summaryBootstrapped = false;
+      statePoll.lastSeq = 0;
+      scheduleStatePoll(500);
+
       const { host, port } = data;
       if (port) {
         const resolvedHost = resolveHost(host);
@@ -576,8 +1052,15 @@
     showFrame();
     if (statusCard) statusCard.style.display = 'none';
     // Send hello to establish communication
-    frame.contentWindow?.postMessage({ _mobileShell: true, type: 'hello' }, '*');
+    const bridgeArgs = {
+      endpoint: bridgeStateEndpoint,
+      flushInterval: statePoll.interval,
+      retryDelay: statePoll.retryDelay,
+    };
+    frame.contentWindow?.postMessage({ _mobileShell: true, type: 'hello', args: bridgeArgs }, '*');
+    startBridgePolling(300);
     setTimeout(() => {
+      sendCommand('configureBridge', bridgeArgs);
       sendCommand('requestExplorerTree');
       if (seed.file_path) {
         sendCommand('openPath', {
@@ -601,120 +1084,15 @@
 
   window.addEventListener('message', (event) => {
     const data = event.data || {};
-    
-    // DEBUG: Log ALL messages to see what's happening
-    console.log('[ide_fullpage] Message received:', {
-      origin: event.origin,
-      data: data,
-      hasMobileBridge: !!data._mobileBridge,
-      hasMobileShell: !!data._mobileShell,
-      type: data.type
-    });
-    
-    if (!data || !data._mobileBridge) return;
+    if (data && data._mobileBridge) {
+      handleBridgeEvent(data);
+    }
+  });
 
-    switch (data.type) {
-      case 'state': {
-        const dim = !!(data.sidebarVisible || data.panelVisible);
-        document.body.classList.toggle('dim', dim);
-        break;
-      }
-      case 'explorerTree': {
-        const entries = data.entries || [];
-        if (!entries.length && !data.parent) {
-          explorerState.nodes.clear();
-          explorerState.rootPaths = [];
-          explorerState.expanded.clear();
-          explorerPlaceholder('Workspace is empty.');
-          break;
-        }
-        applyBridgeState({ bridge_installed: true });
-        applyExplorerEntries(entries, data.parent || null);
-        if (!data.parent && !currentProject && explorerState.rootPaths.length) {
-          currentProject = explorerState.rootPaths[0];
-          updateDocPlaceholder();
-          updateSubtitle();
-        }
-        renderExplorerTree();
-        if (!data.parent) {
-          root.classList.add('drawer-open');
-        }
-        break;
-      }
-      case 'chatProviders': {
-        if (Array.isArray(data.providers) && data.providers.length) {
-          const active = data.providers.find((provider) => provider.active);
-          chatSubtitle.textContent = active
-            ? `Showing ${active.label || active.id}`
-            : 'No active provider selected';
-        }
-        break;
-      }
-      case 'chatAttachment': {
-        const placeholder = document.getElementById('chat-placeholder');
-        if (placeholder) {
-          placeholder.innerHTML = '';
-          placeholder.appendChild(data.element || document.createTextNode('Extension attached.'));
-        }
-        break;
-      }
-      case 'activeEditor': {
-        if (data.path) {
-          currentFile = data.path;
-          updateDocPlaceholder();
-          updateSubtitle();
-          if (!explorerState.nodes.has(data.path)) {
-            sendCommand('revealPath', { path: data.path });
-          }
-          ensurePathVisible(data.path);
-          applyBridgeState({ bridge_installed: true });
-          
-          // Show iframe in document view when file is active
-          if (activeView === 'document' && frameShell) {
-            frameShell.style.display = 'block';
-            if (documentFrameTarget && !documentFrameTarget.contains(frameShell)) {
-              documentFrameTarget.appendChild(frameShell);
-            }
-          }
-        } else {
-          // No active editor
-          currentFile = null;
-          updateDocPlaceholder();
-          updateSubtitle();
-          
-          // Hide iframe in document view when no file is open
-          if (activeView === 'document' && frameShell) {
-            frameShell.style.display = 'none';
-          }
-        }
-        break;
-      }
-      case 'workspaceFolders': {
-        if (!Array.isArray(data.folders) || !data.folders.length) {
-          explorerPlaceholder('Workspace is empty.');
-        }
-        break;
-      }
-      case 'bridgeState': {
-        applyBridgeState(data);
-        break;
-      }
-      case 'bridgeActivated': {
-        console.log('[ide_fullpage] Bridge activated!', data);
-        applyBridgeState({ bridge_installed: true });
-        // Request initial data
-        setTimeout(() => {
-          sendCommand('requestExplorerTree', { depth: 2 });
-        }, 100);
-        break;
-      }
-      case 'test': {
-        console.log('[ide_fullpage] Test message from bridge:', data.message);
-        break;
-      }
-      default:
-        console.log('[ide_fullpage] Unknown message type:', data.type);
-        break;
+  window.addEventListener('beforeunload', () => {
+    if (statePoll.timer) {
+      clearTimeout(statePoll.timer);
+      statePoll.timer = null;
     }
   });
 

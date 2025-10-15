@@ -1,76 +1,66 @@
-# Code OSS App: Current Status and Recent Fixes
+# Code OSS App: Current Status
 
-## Version Info
-- **App Version**: 0.2.0
-- **Bridge Extension**: 0.3.0
-- **Last Updated**: 2024-10-14
+## Version Snapshot
+- **App Wrapper** (`app/apps/code_oss/templates`, `static/js/ide_fullpage.js`): 0.2.1  
+- **Bridge Extension** (`mobile-bridge` VSIX): 0.6.0  
+- **Backend Blueprint** (`app/apps/code_oss/backend.py`): rev 2025-10-12  
+- **Last Reviewed**: 2025-10-12
 
 ## Overview
-The Code OSS app integrates code-server (VS Code in the browser) into the Termux Extensions framework with a mobile-optimized interface. The app features a "mobile bridge" extension for communication between the wrapper and VS Code, separate Document and Full IDE viewing modes, and persistent sessions across browser refreshes. Most major issues have been resolved with comprehensive debugging added.
+The Code OSS app embeds the bundled `code-server` runtime inside the Termux Extensions framework. A mobile-focused wrapper presents:
+
+1. A **Document view** intended to mirror the currently focused Monaco editor.
+2. A **Full IDE view** that exposes the entire Code OSS interface in a drawer-based layout.
+3. A **chat/assistant rail** reserved for future bridge extensions.
+
+Communication between the wrapper and code-server now flows through a backend state cache instead of direct `postMessage` calls. This change works around browser security restrictions that prevent VS Code web extensions from talking directly to parent frames.
 
 ## Wiring Summary
+
 ### Backend (`app/apps/code_oss/backend.py`)
-- Starts/stops the code-server worker inside a framework shell.
-- Packages the bridge as a VSIX (`app/apps/code_oss/bridge_extension/mobile-bridge-0.3.0.vsix`) and installs it via `code-server --install-extension`.
-- Reports bridge install state/version by running `code-server --list-extensions`.
-- Exposes `/api/app/code_oss/status`, `/start`, `/stop`, `/project`, `/bridge/install`, and `/file` endpoints.
-- **NEW**: Uses persistent directories for user data, extensions, and config at `~/.cache/termux_extensions/code_oss/`
-- **NEW**: Passes `--disable-workspace-trust` flag to prevent security prompts
+- Launches code-server inside a framework shell with persistent `user-data`, `extensions`, and `config` directories.
+- Installs the vendored bridge extension (`mobile-bridge-0.6.0.vsix`) on startup or via `/api/app/code_oss/bridge/install`.
+- Provides REST endpoints: `/status`, `/start`, `/stop`, `/project`, `/file`, and the new `/state` stream.
+- `/state` accepts POSTed bridge events, stores them in a bounded ring buffer, and exposes snapshots/past events via `GET /api/app/code_oss/state?since=<seq>`.
+- Resets the event cache whenever the code-server shell restarts to avoid leaking stale explorer/document metadata.
 
 ### Bridge Extension (`app/apps/code_oss/bridge_extension`)
-- **FIXED**: Now declared with `extensionKind: ["ui", "workspace"]` for web compatibility
-- **FIXED**: Message flag alignment - receives `_mobileShell`, sends `_mobileBridge`
-- **NEW**: Debug logging added with `[Mobile Bridge]` prefix for troubleshooting
-- Responds to `_mobileShell` postMessages:
-  - Emits explorer listings (`explorerTree`), active editor notifications, and workspace folders.
-  - Executes commands (`openPath`, `requestExplorerChildren`, etc.) inside VS Code.
+- Queues bridge payloads and flushes them to `/api/app/code_oss/state` with `fetch`, retrying on transient failures.
+- Accepts a new `_mobileShell` command `configureBridge` to update endpoint, flush cadence, and retry delays from the wrapper.
+- Still emits explorer listings, active-editor notifications, workspace folder updates, and chat provider metadata.
+- Exposes the same command surface (`openPath`, `requestExplorerTree`, `requestExplorerChildren`, etc.) so the wrapper can manipulate the VS Code session.
 
-### Launcher UI (`app/apps/code_oss/template.html`, `main.js`)
-- “Install/Reinstall Bridge” button triggers the `/bridge/install` endpoint.
-- Status badge reflects CLI-reported bridge availability.
-- Launch button opens `/api/app/code_oss/fullpage`.
+### Full-Page Wrapper (`app/apps/code_oss/static/js/ide_fullpage.js`)
+- On iframe load, sends a `hello` message and a `configureBridge` command with the correct backend endpoint.
+- Polls `/api/app/code_oss/state` every ~1.5s with jitter, applying new events and bootstrapping from the cached summary on first load.
+- Automatically reinitialises the poller when the project changes or the shell restarts.
+- Keeps the manual “Test Bridge” control, now augmented to push `configureBridge` as well as `hello`.
 
-### Full-Page Wrapper (`app/apps/code_oss/templates/fullpage.html`, `static/js/ide_fullpage.js`)
-- **FIXED**: Separate iframes for Document (Monaco) and Full IDE views
-- **FIXED**: Document view now shows standalone Monaco editor via `document-viewer.html`
-- **NEW**: Monaco vendored locally at `/app/apps/code_oss/static/vendor/monaco/`
-- **NEW**: Debug logging added with `[Bridge Wrapper]` and `[ide_fullpage]` prefixes
-- **NEW**: "Test Bridge" button added for manual debugging
-- Drawer renders tree from bridge `explorerTree` messages
-- Status label shows bridge state in real time
+### Launcher UI (`app/apps/code_oss/main.js`, `template.html`)
+- Shows bridge install status and allows reinstall via the backend CLI helper.
+- Opens the full-page IDE wrapper at `/api/app/code_oss/fullpage`.
+- Provides “Open Project…” and “Back” affordances in the drawer header.
 
-## Working Behaviours
-- Starting/stopping code-server through the app shell succeeds ✅
-- Bridge VSIX installs cleanly (CLI, launcher button) ✅
-- "Open Project…" restarts code-server with a new workspace path ✅
-- The full IDE tab loads Code OSS and extension shows `termux.mobile-bridge` ✅
-- Sessions persist across browser refreshes ✅
-- Document tab shows standalone Monaco editor ✅
-- Bridge extension compatible with web version of VS Code ✅
+## Behaviours Confirmed After Update
+- ✅ Bridge extension packages cleanly with `vsce` → `mobile-bridge-0.6.0.vsix`.
+- ✅ `/state` endpoint accepts batched events and returns cached summaries with `sequence` cursors.
+- ✅ Wrapper poller advances `since` cursors and replays bridge events as they arrive.
+- ✅ “Open Project…” still restarts the worker and preserves persistence directories.
+- ✅ Back button + hamburger placement matches the requested layout.
 
-## Current Status
-| Feature | Expected | Actual | Status |
+## Known Gaps
+| Area | Expected | Current Behaviour | Notes |
 | --- | --- | --- | --- |
-| Session persistence | Maintain state across refreshes | Works with persistent directories | ✅ Fixed |
-| Document tab | Standalone Monaco view | Shows Monaco editor separately | ✅ Fixed |
-| Bridge compatibility | Install in web VS Code | Works with `["ui", "workspace"]` | ✅ Fixed |
-| Message communication | Bidirectional messages | Messages flow with correct flags | ✅ Fixed |
-| Explorer drawer | Tree of workspace files | May need manual trigger | ⚠️ Debug mode |
+| Document view | Mirror focused Monaco editor only | Still renders the full IDE iframe | Requires bridge-driven Monaco embedding or webview approach. |
+| Explorer drawer | Folder/file tree synced with VS Code | Bridge events arriving, but drawer still shows placeholder until event cadence verified | Needs deeper debugging with real payloads once bridge is polled live. |
+| Chat rail | Extension-provided panel | Placeholder only | Awaiting final chat extension scope. |
+| Extension install UX | Report success & diagnostics | Button triggers CLI, but no frontend toast/log surface | Capture backend response + display state in launcher. |
 
-## Fixes Applied
-1. **Message flag alignment**: Fixed mismatch between `_mobileShell` and `_mobileBridge` flags
-2. **Extension compatibility**: Changed `extensionKind` to `["ui", "workspace"]` for web support  
-3. **Session persistence**: Added persistent directories and `--disable-workspace-trust` flag
-4. **Document view**: Implemented separate Monaco editor instance with vendored Monaco library
-5. **Debug logging**: Added comprehensive logging in both extension and wrapper
+## Next Steps / Open Questions
+1. **Validate live explorer payloads**: confirm the new polling flow delivers `explorerTree` events end-to-end. Instrument backend logs if the queue stays empty.
+2. **Decide on the document view approach**: either continue with the full iframe and add native Monaco mirroring via the bridge, or pivot to a VS Code webview that streams editor content.
+3. **State diffing on the wrapper**: dedupe explorer updates to avoid rerender storms once large workspaces are opened.
+4. **Surface bridge diagnostics**: expose `/state` error history in the UI so users can see when the bridge fails to push state.
+5. **Longer term**: explore a backend watcher (filesystem + code-server REST APIs) to populate explorer/chat panes even when the bridge is paused.
 
-## Debugging the Explorer
-If the explorer doesn't populate immediately:
-1. Open browser console (F12) and look for debug messages:
-   - `[Mobile Bridge]` messages from the extension
-   - `[Bridge Wrapper]` or `[ide_fullpage]` messages from the wrapper
-2. Click the "Test Bridge" button to manually trigger communication
-3. Check that messages show:
-   - Extension receiving: `{_mobileShell: true, type: "hello"}`
-   - Extension sending: `{_mobileBridge: true, type: "explorerTree", ...}`
-4. If no messages appear, the extension may not be activated - try refreshing the page
+_See `TODO.md` (§ Code-OSS Full-Page App Integration) for the task-level checklist that depends on this status update._

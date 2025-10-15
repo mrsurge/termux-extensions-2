@@ -42,13 +42,14 @@ export default function initCodeOSS(container, _api, host) {
 
   const statusBox = container.querySelector('#code-oss-status');
   const statusDetail = container.querySelector('#code-oss-status-detail');
+  const startBtn = container.querySelector('#code-oss-start');
   const launchBtn = container.querySelector('#code-oss-launch');
   const stopBtn = container.querySelector('#code-oss-stop');
   const copyBtn = container.querySelector('#code-oss-copy-link');
   const bridgeBtn = container.querySelector('#code-oss-install-bridge');
   const bridgeStatus = container.querySelector('#code-oss-bridge-status');
 
-  if (!statusBox || !launchBtn || !stopBtn || !copyBtn) {
+  if (!statusBox || !startBtn || !launchBtn || !stopBtn || !copyBtn) {
     return;
   }
 
@@ -83,36 +84,42 @@ export default function initCodeOSS(container, _api, host) {
       const data = await apiCall('/api/app/code_oss/status');
       if (data.running) {
         setStatus('running', 'Server is running', formatStatus(data.host, data.port, data.project_path, data.bridge_installed, data.bridge_version));
+        startBtn.disabled = true;
         launchBtn.disabled = false;
         stopBtn.disabled = false;
       } else {
         setStatus('idle', 'Server is stopped', 'Launch the IDE to start a fresh session.');
-        launchBtn.disabled = false;
+        startBtn.disabled = false;
+        launchBtn.disabled = true;
         stopBtn.disabled = true;
       }
       updateBridgeState(data);
     } catch (error) {
       setStatus('error', 'Status unavailable', error.message || 'Unknown error');
-      launchBtn.disabled = false;
+      startBtn.disabled = false;
+      launchBtn.disabled = true;
       stopBtn.disabled = false;
       updateBridgeState({ error: error.message });
     }
   }
 
-  launchBtn?.addEventListener('click', async () => {
-    launchBtn.disabled = true;
+  startBtn?.addEventListener('click', async () => {
+    startBtn.disabled = true;
     setStatus('checking', 'Starting server…', 'Booting the bundled code-server binary.');
     try {
       const data = await apiCall('/api/app/code_oss/start', { method: 'POST' });
       host?.toast?.('Code OSS started');
-      window.open('/api/app/code_oss/fullpage', '_blank');
       updateBridgeState(data);
       await refreshStatus();
     } catch (error) {
-      launchBtn.disabled = false;
+      startBtn.disabled = false;
       host?.toast?.(`Start failed: ${error.message}`, { variant: 'error' });
       setStatus('error', 'Failed to start', error.message || 'Unknown error');
     }
+  });
+
+  launchBtn?.addEventListener('click', () => {
+    window.open('/api/app/code_oss/fullpage', '_blank');
   });
 
   stopBtn?.addEventListener('click', async () => {
