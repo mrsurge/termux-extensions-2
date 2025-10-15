@@ -259,6 +259,9 @@ function activate(ctx) {
             configureBridgeFromSettings();
         }
     }));
+
+    // Automatically run the activation logic on startup
+    runActivationLogic(ctx);
 }
 
 function deactivate() {
