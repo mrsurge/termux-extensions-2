@@ -44,7 +44,7 @@ const chatProviders = [
 
 const bridgeOptions = {
     endpoint: null,
-    token: null, // For future use
+    token: null,
 };
 
 async function httpPost(body) {
@@ -59,7 +59,7 @@ async function httpPost(body) {
                 'Content-Type': 'application/json',
                 ...(bridgeOptions.token ? { 'Authorization': `Bearer ${bridgeOptions.token}` } : {})
             },
-            body: JSON.stringify({ events: [body] }), // Send as a batch of one
+            body: JSON.stringify({ events: [body] }),
         });
         if (!res.ok) {
             throw new Error(`HTTP ${res.status}`);
@@ -67,24 +67,20 @@ async function httpPost(body) {
         return res.json().catch(() => ({}));
     } catch (error) {
         console.error('[Mobile Bridge] Failed to POST event:', error);
-        // Do not re-throw, as it could crash the extension host
     }
 }
 
-function configureBridgeEndpoint(endpoint, options = {}) {
-    let nextEndpoint = endpoint;
-    if (typeof nextEndpoint === 'string') {
-        nextEndpoint = nextEndpoint.trim();
-        if (nextEndpoint && !/^https?:\/\//i.test(nextEndpoint)) {
-            nextEndpoint = `http://${nextEndpoint}`;
-        }
-        if (nextEndpoint.endsWith('/')) {
-            nextEndpoint = nextEndpoint.slice(0, -1);
-        }
+function configureBridgeFromSettings() {
+    const config = vscode.workspace.getConfiguration('mobile-bridge');
+    const endpoint = config.get('endpoint');
+    const token = config.get('token');
+
+    if (endpoint) {
+        bridgeOptions.endpoint = endpoint;
+        console.log('[Mobile Bridge] Endpoint configured from settings:', bridgeOptions.endpoint);
     }
-    if (nextEndpoint) {
-        bridgeOptions.endpoint = nextEndpoint;
-        console.log('[Mobile Bridge] Endpoint configured:', bridgeOptions.endpoint);
+    if (token) {
+        bridgeOptions.token = token;
     }
 }
 
@@ -213,6 +209,9 @@ async function openPath(path, opts = {}) {
 }
 
 async function runActivationLogic(ctx) {
+    // 1. Configure from settings first
+    configureBridgeFromSettings();
+
     vscode.window.showInformationMessage('Mobile Bridge is activating!');
     console.log('[Mobile Bridge] Manual activation triggered.');
 
@@ -235,7 +234,7 @@ async function runActivationLogic(ctx) {
 
     const activeEditor = vscode.window.activeTextEditor;
     if (activeEditor) {
-        await httpPost({ [BRIDGE_MESSAGE_FLAG]: true, type: 'activeEditor', path: activeEditor ? safeFsPath(activeEditor.document.uri) : null });
+        await httpPost({ [BRIDGE_MESSAGE_FLAG]: true, type: 'activeEditor', path: safeFsPath(activeEditor.document.uri) });
     }
 
     ctx.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(async (editor) => {
@@ -253,24 +252,13 @@ function activate(ctx) {
         runActivationLogic(ctx);
     }));
 
-    const postable = (typeof self !== 'undefined') ? self : undefined;
-    if (postable && typeof postable.addEventListener === 'function') {
-        postable.addEventListener('message', async (event) => {
-            const data = event.data || {};
-            if (!data || !data[SHELL_MESSAGE_FLAG]) return;
-
-            const { type, cmd, args } = data;
-            if (type === 'hello') {
-                if (args?.endpoint) {
-                    configureBridgeEndpoint(args.endpoint, args);
-                }
-                return;
-            }
-            if (type === 'command') {
-                // Command handling from parent window can be added here if needed
-            }
-        });
-    }
+    // Also listen for configuration changes
+    ctx.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('mobile-bridge')) {
+            console.log('[Mobile Bridge] Configuration changed, re-configuring.');
+            configureBridgeFromSettings();
+        }
+    }));
 }
 
 function deactivate() {

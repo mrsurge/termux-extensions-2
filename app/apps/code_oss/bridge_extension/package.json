@@ -3,7 +3,7 @@
   "displayName": "Termux Mobile Bridge",
   "description": "Bridges the Termux Extensions mobile shell with VS Code Web for explorer and focus sync.",
   "publisher": "termux",
-  "version": "0.7.9",
+  "version": "0.8.1",
   "engines": {
     "vscode": "^1.92.0"
   },
@@ -17,6 +17,21 @@
     "onView:mobileBridgeControlView"
   ],
   "contributes": {
+    "configuration": {
+      "title": "Mobile Bridge",
+      "properties": {
+        "mobile-bridge.endpoint": {
+          "type": "string",
+          "default": "",
+          "description": "The endpoint URL for the mobile bridge backend."
+        },
+        "mobile-bridge.token": {
+          "type": "string",
+          "default": "",
+          "description": "The optional bearer token for the mobile bridge backend."
+        }
+      }
+    },
     "views": {
       "explorer": [
         {
