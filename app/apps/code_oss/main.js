@@ -119,7 +119,7 @@ export default function initCodeOSS(container, _api, host) {
   });
 
   launchBtn?.addEventListener('click', () => {
-    window.open('/api/app/code_oss/fullpage', '_blank');
+    window.location.assign('/api/app/code_oss/fullpage');
   });
 
   stopBtn?.addEventListener('click', async () => {
