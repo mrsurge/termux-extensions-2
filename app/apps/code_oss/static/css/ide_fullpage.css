@@ -551,6 +551,48 @@ body {
   color: var(--fg-muted);
 }
 
+/* From Guide: C-2 */
+.ide-footer { position: fixed; left: 0; right: 0; bottom: 0; height: 58px; z-index: 20; display: flex; align-items: center; justify-content: flex-end; padding: 0 20px; background: rgba(9, 14, 27, 0.88); backdrop-filter: blur(12px); border-top: 1px solid var(--border); }
+.ide-chat  { position: fixed; left: 0; right: 0; bottom: 58px; height: 260px; z-index: 15; transition: transform .18s ease; }
+#ide-root.assistant-collapsed .ide-chat { transform: translateY(100%); }
+
+/* From Guide: B */
+#ide-root.mode-document #ide-frame-shell {
+  position: absolute !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  clip-path: inset(50%) !important;
+  border: 0 !important;
+}
+
+/* From Guide: A-1 */
+@media (max-width: 900px) {
+  #ide-root.mode-document {
+    --subheader-h: 48px;  /* adjust if your subheader is taller */
+    --footer-h: 0px;      /* toggled by assistant state in JS */
+  }
+
+  #ide-root.mode-document .ide-main {
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  #ide-root.mode-document #document-view .doc-monaco-container {
+    position: relative;
+    inset: 0;
+    width: 100vw;
+    height: calc(100vh - var(--subheader-h) - var(--footer-h));
+    overflow: hidden; /* Monaco handles its own scroll */
+    border: 0 !important;
+    background: transparent !important;
+  }
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -569,7 +611,6 @@ body {
 @media (max-width: 600px) {
   #ide-root {
     padding-top: 58px;
-    padding-bottom: calc(var(--chat-height) + 12px);
   }
 
   .ide-topbar {
@@ -583,8 +624,7 @@ body {
   }
 
   .ide-main {
-    margin: 12px;
-    margin-bottom: calc(var(--chat-height) + 18px);
+    margin: 0;
   }
 
   .ide-tabbar {

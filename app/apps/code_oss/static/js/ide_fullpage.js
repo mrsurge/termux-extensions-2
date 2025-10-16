@@ -100,26 +100,14 @@
   }
 
   function updateSubtitle() {
-    const parts = [];
-    if (currentProject) parts.push(currentProject);
-    if (currentFile) parts.push(currentFile);
-
-    if (parts.length) {
-      subtitleEl.textContent = parts.join(' · ');
-    } else if (connectionLabel) {
-      subtitleEl.textContent = connectionLabel;
-    } else {
-      subtitleEl.textContent = 'Ready when the server starts…';
-    }
+    const project = currentProject ? (currentProject.split('/').pop() || currentProject) : 'Code IDE';
+    subtitleEl.textContent = project;
   }
 
   function updateDocPlaceholder() {
-    if (docCurrentProject) {
-      docCurrentProject.textContent = currentProject || 'Not selected';
-    }
-    if (docCurrentPath) {
-      docCurrentPath.textContent = currentFile || 'None selected';
-    }
+    const file = currentFile ? (currentFile.split('/').pop() || currentFile) : 'None';
+    docCurrentPath.textContent = file;
+    docCurrentProject.textContent = currentProject ? (currentProject.split('/').pop() || currentProject) : 'Not selected';
     setDocumentHasContent(!!currentFile);
   }
 
@@ -1120,4 +1108,26 @@
   hideFrame();
   root.classList.add('mode-document');
   startServer();
+
+  async function initAssistantToggle() {
+    const btnToggleAssistant = document.getElementById('btn-toggle-assistant');
+    if (!btnToggleAssistant) return;
+    const stateKey = 'code_oss.assistant_collapsed';
+    let isCollapsed = await window.teState.get(stateKey, false);
+
+    function applyState(collapsed) {
+        root.classList.toggle('assistant-collapsed', collapsed);
+        btnToggleAssistant.textContent = collapsed ? '▲' : '▼';
+    }
+
+    applyState(isCollapsed);
+
+    btnToggleAssistant.addEventListener('click', () => {
+        isCollapsed = !isCollapsed;
+        applyState(isCollapsed);
+        window.teState.set(stateKey, isCollapsed);
+    });
+  }
+
+  initAssistantToggle();
 })();
