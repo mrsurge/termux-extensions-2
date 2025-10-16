@@ -657,20 +657,35 @@
     frame.contentWindow.postMessage(payload, '*');
   }
 
-  // File will be opened directly in Code OSS frame for live updates
-  function openFileInEditor(path) {
+  async function openFileInEditor(path) {
     currentFile = path;
     updateDocPlaceholder();
     updateSubtitle();
+
+    // Keep the full IDE in sync
     sendCommand('openPath', { path });
-    setDocumentHasContent(true);
-    
-    // If in document view, show the iframe now that we have a file
-    if (activeView === 'document' && frameShell) {
-      frameShell.style.display = 'block';
-      if (documentFrameTarget && !documentFrameTarget.contains(frameShell)) {
-        documentFrameTarget.appendChild(frameShell);
+
+    // Directly fetch content for the Monaco mirror view for a faster user experience
+    try {
+      const response = await fetch(`/api/app/code_oss/file?path=${encodeURIComponent(path)}`);
+      const body = await response.json();
+      if (!response.ok || !body.ok) {
+        throw new Error(body.error || `HTTP ${response.status}`);
       }
+      const fileData = body.data || {};
+      const docId = buildDocIdFromPath(path);
+      // Guess language from file extension
+      const language = monacoInstance?.languages.getLanguages().find(l => 
+        l.extensions?.some(ext => path.endsWith(ext))
+      )?.id || 'plaintext';
+
+      setMonacoDocument(docId, fileData.content, language);
+      setDocumentHasContent(true);
+    } catch (error) {
+      console.error(`[ide_fullpage] Failed to fetch file content for ${path}:`, error);
+      // Show an error in the monaco editor itself
+      setMonacoDocument(buildDocIdFromPath(path), `// Failed to load file: ${path}\n// Reason: ${error.message}`.trim(), 'plaintext');
+      setDocumentHasContent(true);
     }
   }
 
