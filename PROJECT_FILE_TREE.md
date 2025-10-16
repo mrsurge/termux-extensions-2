@@ -1,0 +1,372 @@
+# Project File Tree (excluding vendor and .git directories)
+
+- app/
+- build/
+- docs/
+- mobile-code-oss/
+- scripts/
+- temp/
+- termux-deb/
+- .gitignore
+- 11442079.png
+- AGENTS.md
+- Answers.md
+- CODE_OSS_APP_STATUS.md
+- CODE_OSS_BRIDGE_FEEDBACK.md
+- CORE_API_MANUAL.md
+- Code-Server-Mobile-Bridge-MVP-integrated.md
+- GEMINI.md
+- PROJECT_FILE_TREE.md
+- PROJECT_HISTORY.md
+- README.md
+- TODO.md
+- WARP.md
+- X_Code-OSS_Lifecycle_via_Framework_Shells.md
+- fixing_hydration_assistant_collapse_before_after_audit_with_diffs.md
+- ide-fix-pack-fullpage-ide_fullpage.md
+- integrating_the_flask_mobile_ide_agent_readable_markdown.md
+- mobile-bridge-command-not-found-fix.md
+- mobile-bridge-command-not-found-web-ext-guide.md
+- mobile-bridge-iteration-review.md
+- mobile-bridge-web-ext-end-to-end.md
+- requirements.txt
+- temp.log
+- vendor_monaco.sh
+- wsgi.py
+- app/
+  - __pycache__/
+  - apps/
+  - extensions/
+  - libs/
+  - static/
+  - templates/
+  - utils/
+  - __init__.py
+  - main.py
+  - supervisor.py
+  - utils.py
+  - apps/
+    - archive_manager/
+    - aria_downloader/
+    - code_oss/
+    - distro/
+    - file_editor/
+    - file_explorer/
+    - settings/
+    - terminal/
+    - termux_lm/
+    - archive_manager/
+      - README.md
+      - backend.py
+      - main.js
+      - manifest.json
+      - template.html
+    - aria_downloader/
+      - app.js
+      - main.js
+      - main.py
+      - manifest.json
+      - template.html
+    - distro/
+      - __pycache__/
+      - config/
+      - plugins/
+      - .gitignore
+      - main.js
+      - main.py
+      - manifest.json
+      - template.html
+      - config/
+        - containers.json
+      - plugins/
+        - __pycache__/
+        - __init__.py
+        - chroot.py
+        - __pycache__/
+          - __init__.cpython-312.pyc
+          - chroot.cpython-312.pyc
+      - __pycache__/
+        - main.cpython-312.pyc
+    - file_editor/
+      - main.js
+      - main.py
+      - manifest.json
+      - template.html
+    - file_explorer/
+      - file_explorer.py
+      - main.js
+      - manifest.json
+      - template.html
+    - settings/
+      - main.js
+      - manifest.json
+      - template.html
+    - terminal/
+      - backend.py
+      - main.js
+      - manifest.json
+      - template.html
+    - termux_lm/
+      - __init__.py
+      - aria_rpc.py
+      - backend.py
+      - hf_proxy.py
+      - main.js
+      - manifest.json
+      - open_interpreter.py
+      - style.css
+      - template.html
+    - code_oss/
+      - __pycache__/
+      - bin/
+      - bridge_extension/
+      - config/
+      - static/
+      - styles/
+      - templates/
+      - __init__.py
+      - backend.py
+      - main.js
+      - manifest.json
+      - template.html
+      - bin/
+        - code-server-wrapper.sh
+      - static/
+        - css/
+        - js/
+        - document-viewer.html
+        - css/
+          - ide_fullpage.css
+        - js/
+          - ide_fullpage.js
+      - templates/
+        - fullpage.html
+      - __pycache__/
+        - __init__.cpython-312.pyc
+        - backend.cpython-312.pyc
+      - bridge_extension/
+        - extension.js
+        - mobile-bridge-0.2.0.vsix
+        - mobile-bridge-0.3.0.vsix
+        - mobile-bridge-0.4.0.vsix
+        - mobile-bridge-0.5.0.vsix
+        - mobile-bridge-0.6.0.vsix
+        - mobile-bridge-0.7.0.vsix
+        - mobile-bridge-0.7.1.vsix
+        - mobile-bridge-0.7.2.vsix
+        - mobile-bridge-0.7.3.vsix
+        - mobile-bridge-0.7.4.vsix
+        - mobile-bridge-0.7.5.vsix
+        - mobile-bridge-0.7.6.vsix
+        - mobile-bridge-0.7.8.vsix
+        - mobile-bridge-web-0.7.9.vsix
+        - mobile-bridge-web-0.8.0.vsix
+        - mobile-bridge-web-0.8.1.vsix
+        - mobile-bridge-web-0.8.2.vsix
+        - mobile-bridge-web-0.8.3.vsix
+        - package-lock.json
+        - package.json
+      - config/
+        - settings.json
+      - styles/
+        - document-mode.css
+  - extensions/
+    - apps/
+    - network_tools/
+    - process_manager/
+    - sessions_and_shortcuts/
+    - shortcut_wizard/
+    - system_stats/
+    - apps/
+      - __pycache__/
+      - main.js
+      - main.py
+      - manifest.json
+      - template.html
+      - __pycache__/
+        - main.cpython-312.pyc
+    - network_tools/
+      - __pycache__/
+      - main.js
+      - main.py
+      - manifest.json
+      - template.html
+      - __pycache__/
+        - main.cpython-312.pyc
+    - process_manager/
+      - __pycache__/
+      - main.js
+      - main.py
+      - manifest.json
+      - template.html
+      - __pycache__/
+        - main.cpython-312.pyc
+    - sessions_and_shortcuts/
+      - __pycache__/
+      - main.js
+      - main.py
+      - manifest.json
+      - template.html
+      - __pycache__/
+        - main.cpython-312.pyc
+    - shortcut_wizard/
+      - __pycache__/
+      - main.js
+      - main.py
+      - manifest.json
+      - template.html
+      - __pycache__/
+        - main.cpython-312.pyc
+    - system_stats/
+      - main.js
+      - manifest.json
+      - template.html
+  - libs/
+    - __pycache__/
+    - README.md
+    - __init__.py
+    - app_lifecycle.py
+    - app_manager.py
+    - app_worker.py
+    - archiver.py
+    - archiver_service.py
+    - bookmarks.py
+    - framework_shells.py
+    - jobs.py
+    - optional_import.py
+    - shell_groups.py
+    - __pycache__/
+      - __init__.cpython-312.pyc
+      - app_lifecycle.cpython-312.pyc
+      - app_manager.cpython-312.pyc
+      - app_worker.cpython-312.pyc
+      - archiver.cpython-312.pyc
+      - archiver_service.cpython-312.pyc
+      - bookmarks.cpython-312.pyc
+      - framework_shells.cpython-312.pyc
+      - jobs.cpython-312.pyc
+      - optional_import.cpython-312.pyc
+      - shell_groups.cpython-312.pyc
+  - static/
+    - js/
+    - bookmarks.json
+    - icon.png
+    - manifest.webmanifest
+    - move.png
+    - js/
+      - file_picker.js
+      - jobs_client.js
+      - sw.js
+      - te_state.js
+      - te_ui.js
+  - templates/
+    - app_shell.html
+    - index.html
+  - utils/
+    - __pycache__/
+    - __init__.py
+    - paths.py
+    - __pycache__/
+      - __init__.cpython-312.pyc
+      - paths.cpython-312.pyc
+  - __pycache__/
+    - __init__.cpython-312.pyc
+    - main.cpython-312.pyc
+    - supervisor.cpython-312.pyc
+- docs/
+  - PROJECT_SPECIFICATION.md
+  - UI_FLOW.md
+  - aria_downloader_framework_integration.md
+  - distro_design.md
+  - distro_states.md
+  - framework_shells.md
+  - job_notification_prompt.md
+  - job_registry_overview.md
+  - repo_overview.md
+  - shared_file_picker.md
+  - shortcut_wizard_spec.md
+  - state_store.md
+  - temp
+  - terminal_app.md
+  - termux-extensions-ui-design-spec.md
+  - termux_lm_overview.md
+  - termux_lm_remote_support.md
+  - termux_lm_session_sync.md
+  - termux_lm_setup_termux.md
+  - termux_lm_working_notes.md
+- mobile-code-oss/
+  - bridge-extension/
+  - server/
+  - README.md
+  - bridge-extension/
+    - dist/
+    - src/
+    - README.md
+    - package-lock.json
+    - package.json
+    - tsconfig.json
+    - src/
+      - extension.ts
+    - dist/
+      - extension.js
+  - server/
+    - static/
+    - templates/
+    - app.py
+    - requirements.txt
+    - static/
+      - css/
+      - js/
+      - css/
+        - app.css
+      - js/
+        - shell.js
+    - templates/
+      - index.html
+- scripts/
+  - bootstrap_termux.sh
+  - browse.sh
+  - get_system_stats.sh
+  - init.sh
+  - list_path_execs.sh
+  - list_sessions.sh
+  - list_shortcuts.sh
+  - manage_helper.sh
+  - run_framework.sh
+  - run_in_session.sh
+- termux-deb/
+  - data/
+  - data.tar
+  - data/
+    - data/
+    - data/
+      - com.termux/
+      - com.termux/
+        - files/
+        - files/
+          - usr/
+          - usr/
+            - bin/
+            - share/
+            - bin/
+              - te-browse-lite
+              - te-collide-check
+              - te-exec
+              - te-inject
+              - te-inject-b64
+              - te-keys
+              - te-list
+              - te-overlay
+              - te-path-execs
+              - te-sanity
+              - te-send
+              - te-update-helpers
+            - share/
+              - termux-extensions/
+              - termux-extensions/
+                - te-attach-init
+- temp/
+  - sample.vsix
+  - vim.vsix
+- build/
+  - config.gypi
