@@ -29,7 +29,8 @@ body {
   position: relative;
   min-height: 100vh;
   padding-top: 64px;
-  padding-bottom: calc(var(--chat-height) + 16px);
+  /* Reduce bottom padding to allow editor to grow */
+  padding-bottom: 20px; 
 }
 
 .ide-topbar {
@@ -94,12 +95,12 @@ body {
 .ide-main {
   position: relative;
   margin: 16px;
-  margin-bottom: calc(var(--chat-height) + 24px);
   border-radius: 20px;
   border: 1px solid var(--border);
   background: rgba(8, 13, 26, 0.88);
   overflow: hidden;
-  min-height: calc(100vh - var(--chat-height) - 120px);
+  /* Adjust height calculation */
+  height: calc(100vh - 64px - 40px); /* header - new reduced padding */
   display: flex;
   flex-direction: column;
 }
@@ -245,6 +246,7 @@ body {
   background: rgba(15, 23, 42, 0.18);
   border: 1px solid rgba(148, 163, 184, 0.12);
   z-index: 2;
+  height: calc(100% - 100px);
 }
 .doc-monaco-editor {
   width: 100%;
@@ -551,46 +553,11 @@ body {
   color: var(--fg-muted);
 }
 
-/* From Guide: C-2 */
 .ide-footer { position: fixed; left: 0; right: 0; bottom: 0; height: 58px; z-index: 20; display: flex; align-items: center; justify-content: flex-end; padding: 0 20px; background: rgba(9, 14, 27, 0.88); backdrop-filter: blur(12px); border-top: 1px solid var(--border); }
+.btn-assistant { background: var(--accent); color: #0b1120; border: none; border-radius: 999px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
 .ide-chat  { position: fixed; left: 0; right: 0; bottom: 58px; height: 260px; z-index: 15; transition: transform .18s ease; }
-#ide-root.assistant-collapsed .ide-chat { transform: translateY(100%); }
-
-/* From Guide: B */
-#ide-root.mode-document #ide-frame-shell {
-  position: absolute !important;
-  width: 0 !important;
-  height: 0 !important;
-  overflow: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  clip-path: inset(50%) !important;
-  border: 0 !important;
-}
-
-/* From Guide: A-1 */
-@media (max-width: 900px) {
-  #ide-root.mode-document {
-    --subheader-h: 48px;  /* adjust if your subheader is taller */
-    --footer-h: 0px;      /* toggled by assistant state in JS */
-  }
-
-  #ide-root.mode-document .ide-main {
-    padding: 0 !important;
-    margin: 0 !important;
-    border: 0 !important;
-    background: transparent !important;
-  }
-
-  #ide-root.mode-document #document-view .doc-monaco-container {
-    position: relative;
-    inset: 0;
-    width: 100vw;
-    height: calc(100vh - var(--subheader-h) - var(--footer-h));
-    overflow: hidden; /* Monaco handles its own scroll */
-    border: 0 !important;
-    background: transparent !important;
-  }
+#ide-root.assistant-collapsed .ide-chat {
+  transform: translateY(80%);
 }
 
 @keyframes spin {

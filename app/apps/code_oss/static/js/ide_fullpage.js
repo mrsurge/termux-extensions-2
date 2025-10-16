@@ -1109,25 +1109,138 @@
   root.classList.add('mode-document');
   startServer();
 
-  async function initAssistantToggle() {
-    const btnToggleAssistant = document.getElementById('btn-toggle-assistant');
-    if (!btnToggleAssistant) return;
-    const stateKey = 'code_oss.assistant_collapsed';
-    let isCollapsed = await window.teState.get(stateKey, false);
+  document.addEventListener('DOMContentLoaded', () => {
+    function getStateAPI() { try { return window.teState || null; } catch { return null; } }
 
-    function applyState(collapsed) {
-        root.classList.toggle('assistant-collapsed', collapsed);
-        btnToggleAssistant.textContent = collapsed ? '▲' : '▼';
+    function restoreAssistantState() {
+      const root = document.getElementById('ide-root');
+      const btn = document.getElementById('btn-toggle-assistant');
+      if (!root || !btn) return;
+      // Always start collapsed
+      const collapsed = true;
+      root.classList.toggle('assistant-collapsed', collapsed);
+      btn.setAttribute('aria-expanded', String(!collapsed));
     }
 
-    applyState(isCollapsed);
+        function wireAssistantToggle() {
 
-    btnToggleAssistant.addEventListener('click', () => {
-        isCollapsed = !isCollapsed;
-        applyState(isCollapsed);
-        window.teState.set(stateKey, isCollapsed);
-    });
-  }
+          const st = getStateAPI();
 
-  initAssistantToggle();
+          const root = document.getElementById('ide-root');
+
+          const btn  = document.getElementById('btn-toggle-assistant');
+
+          if (!root || !btn) return;
+
+          btn.addEventListener('click', () => {
+
+            const collapsed = root.classList.toggle('assistant-collapsed');
+
+            btn.setAttribute('aria-expanded', String(!collapsed));
+
+            if (st && st.set) st.set('assistantCollapsed', collapsed);
+
+            layoutDocumentView(); // Recalculate layout
+
+          });
+
+        }
+
+    
+
+        function layoutDocumentView() {
+
+          const root = document.getElementById('ide-root');
+
+          if (!root || !root.classList.contains('mode-document')) return;
+
+          const sub = document.querySelector('.ide-tabbar');
+
+          const footer = document.getElementById('ide-footer');
+
+          const monacoWrap = document.querySelector('#document-view .doc-monaco-container');
+
+          if (!monacoWrap) return;
+
+          const subH = sub ? sub.getBoundingClientRect().height : 0;
+
+          const footerH = (footer && !root.classList.contains('assistant-collapsed')) ? footer.getBoundingClientRect().height : 0;
+
+          root.style.setProperty('--subheader-h', `${Math.round(subH)}px`);
+
+          root.style.setProperty('--footer-h', `${Math.round(footerH)}px`);
+
+        }
+
+    
+
+        function setMode(which) {
+
+          const root = document.getElementById('ide-root');
+
+          const paneDoc  = document.getElementById('document-view');
+
+          const paneFull = document.getElementById('full-ide-view');
+
+          const tabDoc = document.getElementById('tab-document');
+
+          const tabFull = document.getElementById('tab-full');
+
+          const shell = document.getElementById('ide-frame-shell');
+
+    
+
+          if (!root || !paneDoc || !paneFull || !tabDoc || !tabFull || !shell) return;
+
+    
+
+          const docMode = (which === 'document');
+
+          root.classList.toggle('mode-document', docMode);
+
+          root.classList.toggle('mode-full', !docMode);
+
+          paneDoc.classList.toggle('is-active', docMode);
+
+          paneFull.classList.toggle('is-active', !docMode);
+
+          tabDoc.classList.toggle('is-active', docMode);
+
+          tabFull.classList.toggle('is-active', !docMode);
+
+          
+
+          if (docMode) {
+
+            shell.style.display = 'none';
+
+          } else {
+
+            shell.style.display = '';
+
+          }
+
+    
+
+          layoutDocumentView();
+
+        }
+
+    
+
+        document.getElementById('tab-document')?.addEventListener('click', () => setMode('document'));
+
+        document.getElementById('tab-full')?.addEventListener('click', () => setMode('full'));
+
+        document.getElementById('btn-doc-open-full')?.addEventListener('click', () => setMode('full'));
+
+    
+
+        restoreAssistantState();
+
+        wireAssistantToggle();
+
+        setMode('document'); // Set initial mode
+
+      });
 })();
