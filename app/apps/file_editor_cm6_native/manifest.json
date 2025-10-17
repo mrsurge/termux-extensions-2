@@ -1,0 +1,14 @@
+{
+  "name": "File Editor CM6 Native",
+  "id": "file_editor_cm6_native",
+  "icon_emoji": "\ud83c\udf89",
+  "version": "0.1.0",
+  "description": "CodeMirror 6 editor with automatic native-selection mode for Android (uses vendored CM6).",
+  "author": "mrSurge",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  },
+  "fullscreen": true
+}

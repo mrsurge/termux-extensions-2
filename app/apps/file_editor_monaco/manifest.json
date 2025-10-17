@@ -1,0 +1,14 @@
+{
+  "name": "File Editor (Monaco + EditContext)",
+  "id": "file_editor_monaco_ec",
+  "icon_emoji": "\ud83e\udde9",
+  "version": "0.2.0",
+  "description": "Full-page text editor using Monaco with EditContext (Chromium/WebView 121+), falling back automatically.",
+  "author": "mrSurge",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  },
+  "fullscreen": true
+}
