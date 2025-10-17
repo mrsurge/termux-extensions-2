@@ -13,6 +13,7 @@ const searchKeymap    = CM.searchKeymap    || [];
 const indentWithTab   = CM.indentWithTab   || (() => {});
 const syntaxHighlighting = CM.syntaxHighlighting || (() => []);
 const StreamLanguage  = CM.StreamLanguage;
+const defaultHighlightStyle = CM.defaultHighlightStyle || null;
 
 // Languages (fallbacks are no-ops if missing in your bundle)
 const javascript = CM.javascript || (() => []);
@@ -188,8 +189,8 @@ function makeExtensions() {
     highlightActiveLine(),
   ];
   if (showLineNumbers) exts.push(lineNumbers(), highlightActiveLineGutter());
-  if (!showSyntaxHighlight) {
-    // no-op: CM6 syntax can be omitted by not loading a language; we still keep base
+  if (showSyntaxHighlight && defaultHighlightStyle) {
+    exts.push(syntaxHighlighting(defaultHighlightStyle, { fallback: true }));
   }
   if (wordWrap) {
     exts.push(EditorView.lineWrapping);
