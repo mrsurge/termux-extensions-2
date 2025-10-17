@@ -14,7 +14,7 @@ const indentWithTab   = CM.indentWithTab   || (() => {});
 const syntaxHighlighting = CM.syntaxHighlighting || (() => []);
 const StreamLanguage  = CM.StreamLanguage;
 const defaultHighlightStyle = CM.defaultHighlightStyle || null;
-const { undo, redo, oneDark } = CM;
+const { undo, redo, oneDark, search, openSearchPanel } = CM;
 
 const THEMES = {
   'cm6-dark': EditorView.theme({}), // Basic dark theme
@@ -201,6 +201,7 @@ let currentModeLanguage = null;
 function makeExtensions() {
   const exts = [
     history(),
+    search(),
     keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
     highlightActiveLine(),
   ];
@@ -428,7 +429,7 @@ bindMenuToggle(miToggleWrap, () => {
   selectSurface.classList.toggle('wrap', wordWrap);
   createView(getText());
 });
-bindMenuToggle(miFind, () => { /* framework may provide a modal; CM6 search UI omitted in raw ESM */ host.toast('Use browser Find (⋮ > Find in page) or external search until search UI is wired.'); });
+bindMenuToggle(miFind, () => { if (view && openSearchPanel) openSearchPanel(view); });
 bindMenuToggle(miGoto, () => { const input = window.prompt('Go to line'); const line = Number.parseInt(input || '', 10); if (!Number.isNaN(line)) { const ln = Math.max(1, line); const pos = view.state.doc.line(ln).from; view.dispatch({ selection:{anchor:pos}, scrollIntoView:true }); view.focus(); } });
 
 btnBrowse.addEventListener('click', async () => { const path = await pickFile(); if (path) await openFile(path); });
