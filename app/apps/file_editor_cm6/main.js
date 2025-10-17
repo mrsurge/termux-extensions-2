@@ -14,12 +14,12 @@ const indentWithTab   = CM.indentWithTab   || (() => {});
 const syntaxHighlighting = CM.syntaxHighlighting || (() => []);
 const StreamLanguage  = CM.StreamLanguage;
 const defaultHighlightStyle = CM.defaultHighlightStyle || null;
-const { undo, redo, oneDark, search, openSearchPanel } = CM;
+const { undo, redo, oneDark, search, openSearchPanel, termuxTheme } = CM;
 
 const THEMES = {
-  'cm6-dark': EditorView.theme({}), // Basic dark theme
-  'cm6-light': EditorView.theme({}, {dark: false}), // Basic light theme
+  'cm6-dark': EditorView.theme({}, {dark: true}), // Keep a basic dark as default
   'one-dark': oneDark || null,
+  'termux': termuxTheme ? termuxTheme() : null
 };
 
 const zebraStripes = EditorView.theme({
