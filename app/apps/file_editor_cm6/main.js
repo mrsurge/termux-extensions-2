@@ -14,6 +14,7 @@ const indentWithTab   = CM.indentWithTab   || (() => {});
 const syntaxHighlighting = CM.syntaxHighlighting || (() => []);
 const StreamLanguage  = CM.StreamLanguage;
 const defaultHighlightStyle = CM.defaultHighlightStyle || null;
+const { undo, redo } = CM;
 
 // Languages (fallbacks are no-ops if missing in your bundle)
 const javascript = CM.javascript || (() => []);
@@ -384,8 +385,8 @@ bindMenuToggle(miSaveAs, () => saveAsDialog());
 bindMenuToggle(miClose, () => { currentPath=''; currentPathExists=false; lastPickerPath=HOME_DIR; currentModeLanguage=null; setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); });
 bindMenuToggle(miQuit, () => { try{ host.clearState(); }catch{} currentPath=''; currentPathExists=false; setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); });
 
-bindMenuToggle(miUndo, () => document.execCommand('undo'));   // basic fallback
-bindMenuToggle(miRedo, () => document.execCommand('redo'));
+bindMenuToggle(miUndo, () => { if (view && undo) undo(view); });
+bindMenuToggle(miRedo, () => { if (view && redo) redo(view); });
 bindMenuToggle(miCut,  () => document.execCommand('cut'));
 bindMenuToggle(miCopy, () => document.execCommand('copy'));
 bindMenuToggle(miPaste, async () => {
