@@ -14,7 +14,22 @@ const indentWithTab   = CM.indentWithTab   || (() => {});
 const syntaxHighlighting = CM.syntaxHighlighting || (() => []);
 const StreamLanguage  = CM.StreamLanguage;
 const defaultHighlightStyle = CM.defaultHighlightStyle || null;
-const { undo, redo } = CM;
+const { undo, redo, oneDark } = CM;
+
+const THEMES = {
+  'cm6-dark': EditorView.theme({}), // Basic dark theme
+  'cm6-light': EditorView.theme({}, {dark: false}), // Basic light theme
+  'one-dark': oneDark || null,
+};
+
+const zebraStripes = EditorView.theme({
+  '& .cm-line:nth-child(even)': { 
+    backgroundColor: 'rgba(128, 128, 128, 0.1)' 
+  },
+  '.cm-dark & .cm-line:nth-child(even)': {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)'
+  }
+});
 
 // Languages (fallbacks are no-ops if missing in your bundle)
 const javascript = CM.javascript || (() => []);
@@ -196,10 +211,14 @@ function makeExtensions() {
   if (wordWrap) {
     exts.push(EditorView.lineWrapping);
   }
+  if (showLineShading) {
+    exts.push(zebraStripes);
+  }
+
   // Theme
-  const dark = EditorView.theme({}, {dark:true});
-  const light = EditorView.theme({}, {dark:false});
-  exts.push(currentTheme === 'cm6-dark' ? dark : light);
+  const theme = THEMES[currentTheme] || THEMES['cm6-dark'];
+  if (theme) exts.push(theme);
+
   // Language
   const lang = (currentModeLanguage || 'text');
   switch (lang) {
@@ -402,7 +421,7 @@ bindMenuToggle(miPaste, async () => {
 bindMenuToggle(miSelectAll, () => { if (selectSurface.style.display === 'block') { const r = document.createRange(); r.selectNodeContents(selectSurface); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } else { view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }); view.focus(); } });
 
 bindMenuToggle(miToggleLines, () => { showLineNumbers = !showLineNumbers; setMenuChecked(miToggleLines, showLineNumbers); createView(getText()); });
-bindMenuToggle(miToggleShading, () => { showLineShading = !showLineShading; setMenuChecked(miToggleShading, showLineShading); /* cosmetic no-op */ });
+bindMenuToggle(miToggleShading, () => { showLineShading = !showLineShading; setMenuChecked(miToggleShading, showLineShading); createView(getText()); });
 bindMenuToggle(miToggleSyntax, () => { showSyntaxHighlight = !showSyntaxHighlight; setMenuChecked(miToggleSyntax, showSyntaxHighlight); createView(getText()); });
 bindMenuToggle(miToggleWrap, () => {
   wordWrap = !wordWrap; setMenuChecked(miToggleWrap, wordWrap);
@@ -534,28 +553,49 @@ showLineNumbers = state.showLineNumbers !== false;
 showLineShading = !!state.showLineShading;
 showSyntaxHighlight = state.showSyntaxHighlight !== false;
 wordWrap = !!state.wordWrap;
-currentTheme = (state.theme && typeof state.theme === 'string') ? state.theme : 'cm6-dark';
+currentTheme = (state.theme && THEMES[state.theme]) ? state.theme : 'cm6-dark';
 setMenuChecked(miToggleLines, showLineNumbers);
 setMenuChecked(miToggleShading, showLineShading);
 setMenuChecked(miToggleSyntax, showSyntaxHighlight);
 setMenuChecked(miToggleWrap, wordWrap);
 selectSurface.classList.toggle('wrap', wordWrap);
+
+
+// Theme menu
+themeMenuItems.forEach((item) => {
+  const themeId = item.getAttribute('data-theme');
+  // Check if the theme exists in our map (and isn't null)
+  const isAvailable = !!THEMES[themeId];
+
+  if (!isAvailable) {
+    // This hides the Solarized examples from the menu
+    item.style.display = 'none';
+  }
+
+  // Set the initial checkmark on the correct theme
+  setMenuChecked(item, themeId === currentTheme);
+
+  const handle = () => {
+    if (isAvailable) {
+      currentTheme = themeId;
+      // Update checkmarks for all items
+      themeMenuItems.forEach((it) => {
+        setMenuChecked(it, it.getAttribute('data-theme') === currentTheme);
+      });
+      createView(getText());
+    } else {
+      host.toast(`Theme "${themeId}" is not available.`);
+    }
+  };
+
+  item.addEventListener('click', () => { closeAllMenus(); handle(); });
+  item.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); closeAllMenus(); handle(); } });
+});
+
 createView(state.draft || '');
 lastSavedContent = state.draft ? '' : getText();
 markUnsaved(!!state.draft);
 updatePathDisplay();
-
-// Theme menu
-themeMenuItems.forEach((item) => {
-  const handle = () => {
-    const themeId = item.getAttribute('data-theme');
-    currentTheme = themeId === 'cm6-light' ? 'cm6-light' : 'cm6-dark';
-    themeMenuItems.forEach((it) => setMenuChecked(it, it === item));
-    createView(getText());
-  };
-  item.addEventListener('click', () => { closeAllMenus(); handle(); });
-  item.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); closeAllMenus(); handle(); } });
-});
 
 // Open file via URL param
 const params = new URLSearchParams(window.location.search);
