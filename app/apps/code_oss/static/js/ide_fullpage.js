@@ -14,7 +14,7 @@ try {
 }
 
 const frameShell = document.getElementById('ide-frame-shell');
-const frame = document.getElementById('ide-frame');
+let frame = document.getElementById('ide-frame');
 const statusCard = document.getElementById('ide-status');
 const statusHeadline = statusCard?.querySelector('h1');
 const statusDetail = statusCard?.querySelector('p');
@@ -177,6 +177,51 @@ function resolveHost(host) {
 function encodeFolderPath(path) {
   if (!path) return '';
   return encodeURIComponent(path).replace(/%2F/g, '/');
+}
+
+function buildWorkspaceUrl(projectPath) {
+  const encoded = encodeFolderPath(projectPath);
+  let baseUrl = null;
+  if (frame?.src) {
+    try {
+      baseUrl = new URL(frame.src);
+    } catch (_error) {
+      baseUrl = null;
+    }
+  }
+  if (!baseUrl && iframeOrigin) {
+    try {
+      baseUrl = new URL('/', iframeOrigin);
+    } catch (_error) {
+      baseUrl = null;
+    }
+  }
+  if (!baseUrl) return null;
+
+  baseUrl.hash = '';
+  baseUrl.pathname = '/';
+  if (encoded) {
+    baseUrl.search = `?folder=${encoded}`;
+  } else {
+    baseUrl.search = '';
+  }
+  return baseUrl.toString();
+}
+
+function navigateFrameToProject(projectPath) {
+  if (!frame) return null;
+  const targetUrl = buildWorkspaceUrl(projectPath);
+  if (!targetUrl) return null;
+  try {
+    const parsed = new URL(targetUrl);
+    iframeOrigin = parsed.origin;
+  } catch (_error) {
+    // Keep previous origin if parsing fails.
+  }
+  frameReady = false;
+  frame.setAttribute('aria-hidden', 'true');
+  frame.src = targetUrl;
+  return targetUrl;
 }
 
 function normalizeServerUrl({ url, host, port, projectPath } = {}) {
@@ -729,6 +774,15 @@ function scheduleBridgeHandshake(delay = BRIDGE_HANDSHAKE_INTERVAL) {
   bridgeHandshake.timer = setTimeout(runBridgeHandshake, Math.max(100, delay));
 }
 
+function attachFrame(newFrame) {
+  if (!newFrame) return;
+  if (frame && frame !== newFrame) {
+    frame.removeEventListener('load', handleFrameLoad);
+  }
+  frame = newFrame;
+  frame.addEventListener('load', handleFrameLoad);
+}
+
 function startBridgeHandshake(initialDelay = 0) {
   finishBridgeHandshake();
   bridgeHandshake.active = true;
@@ -1053,7 +1107,6 @@ function markReady(url) {
   updateStatusBar();
   if (frame) {
     frameReady = false;
-    startBridgeHandshake();
     frame.src = parsed.toString();
   }
 }
@@ -1229,13 +1282,13 @@ function handleBridgeEvent(data) {
   }
 }
 
-frame?.addEventListener('load', () => {
+function handleFrameLoad() {
   frameReady = true;
+  frame?.setAttribute('aria-hidden', 'false');
   hideOverlay();
   const bridgeArgs = getBridgeArgs();
   frame.contentWindow?.postMessage({ _mobileShell: true, type: 'hello', args: bridgeArgs }, '*');
   startBridgePolling(300);
-  startBridgeHandshake(200);
   setTimeout(() => {
     sendCommand('configureBridge', bridgeArgs);
     sendCommand('requestExplorerTree');
@@ -1252,7 +1305,9 @@ frame?.addEventListener('load', () => {
       seed.view = null;
     }
   }, 600);
-});
+}
+
+attachFrame(frame);
 
 window.addEventListener('message', (event) => {
   const data = event.data || {};
@@ -1422,48 +1477,27 @@ btnOpenProject?.addEventListener('click', async () => {
     if (!choice || !choice.path) return;
 
     btnOpenProject.disabled = true;
-    frameReady = false;
-    updateStatus('Switching workspace…', 'Restarting code-server for the selected folder.');
+    updateStatus('Switching workspace…', 'Loading the selected folder in code-server.');
 
-    const response = await fetch('/api/app/code_oss/project', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: choice.path }),
-    });
-    const body = await response.json();
-    if (!response.ok || !body.ok) {
-      throw new Error(body?.error || `HTTP ${response.status}`);
-    }
-    const data = body.data || {};
-    currentProject = data.project_path || choice.path;
+    currentProject = choice.path;
     currentFile = null;
     updateDocPlaceholder();
     updateHeaderFile();
     updateSubtitle();
-    applyBridgeState(data);
+    setDocumentHasContent(false);
     explorerState.nodes.clear();
     explorerState.rootPaths = [];
     explorerState.expanded.clear();
     explorerState.activePath = null;
     explorerPlaceholder('Loading workspace…');
 
-    summaryBootstrapped = false;
-    statePoll.lastSeq = 0;
-    scheduleStatePoll(500);
-
-    const serverUrl = normalizeServerUrl({
-      url: data.url,
-      host: data.host,
-      port: data.port,
-      projectPath: currentProject,
-    });
-    if (serverUrl) {
-      markReady(serverUrl);
-    } else {
-      await startServer();
+    const targetUrl = navigateFrameToProject(choice.path);
+    if (!targetUrl) {
+      throw new Error('Unable to determine code-server URL for selected folder.');
     }
   } catch (error) {
-    showError(error.message || 'Failed to open project');
+    console.error('[ide_fullpage] Failed to switch project', error);
+    updateStatus('Unable to switch project', error?.message || 'Unknown error', { working: false });
   } finally {
     btnOpenProject.disabled = false;
   }
