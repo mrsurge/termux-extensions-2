@@ -150,6 +150,8 @@ const bridgeHandshake = {
   active: false,
 };
 
+const PROJECT_STATE_KEY = 'codeOss.currentProjectPath';
+
 const cmState = {
   view: null,
   docId: null,
@@ -222,6 +224,56 @@ function navigateFrameToProject(projectPath) {
   frame.setAttribute('aria-hidden', 'true');
   frame.src = targetUrl;
   return targetUrl;
+}
+
+function normalizeProjectPath(path) {
+  if (typeof path !== 'string') return null;
+  const trimmed = path.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function setCurrentProject(path, { updateUI = true, persist = true } = {}) {
+  const normalized = normalizeProjectPath(path);
+  if (currentProject === normalized) {
+    if (updateUI) {
+      updateSubtitle();
+      updateDocPlaceholder();
+    }
+    return;
+  }
+  currentProject = normalized;
+  if (persist) {
+    const st = getStateAPI();
+    if (st && typeof st.set === 'function') {
+      try {
+        st.set(PROJECT_STATE_KEY, normalized);
+      } catch (error) {
+        console.warn('[ide_fullpage] Failed to persist project path', error);
+      }
+    }
+  }
+  if (updateUI) {
+    updateSubtitle();
+    updateDocPlaceholder();
+  }
+}
+
+function extractFolderPath(folder) {
+  if (!folder) return null;
+  if (typeof folder === 'string') return normalizeProjectPath(folder);
+  if (typeof folder.path === 'string') return normalizeProjectPath(folder.path);
+  const uri = folder.uri || folder.url;
+  if (typeof uri === 'string') {
+    if (uri.startsWith('file://')) {
+      try {
+        return normalizeProjectPath(decodeURIComponent(uri.replace(/^file:\/\//, '')));
+      } catch (_error) {
+        return normalizeProjectPath(uri.replace(/^file:\/\//, ''));
+      }
+    }
+    return normalizeProjectPath(uri);
+  }
+  return null;
 }
 
 function normalizeServerUrl({ url, host, port, projectPath } = {}) {
@@ -1094,16 +1146,20 @@ function markReady(url) {
   connectionLabel = `Connected to ${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}`.trim();
 
   const folderParam = parsed.searchParams.get('folder');
+  let projectUpdated = false;
   if (folderParam) {
     try {
       const decoded = decodeURIComponent(folderParam);
-      currentProject = decoded;
-      updateDocPlaceholder();
+      setCurrentProject(decoded);
+      projectUpdated = true;
     } catch (_error) {
       // Ignore decoding issues; fall back to existing project state.
     }
   }
-  updateSubtitle();
+  if (!projectUpdated) {
+    updateSubtitle();
+    updateDocPlaceholder();
+  }
   updateStatusBar();
   if (frame) {
     frameReady = false;
@@ -1132,10 +1188,9 @@ async function startServer({ headline, detail } = {}) {
     }
     const data = body.data || {};
     if (data.project_path) {
-      currentProject = data.project_path;
-      updateDocPlaceholder();
+      currentFile = null;
+      setCurrentProject(data.project_path);
       updateHeaderFile();
-      updateSubtitle();
     }
     applyBridgeState(data);
     const serverUrl = normalizeServerUrl({
@@ -1173,11 +1228,9 @@ function handleBridgeEvent(data) {
       if (!data.parent) {
         finishBridgeHandshake('explorerTree');
       }
-      if (!data.parent && !currentProject && explorerState.rootPaths.length) {
-        currentProject = explorerState.rootPaths[0];
-        updateDocPlaceholder();
+      if (!data.parent && explorerState.rootPaths.length) {
+        setCurrentProject(explorerState.rootPaths[0]);
         updateHeaderFile();
-        updateSubtitle();
       }
       renderExplorerTree();
       if (!data.parent) {
@@ -1252,8 +1305,16 @@ function handleBridgeEvent(data) {
       break;
     }
     case 'workspaceFolders': {
-      if (!Array.isArray(data.folders) || !data.folders.length) {
+      const folders = Array.isArray(data.folders) ? data.folders : [];
+      if (!folders.length) {
+        setCurrentProject(null);
         explorerPlaceholder('Workspace is empty.');
+      } else {
+        const firstPath = extractFolderPath(folders[0]);
+        if (firstPath) {
+          setCurrentProject(firstPath);
+          updateHeaderFile();
+        }
       }
       break;
     }
@@ -1468,6 +1529,8 @@ btnOpenProject?.addEventListener('click', async () => {
     window.alert('Directory picker is unavailable in this environment.');
     return;
   }
+  const previousProject = currentProject;
+  const previousFile = currentFile;
   try {
     const choice = await window.teFilePicker.openDirectory({
       title: 'Open Project Folder',
@@ -1479,24 +1542,32 @@ btnOpenProject?.addEventListener('click', async () => {
     btnOpenProject.disabled = true;
     updateStatus('Switching workspace…', 'Loading the selected folder in code-server.');
 
-    currentProject = choice.path;
-    currentFile = null;
-    updateDocPlaceholder();
-    updateHeaderFile();
-    updateSubtitle();
-    setDocumentHasContent(false);
     explorerState.nodes.clear();
     explorerState.rootPaths = [];
     explorerState.expanded.clear();
     explorerState.activePath = null;
     explorerPlaceholder('Loading workspace…');
-
     const targetUrl = navigateFrameToProject(choice.path);
     if (!targetUrl) {
+      setCurrentProject(previousProject, { updateUI: true });
+      currentFile = previousFile;
+      updateHeaderFile();
+      setDocumentHasContent(Boolean(previousFile));
       throw new Error('Unable to determine code-server URL for selected folder.');
     }
+    currentFile = null;
+    setCurrentProject(choice.path);
+    updateHeaderFile();
+    setDocumentHasContent(false);
+    summaryBootstrapped = false;
+    statePoll.lastSeq = 0;
+    scheduleStatePoll(500);
   } catch (error) {
     console.error('[ide_fullpage] Failed to switch project', error);
+    setCurrentProject(previousProject, { updateUI: true });
+    currentFile = previousFile;
+    updateHeaderFile();
+    setDocumentHasContent(Boolean(previousFile));
     updateStatus('Unable to switch project', error?.message || 'Unknown error', { working: false });
   } finally {
     btnOpenProject.disabled = false;
@@ -1514,6 +1585,24 @@ function getStateAPI() {
     return window.teState || null;
   } catch (_error) {
     return null;
+  }
+}
+
+function restoreProjectState() {
+  const st = getStateAPI();
+  if (st && typeof st.get === 'function') {
+    try {
+      const stored = st.get(PROJECT_STATE_KEY);
+      if (stored) {
+        setCurrentProject(stored, { updateUI: false, persist: false });
+        return;
+      }
+    } catch (error) {
+      console.warn('[ide_fullpage] Failed to restore project path from state', error);
+    }
+  }
+  if (currentProject) {
+    setCurrentProject(currentProject, { updateUI: false });
   }
 }
 
@@ -1536,11 +1625,12 @@ function wireAssistantToggle() {
   });
 }
 
+restoreAssistantState();
+wireAssistantToggle();
+restoreProjectState();
 updateSubtitle();
 updateHeaderFile();
 updateDocPlaceholder();
 ensureEditor();
 syncMenuState();
-restoreAssistantState();
-wireAssistantToggle();
 startServer();

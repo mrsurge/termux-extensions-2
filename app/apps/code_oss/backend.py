@@ -72,6 +72,19 @@ def _reset_bridge_state() -> None:
     _BRIDGE_STATE_CACHE["summary"] = _empty_bridge_summary()
 
 
+def _normalize_project_path(path: str) -> str:
+    try:
+        return str(Path(path).expanduser().resolve(strict=False))
+    except Exception:
+        return str(path)
+
+
+def _update_current_project(path: Optional[str]) -> None:
+    if not path:
+        return
+    _SHELL_STATE["project_path"] = _normalize_project_path(path)
+
+
 def _update_bridge_summary(event: Dict[str, Any]) -> None:
     summary = _BRIDGE_STATE_CACHE.setdefault("summary", _empty_bridge_summary())
     event_type = event.get("type")
@@ -79,7 +92,19 @@ def _update_bridge_summary(event: Dict[str, Any]) -> None:
     if event_type == "activeEditor":
         summary["active_editor"] = event.get("path")
     elif event_type == "workspaceFolders":
-        summary["workspace_folders"] = event.get("folders") or []
+        folders = event.get("folders") or []
+        summary["workspace_folders"] = folders
+        for folder in folders:
+            path = None
+            if isinstance(folder, str):
+                path = folder
+            elif isinstance(folder, dict):
+                path = folder.get("path") or folder.get("uri") or folder.get("url")
+            if isinstance(path, str):
+                if path.startswith("file://"):
+                    path = path.replace("file://", "", 1)
+                _update_current_project(path)
+                break
     elif event_type == "explorerTree":
         # Store the most recent tree payload; consumers can diff if needed.
         summary["explorer_tree"] = {
@@ -87,6 +112,13 @@ def _update_bridge_summary(event: Dict[str, Any]) -> None:
             for key, value in event.items()
             if key not in {"seq", "timestamp"}
         }
+        if not event.get("parent"):
+            entries = event.get("entries") or []
+            for entry in entries:
+                path = entry.get("path") if isinstance(entry, dict) else None
+                if isinstance(path, str):
+                    _update_current_project(path)
+                    break
     elif event_type == "chatProviders":
         summary["chat_providers"] = event.get("providers") or []
     elif event_type == "state":
