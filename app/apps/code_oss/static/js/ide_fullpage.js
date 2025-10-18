@@ -165,6 +165,34 @@ function resolveHost(host) {
   return host;
 }
 
+function encodeFolderPath(path) {
+  if (!path) return '';
+  return encodeURIComponent(path).replace(/%2F/g, '/');
+}
+
+function normalizeServerUrl({ url, host, port, projectPath } = {}) {
+  if (typeof url === 'string' && url.length) {
+    try {
+      const parsed = new URL(url);
+      const resolvedHost = resolveHost(parsed.hostname);
+      if (resolvedHost !== parsed.hostname) {
+        parsed.hostname = resolvedHost;
+      }
+      return parsed.toString();
+    } catch (_error) {
+      // fall through to manual construction
+    }
+  }
+  if (!port) return null;
+  const resolvedHost = resolveHost(host);
+  const base = `http://${resolvedHost}:${port}`;
+  if (projectPath) {
+    const encoded = encodeFolderPath(projectPath);
+    return `${base}/?folder=${encoded}`;
+  }
+  return base;
+}
+
 function updateSubtitle() {
   if (!subtitleEl) return;
   const project = currentProject ? (currentProject.split('/').pop() || currentProject) : 'Code IDE';
@@ -932,14 +960,33 @@ function hideOverlay() {
 }
 
 function markReady(url) {
-  const urlObj = new URL(url);
-  iframeOrigin = urlObj.origin;
-  connectionLabel = `Connected to ${urlObj.hostname}${urlObj.port ? `:${urlObj.port}` : ''}`.trim();
+  if (!url) return;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (error) {
+    console.error('[ide_fullpage] Invalid server URL', url, error);
+    return;
+  }
+
+  iframeOrigin = parsed.origin;
+  connectionLabel = `Connected to ${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}`.trim();
+
+  const folderParam = parsed.searchParams.get('folder');
+  if (folderParam) {
+    try {
+      const decoded = decodeURIComponent(folderParam);
+      currentProject = decoded;
+      updateDocPlaceholder();
+    } catch (_error) {
+      // Ignore decoding issues; fall back to existing project state.
+    }
+  }
   updateSubtitle();
   updateStatusBar();
   if (frame) {
     frameReady = false;
-    frame.src = url;
+    frame.src = parsed.toString();
   }
 }
 
@@ -970,11 +1017,14 @@ async function startServer({ headline, detail } = {}) {
       updateSubtitle();
     }
     applyBridgeState(data);
-    const { host, port } = data;
-    if (!port) throw new Error('No port returned from code-server start');
-    const resolvedHost = resolveHost(host);
-    const url = `http://${resolvedHost}:${port}`;
-    markReady(url);
+    const serverUrl = normalizeServerUrl({
+      url: data.url,
+      host: data.host,
+      port: data.port,
+      projectPath: currentProject,
+    });
+    if (!serverUrl) throw new Error('No code-server URL returned from backend');
+    markReady(serverUrl);
   } catch (error) {
     showError(error.message || 'Unknown error');
   }
@@ -1332,10 +1382,14 @@ btnOpenProject?.addEventListener('click', async () => {
     statePoll.lastSeq = 0;
     scheduleStatePoll(500);
 
-    const { host, port } = data;
-    if (port) {
-      const resolvedHost = resolveHost(host);
-      markReady(`http://${resolvedHost}:${port}`);
+    const serverUrl = normalizeServerUrl({
+      url: data.url,
+      host: data.host,
+      port: data.port,
+      projectPath: currentProject,
+    });
+    if (serverUrl) {
+      markReady(serverUrl);
     } else {
       await startServer();
     }

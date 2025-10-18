@@ -9,6 +9,7 @@ from collections import deque
 from pathlib import Path
 import os
 from typing import Any, Dict, Optional
+from urllib.parse import quote as urlquote
 
 from flask import Blueprint, current_app, jsonify, request, render_template_string
 
@@ -407,6 +408,16 @@ def _pick_port() -> int:
     return port
 
 
+def _build_server_url(host: Optional[str], port: Optional[int], project_path: Optional[str]) -> Optional[str]:
+    if not host or not port:
+        return None
+    base = f"http://{host}:{port}"
+    if project_path:
+        encoded = urlquote(project_path, safe="/~")
+        return f"{base}/?folder={encoded}"
+    return base
+
+
 def _spawn_shell() -> None:
     manager = _manager()
     binary = _wrapper_script()
@@ -611,7 +622,8 @@ def start():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
     port = _SHELL_STATE.get("port")
-    url = f"http://{DEFAULT_HOST}:{port}" if port else None
+    project_path = _SHELL_STATE.get("project_path")
+    url = _build_server_url(DEFAULT_HOST, port, project_path)
     manifest = _bridge_manifest()
     return jsonify(
         {
@@ -620,7 +632,7 @@ def start():
                 "host": DEFAULT_HOST,
                 "port": port,
                 "url": url,
-                "project_path": _SHELL_STATE.get("project_path"),
+                "project_path": project_path,
                 "bridge_installed": _is_bridge_installed(manifest),
                 "bridge_version": manifest.get("version") if manifest else None,
             },
@@ -700,6 +712,7 @@ def set_project():
 
     port = _SHELL_STATE.get("port")
     manifest = _bridge_manifest()
+    url = _build_server_url(DEFAULT_HOST, port, _SHELL_STATE.get("project_path"))
     return jsonify(
         {
             "ok": True,
@@ -707,7 +720,7 @@ def set_project():
                 "host": DEFAULT_HOST,
                 "port": port,
                 "project_path": _SHELL_STATE.get("project_path"),
-                "url": f"http://{DEFAULT_HOST}:{port}" if port else None,
+                "url": url,
                 "bridge_installed": _is_bridge_installed(manifest),
                 "bridge_version": manifest.get("version") if manifest else None,
             },
