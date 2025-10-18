@@ -37,7 +37,6 @@ body {
   min-height: 100%;
   background: var(--bg);
   color: var(--fg);
-  overflow: hidden;
 }
 
 .ide-topbar {
@@ -287,6 +286,10 @@ body {
 .cm-editor {
   flex: 1;
   height: 100%;
+}
+
+.cm-scroller {
+  overflow-x: auto !important;
 }
 
 .ide-frame-shell {

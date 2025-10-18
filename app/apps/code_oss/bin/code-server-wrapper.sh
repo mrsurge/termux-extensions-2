@@ -1,2 +1,3 @@
 #!/bin/env bash
-code-server "$@"
+set -euo pipefail
+exec code-server "$@"
