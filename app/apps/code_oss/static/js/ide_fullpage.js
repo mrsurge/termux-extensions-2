@@ -116,6 +116,9 @@ const statePoll = {
   jitter: 400,
 };
 
+const BRIDGE_HANDSHAKE_INTERVAL = 900;
+const BRIDGE_HANDSHAKE_MAX_ATTEMPTS = 0;
+
 let summaryBootstrapped = false;
 let iframeOrigin = null;
 let frameReady = false;
@@ -140,6 +143,12 @@ const explorerState = {
 };
 
 const docRevisions = new Map();
+
+const bridgeHandshake = {
+  timer: null,
+  attempts: 0,
+  active: false,
+};
 
 const cmState = {
   view: null,
@@ -690,6 +699,64 @@ function startBridgePolling(initialDelay = 600) {
   scheduleStatePoll(initialDelay);
 }
 
+function getBridgeArgs() {
+  return {
+    endpoint: bridgeStateEndpoint,
+    flushInterval: statePoll.interval,
+    retryDelay: statePoll.retryDelay,
+  };
+}
+
+function clearBridgeHandshakeTimer() {
+  if (bridgeHandshake.timer) {
+    clearTimeout(bridgeHandshake.timer);
+    bridgeHandshake.timer = null;
+  }
+}
+
+function finishBridgeHandshake(reason) {
+  if (!bridgeHandshake.active) return;
+  clearBridgeHandshakeTimer();
+  bridgeHandshake.active = false;
+  bridgeHandshake.attempts = 0;
+  if (reason) {
+    console.debug('[ide_fullpage] Bridge handshake finished:', reason);
+  }
+}
+
+function scheduleBridgeHandshake(delay = BRIDGE_HANDSHAKE_INTERVAL) {
+  clearBridgeHandshakeTimer();
+  bridgeHandshake.timer = setTimeout(runBridgeHandshake, Math.max(100, delay));
+}
+
+function startBridgeHandshake(initialDelay = 0) {
+  finishBridgeHandshake();
+  bridgeHandshake.active = true;
+  bridgeHandshake.attempts = 0;
+  scheduleBridgeHandshake(initialDelay);
+}
+
+function runBridgeHandshake() {
+  if (!bridgeHandshake.active) return;
+  if (!frameReady || !frame?.contentWindow) {
+    scheduleBridgeHandshake(200);
+    return;
+  }
+
+  const args = getBridgeArgs();
+  bridgeHandshake.attempts += 1;
+  console.debug('[ide_fullpage] Running bridge handshake attempt', bridgeHandshake.attempts);
+  sendCommand('configureBridge', args);
+  sendCommand('requestExplorerTree', { depth: 2 });
+
+  if (BRIDGE_HANDSHAKE_MAX_ATTEMPTS > 0 && bridgeHandshake.attempts >= BRIDGE_HANDSHAKE_MAX_ATTEMPTS) {
+    console.warn('[ide_fullpage] Bridge handshake attempts exhausted');
+    finishBridgeHandshake('max_attempts');
+  } else {
+    scheduleBridgeHandshake(BRIDGE_HANDSHAKE_INTERVAL);
+  }
+}
+
 async function runStatePoll() {
   if (statePoll.pending) {
     scheduleStatePoll(statePoll.interval);
@@ -986,6 +1053,7 @@ function markReady(url) {
   updateStatusBar();
   if (frame) {
     frameReady = false;
+    startBridgeHandshake();
     frame.src = parsed.toString();
   }
 }
@@ -1049,6 +1117,9 @@ function handleBridgeEvent(data) {
       }
       applyBridgeState({ bridge_installed: true });
       applyExplorerEntries(entries, data.parent || null);
+      if (!data.parent) {
+        finishBridgeHandshake('explorerTree');
+      }
       if (!data.parent && !currentProject && explorerState.rootPaths.length) {
         currentProject = explorerState.rootPaths[0];
         updateDocPlaceholder();
@@ -1140,6 +1211,7 @@ function handleBridgeEvent(data) {
     case 'bridgeActivated': {
       console.log('[ide_fullpage] Bridge activated!', data);
       applyBridgeState({ bridge_installed: true });
+      finishBridgeHandshake('bridgeActivated');
       setTimeout(() => {
         sendCommand('requestExplorerTree', { depth: 2 });
       }, 100);
@@ -1160,13 +1232,10 @@ function handleBridgeEvent(data) {
 frame?.addEventListener('load', () => {
   frameReady = true;
   hideOverlay();
-  const bridgeArgs = {
-    endpoint: bridgeStateEndpoint,
-    flushInterval: statePoll.interval,
-    retryDelay: statePoll.retryDelay,
-  };
+  const bridgeArgs = getBridgeArgs();
   frame.contentWindow?.postMessage({ _mobileShell: true, type: 'hello', args: bridgeArgs }, '*');
   startBridgePolling(300);
+  startBridgeHandshake(200);
   setTimeout(() => {
     sendCommand('configureBridge', bridgeArgs);
     sendCommand('requestExplorerTree');
