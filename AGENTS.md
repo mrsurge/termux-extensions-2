@@ -1,1 +1,1 @@
-GEMINI.md
+/data/data/com.termux/files/home/testing-grounds7/GEMINI.md

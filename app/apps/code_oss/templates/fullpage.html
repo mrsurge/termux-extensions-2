@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/apps/code_oss/static/css/ide_fullpage.css" />
 </head>
 <body>
-  <div id="ide-root" data-seed='{{ seed_state | tojson }}'>
+  <div id="ide-root" class="mode-document" data-seed='{{ seed_state | tojson }}'>
     <aside id="ide-drawer" aria-labelledby="ide-drawer-title">
       <header class="drawer-header">
         <h2 id="ide-drawer-title">Explorer</h2>
@@ -18,7 +18,12 @@
         </div>
       </header>
       <div class="drawer-body">
-        <div id="explorer-content" class="explorer-empty">
+        <div class="drawer-links">
+          <a id="drawer-open-full" class="drawer-link" href="/api/app/code_oss/fullpage" target="_blank" rel="noopener">
+            Open full Code OSS ↗
+          </a>
+        </div>
+        <div id="explorer-content" class="explorer-empty" aria-live="polite">
           <p>Loading workspace…</p>
         </div>
       </div>
@@ -26,50 +31,144 @@
     <div id="drawer-backdrop"></div>
 
     <header class="ide-topbar">
-      <button id="btn-menu" class="icon-btn" aria-label="Toggle Explorer">☰</button>
-      <button id="btn-back" class="icon-btn" aria-label="Back to launcher">←</button>
+      <button id="btn-menu" class="icon-btn" type="button" aria-label="Toggle Explorer">☰</button>
+      <button id="btn-back" class="icon-btn" type="button" aria-label="Back to launcher">←</button>
       <div class="ide-meta">
         <span class="ide-title">Code IDE</span>
         <span id="ide-subtitle" class="ide-subtitle">Preparing…</span>
+        <span id="ide-file-label" class="ide-file-label">No file selected</span>
       </div>
       <div class="spacer"></div>
-      <button id="btn-search" class="icon-btn" aria-label="Search">🔎</button>
-      <button id="btn-command" class="icon-btn" aria-label="Command Palette">⌘</button>
-      <button id="btn-settings" class="icon-btn" aria-label="Settings">⚙</button>
-      <button id="btn-doc-test-edit" class="icon-btn" aria-label="Apply sample edit">✎</button>
+      <button id="btn-search" class="icon-btn" type="button" aria-label="Search">🔎</button>
+      <button id="btn-command" class="icon-btn" type="button" aria-label="Command Palette">⌘</button>
+      <button id="btn-settings" class="icon-btn" type="button" aria-label="Settings">⚙</button>
+      <button id="btn-doc-test-edit" class="icon-btn" type="button" aria-label="Apply sample edit">✎</button>
+      <button id="btn-chat-refresh" class="icon-btn" type="button" aria-label="Refresh chat panel">⟳</button>
     </header>
 
-    <main class="ide-main">
-      <div class="ide-tabbar" role="tablist" aria-label="IDE view mode">
-        <button id="tab-document" class="ide-tab is-active" role="tab" aria-selected="true" aria-controls="document-view">Document</button>
-        <button id="tab-full" class="ide-tab" role="tab" aria-selected="false" aria-controls="full-ide-view">Full IDE</button>
-      </div>
-
-      <section id="document-view" class="ide-pane is-active" role="tabpanel" aria-labelledby="tab-document">
-        <div id="document-frame-target" class="ide-frame-target">
-          <!-- Code OSS iframe will be moved here in document view -->
-        </div>
-        <div id="doc-monaco-container" class="doc-monaco-container">
-          <div id="doc-monaco-editor" class="doc-monaco-editor"></div>
-        </div>
-        <div class="doc-overlay" aria-hidden="true">
-          <div class="doc-card">
-            <h1>Focused document</h1>
-            <p class="doc-current">Workspace: <span id="doc-current-project">Not selected</span></p>
-            <p class="doc-current">File: <span id="doc-current-path">None selected</span></p>
-            <button id="btn-doc-open-full" class="icon-btn doc-primary" type="button">Switch to Full IDE</button>
+    <main class="ide-main" role="main">
+      <section id="document-view" class="doc-view" aria-label="Focused document">
+        <div id="doc-stage" class="doc-stage">
+          <div id="ide-frame-shell" class="ide-frame-shell">
+            <div id="ide-status" class="ide-status ide-status--working" role="status" aria-live="polite">
+              <div class="spinner" aria-hidden="true"></div>
+              <div class="status-copy">
+                <h1>Starting Code OSS…</h1>
+                <p>You can leave this page open; the editor will appear when ready.</p>
+              </div>
+            </div>
+            <iframe id="ide-frame" title="Code OSS" frameborder="0" aria-hidden="true"></iframe>
           </div>
-        </div>
-      </section>
 
-      <section id="full-ide-view" class="ide-pane" role="tabpanel" aria-labelledby="tab-full" aria-hidden="true">
-        <div id="full-frame-target" class="ide-frame-target">
-          <!-- Code OSS iframe will be moved here in full view -->
-        </div>
-        <div class="full-overlay" aria-hidden="true">
-          <div class="full-card">
-            <h2>Full Code OSS</h2>
-            <p>The complete desktop layout is visible in this tab. Use Document to return to the focused editor view.</p>
+          <div id="cm6-wrapper" class="cm6-wrapper">
+            <header class="cm6-toolbar">
+              <div class="cm6-title">
+                <span id="doc-current-path" class="cm6-file">No file selected</span>
+                <span id="doc-current-project" class="cm6-project">No project</span>
+              </div>
+              <span id="cm6-status" class="cm6-status">Bridge: checking…</span>
+            </header>
+
+            <nav class="cm6-menubar" aria-label="Editor menu">
+              <div class="cm6-menu">
+                <button id="menu-file-btn" class="cm6-menu-btn" type="button" aria-haspopup="true" aria-expanded="false">
+                  File ▾
+                </button>
+                <div id="menu-file-dd" class="cm6-dropdown" role="menu">
+                  <button id="mi-new" class="cm6-item" type="button">
+                    <span>New</span><span class="cm6-kbd">Ctrl/Cmd+N</span>
+                  </button>
+                  <button id="mi-open" class="cm6-item" type="button">
+                    <span>Open…</span><span class="cm6-kbd">Ctrl/Cmd+O</span>
+                  </button>
+                  <button id="mi-save" class="cm6-item" type="button">
+                    <span>Save</span><span class="cm6-kbd">Ctrl/Cmd+S</span>
+                  </button>
+                  <button id="mi-saveas" class="cm6-item" type="button">
+                    <span>Save As…</span><span class="cm6-kbd">Ctrl/Cmd+Shift+S</span>
+                  </button>
+                  <button id="mi-close" class="cm6-item" type="button">
+                    <span>Close</span>
+                  </button>
+                  <button id="mi-quit" class="cm6-item" type="button">
+                    <span>Quit (Clear State)</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="cm6-menu">
+                <button id="menu-edit-btn" class="cm6-menu-btn" type="button" aria-haspopup="true" aria-expanded="false">
+                  Edit ▾
+                </button>
+                <div id="menu-edit-dd" class="cm6-dropdown" role="menu">
+                  <button id="mi-undo" class="cm6-item" type="button">
+                    <span>Undo</span><span class="cm6-kbd">Ctrl/Cmd+Z</span>
+                  </button>
+                  <button id="mi-redo" class="cm6-item" type="button">
+                    <span>Redo</span><span class="cm6-kbd">Ctrl/Cmd+Y</span>
+                  </button>
+                  <button id="mi-cut" class="cm6-item" type="button">
+                    <span>Cut</span><span class="cm6-kbd">Ctrl/Cmd+X</span>
+                  </button>
+                  <button id="mi-copy" class="cm6-item" type="button">
+                    <span>Copy</span><span class="cm6-kbd">Ctrl/Cmd+C</span>
+                  </button>
+                  <button id="mi-paste" class="cm6-item" type="button">
+                    <span>Paste</span><span class="cm6-kbd">Ctrl/Cmd+V</span>
+                  </button>
+                  <button id="mi-selectall" class="cm6-item" type="button">
+                    <span>Select All</span><span class="cm6-kbd">Ctrl/Cmd+A</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="cm6-menu">
+                <button id="menu-view-btn" class="cm6-menu-btn" type="button" aria-haspopup="true" aria-expanded="false">
+                  View ▾
+                </button>
+                <div id="menu-view-dd" class="cm6-dropdown" role="menu">
+                  <button id="mi-toggle-lines" class="cm6-item" type="button" data-checkable="true" role="menuitemcheckbox" aria-checked="false">
+                    <span>Show Line Numbers</span>
+                  </button>
+                  <button id="mi-toggle-shading" class="cm6-item" type="button" data-checkable="true" role="menuitemcheckbox" aria-checked="false">
+                    <span>Line Shading</span>
+                  </button>
+                  <button id="mi-toggle-syntax" class="cm6-item" type="button" data-checkable="true" role="menuitemcheckbox" aria-checked="false">
+                    <span>Syntax Highlighting</span>
+                  </button>
+                  <button id="mi-toggle-wrap" class="cm6-item" type="button" data-checkable="true" role="menuitemcheckbox" aria-checked="false">
+                    <span>Word Wrap</span>
+                  </button>
+                  <button id="mi-find" class="cm6-item" type="button">
+                    <span>Find/Replace</span><span class="cm6-kbd">Ctrl/Cmd+F</span>
+                  </button>
+                  <button id="mi-goto" class="cm6-item" type="button">
+                    <span>Go To Line…</span><span class="cm6-kbd">Ctrl/Cmd+G</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="cm6-menu">
+                <button id="menu-theme-btn" class="cm6-menu-btn" type="button" aria-haspopup="true" aria-expanded="false">
+                  Themes ▾
+                </button>
+                <div id="menu-theme-dd" class="cm6-dropdown" role="menu">
+                  <button class="cm6-item" type="button" data-theme="cm6-dark" data-checkable="true" role="menuitemradio" aria-checked="false">
+                    <span>Dark (Default)</span>
+                  </button>
+                  <button class="cm6-item" type="button" data-theme="one-dark" data-checkable="true" role="menuitemradio" aria-checked="false">
+                    <span>One Dark</span>
+                  </button>
+                  <button class="cm6-item" type="button" data-theme="termux" data-checkable="true" role="menuitemradio" aria-checked="false">
+                    <span>Termux</span>
+                  </button>
+                </div>
+              </div>
+            </nav>
+
+            <div class="cm6-editor-container">
+              <div id="cm6-host" class="cm6-host" role="presentation"></div>
+            </div>
           </div>
         </div>
       </section>
@@ -81,32 +180,19 @@
           <strong>Assistant Panel</strong>
           <span id="chat-subtitle">Choose an extension in Settings</span>
         </div>
-        <button id="btn-chat-refresh" class="icon-btn" aria-label="Refresh chat panel">⟳</button>
+        <button id="btn-chat-refresh" class="icon-btn" type="button" aria-label="Refresh chat panel">⟳</button>
       </header>
       <div id="chat-placeholder" class="chat-placeholder">
         <p>No extension selected. Open Settings to pick a chat provider.</p>
       </div>
     </section>
-    
-    <!-- Shared iframe shell that moves between views -->
-    <div id="ide-frame-shell" class="ide-frame-shell" style="display: none;">
-      <div id="ide-status" class="ide-status ide-status--working">
-        <div class="spinner" aria-hidden="true"></div>
-        <div class="status-copy">
-          <h1>Starting Code OSS…</h1>
-          <p>You can leave this tab open; the editor will appear when ready.</p>
-        </div>
-      </div>
-      <iframe id="ide-frame" class="is-hidden" title="Code OSS" frameborder="0"></iframe>
-    </div>
 
     <footer id="ide-footer" class="ide-footer">
-      <button id="btn-toggle-assistant" aria-expanded="true" class="btn-assistant">Assistant</button>
+      <button id="btn-toggle-assistant" aria-expanded="true" class="btn-assistant" type="button">Assistant</button>
     </footer>
   </div>
   <script type="module" src="/static/js/te_ui.js"></script>
   <script type="module" src="/static/js/file_picker.js"></script>
-  <script src="/apps/code_oss/static/vendor/monaco/min/vs/loader.js"></script>
-  <script src="/apps/code_oss/static/js/ide_fullpage.js" defer></script>
+  <script type="module" src="/apps/code_oss/static/js/ide_fullpage.js"></script>
 </body>
 </html>
