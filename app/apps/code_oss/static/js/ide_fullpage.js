@@ -19,7 +19,6 @@ const statusCard = document.getElementById('ide-status');
 const statusHeadline = statusCard?.querySelector('h1');
 const statusDetail = statusCard?.querySelector('p');
 const subtitleEl = document.getElementById('ide-subtitle');
-const headerFileLabel = document.getElementById('ide-file-label');
 const drawerBackdrop = document.getElementById('drawer-backdrop');
 const explorerContent = document.getElementById('explorer-content');
 const btnMenu = document.getElementById('btn-menu');
@@ -37,10 +36,10 @@ const chatSubtitle = document.getElementById('chat-subtitle');
 const bridgeStatusLabel = document.getElementById('bridge-status');
 const documentView = document.getElementById('document-view');
 const cmHost = document.getElementById('cm6-host');
-const docProjectLabel = document.getElementById('doc-current-project');
 const docFileLabel = document.getElementById('doc-current-path');
 const recentTabToggle = document.getElementById('recent-tab-toggle');
 const recentTabMenu = document.getElementById('recent-tab-menu');
+const gitToggleInput = document.getElementById('drawer-git-toggle');
 
 const menuFileBtn = document.getElementById('menu-file-btn');
 const menuFileDD = document.getElementById('menu-file-dd');
@@ -141,6 +140,15 @@ const explorerState = {
   nodes: new Map(),
   expanded: new Set(),
   activePath: null,
+  git: {
+    enabled: false,
+    repository: false,
+    entries: new Map(),
+    directories: new Map(),
+    summary: {},
+    generatedAt: 0,
+  },
+  indicatorsEnabled: true,
 };
 
 const docRevisions = new Map();
@@ -154,6 +162,25 @@ const bridgeHandshake = {
 const PROJECT_STATE_KEY = 'codeOss.currentProjectPath';
 const MAX_RECENT_PROJECTS = 12;
 const MAX_RECENT_FILES = 12;
+const GIT_INDICATOR_STATE_KEY = 'codeOss.gitIndicatorsEnabled';
+const GIT_LABEL_MAP = {
+  modified: 'M',
+  staged: 'S',
+  untracked: 'U',
+  deleted: 'D',
+  renamed: 'R',
+  conflict: '!',
+  ignored: 'I',
+};
+const GIT_CLASS_MAP = {
+  modified: 'git-modified',
+  staged: 'git-staged',
+  untracked: 'git-untracked',
+  deleted: 'git-deleted',
+  renamed: 'git-renamed',
+  conflict: 'git-conflict',
+  ignored: 'git-ignored',
+};
 
 const historyState = {
   recentProjects: [],
@@ -247,6 +274,183 @@ function normalizeFilePath(path) {
   if (typeof path !== 'string') return null;
   const trimmed = path.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeFsPath(path) {
+  if (typeof path !== 'string') return null;
+  return path.replace(/\\/g, '/');
+}
+
+function resetGitSnapshot() {
+  explorerState.git.entries.clear();
+  explorerState.git.directories.clear();
+  explorerState.git.summary = {};
+  explorerState.git.repository = false;
+  explorerState.git.generatedAt = 0;
+  syncGitToggle();
+}
+
+function shouldShowGitIndicators() {
+  return (
+    explorerState.indicatorsEnabled &&
+    explorerState.git.enabled &&
+    explorerState.git.repository
+  );
+}
+
+function getGitEntry(path) {
+  if (!path) return null;
+  const entries = explorerState.git.entries;
+  if (entries.has(path)) return entries.get(path);
+  const normalized = normalizeFsPath(path);
+  if (normalized && entries.has(normalized)) return entries.get(normalized);
+  return null;
+}
+
+function getDirectoryGitStats(path) {
+  if (!path) return null;
+  const directories = explorerState.git.directories;
+  if (directories.has(path)) return directories.get(path);
+  const normalized = normalizeFsPath(path);
+  if (normalized && directories.has(normalized)) return directories.get(normalized);
+  return null;
+}
+
+function buildFileGitBadge(meta) {
+  if (!meta) return null;
+  const badge = document.createElement('span');
+  badge.className = 'explorer-git-badge git-file';
+  const label = GIT_LABEL_MAP[meta.label] || (meta.code ? meta.code.trim() : '') || '•';
+  badge.textContent = label;
+  badge.title = `Git: ${meta.label || 'changed'}`;
+  const className = GIT_CLASS_MAP[meta.label];
+  if (className) badge.classList.add(className);
+  if (meta.staged && meta.unstaged) {
+    badge.dataset.state = 'mixed';
+  } else if (meta.staged) {
+    badge.dataset.state = 'staged';
+  } else if (meta.unstaged) {
+    badge.dataset.state = 'unstaged';
+  }
+  return badge;
+}
+
+function buildDirectoryGitBadge(stats) {
+  if (!stats || !stats.total) return null;
+  const badge = document.createElement('span');
+  badge.className = 'explorer-git-badge git-dir';
+  badge.textContent = String(stats.total);
+  const statuses = stats.statuses || {};
+  const detail = Object.entries(statuses)
+    .filter(([, count]) => count)
+    .map(([key, count]) => `${count} ${key}`)
+    .join(', ');
+  badge.title = detail || `${stats.total} changes`;
+  return badge;
+}
+
+function syncGitToggle() {
+  if (!gitToggleInput) return;
+  const repoActive = explorerState.git.enabled && explorerState.git.repository;
+  gitToggleInput.disabled = !repoActive;
+  gitToggleInput.checked = repoActive ? explorerState.indicatorsEnabled : false;
+  const label = gitToggleInput.closest('.drawer-toggle');
+  if (label) {
+    label.classList.toggle('is-disabled', gitToggleInput.disabled);
+  }
+}
+
+function persistGitPreference(enabled) {
+  const st = getStateAPI();
+  if (!st || typeof st.set !== 'function') return;
+  try {
+    st.set(GIT_INDICATOR_STATE_KEY, enabled);
+  } catch (error) {
+    console.warn('[ide_fullpage] Failed to persist git indicator preference', error);
+  }
+}
+
+function restoreGitPreference() {
+  const st = getStateAPI();
+  if (st && typeof st.get === 'function') {
+    try {
+      const stored = st.get(GIT_INDICATOR_STATE_KEY);
+      if (typeof stored === 'boolean') {
+        explorerState.indicatorsEnabled = stored;
+      }
+    } catch (error) {
+      console.warn('[ide_fullpage] Failed to restore git indicator preference', error);
+    }
+  }
+  if (gitToggleInput) {
+    gitToggleInput.checked = explorerState.indicatorsEnabled;
+  }
+  syncGitToggle();
+}
+
+function updateGitSnapshot(payload) {
+  const gitState = explorerState.git;
+  gitState.entries.clear();
+  gitState.directories.clear();
+  if (payload && typeof payload.enabled === 'boolean') {
+    gitState.enabled = payload.enabled;
+  }
+  if (payload && typeof payload.git_available === 'boolean' && !payload.git_available) {
+    gitState.enabled = false;
+  }
+  if (payload) {
+    gitState.repository = Boolean(payload.repository);
+  } else {
+    gitState.repository = false;
+  }
+  gitState.summary = payload && payload.summary ? { ...payload.summary } : {};
+  gitState.generatedAt = (payload && payload.generated_at) || 0;
+
+  if (payload && payload.entries && typeof payload.entries === 'object') {
+    Object.values(payload.entries).forEach((entry) => {
+      if (!entry) return;
+      const key = normalizeFilePath(entry.path) || entry.path;
+      if (!key) return;
+      const normalized = normalizeFsPath(key);
+      const meta = { ...entry, path: key };
+      gitState.entries.set(key, meta);
+      if (normalized && normalized !== key) {
+        gitState.entries.set(normalized, meta);
+      }
+    });
+  }
+
+  if (payload && payload.directories && typeof payload.directories === 'object') {
+    Object.entries(payload.directories).forEach(([directory, stats]) => {
+      if (!directory || !stats) return;
+      const key = normalizeFilePath(directory) || directory;
+      if (!key) return;
+      const normalized = normalizeFsPath(key);
+      const meta = {
+        path: key,
+        total: Number(stats.total) || 0,
+        statuses: { ...(stats.statuses || {}) },
+      };
+      gitState.directories.set(key, meta);
+      if (normalized && normalized !== key) {
+        gitState.directories.set(normalized, meta);
+      }
+    });
+  }
+
+  syncGitToggle();
+}
+
+function wireGitToggle() {
+  if (!gitToggleInput) return;
+  gitToggleInput.checked = explorerState.indicatorsEnabled;
+  gitToggleInput.addEventListener('change', () => {
+    explorerState.indicatorsEnabled = gitToggleInput.checked;
+    persistGitPreference(explorerState.indicatorsEnabled);
+    syncGitToggle();
+    renderExplorerTree();
+  });
+  syncGitToggle();
 }
 
 function projectLabel(path) {
@@ -465,6 +669,7 @@ function setCurrentProject(path, { updateUI = true, persist = true } = {}) {
     return;
   }
   currentProject = normalized;
+  resetGitSnapshot();
   renderRecentTabs();
   if (normalized) {
     if (persist) {
@@ -537,16 +742,8 @@ function updateSubtitle() {
   subtitleEl.textContent = project;
 }
 
-function updateHeaderFile() {
-  if (!headerFileLabel) return;
-  const file = currentFile ? (currentFile.split('/').pop() || currentFile) : 'No file selected';
-  headerFileLabel.textContent = file;
-}
-
 function updateDocPlaceholder() {
-  const project = currentProject ? (currentProject.split('/').pop() || currentProject) : 'No project';
   const file = currentFile ? (currentFile.split('/').pop() || currentFile) : 'No file selected';
-  if (docProjectLabel) docProjectLabel.textContent = project;
   if (docFileLabel) docFileLabel.textContent = file;
   setDocumentHasContent(Boolean(currentFile));
 }
@@ -929,7 +1126,6 @@ function sendCommand(cmd, args = {}) {
   if (cmd === 'openPath' && args?.path) {
     currentFile = args.path;
     updateDocPlaceholder();
-    updateHeaderFile();
   }
   const payload = { _mobileShell: true, type: 'command', cmd, args };
   frame.contentWindow.postMessage(payload, '*');
@@ -938,7 +1134,6 @@ function sendCommand(cmd, args = {}) {
 async function openFileInEditor(path) {
   currentFile = path;
   updateDocPlaceholder();
-  updateHeaderFile();
 
   sendCommand('openPath', { path });
 
@@ -982,6 +1177,10 @@ function applyBridgeState(data = {}) {
   }
   bridgeState.error = data.error || null;
   bridgeState.known = true;
+  if (typeof data.git_enabled === 'boolean') {
+    explorerState.git.enabled = data.git_enabled;
+    syncGitToggle();
+  }
   if (bridgeStatusLabel) {
     if (bridgeState.installed) {
       bridgeStatusLabel.dataset.state = 'installed';
@@ -1164,8 +1363,11 @@ function normalizeEntry(raw) {
   if (!raw) return null;
   const type = raw.entryType || raw.type || 'file';
   const label = raw.label || raw.name || raw.path?.split('/').pop() || 'item';
+  const sourcePath = raw.path || raw.uri || raw.url;
+  const normalizedPath = normalizeFsPath(normalizeFilePath(sourcePath)) || sourcePath;
   return {
-    path: raw.path,
+    path: normalizedPath,
+    sourcePath,
     label,
     entryType: type,
     hasChildren: !!raw.hasChildren || type === 'directory',
@@ -1194,7 +1396,13 @@ function applyExplorerEntries(entries, parentPath = null) {
     node.entryType = entry.entryType;
     node.hasChildren = entry.hasChildren;
     node.children = Array.isArray(entry.children)
-      ? entry.children.map((child) => child.path).filter(Boolean)
+      ? entry.children
+          .map((child) => (
+            normalizeFsPath(
+              normalizeFilePath(child?.path || child?.uri || child?.url)
+            ) || child?.path || child?.uri || child?.url
+          ))
+          .filter(Boolean)
       : [];
     node.childrenLoaded = Array.isArray(entry.children) && entry.children.length > 0;
     explorerState.nodes.set(entry.path, node);
@@ -1227,18 +1435,19 @@ function renderExplorerTree() {
   }
   explorerContent.classList.remove('explorer-empty');
   explorerContent.innerHTML = '';
+  const showGit = shouldShowGitIndicators();
   const rootList = document.createElement('ul');
   rootList.className = 'explorer-tree';
   explorerState.rootPaths.forEach((path) => {
     const node = explorerState.nodes.get(path);
     if (node) {
-      rootList.appendChild(renderExplorerNode(node, 0));
+      rootList.appendChild(renderExplorerNode(node, 0, showGit));
     }
   });
   explorerContent.appendChild(rootList);
 }
 
-function renderExplorerNode(node, depth) {
+function renderExplorerNode(node, depth, showGit) {
   const item = document.createElement('li');
   item.className = 'explorer-node';
   item.dataset.path = node.path;
@@ -1247,8 +1456,9 @@ function renderExplorerNode(node, depth) {
   if (explorerState.activePath === node.path) item.classList.add('is-active');
 
   const row = document.createElement('div');
+  const indent = depth * 16 + 8;
   row.className = 'explorer-row';
-  row.style.paddingLeft = `${depth * 16 + 8}px`;
+  row.style.paddingLeft = `${indent}px`;
 
   if (node.entryType === 'directory') {
     const toggle = document.createElement('button');
@@ -1272,6 +1482,28 @@ function renderExplorerNode(node, depth) {
   name.textContent = node.label || node.path.split('/').pop() || node.path;
   row.appendChild(name);
 
+  const gitMeta = getGitEntry(node.path);
+  const gitStats = node.entryType === 'directory'
+    ? getDirectoryGitStats(node.path)
+    : null;
+
+  if (node.entryType === 'file' && gitMeta?.executable) {
+    item.classList.add('is-executable');
+  }
+
+  let badge = null;
+  if (showGit) {
+    if (node.entryType === 'file') {
+      badge = buildFileGitBadge(gitMeta);
+    } else if (node.entryType === 'directory') {
+      badge = buildDirectoryGitBadge(gitStats);
+    }
+  }
+  if (badge) {
+    row.appendChild(badge);
+    item.classList.add('has-git');
+  }
+
   row.addEventListener('click', () => {
     if (node.entryType === 'directory') {
       toggleDirectory(node);
@@ -1287,11 +1519,17 @@ function renderExplorerNode(node, depth) {
   if (node.entryType === 'directory' && explorerState.expanded.has(node.path)) {
     const childList = document.createElement('ul');
     childList.className = 'explorer-children';
+    const separatorTop = document.createElement('div');
+    separatorTop.className = 'explorer-separator';
+    separatorTop.style.marginLeft = `${indent + 22}px`;
+    const separatorBottom = document.createElement('div');
+    separatorBottom.className = 'explorer-separator';
+    separatorBottom.style.marginLeft = `${indent + 22}px`;
     if (node.children && node.children.length) {
       node.children.forEach((childPath) => {
         const childNode = explorerState.nodes.get(childPath);
         if (childNode) {
-          childList.appendChild(renderExplorerNode(childNode, depth + 1));
+          childList.appendChild(renderExplorerNode(childNode, depth + 1, showGit));
         }
       });
     } else if (!node.childrenLoaded) {
@@ -1300,7 +1538,13 @@ function renderExplorerNode(node, depth) {
       loadingItem.innerHTML = '<div class="explorer-row">Loading…</div>';
       childList.appendChild(loadingItem);
     }
-    item.appendChild(childList);
+    if (childList.children.length) {
+      item.appendChild(separatorTop);
+      item.appendChild(childList);
+      item.appendChild(separatorBottom);
+    } else {
+      item.appendChild(childList);
+    }
   }
 
   return item;
@@ -1414,7 +1658,6 @@ async function startServer({ headline, detail } = {}) {
     if (data.project_path) {
       currentFile = null;
       setCurrentProject(data.project_path);
-      updateHeaderFile();
     }
     applyBridgeState(data);
     const serverUrl = normalizeServerUrl({
@@ -1440,6 +1683,9 @@ function handleBridgeEvent(data) {
     }
     case 'explorerTree': {
       const entries = data.entries || [];
+      if ('git' in data) {
+        updateGitSnapshot(data.git);
+      }
       if (!entries.length && !data.parent) {
         explorerState.nodes.clear();
         explorerState.rootPaths = [];
@@ -1454,7 +1700,6 @@ function handleBridgeEvent(data) {
       }
       if (!data.parent && explorerState.rootPaths.length) {
         setCurrentProject(explorerState.rootPaths[0]);
-        updateHeaderFile();
       }
       renderExplorerTree();
       if (!data.parent) {
@@ -1510,7 +1755,6 @@ function handleBridgeEvent(data) {
       if (data.path) {
         currentFile = data.path;
         updateDocPlaceholder();
-        updateHeaderFile();
         updateSubtitle();
         if (!explorerState.nodes.has(data.path)) {
           sendCommand('revealPath', { path: data.path });
@@ -1523,7 +1767,6 @@ function handleBridgeEvent(data) {
         currentFile = null;
         currentDocId = null;
         updateDocPlaceholder();
-        updateHeaderFile();
         updateSubtitle();
         setDocumentHasContent(false);
       }
@@ -1538,7 +1781,6 @@ function handleBridgeEvent(data) {
         const firstPath = extractFolderPath(folders[0]);
         if (firstPath) {
           setCurrentProject(firstPath);
-          updateHeaderFile();
         }
       }
       break;
@@ -1804,13 +2046,12 @@ btnOpenProject?.addEventListener('click', async () => {
     if (!targetUrl) {
       setCurrentProject(previousProject, { updateUI: true });
       currentFile = previousFile;
-      updateHeaderFile();
+      updateDocPlaceholder();
       setDocumentHasContent(Boolean(previousFile));
       throw new Error('Unable to determine code-server URL for selected folder.');
     }
     currentFile = null;
     setCurrentProject(choice.path);
-    updateHeaderFile();
     setDocumentHasContent(false);
     summaryBootstrapped = false;
     statePoll.lastSeq = 0;
@@ -1819,7 +2060,7 @@ btnOpenProject?.addEventListener('click', async () => {
     console.error('[ide_fullpage] Failed to switch project', error);
     setCurrentProject(previousProject, { updateUI: true });
     currentFile = previousFile;
-    updateHeaderFile();
+    updateDocPlaceholder();
     setDocumentHasContent(Boolean(previousFile));
     updateStatus('Unable to switch project', error?.message || 'Unknown error', { working: false });
   } finally {
@@ -1882,8 +2123,9 @@ restoreAssistantState();
 wireAssistantToggle();
 initializeHistory();
 restoreProjectState();
+restoreGitPreference();
+wireGitToggle();
 updateSubtitle();
-updateHeaderFile();
 updateDocPlaceholder();
 ensureEditor();
 syncMenuState();

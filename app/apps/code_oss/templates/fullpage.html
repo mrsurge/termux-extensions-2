@@ -22,6 +22,10 @@
           <a id="drawer-open-full" class="drawer-link" href="/api/app/code_oss/fullpage" target="_blank" rel="noopener">
             Open full Code OSS ↗
           </a>
+          <label class="drawer-link drawer-toggle">
+            <input id="drawer-git-toggle" type="checkbox" checked />
+            <span>Git indicators</span>
+          </label>
         </div>
         <div id="explorer-content" class="explorer-empty" aria-live="polite">
           <p>Loading workspace…</p>
@@ -36,7 +40,6 @@
       <div class="ide-meta">
         <span class="ide-title">Code IDE</span>
         <span id="ide-subtitle" class="ide-subtitle">Preparing…</span>
-        <span id="ide-file-label" class="ide-file-label">No file selected</span>
       </div>
       <div class="spacer"></div>
       <button id="btn-search" class="icon-btn" type="button" aria-label="Search">🔎</button>
@@ -64,7 +67,6 @@
             <header class="cm6-toolbar">
               <div class="cm6-title">
                 <span id="doc-current-path" class="cm6-file">No file selected</span>
-                <span id="doc-current-project" class="cm6-project">No project</span>
               </div>
               <div id="cm6-status" class="cm6-status">
                 <button id="recent-tab-toggle" class="recent-tab-toggle" type="button" aria-haspopup="true" aria-expanded="false" disabled>

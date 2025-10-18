@@ -95,8 +95,7 @@ body {
   font-size: 1rem;
 }
 
-.ide-subtitle,
-.ide-file-label {
+.ide-subtitle {
   font-size: 0.8rem;
   color: var(--fg-muted);
   white-space: nowrap;
@@ -244,22 +243,14 @@ body {
 
 .cm6-title {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
 }
 
 .cm6-file {
   font-size: 0.95rem;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cm6-project {
-  font-size: 0.75rem;
-  color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -560,6 +551,36 @@ body {
   text-decoration: underline;
 }
 
+.drawer-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--fg);
+}
+
+.drawer-toggle input {
+  accent-color: var(--accent);
+}
+
+.drawer-toggle span {
+  color: var(--fg);
+}
+
+.drawer-toggle:hover {
+  text-decoration: none;
+}
+
+.drawer-toggle.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.drawer-toggle.is-disabled input {
+  pointer-events: none;
+}
+
 .explorer-empty {
   text-align: center;
   color: var(--fg-muted);
@@ -586,6 +607,21 @@ body {
   cursor: pointer;
   font-size: 0.88rem;
   transition: background 0.2s ease;
+}
+
+.explorer-node.is-directory > .explorer-row .explorer-name {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.explorer-node.is-file > .explorer-row .explorer-name {
+  color: var(--fg);
+  font-weight: 400;
+}
+
+.explorer-node.is-file.is-executable > .explorer-row .explorer-name {
+  color: #4ade80;
+  font-weight: 600;
 }
 
 .explorer-row:hover {
@@ -625,6 +661,80 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.explorer-git-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  min-width: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--fg);
+  margin-left: auto;
+}
+
+.explorer-git-badge.git-dir {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.32);
+  color: #7dd3fc;
+}
+
+.explorer-git-badge.git-file {
+  min-width: 28px;
+}
+
+.explorer-git-badge.git-modified {
+  background: rgba(250, 204, 21, 0.18);
+  border-color: rgba(250, 204, 21, 0.32);
+  color: #facc15;
+}
+
+.explorer-git-badge.git-staged {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.32);
+  color: #34d399;
+}
+
+.explorer-git-badge.git-untracked {
+  background: rgba(147, 197, 253, 0.16);
+  border-color: rgba(147, 197, 253, 0.32);
+  color: #93c5fd;
+}
+
+.explorer-git-badge.git-deleted {
+  background: rgba(248, 113, 113, 0.18);
+  border-color: rgba(248, 113, 113, 0.32);
+  color: #f87171;
+}
+
+.explorer-git-badge.git-renamed {
+  background: rgba(244, 114, 182, 0.18);
+  border-color: rgba(244, 114, 182, 0.32);
+  color: #f472b6;
+}
+
+.explorer-git-badge.git-conflict {
+  background: rgba(248, 113, 113, 0.22);
+  border-color: rgba(248, 113, 113, 0.38);
+  color: #fca5a5;
+}
+
+.explorer-git-badge.git-ignored {
+  background: rgba(148, 163, 184, 0.1);
+  border-color: rgba(148, 163, 184, 0.28);
+  color: rgba(148, 163, 184, 0.8);
+}
+
+.explorer-separator {
+  height: 1px;
+  background: rgba(148, 163, 184, 0.18);
+  margin: 6px 8px;
+  border-radius: 999px;
 }
 
 .explorer-node.is-loading .explorer-row {

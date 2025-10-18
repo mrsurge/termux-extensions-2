@@ -5,7 +5,7 @@ import json
 import socket
 import subprocess
 import time
-from collections import deque
+from collections import deque, defaultdict
 from pathlib import Path
 import os
 from typing import Any, Dict, Optional
@@ -46,6 +46,14 @@ _BRIDGE_DOC_CACHE: Dict[str, Dict[str, Any]] = {}
 history_store = HistoryStore()
 
 
+_GIT_SETTINGS: dict[str, Any] = {
+    "enabled": True,
+    "ttl": 4.0,
+}
+
+_GIT_STATUS_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
 def _empty_bridge_summary() -> Dict[str, Any]:
     return {
         "active_editor": None,
@@ -70,6 +78,7 @@ def _reset_bridge_state() -> None:
     _BRIDGE_EVENTS.clear()
     _BRIDGE_COMMANDS.clear()
     _BRIDGE_DOC_CACHE.clear()
+    _clear_git_cache()
     _BRIDGE_SEQ = 0
     _BRIDGE_STATE_CACHE["timestamp"] = 0.0
     _BRIDGE_STATE_CACHE["last_seq"] = 0
@@ -90,12 +99,261 @@ def _normalize_file_path(path: str) -> str:
         return str(path)
 
 
+def _git_enabled() -> bool:
+    return bool(_GIT_SETTINGS.get("enabled", True))
+
+
+def _git_cache_ttl() -> float:
+    try:
+        ttl = float(_GIT_SETTINGS.get("ttl", 4.0) or 0)
+    except (TypeError, ValueError):
+        ttl = 4.0
+    return max(1.0, ttl)
+
+
+def _clear_git_cache(project_path: Optional[str] = None) -> None:
+    if project_path:
+        normalized = _normalize_project_path(project_path)
+        _GIT_STATUS_CACHE.pop(normalized, None)
+        return
+    _GIT_STATUS_CACHE.clear()
+
+
+def _probe_git_repository(project_path: str) -> tuple[bool, bool, Optional[str]]:
+    """Return (git_available, is_repo, error_code)."""
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=project_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=4,
+            check=True,
+        )
+    except FileNotFoundError:
+        return False, False, "git-not-found"
+    except subprocess.TimeoutExpired:
+        return True, False, "timeout"
+    except subprocess.CalledProcessError:
+        return True, False, "not-a-repo"
+
+    return True, result.stdout.strip().lower() == "true", None
+
+
+def _classify_git_status(code: str) -> Dict[str, Any]:
+    code = (code or "  ")[:2]
+    staged_flag = code[0] not in {" ", "?", "!"}
+    unstaged_flag = code[1] not in {" ", "?", "!"}
+
+    label = "modified"
+    if code == "??":
+        label = "untracked"
+    elif code == "!!":
+        label = "ignored"
+    elif "U" in code:
+        label = "conflict"
+    elif "D" in code:
+        label = "deleted"
+    elif "R" in code or "C" in code:
+        label = "renamed"
+    elif staged_flag and not unstaged_flag:
+        label = "staged"
+
+    return {
+        "code": code,
+        "label": label,
+        "staged": staged_flag,
+        "unstaged": unstaged_flag,
+        "untracked": label == "untracked",
+        "ignored": label == "ignored",
+        "conflict": label == "conflict",
+        "deleted": label == "deleted",
+        "renamed": label == "renamed",
+    }
+
+
+def _gather_git_status(project_path: str) -> Dict[str, Any]:
+    normalized = _normalize_project_path(project_path)
+    available, is_repo, probe_error = _probe_git_repository(normalized)
+    generated_at = time.time()
+
+    summary = {
+        "total": 0,
+        "staged": 0,
+        "unstaged": 0,
+        "untracked": 0,
+        "conflicts": 0,
+        "deleted": 0,
+    }
+
+    payload: Dict[str, Any] = {
+        "enabled": _git_enabled(),
+        "git_available": available,
+        "repository": bool(available and is_repo),
+        "project": normalized,
+        "generated_at": generated_at,
+        "entries": {},
+        "directories": {},
+        "summary": summary,
+    }
+
+    if not available:
+        payload["error"] = probe_error or "git-not-found"
+        return payload
+
+    if not is_repo:
+        if probe_error:
+            payload["error"] = probe_error
+        return payload
+
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=normalized,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        payload["error"] = "timeout"
+        return payload
+    except FileNotFoundError:
+        payload["git_available"] = False
+        payload["repository"] = False
+        payload["error"] = "git-not-found"
+        return payload
+
+    lines = result.stdout.splitlines()
+    entries: Dict[str, Dict[str, Any]] = {}
+    directory_totals: Dict[str, Dict[str, Any]] = {}
+    repo_path = Path(normalized)
+
+    for line in lines:
+        if not line:
+            continue
+        if len(line) < 3:
+            continue
+        code = line[:2]
+        rel = line[3:]
+        if not rel:
+            continue
+        if " -> " in rel:
+            rel = rel.split(" -> ", 1)[1]
+        abs_path = _normalize_file_path(str(repo_path / rel))
+        meta = _classify_git_status(code)
+        exists = os.path.exists(abs_path)
+        meta.update(
+            {
+                "path": abs_path,
+                "relative": rel,
+                "exists": exists,
+                "executable": bool(os.access(abs_path, os.X_OK)) if exists and os.path.isfile(abs_path) else False,
+            }
+        )
+        entries[abs_path] = meta
+
+        summary["total"] += 1
+        if meta["staged"]:
+            summary["staged"] += 1
+        if meta["unstaged"]:
+            summary["unstaged"] += 1
+        if meta["label"] == "untracked":
+            summary["untracked"] += 1
+        if meta["label"] == "conflict":
+            summary["conflicts"] += 1
+        if meta["label"] == "deleted":
+            summary["deleted"] += 1
+
+        project_root = Path(normalized)
+        parent = Path(abs_path).parent
+        while parent and str(parent).startswith(normalized):
+            try:
+                parent.relative_to(project_root)
+            except ValueError:
+                break
+            parent_str = str(parent)
+            bucket = directory_totals.setdefault(
+                parent_str,
+                {
+                    "total": 0,
+                    "statuses": defaultdict(int),
+                },
+            )
+            bucket["total"] += 1
+            bucket["statuses"][meta["label"]] += 1
+            if parent == project_root:
+                break
+            parent = parent.parent
+
+    payload["entries"] = entries
+    payload["directories"] = {
+        directory: {
+            "total": data["total"],
+            "statuses": dict(data["statuses"]),
+        }
+        for directory, data in directory_totals.items()
+    }
+
+    return payload
+
+
+def _load_git_metadata(project_path: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not project_path or not _git_enabled():
+        if not _git_enabled():
+            return {"enabled": False}
+        return None
+
+    normalized = _normalize_project_path(project_path)
+    now = time.time()
+    cache_entry = _GIT_STATUS_CACHE.get(normalized)
+    ttl = _git_cache_ttl()
+    if cache_entry and now - cache_entry.get("timestamp", 0) < ttl:
+        return cache_entry.get("data")
+
+    data = _gather_git_status(normalized)
+    _GIT_STATUS_CACHE[normalized] = {"timestamp": now, "data": data}
+    return data
+
+
+def _augment_explorer_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    project = _SHELL_STATE.get("project_path")
+    if not project:
+        entries = event.get("entries")
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict) and entry.get("path"):
+                    path_candidate = entry["path"]
+                    if entry.get("entryType") == "directory":
+                        project = path_candidate
+                    else:
+                        project = str(Path(path_candidate).parent)
+                    break
+    metadata = _load_git_metadata(project)
+    if metadata is None:
+        return event
+
+    augmented = copy.deepcopy(event)
+    augmented["git"] = metadata
+    return augmented
+
+
+def _augment_bridge_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    if event.get("type") == "explorerTree":
+        return _augment_explorer_event(event)
+    return event
+
+
 def _update_current_project(path: Optional[str]) -> None:
     if not path:
         return
     normalized = _normalize_project_path(path)
     _SHELL_STATE["project_path"] = normalized
     history_store.touch_project(normalized)
+    _clear_git_cache(normalized)
 
 
 def _update_bridge_summary(event: Dict[str, Any]) -> None:
@@ -192,6 +450,8 @@ def _record_bridge_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     event = dict(payload)
     event.pop("_mobileBridge", None)
     event.setdefault("type", "event")
+
+    event = _augment_bridge_event(event)
 
     event = _next_bridge_seq(event)
 
@@ -546,6 +806,7 @@ def status():
                 "project_path": _SHELL_STATE.get("project_path"),
                 "bridge_installed": _is_bridge_installed(manifest),
                 "bridge_version": manifest.get("version") if manifest else None,
+                "git_enabled": _git_enabled(),
             },
         }
     )
@@ -680,6 +941,7 @@ def start():
                 "project_path": project_path,
                 "bridge_installed": _is_bridge_installed(manifest),
                 "bridge_version": manifest.get("version") if manifest else None,
+                "git_enabled": _git_enabled(),
             },
         }
     )
@@ -770,6 +1032,7 @@ def set_project():
                 "url": url,
                 "bridge_installed": _is_bridge_installed(manifest),
                 "bridge_version": manifest.get("version") if manifest else None,
+                "git_enabled": _git_enabled(),
             },
         }
     )
@@ -855,6 +1118,65 @@ def delete_history_file():
     normalized_file = _normalize_file_path(file_path)
     removed = history_store.remove_file(normalized_project, normalized_file)
     return jsonify({"ok": True, "data": {"removed": removed}})
+
+
+@code_oss_bp.get("/git/settings")
+def get_git_settings():
+    project = _SHELL_STATE.get("project_path")
+    cache_info = None
+    if project:
+        normalized = _normalize_project_path(project)
+        cache_entry = _GIT_STATUS_CACHE.get(normalized)
+        if cache_entry:
+            data = cache_entry.get("data", {})
+            cache_info = {
+                "project": normalized,
+                "generated_at": data.get("generated_at"),
+                "summary": data.get("summary"),
+            }
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "enabled": _git_enabled(),
+                "ttl": _git_cache_ttl(),
+                "current_project": project,
+                "last_scan": cache_info,
+            },
+        }
+    )
+
+
+@code_oss_bp.post("/git/settings")
+def update_git_settings():
+    payload = request.get_json(silent=True) or {}
+    changed = False
+
+    if "enabled" in payload:
+        _GIT_SETTINGS["enabled"] = bool(payload.get("enabled"))
+        changed = True
+
+    if "ttl" in payload:
+        try:
+            ttl_value = float(payload.get("ttl"))
+            if ttl_value > 0:
+                _GIT_SETTINGS["ttl"] = max(1.0, min(ttl_value, 60.0))
+                changed = True
+        except (TypeError, ValueError):
+            pass
+
+    if changed:
+        _clear_git_cache()
+
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "enabled": _git_enabled(),
+                "ttl": _git_cache_ttl(),
+            },
+        }
+    )
 
 
 @code_oss_bp.post("/edits")
