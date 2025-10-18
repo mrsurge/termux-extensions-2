@@ -39,7 +39,8 @@ const documentView = document.getElementById('document-view');
 const cmHost = document.getElementById('cm6-host');
 const docProjectLabel = document.getElementById('doc-current-project');
 const docFileLabel = document.getElementById('doc-current-path');
-const docStatusLabel = document.getElementById('cm6-status');
+const recentTabToggle = document.getElementById('recent-tab-toggle');
+const recentTabMenu = document.getElementById('recent-tab-menu');
 
 const menuFileBtn = document.getElementById('menu-file-btn');
 const menuFileDD = document.getElementById('menu-file-dd');
@@ -151,6 +152,16 @@ const bridgeHandshake = {
 };
 
 const PROJECT_STATE_KEY = 'codeOss.currentProjectPath';
+const MAX_RECENT_PROJECTS = 12;
+const MAX_RECENT_FILES = 12;
+
+const historyState = {
+  recentProjects: [],
+  projectFiles: new Map(),
+  loadingProjects: new Set(),
+};
+
+let recentMenuOpen = false;
 
 const cmState = {
   view: null,
@@ -232,25 +243,246 @@ function normalizeProjectPath(path) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizeFilePath(path) {
+  if (typeof path !== 'string') return null;
+  const trimmed = path.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function projectLabel(path) {
+  if (!path) return '';
+  const segments = path.split('/');
+  return segments.pop() || path;
+}
+
+function fileLabel(path) {
+  if (!path) return '';
+  const segments = path.split('/');
+  return segments.pop() || path;
+}
+
+function updateRecentProjectsLocal(path, openedAt = new Date().toISOString()) {
+  if (!path) return;
+  const entry = {
+    path,
+    label: projectLabel(path),
+    opened_at: openedAt,
+  };
+  historyState.recentProjects = [
+    entry,
+    ...historyState.recentProjects.filter((item) => item.path !== path),
+  ].slice(0, MAX_RECENT_PROJECTS);
+}
+
+function updateProjectFilesLocal(projectPath, files) {
+  if (!projectPath) return;
+  const normalized = normalizeProjectPath(projectPath);
+  if (!normalized) return;
+  historyState.projectFiles.set(normalized, Array.isArray(files) ? files.slice(0, MAX_RECENT_FILES) : []);
+}
+
+async function ensureProjectHistory(projectPath) {
+  const normalized = normalizeProjectPath(projectPath);
+  if (!normalized || historyState.projectFiles.has(normalized)) {
+    renderRecentTabs();
+    return;
+  }
+  if (historyState.loadingProjects.has(normalized)) return;
+  historyState.loadingProjects.add(normalized);
+  try {
+    const response = await fetch(`/api/app/code_oss/history?project=${encodeURIComponent(normalized)}`, { cache: 'no-store' });
+    if (response.ok) {
+      const body = await response.json().catch(() => null);
+      if (body?.ok) {
+        const files = Array.isArray(body.data?.files) ? body.data.files : [];
+        updateProjectFilesLocal(normalized, files);
+      }
+    }
+  } catch (error) {
+    console.warn('[ide_fullpage] Failed to load project history', error);
+  } finally {
+    historyState.loadingProjects.delete(normalized);
+    renderRecentTabs();
+  }
+}
+
+function recordProjectHistory(projectPath, { persist = true } = {}) {
+  const normalized = normalizeProjectPath(projectPath);
+  if (!normalized) return;
+  updateRecentProjectsLocal(normalized);
+  if (persist) {
+    fetch('/api/app/code_oss/history/project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: normalized }),
+    })
+      .then((response) => response.json().catch(() => null))
+      .then((body) => {
+        if (body?.ok && body.data) {
+          updateRecentProjectsLocal(body.data.path, body.data.opened_at);
+          renderRecentTabs();
+        }
+      })
+      .catch((error) => {
+        console.warn('[ide_fullpage] Failed to persist project history', error);
+      });
+  }
+}
+
+function recordFileHistory(projectPath, filePath, { persist = true } = {}) {
+  const project = normalizeProjectPath(projectPath);
+  const file = normalizeFilePath(filePath);
+  if (!project || !file) return;
+  const files = historyState.projectFiles.get(project) || [];
+  const openedAt = new Date().toISOString();
+  const entry = { path: file, label: fileLabel(file), opened_at: openedAt };
+  const next = [entry, ...files.filter((item) => item.path !== file)].slice(0, MAX_RECENT_FILES);
+  historyState.projectFiles.set(project, next);
+  renderRecentTabs();
+  if (persist) {
+    fetch('/api/app/code_oss/history/file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_path: project, file_path: file }),
+    })
+      .then((response) => response.json().catch(() => null))
+      .then((body) => {
+        if (body?.ok && body.data) {
+          const currentEntries = historyState.projectFiles.get(project) || [];
+          const updated = [body.data, ...currentEntries.filter((item) => item.path !== body.data.path)].slice(0, MAX_RECENT_FILES);
+          historyState.projectFiles.set(project, updated);
+          renderRecentTabs();
+        }
+      })
+      .catch((error) => {
+        console.warn('[ide_fullpage] Failed to persist file history', error);
+      });
+  }
+}
+
+function removeFileHistory(projectPath, filePath, { persist = true } = {}) {
+  const project = normalizeProjectPath(projectPath);
+  const file = normalizeFilePath(filePath);
+  if (!project || !file) return;
+  const files = historyState.projectFiles.get(project);
+  if (!files || !files.length) return;
+  const filtered = files.filter((item) => item.path !== file);
+  historyState.projectFiles.set(project, filtered);
+  renderRecentTabs();
+  if (persist) {
+    fetch('/api/app/code_oss/history/file', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_path: project, file_path: file }),
+    }).catch((error) => {
+      console.warn('[ide_fullpage] Failed to remove file from history', error);
+    });
+  }
+}
+
+function openRecentMenu() {
+  if (!recentTabMenu || !recentTabToggle) return;
+  if (!recentTabMenu.innerHTML.trim()) return;
+  recentMenuOpen = true;
+  recentTabMenu.classList.add('is-open');
+  recentTabToggle.setAttribute('aria-expanded', 'true');
+}
+
+function closeRecentMenu() {
+  if (!recentTabMenu || !recentTabToggle) return;
+  if (!recentMenuOpen) {
+    recentTabMenu.classList.remove('is-open');
+    recentTabToggle.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  recentMenuOpen = false;
+  recentTabMenu.classList.remove('is-open');
+  recentTabToggle.setAttribute('aria-expanded', 'false');
+}
+
+function renderRecentTabs() {
+  if (!recentTabToggle || !recentTabMenu) return;
+  const project = normalizeProjectPath(currentProject);
+  const files = project ? historyState.projectFiles.get(project) || [] : [];
+  const count = files.length;
+  const label = count ? `Recent Files (${count}) ▾` : 'Recent Files ▾';
+  recentTabToggle.textContent = label;
+  if (!count) {
+    recentTabToggle.disabled = true;
+    recentTabMenu.innerHTML = '';
+    closeRecentMenu();
+    return;
+  }
+  recentTabToggle.disabled = false;
+  const activeFile = normalizeFilePath(currentFile);
+  const itemsHtml = files
+    .map((entry) => {
+      const isActive = entry.path === activeFile;
+      const classes = ['recent-menu-item'];
+      if (isActive) classes.push('is-active');
+      return `
+        <div class="${classes.join(' ')}" data-path="${entry.path}">
+          <span class="recent-menu-label" title="${entry.path}">${entry.label || entry.path}</span>
+          <button type="button" class="recent-menu-close" data-action="close" aria-label="Remove ${entry.label || entry.path}">×</button>
+        </div>
+      `;
+    })
+    .join('');
+  recentTabMenu.innerHTML = itemsHtml;
+  if (recentMenuOpen) {
+    recentTabMenu.classList.add('is-open');
+    recentTabToggle.setAttribute('aria-expanded', 'true');
+  }
+}
+
+function initializeHistory() {
+  fetch('/api/app/code_oss/history', { cache: 'no-store' })
+    .then((response) => response.json().catch(() => null))
+    .then((body) => {
+      if (body?.ok && Array.isArray(body.data?.recent_projects)) {
+        historyState.recentProjects = body.data.recent_projects.slice(0, MAX_RECENT_PROJECTS);
+      }
+      if (currentProject) {
+        ensureProjectHistory(currentProject);
+      }
+    })
+    .catch((error) => {
+      console.warn('[ide_fullpage] Failed to load history overview', error);
+    })
+    .finally(() => {
+      renderRecentTabs();
+    });
+}
+
 function setCurrentProject(path, { updateUI = true, persist = true } = {}) {
   const normalized = normalizeProjectPath(path);
   if (currentProject === normalized) {
     if (updateUI) {
       updateSubtitle();
       updateDocPlaceholder();
+      renderRecentTabs();
     }
     return;
   }
   currentProject = normalized;
-  if (persist) {
-    const st = getStateAPI();
-    if (st && typeof st.set === 'function') {
-      try {
-        st.set(PROJECT_STATE_KEY, normalized);
-      } catch (error) {
-        console.warn('[ide_fullpage] Failed to persist project path', error);
+  renderRecentTabs();
+  if (normalized) {
+    if (persist) {
+      const st = getStateAPI();
+      if (st && typeof st.set === 'function') {
+        try {
+          st.set(PROJECT_STATE_KEY, normalized);
+        } catch (error) {
+          console.warn('[ide_fullpage] Failed to persist project path', error);
+        }
       }
+      recordProjectHistory(normalized, { persist: true });
+    } else {
+      recordProjectHistory(normalized, { persist: false });
     }
+    ensureProjectHistory(normalized);
+  } else {
+    renderRecentTabs();
   }
   if (updateUI) {
     updateSubtitle();
@@ -627,22 +859,12 @@ function ensureEditor() {
 }
 
 function updateStatusBar() {
-  if (!docStatusLabel) return;
-  const parts = [];
-  if (connectionLabel) parts.push(connectionLabel);
-  if (!bridgeState.known) {
-    parts.push('Bridge: checking…');
-  } else if (bridgeState.error) {
-    parts.push(`Bridge error: ${bridgeState.error}`);
-  } else if (bridgeState.installed) {
-    parts.push(bridgeState.version ? `Bridge v${bridgeState.version}` : 'Bridge installed');
-  } else {
-    parts.push('Bridge: not installed');
-  }
+  if (!recentTabToggle) return;
   if (cmState.language && cmState.language !== 'plaintext') {
-    parts.push(cmState.language);
+    recentTabToggle.title = `Language: ${cmState.language}`;
+  } else {
+    recentTabToggle.removeAttribute('title');
   }
-  docStatusLabel.textContent = parts.join(' • ');
 }
 
 function setEditorDocument(docId, text, languageId) {
@@ -729,7 +951,9 @@ async function openFileInEditor(path) {
     const fileData = body.data || {};
     const docId = buildDocIdFromPath(path);
     const language = normalizeLanguageId(fileData.language || null, path);
+    closeRecentMenu();
     setEditorDocument(docId, fileData.content || '', language);
+    recordFileHistory(currentProject, path, { persist: true });
   } catch (error) {
     console.error(`[ide_fullpage] Failed to fetch file content for ${path}:`, error);
     const docId = buildDocIdFromPath(path);
@@ -1294,6 +1518,7 @@ function handleBridgeEvent(data) {
         ensurePathVisible(data.path);
         applyBridgeState({ bridge_installed: true });
         setDocumentHasContent(true);
+        recordFileHistory(currentProject, data.path, { persist: true });
       } else {
         currentFile = null;
         currentDocId = null;
@@ -1396,18 +1621,46 @@ menuRegistry.forEach(({ button, dropdown }) => {
   });
 });
 
+recentTabToggle?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  if (recentTabToggle.disabled) return;
+  if (recentMenuOpen) {
+    closeRecentMenu();
+  } else {
+    openRecentMenu();
+  }
+});
+
+recentTabMenu?.addEventListener('click', (event) => {
+  const closeButton = event.target.closest('[data-action="close"]');
+  const item = event.target.closest('.recent-menu-item');
+  if (!item) return;
+  const { path } = item.dataset;
+  if (!path) return;
+  if (closeButton) {
+    event.stopPropagation();
+    removeFileHistory(currentProject, path, { persist: true });
+    return;
+  }
+  closeRecentMenu();
+  openFileInEditor(path);
+});
+
 document.addEventListener('pointerdown', (event) => {
   const target = event.target;
   const insideMenu = menuRegistry.some(({ button, dropdown }) => {
     return button.contains(target) || dropdown.contains(target);
   });
   if (!insideMenu) closeMenus();
+  const insideRecent = target.closest('#recent-tab-menu') || target.closest('#recent-tab-toggle');
+  if (!insideRecent) closeRecentMenu();
 });
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     closeMenus();
     disableNativeSelection();
+    closeRecentMenu();
   }
 });
 
@@ -1602,7 +1855,7 @@ function restoreProjectState() {
     }
   }
   if (currentProject) {
-    setCurrentProject(currentProject, { updateUI: false });
+    setCurrentProject(currentProject, { updateUI: false, persist: false });
   }
 }
 
@@ -1627,6 +1880,7 @@ function wireAssistantToggle() {
 
 restoreAssistantState();
 wireAssistantToggle();
+initializeHistory();
 restoreProjectState();
 updateSubtitle();
 updateHeaderFile();

@@ -15,6 +15,8 @@ from flask import Blueprint, current_app, jsonify, request, render_template_stri
 
 from app.libs.framework_shells import _manager
 
+from .history_store import HistoryStore
+
 
 code_oss_bp = Blueprint(
     "code_oss_backend",
@@ -40,6 +42,8 @@ _BRIDGE_EVENTS: deque[dict[str, Any]] = deque(maxlen=_BRIDGE_EVENT_LIMIT)
 _BRIDGE_SEQ = 0
 _BRIDGE_COMMANDS: deque[dict[str, Any]] = deque()
 _BRIDGE_DOC_CACHE: Dict[str, Dict[str, Any]] = {}
+
+history_store = HistoryStore()
 
 
 def _empty_bridge_summary() -> Dict[str, Any]:
@@ -79,10 +83,19 @@ def _normalize_project_path(path: str) -> str:
         return str(path)
 
 
+def _normalize_file_path(path: str) -> str:
+    try:
+        return str(Path(path).expanduser().resolve(strict=False))
+    except Exception:
+        return str(path)
+
+
 def _update_current_project(path: Optional[str]) -> None:
     if not path:
         return
-    _SHELL_STATE["project_path"] = _normalize_project_path(path)
+    normalized = _normalize_project_path(path)
+    _SHELL_STATE["project_path"] = normalized
+    history_store.touch_project(normalized)
 
 
 def _update_bridge_summary(event: Dict[str, Any]) -> None:
@@ -733,8 +746,10 @@ def set_project():
     if not folder.is_dir():
         return jsonify({"ok": False, "error": f"Not a directory: {folder}"}), 400
 
+    normalized = _normalize_project_path(str(folder))
     _stop_shell()
-    _SHELL_STATE["project_path"] = str(folder)
+    _SHELL_STATE["project_path"] = normalized
+    history_store.touch_project(normalized)
 
     try:
         _ensure_running()
@@ -744,14 +759,14 @@ def set_project():
 
     port = _SHELL_STATE.get("port")
     manifest = _bridge_manifest()
-    url = _build_server_url(DEFAULT_HOST, port, _SHELL_STATE.get("project_path"))
+    url = _build_server_url(DEFAULT_HOST, port, normalized)
     return jsonify(
         {
             "ok": True,
             "data": {
                 "host": DEFAULT_HOST,
                 "port": port,
-                "project_path": _SHELL_STATE.get("project_path"),
+                "project_path": normalized,
                 "url": url,
                 "bridge_installed": _is_bridge_installed(manifest),
                 "bridge_version": manifest.get("version") if manifest else None,
@@ -778,6 +793,68 @@ def install_bridge():
             },
         }
     )
+
+
+@code_oss_bp.get("/history")
+def get_history():
+    project = request.args.get("project")
+    if project:
+        normalized = _normalize_project_path(project)
+        files = history_store.list_files(normalized)
+        return jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "project_path": normalized,
+                    "files": files,
+                },
+            }
+        )
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "recent_projects": history_store.list_projects(),
+            },
+        }
+    )
+
+
+@code_oss_bp.post("/history/project")
+def touch_history_project():
+    payload = request.get_json(silent=True) or {}
+    path = payload.get("path")
+    if not path:
+        return jsonify({"ok": False, "error": "Missing project path"}), 400
+    normalized = _normalize_project_path(path)
+    entry = history_store.touch_project(normalized)
+    return jsonify({"ok": True, "data": entry})
+
+
+@code_oss_bp.post("/history/file")
+def touch_history_file():
+    payload = request.get_json(silent=True) or {}
+    project_path = payload.get("project_path")
+    file_path = payload.get("file_path")
+    if not project_path or not file_path:
+        return jsonify({"ok": False, "error": "Missing project_path or file_path"}), 400
+    normalized_project = _normalize_project_path(project_path)
+    normalized_file = _normalize_file_path(file_path)
+    entry = history_store.touch_file(normalized_project, normalized_file)
+    return jsonify({"ok": True, "data": entry})
+
+
+@code_oss_bp.delete("/history/file")
+def delete_history_file():
+    payload = request.get_json(silent=True) or {}
+    project_path = payload.get("project_path")
+    file_path = payload.get("file_path")
+    if not project_path or not file_path:
+        return jsonify({"ok": False, "error": "Missing project_path or file_path"}), 400
+    normalized_project = _normalize_project_path(project_path)
+    normalized_file = _normalize_file_path(file_path)
+    removed = history_store.remove_file(normalized_project, normalized_file)
+    return jsonify({"ok": True, "data": {"removed": removed}})
 
 
 @code_oss_bp.post("/edits")
