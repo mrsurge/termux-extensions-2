@@ -10,6 +10,7 @@
   --drawer-width: min(320px, 82vw);
   --chat-height: min(240px, 40vh);
   --topbar-height: 60px;
+  --editor-safe-area: 0px;
 }
 
 *,
@@ -37,6 +38,11 @@ body {
   min-height: 100%;
   background: var(--bg);
   color: var(--fg);
+  --editor-safe-area: calc(var(--chat-height) + 42px);
+}
+
+#ide-root.assistant-collapsed {
+  --editor-safe-area: 72px;
 }
 
 .ide-topbar {
@@ -114,6 +120,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
 }
 
 .doc-stage {
@@ -121,6 +128,7 @@ body {
   flex: 1;
   min-height: 0;
   display: flex;
+  min-width: 0;
   flex-direction: column;
 }
 
@@ -129,6 +137,7 @@ body {
   z-index: 2;
   flex: 1;
   display: flex;
+  min-width: 0;
   flex-direction: column;
   background: var(--bg);
 }
@@ -354,22 +363,26 @@ body {
 .cm6-editor-container {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   position: relative;
 }
 
 .cm6-host {
   position: absolute;
-  inset: 0;
+  inset: 0 0 var(--editor-safe-area, 0px) 0;
   display: flex;
+  min-width: 0;
 }
 
 .cm-editor {
   flex: 1;
   height: 100%;
+  min-width: 0;
 }
 
 .cm-scroller {
   overflow-x: auto !important;
+  overflow-y: auto !important;
 }
 
 .ide-frame-shell {
