@@ -49,10 +49,11 @@ Extensions and apps are the primary way to add functionality to the framework. E
 
 ### Frontend Development
 
-The frontend is built with vanilla JavaScript, HTML, and CSS. The project encourages the use of two shared utilities for a consistent user experience:
+The frontend is built with vanilla JavaScript, HTML, and CSS. For a consistent UX, rely on the shared file picker utility:
 
 *   `window.teFilePicker`: A universal file picker modal.
-*   `window.teState`: A state-store helper for persisting frontend state.
+
+> ⚠️ **Persistent state must live on disk.** Do **not** use `window.teState` (localStorage/cookies) for IDE features or user settings unless the user explicitly requests it for a specific scenario (the only standing exception is transient directory hints inside the shared file picker itself).
 
 ### Diagnostics and Runtime Management
 

@@ -159,10 +159,10 @@ const bridgeHandshake = {
   active: false,
 };
 
-const PROJECT_STATE_KEY = 'codeOss.currentProjectPath';
 const MAX_RECENT_PROJECTS = 12;
 const MAX_RECENT_FILES = 12;
-const GIT_INDICATOR_STATE_KEY = 'codeOss.gitIndicatorsEnabled';
+const LAST_FILE_RESTORE_DELAY = 4000;
+const PREFERENCES_ENDPOINT = '/api/app/code_oss/preferences';
 const GIT_LABEL_MAP = {
   modified: 'M',
   staged: 'S',
@@ -181,6 +181,30 @@ const GIT_CLASS_MAP = {
   conflict: 'git-conflict',
   ignored: 'git-ignored',
 };
+
+const DEFAULT_EDITOR_PREFS = {
+  showLineNumbers: true,
+  showSyntax: true,
+  showShading: false,
+  wordWrap: false,
+  theme: 'cm6-dark',
+};
+
+const DEFAULT_UI_PREFS = {
+  assistantCollapsed: true,
+  gitIndicators: true,
+};
+
+let preferences = {
+  editor: { ...DEFAULT_EDITOR_PREFS },
+  ui: { ...DEFAULT_UI_PREFS },
+  project: { lastFile: null },
+};
+
+let preferencesProjectPath = null;
+let pendingPreferencesRequest = null;
+let pendingLastFile = null;
+let pendingLastFileTimer = null;
 
 const historyState = {
   recentProjects: [],
@@ -253,6 +277,127 @@ function shouldShowGitIndicators() {
   );
 }
 
+function getCurrentEditorPrefs() {
+  return {
+    showLineNumbers: !!cmState.showLineNumbers,
+    showSyntax: !!cmState.showSyntax,
+    showShading: !!cmState.showShading,
+    wordWrap: !!cmState.wordWrap,
+    theme: cmState.theme || DEFAULT_EDITOR_PREFS.theme,
+  };
+}
+
+async function loadPreferences(projectPath) {
+  const params = projectPath ? `?project=${encodeURIComponent(projectPath)}` : '';
+  try {
+    const request = fetch(`${PREFERENCES_ENDPOINT}${params}`, { cache: 'no-store' });
+    pendingPreferencesRequest = request;
+    const response = await request;
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body?.ok) {
+      throw new Error(body?.error || `HTTP ${response.status}`);
+    }
+    const data = body.data || {};
+    preferences.editor = { ...DEFAULT_EDITOR_PREFS, ...(data.editor || {}) };
+    preferences.ui = { ...DEFAULT_UI_PREFS, ...(data.ui || {}) };
+    const projectData = data.project || {};
+    preferences.project = {
+      lastFile: projectData.last_file || null,
+    };
+    preferencesProjectPath = projectData.path || projectPath || null;
+    queueLastFileRestore(preferences.project.lastFile);
+  } catch (error) {
+    console.warn('[ide_fullpage] Failed to load preferences', error);
+    preferences = {
+      editor: { ...DEFAULT_EDITOR_PREFS },
+      ui: { ...DEFAULT_UI_PREFS },
+      project: { lastFile: null },
+    };
+    preferencesProjectPath = projectPath || null;
+    queueLastFileRestore(null);
+    throw error;
+  } finally {
+    pendingPreferencesRequest = null;
+  }
+}
+
+async function persistPreferences({ editor, ui, project } = {}) {
+  const payload = {};
+  if (editor) payload.editor = editor;
+  if (ui) payload.ui = ui;
+  if (project) payload.project = project;
+  if (!Object.keys(payload).length) return;
+  try {
+    await fetch(PREFERENCES_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    console.warn('[ide_fullpage] Failed to persist preferences', error);
+  }
+}
+
+function persistEditorPreferences() {
+  preferences.editor = getCurrentEditorPrefs();
+  persistPreferences({ editor: preferences.editor });
+}
+
+function persistUiPreferences() {
+  persistPreferences({ ui: preferences.ui });
+}
+
+function updateLastOpenedFile(path) {
+  const projectPath = currentProject || preferencesProjectPath;
+  if (!projectPath) return;
+  preferences.project.lastFile = path || null;
+  persistPreferences({ project: { path: projectPath, last_file: preferences.project.lastFile } });
+}
+
+function applyEditorPreferences() {
+  cmState.showLineNumbers = !!preferences.editor.showLineNumbers;
+  cmState.showSyntax = !!preferences.editor.showSyntax;
+  cmState.showShading = !!preferences.editor.showShading;
+  cmState.wordWrap = !!preferences.editor.wordWrap;
+  cmState.theme = preferences.editor.theme || DEFAULT_EDITOR_PREFS.theme;
+}
+
+function applyAssistantPreference() {
+  if (!root) return;
+  const collapsed = !!preferences.ui.assistantCollapsed;
+  root.classList.toggle('assistant-collapsed', collapsed);
+  if (btnToggleAssistant) {
+    btnToggleAssistant.setAttribute('aria-expanded', String(!collapsed));
+  }
+}
+
+function applyPreferences() {
+  applyEditorPreferences();
+  explorerState.indicatorsEnabled = !!preferences.ui.gitIndicators;
+  applyAssistantPreference();
+  syncGitToggle();
+}
+
+function queueLastFileRestore(filePath) {
+  pendingLastFile = filePath || null;
+  if (pendingLastFileTimer) {
+    clearTimeout(pendingLastFileTimer);
+    pendingLastFileTimer = null;
+  }
+}
+
+function triggerLastFileRestoreIfReady() {
+  if (!pendingLastFile || pendingLastFileTimer || !frameReady) return;
+  pendingLastFileTimer = setTimeout(() => {
+    const targetPath = pendingLastFile;
+    pendingLastFile = null;
+    pendingLastFileTimer = null;
+    if (targetPath && targetPath !== currentFile) {
+      openFileInEditor(targetPath);
+    }
+  }, LAST_FILE_RESTORE_DELAY);
+}
+
 function getGitEntry(path) {
   if (!path) return null;
   const entries = explorerState.git.entries;
@@ -308,39 +453,12 @@ function syncGitToggle() {
   if (!gitToggleInput) return;
   const repoActive = explorerState.git.enabled && explorerState.git.repository;
   gitToggleInput.disabled = !repoActive;
-  gitToggleInput.checked = repoActive ? explorerState.indicatorsEnabled : false;
+  const enabled = repoActive ? explorerState.indicatorsEnabled : false;
+  gitToggleInput.checked = enabled;
   const label = gitToggleInput.closest('.drawer-toggle');
   if (label) {
     label.classList.toggle('is-disabled', gitToggleInput.disabled);
   }
-}
-
-function persistGitPreference(enabled) {
-  const st = getStateAPI();
-  if (!st || typeof st.set !== 'function') return;
-  try {
-    st.set(GIT_INDICATOR_STATE_KEY, enabled);
-  } catch (error) {
-    console.warn('[ide_fullpage] Failed to persist git indicator preference', error);
-  }
-}
-
-function restoreGitPreference() {
-  const st = getStateAPI();
-  if (st && typeof st.get === 'function') {
-    try {
-      const stored = st.get(GIT_INDICATOR_STATE_KEY);
-      if (typeof stored === 'boolean') {
-        explorerState.indicatorsEnabled = stored;
-      }
-    } catch (error) {
-      console.warn('[ide_fullpage] Failed to restore git indicator preference', error);
-    }
-  }
-  if (gitToggleInput) {
-    gitToggleInput.checked = explorerState.indicatorsEnabled;
-  }
-  syncGitToggle();
 }
 
 function updateGitSnapshot(payload) {
@@ -398,14 +516,24 @@ function updateGitSnapshot(payload) {
 
 function wireGitToggle() {
   if (!gitToggleInput) return;
-  gitToggleInput.checked = explorerState.indicatorsEnabled;
   gitToggleInput.addEventListener('change', () => {
     explorerState.indicatorsEnabled = gitToggleInput.checked;
-    persistGitPreference(explorerState.indicatorsEnabled);
+    preferences.ui.gitIndicators = explorerState.indicatorsEnabled;
+    persistUiPreferences();
     syncGitToggle();
     renderExplorerTree();
   });
   syncGitToggle();
+}
+
+function wireAssistantToggle() {
+  if (!btnToggleAssistant || !root) return;
+  btnToggleAssistant.addEventListener('click', () => {
+    const collapsed = root.classList.toggle('assistant-collapsed');
+    btnToggleAssistant.setAttribute('aria-expanded', String(!collapsed));
+    preferences.ui.assistantCollapsed = collapsed;
+    persistUiPreferences();
+  });
 }
 
 function projectLabel(path) {
@@ -628,19 +756,25 @@ function setCurrentProject(path, { updateUI = true, persist = true } = {}) {
   renderRecentTabs();
   if (normalized) {
     if (persist) {
-      const st = getStateAPI();
-      if (st && typeof st.set === 'function') {
-        try {
-          st.set(PROJECT_STATE_KEY, normalized);
-        } catch (error) {
-          console.warn('[ide_fullpage] Failed to persist project path', error);
-        }
-      }
       recordProjectHistory(normalized, { persist: true });
     } else {
       recordProjectHistory(normalized, { persist: false });
     }
     ensureProjectHistory(normalized);
+    if (normalized !== preferencesProjectPath) {
+      loadPreferences(normalized)
+        .then(() => {
+          applyPreferences();
+          syncMenuState();
+          if (cmState.view) {
+            recreateEditor(cmState.text, { preserveSelection: true });
+          }
+        })
+        .catch(() => {
+          applyPreferences();
+          syncMenuState();
+        });
+    }
   } else {
     renderRecentTabs();
   }
@@ -1087,6 +1221,11 @@ function sendCommand(cmd, args = {}) {
 }
 
 async function openFileInEditor(path) {
+  if (pendingLastFileTimer) {
+    clearTimeout(pendingLastFileTimer);
+    pendingLastFileTimer = null;
+  }
+  pendingLastFile = null;
   currentFile = path;
   updateDocPlaceholder();
 
@@ -1104,11 +1243,13 @@ async function openFileInEditor(path) {
     closeRecentMenu();
     setEditorDocument(docId, fileData.content || '', language);
     recordFileHistory(currentProject, path, { persist: true });
+    updateLastOpenedFile(path);
   } catch (error) {
     console.error(`[ide_fullpage] Failed to fetch file content for ${path}:`, error);
     const docId = buildDocIdFromPath(path);
     const fallback = `// Failed to load file: ${path}\n// Reason: ${error.message}`.trim();
     setEditorDocument(docId, fallback, 'plaintext');
+    updateLastOpenedFile(path);
   }
 }
 
@@ -1661,6 +1802,7 @@ function handleBridgeEvent(data) {
       renderExplorerTree();
       if (!data.parent) {
         root.classList.add('drawer-open');
+        triggerLastFileRestoreIfReady();
       }
       break;
     }
@@ -1720,12 +1862,14 @@ function handleBridgeEvent(data) {
         applyBridgeState({ bridge_installed: true });
         setDocumentHasContent(true);
         recordFileHistory(currentProject, data.path, { persist: true });
+        updateLastOpenedFile(data.path);
       } else {
         currentFile = null;
         currentDocId = null;
         updateDocPlaceholder();
         updateSubtitle();
         setDocumentHasContent(false);
+        updateLastOpenedFile(null);
       }
       break;
     }
@@ -1771,6 +1915,7 @@ function handleFrameLoad() {
   frameReady = true;
   frame?.setAttribute('aria-hidden', 'false');
   hideOverlay();
+  triggerLastFileRestoreIfReady();
   const bridgeArgs = getBridgeArgs();
   frame.contentWindow?.postMessage({ _mobileShell: true, type: 'hello', args: bridgeArgs }, '*');
   startBridgePolling(300);
@@ -1920,6 +2065,7 @@ miToggleLines?.addEventListener('click', () => {
   cmState.showLineNumbers = !cmState.showLineNumbers;
   syncMenuState();
   recreateEditor(cmState.text, { preserveSelection: true });
+  persistEditorPreferences();
   closeMenus();
 });
 
@@ -1927,6 +2073,7 @@ miToggleShading?.addEventListener('click', () => {
   cmState.showShading = !cmState.showShading;
   syncMenuState();
   recreateEditor(cmState.text, { preserveSelection: true });
+  persistEditorPreferences();
   closeMenus();
 });
 
@@ -1934,6 +2081,7 @@ miToggleSyntax?.addEventListener('click', () => {
   cmState.showSyntax = !cmState.showSyntax;
   syncMenuState();
   recreateEditor(cmState.text, { preserveSelection: true });
+  persistEditorPreferences();
   closeMenus();
 });
 
@@ -1941,6 +2089,7 @@ miToggleWrap?.addEventListener('click', () => {
   cmState.wordWrap = !cmState.wordWrap;
   syncMenuState();
   recreateEditor(cmState.text, { preserveSelection: true });
+  persistEditorPreferences();
   closeMenus();
 });
 
@@ -1972,6 +2121,7 @@ themeMenuItems.forEach((item) => {
     cmState.theme = theme;
     syncMenuState();
     recreateEditor(cmState.text, { preserveSelection: true });
+    persistEditorPreferences();
     closeMenus();
   });
 });
@@ -2044,59 +2194,19 @@ window.addEventListener('resize', () => {
   }
 });
 
-function getStateAPI() {
-  try {
-    return window.teState || null;
-  } catch (_error) {
-    return null;
-  }
-}
-
-function restoreProjectState() {
-  const st = getStateAPI();
-  if (st && typeof st.get === 'function') {
-    try {
-      const stored = st.get(PROJECT_STATE_KEY);
-      if (stored) {
-        setCurrentProject(stored, { updateUI: false, persist: false });
-        return;
-      }
-    } catch (error) {
-      console.warn('[ide_fullpage] Failed to restore project path from state', error);
-    }
-  }
-  if (currentProject) {
-    setCurrentProject(currentProject, { updateUI: false, persist: false });
-  }
-}
-
-function restoreAssistantState() {
-  const btn = btnToggleAssistant;
-  if (!root || !btn) return;
-  const collapsed = true;
-  root.classList.toggle('assistant-collapsed', collapsed);
-  btn.setAttribute('aria-expanded', String(!collapsed));
-}
-
-function wireAssistantToggle() {
-  const st = getStateAPI();
-  const btn = btnToggleAssistant;
-  if (!root || !btn) return;
-  btn.addEventListener('click', () => {
-    const collapsed = root.classList.toggle('assistant-collapsed');
-    btn.setAttribute('aria-expanded', String(!collapsed));
-    if (st && st.set) st.set('assistantCollapsed', collapsed);
-  });
-}
-
-restoreAssistantState();
 wireAssistantToggle();
 initializeHistory();
-restoreProjectState();
-restoreGitPreference();
 wireGitToggle();
 updateSubtitle();
 updateDocPlaceholder();
-ensureEditor();
-syncMenuState();
-startServer();
+(async () => {
+  try {
+    await loadPreferences(currentProject);
+  } catch (error) {
+    // Errors already logged inside loadPreferences; continue with defaults.
+  }
+  applyPreferences();
+  ensureEditor();
+  syncMenuState();
+  startServer();
+})();

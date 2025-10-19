@@ -16,6 +16,7 @@ from flask import Blueprint, current_app, jsonify, request, render_template_stri
 from app.libs.framework_shells import _manager
 
 from .history_store import HistoryStore
+from .preferences_store import PreferencesStore
 
 
 code_oss_bp = Blueprint(
@@ -44,6 +45,7 @@ _BRIDGE_COMMANDS: deque[dict[str, Any]] = deque()
 _BRIDGE_DOC_CACHE: Dict[str, Dict[str, Any]] = {}
 
 history_store = HistoryStore()
+preferences_store = PreferencesStore()
 
 
 _GIT_SETTINGS: dict[str, Any] = {
@@ -1061,6 +1063,32 @@ def set_project():
             },
         }
     )
+
+
+@code_oss_bp.get("/preferences")
+def get_preferences():
+    project = request.args.get("project") or _SHELL_STATE.get("project_path")
+    prefs = preferences_store.get_preferences(project)
+    return jsonify({"ok": True, "data": prefs})
+
+
+@code_oss_bp.post("/preferences")
+def update_preferences():
+    payload = request.get_json(silent=True) or {}
+    editor = payload.get("editor") if isinstance(payload.get("editor"), dict) else None
+    ui = payload.get("ui") if isinstance(payload.get("ui"), dict) else None
+    project_payload = payload.get("project") if isinstance(payload.get("project"), dict) else None
+
+    try:
+        updated = preferences_store.update_preferences(
+            editor=editor,
+            ui=ui,
+            project=project_payload,
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    return jsonify({"ok": True, "data": updated})
 
 
 @code_oss_bp.post("/bridge/install")
