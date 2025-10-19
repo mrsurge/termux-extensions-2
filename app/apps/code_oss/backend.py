@@ -17,6 +17,7 @@ from app.libs.framework_shells import _manager
 
 from .history_store import HistoryStore
 from .preferences_store import PreferencesStore
+from .terminal_manager import get_terminal_manager
 
 
 code_oss_bp = Blueprint(
@@ -617,11 +618,11 @@ def _runtime_dirs() -> dict[str, Path]:
     user_data = base / "user-data"
     extensions = base / "extensions"
     config = base / "config"
-    
+
     base.mkdir(parents=True, exist_ok=True)
     for path in (logs, user_data, extensions, config):
         path.mkdir(parents=True, exist_ok=True)
-    
+
     return {
         "base": base,
         "logs": logs,
@@ -669,8 +670,9 @@ def _installed_extensions() -> set[str]:
         result = subprocess.run(
             [
                 str(_wrapper_script()),
-                "--extensions-dir", str(runtime["extensions"]),
-                "--list-extensions"
+                "--extensions-dir",
+                str(runtime["extensions"]),
+                "--list-extensions",
             ],
             check=True,
             capture_output=True,
@@ -701,19 +703,23 @@ def _ensure_bridge_extension(force: bool = False) -> None:
         return
     if not force and _is_bridge_installed(manifest):
         return
-    
+
     runtime = _runtime_dirs()
     command = [
-        str(_wrapper_script()), 
-        "--extensions-dir", str(runtime["extensions"]),
-        "--install-extension", str(vsix_path)
+        str(_wrapper_script()),
+        "--extensions-dir",
+        str(runtime["extensions"]),
+        "--install-extension",
+        str(vsix_path),
     ]
     if force:
         command.insert(3, "--force")
     try:
         subprocess.run(command, check=True, env=_cli_env())
     except Exception:  # pragma: no cover - defensive
-        current_app.logger.exception("Failed to install mobile bridge extension via CLI")
+        current_app.logger.exception(
+            "Failed to install mobile bridge extension via CLI"
+        )
 
 
 def _is_shell_running() -> bool:
@@ -740,7 +746,9 @@ def _pick_port() -> int:
     return port
 
 
-def _build_server_url(host: Optional[str], port: Optional[int], project_path: Optional[str]) -> Optional[str]:
+def _build_server_url(
+    host: Optional[str], port: Optional[int], project_path: Optional[str]
+) -> Optional[str]:
     if not host or not port:
         return None
     base = f"http://{host}:{port}"
@@ -986,37 +994,39 @@ def read_file():
     file_path = request.args.get("path")
     if not file_path:
         return jsonify({"ok": False, "error": "Missing path parameter"}), 400
-    
+
     try:
         # Resolve path
         resolved_path = Path(file_path).expanduser().resolve()
-        
+
         # Basic security check - ensure file is under home directory
         if not str(resolved_path).startswith(str(Path.home())):
             return jsonify({"ok": False, "error": "Access denied"}), 403
-        
+
         if not resolved_path.exists():
             return jsonify({"ok": False, "error": "File not found"}), 404
-        
+
         if not resolved_path.is_file():
             return jsonify({"ok": False, "error": "Not a file"}), 400
-        
+
         # Read file content
         try:
             content = resolved_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             # Try as binary if text fails
             content = f"[Binary file - {resolved_path.stat().st_size} bytes]"
-        
-        return jsonify({
-            "ok": True,
-            "data": {
-                "path": str(resolved_path),
-                "content": content,
-                "size": resolved_path.stat().st_size
+
+        return jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "path": str(resolved_path),
+                    "content": content,
+                    "size": resolved_path.stat().st_size,
+                },
             }
-        })
-        
+        )
+
     except Exception as e:
         current_app.logger.exception("Failed to read file")
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -1077,7 +1087,9 @@ def update_preferences():
     payload = request.get_json(silent=True) or {}
     editor = payload.get("editor") if isinstance(payload.get("editor"), dict) else None
     ui = payload.get("ui") if isinstance(payload.get("ui"), dict) else None
-    project_payload = payload.get("project") if isinstance(payload.get("project"), dict) else None
+    project_payload = (
+        payload.get("project") if isinstance(payload.get("project"), dict) else None
+    )
 
     try:
         updated = preferences_store.update_preferences(
@@ -1244,7 +1256,9 @@ def enqueue_edits():
     text = payload.get("text")
 
     if edits and text is not None:
-        return jsonify({"ok": False, "error": "Provide either edits or text, not both"}), 400
+        return jsonify(
+            {"ok": False, "error": "Provide either edits or text, not both"}
+        ), 400
     if not edits and text is None:
         return jsonify({"ok": False, "error": "Missing edits/text payload"}), 400
 
@@ -1269,3 +1283,263 @@ def enqueue_edits():
         return jsonify({"ok": False, "error": str(exc)}), 400
 
     return jsonify({"ok": True, "data": {"op_id": op_id, "queued": True}})
+
+
+# ==============================================================================
+# Terminal API Endpoints
+# ==============================================================================
+
+
+@code_oss_bp.post("/terminals")
+def create_terminal():
+    """Create a new terminal for the current project."""
+    payload = request.get_json(silent=True) or {}
+
+    # Get project path from shell state or request
+    project_path = _SHELL_STATE.get("project_path") or payload.get("project_path")
+    if not project_path:
+        return jsonify({"ok": False, "error": "No project path available"}), 400
+
+    shell_cmd = payload.get("shell")
+    if isinstance(shell_cmd, str):
+        import shlex
+
+        shell_cmd = shlex.split(shell_cmd)
+
+    title = payload.get("title")
+    cols = payload.get("cols", 80)
+    rows = payload.get("rows", 24)
+
+    try:
+        terminal_manager = get_terminal_manager()
+        terminal_info = terminal_manager.create_terminal(
+            project_path=project_path,
+            shell_cmd=shell_cmd,
+            title=title,
+            cols=cols,
+            rows=rows,
+        )
+        return jsonify({"ok": True, "data": terminal_info}), 201
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@code_oss_bp.get("/terminals")
+def list_terminals():
+    """List terminals for the current project."""
+    project_path = _SHELL_STATE.get("project_path")
+
+    try:
+        terminal_manager = get_terminal_manager()
+        terminals = terminal_manager.list_terminals(project_path=project_path)
+        return jsonify({"ok": True, "data": terminals})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@code_oss_bp.get("/terminals/<terminal_id>")
+def get_terminal(terminal_id: str):
+    """Get details for a specific terminal."""
+    try:
+        terminal_manager = get_terminal_manager()
+        terminal_info = terminal_manager.get_terminal(terminal_id)
+
+        if not terminal_info:
+            return jsonify({"ok": False, "error": "Terminal not found"}), 404
+
+        # Include output if requested
+        include_output = request.args.get("output", "false").lower() in {
+            "true",
+            "1",
+            "yes",
+        }
+        if include_output:
+            mgr = _manager()
+            if mgr:
+                shell = mgr.get_shell(terminal_info["shell_id"])
+                if shell:
+                    tail = max(0, int(request.args.get("tail", "100")))
+                    shell_desc = mgr.describe(shell, include_logs=True, tail_lines=tail)
+                    terminal_info["output"] = shell_desc.get("logs", {})
+
+        return jsonify({"ok": True, "data": terminal_info})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@code_oss_bp.post("/terminals/<terminal_id>/input")
+def send_terminal_input(terminal_id: str):
+    """Send input to a terminal."""
+    payload = request.get_json(silent=True) or {}
+    data = payload.get("data", "")
+
+    if not isinstance(data, str):
+        return jsonify({"ok": False, "error": "Invalid input data"}), 400
+
+    try:
+        terminal_manager = get_terminal_manager()
+        terminal_info = terminal_manager.get_terminal(terminal_id)
+
+        if not terminal_info:
+            return jsonify({"ok": False, "error": "Terminal not found"}), 404
+
+        mgr = _manager()
+        if not mgr:
+            return jsonify(
+                {"ok": False, "error": "Framework shell manager not available"}
+            ), 500
+
+        # Send input to the PTY
+        mgr.write_to_pty(terminal_info["shell_id"], data)
+
+        return jsonify({"ok": True, "data": {"sent": len(data)}})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@code_oss_bp.post("/terminals/<terminal_id>/resize")
+def resize_terminal(terminal_id: str):
+    """Resize a terminal."""
+    payload = request.get_json(silent=True) or {}
+    cols = payload.get("cols", 80)
+    rows = payload.get("rows", 24)
+
+    try:
+        cols = max(1, int(cols))
+        rows = max(1, int(rows))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Invalid dimensions"}), 400
+
+    try:
+        terminal_manager = get_terminal_manager()
+        success = terminal_manager.resize_terminal(terminal_id, cols, rows)
+
+        if not success:
+            return jsonify({"ok": False, "error": "Failed to resize terminal"}), 400
+
+        return jsonify({"ok": True, "data": {"cols": cols, "rows": rows}})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@code_oss_bp.delete("/terminals/<terminal_id>")
+def destroy_terminal(terminal_id: str):
+    """Destroy a terminal."""
+    try:
+        terminal_manager = get_terminal_manager()
+        success = terminal_manager.destroy_terminal(terminal_id)
+
+        if not success:
+            return jsonify({"ok": False, "error": "Failed to destroy terminal"}), 404
+
+        return jsonify({"ok": True, "data": {"destroyed": terminal_id}})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@code_oss_bp.patch("/terminals/<terminal_id>")
+def update_terminal(terminal_id: str):
+    """Update terminal properties (title, active state)."""
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        terminal_manager = get_terminal_manager()
+
+        if "title" in payload:
+            terminal_manager.update_terminal_title(terminal_id, payload["title"])
+
+        if "active" in payload:
+            terminal_manager.set_terminal_active(terminal_id, bool(payload["active"]))
+
+        terminal_info = terminal_manager.get_terminal(terminal_id)
+        if not terminal_info:
+            return jsonify({"ok": False, "error": "Terminal not found"}), 404
+
+        return jsonify({"ok": True, "data": terminal_info})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+def register_terminal_websocket(app):
+    """Register WebSocket routes for terminal I/O."""
+    sock = app.config.get("SOCK")
+    if not sock:
+        return
+
+    @sock.route("/api/app/code_oss/ws/terminal/<terminal_id>")
+    def terminal_ws(ws, terminal_id: str):
+        """WebSocket handler for terminal I/O."""
+        terminal_manager = get_terminal_manager()
+        terminal_info = terminal_manager.get_terminal(terminal_id)
+
+        if not terminal_info:
+            ws.close()
+            return
+
+        mgr = _manager()
+        if not mgr:
+            ws.close()
+            return
+
+        shell_id = terminal_info["shell_id"]
+
+        # Subscribe to shell output
+        try:
+            output_queue = mgr.subscribe_output(shell_id)
+        except Exception:
+            ws.close()
+            return
+
+        # Handle incoming messages (input, resize)
+        def handle_input():
+            try:
+                while True:
+                    message = ws.receive()
+                    if message is None:
+                        break
+
+                    try:
+                        data = json.loads(message)
+                        msg_type = data.get("type")
+
+                        if msg_type == "input":
+                            input_data = data.get("data", "")
+                            mgr.write_to_pty(shell_id, input_data)
+                        elif msg_type == "resize":
+                            cols = data.get("cols", 80)
+                            rows = data.get("rows", 24)
+                            terminal_manager.resize_terminal(terminal_id, cols, rows)
+                    except json.JSONDecodeError:
+                        continue
+            except Exception:
+                pass
+
+        # Handle outgoing messages (output)
+        def handle_output():
+            try:
+                while True:
+                    output = output_queue.get(timeout=30)
+                    if output is None:
+                        break
+
+                    ws.send(json.dumps({"type": "output", "data": output}))
+            except Exception:
+                pass
+
+        # Start input handler in background
+        import threading
+
+        input_thread = threading.Thread(target=handle_input)
+        input_thread.daemon = True
+        input_thread.start()
+
+        # Run output handler in main thread
+        handle_output()
+
+        # Clean up
+        try:
+            # Note: framework_shells may not have unsubscribe method
+            # but queues clean up automatically when shell terminates
+            pass
+        except Exception:
+            pass

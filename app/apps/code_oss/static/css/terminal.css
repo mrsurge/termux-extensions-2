@@ -1,0 +1,299 @@
+/* Terminal Panel Styles */
+
+.ide-terminal {
+    display: flex;
+    flex-direction: column;
+    background: var(--vscode-terminal-background, #1e1e1e);
+    border-top: 1px solid var(--vscode-panel-border, #2d2d30);
+    height: 300px;
+    transition: height 0.3s ease;
+}
+
+.terminal-collapsed .ide-terminal {
+    height: 0;
+    overflow: hidden;
+    border-top: none;
+}
+
+.terminal-maximized .ide-terminal {
+    height: calc(100vh - 40px);
+}
+
+/* Terminal Header */
+.terminal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--vscode-titleBar-background, #2d2d30);
+    border-bottom: 1px solid var(--vscode-panel-border, #2d2d30);
+    min-height: 35px;
+    padding: 0 8px;
+}
+
+.terminal-tabs-wrapper {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    overflow: hidden;
+}
+
+.terminal-tabs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.terminal-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+/* Terminal Tab */
+.terminal-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: var(--vscode-tab-inactiveBackground, #2d2d30);
+    color: var(--vscode-tab-inactiveForeground, #969696);
+    border: 1px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    font-size: 13px;
+    transition: all 0.2s ease;
+}
+
+.terminal-tab:hover {
+    background: var(--vscode-tab-hoverBackground, #3c3c3c);
+}
+
+.terminal-tab.active {
+    background: var(--vscode-editor-background, #1e1e1e);
+    color: var(--vscode-tab-activeForeground, #ffffff);
+    border-color: var(--vscode-tab-activeBorder, transparent);
+    border-bottom-color: transparent;
+}
+
+.terminal-tab-title {
+    user-select: none;
+}
+
+.terminal-tab-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.7;
+    cursor: pointer;
+    border-radius: 2px;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.terminal-tab-close:hover {
+    opacity: 1;
+    background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
+}
+
+/* Terminal Actions */
+.terminal-new-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    padding: 0 8px;
+    margin-left: 4px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--vscode-foreground, #cccccc);
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 16px;
+    transition: all 0.2s ease;
+}
+
+.terminal-new-btn:hover {
+    background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
+}
+
+.terminal-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.terminal-action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--vscode-foreground, #cccccc);
+    cursor: pointer;
+    border-radius: 3px;
+    opacity: 0.8;
+    transition: all 0.2s ease;
+}
+
+.terminal-action:hover {
+    opacity: 1;
+    background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
+}
+
+/* Terminal Content */
+.terminal-content {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: var(--vscode-terminal-background, #1e1e1e);
+}
+
+.terminal-instance {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 4px;
+}
+
+.terminal-instance .xterm {
+    height: 100%;
+}
+
+.terminal-instance .xterm-viewport {
+    background: transparent !important;
+}
+
+.terminal-instance .xterm-screen {
+    height: 100% !important;
+}
+
+/* Button in footer */
+.btn-terminal {
+    padding: 4px 12px;
+    background: var(--vscode-button-secondaryBackground, #3c3c3c);
+    color: var(--vscode-button-secondaryForeground, #cccccc);
+    border: none;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.2s ease;
+}
+
+.btn-terminal:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #4a4a4a);
+}
+
+.btn-terminal[aria-expanded="false"] {
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #ffffff);
+}
+
+/* Terminal collapsed state */
+.terminal-collapsed .ide-terminal {
+    display: none;
+}
+
+/* Override xterm.js default colors */
+.terminal-instance .xterm-bold {
+    font-weight: bold;
+}
+
+.terminal-instance .xterm-cursor-layer {
+    z-index: 2;
+}
+
+.terminal-instance .xterm-selection-layer {
+    z-index: 1;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .ide-terminal {
+        height: 250px;
+    }
+
+    .terminal-tab {
+        padding: 4px 8px;
+        font-size: 12px;
+    }
+
+    .terminal-new-btn,
+    .terminal-action {
+        width: 24px;
+        height: 24px;
+    }
+}
+
+/* Dark theme adjustments */
+@media (prefers-color-scheme: dark) {
+    .ide-terminal {
+        background: #1a1a1a;
+    }
+
+    .terminal-header {
+        background: #252526;
+    }
+
+    .terminal-tab {
+        background: #2d2d30;
+    }
+
+    .terminal-tab.active {
+        background: #1e1e1e;
+    }
+}
+
+/* Light theme support */
+.vscode-light .ide-terminal {
+    background: #ffffff;
+    border-top-color: #e5e5e5;
+}
+
+.vscode-light .terminal-header {
+    background: #f3f3f3;
+    border-bottom-color: #e5e5e5;
+}
+
+.vscode-light .terminal-tab {
+    background: #ececec;
+    color: #333333;
+}
+
+.vscode-light .terminal-tab.active {
+    background: #ffffff;
+    color: #333333;
+}
+
+.vscode-light .terminal-content {
+    background: #ffffff;
+}
+
+.vscode-light .terminal-new-btn,
+.vscode-light .terminal-action {
+    color: #333333;
+}
+
+.vscode-light .btn-terminal {
+    background: #e5e5e5;
+    color: #333333;
+}
+
+.vscode-light .btn-terminal:hover {
+    background: #d0d0d0;
+}
+
+.vscode-light .btn-terminal[aria-expanded="false"] {
+    background: #007acc;
+    color: #ffffff;
+}
