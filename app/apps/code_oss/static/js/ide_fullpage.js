@@ -219,51 +219,6 @@ function encodeFolderPath(path) {
   return encodeURIComponent(path).replace(/%2F/g, '/');
 }
 
-function buildWorkspaceUrl(projectPath) {
-  const encoded = encodeFolderPath(projectPath);
-  let baseUrl = null;
-  if (frame?.src) {
-    try {
-      baseUrl = new URL(frame.src);
-    } catch (_error) {
-      baseUrl = null;
-    }
-  }
-  if (!baseUrl && iframeOrigin) {
-    try {
-      baseUrl = new URL('/', iframeOrigin);
-    } catch (_error) {
-      baseUrl = null;
-    }
-  }
-  if (!baseUrl) return null;
-
-  baseUrl.hash = '';
-  baseUrl.pathname = '/';
-  if (encoded) {
-    baseUrl.search = `?folder=${encoded}`;
-  } else {
-    baseUrl.search = '';
-  }
-  return baseUrl.toString();
-}
-
-function navigateFrameToProject(projectPath) {
-  if (!frame) return null;
-  const targetUrl = buildWorkspaceUrl(projectPath);
-  if (!targetUrl) return null;
-  try {
-    const parsed = new URL(targetUrl);
-    iframeOrigin = parsed.origin;
-  } catch (_error) {
-    // Keep previous origin if parsing fails.
-  }
-  frameReady = false;
-  frame.setAttribute('aria-hidden', 'true');
-  frame.src = targetUrl;
-  return targetUrl;
-}
-
 function normalizeProjectPath(path) {
   if (typeof path !== 'string') return null;
   const trimmed = path.trim();
@@ -1367,6 +1322,7 @@ function normalizeEntry(raw) {
   const normalizedPath = normalizeFsPath(normalizeFilePath(sourcePath)) || sourcePath;
   return {
     path: normalizedPath,
+    executable: Boolean(raw.executable),
     sourcePath,
     label,
     entryType: type,
@@ -1395,6 +1351,7 @@ function applyExplorerEntries(entries, parentPath = null) {
     node.label = entry.label;
     node.entryType = entry.entryType;
     node.hasChildren = entry.hasChildren;
+    node.executable = !!entry.executable;
     node.children = Array.isArray(entry.children)
       ? entry.children
           .map((child) => (
@@ -1482,12 +1439,12 @@ function renderExplorerNode(node, depth, showGit) {
   name.textContent = node.label || node.path.split('/').pop() || node.path;
   row.appendChild(name);
 
-  const gitMeta = getGitEntry(node.path);
-  const gitStats = node.entryType === 'directory'
+  const gitMeta = showGit ? getGitEntry(node.path) : null;
+  const gitStats = showGit && node.entryType === 'directory'
     ? getDirectoryGitStats(node.path)
     : null;
 
-  if (node.entryType === 'file' && gitMeta?.executable) {
+  if (node.entryType === 'file' && (node.executable || gitMeta?.executable)) {
     item.classList.add('is-executable');
   }
 
@@ -2026,6 +1983,7 @@ btnOpenProject?.addEventListener('click', async () => {
   }
   const previousProject = currentProject;
   const previousFile = currentFile;
+  let pendingReload = false;
   try {
     const choice = await window.teFilePicker.openDirectory({
       title: 'Open Project Folder',
@@ -2042,20 +2000,30 @@ btnOpenProject?.addEventListener('click', async () => {
     explorerState.expanded.clear();
     explorerState.activePath = null;
     explorerPlaceholder('Loading workspace…');
-    const targetUrl = navigateFrameToProject(choice.path);
-    if (!targetUrl) {
-      setCurrentProject(previousProject, { updateUI: true });
-      currentFile = previousFile;
-      updateDocPlaceholder();
-      setDocumentHasContent(Boolean(previousFile));
-      throw new Error('Unable to determine code-server URL for selected folder.');
+
+    const response = await fetch('/api/app/code_oss/project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: choice.path }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.ok) {
+      throw new Error(body?.error || `HTTP ${response.status}`);
     }
+
     currentFile = null;
     setCurrentProject(choice.path);
     setDocumentHasContent(false);
     summaryBootstrapped = false;
     statePoll.lastSeq = 0;
-    scheduleStatePoll(500);
+
+    const nextLocation = new URL(window.location.href);
+    nextLocation.searchParams.set('project', choice.path);
+    nextLocation.searchParams.delete('file');
+    nextLocation.searchParams.delete('line');
+    nextLocation.searchParams.delete('col');
+    pendingReload = true;
+    window.location.replace(nextLocation.toString());
   } catch (error) {
     console.error('[ide_fullpage] Failed to switch project', error);
     setCurrentProject(previousProject, { updateUI: true });
@@ -2064,7 +2032,9 @@ btnOpenProject?.addEventListener('click', async () => {
     setDocumentHasContent(Boolean(previousFile));
     updateStatus('Unable to switch project', error?.message || 'Unknown error', { working: false });
   } finally {
-    btnOpenProject.disabled = false;
+    if (!pendingReload) {
+      btnOpenProject.disabled = false;
+    }
   }
 });
 

@@ -99,6 +99,16 @@ def _normalize_file_path(path: str) -> str:
         return str(path)
 
 
+def _is_executable_file(path: Optional[str]) -> bool:
+    if not path:
+        return False
+    try:
+        resolved = Path(path)
+        return resolved.is_file() and os.access(resolved, os.X_OK)
+    except Exception:
+        return False
+
+
 def _git_enabled() -> bool:
     return bool(_GIT_SETTINGS.get("enabled", True))
 
@@ -251,7 +261,7 @@ def _gather_git_status(project_path: str) -> Dict[str, Any]:
                 "path": abs_path,
                 "relative": rel,
                 "exists": exists,
-                "executable": bool(os.access(abs_path, os.X_OK)) if exists and os.path.isfile(abs_path) else False,
+                "executable": _is_executable_file(abs_path) if exists else False,
             }
         )
         entries[abs_path] = meta
@@ -319,6 +329,19 @@ def _load_git_metadata(project_path: Optional[str]) -> Optional[Dict[str, Any]]:
     return data
 
 
+def _annotate_entry_exec(entries: Optional[list]) -> None:
+    if not entries:
+        return
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        entry["executable"] = _is_executable_file(path)
+        children = entry.get("children")
+        if isinstance(children, list) and children:
+            _annotate_entry_exec(children)
+
+
 def _augment_explorer_event(event: Dict[str, Any]) -> Dict[str, Any]:
     project = _SHELL_STATE.get("project_path")
     if not project:
@@ -337,6 +360,8 @@ def _augment_explorer_event(event: Dict[str, Any]) -> Dict[str, Any]:
         return event
 
     augmented = copy.deepcopy(event)
+    if "entries" in augmented:
+        _annotate_entry_exec(augmented.get("entries"))
     augmented["git"] = metadata
     return augmented
 
