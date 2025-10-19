@@ -54,6 +54,7 @@ If you prefer a manual install, follow these steps instead:
 
 4. **Access the UI**
    Navigate to `http://localhost:8080` in a browser.
+
 ### Production run (serve to other devices)
 
 To allow other devices on your network to access the UI, run with Gunicorn and bind to all interfaces:
@@ -117,6 +118,10 @@ Notes:
 *   **Built-In Diagnostics:** Apps such as the Distro manager ship with inline debug consoles so you can pause, inspect, and clear log streams while reproducing issues.
 *   **Embedded Terminal App:** A full-page app built atop framework shells offers multi-terminal management with xterm.js, WebSocket streaming, and soft-key controls directly in the browser.
 *   **Easy Installation:** Designed to be installed as a standard Debian package via `apt`.
+
+## Code OSS App
+
+One of the bundled apps wraps `code-server` in a mobile-friendly façade. The app keeps a single code-server instance alive, mirrors its explorer tree into a lightweight CM6 viewer, and persists editor/UI preferences on disk so behaviour is identical across browsers. For a detailed technical breakdown, see [`CODE_OSS_APP_README.md`](CODE_OSS_APP_README.md).
 
 ## Persistent State Store
 
