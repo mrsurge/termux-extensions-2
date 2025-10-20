@@ -50,13 +50,23 @@ const menuViewDD = document.getElementById('menu-view-dd');
 const menuThemeBtn = document.getElementById('menu-theme-btn');
 const menuThemeDD = document.getElementById('menu-theme-dd');
 
+const miNew = document.getElementById('mi-new');
+const miOpen = document.getElementById('mi-open');
+const miSave = document.getElementById('mi-save');
+const miSaveAs = document.getElementById('mi-saveas');
+const miClose = document.getElementById('mi-close');
+const miAutoSave = document.getElementById('mi-autosave');
+const miUndo = document.getElementById('mi-undo');
+const miRedo = document.getElementById('mi-redo');
 const miToggleLines = document.getElementById('mi-toggle-lines');
 const miToggleShading = document.getElementById('mi-toggle-shading');
 const miToggleSyntax = document.getElementById('mi-toggle-syntax');
 const miToggleWrap = document.getElementById('mi-toggle-wrap');
-const miAutosave = document.getElementById('mi-autosave');
+const miInlineDiffs = document.getElementById('mi-inline-diffs');
 const miFind = document.getElementById('mi-find');
 const miGoto = document.getElementById('mi-goto');
+
+const saveStateLabel = document.getElementById('save-state');
 
 const themeMenuItems = menuThemeDD ? Array.from(menuThemeDD.querySelectorAll('[data-theme]')) : [];
 
@@ -65,6 +75,8 @@ if (menuFileBtn && menuFileDD) menuRegistry.push({ button: menuFileBtn, dropdown
 if (menuEditBtn && menuEditDD) menuRegistry.push({ button: menuEditBtn, dropdown: menuEditDD });
 if (menuViewBtn && menuViewDD) menuRegistry.push({ button: menuViewBtn, dropdown: menuViewDD });
 if (menuThemeBtn && menuThemeDD) menuRegistry.push({ button: menuThemeBtn, dropdown: menuThemeDD });
+
+let diffSupported = false;
 
 const EditorState = CM.EditorState;
 const { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, lineNumbers } = CM;
@@ -80,6 +92,12 @@ const search = CM.search || (() => []);
 const openSearchPanel = CM.openSearchPanel || null;
 const oneDark = CM.oneDark || null;
 const termuxTheme = CM.termuxTheme || null;
+const undo = CM.undo || null;
+const redo = CM.redo || null;
+const Decoration = CM.Decoration || null;
+const WidgetType = CM.WidgetType || null;
+const StateEffect = CM.StateEffect || null;
+const StateField = CM.StateField || null;
 
 const javascript = CM.javascript || (() => []);
 const jsonLang = CM.json || (() => []);
@@ -188,8 +206,9 @@ const DEFAULT_EDITOR_PREFS = {
   showSyntax: true,
   showShading: false,
   wordWrap: false,
-  autosave: true,
   theme: 'cm6-dark',
+  autoSave: true,
+  showInlineDiffs: true,
 };
 
 const DEFAULT_UI_PREFS = {
@@ -207,6 +226,10 @@ let preferencesProjectPath = null;
 let pendingPreferencesRequest = null;
 let pendingLastFile = null;
 let pendingLastFileTimer = null;
+let suppressDocChangeDepth = 0;
+let diffRefreshTimer = null;
+let diffRequestToken = 0;
+let lastDiffPath = null;
 
 const historyState = {
   recentProjects: [],
@@ -225,16 +248,20 @@ const cmState = {
   showShading: false,
   showSyntax: true,
   wordWrap: false,
-  autosave: true,
   theme: 'cm6-dark',
+  autoSave: true,
+  showInlineDiffs: true,
+  dirty: false,
+  saving: false,
+  saveError: null,
+  diffDecorations: Decoration && Decoration.none ? Decoration.none : null,
+  diffMeta: null,
 };
 
 let cmContentNode = null;
 let nativeSelectionTimer = null;
 let nativeSelectionActive = false;
 let nativePressPoint = null;
-let autosaveTimer = null;
-let ignoreBridgeEvents = false;
 
 function resolveHost(host) {
   if (!host || host === '0.0.0.0' || host === '127.0.0.1') {
@@ -288,8 +315,9 @@ function getCurrentEditorPrefs() {
     showSyntax: !!cmState.showSyntax,
     showShading: !!cmState.showShading,
     wordWrap: !!cmState.wordWrap,
-    autosave: !!cmState.autosave,
     theme: cmState.theme || DEFAULT_EDITOR_PREFS.theme,
+    autoSave: !!cmState.autoSave,
+    showInlineDiffs: !!cmState.showInlineDiffs,
   };
 }
 
@@ -365,8 +393,9 @@ function applyEditorPreferences() {
   cmState.showSyntax = !!preferences.editor.showSyntax;
   cmState.showShading = !!preferences.editor.showShading;
   cmState.wordWrap = !!preferences.editor.wordWrap;
-  cmState.autosave = !!preferences.editor.autosave;
   cmState.theme = preferences.editor.theme || DEFAULT_EDITOR_PREFS.theme;
+  cmState.autoSave = preferences.editor.autoSave !== false;
+  cmState.showInlineDiffs = preferences.editor.showInlineDiffs !== false;
 }
 
 function applyAssistantPreference() {
@@ -383,6 +412,344 @@ function applyPreferences() {
   explorerState.indicatorsEnabled = !!preferences.ui.gitIndicators;
   applyAssistantPreference();
   syncGitToggle();
+  updateSaveIndicator();
+}
+
+const AUTO_SAVE_DELAY = 1200;
+const DIFF_REFRESH_DELAY = 1500;
+
+const emptyDiffSet = Decoration && Decoration.none ? Decoration.none : null;
+const diffEffect = (StateEffect && Decoration && emptyDiffSet)
+  ? StateEffect.define()
+  : null;
+const diffField = diffEffect && StateField && emptyDiffSet
+  ? StateField.define({
+      create() {
+        return emptyDiffSet;
+      },
+      update(value, tr) {
+        let next = value || emptyDiffSet;
+        if (tr.docChanged && next && typeof next.map === 'function') {
+          next = next.map(tr.changes);
+        }
+        for (const effect of tr.effects) {
+          if (effect.is(diffEffect)) {
+            next = effect.value || emptyDiffSet;
+          }
+        }
+        return next;
+      },
+      provide: (field) => (EditorView ? EditorView.decorations.from(field) : []),
+    })
+  : null;
+diffSupported = Boolean(diffEffect && diffField && emptyDiffSet);
+if (miInlineDiffs && !diffSupported) {
+  miInlineDiffs.disabled = true;
+  miInlineDiffs.setAttribute('aria-disabled', 'true');
+}
+if (!diffSupported) {
+  cmState.showInlineDiffs = false;
+  preferences.editor.showInlineDiffs = false;
+}
+
+let autoSaveTimer = null;
+let saveInFlight = false;
+let queuedSaveOptions = null;
+
+function withDocChangeSuppressed(fn) {
+  suppressDocChangeDepth += 1;
+  try {
+    return fn();
+  } finally {
+    suppressDocChangeDepth = Math.max(0, suppressDocChangeDepth - 1);
+  }
+}
+
+function cancelAutoSaveTimer() {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+}
+
+function markSaveError(message) {
+  cmState.saveError = message || null;
+  root.classList.toggle('save-error', !!cmState.saveError);
+  updateSaveIndicator();
+}
+
+function setDirty(flag) {
+  const dirty = !!flag;
+  cmState.dirty = dirty;
+  if (!dirty) {
+    cmState.saveError = null;
+  }
+  root.classList.toggle('doc-dirty', dirty);
+  updateSaveIndicator();
+}
+
+function updateSaveIndicator() {
+  if (!saveStateLabel) return;
+  let label = '';
+  let state = 'idle';
+
+  if (cmState.saveError) {
+    label = `Save failed: ${cmState.saveError}`;
+    state = 'error';
+  } else if (cmState.autoSave) {
+    if (cmState.saving) {
+      label = 'Auto Save (Saving…)';
+      state = 'saving';
+    } else if (cmState.dirty) {
+      label = 'Auto Save (Pending)';
+      state = 'pending';
+    } else {
+      label = 'Auto Save (On)';
+      state = 'auto';
+    }
+  } else {
+    if (cmState.saving) {
+      label = 'Manual (Saving…)';
+      state = 'saving';
+    } else if (cmState.dirty) {
+      label = 'Manual (Unsaved)';
+      state = 'dirty';
+    } else {
+      label = 'Manual';
+      state = 'manual';
+    }
+  }
+
+  saveStateLabel.textContent = label;
+  saveStateLabel.dataset.state = state;
+}
+
+function scheduleAutoSave(reason = 'change') {
+  if (!cmState.view) return;
+  setDirty(true);
+  if (!cmState.autoSave) {
+    cancelAutoSaveTimer();
+    return;
+  }
+  cancelAutoSaveTimer();
+  autoSaveTimer = window.setTimeout(() => {
+    autoSaveTimer = null;
+    queueSave({ reason });
+  }, AUTO_SAVE_DELAY);
+}
+
+async function queueSave(options = {}) {
+  if (!cmState.view) return;
+  const docId = cmState.docId || buildDocIdFromPath(currentFile);
+  if (!docId) return;
+
+  const payload = {
+    doc_id: docId,
+    text: cmState.view.state.doc.toString(),
+  };
+
+  const baseRev = docRevisions.get(docId);
+  if (typeof baseRev === 'number') {
+    payload.base_rev = baseRev;
+  }
+
+  if (options.targetPath) {
+    payload.target_path = options.targetPath;
+  }
+
+  cancelAutoSaveTimer();
+
+  if (saveInFlight) {
+    queuedSaveOptions = options;
+    return;
+  }
+
+  saveInFlight = true;
+  cmState.saving = true;
+  markSaveError(null);
+  updateSaveIndicator();
+
+  try {
+    const response = await fetch('/api/app/code_oss/edits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body?.ok) {
+      throw new Error(body?.error || `HTTP ${response.status}`);
+    }
+    setDirty(false);
+    scheduleDiffRefresh('save');
+  } catch (error) {
+    console.error('[ide_fullpage] Failed to persist document', error);
+    markSaveError(error?.message || 'unknown error');
+    setDirty(true);
+  } finally {
+    saveInFlight = false;
+    cmState.saving = false;
+    updateSaveIndicator();
+    if (queuedSaveOptions) {
+      const next = queuedSaveOptions;
+      queuedSaveOptions = null;
+      queueSave(next);
+    }
+  }
+}
+
+function applyDiffDecorations(decorations) {
+  if (!diffSupported || !cmState.view) {
+    cmState.diffDecorations = null;
+    return;
+  }
+  const set = decorations || emptyDiffSet;
+  cmState.diffDecorations = set;
+  withDocChangeSuppressed(() => {
+    cmState.view.dispatch({ effects: diffEffect.of(set) });
+  });
+}
+
+function clearDiffDecorations() {
+  if (!diffSupported) {
+    cmState.diffDecorations = null;
+    cmState.diffMeta = null;
+    return;
+  }
+  cmState.diffMeta = null;
+  applyDiffDecorations(emptyDiffSet);
+}
+
+const BaseWidgetType = WidgetType || class {
+  constructor() { this.text = ''; }
+  eq(other) {
+    return other && other.text === this.text;
+  }
+  toDOM() {
+    const el = document.createElement('div');
+    el.textContent = this.text || '';
+    return el;
+  }
+  ignoreEvent() {
+    return true;
+  }
+};
+
+class RemovedLineWidget extends BaseWidgetType {
+  constructor(text) {
+    super();
+    this.text = text || '';
+  }
+
+  eq(other) {
+    return other instanceof RemovedLineWidget && other.text === this.text;
+  }
+
+  toDOM() {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'cm6-diff-removed-line';
+    const glyph = document.createElement('span');
+    glyph.className = 'cm6-diff-removed-glyph';
+    glyph.textContent = '−';
+    const content = document.createElement('code');
+    content.className = 'cm6-diff-removed-content';
+    content.textContent = this.text || '';
+    wrapper.append(glyph, content);
+    return wrapper;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
+function buildDiffDecorations(diff) {
+  if (!diffSupported || !cmState.view || !Decoration) {
+    return null;
+  }
+  if (!diff || !Array.isArray(diff.hunks) || !diff.hunks.length || diff.binary) {
+    return emptyDiffSet;
+  }
+  const ranges = [];
+  const doc = cmState.view.state.doc;
+  diff.hunks.forEach((hunk) => {
+    let newLine = Math.max(1, Number.parseInt(hunk.new_start, 10) || 1);
+    const entries = Array.isArray(hunk.lines) ? hunk.lines : [];
+    entries.forEach((entry) => {
+      const type = entry?.type;
+      if (type === 'add') {
+        const targetLine = Math.max(1, Math.min(newLine, doc.lines || 1));
+        const lineInfo = doc.line(targetLine);
+        ranges.push(Decoration.line({ class: 'cm-diff-added' }).range(lineInfo.from));
+        newLine += 1;
+      } else if (type === 'context') {
+        newLine += 1;
+      } else if (type === 'remove') {
+        const targetLine = newLine <= doc.lines ? Math.max(1, newLine) : doc.lines;
+        const pos = newLine <= doc.lines ? doc.line(targetLine).from : doc.length;
+        ranges.push(Decoration.widget({
+          widget: new RemovedLineWidget(entry.text || ''),
+          block: true,
+        }).range(pos));
+      }
+    });
+  });
+  if (!ranges.length) {
+    return emptyDiffSet;
+  }
+  return Decoration.set(ranges, true);
+}
+
+async function loadDiffForCurrentFile({ force = false } = {}) {
+  if (!diffSupported) return;
+  if (!cmState.showInlineDiffs) {
+    clearDiffDecorations();
+    return;
+  }
+  const path = normalizeFilePath(currentFile);
+  if (!path) {
+    clearDiffDecorations();
+    return;
+  }
+  if (!force && cmState.diffMeta && cmState.diffMeta.file_path === path && !cmState.dirty) {
+    return;
+  }
+  lastDiffPath = path;
+  const requestId = ++diffRequestToken;
+  try {
+    const params = new URLSearchParams({ path });
+    const response = await fetch(`/api/app/code_oss/diff?${params.toString()}`, { cache: 'no-store' });
+    const body = await response.json().catch(() => ({}));
+    if (requestId !== diffRequestToken) return;
+    if (!response.ok || !body?.ok) {
+      throw new Error(body?.error || `HTTP ${response.status}`);
+    }
+    const diff = body.data || {};
+    cmState.diffMeta = diff;
+    if (diff.binary || !Array.isArray(diff.hunks) || diff.hunks.length === 0) {
+      clearDiffDecorations();
+      return;
+    }
+    const decorations = buildDiffDecorations(diff) || emptyDiffSet;
+    applyDiffDecorations(decorations);
+  } catch (error) {
+    if (requestId === diffRequestToken) {
+      console.warn('[ide_fullpage] Failed to load diff', error);
+      clearDiffDecorations();
+    }
+  }
+}
+
+function scheduleDiffRefresh(reason = 'change') {
+  if (!diffSupported || !cmState.showInlineDiffs) return;
+  if (diffRefreshTimer) {
+    clearTimeout(diffRefreshTimer);
+    diffRefreshTimer = null;
+  }
+  const delay = reason === 'open' ? 0 : DIFF_REFRESH_DELAY;
+  diffRefreshTimer = window.setTimeout(() => {
+    diffRefreshTimer = null;
+    loadDiffForCurrentFile({ force: reason !== 'change' });
+  }, delay);
 }
 
 function queueLastFileRestore(filePath) {
@@ -674,6 +1041,29 @@ function removeFileHistory(projectPath, filePath, { persist = true } = {}) {
   }
 }
 
+function computeStartDirectory(fallback = '~') {
+  const filePath = normalizeFilePath(currentFile);
+  if (filePath) {
+    const idx = filePath.lastIndexOf('/');
+    if (idx > 0) {
+      return filePath.slice(0, idx);
+    }
+    return filePath;
+  }
+  const projectPath = normalizeProjectPath(currentProject);
+  if (projectPath) {
+    return projectPath;
+  }
+  return fallback;
+}
+
+function basename(path) {
+  if (!path) return path;
+  const normalized = path.replace(/\\/g, '/');
+  const idx = normalized.lastIndexOf('/');
+  return idx >= 0 ? normalized.slice(idx + 1) : normalized;
+}
+
 function openRecentMenu() {
   if (!recentTabMenu || !recentTabToggle) return;
   if (!recentTabMenu.innerHTML.trim()) return;
@@ -853,6 +1243,16 @@ function setDocumentHasContent(hasContent) {
   if (btnDocTestEdit) {
     btnDocTestEdit.disabled = !enabled;
   }
+  if (!enabled) {
+    cancelAutoSaveTimer();
+    setDirty(false);
+    if (diffRefreshTimer) {
+      clearTimeout(diffRefreshTimer);
+      diffRefreshTimer = null;
+    }
+    diffRequestToken += 1;
+    clearDiffDecorations();
+  }
 }
 
 function closeMenus(exceptDropdown = null) {
@@ -867,6 +1267,20 @@ function setMenuChecked(element, checked) {
   if (!element) return;
   element.classList.toggle('is-checked', !!checked);
   element.setAttribute('aria-checked', checked ? 'true' : 'false');
+}
+
+function syncMenuState() {
+  setMenuChecked(miToggleLines, cmState.showLineNumbers);
+  setMenuChecked(miToggleShading, cmState.showShading);
+  setMenuChecked(miToggleSyntax, cmState.showSyntax);
+  setMenuChecked(miToggleWrap, cmState.wordWrap);
+  setMenuChecked(miAutoSave, cmState.autoSave);
+  setMenuChecked(miInlineDiffs, cmState.showInlineDiffs && diffSupported);
+  themeMenuItems.forEach((item) => {
+    const active = item.dataset.theme === cmState.theme;
+    item.classList.toggle('is-checked', active);
+    item.setAttribute('aria-checked', active ? 'true' : 'false');
+  });
 }
 
 function detectLanguageFromFilename(filename) {
@@ -978,21 +1392,16 @@ function makeExtensions() {
   if (theme) exts.push(theme);
   const langExt = resolveLanguageExtension(cmState.language);
   if (langExt) exts.push(langExt);
-
-  exts.push(EditorView.updateListener.of((update) => {
-    if (update.docChanged) {
-      if (autosaveTimer) clearTimeout(autosaveTimer);
-      ignoreBridgeEvents = true;
-
-      if (cmState.autosave) {
-        autosaveTimer = setTimeout(() => {
-          saveFile();
-          ignoreBridgeEvents = false;
-        }, 1500);
+  if (diffField) exts.push(diffField);
+  if (EditorView && typeof EditorView.updateListener === 'function') {
+    exts.push(EditorView.updateListener((update) => {
+      if (suppressDocChangeDepth > 0) return;
+      if (update.docChanged) {
+        cmState.text = update.state.doc.toString();
+        scheduleAutoSave('change');
       }
-    }
-  }));
-
+    }));
+  }
   return exts.filter(Boolean);
 }
 
@@ -1124,15 +1533,17 @@ function recreateEditor(text, { preserveSelection = false } = {}) {
     selection = { anchor: main.anchor, head: main.head };
   }
   detachNativeSelection();
-  if (cmState.view) {
-    cmState.view.destroy();
-  }
-  cmHost.innerHTML = '';
-  const state = EditorState.create({
-    doc: text,
-    extensions: makeExtensions(),
+  withDocChangeSuppressed(() => {
+    if (cmState.view) {
+      cmState.view.destroy();
+    }
+    cmHost.innerHTML = '';
+    const state = EditorState.create({
+      doc: text,
+      extensions: makeExtensions(),
+    });
+    cmState.view = new EditorView({ state, parent: cmHost });
   });
-  cmState.view = new EditorView({ state, parent: cmHost });
   cmState.text = text;
   attachNativeSelection();
   if (selection) {
@@ -1170,9 +1581,17 @@ function setEditorDocument(docId, text, languageId) {
   cmState.text = typeof text === 'string' ? text : '';
   cmState.language = normalizeLanguageId(languageId, currentFile);
   recreateEditor(cmState.text);
+  cancelAutoSaveTimer();
+  setDirty(false);
+  markSaveError(null);
   syncMenuState();
   setDocumentHasContent(true);
   updateStatusBar();
+  if (cmState.showInlineDiffs) {
+    loadDiffForCurrentFile({ force: true });
+  } else {
+    clearDiffDecorations();
+  }
 }
 
 function posFromLocation(location) {
@@ -1197,8 +1616,13 @@ function applyEditorChanges(docId, changes) {
     edits.push({ from, to, insert });
   });
   if (edits.length) {
-    cmState.view.dispatch({ changes: edits });
+    withDocChangeSuppressed(() => {
+      cmState.view.dispatch({ changes: edits });
+    });
     cmState.text = cmState.view.state.doc.toString();
+    setDirty(false);
+    markSaveError(null);
+    scheduleDiffRefresh('change');
   }
 }
 
@@ -1242,10 +1666,14 @@ async function openFileInEditor(path) {
   sendCommand('openPath', { path });
 
   try {
-    const response = await fetch(`/api/app/code_oss/file?path=${encodeURIComponent(path)}`);
-    const body = await response.json();
-    if (!response.ok || !body.ok) {
-      throw new Error(body.error || `HTTP ${response.status}`);
+    const response = await fetch('/api/app/code_oss/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body?.ok) {
+      throw new Error(body?.error || `HTTP ${response.status}`);
     }
     const fileData = body.data || {};
     const docId = buildDocIdFromPath(path);
@@ -1783,7 +2211,6 @@ async function startServer({ headline, detail } = {}) {
 
 function handleBridgeEvent(data) {
   if (!data || typeof data !== 'object') return;
-  if (ignoreBridgeEvents && data.type === 'doc_changes') return;
   switch (data.type) {
     case 'state': {
       const dim = !!(data.sidebarVisible || data.panelVisible);
@@ -1842,6 +2269,11 @@ function handleBridgeEvent(data) {
       if (data.doc_id && typeof data.applied_rev === 'number') {
         docRevisions.set(data.doc_id, data.applied_rev);
       }
+      if (!data.doc_id || data.doc_id === cmState.docId) {
+        setDirty(false);
+        markSaveError(null);
+        scheduleDiffRefresh('ack');
+      }
       break;
     }
     case 'chatProviders': {
@@ -1874,6 +2306,7 @@ function handleBridgeEvent(data) {
         setDocumentHasContent(true);
         recordFileHistory(currentProject, data.path, { persist: true });
         updateLastOpenedFile(data.path);
+        scheduleDiffRefresh('open');
       } else {
         currentFile = null;
         currentDocId = null;
@@ -1948,23 +2381,6 @@ function handleFrameLoad() {
   }, 600);
 }
 
-async function saveFile() {
-    if (!currentFile || !cmState.view) return;
-
-    const content = cmState.view.state.doc.toString();
-
-    try {
-        await fetch('/api/app/code_oss/file', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: currentFile, content }),
-        });
-    } catch (error) {
-        console.error('[ide_fullpage] Failed to save file', error);
-    }
-}
-
-
 attachFrame(frame);
 
 window.addEventListener('message', (event) => {
@@ -2028,35 +2444,323 @@ document.addEventListener('pointerdown', (event) => {
   if (!insideRecent) closeRecentMenu();
 });
 
-miAutosave?.addEventListener('click', () => {
-    cmState.autosave = !cmState.autosave;
-    setMenuChecked(miAutosave, cmState.autosave);
-    persistEditorPreferences();
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeMenus();
+    disableNativeSelection();
+    closeRecentMenu();
+  }
 });
 
+btnBack?.addEventListener('click', () => {
+  if (document.referrer && document.referrer.includes('/app/')) {
+    window.location.href = document.referrer;
+  } else {
+    window.location.href = '/app/code_oss';
+  }
+});
 
-function syncMenuState() {
-    setMenuChecked(miToggleLines, cmState.showLineNumbers);
-    setMenuChecked(miToggleShading, cmState.showShading);
-    setMenuChecked(miToggleSyntax, cmState.showSyntax);
-    setMenuChecked(miToggleWrap, cmState.wordWrap);
-    setMenuChecked(miAutosave, cmState.autosave);
-    themeMenuItems.forEach((item) => {
-        const active = item.dataset.theme === cmState.theme;
-        item.classList.toggle('is-checked', active);
-        item.setAttribute('aria-checked', active ? 'true' : 'false');
+btnSearch?.addEventListener('click', () => sendCommand('openSearch'));
+btnCommand?.addEventListener('click', () => sendCommand('showCommands'));
+btnSettings?.addEventListener('click', () => sendCommand('openSettingsJSON'));
+btnChatRefresh?.addEventListener('click', () => sendCommand('refreshChat'));
+
+btnDocTestEdit?.addEventListener('click', async () => {
+  if (btnDocTestEdit.disabled) return;
+  const docId = currentDocId || buildDocIdFromPath(currentFile);
+  if (!docId) {
+    window.alert('No focused document available for edits yet.');
+    return;
+  }
+  const baseRev = docRevisions.get(docId);
+  const timestamp = new Date().toISOString();
+  const payload = {
+    doc_id: docId,
+    base_rev: baseRev,
+    edits: [
+      {
+        start: { l: 0, c: 0 },
+        end: { l: 0, c: 0 },
+        text: `// inserted via mobile wrapper ${timestamp}\n`,
+      },
+    ],
+  };
+  btnDocTestEdit.disabled = true;
+  try {
+    const response = await fetch('/api/app/code_oss/edits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
-}
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body?.ok) {
+      throw new Error(body?.error || `HTTP ${response.status}`);
+    }
+    console.log('[ide_fullpage] Queued sample edit', body?.data);
+  } catch (error) {
+    console.error('[ide_fullpage] Failed to queue sample edit', error);
+    window.alert(`Failed to queue edit: ${error?.message || error}`);
+  } finally {
+    btnDocTestEdit.disabled = false;
+  }
+});
 
+miOpen?.addEventListener('click', async () => {
+  closeMenus();
+  if (!(window.teFilePicker && typeof window.teFilePicker.openFile === 'function')) {
+    window.alert('File picker is unavailable in this environment.');
+    return;
+  }
+  try {
+    const choice = await window.teFilePicker.openFile({
+      title: 'Open File',
+      startPath: computeStartDirectory(),
+      selectLabel: 'Open',
+    });
+    if (choice?.path) {
+      openFileInEditor(choice.path);
+    }
+  } catch (error) {
+    if (error?.message !== 'cancelled') {
+      console.warn('[ide_fullpage] File picker failed', error);
+    }
+  }
+});
 
-loadPreferences(currentProject)
-  .catch(() => {}) // Errors already logged inside loadPreferences; continue with defaults.
-  .finally(() => {
-    applyPreferences();
-    syncMenuState();
-    ensureEditor();
-    startServer({});
-    initializeHistory();
-    wireGitToggle();
-    wireAssistantToggle();
+miSave?.addEventListener('click', async () => {
+  closeMenus();
+  if (!cmState.view || !cmState.docId) {
+    window.alert('No document open to save.');
+    return;
+  }
+  await queueSave({ reason: 'manual' });
+});
+
+miSaveAs?.addEventListener('click', async () => {
+  closeMenus();
+  if (!(window.teFilePicker && typeof window.teFilePicker.saveFile === 'function')) {
+    window.alert('Save dialog is unavailable in this environment.');
+    return;
+  }
+  if (!cmState.view || !cmState.docId) {
+    window.alert('No document open to save.');
+    return;
+  }
+  const defaultDir = computeStartDirectory();
+  const defaultName = basename(normalizeFilePath(currentFile)) || '';
+  try {
+    const result = await window.teFilePicker.saveFile({
+      title: 'Save File As…',
+      startPath: defaultDir,
+      filename: defaultName,
+      selectLabel: 'Save',
+    });
+    if (!result || !result.path) return;
+    if (result.existed && !window.confirm('File exists. Overwrite the existing file?')) {
+      return;
+    }
+    await queueSave({ reason: 'saveAs', targetPath: result.path });
+    currentFile = result.path;
+    updateDocPlaceholder();
+    updateLastOpenedFile(result.path);
+    recordFileHistory(currentProject, result.path, { persist: true });
+    sendCommand('openPath', { path: result.path });
+  } catch (error) {
+    if (error?.message !== 'cancelled') {
+      console.error('[ide_fullpage] Save As dialog failed', error);
+      markSaveError(error?.message || 'save failed');
+    }
+  }
+});
+
+miAutoSave?.addEventListener('click', () => {
+  cmState.autoSave = !cmState.autoSave;
+  cancelAutoSaveTimer();
+  if (cmState.autoSave && cmState.dirty) {
+    scheduleAutoSave('toggle');
+  }
+  persistEditorPreferences();
+  syncMenuState();
+  updateSaveIndicator();
+  closeMenus();
+});
+
+miInlineDiffs?.addEventListener('click', () => {
+  if (!diffSupported) {
+    window.alert('Inline diffs are not available in this environment.');
+    return;
+  }
+  cmState.showInlineDiffs = !cmState.showInlineDiffs;
+  persistEditorPreferences();
+  syncMenuState();
+  closeMenus();
+  if (cmState.showInlineDiffs) {
+    loadDiffForCurrentFile({ force: true });
+  } else {
+    clearDiffDecorations();
+  }
+});
+
+miUndo?.addEventListener('click', () => {
+  closeMenus();
+  if (cmState.view && typeof undo === 'function') {
+    undo(cmState.view);
+  }
+});
+
+miRedo?.addEventListener('click', () => {
+  closeMenus();
+  if (cmState.view && typeof redo === 'function') {
+    redo(cmState.view);
+  }
+});
+
+miToggleLines?.addEventListener('click', () => {
+  cmState.showLineNumbers = !cmState.showLineNumbers;
+  syncMenuState();
+  recreateEditor(cmState.text, { preserveSelection: true });
+  persistEditorPreferences();
+  closeMenus();
+});
+
+miToggleShading?.addEventListener('click', () => {
+  cmState.showShading = !cmState.showShading;
+  syncMenuState();
+  recreateEditor(cmState.text, { preserveSelection: true });
+  persistEditorPreferences();
+  closeMenus();
+});
+
+miToggleSyntax?.addEventListener('click', () => {
+  cmState.showSyntax = !cmState.showSyntax;
+  syncMenuState();
+  recreateEditor(cmState.text, { preserveSelection: true });
+  persistEditorPreferences();
+  closeMenus();
+});
+
+miToggleWrap?.addEventListener('click', () => {
+  cmState.wordWrap = !cmState.wordWrap;
+  syncMenuState();
+  recreateEditor(cmState.text, { preserveSelection: true });
+  persistEditorPreferences();
+  closeMenus();
+});
+
+miFind?.addEventListener('click', () => {
+  closeMenus();
+  if (cmState.view && typeof openSearchPanel === 'function') {
+    openSearchPanel(cmState.view);
+  }
+});
+
+miGoto?.addEventListener('click', () => {
+  closeMenus();
+  if (!cmState.view) return;
+  const input = window.prompt('Go to line');
+  const line = Number.parseInt(input || '', 10);
+  if (Number.isNaN(line)) return;
+  const ln = Math.max(1, line);
+  const lineInfo = cmState.view.state.doc.line(Math.min(ln, cmState.view.state.doc.lines));
+  cmState.view.dispatch({
+    selection: { anchor: lineInfo.from, head: lineInfo.from },
+    scrollIntoView: true,
   });
+  cmState.view.focus();
+});
+
+themeMenuItems.forEach((item) => {
+  item.addEventListener('click', () => {
+    const theme = item.dataset.theme || 'cm6-dark';
+    cmState.theme = theme;
+    syncMenuState();
+    recreateEditor(cmState.text, { preserveSelection: true });
+    persistEditorPreferences();
+    closeMenus();
+  });
+});
+
+btnOpenProject?.addEventListener('click', async () => {
+  if (!(window.teFilePicker && typeof window.teFilePicker.openDirectory === 'function')) {
+    window.alert('Directory picker is unavailable in this environment.');
+    return;
+  }
+  const previousProject = currentProject;
+  const previousFile = currentFile;
+  let pendingReload = false;
+  try {
+    const choice = await window.teFilePicker.openDirectory({
+      title: 'Open Project Folder',
+      selectLabel: 'Open',
+      startPath: currentProject || '~',
+    });
+    if (!choice || !choice.path) return;
+
+    btnOpenProject.disabled = true;
+    updateStatus('Switching workspace…', 'Loading the selected folder in code-server.');
+
+    explorerState.nodes.clear();
+    explorerState.rootPaths = [];
+    explorerState.expanded.clear();
+    explorerState.activePath = null;
+    explorerPlaceholder('Loading workspace…');
+
+    const response = await fetch('/api/app/code_oss/project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: choice.path }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.ok) {
+      throw new Error(body?.error || `HTTP ${response.status}`);
+    }
+
+    currentFile = null;
+    setCurrentProject(choice.path);
+    setDocumentHasContent(false);
+    summaryBootstrapped = false;
+    statePoll.lastSeq = 0;
+
+    const nextLocation = new URL(window.location.href);
+    nextLocation.searchParams.set('project', choice.path);
+    nextLocation.searchParams.delete('file');
+    nextLocation.searchParams.delete('line');
+    nextLocation.searchParams.delete('col');
+    pendingReload = true;
+    window.location.replace(nextLocation.toString());
+  } catch (error) {
+    console.error('[ide_fullpage] Failed to switch project', error);
+    setCurrentProject(previousProject, { updateUI: true });
+    currentFile = previousFile;
+    updateDocPlaceholder();
+    setDocumentHasContent(Boolean(previousFile));
+    updateStatus('Unable to switch project', error?.message || 'Unknown error', { working: false });
+  } finally {
+    if (!pendingReload) {
+      btnOpenProject.disabled = false;
+    }
+  }
+});
+
+window.addEventListener('resize', () => {
+  if (window.innerWidth > 900) {
+    toggleDrawer(false);
+  }
+});
+
+wireAssistantToggle();
+initializeHistory();
+wireGitToggle();
+updateSubtitle();
+updateDocPlaceholder();
+(async () => {
+  try {
+    await loadPreferences(currentProject);
+  } catch (error) {
+    // Errors already logged inside loadPreferences; continue with defaults.
+  }
+  applyPreferences();
+  ensureEditor();
+  syncMenuState();
+  startServer();
+})();

@@ -73,6 +73,7 @@
                   Recent Files ▾
                 </button>
                 <div id="recent-tab-menu" class="recent-tab-menu" role="menu" aria-label="Recent files"></div>
+                <span id="save-state" class="cm6-save-state" aria-live="polite">Auto Save (On)</span>
               </div>
             </header>
 
@@ -93,6 +94,9 @@
                   </button>
                   <button id="mi-saveas" class="cm6-item" type="button">
                     <span>Save As…</span><span class="cm6-kbd">Ctrl/Cmd+Shift+S</span>
+                  </button>
+                  <button id="mi-autosave" class="cm6-item" type="button" data-checkable="true" role="menuitemcheckbox" aria-checked="true">
+                    <span>Auto Save</span>
                   </button>
                   <button id="mi-close" class="cm6-item" type="button">
                     <span>Close</span>
@@ -146,8 +150,8 @@
                   <button id="mi-toggle-wrap" class="cm6-item" type="button" data-checkable="true" role="menuitemcheckbox" aria-checked="false">
                     <span>Word Wrap</span>
                   </button>
-                  <button id="mi-autosave" class="cm6-item" type="button" data-checkable="true" role="menuitemcheckbox" aria-checked="false">
-                    <span>Auto-save</span>
+                  <button id="mi-inline-diffs" class="cm6-item" type="button" data-checkable="true" role="menuitemcheckbox" aria-checked="true">
+                    <span>Show Inline Diffs</span>
                   </button>
                   <button id="mi-find" class="cm6-item" type="button">
                     <span>Find/Replace</span><span class="cm6-kbd">Ctrl/Cmd+F</span>

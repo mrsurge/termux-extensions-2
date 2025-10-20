@@ -6,9 +6,10 @@ import socket
 import subprocess
 import time
 from collections import deque, defaultdict
+import re
 from pathlib import Path
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote as urlquote
 
 from flask import Blueprint, current_app, jsonify, request, render_template_string
@@ -17,7 +18,6 @@ from app.libs.framework_shells import _manager
 
 from .history_store import HistoryStore
 from .preferences_store import PreferencesStore
-from .editor import Editor
 
 
 code_oss_bp = Blueprint(
@@ -47,7 +47,6 @@ _BRIDGE_DOC_CACHE: Dict[str, Dict[str, Any]] = {}
 
 history_store = HistoryStore()
 preferences_store = PreferencesStore()
-file_editor = Editor()
 
 
 _GIT_SETTINGS: dict[str, Any] = {
@@ -76,6 +75,34 @@ _BRIDGE_STATE_CACHE: Dict[str, Any] = {
     "summary": _empty_bridge_summary(),
 }
 
+_LANGUAGE_EXTENSIONS: Dict[str, str] = {
+    "js": "javascript",
+    "mjs": "javascript",
+    "cjs": "javascript",
+    "jsx": "javascript",
+    "ts": "javascript",
+    "tsx": "javascript",
+    "json": "json",
+    "py": "python",
+    "pyw": "python",
+    "html": "html",
+    "htm": "html",
+    "xml": "xml",
+    "svg": "xml",
+    "css": "css",
+    "scss": "css",
+    "less": "css",
+    "md": "markdown",
+    "markdown": "markdown",
+    "sh": "shell",
+    "bash": "shell",
+    "zsh": "shell",
+    "ksh": "shell",
+    "csh": "shell",
+    "txt": "plaintext",
+}
+_DEFAULT_LANGUAGE = "plaintext"
+
 
 def _reset_bridge_state() -> None:
     global _BRIDGE_SEQ
@@ -103,6 +130,57 @@ def _normalize_file_path(path: str) -> str:
         return str(path)
 
 
+def _path_within(base: Path, target: Path) -> bool:
+    try:
+        target.relative_to(base)
+        return True
+    except ValueError:
+        return False
+
+
+def _guess_language_from_path(path: Path) -> Optional[str]:
+    suffix = path.suffix.lower().lstrip(".")
+    if not suffix:
+        return None
+    return _LANGUAGE_EXTENSIONS.get(suffix, None)
+
+
+def _load_file_document(raw_path: str) -> Dict[str, Any]:
+    if not raw_path:
+        raise ValueError("Missing path")
+
+    try:
+        resolved = Path(raw_path).expanduser().resolve()
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ValueError(f"Invalid path: {raw_path}") from exc
+
+    home = Path.home().resolve()
+    if not _path_within(home, resolved):
+        raise PermissionError("Access denied")
+
+    if not resolved.exists():
+        raise FileNotFoundError(f"File not found: {resolved}")
+    if not resolved.is_file():
+        raise IsADirectoryError(f"Not a file: {resolved}")
+
+    stat_result = resolved.stat()
+    try:
+        content = resolved.read_text(encoding="utf-8")
+        binary = False
+    except UnicodeDecodeError:
+        content = f"[Binary file - {stat_result.st_size} bytes]"
+        binary = True
+
+    language = _guess_language_from_path(resolved) or _DEFAULT_LANGUAGE
+    return {
+        "path": str(resolved),
+        "content": content,
+        "size": stat_result.st_size,
+        "language": language,
+        "binary": binary,
+    }
+
+
 def _is_executable_file(path: Optional[str]) -> bool:
     if not path:
         return False
@@ -116,6 +194,7 @@ def _is_executable_file(path: Optional[str]) -> bool:
 def _git_enabled() -> bool:
     return bool(_GIT_SETTINGS.get("enabled", True))
 
+
 def _git_cache_ttl() -> float:
     try:
         ttl = float(_GIT_SETTINGS.get("ttl", 4.0) or 0)
@@ -123,12 +202,14 @@ def _git_cache_ttl() -> float:
         ttl = 4.0
     return max(1.0, ttl)
 
+
 def _clear_git_cache(project_path: Optional[str] = None) -> None:
     if project_path:
         normalized = _normalize_project_path(project_path)
         _GIT_STATUS_CACHE.pop(normalized, None)
         return
     _GIT_STATUS_CACHE.clear()
+
 
 def _probe_git_repository(project_path: str) -> tuple[bool, bool, Optional[str]]:
     """Return (git_available, is_repo, error_code)."""
@@ -151,6 +232,7 @@ def _probe_git_repository(project_path: str) -> tuple[bool, bool, Optional[str]]
         return True, False, "not-a-repo"
 
     return True, result.stdout.strip().lower() == "true", None
+
 
 def _classify_git_status(code: str) -> Dict[str, Any]:
     code = (code or "  ")[:2]
@@ -182,6 +264,7 @@ def _classify_git_status(code: str) -> Dict[str, Any]:
         "deleted": label == "deleted",
         "renamed": label == "renamed",
     }
+
 
 def _gather_git_status(project_path: str) -> Dict[str, Any]:
     normalized = _normalize_project_path(project_path)
@@ -309,6 +392,104 @@ def _gather_git_status(project_path: str) -> Dict[str, Any]:
 
     return payload
 
+
+def _parse_git_diff_hunks(diff_text: str) -> List[Dict[str, Any]]:
+    hunks: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git ") or line.startswith("index "):
+            continue
+        if line.startswith("--- ") or line.startswith("+++ "):
+            continue
+
+        match = _HUNK_HEADER_RE.match(line)
+        if match:
+            if current:
+                hunks.append(current)
+            current = {
+                "header": line,
+                "old_start": int(match.group(1) or "0"),
+                "old_lines": int(match.group(2) or "1"),
+                "new_start": int(match.group(3) or "0"),
+                "new_lines": int(match.group(4) or "1"),
+                "lines": [],
+            }
+            continue
+
+        if current is None:
+            continue
+
+        if line.startswith("+"):
+            current["lines"].append({"type": "add", "text": line[1:]})
+        elif line.startswith("-"):
+            current["lines"].append({"type": "remove", "text": line[1:]})
+        elif line.startswith(" "):
+            current["lines"].append({"type": "context", "text": line[1:]})
+        elif line.startswith("\\ No newline"):
+            current["lines"].append({"type": "meta", "text": line})
+        else:
+            current["lines"].append({"type": "context", "text": line})
+
+    if current:
+        hunks.append(current)
+
+    return hunks
+
+
+def _git_diff_for_file(
+    project_path: str,
+    file_path: str,
+    *,
+    staged: bool = False,
+) -> Dict[str, Any]:
+    if not _git_enabled():
+        raise RuntimeError("git integration disabled")
+
+    normalized_project = Path(_normalize_project_path(project_path)).resolve()
+    normalized_file = Path(_normalize_file_path(file_path)).resolve()
+
+    available, is_repo, probe_error = _probe_git_repository(str(normalized_project))
+    if not available:
+        raise RuntimeError("git-not-found")
+    if not is_repo:
+        raise RuntimeError(probe_error or "not-a-repo")
+
+    if not _path_within(normalized_project, normalized_file):
+        raise ValueError("File path must reside inside the current project")
+
+    rel_path = normalized_file.relative_to(normalized_project)
+    args = ["git", "diff", "--no-color", "--no-ext-diff", "--unified=200"]
+    if staged:
+        args.insert(2, "--cached")
+    args.extend(["--", str(rel_path)])
+
+    result = subprocess.run(
+        args,
+        cwd=str(normalized_project),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    if result.returncode not in (0, 1):
+        raise RuntimeError(result.stderr.strip() or f"git diff failed with {result.returncode}")
+
+    output = result.stdout or ""
+    lines = output.splitlines()
+    is_binary = any(line.startswith("Binary files ") for line in lines)
+    hunks: List[Dict[str, Any]] = [] if is_binary else _parse_git_diff_hunks(output)
+
+    return {
+        "project_path": str(normalized_project),
+        "file_path": str(normalized_file),
+        "relative_path": str(rel_path),
+        "staged": bool(staged),
+        "binary": is_binary,
+        "hunks": hunks,
+    }
+
+
 def _load_git_metadata(project_path: Optional[str]) -> Optional[Dict[str, Any]]:
     if not project_path or not _git_enabled():
         if not _git_enabled():
@@ -326,6 +507,7 @@ def _load_git_metadata(project_path: Optional[str]) -> Optional[Dict[str, Any]]:
     _GIT_STATUS_CACHE[normalized] = {"timestamp": now, "data": data}
     return data
 
+
 def _annotate_entry_exec(entries: Optional[list]) -> None:
     if not entries:
         return
@@ -337,6 +519,7 @@ def _annotate_entry_exec(entries: Optional[list]) -> None:
         children = entry.get("children")
         if isinstance(children, list) and children:
             _annotate_entry_exec(children)
+
 
 def _augment_explorer_event(event: Dict[str, Any]) -> Dict[str, Any]:
     project = _SHELL_STATE.get("project_path")
@@ -361,10 +544,12 @@ def _augment_explorer_event(event: Dict[str, Any]) -> Dict[str, Any]:
     augmented["git"] = metadata
     return augmented
 
+
 def _augment_bridge_event(event: Dict[str, Any]) -> Dict[str, Any]:
     if event.get("type") == "explorerTree":
         return _augment_explorer_event(event)
     return event
+
 
 def _update_current_project(path: Optional[str]) -> None:
     if not path:
@@ -373,6 +558,7 @@ def _update_current_project(path: Optional[str]) -> None:
     _SHELL_STATE["project_path"] = normalized
     history_store.touch_project(normalized)
     _clear_git_cache(normalized)
+
 
 def _update_bridge_summary(event: Dict[str, Any]) -> None:
     summary = _BRIDGE_STATE_CACHE.setdefault("summary", _empty_bridge_summary())
@@ -428,7 +614,7 @@ def _update_bridge_summary(event: Dict[str, Any]) -> None:
         doc_id = event.get("doc_id")
         if doc_id:
             entry = documents.setdefault(doc_id, {"doc_id": doc_id})
-            entry["rev"] = event.get("next_rev", entry.get("rev") )
+            entry["rev"] = event.get("next_rev", entry.get("rev"))
     elif event_type in {"bridgeState", "bridgeActivated"}:
         bridge_state = summary.setdefault("bridge", {})
         bridge_state.update(
@@ -452,12 +638,14 @@ def _update_bridge_summary(event: Dict[str, Any]) -> None:
         if len(errors) > 20:
             del errors[:-20]
 
+
 def _next_bridge_seq(payload: Dict[str, Any]) -> Dict[str, Any]:
     global _BRIDGE_SEQ
     _BRIDGE_SEQ += 1
     payload["seq"] = _BRIDGE_SEQ
     payload.setdefault("timestamp", time.time())
     return payload
+
 
 def _record_bridge_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
@@ -494,17 +682,19 @@ def _record_bridge_event(payload: Dict[str, Any]) -> Dict[str, Any]:
         doc_id = event.get("doc_id")
         if doc_id and doc_id in _BRIDGE_DOC_CACHE:
             entry = _BRIDGE_DOC_CACHE[doc_id]
-            entry["rev"] = event.get("next_rev", entry.get("rev") )
-            entry["timestamp"] = event.get("timestamp", entry.get("timestamp") )
+            entry["rev"] = event.get("next_rev", entry.get("rev"))
+            entry["timestamp"] = event.get("timestamp", entry.get("timestamp"))
     elif event_type == "ack":
         op_id = event.get("op_id")
         if op_id:
-            _acknowledge_command(op_id, applied_rev=event.get("applied_rev") )
+            _acknowledge_command(op_id, applied_rev=event.get("applied_rev"))
 
     return event
 
+
 def _bridge_summary_snapshot() -> Dict[str, Any]:
     return copy.deepcopy(_BRIDGE_STATE_CACHE.get("summary", _empty_bridge_summary()))
+
 
 def _bridge_state_payload(events: list[Dict[str, Any]]) -> Dict[str, Any]:
     return {
@@ -515,6 +705,7 @@ def _bridge_state_payload(events: list[Dict[str, Any]]) -> Dict[str, Any]:
         "pending_commands": list(_BRIDGE_COMMANDS),
     }
 
+
 def _enqueue_bridge_command(command: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(command, dict):
         raise ValueError("Command payload must be a dict")
@@ -523,6 +714,7 @@ def _enqueue_bridge_command(command: Dict[str, Any]) -> Dict[str, Any]:
     _BRIDGE_STATE_CACHE["timestamp"] = command["timestamp"]
     _BRIDGE_STATE_CACHE["last_seq"] = command["seq"]
     return command
+
 
 def _acknowledge_command(op_id: str, *, applied_rev: Optional[int] = None) -> None:
     if not op_id:
@@ -547,20 +739,23 @@ def _acknowledge_command(op_id: str, *, applied_rev: Optional[int] = None) -> No
             }
         )
 
+
 def _corsify_response(response):
     origin = request.headers.get("Origin")
     if origin:
         response.headers["Access-Control-Allow-Origin"] = origin
     else:
         response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,PATCH,OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Cache-Control"] = "no-store"
     return response
 
+
 def _cors_preflight():
     response = current_app.make_response(("", 204))
     return _corsify_response(response)
+
 
 def _seed_state() -> dict:
     params = request.args
@@ -582,6 +777,7 @@ def _seed_state() -> dict:
         "branch": params.get("branch"),
     }
 
+
 def _wrapper_script() -> Path:
     # backend.py lives at <repo>/app/apps/code_oss/backend.py>
     repo_root = Path(__file__).resolve().parents[3]
@@ -589,6 +785,7 @@ def _wrapper_script() -> Path:
     if not script.exists():
         raise FileNotFoundError(f"Wrapper script not found at {script}")
     return script
+
 
 def _runtime_dirs() -> dict[str, Path]:
     base = Path.home() / ".cache" / "termux_extensions" / "code_oss"
@@ -610,6 +807,7 @@ def _runtime_dirs() -> dict[str, Path]:
         "config": config,
     }
 
+
 def _bridge_manifest() -> dict:
     if not BRIDGE_PACKAGE.exists():
         return {}
@@ -618,15 +816,18 @@ def _bridge_manifest() -> dict:
     except Exception:
         return {}
 
+
 def _bridge_vsix_path(manifest: dict) -> Path:
     name = manifest.get("name") or "mobile-bridge"
     version = manifest.get("version") or "0.0.0"
     return BRIDGE_SRC / f"{name}-{version}.vsix"
 
+
 def _bridge_extension_id(manifest: dict) -> str:
     publisher = manifest.get("publisher") or "termux"
     name = manifest.get("name") or "mobile-bridge"
     return f"{publisher}.{name}"
+
 
 def _cli_env() -> dict:
     env = os.environ.copy()
@@ -637,6 +838,7 @@ def _cli_env() -> dict:
         }
     )
     return env
+
 
 def _installed_extensions() -> set[str]:
     try:
@@ -656,6 +858,7 @@ def _installed_extensions() -> set[str]:
         return set()
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
+
 def _is_bridge_installed(manifest: Optional[dict] = None) -> bool:
     manifest = manifest or _bridge_manifest()
     if not manifest:
@@ -663,6 +866,7 @@ def _is_bridge_installed(manifest: Optional[dict] = None) -> bool:
     extension_id = _bridge_extension_id(manifest)
     installed = _installed_extensions()
     return extension_id in installed
+
 
 def _ensure_bridge_extension(force: bool = False) -> None:
     manifest = _bridge_manifest()
@@ -688,6 +892,7 @@ def _ensure_bridge_extension(force: bool = False) -> None:
     except Exception:  # pragma: no cover - defensive
         current_app.logger.exception("Failed to install mobile bridge extension via CLI")
 
+
 def _is_shell_running() -> bool:
     shell_id = _SHELL_STATE.get("shell_id")
     if not shell_id:
@@ -700,6 +905,7 @@ def _is_shell_running() -> bool:
         return False
     return True
 
+
 def _pick_port() -> int:
     if _SHELL_STATE.get("port"):
         return int(_SHELL_STATE["port"])  # type: ignore[arg-type]
@@ -710,14 +916,16 @@ def _pick_port() -> int:
     _SHELL_STATE["port"] = port
     return port
 
+
 def _build_server_url(host: Optional[str], port: Optional[int], project_path: Optional[str]) -> Optional[str]:
     if not host or not port:
         return None
     base = f"http://{host}:{port}"
     if project_path:
-        encoded = urlquote(project_path, safe="/~ ")
+        encoded = urlquote(project_path, safe="/~")
         return f"{base}/?folder={encoded}"
     return base
+
 
 def _spawn_shell() -> None:
     manager = _manager()
@@ -764,10 +972,12 @@ def _spawn_shell() -> None:
     )
     _SHELL_STATE["shell_id"] = shell.id
 
+
 def _ensure_running() -> None:
     if _is_shell_running():
         return
     _spawn_shell()
+
 
 def _stop_shell() -> bool:
     shell_id = _SHELL_STATE.get("shell_id")
@@ -947,78 +1157,53 @@ def stop():
     return jsonify({"ok": True, "data": {"stopped": stopped}})
 
 
-@code_oss_bp.route("/file", methods=["GET", "PUT", "PATCH"])
-def handle_file():
-    """Handle file operations: read, write, and patch."""
-    if request.method == "GET":
-        file_path = request.args.get("path")
-        if not file_path:
-            return jsonify({"ok": False, "error": "Missing path parameter"}), 400
-        
-        try:
-            # Resolve path
-            resolved_path = Path(file_path).expanduser().resolve()
-            
-            # Basic security check - ensure file is under home directory
-            if not str(resolved_path).startswith(str(Path.home())):
-                return jsonify({"ok": False, "error": "Access denied"}), 403
-            
-            if not resolved_path.exists():
-                return jsonify({"ok": False, "error": "File not found"}), 404
-            
-            if not resolved_path.is_file():
-                return jsonify({"ok": False, "error": "Not a file"}), 400
-            
-            # Read file content
-            try:
-                content = resolved_path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                # Try as binary if text fails
-                content = f"[Binary file - {resolved_path.stat().st_size} bytes]"
-            
-            return jsonify({
-                "ok": True,
-                "data": {
-                    "path": str(resolved_path),
-                    "content": content,
-                    "size": resolved_path.stat().st_size
-                }
-            })
-            
-        except Exception as e:
-            current_app.logger.exception("Failed to read file")
-            return jsonify({"ok": False, "error": str(e)}), 500
-
-    payload = request.get_json(silent=True)
-    if not payload:
-        return jsonify({"ok": False, "error": "Missing JSON payload"}), 400
-
-    file_path = payload.get("path")
+@code_oss_bp.get("/file")
+def read_file():
+    """Read a file's content for the document viewer."""
+    file_path = request.args.get("path")
     if not file_path:
-        return jsonify({"ok": False, "error": "Missing path in payload"}), 400
+        return jsonify({"ok": False, "error": "Missing path parameter"}), 400
 
     try:
-        if request.method == "PUT":
-            content = payload.get("content")
-            if content is None:
-                return jsonify({"ok": False, "error": "Missing content for PUT request"}), 400
-            file_editor.write(file_path, content)
-            return jsonify({"ok": True, "data": {"path": file_path, "size": len(content)}})
-
-        if request.method == "PATCH":
-            edits = payload.get("edits")
-            if not isinstance(edits, list):
-                return jsonify({"ok": False, "error": "Missing or invalid edits for PATCH request"}), 400
-            file_editor.patch(file_path, edits)
-            return jsonify({"ok": True, "data": {"path": file_path}})
-
-    except (IOError, PermissionError, NotImplementedError) as e:
-        current_app.logger.exception("Failed to handle file operation")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        document = _load_file_document(file_path)
+    except PermissionError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 403
+    except FileNotFoundError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except IsADirectoryError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as e:
-        current_app.logger.exception("An unexpected error occurred during file handling")
-        return jsonify({"ok": False, "error": "An unexpected error occurred"}), 500
+        current_app.logger.exception("Failed to read file")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
+    return jsonify({"ok": True, "data": document})
+
+
+@code_oss_bp.post("/open")
+def open_document():
+    """Open a file (POST) and return its contents."""
+    payload = request.get_json(silent=True) or {}
+    file_path = payload.get("path")
+    if not file_path:
+        return jsonify({"ok": False, "error": "Missing path"}), 400
+
+    try:
+        document = _load_file_document(file_path)
+    except PermissionError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 403
+    except FileNotFoundError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except IsADirectoryError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - defensive
+        current_app.logger.exception("Failed to open file")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    return jsonify({"ok": True, "data": document})
 
 
 @code_oss_bp.post("/project")
@@ -1172,6 +1357,34 @@ def delete_history_file():
     return jsonify({"ok": True, "data": {"removed": removed}})
 
 
+@code_oss_bp.get("/diff")
+def get_diff_for_file():
+    file_path = request.args.get("path")
+    if not file_path:
+        return jsonify({"ok": False, "error": "Missing path parameter"}), 400
+
+    project_path = _SHELL_STATE.get("project_path")
+    if not project_path:
+        return jsonify({"ok": False, "error": "No active project"}), 400
+
+    staged_flag = request.args.get("staged", "").strip().lower()
+    staged = staged_flag in {"1", "true", "yes", "on"}
+
+    try:
+        diff_payload = _git_diff_for_file(project_path, file_path, staged=staged)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except FileNotFoundError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except RuntimeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - defensive
+        current_app.logger.exception("Failed to compute git diff")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    return jsonify({"ok": True, "data": diff_payload})
+
+
 @code_oss_bp.get("/git/settings")
 def get_git_settings():
     project = _SHELL_STATE.get("project_path")
@@ -1205,12 +1418,12 @@ def update_git_settings():
     changed = False
 
     if "enabled" in payload:
-        _GIT_SETTINGS["enabled"] = bool(payload.get("enabled") )
+        _GIT_SETTINGS["enabled"] = bool(payload.get("enabled"))
         changed = True
 
     if "ttl" in payload:
         try:
-            ttl_value = float(payload.get("ttl") )
+            ttl_value = float(payload.get("ttl"))
             if ttl_value > 0:
                 _GIT_SETTINGS["ttl"] = max(1.0, min(ttl_value, 60.0))
                 changed = True
