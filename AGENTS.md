@@ -1,9 +1,8 @@
-# Gemini Code Assistant Context
-Hi how are you?  If you can read this that means autosave is working perfectly....  
-hi hi hi hi bsff
+# Gemini Code Assistant Context terter uyiuyiyiuy
+tretsergioer    kjlhkkl gkjhgjkhg kjghkjgjkgjk kghjg
 This document provides context for the `termux-extensions-2` project, a web framework for Termux that provides a mobile-friendly UI to manage and interact with the Termux environment.
 
-## Project Overview
+## Project Overview kgku
 
 `termux-extensions-2` is a Flask-based web framework for Termux that provides a mobile-friendly UI to manage and interact with the Termux environment. It operates as a local web server, presenting a clean UI for controlling your terminal sessions. The core functionality is delivered through a system of "extensions" and "apps" that leverage standard command-line tools to provide rich, interactive control over your Termux sessions.
 

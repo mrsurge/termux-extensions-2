@@ -984,10 +984,13 @@ function makeExtensions() {
 
   exts.push(EditorView.updateListener.of((update) => {
     if (update.docChanged) {
+      console.log('[DEBUG] updateListener fired.');
       if (update.transactions.some(t => t.annotation(fromBridge))) {
+        console.log('[DEBUG] IGNORING transaction: fromBridge annotation found.');
         return;
       }
 
+      console.log('[DEBUG] PROCESSING transaction: No fromBridge annotation.');
       if (autosaveTimer) clearTimeout(autosaveTimer);
 
       if (cmState.autosave) {
@@ -1204,6 +1207,7 @@ function applyEditorChanges(docId, changes) {
     edits.push({ from, to, insert });
   });
   if (edits.length) {
+    console.log('[DEBUG] Dispatching change with fromBridge annotation.');
     cmState.view.dispatch({
       changes: edits,
       annotations: fromBridge.of(true)
@@ -1792,6 +1796,7 @@ async function startServer({ headline, detail } = {}) {
 }
 
 function handleBridgeEvent(data) {
+  console.log('[DEBUG] Bridge event received:', data);
   if (!data || typeof data !== 'object') return;
   if (ignoreBridgeEvents && data.type === 'doc_changes') return;
   switch (data.type) {
