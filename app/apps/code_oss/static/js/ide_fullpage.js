@@ -1,5 +1,7 @@
 import * as CM from '/static/vendor/codemirror.1/codemirror.bundle.js';
 
+import { Annotation } from  "/static/vendor/codemirror.2/cm_state_view.bundle.js";
+const fromBridge = Annotation.define();
 const root = document.getElementById('ide-root');
 if (!root) {
   console.error('[ide_fullpage] Missing ide root');
@@ -57,7 +59,7 @@ const miToggleWrap = document.getElementById('mi-toggle-wrap');
 const miAutosave = document.getElementById('mi-autosave');
 const miFind = document.getElementById('mi-find');
 const miGoto = document.getElementById('mi-goto');
-
+const miSave = document.getElementById('mi-save');
 const themeMenuItems = menuThemeDD ? Array.from(menuThemeDD.querySelectorAll('[data-theme]')) : [];
 
 const menuRegistry = [];
@@ -67,6 +69,7 @@ if (menuViewBtn && menuViewDD) menuRegistry.push({ button: menuViewBtn, dropdown
 if (menuThemeBtn && menuThemeDD) menuRegistry.push({ button: menuThemeBtn, dropdown: menuThemeDD });
 
 const EditorState = CM.EditorState;
+// const fromBridge = CM.Annotation.define();
 const { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, lineNumbers } = CM;
 const defaultKeymap = CM.defaultKeymap || [];
 const history = CM.history || (() => []);
@@ -981,14 +984,18 @@ function makeExtensions() {
 
   exts.push(EditorView.updateListener.of((update) => {
     if (update.docChanged) {
+      if (update.transactions.some(t => t.annotation(fromBridge))) {
+        return;
+      }
+
       if (autosaveTimer) clearTimeout(autosaveTimer);
-      ignoreBridgeEvents = true;
 
       if (cmState.autosave) {
         autosaveTimer = setTimeout(() => {
           saveFile();
-          ignoreBridgeEvents = false;
         }, 1500);
+      } else {
+        if (miSave) miSave.disabled = false;
       }
     }
   }));
@@ -1197,7 +1204,10 @@ function applyEditorChanges(docId, changes) {
     edits.push({ from, to, insert });
   });
   if (edits.length) {
-    cmState.view.dispatch({ changes: edits });
+    cmState.view.dispatch({
+      changes: edits,
+      annotations: fromBridge.of(true)
+    });
     cmState.text = cmState.view.state.doc.toString();
   }
 }
@@ -1959,11 +1969,13 @@ async function saveFile() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: currentFile, content }),
         });
+        if (miSave) miSave.disabled = true;
     } catch (error) {
         console.error('[ide_fullpage] Failed to save file', error);
+    } finally {
+        ignoreBridgeEvents = false;
     }
 }
-
 
 attachFrame(frame);
 
@@ -2016,6 +2028,10 @@ recentTabMenu?.addEventListener('click', (event) => {
   }
   closeRecentMenu();
   openFileInEditor(path);
+});
+
+miSave?.addEventListener('click', () => {
+    saveFile();
 });
 
 document.addEventListener('pointerdown', (event) => {
