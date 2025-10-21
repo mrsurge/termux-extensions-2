@@ -1,5 +1,7 @@
 import * as CM from '/static/vendor/codemirror.1/codemirror.bundle.js';
 
+const fromBridge = CM.Annotation.define();
+
 const root = document.getElementById('ide-root');
 if (!root) {
   console.error('[ide_fullpage] Missing ide root');
@@ -983,6 +985,23 @@ function makeExtensions() {
   if (theme) exts.push(theme);
   const langExt = resolveLanguageExtension(cmState.language);
   if (langExt) exts.push(langExt);
+  exts.push(EditorView.updateListener.of((update) => {
+    if (update.docChanged) {
+      if (update.transactions.some(t => t.annotation(fromBridge))) {
+        return;
+      }
+
+      if (autosaveTimer) clearTimeout(autosaveTimer);
+
+      if (cmState.autosave) {
+        autosaveTimer = setTimeout(() => {
+          saveFile();
+        }, 1500);
+      } else {
+        if (miSave) miSave.disabled = false;
+      }
+    }
+  }));
   return exts.filter(Boolean);
 }
 
@@ -1187,7 +1206,10 @@ function applyEditorChanges(docId, changes) {
     edits.push({ from, to, insert });
   });
   if (edits.length) {
-    cmState.view.dispatch({ changes: edits });
+    cmState.view.dispatch({
+      changes: edits,
+      annotations: fromBridge.of(true)
+    });
     cmState.text = cmState.view.state.doc.toString();
   }
 }

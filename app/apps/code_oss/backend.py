@@ -17,6 +17,7 @@ from app.libs.framework_shells import _manager
 
 from .history_store import HistoryStore
 from .preferences_store import PreferencesStore
+from .editor import Editor
 
 
 code_oss_bp = Blueprint(
@@ -46,6 +47,7 @@ _BRIDGE_DOC_CACHE: Dict[str, Dict[str, Any]] = {}
 
 history_store = HistoryStore()
 preferences_store = PreferencesStore()
+file_editor = Editor()
 
 
 _GIT_SETTINGS: dict[str, Any] = {
@@ -980,46 +982,77 @@ def stop():
     return jsonify({"ok": True, "data": {"stopped": stopped}})
 
 
-@code_oss_bp.get("/file")
-def read_file():
-    """Read a file's content for the document viewer."""
-    file_path = request.args.get("path")
-    if not file_path:
-        return jsonify({"ok": False, "error": "Missing path parameter"}), 400
-    
-    try:
-        # Resolve path
-        resolved_path = Path(file_path).expanduser().resolve()
+@code_oss_bp.route("/file", methods=["GET", "PUT", "PATCH"])
+def handle_file():
+    """Handle file operations: read, write, and patch."""
+    if request.method == "GET":
+        file_path = request.args.get("path")
+        if not file_path:
+            return jsonify({"ok": False, "error": "Missing path parameter"}), 400
         
-        # Basic security check - ensure file is under home directory
-        if not str(resolved_path).startswith(str(Path.home())):
-            return jsonify({"ok": False, "error": "Access denied"}), 403
-        
-        if not resolved_path.exists():
-            return jsonify({"ok": False, "error": "File not found"}), 404
-        
-        if not resolved_path.is_file():
-            return jsonify({"ok": False, "error": "Not a file"}), 400
-        
-        # Read file content
         try:
-            content = resolved_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            # Try as binary if text fails
-            content = f"[Binary file - {resolved_path.stat().st_size} bytes]"
-        
-        return jsonify({
-            "ok": True,
-            "data": {
-                "path": str(resolved_path),
-                "content": content,
-                "size": resolved_path.stat().st_size
-            }
-        })
-        
-    except Exception as e:
-        current_app.logger.exception("Failed to read file")
+            # Resolve path
+            resolved_path = Path(file_path).expanduser().resolve()
+            
+            # Basic security check - ensure file is under home directory
+            if not str(resolved_path).startswith(str(Path.home())):
+                return jsonify({"ok": False, "error": "Access denied"}), 403
+            
+            if not resolved_path.exists():
+                return jsonify({"ok": False, "error": "File not found"}), 404
+            
+            if not resolved_path.is_file():
+                return jsonify({"ok": False, "error": "Not a file"}), 400
+            
+            # Read file content
+            try:
+                content = resolved_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                # Try as binary if text fails
+                content = f"[Binary file - {resolved_path.stat().st_size} bytes]"
+            
+            return jsonify({
+                "ok": True,
+                "data": {
+                    "path": str(resolved_path),
+                    "content": content,
+                    "size": resolved_path.stat().st_size
+                }
+            })
+            
+        except Exception as e:
+            current_app.logger.exception("Failed to read file")
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({"ok": False, "error": "Missing JSON payload"}), 400
+
+    file_path = payload.get("path")
+    if not file_path:
+        return jsonify({"ok": False, "error": "Missing path in payload"}), 400
+
+    try:
+        if request.method == "PUT":
+            content = payload.get("content")
+            if content is None:
+                return jsonify({"ok": False, "error": "Missing content for PUT request"}), 400
+            file_editor.write(file_path, content)
+            return jsonify({"ok": True, "data": {"path": file_path, "size": len(content)}})
+
+        if request.method == "PATCH":
+            edits = payload.get("edits")
+            if not isinstance(edits, list):
+                return jsonify({"ok": False, "error": "Missing or invalid edits for PATCH request"}), 400
+            file_editor.patch(file_path, edits)
+            return jsonify({"ok": True, "data": {"path": file_path}})
+
+    except (IOError, PermissionError, NotImplementedError) as e:
+        current_app.logger.exception("Failed to handle file operation")
         return jsonify({"ok": False, "error": str(e)}), 500
+    except Exception as e:
+        current_app.logger.exception("An unexpected error occurred during file handling")
+        return jsonify({"ok": False, "error": "An unexpected error occurred"}), 500
 
 
 @code_oss_bp.post("/project")
