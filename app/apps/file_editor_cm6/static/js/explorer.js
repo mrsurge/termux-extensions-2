@@ -48,7 +48,7 @@ export async function initExplorerUI() {
 
 async function refreshCurrentProject() {
   try {
-    const r = await fetch('project/current');
+    const r = await fetch('/api/app/file_editor_cm6/project/current');
     const j = await r.json();
     currentProjectPath = j?.data?.path || '';
     const label = document.getElementById('fe-project-label');
@@ -75,7 +75,7 @@ async function openProjectPrompt() {
     });
 
     // 3. Send the valid, absolute path to the backend
-    const r = await fetch('project/open', {
+    const r = await fetch('/api/app/file_editor_cm6/project/open', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: choice.path })
@@ -106,7 +106,7 @@ async function renderRecentMenu() {
   dd.innerHTML = '';
 
   try {
-    const r = await fetch('history/files');
+    const r = await fetch('/api/app/file_editor_cm6/history/files');
     const j = await r.json();
     const files = j?.data || [];
 
@@ -167,7 +167,7 @@ async function renderRecentMenu() {
 
 async function removeRecent(path) {
   try {
-    const u = new URL('history/file', location.href);
+    const u = new URL('/api/app/file_editor_cm6/history/file', location.href);
     u.searchParams.set('path', path);
     await fetch(u, { method: 'DELETE' });
   } catch (e) {
@@ -182,7 +182,7 @@ function renderTreeRoot(treeEl) {
 
 async function addTreeChildren(parentEl, rel) {
   try {
-    const u = new URL('explorer/list', location.href);
+    const u = new URL('/api/app/file_editor_cm6/explorer/list', location.href);
     u.searchParams.set('dir', rel);
     const r = await fetch(u);
     const j = await r.json();
