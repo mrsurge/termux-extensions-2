@@ -2,6 +2,7 @@
 // Code Viewer (CM6) — dual-surface editor with native Android selection mode.
 // Imports resolve to files produced by scripts/vendor_cm6.sh
 import * as CM from '/static/vendor/codemirror.1/codemirror.bundle.js';
+import { initExplorerUI } from './static/js/explorer.js';
 
 // Core
 const EditorState = CM.EditorState;
@@ -84,7 +85,9 @@ const menuThemeBtn= requireEl('#menu-theme-btn');
 const menuThemeDD = requireEl('#menu-theme-dd');
 const themeMenuItems = Array.from(menuThemeDD.querySelectorAll('[data-theme]'));
 
-const btnBrowse   = requireEl('#fe-browse');
+
+const recentFilesBtn = requireEl('#recent-files-btn');
+const recentFilesDD  = requireEl('#recent-files-dd');
 const miNew       = requireEl('#mi-new');
 const miOpen      = requireEl('#mi-open');
 const miSave      = requireEl('#mi-save');
@@ -103,6 +106,7 @@ const miToggleLines   = requireEl('#mi-toggle-lines');
 const miToggleShading = requireEl('#mi-toggle-shading');
 const miToggleSyntax  = requireEl('#mi-toggle-syntax');
 const miToggleWrap    = requireEl('#mi-toggle-wrap');
+const miToggleAutosave = requireEl('#mi-toggle-autosave');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
 
@@ -194,9 +198,20 @@ let showLineNumbers = true;
 let showLineShading = false; // cosmetic; not implemented for CM6 here
 let showSyntaxHighlight = true;
 let wordWrap = false;
+let autoSaveEnabled = true;
 let currentTheme = 'cm6-dark';
 let lastPickerPath = HOME_DIR;
 let currentModeLanguage = null;
+
+// WebSocket and autosave state
+let ws = null;
+let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+let lastSha256 = null;
+let inflightOpId = null;
+let saveDebounceTimer = null;
+const AUTOSAVE_DELAY = 1200; // 1200ms debounce
+let lastSaveTime = 0;
+const SELF_ECHO_GRACE = 300; // 300ms grace period after save
 
 function makeExtensions() {
   const exts = [
@@ -268,6 +283,79 @@ async function apiPost(path, body) {
   return res.data || res;
 }
 
+// ---------- WebSocket management ----------
+function closeWebSocket() {
+  if (ws) {
+    try { ws.close(); } catch {}
+    ws = null;
+  }
+}
+
+function openWebSocket(path) {
+  closeWebSocket();
+  if (!path) return;
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}/api/app/file_editor_cm6/ws/read?path=${encodeURIComponent(path)}&client_id=${encodeURIComponent(clientId)}`;
+
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    console.log('WebSocket connected for:', path);
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      handleWSMessage(msg);
+    } catch (e) {
+      console.error('Failed to parse WS message:', e);
+    }
+  };
+
+  ws.onerror = (err) => {
+    console.error('WebSocket error:', err);
+  };
+
+  ws.onclose = () => {
+    console.log('WebSocket closed');
+    ws = null;
+  };
+}
+
+function handleWSMessage(msg) {
+  const type = msg.type;
+
+  if (type === 'replace_full') {
+    // Check if we're in grace period after save
+    const timeSinceSave = Date.now() - lastSaveTime;
+    const isInGracePeriod = inflightOpId || timeSinceSave < SELF_ECHO_GRACE;
+
+    if (isInGracePeriod) {
+      console.log('Ignoring replace_full during grace period');
+      return;
+    }
+
+    // Update editor content
+    const newContent = msg.content || '';
+    if (getText() !== newContent) {
+      setText(newContent);
+      lastSavedContent = newContent;
+      lastSha256 = msg.sha256 || null;
+      markUnsaved(false);
+      statusEl.textContent = 'Updated from disk';
+      setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 2000);
+    }
+  } else if (type === 'save_ack') {
+    if (msg.op_id === inflightOpId) {
+      inflightOpId = null;
+      lastSha256 = msg.meta?.sha256 || lastSha256;
+      statusEl.textContent = 'Saved';
+      setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
+    }
+  }
+}
+
 // ---------- File ops ----------
 function updatePathDisplay() {
   if (!currentPath) {
@@ -294,11 +382,23 @@ async function openFile(path) {
     currentPathExists = true;
     lastPickerPath = parentDir(resolved);
     currentModeLanguage = detectLanguageFromFilename(resolved);
+
+    // Initialize SHA256 if provided
+    lastSha256 = payload.sha256 || null;
+
     setText(payload.content || '');
     lastSavedContent = getText();
     markUnsaved(false);
     updatePathDisplay();
     statusEl.textContent = '';
+
+    // Open WebSocket for this file
+    openWebSocket(resolved);
+
+    // Add to recent files (explorer.js will refresh the menu)
+    apiPost('history/touch', { path: resolved }).catch(err => {
+      console.error('Failed to add to recent files:', err);
+    });
   } catch (e) {
     statusEl.textContent = '';
     host.toast(`Failed to open: ${e.message}`);
@@ -306,18 +406,76 @@ async function openFile(path) {
   }
 }
 
+async function doSave(targetPath, content) {
+  const opId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  inflightOpId = opId;
+  lastSaveTime = Date.now();
+
+  const payload = {
+    path: targetPath,
+    content: content,
+    client_id: clientId,
+    op_id: opId
+  };
+
+  if (lastSha256) {
+    payload.base = { sha256: lastSha256 };
+  }
+
+  try {
+    const result = await apiPost('write', payload);
+    lastSha256 = result.sha256 || lastSha256;
+    lastSavedContent = content;
+    markUnsaved(false);
+    return { success: true, result };
+  } catch (e) {
+    inflightOpId = null;
+
+    // Handle 409 conflict
+    if (e.status === 409 || (e.response && e.response.error === 'BASE_MISMATCH')) {
+      // Try to fetch latest and rebase once
+      try {
+        const latest = await apiGet(`read?path=${encodeURIComponent(targetPath)}`);
+        lastSha256 = latest.sha256 || null;
+
+        // Simple rebase: if our changes conflict, ask user
+        if (window.confirm('File was modified externally. Retry save and overwrite?')) {
+          // Retry once without base check (force overwrite)
+          const retryPayload = {
+            path: targetPath,
+            content: content,
+            client_id: clientId,
+            op_id: `${opId}_retry`
+          };
+          const retryResult = await apiPost('write', retryPayload);
+          lastSha256 = retryResult.sha256 || lastSha256;
+          lastSavedContent = content;
+          markUnsaved(false);
+          return { success: true, result: retryResult };
+        } else {
+          return { success: false, error: 'Conflict - user cancelled' };
+        }
+      } catch (retryErr) {
+        return { success: false, error: `Conflict resolution failed: ${retryErr.message}` };
+      }
+    }
+
+    return { success: false, error: e.message };
+  }
+}
+
 async function saveFile() {
   if (!currentPath || !currentPathExists) return saveAsDialog();
   statusEl.textContent = 'Saving...';
-  try {
-    const content = getText();
-    await apiPost('write', { path: currentPath, content });
-    lastSavedContent = content;
-    markUnsaved(false);
-    host.toast('Saved');
-  } catch (e) {
-    host.toast(`Save failed: ${e.message}`);
-  } finally {
+
+  const content = getText();
+  const result = await doSave(currentPath, content);
+
+  if (result.success) {
+    statusEl.textContent = 'Saved';
+    setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
+  } else {
+    host.toast(`Save failed: ${result.error}`);
     statusEl.textContent = '';
   }
 }
@@ -327,22 +485,50 @@ async function saveAsDialog() {
   if (!target || !target.path) return;
   if (target.existed && !window.confirm('File exists. Overwrite?')) return;
   statusEl.textContent = 'Saving...';
-  try {
-    const content = getText();
-    await apiPost('write', { path: target.path, content });
-    currentPath = toAbsolute(target.path, null, HOME_DIR);
+
+  const content = getText();
+  const targetAbs = toAbsolute(target.path, null, HOME_DIR);
+
+  // Reset SHA256 since this is a new file path
+  lastSha256 = null;
+
+  const result = await doSave(targetAbs, content);
+
+  if (result.success) {
+    currentPath = targetAbs;
     currentPathExists = true;
     lastPickerPath = parentDir(currentPath);
     currentModeLanguage = detectLanguageFromFilename(currentPath);
-    lastSavedContent = content;
-    markUnsaved(false);
     updatePathDisplay();
-    host.toast('Saved');
-  } catch (e) {
-    host.toast(`Save failed: ${e.message}`);
-  } finally {
+    statusEl.textContent = 'Saved';
+    setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
+
+    // Open WebSocket for this new file
+    closeWebSocket();
+    openWebSocket(currentPath);
+  } else {
+    host.toast(`Save failed: ${result.error}`);
     statusEl.textContent = '';
   }
+}
+
+// Autosave: debounced save
+function scheduleAutosave() {
+  if (saveDebounceTimer) {
+    clearTimeout(saveDebounceTimer);
+  }
+
+  if (!autoSaveEnabled) {
+    return; // Autosave is disabled
+  }
+
+  saveDebounceTimer = setTimeout(() => {
+    if (unsaved && currentPath && currentPathExists) {
+      saveFile().catch(err => {
+        console.error('Autosave failed:', err);
+      });
+    }
+  }, AUTOSAVE_DELAY);
 }
 
 // ---------- Picker helpers (shared modal provided by framework) ----------
@@ -380,7 +566,13 @@ async function pickSaveTarget() {
 }
 
 // ---------- Menu & keyboard wiring ----------
-function closeAllMenus() { menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); }
+function closeAllMenus() {
+  menuFileDD.classList.remove('show');
+  menuEditDD.classList.remove('show');
+  menuViewDD.classList.remove('show');
+  menuThemeDD.classList.remove('show');
+  recentFilesDD.classList.remove('show');
+}
 function bindMenuToggle(el, action) {
   if (!el) return;
   const run = () => { closeAllMenus(); action(); };
@@ -388,22 +580,35 @@ function bindMenuToggle(el, action) {
   el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); run(); } });
 }
 
-menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show');}});
-menuEditBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show');}});
-menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuViewDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuThemeDD.classList.remove('show');}});
-menuThemeBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuThemeDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show');}});
+menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show');}});
+menuEditBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show');}});
+menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuViewDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show');}});
+menuThemeBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuThemeDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show');}});
+recentFilesBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = recentFilesDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show');}});
 document.addEventListener('click', () => closeAllMenus());
 
 bindMenuToggle(miNew, () => {
   if (unsaved) { showConfirm(); return; }
+  closeWebSocket();
   currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
+  lastSha256 = null;
   setText(''); lastSavedContent = ''; markUnsaved(false); updatePathDisplay();
 });
 bindMenuToggle(miOpen, async () => { const p = await pickFile(); if (p) await openFile(p); });
 bindMenuToggle(miSave, () => saveFile());
 bindMenuToggle(miSaveAs, () => saveAsDialog());
-bindMenuToggle(miClose, () => { currentPath=''; currentPathExists=false; lastPickerPath=HOME_DIR; currentModeLanguage=null; setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); });
-bindMenuToggle(miQuit, () => { try{ host.clearState(); }catch{} currentPath=''; currentPathExists=false; setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); });
+bindMenuToggle(miClose, () => {
+  closeWebSocket();
+  currentPath=''; currentPathExists=false; lastPickerPath=HOME_DIR; currentModeLanguage=null;
+  lastSha256 = null;
+  setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay();
+});
+bindMenuToggle(miQuit, () => {
+  try{ host.clearState(); }catch{}
+  closeWebSocket();
+  currentPath=''; currentPathExists=false; lastSha256 = null;
+  setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay();
+});
 
 bindMenuToggle(miUndo, () => { if (view && undo) undo(view); });
 bindMenuToggle(miRedo, () => { if (view && redo) redo(view); });
@@ -429,15 +634,28 @@ bindMenuToggle(miToggleWrap, () => {
   selectSurface.classList.toggle('wrap', wordWrap);
   createView(getText());
 });
+bindMenuToggle(miToggleAutosave, () => {
+  autoSaveEnabled = !autoSaveEnabled;
+  setMenuChecked(miToggleAutosave, autoSaveEnabled);
+  if (autoSaveEnabled && unsaved && currentPath && currentPathExists) {
+    scheduleAutosave(); // Trigger autosave immediately if there are unsaved changes
+  }
+});
 bindMenuToggle(miFind, () => { if (view && openSearchPanel) openSearchPanel(view); });
 bindMenuToggle(miGoto, () => { const input = window.prompt('Go to line'); const line = Number.parseInt(input || '', 10); if (!Number.isNaN(line)) { const ln = Math.max(1, line); const pos = view.state.doc.line(ln).from; view.dispatch({ selection:{anchor:pos}, scrollIntoView:true }); view.focus(); } });
 
-btnBrowse.addEventListener('click', async () => { const path = await pickFile(); if (path) await openFile(path); });
+
 
 // Unsaved tracking
 function onAnyChange() {
   const now = getText();
-  markUnsaved(now !== lastSavedContent);
+  const hasChanges = now !== lastSavedContent;
+  markUnsaved(hasChanges);
+
+  // Schedule autosave if there are changes
+  if (hasChanges) {
+    scheduleAutosave();
+  }
 }
 const changeObserver = new MutationObserver(onAnyChange);
 const observeEditor = () => {
@@ -449,6 +667,34 @@ const reobserve = () => setTimeout(observeEditor, 0);
 // Initialize editor
 createView('');
 reobserve();
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+  const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+  // Ctrl/Cmd+S: Save
+  if (cmdOrCtrl && e.key === 's') {
+    e.preventDefault();
+    saveFile();
+  }
+
+  // Ctrl/Cmd+N: New
+  if (cmdOrCtrl && e.key === 'n') {
+    e.preventDefault();
+    if (unsaved) { showConfirm(); return; }
+    closeWebSocket();
+    currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
+    lastSha256 = null;
+    setText(''); lastSavedContent = ''; markUnsaved(false); updatePathDisplay();
+  }
+
+  // Ctrl/Cmd+O: Open
+  if (cmdOrCtrl && e.key === 'o') {
+    e.preventDefault();
+    pickFile().then(p => { if (p) openFile(p); });
+  }
+});
 
 // ---------- Dual-surface selection mode ----------
 let selectMode = false;
@@ -547,18 +793,21 @@ host.setTitle('Code Viewer (CM6)');
 const state = host.loadState({
   lastPath: null, draft: null,
   showLineNumbers: true, showLineShading: false,
-  showSyntaxHighlight: true, wordWrap: false, theme: 'cm6-dark',
+  showSyntaxHighlight: true, wordWrap: false,
+  autoSaveEnabled: true, theme: 'cm6-dark',
 }) || {};
 
 showLineNumbers = state.showLineNumbers !== false;
 showLineShading = !!state.showLineShading;
 showSyntaxHighlight = state.showSyntaxHighlight !== false;
 wordWrap = !!state.wordWrap;
+autoSaveEnabled = state.autoSaveEnabled !== false;
 currentTheme = (state.theme && THEMES[state.theme]) ? state.theme : 'cm6-dark';
 setMenuChecked(miToggleLines, showLineNumbers);
 setMenuChecked(miToggleShading, showLineShading);
 setMenuChecked(miToggleSyntax, showSyntaxHighlight);
 setMenuChecked(miToggleWrap, wordWrap);
+setMenuChecked(miToggleAutosave, autoSaveEnabled);
 selectSurface.classList.toggle('wrap', wordWrap);
 
 
@@ -598,6 +847,26 @@ lastSavedContent = state.draft ? '' : getText();
 markUnsaved(!!state.draft);
 updatePathDisplay();
 
+// Set up global file opening hooks for explorer.js
+window.appOpenFile = (absPath) => {
+  openFile(absPath).catch(e => {
+    host.toast(`Failed to open: ${e.message}`);
+  });
+};
+
+window.appOpenFileRel = (rel) => {
+  // Convert relative path to absolute using project root
+  const abs = toAbsolute(rel, HOME_DIR, HOME_DIR);
+  openFile(abs).catch(e => {
+    host.toast(`Failed to open: ${e.message}`);
+  });
+};
+
+// Initialize explorer UI
+initExplorerUI().catch(e => {
+  console.error('Failed to initialize explorer UI:', e);
+});
+
 // Open file via URL param
 const params = new URLSearchParams(window.location.search);
 const fileFromUrl = params.get('file');
@@ -627,7 +896,8 @@ host.onBeforeExit(() => {
     lastPath: currentPath || null,
     draft: unsaved ? getText() : null,
     showLineNumbers, showLineShading,
-    showSyntaxHighlight, wordWrap, theme: currentTheme,
+    showSyntaxHighlight, wordWrap,
+    autoSaveEnabled, theme: currentTheme,
   };
 });
 

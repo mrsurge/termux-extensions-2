@@ -1,0 +1,55 @@
+<style>
+  .code-oss-root { display: flex; flex-direction: column; height: 100%; padding: 16px; gap: 16px; color: var(--foreground, #e5e7eb); }
+  .code-oss-card { background: var(--card, #0b0f1a); border: 1px solid var(--border, #1f2937); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 20px 40px rgba(15, 23, 42, 0.22); }
+  .code-oss-heading { font-size: 1.4rem; font-weight: 600; display: flex; align-items: center; gap: 0.4rem; }
+  .code-oss-body { font-size: 0.95rem; line-height: 1.5; color: var(--muted-foreground, #94a3b8); }
+  .code-oss-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+  .code-oss-btn { background: var(--primary, #3b82f6); color: var(--primary-foreground, #010409); border: none; border-radius: 999px; padding: 10px 18px; font-weight: 600; cursor: pointer; transition: background 0.2s ease, box-shadow 0.2s ease; font-size: 0.95rem; }
+  .code-oss-btn:hover { background: #5598ff; box-shadow: 0 12px 28px rgba(59, 130, 246, 0.35); }
+  .code-oss-btn:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+  .code-oss-secondary { background: var(--secondary, #0f172a); color: var(--secondary-foreground, #e2e8f0); border: 1px solid var(--border, #1f2937); }
+  .code-oss-secondary:hover:not(:disabled) { background: #16213c; box-shadow: none; }
+  .code-oss-status { padding: 12px 14px; border-radius: 12px; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); font-size: 0.95rem; display: flex; align-items: center; gap: 10px; }
+  .code-oss-status[data-state="running"] { background: rgba(34, 197, 94, 0.18); border-color: rgba(34, 197, 94, 0.4); }
+  .code-oss-status[data-state="error"] { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.4); }
+  .code-oss-status strong { font-weight: 600; }
+  .status-dot { font-size: 0.8rem; color: var(--primary, #3b82f6); }
+  .code-oss-status[data-state="running"] .status-dot { color: #22c55e; }
+  .code-oss-status[data-state="error"] .status-dot { color: #ef4444; }
+  .code-oss-bridge-status { font-size: 0.85rem; color: var(--muted-foreground, #94a3b8); }
+  .code-oss-bridge-status[data-state="installed"] { color: #22c55e; }
+  .code-oss-bridge-status[data-state="error"] { color: #ef4444; }
+  .code-oss-meta { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: var(--muted-foreground, #94a3b8); }
+  .code-oss-meta strong { color: var(--foreground, #e5e7eb); font-weight: 600; }
+</style>
+
+<div class="code-oss-root">
+  <div class="code-oss-card">
+    <div class="code-oss-heading">💻 Code IDE</div>
+    <div class="code-oss-body">
+      Launch the bundled Code OSS server and jump into the mobile wrapper. The session shares files,
+      terminals, and extensions with other Termux Extensions apps—no extra packages required.
+    </div>
+    <div id="code-oss-status" class="code-oss-status" data-state="checking">
+      <span class="status-dot">●</span>
+      <div>
+        <strong>Checking runtime…</strong>
+        <div id="code-oss-status-detail">Ensuring the bundled server is available.</div>
+      </div>
+    </div>
+    <div class="code-oss-actions">
+      <button id="code-oss-start" class="code-oss-btn">Start Server</button>
+      <button id="code-oss-launch" class="code-oss-btn code-oss-secondary" disabled>Open IDE</button>
+      <button id="code-oss-stop" class="code-oss-btn code-oss-secondary" disabled>Stop Server</button>
+      <button id="code-oss-copy-link" class="code-oss-btn code-oss-secondary">Copy Deep-Link</button>
+      <button id="code-oss-install-bridge" class="code-oss-btn code-oss-secondary">Install Bridge</button>
+    </div>
+    <div id="code-oss-bridge-status" class="code-oss-bridge-status" data-state="checking">Bridge extension status: checking…</div>
+    <div class="code-oss-meta">
+      <div><strong>Runtime target:</strong> code-server (via wrapper)</div>
+      <div><strong>Explorer drawer:</strong> tap ☰ inside the IDE to browse and open files.</div>
+      <div><strong>Assistant panel:</strong> pick your chat extension from the IDE wrapper settings.</div>
+      <div><strong>Bridge extension:</strong> installs a VS Code helper so the drawer mirrors Code OSS. Use the button above if it shows as missing.</div>
+    </div>
+  </div>
+</div>

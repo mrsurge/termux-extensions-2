@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Document Viewer</title>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden;
+            background: #1e1e1e;
+        }
+        #container { 
+            width: 100vw; 
+            height: 100vh; 
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ccc;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">Loading editor...</div>
+    <div id="container"></div>
+    
+    <script src="/apps/code_oss/static/vendor/monaco/min/vs/loader.js"></script>
+    <script>
+        // Configure Monaco loader to use vendored files
+        require.config({ 
+            paths: { 
+                'vs': '/apps/code_oss/static/vendor/monaco/min/vs' 
+            }
+        });
+
+        let editor = null;
+        let currentPath = null;
+
+        // Load Monaco
+        require(['vs/editor/editor.main'], function() {
+            document.getElementById('loading').style.display = 'none';
+            
+            // Create editor
+            editor = monaco.editor.create(document.getElementById('container'), {
+                value: '// Open a file from the explorer',
+                language: 'plaintext',
+                theme: 'vs-dark',
+                automaticLayout: true,
+                fontSize: 14,
+                fontFamily: "'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace",
+                minimap: {
+                    enabled: true
+                },
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                readOnly: false
+            });
+
+            // Listen for parent messages
+            window.addEventListener('message', async (event) => {
+                const data = event.data || {};
+                
+                if (data.type === 'loadFile' && data.path) {
+                    currentPath = data.path;
+                    
+                    // Detect language from file extension
+                    const ext = data.path.split('.').pop().toLowerCase();
+                    const langMap = {
+                        'js': 'javascript',
+                        'ts': 'typescript', 
+                        'py': 'python',
+                        'java': 'java',
+                        'cpp': 'cpp',
+                        'c': 'c',
+                        'cs': 'csharp',
+                        'html': 'html',
+                        'css': 'css',
+                        'json': 'json',
+                        'xml': 'xml',
+                        'md': 'markdown',
+                        'yaml': 'yaml',
+                        'yml': 'yaml',
+                        'sh': 'shell',
+                        'bash': 'shell',
+                        'rs': 'rust',
+                        'go': 'go',
+                        'rb': 'ruby',
+                        'php': 'php',
+                        'sql': 'sql'
+                    };
+                    
+                    const language = langMap[ext] || 'plaintext';
+                    
+                    // Set content and language
+                    if (data.content !== undefined) {
+                        editor.setValue(data.content);
+                        monaco.editor.setModelLanguage(editor.getModel(), language);
+                    }
+                    
+                    // Set position if provided
+                    if (data.line) {
+                        editor.setPosition({
+                            lineNumber: data.line,
+                            column: data.column || 1
+                        });
+                        editor.revealLineInCenter(data.line);
+                    }
+                }
+                
+                if (data.type === 'setTheme') {
+                    monaco.editor.setTheme(data.theme || 'vs-dark');
+                }
+                
+                if (data.type === 'setReadOnly') {
+                    editor.updateOptions({ readOnly: data.readOnly });
+                }
+            });
+
+            // Notify parent that editor is ready
+            if (window.parent !== window) {
+                window.parent.postMessage({ 
+                    type: 'monacoReady',
+                    _documentViewer: true 
+                }, '*');
+            }
+
+            // Handle editor changes
+            editor.onDidChangeModelContent(() => {
+                if (window.parent !== window && currentPath) {
+                    window.parent.postMessage({
+                        type: 'documentChanged',
+                        path: currentPath,
+                        content: editor.getValue(),
+                        _documentViewer: true
+                    }, '*');
+                }
+            });
+        });
+
+        // Handle resize
+        window.addEventListener('resize', () => {
+            if (editor) {
+                editor.layout();
+            }
+        });
+    </script>
+</body>
+</html>

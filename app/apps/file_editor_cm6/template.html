@@ -2,6 +2,7 @@
 <!DOCTYPE html>
 <meta charset="utf-8" />
 <title>Code Viewer (CM6)</title>
+<link rel="stylesheet" href="/apps/file_editor_cm6/static/js/explorer.css" />
 <style>
   :root {
     --fg: var(--foreground, #e5e7eb);
@@ -54,12 +55,29 @@
 </style>
 
 <div class="fe-root">
+  <aside id="fe-drawer" class="fe-drawer">
+          <header class="fe-drawer-head">
+            <strong>Project:</strong>
+            <span id="fe-project-label"></span>
+            <button id="fe-open-project" class="fe-btn" title="Open Project">Open Project…</button>
+            <button id="fe-drawer-close" class="fe-btn">✕</button>
+          </header>    <div class="fe-drawer-body">
+      <ul id="fe-file-tree" class="fe-tree" data-project=""></ul>
+    </div>
+  </aside>
+  <div class="fe-drawer-backdrop" id="fe-drawer-backdrop"></div>
+
   <div class="fe-toolbar">
+    <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer">☰</button>
     <div class="fe-title-block">
       <div id="fe-file-name" class="fe-file-name" title="Current file">Untitled</div>
       <div id="fe-file-path" class="fe-file-path" title="Current path">No file open</div>
     </div>
-    <button id="fe-browse" class="fe-btn" title="Browse">📁</button>
+
+    <div class="fe-menu" style="position: relative; margin-left: auto;">
+      <button id="recent-files-btn" class="fe-btn" style="margin: 0;" disabled>Recent Files ▾</button>
+      <div id="recent-files-dd" class="fe-dropdown"></div>
+    </div>
     <span id="fe-status" class="fe-status"></span>
   </div>
 
@@ -93,6 +111,7 @@
         <div class="fe-dd-item" id="mi-toggle-shading" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Line Shading</span></div>
         <div class="fe-dd-item" id="mi-toggle-syntax" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Syntax Highlighting</span></div>
         <div class="fe-dd-item" id="mi-toggle-wrap" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Word Wrap</span></div>
+        <div class="fe-dd-item" id="mi-toggle-autosave" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Save</span></div>
         <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
         <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
       </div>

@@ -1,0 +1,39 @@
+/* Document Mode CSS - Hide all UI except editor */
+body.document-mode .monaco-workbench .part.sidebar {
+  display: none !important;
+}
+
+body.document-mode .monaco-workbench .part.activitybar {
+  display: none !important;
+}
+
+body.document-mode .monaco-workbench .part.panel {
+  display: none !important;
+}
+
+body.document-mode .monaco-workbench .part.statusbar {
+  display: none !important;
+}
+
+body.document-mode .monaco-workbench .part.titlebar {
+  display: none !important;
+}
+
+body.document-mode .monaco-workbench .part.editor > .content .editor-group-container > .title {
+  display: none !important;
+}
+
+body.document-mode .monaco-workbench .part.editor > .content .editor-group-container > .editor-container {
+  height: 100% !important;
+}
+
+body.document-mode .monaco-workbench {
+  grid-template-areas: "editor editor editor" !important;
+  grid-template-columns: 1fr !important;
+}
+
+body.document-mode .monaco-workbench .part.editor {
+  grid-area: editor !important;
+  width: 100% !important;
+  height: 100vh !important;
+}
