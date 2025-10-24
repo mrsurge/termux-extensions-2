@@ -1,4 +1,6 @@
 
+# app/apps/file_editor_cm6/main.py
+
 import os
 import json
 from pathlib import Path
@@ -30,8 +32,6 @@ def status():
 @file_editor_cm6_bp.get('/read')
 def read_file():
     path = request.args.get('path')
-    if not path:
-        return jsonify({"ok": False, "error": '"path" query parameter is required'}), 400
     expanded, err = _expand_and_validate_path(path)
     if err:
         return jsonify({"ok": False, "error": err}), 403
@@ -56,17 +56,9 @@ def write_file_route():
     if data.get('base') and isinstance(data['base'], dict):
         base_sha256 = data['base'].get('sha256')
 
-    if not path or content is None:
-        return jsonify({"ok": False, "error": 'Both "path" and "content" are required'}), 400
-
-    # Convert absolute path to relative for core_write
     project_root = get_project_root()
-    try:
-        abs_path = Path(path).expanduser().resolve()
-        rel_path = abs_path.relative_to(project_root.resolve())
-    except (ValueError, RuntimeError):
-        return jsonify({"ok": False, "error": "Path is outside project root"}), 403
-
+    rel_path = path
+    
     try:
         # Initialize watcher if not already running
         init_watcher(project_root)
@@ -106,20 +98,14 @@ def ws_read(ws):
         ws.close(reason='Missing path parameter')
         return
 
-    # Convert absolute path to relative
     project_root = get_project_root()
-    try:
-        abs_path = Path(path).expanduser().resolve()
-        rel_path = abs_path.relative_to(project_root.resolve())
-    except (ValueError, RuntimeError):
-        ws.close(reason='Path outside project root')
-        return
+    rel_path = path
 
     # Initialize watcher if not already running
     init_watcher(project_root)
 
     # Subscribe to file changes
-    token = subscribe(str(rel_path), client_id, lambda event: ws.send(json.dumps(event)))
+    token = subscribe(project_root, str(rel_path), client_id, lambda event: ws.send(json.dumps(event)))
 
     try:
         # Keep connection alive and ignore incoming messages
@@ -136,15 +122,12 @@ def project_open():
     data = request.get_json(silent=True) or {}
     path = (data.get('path') or '').strip()
 
-    if not path:
-        return jsonify({"ok": False, "error": "path required"}), 400
-
     try:
         abs_path = set_project_root(path)  # validates and sets global project root
         _history_store.touch_project(str(abs_path))
         return jsonify({"ok": True, "data": {"path": str(abs_path)}})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @file_editor_cm6_bp.get('/project/current')
 def project_current():
@@ -159,7 +142,7 @@ def explorer_list():
     try:
         return jsonify({"ok": True, "data": list_dir(rel)})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @file_editor_cm6_bp.get('/history/files')
 def get_recent_files():
@@ -177,9 +160,6 @@ def touch_file_history():
     data = request.get_json(silent=True) or {}
     path = data.get('path')
 
-    if not path:
-        return jsonify({"ok": False, "error": 'Path is required'}), 400
-
     project_root = get_project_root()
     try:
         entry = _history_store.touch_file(str(project_root), path)
@@ -191,9 +171,6 @@ def touch_file_history():
 def remove_file_history():
     """Remove a file from the recent files list."""
     path = request.args.get('path')
-
-    if not path:
-        return jsonify({"ok": False, "error": 'Path query parameter is required'}), 400
 
     project_root = get_project_root()
     try:

@@ -1,3 +1,5 @@
+# app/apps/file_editor_cm6/core_read.py
+
 from __future__ import annotations
 import os
 import time
@@ -160,18 +162,16 @@ def _do_handle_fs_event(raw_event):
     path = raw_event.get("path")
     if not path: return
 
-    rel_path = os.path.relpath(path, _project_root)
-    
     try:
         file_meta = _get_file_meta(Path(path))
         content = Path(path).read_text(encoding='utf-8', errors='replace')
         lang = "plaintext"
-        if rel_path.endswith('.py'): lang = 'python'
-        if rel_path.endswith('.js'): lang = 'javascript'
+        if path.endswith('.py'): lang = 'python'
+        if path.endswith('.js'): lang = 'javascript'
         
         _emit_event({
             "type": "replace_full",
-            "path": rel_path,
+            "path": path,
             "content": content,
             "language": lang,
             "sha256": file_meta["sha256"]

@@ -1,3 +1,5 @@
+// app/apps/file_editor_cm6/static/js/explorer.js
+
 // explorer.js - File Explorer Drawer for CM6 Editor
 let currentProjectPath = '';
 
@@ -91,9 +93,6 @@ async function openProjectPrompt() {
 
     // 4. Reload the page on success
     if (j?.ok) {
-      if (window.appSetProjectRoot) {
-        window.appSetProjectRoot(j.data.path);
-      }
       location.reload();
     } else {
       alert(`Failed to open project: ${j?.error || 'Unknown error'}`);

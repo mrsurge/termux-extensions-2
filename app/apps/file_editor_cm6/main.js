@@ -1,3 +1,4 @@
+// app/apps/file_editor_cm6/main.js
 
 // Code Viewer (CM6) — dual-surface editor with native Android selection mode.
 // Imports resolve to files produced by scripts/vendor_cm6.sh
@@ -283,24 +284,6 @@ async function apiPost(path, body) {
   return res.data || res;
 }
 
-let currentProjectRoot = null;
-
-async function getCurrentProjectRoot() {
-  if (currentProjectRoot) return currentProjectRoot;
-  try {
-    const res = await apiGet('project/current');
-    currentProjectRoot = res.path;
-    return currentProjectRoot;
-  } catch (e) {
-    console.error('Failed to get current project root:', e);
-    return HOME_DIR; // Fallback to HOME_DIR
-  }
-}
-
-window.appSetProjectRoot = (path) => {
-  currentProjectRoot = path;
-};
-
 // ---------- WebSocket management ----------
 function closeWebSocket() {
   if (ws) {
@@ -309,19 +292,12 @@ function closeWebSocket() {
   }
 }
 
-async function openWebSocket(path) {
+function openWebSocket(path) {
   closeWebSocket();
   if (!path) return;
 
-  const projectRoot = await getCurrentProjectRoot();
-  let relPath = path; // Assume path is already relative if projectRoot is not set or path is not absolute
-  if (projectRoot && path.startsWith(projectRoot)) {
-    relPath = path.substring(projectRoot.length);
-    if (relPath.startsWith('/')) relPath = relPath.substring(1);
-  }
-
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/api/app/file_editor_cm6/ws/read?path=${encodeURIComponent(relPath)}&client_id=${encodeURIComponent(clientId)}`;
+  const wsUrl = `${protocol}//${location.hostname}:39873/ws/read?path=${encodeURIComponent(path)}&client_id=${encodeURIComponent(clientId)}`;
 
   ws = new WebSocket(wsUrl);
 
@@ -436,15 +412,8 @@ async function doSave(targetPath, content) {
   inflightOpId = opId;
   lastSaveTime = Date.now();
 
-  const projectRoot = await getCurrentProjectRoot();
-  let relTargetPath = targetPath; // Assume path is already relative if projectRoot is not set or path is not absolute
-  if (projectRoot && targetPath.startsWith(projectRoot)) {
-    relTargetPath = targetPath.substring(projectRoot.length);
-    if (relTargetPath.startsWith('/')) relTargetPath = relTargetPath.substring(1);
-  }
-
   const payload = {
-    path: relTargetPath,
+    path: targetPath,
     content: content,
     client_id: clientId,
     op_id: opId
@@ -474,7 +443,7 @@ async function doSave(targetPath, content) {
         if (window.confirm('File was modified externally. Retry save and overwrite?')) {
           // Retry once without base check (force overwrite)
           const retryPayload = {
-            path: relTargetPath,
+            path: targetPath,
             content: content,
             client_id: clientId,
             op_id: `${opId}_retry`
@@ -894,32 +863,40 @@ window.appOpenFileRel = (rel, projectRoot) => {
   });
 };
 
-// Initialize explorer UI
-initExplorerUI().catch(e => {
-  console.error('Failed to initialize explorer UI:', e);
-});
+async function main() {
+  // Initialize explorer first to get project context
+  await initExplorerUI().catch(e => {
+    console.error('Failed to initialize explorer UI:', e);
+  });
 
-// Open file via URL param
-const params = new URLSearchParams(window.location.search);
-const fileFromUrl = params.get('file');
-if (fileFromUrl) {
-  const abs = toAbsolute(fileFromUrl, null, HOME_DIR);
-  lastPickerPath = parentDir(abs);
-  openFile(abs).catch((e) => {
-    host.toast(`Failed to open file: ${e.message}`);
-    currentPath = ''; currentPathExists = false; setText(''); markUnsaved(false); updatePathDisplay();
-  });
-} else if (state.draft) {
-  currentPath = state.lastPath ? toAbsolute(state.lastPath, null, HOME_DIR) : '';
-  currentPathExists = false;
-  currentModeLanguage = currentPath ? detectLanguageFromFilename(currentPath) : null;
-} else if (state.lastPath) {
-  const abs = toAbsolute(state.lastPath, null, HOME_DIR);
-  lastPickerPath = parentDir(abs);
-  openFile(abs).catch(() => {
-    currentPath = abs; currentPathExists = false; setText(''); updatePathDisplay();
-  });
+  // Ensure we have the project root before opening any files
+  await getCurrentProjectRoot();
+
+  // Open file via URL param or saved state
+  const params = new URLSearchParams(window.location.search);
+  const fileFromUrl = params.get('file');
+  if (fileFromUrl) {
+    const abs = toAbsolute(fileFromUrl, null, HOME_DIR);
+    lastPickerPath = parentDir(abs);
+    openFile(abs).catch((e) => {
+      host.toast(`Failed to open file: ${e.message}`);
+      currentPath = ''; currentPathExists = false; setText(''); markUnsaved(false); updatePathDisplay();
+    });
+  } else if (state.draft) {
+    currentPath = state.lastPath ? toAbsolute(state.lastPath, null, HOME_DIR) : '';
+    currentPathExists = false;
+    currentModeLanguage = currentPath ? detectLanguageFromFilename(currentPath) : null;
+  } else if (state.lastPath) {
+    const abs = toAbsolute(state.lastPath, null, HOME_DIR);
+    lastPickerPath = parentDir(abs);
+    openFile(abs).catch(() => {
+      currentPath = abs; currentPathExists = false; setText(''); updatePathDisplay();
+    });
+  }
 }
+
+// Run the main boot sequence
+main();
 
 // Save state on exit
 host.onBeforeExit(() => {

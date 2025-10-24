@@ -1,5 +1,5 @@
 #!/bin/env python
-
+# main.py (project_root)
 import errno
 import json
 import os
@@ -681,6 +681,9 @@ def _before_request_init():
 
 @app.route('/api/app/<app_id>/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
 def proxy_app_request(app_id, subpath):
+    # If it's a WebSocket handshake, don't proxy it—just end here.
+    if request.headers.get("Upgrade", "").lower() == "websocket":
+        return "", 404
     try:
         app_info = ensure_app_running(app_id)
     except (ValueError, RuntimeError) as e:
