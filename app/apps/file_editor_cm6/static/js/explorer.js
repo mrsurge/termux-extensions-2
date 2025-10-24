@@ -91,6 +91,9 @@ async function openProjectPrompt() {
 
     // 4. Reload the page on success
     if (j?.ok) {
+      if (window.appSetProjectRoot) {
+        window.appSetProjectRoot(j.data.path);
+      }
       location.reload();
     } else {
       alert(`Failed to open project: ${j?.error || 'Unknown error'}`);
@@ -254,7 +257,7 @@ async function onTreeClick(ev) {
     }
   } else {
     // File clicked - open it
-    openFileRel(rel);
+    openFileRel(rel, currentProjectPath);
   }
 }
 
@@ -267,9 +270,9 @@ function openFile(absPath) {
   }
 }
 
-function openFileRel(rel) {
+function openFileRel(rel, projectRoot) {
   if (window.appOpenFileRel) {
-    window.appOpenFileRel(rel);
+    window.appOpenFileRel(rel, projectRoot);
   } else {
     console.error('appOpenFileRel not available');
   }

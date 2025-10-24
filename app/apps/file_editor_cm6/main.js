@@ -283,6 +283,24 @@ async function apiPost(path, body) {
   return res.data || res;
 }
 
+let currentProjectRoot = null;
+
+async function getCurrentProjectRoot() {
+  if (currentProjectRoot) return currentProjectRoot;
+  try {
+    const res = await apiGet('project/current');
+    currentProjectRoot = res.path;
+    return currentProjectRoot;
+  } catch (e) {
+    console.error('Failed to get current project root:', e);
+    return HOME_DIR; // Fallback to HOME_DIR
+  }
+}
+
+window.appSetProjectRoot = (path) => {
+  currentProjectRoot = path;
+};
+
 // ---------- WebSocket management ----------
 function closeWebSocket() {
   if (ws) {
@@ -291,12 +309,19 @@ function closeWebSocket() {
   }
 }
 
-function openWebSocket(path) {
+async function openWebSocket(path) {
   closeWebSocket();
   if (!path) return;
 
+  const projectRoot = await getCurrentProjectRoot();
+  let relPath = path; // Assume path is already relative if projectRoot is not set or path is not absolute
+  if (projectRoot && path.startsWith(projectRoot)) {
+    relPath = path.substring(projectRoot.length);
+    if (relPath.startsWith('/')) relPath = relPath.substring(1);
+  }
+
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/api/app/file_editor_cm6/ws/read?path=${encodeURIComponent(path)}&client_id=${encodeURIComponent(clientId)}`;
+  const wsUrl = `${protocol}//${window.location.host}/api/app/file_editor_cm6/ws/read?path=${encodeURIComponent(relPath)}&client_id=${encodeURIComponent(clientId)}`;
 
   ws = new WebSocket(wsUrl);
 
@@ -411,8 +436,15 @@ async function doSave(targetPath, content) {
   inflightOpId = opId;
   lastSaveTime = Date.now();
 
+  const projectRoot = await getCurrentProjectRoot();
+  let relTargetPath = targetPath; // Assume path is already relative if projectRoot is not set or path is not absolute
+  if (projectRoot && targetPath.startsWith(projectRoot)) {
+    relTargetPath = targetPath.substring(projectRoot.length);
+    if (relTargetPath.startsWith('/')) relTargetPath = relTargetPath.substring(1);
+  }
+
   const payload = {
-    path: targetPath,
+    path: relTargetPath,
     content: content,
     client_id: clientId,
     op_id: opId
@@ -442,7 +474,7 @@ async function doSave(targetPath, content) {
         if (window.confirm('File was modified externally. Retry save and overwrite?')) {
           // Retry once without base check (force overwrite)
           const retryPayload = {
-            path: targetPath,
+            path: relTargetPath,
             content: content,
             client_id: clientId,
             op_id: `${opId}_retry`
@@ -854,9 +886,9 @@ window.appOpenFile = (absPath) => {
   });
 };
 
-window.appOpenFileRel = (rel) => {
+window.appOpenFileRel = (rel, projectRoot) => {
   // Convert relative path to absolute using project root
-  const abs = toAbsolute(rel, HOME_DIR, HOME_DIR);
+  const abs = toAbsolute(rel, projectRoot, HOME_DIR);
   openFile(abs).catch(e => {
     host.toast(`Failed to open: ${e.message}`);
   });
