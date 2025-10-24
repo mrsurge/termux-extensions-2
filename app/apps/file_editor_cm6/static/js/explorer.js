@@ -46,6 +46,12 @@ export async function initExplorerUI() {
   treeEl?.addEventListener('click', onTreeClick);
 }
 
+function basename(path) {
+  if (!path || path === '/') return '/';
+  const parts = path.split('/').filter(Boolean);
+  return parts[parts.length - 1] || '/';
+}
+
 async function refreshCurrentProject() {
   try {
     const r = await fetch('/api/app/file_editor_cm6/project/current');
@@ -53,7 +59,8 @@ async function refreshCurrentProject() {
     currentProjectPath = j?.data?.path || '';
     const label = document.getElementById('fe-project-label');
     if (label) {
-      label.textContent = currentProjectPath || '(none)';
+      label.textContent = currentProjectPath ? basename(currentProjectPath) : '(none)';
+      label.title = currentProjectPath; // Keep full path in title for tooltip
     }
   } catch (e) {
     console.error('Failed to refresh current project:', e);

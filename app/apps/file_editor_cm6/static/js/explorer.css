@@ -1,20 +1,20 @@
 /* explorer.css - File Explorer Drawer Styles */
 
 :root {
-  --drawer-width: min(320px, 82vw);
+  --drawer-width: 75vw; /* New width: 75% of viewport width */
 }
 
 /* Drawer container - positioned off-screen by default */
 .fe-drawer {
   position: fixed;
   top: 0;
-  left: calc(-1 * var(--drawer-width));
+  left: calc(-1 * var(--drawer-width)); /* Position off-screen by its own width */
   width: var(--drawer-width);
   bottom: 0;
-  background: rgba(7, 10, 19, 0.96);
+  background: var(--card);
   backdrop-filter: blur(12px);
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
-  transform: translateX(0);
+  border-right: 1px solid var(--border);
+  transform: translateX(0); /* Initial transform */
   transition: transform 0.3s ease;
   z-index: 100;
   display: flex;
@@ -23,7 +23,7 @@
 
 /* Show drawer by sliding it in when root has drawer-open class */
 .fe-root.drawer-open .fe-drawer {
-  transform: translateX(var(--drawer-width));
+  transform: translateX(var(--drawer-width)); /* Slide in by its own width */
 }
 
 /* Backdrop overlay */
@@ -48,8 +48,8 @@
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--border);
+  background: rgba(from var(--border) r g b / 0.2);
 }
 
 .drawer-action {
@@ -105,7 +105,7 @@
   gap: 6px;
   padding: 6px 8px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 8px;
   transition: background 0.15s;
   color: #e5e7eb;
   font-size: 0.9rem;
@@ -115,11 +115,22 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
-.fe-tree-icon {
+.fe-tree-twisty {
   flex-shrink: 0;
-  width: 16px;
-  text-align: center;
-  font-size: 0.85rem;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--muted, #9ca3af);
+  cursor: pointer;
+  transition: transform 0.2s ease-out;
+}
+
+.fe-tree-node[data-open="true"] .fe-tree-twisty {
+  transform: rotate(90deg);
 }
 
 .fe-tree-name {
