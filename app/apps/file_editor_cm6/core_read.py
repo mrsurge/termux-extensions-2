@@ -153,6 +153,47 @@ def _emit_event(event: dict):
                 except Exception:
                     pass
 
+
+def stop_watcher():
+    """Stop the current watcher and reset shared state."""
+    global _watcher_thread, _project_root
+    thread = None
+    with _lock:
+        thread = _watcher_thread
+        _watcher_thread = None
+        _project_root = None
+
+        # Cancel all pending timers
+        for timer in _debounce_timers.values():
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+        _debounce_timers.clear()
+        _debounced_events.clear()
+        _suppression_windows.clear()
+        _token_to_client_id.clear()
+        _subscribers.clear()
+
+    # Stop the watcher thread (outside lock to avoid deadlock)
+    if thread:
+        try:
+            # For Watchdog Observer
+            if hasattr(thread, 'stop'):
+                thread.stop()
+            # For PollingWatcher
+            elif hasattr(thread, '_running'):
+                thread._running = False
+        except Exception:
+            pass
+
+        # Wait for thread to finish
+        try:
+            if hasattr(thread, 'join'):
+                thread.join(timeout=2.0)
+        except Exception:
+            pass
+
 def _process_debounced_event(path: str):
     with _lock:
         event = _debounced_events.pop(path, None)
@@ -163,14 +204,17 @@ def _process_debounced_event(path: str):
 def _handle_fs_event(raw_event):
     """Debounces and processes a raw filesystem event."""
     path = raw_event.get("path")
-    if not path: return
+    if not path:
+        return
+    norm = _norm_path(path)
 
     with _lock:
-        _debounced_events[path] = raw_event
-        if path in _debounce_timers:
-            _debounce_timers[path].cancel()
-        _debounce_timers[path] = Timer(DEBOUNCE_DELAY, _process_debounced_event, args=(path,))
-        _debounce_timers[path].start()
+        _debounced_events[norm] = raw_event
+        timer = _debounce_timers.get(norm)
+        if timer:
+            timer.cancel()
+        _debounce_timers[norm] = Timer(DEBOUNCE_DELAY, _process_debounced_event, args=(norm,))
+        _debounce_timers[norm].start()
 
 def _do_handle_fs_event(raw_event):
     """Processes a raw filesystem event into a replace_full event."""
@@ -197,21 +241,43 @@ def _do_handle_fs_event(raw_event):
 def init_watcher(project_root: Path):
     """Initializes and starts the file system watcher if not already running."""
     global _watcher_thread, _project_root
-    if _watcher_thread:
-        return
 
-    _project_root = project_root
+    desired_root = project_root.resolve()
+    
+    # Check if watcher needs to be restarted due to project change
+    with _lock:
+        existing_root = _project_root.resolve() if _project_root else None
+        
+        # If project changed, stop the old watcher
+        if _watcher_thread and existing_root and existing_root != desired_root:
+            # Release lock before stopping to avoid deadlock
+            pass  # Will stop below
+        elif _watcher_thread:
+            # Same project, watcher already running
+            return
+        else:
+            # No watcher running, set the root
+            _project_root = desired_root
+    
+    # Stop old watcher if project changed (outside lock to avoid deadlock)
+    if existing_root and existing_root != desired_root:
+        stop_watcher()
+        with _lock:
+            _project_root = desired_root
 
+    # Start new watcher
     if _is_watchdog_available:
         handler = WatchdogHandler(_handle_fs_event)
         observer = Observer()
-        observer.schedule(handler, str(project_root), recursive=True)
+        observer.schedule(handler, str(desired_root), recursive=True)
         observer.start()
-        _watcher_thread = observer
+        with _lock:
+            _watcher_thread = observer
     else:
-        watcher = PollingWatcher(str(project_root), _handle_fs_event)
+        watcher = PollingWatcher(str(desired_root), _handle_fs_event)
         watcher.start()
-        _watcher_thread = watcher
+        with _lock:
+            _watcher_thread = watcher
 
 def subscribe(path: str, client_id: str, on_event: Callable[[dict], None]) -> str:
     """Subscribes a client to file events, sends an initial snapshot, and returns a token."""

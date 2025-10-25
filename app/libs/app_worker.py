@@ -39,6 +39,13 @@ def main():
         if not blueprint_found:
             raise RuntimeError(f"No Flask Blueprint found in {args.backend_module}")
 
+        sock_obj = getattr(module, "sock", None)
+        if sock_obj is not None and hasattr(sock_obj, "init_app"):
+            try:
+                sock_obj.init_app(app)
+            except Exception as sock_err:
+                raise RuntimeError(f"Failed to initialize WebSocket routes: {sock_err}") from sock_err
+
     except Exception as e:
         print(f"Error loading app backend: {e}", file=sys.stderr)
         sys.exit(1)

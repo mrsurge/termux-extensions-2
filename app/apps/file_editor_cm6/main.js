@@ -203,6 +203,7 @@ let autoSaveEnabled = true;
 let currentTheme = 'cm6-dark';
 let lastPickerPath = HOME_DIR;
 let currentModeLanguage = null;
+let cachedProjectRoot = null;
 
 // WebSocket and autosave state
 let ws = null;
@@ -887,6 +888,23 @@ window.appOpenFileRel = (rel, projectRoot) => {
     host.toast(`Failed to open: ${e.message}`);
   });
 };
+
+async function getCurrentProjectRoot(forceRefresh = false) {
+  if (!forceRefresh && cachedProjectRoot) {
+    return cachedProjectRoot;
+  }
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/project/current', { cache: 'no-store' });
+    const json = await resp.json();
+    const path = json?.data?.path || '';
+    cachedProjectRoot = path || null;
+    return cachedProjectRoot;
+  } catch (err) {
+    console.error('Failed to fetch current project root:', err);
+    cachedProjectRoot = null;
+    return null;
+  }
+}
 
 async function main() {
   // Initialize explorer first to get project context
