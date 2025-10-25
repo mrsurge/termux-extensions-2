@@ -363,6 +363,14 @@ function handleWSMessage(msg) {
       return;
     }
 
+    if (msg.path) {
+      const normalized = toAbsolute(msg.path, null, HOME_DIR);
+      if (normalized !== currentPath) {
+        currentPath = normalized;
+        updatePathDisplay();
+      }
+    }
+
     // Update editor content
     const newContent = msg.content || '';
     if (getText() !== newContent) {
