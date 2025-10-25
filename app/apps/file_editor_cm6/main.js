@@ -204,6 +204,7 @@ let currentTheme = 'cm6-dark';
 let lastPickerPath = HOME_DIR;
 let currentModeLanguage = null;
 let cachedProjectRoot = null;
+let editorState = null;
 
 // WebSocket and autosave state
 let ws = null;
@@ -284,6 +285,28 @@ async function apiPost(path, body) {
   const res = await api.post(path, body);
   return res.data || res;
 }
+
+async function syncEditorState(forceRefresh = false) {
+  if (!forceRefresh && editorState) {
+    return editorState;
+  }
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/state', { cache: 'no-store' });
+    const json = await resp.json();
+    editorState = json?.data || {};
+    cachedProjectRoot = editorState.activeProject || null;
+    window.__cm6EditorState = editorState;
+    return editorState;
+  } catch (err) {
+    console.error('Failed to fetch editor state:', err);
+    editorState = null;
+    cachedProjectRoot = null;
+    window.__cm6EditorState = null;
+    return null;
+  }
+}
+
+window.__cm6SyncState = syncEditorState;
 
 // ---------- WebSocket management ----------
 function closeWebSocket() {
@@ -430,9 +453,18 @@ async function openFile(path) {
     // Open WebSocket for this file
     openWebSocket(resolved);
 
-    // Add to recent files (explorer.js will refresh the menu)
-    apiPost('history/touch', { path: resolved }).catch(err => {
-      console.error('Failed to add to recent files:', err);
+    // Update persisted editor state (last file + recents)
+    apiPost('state/file_activity', { path: resolved }).then((data) => {
+      if (data?.state) {
+        editorState = data.state;
+        cachedProjectRoot = editorState.activeProject || cachedProjectRoot;
+        window.__cm6EditorState = editorState;
+        if (typeof window.__cm6RefreshRecents === 'function') {
+          window.__cm6RefreshRecents(editorState);
+        }
+      }
+    }).catch(err => {
+      console.error('Failed to record file activity:', err);
     });
   } catch (e) {
     statusEl.textContent = '';
@@ -541,6 +573,19 @@ async function saveAsDialog() {
     // Open WebSocket for this new file
     closeWebSocket();
     openWebSocket(currentPath);
+
+    apiPost('state/file_activity', { path: currentPath }).then((data) => {
+      if (data?.state) {
+        editorState = data.state;
+        cachedProjectRoot = editorState.activeProject || cachedProjectRoot;
+        window.__cm6EditorState = editorState;
+        if (typeof window.__cm6RefreshRecents === 'function') {
+          window.__cm6RefreshRecents(editorState);
+        }
+      }
+    }).catch(err => {
+      console.error('Failed to record file activity after save-as:', err);
+    });
   } else {
     host.toast(`Save failed: ${result.error}`);
     statusEl.textContent = '';
@@ -825,19 +870,19 @@ btnSaveConfirm.addEventListener('click', async () => { await saveFile(); hideCon
 
 // ---------- State load/init ----------
 host.setTitle('Code Viewer (CM6)');
-const state = host.loadState({
+const persistedState = host.loadState({
   lastPath: null, draft: null,
   showLineNumbers: true, showLineShading: false,
   showSyntaxHighlight: true, wordWrap: false,
   autoSaveEnabled: true, theme: 'cm6-dark',
 }) || {};
 
-showLineNumbers = state.showLineNumbers !== false;
-showLineShading = !!state.showLineShading;
-showSyntaxHighlight = state.showSyntaxHighlight !== false;
-wordWrap = !!state.wordWrap;
-autoSaveEnabled = state.autoSaveEnabled !== false;
-currentTheme = (state.theme && THEMES[state.theme]) ? state.theme : 'cm6-dark';
+showLineNumbers = persistedState.showLineNumbers !== false;
+showLineShading = !!persistedState.showLineShading;
+showSyntaxHighlight = persistedState.showSyntaxHighlight !== false;
+wordWrap = !!persistedState.wordWrap;
+autoSaveEnabled = persistedState.autoSaveEnabled !== false;
+currentTheme = (persistedState.theme && THEMES[persistedState.theme]) ? persistedState.theme : 'cm6-dark';
 setMenuChecked(miToggleLines, showLineNumbers);
 setMenuChecked(miToggleShading, showLineShading);
 setMenuChecked(miToggleSyntax, showSyntaxHighlight);
@@ -877,9 +922,9 @@ themeMenuItems.forEach((item) => {
   item.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); closeAllMenus(); handle(); } });
 });
 
-createView(state.draft || '');
-lastSavedContent = state.draft ? '' : getText();
-markUnsaved(!!state.draft);
+createView(persistedState.draft || '');
+lastSavedContent = persistedState.draft ? '' : getText();
+markUnsaved(!!persistedState.draft);
 updatePathDisplay();
 
 // Set up global file opening hooks for explorer.js
@@ -891,27 +936,16 @@ window.appOpenFile = (absPath) => {
 
 window.appOpenFileRel = (rel, projectRoot) => {
   // Convert relative path to absolute using project root
-  const abs = toAbsolute(rel, projectRoot, HOME_DIR);
+  const base = projectRoot || cachedProjectRoot || HOME_DIR;
+  const abs = toAbsolute(rel, base, HOME_DIR);
   openFile(abs).catch(e => {
     host.toast(`Failed to open: ${e.message}`);
   });
 };
 
 async function getCurrentProjectRoot(forceRefresh = false) {
-  if (!forceRefresh && cachedProjectRoot) {
-    return cachedProjectRoot;
-  }
-  try {
-    const resp = await fetch('/api/app/file_editor_cm6/project/current', { cache: 'no-store' });
-    const json = await resp.json();
-    const path = json?.data?.path || '';
-    cachedProjectRoot = path || null;
-    return cachedProjectRoot;
-  } catch (err) {
-    console.error('Failed to fetch current project root:', err);
-    cachedProjectRoot = null;
-    return null;
-  }
+  const state = await syncEditorState(forceRefresh);
+  return state?.activeProject || null;
 }
 
 async function main() {
@@ -920,29 +954,52 @@ async function main() {
     console.error('Failed to initialize explorer UI:', e);
   });
 
-  // Ensure we have the project root before opening any files
-  await getCurrentProjectRoot();
+  const serverState = await syncEditorState(true);
+  if (!serverState || !serverState.activeProject || !serverState.activeProjectExists) {
+    statusEl.textContent = serverState?.activeProjectMessage || 'Select a project to begin.';
+    fileNameEl.textContent = 'No file';
+    fileNameEl.title = 'No file';
+    filePathEl.textContent = '';
+    filePathEl.title = '';
+    return;
+  }
 
   // Open file via URL param or saved state
   const params = new URLSearchParams(window.location.search);
   const fileFromUrl = params.get('file');
+  let bootOpened = false;
+
   if (fileFromUrl) {
     const abs = toAbsolute(fileFromUrl, null, HOME_DIR);
     lastPickerPath = parentDir(abs);
+    bootOpened = true;
     openFile(abs).catch((e) => {
       host.toast(`Failed to open file: ${e.message}`);
       currentPath = ''; currentPathExists = false; setText(''); markUnsaved(false); updatePathDisplay();
     });
-  } else if (state.draft) {
-    currentPath = state.lastPath ? toAbsolute(state.lastPath, null, HOME_DIR) : '';
+  } else if (persistedState.draft) {
+    currentPath = persistedState.lastPath ? toAbsolute(persistedState.lastPath, null, HOME_DIR) : '';
     currentPathExists = false;
     currentModeLanguage = currentPath ? detectLanguageFromFilename(currentPath) : null;
-  } else if (state.lastPath) {
-    const abs = toAbsolute(state.lastPath, null, HOME_DIR);
+  } else if (persistedState.lastPath) {
+    const abs = toAbsolute(persistedState.lastPath, null, HOME_DIR);
     lastPickerPath = parentDir(abs);
+    bootOpened = true;
     openFile(abs).catch(() => {
       currentPath = abs; currentPathExists = false; setText(''); updatePathDisplay();
     });
+  } else if (serverState.lastFile && serverState.lastFileExists) {
+    bootOpened = true;
+    setTimeout(() => {
+      openFile(serverState.lastFile).catch((e) => {
+        console.error('Failed to reopen last file:', e);
+        statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
+      });
+    }, 400);
+  } else if (serverState.lastFile && !serverState.lastFileExists) {
+    statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
+  } else if (!bootOpened) {
+    statusEl.textContent = 'Select a file to begin.';
   }
 }
 

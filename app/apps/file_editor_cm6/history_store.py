@@ -38,6 +38,7 @@ class HistoryStore:
         self._data: Dict[str, object] = {
             "recent_projects": [],
             "projects": {},
+            "active_project": None,
         }
         self._load()
 
@@ -54,9 +55,10 @@ class HistoryStore:
             if isinstance(data, dict):
                 self._data["recent_projects"] = data.get("recent_projects", [])
                 self._data["projects"] = data.get("projects", {})
+                self._data["active_project"] = data.get("active_project")
         except Exception:
             # Corrupt or unreadable history; start fresh.
-            self._data = {"recent_projects": [], "projects": {}}
+            self._data = {"recent_projects": [], "projects": {}, "active_project": None}
 
     def _save_locked(self) -> None:
         tmp_path = self._path.with_suffix(".tmp")
@@ -71,7 +73,12 @@ class HistoryStore:
 
     def _touch_project_locked(self, path: str) -> Dict[str, object]:
         projects: Dict[str, Dict[str, object]] = self._data.setdefault("projects", {})
-        project_entry = projects.get(path, {"files": []})
+        project_entry = projects.get(path)
+        if not project_entry:
+            project_entry = {"files": [], "last_file": None}
+        else:
+            project_entry.setdefault("files", [])
+            project_entry.setdefault("last_file", None)
         project_entry["label"] = _project_label(path)
         timestamp = _utc_timestamp()
         project_entry["opened_at"] = timestamp
@@ -122,6 +129,7 @@ class HistoryStore:
             }
             files.insert(0, file_entry)
             project_entry["files"] = files[:MAX_RECENT_FILES]
+            project_entry["last_file"] = normalized_file
             self._save_locked()
             return file_entry
 
@@ -137,6 +145,8 @@ class HistoryStore:
             if len(new_files) == len(files):
                 return False
             project_entry["files"] = new_files
+            if project_entry.get("last_file") == normalized_file:
+                project_entry["last_file"] = new_files[0]["path"] if new_files else None
             self._save_locked()
             return True
 
@@ -151,3 +161,72 @@ class HistoryStore:
             if not entry:
                 return []
             return list(entry.get("files") or [])
+
+    # ----- new state helpers ---------------------------------------------------
+
+    def set_active_project(self, project_path: Optional[str]) -> Optional[str]:
+        with self._lock:
+            if project_path:
+                self._touch_project_locked(project_path)
+            self._data["active_project"] = project_path
+            self._save_locked()
+            return project_path
+
+    def get_active_project(self) -> Optional[str]:
+        with self._lock:
+            return self._data.get("active_project")
+
+    def set_last_file(self, project_path: str, file_path: Optional[str]) -> Optional[str]:
+        normalized = self._normalize_file_path(file_path) if file_path else None
+        with self._lock:
+            project_entry = self._touch_project_locked(project_path)
+            project_entry["last_file"] = normalized
+            if normalized:
+                files: List[Dict[str, object]] = project_entry.setdefault("files", [])
+                files = [entry for entry in files if entry.get("path") != normalized]
+                timestamp = _utc_timestamp()
+                files.insert(
+                    0,
+                    {
+                        "path": normalized,
+                        "label": _project_label(normalized),
+                        "opened_at": timestamp,
+                    },
+                )
+                project_entry["files"] = files[:MAX_RECENT_FILES]
+            self._save_locked()
+            return normalized
+
+    def get_last_file(self, project_path: Optional[str]) -> Optional[str]:
+        if not project_path:
+            return None
+        with self._lock:
+            projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
+            entry = projects.get(project_path)
+            if not entry:
+                return None
+            return entry.get("last_file")
+
+    def record_file_activity(self, project_path: str, file_path: str) -> Dict[str, object]:
+        normalized = self._normalize_file_path(file_path)
+        with self._lock:
+            project_entry = self._touch_project_locked(project_path)
+            project_entry["last_file"] = normalized
+            files: List[Dict[str, object]] = project_entry.setdefault("files", [])
+            files = [entry for entry in files if entry.get("path") != normalized]
+            timestamp = _utc_timestamp()
+            entry = {
+                "path": normalized,
+                "label": _project_label(normalized),
+                "opened_at": timestamp,
+            }
+            files.insert(0, entry)
+            project_entry["files"] = files[:MAX_RECENT_FILES]
+            self._save_locked()
+            return entry
+
+    @staticmethod
+    def format_label(path: Optional[str]) -> str:
+        if not path:
+            return ""
+        return _project_label(path)

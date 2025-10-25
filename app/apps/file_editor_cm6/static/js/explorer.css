@@ -54,6 +54,10 @@
   background: rgba(from var(--border) r g b / 0.2);
 }
 
+.fe-label-missing {
+  color: #f87171;
+}
+
 .drawer-action {
   padding: 6px 12px;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -153,4 +157,15 @@
 /* Nested tree indentation */
 .fe-tree .fe-tree {
   padding-left: 16px;
+}
+
+.fe-dd-item-missing {
+  opacity: 0.65;
+  font-style: italic;
+}
+
+.fe-tree-empty {
+  padding: 12px;
+  color: rgba(229, 231, 235, 0.6);
+  font-style: italic;
 }

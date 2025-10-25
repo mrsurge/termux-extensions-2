@@ -2,6 +2,40 @@
 
 // explorer.js - File Explorer Drawer for CM6 Editor
 let currentProjectPath = '';
+let cachedState = null;
+
+async function getEditorState(forceRefresh = false) {
+  if (!forceRefresh && cachedState) return cachedState;
+  if (typeof window.__cm6SyncState === 'function') {
+    cachedState = await window.__cm6SyncState(forceRefresh);
+    return cachedState;
+  }
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/state', { cache: 'no-store' });
+    const json = await resp.json();
+    cachedState = json?.data || null;
+    return cachedState;
+  } catch (err) {
+    console.error('Failed to fetch editor state:', err);
+    cachedState = null;
+    return null;
+  }
+}
+
+function toast(message) {
+  if (window.host && typeof window.host.toast === 'function') {
+    window.host.toast(message);
+  } else {
+    alert(message);
+  }
+}
+
+window.__cm6RefreshRecents = (state) => {
+  if (state) {
+    cachedState = state;
+  }
+  renderRecentMenu(state);
+};
 
 export async function initExplorerUI() {
   const backdrop = document.getElementById('fe-backdrop');
@@ -15,9 +49,9 @@ export async function initExplorerUI() {
   const drawerBackdrop = document.getElementById('fe-drawer-backdrop');
   const treeEl = document.getElementById('fe-file-tree');
 
-  await refreshCurrentProject();
-  await renderRecentMenu();
-  if (treeEl) {
+  const state = await refreshCurrentProject(true);
+  await renderRecentMenu(state);
+  if (treeEl && state?.activeProjectExists) {
     renderTreeRoot(treeEl);
   }
 
@@ -54,19 +88,28 @@ function basename(path) {
   return parts[parts.length - 1] || '/';
 }
 
-async function refreshCurrentProject() {
-  try {
-    const r = await fetch('/api/app/file_editor_cm6/project/current');
-    const j = await r.json();
-    currentProjectPath = j?.data?.path || '';
-    const label = document.getElementById('fe-project-label');
-    if (label) {
-      label.textContent = currentProjectPath ? basename(currentProjectPath) : '(none)';
-      label.title = currentProjectPath; // Keep full path in title for tooltip
+async function refreshCurrentProject(forceRefresh = false) {
+  const state = await getEditorState(forceRefresh);
+  const label = document.getElementById('fe-project-label');
+
+  currentProjectPath = state?.activeProjectExists ? state.activeProject : '';
+
+  if (label) {
+    if (state?.activeProject) {
+      const display = state.activeProjectExists
+        ? (state.activeProjectLabel || basename(state.activeProject))
+        : `${state.activeProjectLabel || basename(state.activeProject)} (missing)`;
+      label.textContent = display;
+      label.title = state.activeProject;
+      label.classList.toggle('fe-label-missing', !state.activeProjectExists);
+    } else {
+      label.textContent = '(none)';
+      label.title = '';
+      label.classList.remove('fe-label-missing');
     }
-  } catch (e) {
-    console.error('Failed to refresh current project:', e);
   }
+
+  return state;
 }
 
 async function openProjectPrompt() {
@@ -106,18 +149,18 @@ async function openProjectPrompt() {
   }
 }
 
-async function renderRecentMenu() {
+async function renderRecentMenu(state) {
   const dd = document.getElementById('recent-files-dd');
   const ddBtn = document.getElementById('recent-files-btn');
 
-  if (!dd) return;
+  if (!dd || !ddBtn) return;
 
   dd.innerHTML = '';
 
   try {
-    const r = await fetch('/api/app/file_editor_cm6/history/files');
-    const j = await r.json();
-    const files = j?.data || [];
+    const s = state || await getEditorState(false);
+    cachedState = s;
+    const files = s?.recents || [];
 
     if (files.length === 0) {
       ddBtn.disabled = true;
@@ -139,10 +182,13 @@ async function renderRecentMenu() {
       div.style.alignItems = 'center';
 
       const span = document.createElement('span');
-      span.textContent = entry.label || entry.path;
+      span.textContent = entry.exists ? (entry.label || entry.path) : `${entry.label || entry.path} (missing)`;
       span.title = entry.path;
       span.style.flex = '1';
       span.style.cursor = 'pointer';
+      if (!entry.exists) {
+        span.classList.add('fe-dd-item-missing');
+      }
 
       const x = document.createElement('button');
       x.textContent = '×';
@@ -152,6 +198,10 @@ async function renderRecentMenu() {
 
       span.addEventListener('click', () => {
         dd.classList.remove('show');
+        if (!entry.exists) {
+          toast(`File "${entry.label}" not found.`);
+          return;
+        }
         openFile(entry.path);
       });
 
@@ -159,10 +209,6 @@ async function renderRecentMenu() {
         e.stopPropagation();
         await removeRecent(entry.path);
         div.remove();
-        // If no more files, show empty state
-        if (dd.children.length === 0) {
-          await renderRecentMenu();
-        }
       });
 
       div.appendChild(span);
@@ -179,6 +225,8 @@ async function removeRecent(path) {
     const u = new URL('/api/app/file_editor_cm6/history/file', location.href);
     u.searchParams.set('path', path);
     await fetch(u, { method: 'DELETE' });
+    await getEditorState(true);
+    await renderRecentMenu();
   } catch (e) {
     console.error('Failed to remove recent file:', e);
   }
@@ -186,6 +234,13 @@ async function removeRecent(path) {
 
 function renderTreeRoot(treeEl) {
   treeEl.replaceChildren();
+  if (!currentProjectPath) {
+    const empty = document.createElement('li');
+    empty.className = 'fe-tree-empty';
+    empty.textContent = 'Select a project to load the explorer.';
+    treeEl.appendChild(empty);
+    return;
+  }
   addTreeChildren(treeEl, '.');
 }
 
@@ -229,6 +284,10 @@ async function addTreeChildren(parentEl, rel) {
 }
 
 async function onTreeClick(ev) {
+  if (!currentProjectPath) {
+    toast('Select a project before browsing files.');
+    return;
+  }
   const li = ev.target.closest('li.fe-tree-node');
   if (!li) return;
 

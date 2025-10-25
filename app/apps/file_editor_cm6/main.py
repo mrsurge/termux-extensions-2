@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
 from flask_sock import Sock
 
 from .core_read import init_watcher, subscribe, unsubscribe, push_save_ack
-from .core_write import write_full, BaseMismatchError
+from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .history_store import HistoryStore
 from .explorer_helper import set_project_root, get_project_root, list_dir
 
@@ -17,6 +17,75 @@ sock = Sock()
 
 # Initialize history store (project root managed by explorer_helper)
 _history_store = HistoryStore()
+
+def _ensure_project_root_synced() -> Path:
+    """Ensure the in-memory project root matches the persisted active project."""
+    stored = _history_store.get_active_project()
+    if stored:
+        stored_path = Path(stored)
+        if stored_path.is_dir():
+            current = get_project_root()
+            try:
+                if stored_path.resolve() != current.resolve():
+                    return set_project_root(stored)
+            except Exception:
+                pass
+            return stored_path
+    return get_project_root()
+
+# Sync the initial project root on module import.
+try:
+    _ensure_project_root_synced()
+except Exception:
+    pass
+
+def _build_state_payload() -> dict:
+    project_path = _history_store.get_active_project()
+    project_exists = bool(project_path and Path(project_path).is_dir())
+    project_label = HistoryStore.format_label(project_path)
+    project_message = ""
+    if not project_path:
+        project_message = "No project selected."
+    elif not project_exists:
+        project_message = f'Project "{project_label or project_path}" not found.'
+    else:
+        # Make sure runtime root matches
+        try:
+            set_project_root(project_path)
+        except Exception:
+            project_exists = False
+            project_message = f'Project "{project_label or project_path}" not accessible.'
+
+    last_file = _history_store.get_last_file(project_path)
+    last_file_exists = bool(last_file and Path(last_file).is_file())
+    last_file_label = HistoryStore.format_label(last_file)
+    last_file_message = ""
+    if last_file and not last_file_exists:
+        last_file_message = f'File "{last_file_label or last_file}" not found.'
+
+    recents_raw = _history_store.list_files(project_path) if project_path else []
+    recents = []
+    for entry in recents_raw:
+        entry_path = entry.get("path")
+        exists = bool(entry_path and Path(entry_path).is_file())
+        recents.append({
+            "path": entry_path,
+            "label": entry.get("label") or HistoryStore.format_label(entry_path),
+            "opened_at": entry.get("opened_at"),
+            "exists": exists,
+        })
+
+    return {
+        "activeProject": project_path,
+        "activeProjectLabel": project_label,
+        "activeProjectExists": project_exists,
+        "activeProjectMessage": project_message,
+        "lastFile": last_file,
+        "lastFileLabel": last_file_label,
+        "lastFileExists": last_file_exists,
+        "lastFileMessage": last_file_message,
+        "recents": recents,
+    }
 
 def _expand_and_validate_path(path):
     base_home = os.path.expanduser('~')
@@ -44,7 +113,8 @@ def read_file():
     try:
         with open(expanded, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
-        return jsonify({"ok": True, "data": {"path": expanded, "content": content}})
+        meta = _get_file_meta(Path(expanded))
+        return jsonify({"ok": True, "data": {"path": expanded, "content": content, "sha256": meta.get("sha256")}})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -129,15 +199,47 @@ def project_open():
     try:
         abs_path = set_project_root(path)  # validates and sets global project root
         _history_store.touch_project(str(abs_path))
-        return jsonify({"ok": True, "data": {"path": str(abs_path)}})
+        _history_store.set_active_project(str(abs_path))
+        state = _build_state_payload()
+        return jsonify({"ok": True, "data": {"path": str(abs_path), "state": state}})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
 @file_editor_cm6_bp.get('/project/current')
 def project_current():
     """Get the current project root."""
-    root = get_project_root()
+    root = _history_store.get_active_project() or str(get_project_root())
     return jsonify({"ok": True, "data": {"path": str(root)}})
+
+@file_editor_cm6_bp.get('/state')
+def get_project_state():
+    """Return consolidated editor state."""
+    state = _build_state_payload()
+    return jsonify({"ok": True, "data": state})
+
+@file_editor_cm6_bp.post('/state/file_activity')
+def record_file_activity():
+    """Persist last-opened file and recents for the active project."""
+    data = request.get_json(silent=True) or {}
+    path = data.get('path')
+    if not path:
+        return jsonify({"ok": False, "error": "Path is required"}), 400
+
+    project_path = data.get('project') or _history_store.get_active_project()
+    if not project_path:
+        return jsonify({"ok": False, "error": "No project selected"}), 400
+
+    try:
+        project_root_path = Path(project_path).expanduser().resolve()
+        candidate_path = Path(path).expanduser().resolve()
+        if not str(candidate_path).startswith(str(project_root_path)):
+            return jsonify({"ok": False, "error": "File is outside the project root"}), 400
+
+        entry = _history_store.record_file_activity(project_path, str(candidate_path))
+        state = _build_state_payload()
+        return jsonify({"ok": True, "data": {"entry": entry, "state": state}})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @file_editor_cm6_bp.get('/explorer/list')
 def explorer_list():
@@ -151,9 +253,16 @@ def explorer_list():
 @file_editor_cm6_bp.get('/history/files')
 def get_recent_files():
     """Get recent files for the current project."""
-    project_root = get_project_root()
+    project_root = _history_store.get_active_project() or str(get_project_root())
     try:
-        files = _history_store.list_files(str(project_root))
+        files_raw = _history_store.list_files(str(project_root))
+        files = []
+        for entry in files_raw:
+            entry_path = entry.get("path")
+            files.append({
+                **entry,
+                "exists": bool(entry_path and Path(entry_path).is_file()),
+            })
         return jsonify({"ok": True, "data": files})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -164,9 +273,9 @@ def touch_file_history():
     data = request.get_json(silent=True) or {}
     path = data.get('path')
 
-    project_root = get_project_root()
+    project_root = _history_store.get_active_project() or str(get_project_root())
     try:
-        entry = _history_store.touch_file(str(project_root), path)
+        entry = _history_store.record_file_activity(str(project_root), path)
         return jsonify({"ok": True, "data": entry})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -176,7 +285,7 @@ def remove_file_history():
     """Remove a file from the recent files list."""
     path = request.args.get('path')
 
-    project_root = get_project_root()
+    project_root = _history_store.get_active_project() or str(get_project_root())
     try:
         removed = _history_store.remove_file(str(project_root), path)
         return jsonify({"ok": True, "data": {"removed": removed}})
