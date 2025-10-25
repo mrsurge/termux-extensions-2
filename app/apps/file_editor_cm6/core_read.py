@@ -47,6 +47,18 @@ DEBOUNCE_DELAY = 0.15 # 150 ms
 _suppression_windows: Dict[tuple, float] = {}  # (path, client_id) -> expiry_time
 SUPPRESSION_WINDOW = 0.3  # 300 ms
 
+
+def _norm_path(p: str) -> str:
+    """Return a canonical absolute path for subscription bookkeeping."""
+    candidate = Path(p)
+    if not candidate.is_absolute() and _project_root:
+        candidate = _project_root / candidate
+    try:
+        return str(candidate.resolve())
+    except Exception:
+        return str(candidate.absolute())
+
+
 class PollingWatcher:
     def __init__(self, path, on_event):
         self._path = path
@@ -110,6 +122,9 @@ def _emit_event(event: dict):
     path = event.get("path")
     if not path: return
 
+    key = path if path == "git_status" else _norm_path(path)
+    event["path"] = key
+
     # Clean up expired suppression windows
     now = time.time()
     with _lock:
@@ -117,13 +132,13 @@ def _emit_event(event: dict):
         for k in expired_keys:
             del _suppression_windows[k]
 
-        path_subscribers = _subscribers.get(path, {})
+        path_subscribers = _subscribers.get(key, {})
 
         # For replace_full events, check suppression
         if event.get("type") == "replace_full":
             for token, callback in path_subscribers.items():
                 client_id = _get_client_id_for_token(token)
-                if client_id and (path, client_id) in _suppression_windows:
+                if client_id and (key, client_id) in _suppression_windows:
                     # Skip this client - they just saved
                     continue
                 try:
@@ -201,16 +216,17 @@ def init_watcher(project_root: Path):
 def subscribe(path: str, client_id: str, on_event: Callable[[dict], None]) -> str:
     """Subscribes a client to file events, sends an initial snapshot, and returns a token."""
     token = str(uuid.uuid4())
+    norm = _norm_path(path)
     with _lock:
-        if path not in _subscribers:
-            _subscribers[path] = {}
-        _subscribers[path][token] = on_event
+        if norm not in _subscribers:
+            _subscribers[norm] = {}
+        _subscribers[norm][token] = on_event
         _token_to_client_id[token] = client_id
 
     # Immediately send snapshot
     try:
-        full_path = _project_root.joinpath(path).resolve()
-        if not str(full_path).startswith(str(_project_root.resolve())):
+        full_path = Path(norm)
+        if _project_root and not str(full_path).startswith(str(_project_root.resolve())):
             raise PermissionError("Path traversal detected")
         if full_path.is_symlink():
             raise PermissionError("Symlinks not supported")
@@ -223,7 +239,7 @@ def subscribe(path: str, client_id: str, on_event: Callable[[dict], None]) -> st
 
         snapshot_event = {
             "type": "replace_full",
-            "path": path,
+            "path": norm,
             "content": content,
             "language": lang,
             "sha256": file_meta["sha256"],
@@ -237,23 +253,28 @@ def subscribe(path: str, client_id: str, on_event: Callable[[dict], None]) -> st
 
 def unsubscribe(token: str) -> None:
     """Removes a client subscription."""
+    key_to_prune = None
     with _lock:
-        for path_subs in _subscribers.values():
+        for key, path_subs in _subscribers.items():
             if token in path_subs:
                 del path_subs[token]
+                key_to_prune = key
                 break
         if token in _token_to_client_id:
             del _token_to_client_id[token]
+        if key_to_prune and not _subscribers.get(key_to_prune):
+            _subscribers.pop(key_to_prune, None)
 
 def push_save_ack(path: str, op_id: str, client_id: str, meta: dict) -> None:
     """Pushes a save acknowledgement event to clients and sets suppression window."""
     # Set suppression window to prevent self-echo
+    norm = _norm_path(path)
     with _lock:
-        _suppression_windows[(path, client_id)] = time.time() + SUPPRESSION_WINDOW
+        _suppression_windows[(norm, client_id)] = time.time() + SUPPRESSION_WINDOW
 
     _emit_event({
         "type": "save_ack",
-        "path": path,
+        "path": norm,
         "op_id": op_id,
         "client_id": client_id,
         "meta": meta
@@ -269,4 +290,3 @@ def push_git_status(status: dict) -> None:
         "path": "git_status", # Dummy path
         **status
     })
-

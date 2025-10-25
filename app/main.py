@@ -716,7 +716,13 @@ def proxy_app_request(app_id, subpath):
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
         resp_headers = [(name, value) for name, value in resp.raw.headers.items() if name.lower() not in excluded_headers]
 
-        return Response(resp.iter_content(chunk_size=10*1024), resp.status_code, resp_headers)
+        resp_stream = Response(
+            resp.iter_content(chunk_size=10 * 1024),
+            resp.status_code,
+            resp_headers,
+        )
+        resp_stream.headers["X-App-Worker-Port"] = str(port)
+        return resp_stream
     except requests.exceptions.RequestException as e:
         return jsonify({"ok": False, "error": f"Failed to connect to app worker: {e}"}), 502
 

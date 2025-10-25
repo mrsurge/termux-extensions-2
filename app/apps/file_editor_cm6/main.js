@@ -292,14 +292,39 @@ function closeWebSocket() {
   }
 }
 
-function openWebSocket(path) {
+async function openWebSocket(path) {
   closeWebSocket();
   if (!path) return;
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${location.hostname}:39873/ws/read?path=${encodeURIComponent(path)}&client_id=${encodeURIComponent(clientId)}`;
+  let wsUrl;
+  try {
+    if (!window.wsPort || typeof window.wsPort.buildWsUrl !== 'function') {
+      throw new Error('wsPort helper unavailable');
+    }
+    wsUrl = await window.wsPort.buildWsUrl('file_editor_cm6', path, clientId);
+  } catch (err) {
+    console.error('Failed to resolve WebSocket URL:', err);
+    statusEl.textContent = 'WebSocket unavailable';
+    setTimeout(() => {
+      if (statusEl.textContent === 'WebSocket unavailable') {
+        statusEl.textContent = '';
+      }
+    }, 2000);
+    return;
+  }
 
-  ws = new WebSocket(wsUrl);
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (err) {
+    console.error('Failed to open WebSocket:', err);
+    statusEl.textContent = 'WebSocket unavailable';
+    setTimeout(() => {
+      if (statusEl.textContent === 'WebSocket unavailable') {
+        statusEl.textContent = '';
+      }
+    }, 2000);
+    return;
+  }
 
   ws.onopen = () => {
     console.log('WebSocket connected for:', path);

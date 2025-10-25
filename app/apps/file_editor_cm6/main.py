@@ -26,6 +26,10 @@ def _expand_and_validate_path(path):
     return expanded, None
 
 @file_editor_cm6_bp.route('/')
+def status_root():
+    return jsonify({"ok": True, "data": {"message": "File Editor CM6 app API ready"}})
+
+@file_editor_cm6_bp.get('/status')
 def status():
     return jsonify({"ok": True, "data": {"message": "File Editor CM6 app API ready"}})
 
@@ -105,7 +109,7 @@ def ws_read(ws):
     init_watcher(project_root)
 
     # Subscribe to file changes
-    token = subscribe(project_root, str(rel_path), client_id, lambda event: ws.send(json.dumps(event)))
+    token = subscribe(str(rel_path), client_id, lambda event: ws.send(json.dumps(event)))
 
     try:
         # Keep connection alive and ignore incoming messages
