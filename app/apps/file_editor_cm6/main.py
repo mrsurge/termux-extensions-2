@@ -11,6 +11,7 @@ from .core_read import init_watcher, subscribe, unsubscribe, push_save_ack
 from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .history_store import HistoryStore
 from .explorer_helper import set_project_root, get_project_root, list_dir, mark_git_cache_dirty
+from .diff_helper import collect_diff, invalidate_diff_cache
 from .preferences_store import PreferencesStore
 
 file_editor_cm6_bp = Blueprint('file_editor_cm6', __name__)
@@ -29,7 +30,9 @@ def _ensure_project_root_synced() -> Path:
             current = get_project_root()
             try:
                 if stored_path.resolve() != current.resolve():
-                    return set_project_root(stored)
+                    new_root = set_project_root(stored)
+                    invalidate_diff_cache(new_root)
+                    return new_root
             except Exception:
                 pass
             return stored_path
@@ -99,6 +102,25 @@ def _expand_and_validate_path(path):
         return None, 'Access denied'
     return expanded, None
 
+
+def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
+    """Return a project-relative POSIX path or raise ValueError."""
+    if not raw_path:
+        raise ValueError("path required")
+
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+    else:
+        resolved = (project_root / candidate).resolve()
+
+    project_root_resolved = project_root.resolve()
+    if not str(resolved).startswith(str(project_root_resolved)):
+        raise ValueError("Path outside project root")
+
+    rel = resolved.relative_to(project_root_resolved)
+    return rel.as_posix()
+
 @file_editor_cm6_bp.route('/')
 def status_root():
     return jsonify({"ok": True, "data": {"message": "File Editor CM6 app API ready"}})
@@ -132,11 +154,17 @@ def write_file_route():
     op_id = data.get('op_id', '')
     base_sha256 = None
 
+    if not path:
+        return jsonify({"ok": False, "error": "Path is required"}), 400
+
     if data.get('base') and isinstance(data['base'], dict):
         base_sha256 = data['base'].get('sha256')
 
     project_root = get_project_root()
-    rel_path = path
+    try:
+        rel_path = _normalize_rel_path(project_root, path)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
     
     try:
         # Initialize watcher if not already running
@@ -148,8 +176,9 @@ def write_file_route():
         # Send save acknowledgement to prevent self-echo
         push_save_ack(str(rel_path), op_id, client_id, file_meta)
 
-        # Refresh git cache so explorer styling stays accurate
+        # Refresh caches so explorer + diff stay accurate
         mark_git_cache_dirty(project_root)
+        invalidate_diff_cache(project_root, str(rel_path))
 
         return jsonify({
             "ok": True,
@@ -181,7 +210,11 @@ def ws_read(ws):
         return
 
     project_root = get_project_root()
-    rel_path = path
+    try:
+        rel_path = _normalize_rel_path(project_root, path)
+    except ValueError:
+        ws.close(reason='Path outside project root')
+        return
 
     # Initialize watcher if not already running
     init_watcher(project_root)
@@ -208,6 +241,7 @@ def project_open():
         abs_path = set_project_root(path)  # validates and sets global project root
         _history_store.touch_project(str(abs_path))
         _history_store.set_active_project(str(abs_path))
+        invalidate_diff_cache(abs_path)
         state = _build_state_payload()
         return jsonify({"ok": True, "data": {"path": str(abs_path), "state": state}})
     except Exception as e:
@@ -283,6 +317,30 @@ def record_file_activity():
         return jsonify({"ok": True, "data": {"entry": entry, "state": state}})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@file_editor_cm6_bp.get('/diff')
+def get_diff():
+    """Return git diff hunks for the requested file."""
+    path = request.args.get('path')
+    if not path:
+        return jsonify({"ok": False, "error": "Path is required"}), 400
+
+    project_path = _history_store.get_active_project() or str(get_project_root())
+    if not project_path:
+        return jsonify({"ok": False, "error": "No project selected"}), 400
+
+    project_root = Path(project_path).expanduser()
+    if not project_root.exists():
+        return jsonify({"ok": False, "error": "Project directory not available"}), 404
+
+    try:
+        rel = _normalize_rel_path(project_root, path)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    payload = collect_diff(project_root, rel)
+    return jsonify({"ok": True, "data": payload})
 
 @file_editor_cm6_bp.get('/explorer/list')
 def explorer_list():

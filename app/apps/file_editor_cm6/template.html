@@ -57,6 +57,10 @@
   #select-surface.wrap { white-space:pre-wrap; word-break:break-word; }
   #select-exit { position:absolute; right:12px; bottom:12px; display:none; }
   #select-tip { position:absolute; left:12px; bottom:12px; font-size:.8rem; color:var(--muted); display:none; }
+  .cm-line.cm-diff-line-added { background: rgba(52, 211, 153, 0.22) !important; border-left: 3px solid rgba(52, 211, 153, 0.75) !important; }
+  .cm-line.cm-diff-line-added .cm-content { background: transparent; }
+  .cm-diff-removed { background: rgba(248, 113, 113, 0.18); color: #fecaca; border-left: 3px solid rgba(248, 113, 113, 0.75); padding: 2px 8px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; margin: 2px 6px 4px; white-space: pre-wrap; }
+  .cm-diff-removed strong { font-weight: 600; }
 </style>
 
 <div class="fe-root">
@@ -117,6 +121,7 @@
         <div class="fe-dd-item" id="mi-toggle-syntax" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Syntax Highlighting</span></div>
         <div class="fe-dd-item" id="mi-toggle-wrap" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Word Wrap</span></div>
         <div class="fe-dd-item" id="mi-toggle-autosave" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Save</span></div>
+        <div class="fe-dd-item" id="mi-toggle-diffs" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Show Inline Diffs</span></div>
         <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
         <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
       </div>

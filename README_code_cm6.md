@@ -46,6 +46,7 @@ code_cm6 is the full-screen CodeMirror 6 editor bundled with Termux Extensions
 | `GET` | `/api/app/file_editor_cm6/project/current` | Returns the currently selected project path. |
 | `GET` | `/api/app/file_editor_cm6/read?path=` | Reads a file (absolute path) and returns `{ content, sha256 }`. |
 | `POST` | `/api/app/file_editor_cm6/write` | Writes the document with optional base hash verification. |
+| `GET` | `/api/app/file_editor_cm6/diff?path=` | Streams zero-context git hunks for the requested file (no output when the repo is clean/not tracked). |
 | `GET` | `/api/app/file_editor_cm6/explorer/list?dir=` | Lists directories relative to the active project. |
 | `GET` | `/api/app/file_editor_cm6/history/files` | Lists recent files for the active project, including an `exists` flag. |
 | `DELETE` | `/api/app/file_editor_cm6/history/file?path=` | Removes a file from the recents list. |
@@ -56,8 +57,9 @@ code_cm6 is the full-screen CodeMirror 6 editor bundled with Termux Extensions
 - Top-level fields:
   - `active_project`: absolute path of the currently selected project (or `null`).
   - `projects`: map from project path to `{"label", "opened_at", "last_file", "files"}`.
-  - `recent_projects`: MRU list for the project picker.
+- `recent_projects`: MRU list for the project picker.
 - Each `files` entry includes `{ path, label, opened_at }`. The backend annotates responses with `exists` so the UI can highlight missing files.
+- Preferences now include `showInlineDiffs`, which controls the CM6 diff overlay toggle exposed under View → Show Inline Diffs.
 
 ## WebSocket Event Lifecycle
 1. Client opens a document (`openFile`), then calls `openWebSocket(resolvedPath)`.
@@ -68,6 +70,7 @@ code_cm6 is the full-screen CodeMirror 6 editor bundled with Termux Extensions
 ## Frontend Behaviour
 - **Explorer drawer:** Tracks the active project label, displays missing-project warnings, and lets the user open directories through `teFilePicker`. Recents show `(missing)` when paths are absent. Directory listings now arrive annotated with git status, executable flags, and symlink hints so the tree can style modified files, untracked work, and executable scripts inline.
 - **Editor menus:** File/Edit/View/Theme menus toggle CM6 options and autosave. The “Recent Files” dropdown is a shared component populated from the persisted state.
+- **Inline diffs:** The View menu exposes “Show Inline Diffs”. When enabled, the editor requests `/diff`, highlights added lines inline, and renders removed lines as contextual widgets. Results are cached briefly and refresh after saves, external change events, or manual toggling.
 - **Android selection surface:** Long-press swaps to the contenteditable overlay; exiting selection syncs edits back to CM6.
 - **Autosave:** After 1.2 s of inactivity the editor triggers `/write`; manual saves (Ctrl/Cmd+S) reuse the same pipeline.
 
@@ -75,4 +78,5 @@ code_cm6 is the full-screen CodeMirror 6 editor bundled with Termux Extensions
 - Directory listings and watcher events rely on the selected project remaining accessible; if a project is moved or deleted, the UI reports the issue but manual reselection is required.
 - The backend rejects writes outside the active project root; a future enhancement could surface friendlier picker messages before submitting the request.
 - Git status snapshots are cached in-memory for a few seconds to keep drawer renders snappy; rapid external git operations may take one refresh cycle to appear.
+- Inline diffs read from the repo working tree; unsaved buffer changes are not reflected until the file is written to disk. Extremely large diffs (>512 KiB) are skipped to protect performance.
 Future enhancements will be captured in a dedicated roadmap once the next development cycle begins.

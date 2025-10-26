@@ -4,6 +4,7 @@
 // Imports resolve to files produced by scripts/vendor_cm6.sh
 import * as CM from '/static/vendor/codemirror.1/codemirror.bundle.js';
 import { initExplorerUI } from './static/js/explorer.js';
+import { createDiffController } from './static/js/diff_decorations.js';
 
 // Core
 const EditorState = CM.EditorState;
@@ -108,6 +109,7 @@ const miToggleShading = requireEl('#mi-toggle-shading');
 const miToggleSyntax  = requireEl('#mi-toggle-syntax');
 const miToggleWrap    = requireEl('#mi-toggle-wrap');
 const miToggleAutosave = requireEl('#mi-toggle-autosave');
+const miToggleDiffs  = requireEl('#mi-toggle-diffs');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
 
@@ -116,6 +118,45 @@ const confirmClose = requireEl('#fe-confirm-close');
 const btnDiscard   = requireEl('#fe-discard');
 const btnSaveConfirm = requireEl('#fe-save-confirm');
 const btnCancel    = requireEl('#fe-cancel');
+
+async function fetchDiffPayload(path) {
+  if (!path) return { hunks: [], summary: { tracked: false } };
+  try {
+    const resp = await fetch(`/api/app/file_editor_cm6/diff?path=${encodeURIComponent(path)}`, { cache: 'no-store' });
+    const json = await resp.json();
+    if (!resp.ok || json?.ok === false) {
+      throw new Error(json?.error || resp.statusText || 'Diff request failed');
+    }
+    return json?.data || { hunks: [], summary: { tracked: true } };
+  } catch (err) {
+    console.error('Diff fetch failed:', err);
+    return { hunks: [], summary: { tracked: false } };
+  }
+}
+
+function handleDiffStatus(summary) {
+  const current = statusEl.textContent || '';
+  const isDiffLabel = current.startsWith('Δ ');
+
+  if (!summary || summary.tracked === false || (!summary.added && !summary.deleted)) {
+    statusEl.dataset.diffSummary = '';
+    if (!unsaved && isDiffLabel) {
+      statusEl.textContent = '';
+    }
+    return;
+  }
+  const label = `Δ +${summary.added || 0} −${summary.deleted || 0}`;
+  statusEl.dataset.diffSummary = label;
+  if (!unsaved && (isDiffLabel || !current)) {
+    statusEl.textContent = label;
+  }
+}
+
+const diffController = createDiffController({
+  fetchDiff: fetchDiffPayload,
+  onStatus: handleDiffStatus,
+});
+window.__cm6Diff = diffController;
 
 // ---------- small utils ----------
 function simplifyAbsolute(path) {
@@ -200,6 +241,7 @@ let showLineShading = false; // cosmetic; not implemented for CM6 here
 let showSyntaxHighlight = true;
 let wordWrap = false;
 let autoSaveEnabled = true;
+let showInlineDiffs = true;
 let currentTheme = 'cm6-dark';
 let lastPickerPath = HOME_DIR;
 let currentModeLanguage = null;
@@ -239,6 +281,10 @@ function makeExtensions() {
   const theme = THEMES[currentTheme] || THEMES['cm6-dark'];
   if (theme) exts.push(theme);
 
+  if (diffController?.extension) {
+    exts.push(diffController.extension);
+  }
+
   // Language
   const lang = (currentModeLanguage || 'text');
   switch (lang) {
@@ -256,7 +302,10 @@ function makeExtensions() {
 }
 
 function createView(docText='') {
-  if (view) view.destroy();
+  if (view) {
+    diffController.unbindView(view);
+    view.destroy();
+  }
   const state = EditorState.create({
     doc: docText,
     extensions: makeExtensions(),
@@ -265,6 +314,11 @@ function createView(docText='') {
   view.dom.style.flex = '1';
   view.dom.style.height = '100%';
   view.focus();
+  diffController.bindView(view);
+  diffController.setEnabled(showInlineDiffs);
+  if (showInlineDiffs) {
+    diffController.refresh();
+  }
   reobserve();
 }
 
@@ -296,6 +350,7 @@ function applyPreferencesFromStore(payload) {
   showSyntaxHighlight = editorPrefs.showSyntax !== false;
   wordWrap = !!editorPrefs.wordWrap;
   autoSaveEnabled = editorPrefs.autoSave !== false;
+  showInlineDiffs = editorPrefs.showInlineDiffs !== false;
   const themeId = editorPrefs.theme;
   currentTheme = (themeId && THEMES[themeId]) ? themeId : 'cm6-dark';
   if (editorState) {
@@ -309,6 +364,7 @@ function applyMenuState() {
   setMenuChecked(miToggleSyntax, showSyntaxHighlight);
   setMenuChecked(miToggleWrap, wordWrap);
   setMenuChecked(miToggleAutosave, autoSaveEnabled);
+  setMenuChecked(miToggleDiffs, showInlineDiffs);
   selectSurface.classList.toggle('wrap', wordWrap);
 }
 
@@ -339,6 +395,7 @@ async function fetchPreferencesFromServer() {
 async function loadPreferences(initialPayload = null) {
   const payload = initialPayload || await fetchPreferencesFromServer();
   applyPreferencesFromStore(payload);
+  diffController.setEnabled(showInlineDiffs);
 }
 
 async function persistEditorPreferences(partialEditor = null) {
@@ -499,6 +556,11 @@ function handleWSMessage(msg) {
       markUnsaved(false);
       statusEl.textContent = 'Updated from disk';
       setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 2000);
+      diffController.invalidateCacheForPath(currentPath);
+      diffController.setContext({ path: currentPath, sha: lastSha256 });
+      if (showInlineDiffs) {
+        diffController.refresh(true);
+      }
     }
   } else if (type === 'save_ack') {
     if (msg.op_id === inflightOpId) {
@@ -555,6 +617,10 @@ async function openFile(path) {
 
     // Open WebSocket for this file
     openWebSocket(resolved);
+    diffController.setContext({ path: resolved, sha: lastSha256 });
+    if (showInlineDiffs) {
+      diffController.refresh(true);
+    }
 
     // Update persisted editor state (last file + recents)
     try {
@@ -683,6 +749,11 @@ async function saveAsDialog() {
     // Open WebSocket for this new file
     closeWebSocket();
     openWebSocket(currentPath);
+    diffController.invalidateCacheForPath(currentPath);
+    diffController.setContext({ path: currentPath, sha: lastSha256 });
+    if (showInlineDiffs) {
+      diffController.refresh(true);
+    }
 
     apiPost('state/file_activity', {
       path: currentPath,
@@ -809,6 +880,10 @@ document.addEventListener('click', () => closeAllMenus());
 bindMenuToggle(miNew, () => {
   if (unsaved) { showConfirm(); return; }
   closeWebSocket();
+  if (currentPath) {
+    diffController.invalidateCacheForPath(currentPath);
+  }
+  diffController.setContext(null);
   currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
   lastSha256 = null;
   setText(''); lastSavedContent = ''; markUnsaved(false); updatePathDisplay();
@@ -818,12 +893,20 @@ bindMenuToggle(miSave, () => saveFile());
 bindMenuToggle(miSaveAs, () => saveAsDialog());
 bindMenuToggle(miClose, () => {
   closeWebSocket();
+  if (currentPath) {
+    diffController.invalidateCacheForPath(currentPath);
+  }
+  diffController.setContext(null);
   currentPath=''; currentPathExists=false; lastPickerPath=HOME_DIR; currentModeLanguage=null;
   lastSha256 = null;
   setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay();
 });
 bindMenuToggle(miQuit, () => {
   closeWebSocket();
+  if (currentPath) {
+    diffController.invalidateCacheForPath(currentPath);
+  }
+  diffController.setContext(null);
   currentPath=''; currentPathExists=false; lastSha256 = null;
   setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay();
 });
@@ -876,6 +959,15 @@ bindMenuToggle(miToggleAutosave, () => {
   }
   persistEditorPreferences({ autoSave: autoSaveEnabled });
 });
+bindMenuToggle(miToggleDiffs, () => {
+  showInlineDiffs = !showInlineDiffs;
+  applyMenuState();
+  diffController.setEnabled(showInlineDiffs);
+  if (showInlineDiffs) {
+    diffController.refresh(true);
+  }
+  persistEditorPreferences({ showInlineDiffs });
+});
 bindMenuToggle(miFind, () => { if (view && openSearchPanel) openSearchPanel(view); });
 bindMenuToggle(miGoto, () => { const input = window.prompt('Go to line'); const line = Number.parseInt(input || '', 10); if (!Number.isNaN(line)) { const ln = Math.max(1, line); const pos = view.state.doc.line(ln).from; view.dispatch({ selection:{anchor:pos}, scrollIntoView:true }); view.focus(); } });
 
@@ -917,6 +1009,10 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     if (unsaved) { showConfirm(); return; }
     closeWebSocket();
+    if (currentPath) {
+      diffController.invalidateCacheForPath(currentPath);
+    }
+    diffController.setContext(null);
     currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
     lastSha256 = null;
     setText(''); lastSavedContent = ''; markUnsaved(false); updatePathDisplay();

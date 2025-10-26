@@ -13,6 +13,7 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "wordWrap": False,
     "theme": "cm6-dark",
     "autoSave": True,
+    "showInlineDiffs": True,
 }
 
 DEFAULT_UI_PREFS: Dict[str, Any] = {
