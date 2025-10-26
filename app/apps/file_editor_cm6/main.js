@@ -155,6 +155,7 @@ function handleDiffStatus(summary) {
 const diffController = createDiffController({
   fetchDiff: fetchDiffPayload,
   onStatus: handleDiffStatus,
+  getWordWrap: () => wordWrap,
 });
 window.__cm6Diff = diffController;
 
@@ -949,6 +950,9 @@ bindMenuToggle(miToggleWrap, () => {
   wordWrap = !wordWrap;
   applyMenuState();
   createView(getText());
+  if (showInlineDiffs && currentPath && currentPathExists) {
+    diffController.refresh(true);
+  }
   persistEditorPreferences({ wordWrap });
 });
 bindMenuToggle(miToggleAutosave, () => {

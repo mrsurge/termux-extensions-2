@@ -104,6 +104,8 @@
     color: var(--diff-del-marker);
   }
   .cm-diff-removed-text { display: block; white-space: pre; }
+  .cm-diff-line-removed.cm-diff-wrap { white-space: pre-wrap; word-break: break-word; }
+  .cm-diff-line-removed.cm-diff-wrap .cm-diff-removed-text { white-space: pre-wrap; word-break: break-word; }
   .cm-diff-line-removed + .cm-widgetBuffer,
   .cm-widgetBuffer + .cm-diff-line-removed {
     height: 0 !important;

@@ -24,6 +24,7 @@ import {
 export function createDiffController(options = {}) {
   const fetchDiff = options.fetchDiff || (async () => null);
   const onStatus = typeof options.onStatus === 'function' ? options.onStatus : () => {};
+  const getWordWrap = typeof options.getWordWrap === 'function' ? options.getWordWrap : () => false;
 
   const setDiffEffect = StateEffect.define();
   const clearDiffEffect = StateEffect.define();
@@ -59,13 +60,17 @@ export function createDiffController(options = {}) {
   });
 
   class RemovedLineWidget extends WidgetType {
-    constructor(text) {
+    constructor(text, wordWrap) {
       super();
       this.text = text;
+      this.wordWrap = wordWrap;
     }
     toDOM() {
       const lineEl = document.createElement('div');
       lineEl.className = 'cm-diff-line cm-diff-line-removed';
+      if (this.wordWrap) {
+        lineEl.classList.add('cm-diff-wrap');
+      }
       lineEl.setAttribute('data-diff-marker', '−');
 
       const content = document.createElement('span');
@@ -156,6 +161,7 @@ export function createDiffController(options = {}) {
           lineAddedDeco,
           lineContextDeco,
           RemovedLineWidget,
+          getWordWrap,
         );
         const summary = payload?.summary || null;
         cache.set(key, { payload, decorations, summary });
@@ -239,12 +245,14 @@ function buildDecorations(
   lineAddedDeco,
   lineContextDeco,
   RemovedLineWidget,
+  getWordWrap,
 ) {
   const hunks = payload?.hunks;
   if (!hunks || hunks.length === 0) {
     return Decoration.none;
   }
 
+  const wordWrap = getWordWrap();
   const builder = new RangeSetBuilder();
   const doc = view.state.doc;
   for (const hunk of hunks) {
@@ -264,7 +272,7 @@ function buildDecorations(
         builder.add(pos, pos, Decoration.widget({
           side: -1,
           block: true,
-          widget: new RemovedLineWidget(line.text || ''),
+          widget: new RemovedLineWidget(line.text || '', wordWrap),
         }));
       }
     }
