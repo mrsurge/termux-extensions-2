@@ -3,6 +3,7 @@
 // explorer.js - File Explorer Drawer for CM6 Editor
 let currentProjectPath = '';
 let cachedState = null;
+const expandedDirs = new Set();
 
 const GIT_STATUS_CLASS_MAP = {
   modified: 'fe-git-modified',
@@ -57,7 +58,7 @@ window.__cm6RefreshRecents = (state) => {
 
 export async function initExplorerUI() {
   const backdrop = document.getElementById('fe-backdrop');
-  backdrop?.addEventListener('click', () => root?.classList.remove('drawer-open'));
+  backdrop?.addEventListener('click', () => toggleDrawer(false));
   const btnOpenProject = document.getElementById('fe-open-project');
   const ddBtn = document.getElementById('recent-files-btn');
   const dd = document.getElementById('recent-files-dd');
@@ -70,7 +71,8 @@ export async function initExplorerUI() {
   const state = await refreshCurrentProject(true);
   await renderRecentMenu(state);
   if (treeEl && state?.activeProjectExists) {
-    renderTreeRoot(treeEl);
+    await renderTreeRoot(treeEl);
+    syncExpandedDirsFromTree(treeEl);
   }
 
   window.addEventListener('cm6:recents-updated', (ev) => {
@@ -84,11 +86,18 @@ export async function initExplorerUI() {
   btnOpenProject?.addEventListener('click', openProjectPrompt);
 
   // Toggle drawer function matching old IDE
-  function toggleDrawer(open) {
+  async function toggleDrawer(open) {
     if (open === undefined) {
+      const willOpen = !(root?.classList.contains('drawer-open'));
       root?.classList.toggle('drawer-open');
+      if (willOpen && treeEl) {
+        await refreshTree(treeEl);
+      }
     } else if (open) {
       root?.classList.add('drawer-open');
+      if (treeEl) {
+        await refreshTree(treeEl);
+      }
     } else {
       root?.classList.remove('drawer-open');
     }
@@ -255,7 +264,7 @@ async function removeRecent(path) {
   }
 }
 
-function renderTreeRoot(treeEl) {
+async function renderTreeRoot(treeEl) {
   treeEl.replaceChildren();
   if (!currentProjectPath) {
     const empty = document.createElement('li');
@@ -264,7 +273,7 @@ function renderTreeRoot(treeEl) {
     treeEl.appendChild(empty);
     return;
   }
-  addTreeChildren(treeEl, '.');
+  await addTreeChildren(treeEl, '.');
 }
 
 async function addTreeChildren(parentEl, rel) {
@@ -314,6 +323,82 @@ async function addTreeChildren(parentEl, rel) {
   }
 }
 
+async function refreshTree(treeEl) {
+  syncExpandedDirsFromTree(treeEl);
+  await renderTreeRoot(treeEl);
+  await restoreExpandedDirs(treeEl);
+}
+
+function syncExpandedDirsFromTree(treeEl) {
+  expandedDirs.clear();
+  treeEl?.querySelectorAll('li.fe-tree-node[data-kind="dir"][data-open="true"]').forEach((li) => {
+    const rel = li.dataset.rel;
+    if (rel && rel !== '.') {
+      expandedDirs.add(rel);
+    }
+  });
+}
+
+async function restoreExpandedDirs(treeEl) {
+  if (!expandedDirs.size) return;
+  const ordered = Array.from(expandedDirs).sort((a, b) => {
+    const depthA = a.split('/').length;
+    const depthB = b.split('/').length;
+    return depthA - depthB;
+  });
+  for (const rel of ordered) {
+    await expandDirectory(treeEl, rel);
+  }
+}
+
+async function expandDirectory(treeEl, rel) {
+  if (!rel) return;
+  const segments = rel.split('/').filter(Boolean);
+  if (!segments.length) return;
+
+  let currentRel = '.';
+  let container = treeEl;
+  for (const segment of segments) {
+    const nextRel = currentRel === '.' ? segment : `${currentRel}/${segment}`;
+    let dirNode = findDirNode(container, nextRel);
+    if (!dirNode) {
+      await addTreeChildren(container, currentRel);
+      dirNode = findDirNode(container, nextRel);
+      if (!dirNode) {
+        return;
+      }
+    }
+
+    if (dirNode.dataset.open !== 'true') {
+      dirNode.dataset.open = 'true';
+      const twisty = dirNode.querySelector('.fe-tree-twisty');
+      if (twisty) twisty.textContent = '▾';
+      let childList = dirNode.querySelector(':scope > ul');
+      if (!childList) {
+        childList = document.createElement('ul');
+        childList.className = 'fe-tree';
+        dirNode.appendChild(childList);
+      } else {
+        childList.replaceChildren();
+      }
+      await addTreeChildren(childList, nextRel);
+    }
+
+    container = dirNode.querySelector(':scope > ul');
+    currentRel = nextRel;
+    if (!container) {
+      return;
+    }
+  }
+}
+
+function findDirNode(container, rel) {
+  if (!container) return null;
+  return Array.from(container.querySelectorAll(':scope > li.fe-tree-node[data-kind="dir"]')).find(
+    (li) => li.dataset.rel === rel
+  ) || null;
+}
+
 async function onTreeClick(ev) {
   if (!currentProjectPath) {
     toast('Select a project before browsing files.');
@@ -335,6 +420,14 @@ async function onTreeClick(ev) {
       if (twisty) twisty.textContent = '▸';
       const ul = li.querySelector(':scope > ul');
       if (ul) ul.remove();
+      if (rel && rel !== '.') {
+        expandedDirs.delete(rel);
+        for (const stored of Array.from(expandedDirs)) {
+          if (stored.startsWith(`${rel}/`)) {
+            expandedDirs.delete(stored);
+          }
+        }
+      }
     } else {
       // Expand
       li.dataset.open = 'true';
@@ -343,6 +436,9 @@ async function onTreeClick(ev) {
       ul.className = 'fe-tree';
       li.appendChild(ul);
       await addTreeChildren(ul, rel);
+      if (rel && rel !== '.') {
+        expandedDirs.add(rel);
+      }
     }
   } else {
     // File clicked - open it
