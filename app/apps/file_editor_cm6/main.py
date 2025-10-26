@@ -10,13 +10,15 @@ from flask_sock import Sock
 from .core_read import init_watcher, subscribe, unsubscribe, push_save_ack
 from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .history_store import HistoryStore
-from .explorer_helper import set_project_root, get_project_root, list_dir
+from .explorer_helper import set_project_root, get_project_root, list_dir, mark_git_cache_dirty
+from .preferences_store import PreferencesStore
 
 file_editor_cm6_bp = Blueprint('file_editor_cm6', __name__)
 sock = Sock()
 
 # Initialize history store (project root managed by explorer_helper)
 _history_store = HistoryStore()
+_preferences_store = PreferencesStore()
 
 def _ensure_project_root_synced() -> Path:
     """Ensure the in-memory project root matches the persisted active project."""
@@ -75,6 +77,8 @@ def _build_state_payload() -> dict:
             "exists": exists,
         })
 
+    editor_prefs = _preferences_store.get_preferences(project_path)
+
     return {
         "activeProject": project_path,
         "activeProjectLabel": project_label,
@@ -85,6 +89,7 @@ def _build_state_payload() -> dict:
         "lastFileExists": last_file_exists,
         "lastFileMessage": last_file_message,
         "recents": recents,
+        "preferences": editor_prefs,
     }
 
 def _expand_and_validate_path(path):
@@ -142,6 +147,9 @@ def write_file_route():
 
         # Send save acknowledgement to prevent self-echo
         push_save_ack(str(rel_path), op_id, client_id, file_meta)
+
+        # Refresh git cache so explorer styling stays accurate
+        mark_git_cache_dirty(project_root)
 
         return jsonify({
             "ok": True,
@@ -216,6 +224,41 @@ def get_project_state():
     """Return consolidated editor state."""
     state = _build_state_payload()
     return jsonify({"ok": True, "data": state})
+
+
+@file_editor_cm6_bp.get('/preferences')
+def get_preferences():
+    """Return persisted editor/UI preferences."""
+    project_path = _history_store.get_active_project()
+    prefs = _preferences_store.get_preferences(project_path)
+    return jsonify({"ok": True, "data": prefs})
+
+
+@file_editor_cm6_bp.post('/preferences')
+def update_preferences():
+    """Persist editor/UI preference changes."""
+    payload = request.get_json(silent=True) or {}
+    editor = payload.get('editor')
+    ui = payload.get('ui')
+    project = payload.get('project')
+
+    active_project = _history_store.get_active_project()
+    if project is None and active_project:
+        project = {"path": active_project}
+    elif project and not project.get('path') and active_project:
+        project['path'] = active_project
+
+    try:
+        updated = _preferences_store.update_preferences(
+            editor=editor,
+            ui=ui,
+            project=project,
+        )
+        # Return a fresh snapshot for convenience
+        snapshot = _preferences_store.get_preferences(active_project)
+        return jsonify({"ok": True, "data": snapshot, "updated": updated})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 @file_editor_cm6_bp.post('/state/file_activity')
 def record_file_activity():

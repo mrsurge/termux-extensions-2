@@ -4,6 +4,24 @@
 let currentProjectPath = '';
 let cachedState = null;
 
+const GIT_STATUS_CLASS_MAP = {
+  modified: 'fe-git-modified',
+  staged: 'fe-git-staged',
+  staged_modified: 'fe-git-staged-modified',
+  added: 'fe-git-added',
+  deleted: 'fe-git-deleted',
+  renamed: 'fe-git-renamed',
+  untracked: 'fe-git-untracked',
+  ignored: 'fe-git-ignored',
+  conflict: 'fe-git-conflict',
+};
+
+const FILE_KIND_CLASS = {
+  dir: 'fe-entry-dir',
+  exec: 'fe-entry-exec',
+  file: 'fe-entry-file',
+};
+
 async function getEditorState(forceRefresh = false) {
   if (!forceRefresh && cachedState) return cachedState;
   if (typeof window.__cm6SyncState === 'function') {
@@ -55,11 +73,15 @@ export async function initExplorerUI() {
     renderTreeRoot(treeEl);
   }
 
-  btnOpenProject?.addEventListener('click', openProjectPrompt);
-  ddBtn?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    dd.classList.toggle('show');
+  window.addEventListener('cm6:recents-updated', (ev) => {
+    const detailState = ev?.detail;
+    if (detailState) {
+      cachedState = detailState;
+    }
+    renderRecentMenu(detailState || cachedState);
   });
+
+  btnOpenProject?.addEventListener('click', openProjectPrompt);
 
   // Toggle drawer function matching old IDE
   function toggleDrawer(open) {
@@ -225,8 +247,9 @@ async function removeRecent(path) {
     const u = new URL('/api/app/file_editor_cm6/history/file', location.href);
     u.searchParams.set('path', path);
     await fetch(u, { method: 'DELETE' });
-    await getEditorState(true);
-    await renderRecentMenu();
+    const updatedState = await getEditorState(true);
+    renderRecentMenu(updatedState);
+    window.dispatchEvent(new CustomEvent('cm6:recents-updated', { detail: updatedState }));
   } catch (e) {
     console.error('Failed to remove recent file:', e);
   }
@@ -264,6 +287,13 @@ async function addTreeChildren(parentEl, rel) {
       li.dataset.kind = e.kind;
       li.dataset.rel = e.rel;
       li.dataset.open = 'false';
+      if (e.gitStatus) {
+        li.dataset.gitStatus = e.gitStatus;
+        const statusClass = GIT_STATUS_CLASS_MAP[e.gitStatus];
+        if (statusClass) {
+          li.classList.add(statusClass);
+        }
+      }
 
       const twisty = document.createElement('button');
       twisty.className = 'fe-tree-twisty';
@@ -273,6 +303,7 @@ async function addTreeChildren(parentEl, rel) {
       const text = document.createElement('span');
       text.className = 'fe-tree-text';
       text.textContent = e.name;
+      applyEntryStyling(text, e);
 
       li.appendChild(twisty);
       li.appendChild(text);
@@ -316,6 +347,22 @@ async function onTreeClick(ev) {
   } else {
     // File clicked - open it
     openFileRel(rel, currentProjectPath);
+  }
+}
+
+function applyEntryStyling(labelEl, entry) {
+  labelEl.classList.add('fe-tree-label');
+
+  if (entry.kind === 'dir') {
+    labelEl.classList.add(FILE_KIND_CLASS.dir);
+  } else if (entry.isExecutable) {
+    labelEl.classList.add(FILE_KIND_CLASS.exec);
+  } else {
+    labelEl.classList.add(FILE_KIND_CLASS.file);
+  }
+
+  if (entry.isSymlink) {
+    labelEl.classList.add('fe-entry-symlink');
   }
 }
 

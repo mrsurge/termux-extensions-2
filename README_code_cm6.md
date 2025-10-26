@@ -66,7 +66,7 @@ code_cm6 is the full-screen CodeMirror 6 editor bundled with Termux Extensions
 4. The frontend ignores `replace_full` while a save is inflight (`SELF_ECHO_GRACE` window), otherwise it updates the document and clears the unsaved indicator.
 
 ## Frontend Behaviour
-- **Explorer drawer:** Tracks the active project label, displays missing-project warnings, and lets the user open directories through `teFilePicker`. Recents show `(missing)` when paths are absent.
+- **Explorer drawer:** Tracks the active project label, displays missing-project warnings, and lets the user open directories through `teFilePicker`. Recents show `(missing)` when paths are absent. Directory listings now arrive annotated with git status, executable flags, and symlink hints so the tree can style modified files, untracked work, and executable scripts inline.
 - **Editor menus:** File/Edit/View/Theme menus toggle CM6 options and autosave. The “Recent Files” dropdown is a shared component populated from the persisted state.
 - **Android selection surface:** Long-press swaps to the contenteditable overlay; exiting selection syncs edits back to CM6.
 - **Autosave:** After 1.2 s of inactivity the editor triggers `/write`; manual saves (Ctrl/Cmd+S) reuse the same pipeline.
@@ -74,5 +74,5 @@ code_cm6 is the full-screen CodeMirror 6 editor bundled with Termux Extensions
 ## Known Limitations & Follow-Up
 - Directory listings and watcher events rely on the selected project remaining accessible; if a project is moved or deleted, the UI reports the issue but manual reselection is required.
 - The backend rejects writes outside the active project root; a future enhancement could surface friendlier picker messages before submitting the request.
-- Git status broadcasting is stubbed in `core_read.push_git_status` and can be extended once inline diff support is reintroduced.
+- Git status snapshots are cached in-memory for a few seconds to keep drawer renders snappy; rapid external git operations may take one refresh cycle to appear.
 Future enhancements will be captured in a dedicated roadmap once the next development cycle begins.

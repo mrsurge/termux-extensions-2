@@ -12,6 +12,7 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "showShading": False,
     "wordWrap": False,
     "theme": "cm6-dark",
+    "autoSave": True,
 }
 
 DEFAULT_UI_PREFS: Dict[str, Any] = {
@@ -132,4 +133,3 @@ class PreferencesStore:
                 "ui": {**DEFAULT_UI_PREFS, **(self._data.get("ui") or {})},
                 "project": project_result,
             }
-

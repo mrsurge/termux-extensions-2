@@ -115,6 +115,8 @@
   transition: background 0.15s;
   color: #e5e7eb;
   font-size: 0.9rem;
+  border-left: 3px solid transparent;
+  border: 1px solid transparent;
 }
 
 .fe-tree li:hover {
@@ -139,19 +141,11 @@
   transform: rotate(90deg);
 }
 
-.fe-tree-name {
+.fe-tree-text {
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.fe-tree-dir {
-  font-weight: 500;
-}
-
-.fe-tree-file {
-  color: rgba(229, 231, 235, 0.8);
 }
 
 /* Nested tree indentation */
@@ -168,4 +162,96 @@
   padding: 12px;
   color: rgba(229, 231, 235, 0.6);
   font-style: italic;
+}
+
+.fe-tree-label {
+  transition: color 0.15s ease;
+}
+
+.fe-entry-dir {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.fe-entry-exec {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.fe-entry-file {
+  color: rgba(229, 231, 235, 0.88);
+}
+
+.fe-entry-symlink::after {
+  content: ' ↗';
+  font-size: 0.75em;
+  opacity: 0.7;
+}
+
+.fe-tree-node.fe-git-modified {
+  border-left-color: #f97316;
+}
+
+.fe-tree-node.fe-git-staged {
+  border-left-color: #34d399;
+}
+
+.fe-tree-node.fe-git-staged-modified {
+  border-left-color: #22d3ee;
+}
+
+.fe-tree-node.fe-git-added {
+  border-left-color: #8b5cf6;
+}
+
+.fe-tree-node.fe-git-deleted {
+  border-left-color: #f87171;
+}
+
+.fe-tree-node.fe-git-renamed {
+  border-left-color: #facc15;
+}
+
+.fe-tree-node.fe-git-untracked {
+  border-left-color: #f59e0b;
+}
+
+.fe-tree-node.fe-git-ignored {
+  border-left-color: #6b7280;
+}
+
+.fe-tree-node.fe-git-conflict {
+  border-left-color: #ef4444;
+}
+
+.fe-tree-node[data-kind="dir"] {
+  border-color: rgba(96, 165, 250, 0.35);
+}
+
+.fe-tree-node[data-kind="dir"]:hover {
+  border-color: rgba(96, 165, 250, 0.6);
+}
+
+.fe-tree-node.fe-git-modified[data-kind="dir"] {
+  border-color: rgba(249, 115, 22, 0.6);
+}
+
+.fe-tree-node.fe-git-untracked[data-kind="dir"] {
+  border-color: rgba(52, 211, 153, 0.6);
+}
+
+.fe-tree-node.fe-git-modified[data-kind="file"] {
+  background: rgba(249, 115, 22, 0.12);
+}
+
+.fe-tree-node.fe-git-untracked[data-kind="file"] {
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.fe-tree-node.fe-git-modified[data-kind="file"]:hover {
+  background: rgba(249, 115, 22, 0.18);
+}
+
+.fe-tree-node.fe-git-untracked[data-kind="file"]:hover {
+  background: rgba(52, 211, 153, 0.18);
 }

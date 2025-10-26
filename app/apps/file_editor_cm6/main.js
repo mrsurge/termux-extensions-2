@@ -205,6 +205,7 @@ let lastPickerPath = HOME_DIR;
 let currentModeLanguage = null;
 let cachedProjectRoot = null;
 let editorState = null;
+let cachedPreferences = null;
 
 // WebSocket and autosave state
 let ws = null;
@@ -264,6 +265,7 @@ function createView(docText='') {
   view.dom.style.flex = '1';
   view.dom.style.height = '100%';
   view.focus();
+  reobserve();
 }
 
 function getText() { return view ? view.state.doc.toString() : ''; }
@@ -284,6 +286,91 @@ async function apiGet(path) {
 async function apiPost(path, body) {
   const res = await api.post(path, body);
   return res.data || res;
+}
+
+function applyPreferencesFromStore(payload) {
+  cachedPreferences = payload || {};
+  const editorPrefs = (cachedPreferences && cachedPreferences.editor) || {};
+  showLineNumbers = editorPrefs.showLineNumbers !== false;
+  showLineShading = !!editorPrefs.showShading;
+  showSyntaxHighlight = editorPrefs.showSyntax !== false;
+  wordWrap = !!editorPrefs.wordWrap;
+  autoSaveEnabled = editorPrefs.autoSave !== false;
+  const themeId = editorPrefs.theme;
+  currentTheme = (themeId && THEMES[themeId]) ? themeId : 'cm6-dark';
+  if (editorState) {
+    editorState.preferences = cachedPreferences;
+  }
+}
+
+function applyMenuState() {
+  setMenuChecked(miToggleLines, showLineNumbers);
+  setMenuChecked(miToggleShading, showLineShading);
+  setMenuChecked(miToggleSyntax, showSyntaxHighlight);
+  setMenuChecked(miToggleWrap, wordWrap);
+  setMenuChecked(miToggleAutosave, autoSaveEnabled);
+  selectSurface.classList.toggle('wrap', wordWrap);
+}
+
+function updateThemeMenuChecks() {
+  themeMenuItems.forEach((item) => {
+    const themeId = item.getAttribute('data-theme');
+    const available = !!THEMES[themeId];
+    if (!available) {
+      item.style.display = 'none';
+      setMenuChecked(item, false);
+      return;
+    }
+    setMenuChecked(item, themeId === currentTheme);
+  });
+}
+
+async function fetchPreferencesFromServer() {
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/preferences', { cache: 'no-store' });
+    const json = await resp.json();
+    return json?.data || null;
+  } catch (err) {
+    console.error('Failed to fetch preferences:', err);
+    return null;
+  }
+}
+
+async function loadPreferences(initialPayload = null) {
+  const payload = initialPayload || await fetchPreferencesFromServer();
+  applyPreferencesFromStore(payload);
+}
+
+async function persistEditorPreferences(partialEditor = null) {
+  if (!partialEditor || Object.keys(partialEditor).length === 0) {
+    return;
+  }
+  try {
+    const data = await apiPost('preferences', { editor: partialEditor });
+    if (data && typeof data === 'object') {
+      cachedPreferences = data;
+      if (editorState) {
+        editorState.preferences = data;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to persist editor preferences:', err);
+  }
+}
+
+function broadcastRecentsUpdate(state) {
+  if (!state) {
+    return;
+  }
+  window.__cm6EditorState = state;
+  if (typeof window.__cm6RefreshRecents === 'function') {
+    try {
+      window.__cm6RefreshRecents(state);
+    } catch (err) {
+      console.error('Failed to refresh recents dropdown:', err);
+    }
+  }
+  window.dispatchEvent(new CustomEvent('cm6:recents-updated', { detail: state }));
 }
 
 async function syncEditorState(forceRefresh = false) {
@@ -307,6 +394,15 @@ async function syncEditorState(forceRefresh = false) {
 }
 
 window.__cm6SyncState = syncEditorState;
+
+async function ensureProjectContext() {
+  const state = await syncEditorState(!cachedProjectRoot);
+  if (!state || !state.activeProject || !state.activeProjectExists) {
+    return null;
+  }
+  cachedProjectRoot = state.activeProject;
+  return state;
+}
 
 // ---------- WebSocket management ----------
 function closeWebSocket() {
@@ -433,6 +529,13 @@ function updatePathDisplay() {
 async function openFile(path) {
   if (!path) throw new Error('Path is empty');
   statusEl.textContent = 'Opening...';
+  const projectState = await ensureProjectContext();
+  if (!projectState || !projectState.activeProject || !projectState.activeProjectExists) {
+    statusEl.textContent = '';
+    host.toast(projectState?.activeProjectMessage || 'Select a project before opening files.');
+    return;
+  }
+
   try {
     const payload = await apiGet(`read?path=${encodeURIComponent(path)}`);
     const resolved = toAbsolute(payload.path || path, null, HOME_DIR);
@@ -454,18 +557,25 @@ async function openFile(path) {
     openWebSocket(resolved);
 
     // Update persisted editor state (last file + recents)
-    apiPost('state/file_activity', { path: resolved }).then((data) => {
-      if (data?.state) {
-        editorState = data.state;
+    try {
+      const activity = await apiPost('state/file_activity', {
+        path: resolved,
+        project: cachedProjectRoot || projectState.activeProject,
+      });
+      if (activity?.state) {
+        editorState = activity.state;
         cachedProjectRoot = editorState.activeProject || cachedProjectRoot;
-        window.__cm6EditorState = editorState;
-        if (typeof window.__cm6RefreshRecents === 'function') {
-          window.__cm6RefreshRecents(editorState);
+        broadcastRecentsUpdate(editorState);
+      } else {
+        // Fallback to a fresh pull if the payload lacked state
+        const refreshed = await syncEditorState(true);
+        if (refreshed) {
+          broadcastRecentsUpdate(refreshed);
         }
       }
-    }).catch(err => {
+    } catch (err) {
       console.error('Failed to record file activity:', err);
-    });
+    }
   } catch (e) {
     statusEl.textContent = '';
     host.toast(`Failed to open: ${e.message}`);
@@ -574,7 +684,10 @@ async function saveAsDialog() {
     closeWebSocket();
     openWebSocket(currentPath);
 
-    apiPost('state/file_activity', { path: currentPath }).then((data) => {
+    apiPost('state/file_activity', {
+      path: currentPath,
+      project: cachedProjectRoot || (editorState && editorState.activeProject) || undefined,
+    }).then((data) => {
       if (data?.state) {
         editorState = data.state;
         cachedProjectRoot = editorState.activeProject || cachedProjectRoot;
@@ -660,6 +773,32 @@ function bindMenuToggle(el, action) {
   el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); run(); } });
 }
 
+function bindThemeMenu() {
+  themeMenuItems.forEach((item) => {
+    const themeId = item.getAttribute('data-theme');
+    const available = !!THEMES[themeId];
+    if (!available) {
+      item.style.display = 'none';
+      return;
+    }
+    const handle = () => {
+      currentTheme = themeId;
+      updateThemeMenuChecks();
+      createView(getText());
+      persistEditorPreferences({ theme: currentTheme });
+    };
+
+    item.addEventListener('click', () => { closeAllMenus(); handle(); });
+    item.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        closeAllMenus();
+        handle();
+      }
+    });
+  });
+}
+
 menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show');}});
 menuEditBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show');}});
 menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuViewDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show');}});
@@ -684,7 +823,6 @@ bindMenuToggle(miClose, () => {
   setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay();
 });
 bindMenuToggle(miQuit, () => {
-  try{ host.clearState(); }catch{}
   closeWebSocket();
   currentPath=''; currentPathExists=false; lastSha256 = null;
   setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay();
@@ -706,20 +844,37 @@ bindMenuToggle(miPaste, async () => {
 });
 bindMenuToggle(miSelectAll, () => { if (selectSurface.style.display === 'block') { const r = document.createRange(); r.selectNodeContents(selectSurface); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } else { view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }); view.focus(); } });
 
-bindMenuToggle(miToggleLines, () => { showLineNumbers = !showLineNumbers; setMenuChecked(miToggleLines, showLineNumbers); createView(getText()); });
-bindMenuToggle(miToggleShading, () => { showLineShading = !showLineShading; setMenuChecked(miToggleShading, showLineShading); createView(getText()); });
-bindMenuToggle(miToggleSyntax, () => { showSyntaxHighlight = !showSyntaxHighlight; setMenuChecked(miToggleSyntax, showSyntaxHighlight); createView(getText()); });
-bindMenuToggle(miToggleWrap, () => {
-  wordWrap = !wordWrap; setMenuChecked(miToggleWrap, wordWrap);
-  selectSurface.classList.toggle('wrap', wordWrap);
+bindMenuToggle(miToggleLines, () => {
+  showLineNumbers = !showLineNumbers;
+  applyMenuState();
   createView(getText());
+  persistEditorPreferences({ showLineNumbers });
+});
+bindMenuToggle(miToggleShading, () => {
+  showLineShading = !showLineShading;
+  applyMenuState();
+  createView(getText());
+  persistEditorPreferences({ showShading: showLineShading });
+});
+bindMenuToggle(miToggleSyntax, () => {
+  showSyntaxHighlight = !showSyntaxHighlight;
+  applyMenuState();
+  createView(getText());
+  persistEditorPreferences({ showSyntax: showSyntaxHighlight });
+});
+bindMenuToggle(miToggleWrap, () => {
+  wordWrap = !wordWrap;
+  applyMenuState();
+  createView(getText());
+  persistEditorPreferences({ wordWrap });
 });
 bindMenuToggle(miToggleAutosave, () => {
   autoSaveEnabled = !autoSaveEnabled;
-  setMenuChecked(miToggleAutosave, autoSaveEnabled);
+  applyMenuState();
   if (autoSaveEnabled && unsaved && currentPath && currentPathExists) {
     scheduleAutosave(); // Trigger autosave immediately if there are unsaved changes
   }
+  persistEditorPreferences({ autoSave: autoSaveEnabled });
 });
 bindMenuToggle(miFind, () => { if (view && openSearchPanel) openSearchPanel(view); });
 bindMenuToggle(miGoto, () => { const input = window.prompt('Go to line'); const line = Number.parseInt(input || '', 10); if (!Number.isNaN(line)) { const ln = Math.max(1, line); const pos = view.state.doc.line(ln).from; view.dispatch({ selection:{anchor:pos}, scrollIntoView:true }); view.focus(); } });
@@ -742,11 +897,9 @@ const observeEditor = () => {
   changeObserver.disconnect();
   if (view?.dom) changeObserver.observe(view.dom, { childList:true, subtree:true, characterData:true });
 };
-const reobserve = () => setTimeout(observeEditor, 0);
-
-// Initialize editor
-createView('');
-reobserve();
+function reobserve() {
+  setTimeout(observeEditor, 0);
+}
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
@@ -870,62 +1023,6 @@ btnSaveConfirm.addEventListener('click', async () => { await saveFile(); hideCon
 
 // ---------- State load/init ----------
 host.setTitle('Code Viewer (CM6)');
-const persistedState = host.loadState({
-  lastPath: null, draft: null,
-  showLineNumbers: true, showLineShading: false,
-  showSyntaxHighlight: true, wordWrap: false,
-  autoSaveEnabled: true, theme: 'cm6-dark',
-}) || {};
-
-showLineNumbers = persistedState.showLineNumbers !== false;
-showLineShading = !!persistedState.showLineShading;
-showSyntaxHighlight = persistedState.showSyntaxHighlight !== false;
-wordWrap = !!persistedState.wordWrap;
-autoSaveEnabled = persistedState.autoSaveEnabled !== false;
-currentTheme = (persistedState.theme && THEMES[persistedState.theme]) ? persistedState.theme : 'cm6-dark';
-setMenuChecked(miToggleLines, showLineNumbers);
-setMenuChecked(miToggleShading, showLineShading);
-setMenuChecked(miToggleSyntax, showSyntaxHighlight);
-setMenuChecked(miToggleWrap, wordWrap);
-setMenuChecked(miToggleAutosave, autoSaveEnabled);
-selectSurface.classList.toggle('wrap', wordWrap);
-
-
-// Theme menu
-themeMenuItems.forEach((item) => {
-  const themeId = item.getAttribute('data-theme');
-  // Check if the theme exists in our map (and isn't null)
-  const isAvailable = !!THEMES[themeId];
-
-  if (!isAvailable) {
-    // This hides the Solarized examples from the menu
-    item.style.display = 'none';
-  }
-
-  // Set the initial checkmark on the correct theme
-  setMenuChecked(item, themeId === currentTheme);
-
-  const handle = () => {
-    if (isAvailable) {
-      currentTheme = themeId;
-      // Update checkmarks for all items
-      themeMenuItems.forEach((it) => {
-        setMenuChecked(it, it.getAttribute('data-theme') === currentTheme);
-      });
-      createView(getText());
-    } else {
-      host.toast(`Theme "${themeId}" is not available.`);
-    }
-  };
-
-  item.addEventListener('click', () => { closeAllMenus(); handle(); });
-  item.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); closeAllMenus(); handle(); } });
-});
-
-createView(persistedState.draft || '');
-lastSavedContent = persistedState.draft ? '' : getText();
-markUnsaved(!!persistedState.draft);
-updatePathDisplay();
 
 // Set up global file opening hooks for explorer.js
 window.appOpenFile = (absPath) => {
@@ -954,7 +1051,24 @@ async function main() {
     console.error('Failed to initialize explorer UI:', e);
   });
 
+  // Apply host-side fallback preferences while we wait for disk-backed settings.
+  applyPreferencesFromStore(cachedPreferences);
+  applyMenuState();
+  updateThemeMenuChecks();
+
   const serverState = await syncEditorState(true);
+
+  await loadPreferences(serverState?.preferences || cachedPreferences);
+  applyMenuState();
+  updateThemeMenuChecks();
+  bindThemeMenu();
+
+  const initialDoc = '';
+  createView(initialDoc);
+  lastSavedContent = getText();
+  markUnsaved(false);
+  updatePathDisplay();
+
   if (!serverState || !serverState.activeProject || !serverState.activeProjectExists) {
     statusEl.textContent = serverState?.activeProjectMessage || 'Select a project to begin.';
     fileNameEl.textContent = 'No file';
@@ -977,17 +1091,6 @@ async function main() {
       host.toast(`Failed to open file: ${e.message}`);
       currentPath = ''; currentPathExists = false; setText(''); markUnsaved(false); updatePathDisplay();
     });
-  } else if (persistedState.draft) {
-    currentPath = persistedState.lastPath ? toAbsolute(persistedState.lastPath, null, HOME_DIR) : '';
-    currentPathExists = false;
-    currentModeLanguage = currentPath ? detectLanguageFromFilename(currentPath) : null;
-  } else if (persistedState.lastPath) {
-    const abs = toAbsolute(persistedState.lastPath, null, HOME_DIR);
-    lastPickerPath = parentDir(abs);
-    bootOpened = true;
-    openFile(abs).catch(() => {
-      currentPath = abs; currentPathExists = false; setText(''); updatePathDisplay();
-    });
   } else if (serverState.lastFile && serverState.lastFileExists) {
     bootOpened = true;
     setTimeout(() => {
@@ -1009,13 +1112,7 @@ main();
 // Save state on exit
 host.onBeforeExit(() => {
   if (unsaved) { showConfirm(); host.toast('Unsaved changes — Save or Discard before leaving.'); return { cancel:true }; }
-  return {
-    lastPath: currentPath || null,
-    draft: unsaved ? getText() : null,
-    showLineNumbers, showLineShading,
-    showSyntaxHighlight, wordWrap,
-    autoSaveEnabled, theme: currentTheme,
-  };
+  return {};
 });
 
 // Track changes: refresh unsaved flag
