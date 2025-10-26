@@ -1,4 +1,4 @@
-// app/apps/file_editor_cm6/static/js/diff_decorations.js
+ // app/apps/file_editor_cm6/static/js/diff_decorations.js
 
 import {
   EditorView,
@@ -7,17 +7,18 @@ import {
   RangeSetBuilder,
   Decoration,
   WidgetType,
-} from '/static/vendor/codemirror.2/cm_state_view.bundle.js';
+} from '/static/vendor/codemirror.1/codemirror.bundle.js';
 
 /**
  * Diff decorations controller for the CM6 editor.
  *
- * Usage:
+ * Usage
  *   const controller = createDiffController({ fetchDiff, onStatus });
  *   controller.bindView(view);
  *   controller.setEnabled(true/false);
  *   controller.setContext({ path, sha });
  *   controller.refresh();
+ *   some other diff test
  */
 
 export function createDiffController(options = {}) {
