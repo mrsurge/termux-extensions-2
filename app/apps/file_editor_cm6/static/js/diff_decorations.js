@@ -48,7 +48,15 @@ export function createDiffController(options = {}) {
     provide: field => EditorView.decorations.from(field)
   });
 
-  const lineAddedDeco = Decoration.line({ class: 'cm-diff-line-added' });
+  const lineAddedDeco = Decoration.line({
+    class: 'cm-diff-line cm-diff-line-added',
+    attributes: { 'data-diff-marker': '+' },
+  });
+
+  const lineContextDeco = Decoration.line({
+    class: 'cm-diff-line cm-diff-line-context',
+    attributes: { 'data-diff-marker': '│' },
+  });
 
   class RemovedLineWidget extends WidgetType {
     constructor(text) {
@@ -56,10 +64,16 @@ export function createDiffController(options = {}) {
       this.text = text;
     }
     toDOM() {
-      const el = document.createElement('div');
-      el.className = 'cm-diff-removed';
-      el.textContent = `− ${this.text}`;
-      return el;
+      const lineEl = document.createElement('div');
+      lineEl.className = 'cm-diff-line-removed';
+      lineEl.setAttribute('data-diff-marker', '−');
+
+      const content = document.createElement('span');
+      content.className = 'cm-diff-removed-text';
+      content.textContent = this.text ?? '';
+
+      lineEl.append(content);
+      return lineEl;
     }
     ignoreEvent() { return true; }
   }
@@ -134,7 +148,15 @@ export function createDiffController(options = {}) {
         if (pendingKey !== key) {
           return;
         }
-        const decorations = buildDecorations(controllerView, payload, Decoration, RangeSetBuilder, lineAddedDeco, RemovedLineWidget);
+        const decorations = buildDecorations(
+          controllerView,
+          payload,
+          Decoration,
+          RangeSetBuilder,
+          lineAddedDeco,
+          lineContextDeco,
+          RemovedLineWidget,
+        );
         const summary = payload?.summary || null;
         cache.set(key, { payload, decorations, summary });
         applyDecorations(decorations, summary);
@@ -209,7 +231,15 @@ export function createDiffController(options = {}) {
   };
 }
 
-function buildDecorations(view, payload, Decoration, RangeSetBuilder, lineAddedDeco, RemovedLineWidget) {
+function buildDecorations(
+  view,
+  payload,
+  Decoration,
+  RangeSetBuilder,
+  lineAddedDeco,
+  lineContextDeco,
+  RemovedLineWidget,
+) {
   const hunks = payload?.hunks;
   if (!hunks || hunks.length === 0) {
     return Decoration.none;
@@ -223,8 +253,9 @@ function buildDecorations(view, payload, Decoration, RangeSetBuilder, lineAddedD
       const kind = line.type;
       if (kind === 'add' || kind === 'context') {
         const lineInfo = safeLine(doc, newLine);
-        if (lineInfo && kind === 'add') {
-          builder.add(lineInfo.from, lineInfo.from, lineAddedDeco);
+        if (lineInfo) {
+          const deco = kind === 'add' ? lineAddedDeco : lineContextDeco;
+          builder.add(lineInfo.from, lineInfo.from, deco);
         }
         newLine += 1;
       } else if (kind === 'del') {

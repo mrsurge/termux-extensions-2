@@ -12,6 +12,7 @@
     --border: var(--border, #333);
     --muted: var(--muted-foreground, #9ca3af);
     --primary: var(--primary, #3b82f6);
+    --diff-marker-width: 1.65rem;
   }
   .fe-root { display: flex; flex-direction: column; height: 100%; background:var(--bg); color:var(--fg); }
   .fe-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
@@ -57,10 +58,42 @@
   #select-surface.wrap { white-space:pre-wrap; word-break:break-word; }
   #select-exit { position:absolute; right:12px; bottom:12px; display:none; }
   #select-tip { position:absolute; left:12px; bottom:12px; font-size:.8rem; color:var(--muted); display:none; }
+  .cm-line.cm-diff-line { position: relative; padding-left: calc(var(--diff-marker-width) + 0.35rem); }
+  .cm-line.cm-diff-line::before {
+    content: attr(data-diff-marker);
+    position: absolute;
+    left: 0;
+    width: var(--diff-marker-width);
+    text-align: center;
+    font-weight: 600;
+    opacity: 0.85;
+    color: rgba(148, 163, 184, 0.65);
+  }
   .cm-line.cm-diff-line-added { background: rgba(52, 211, 153, 0.22) !important; border-left: 3px solid rgba(52, 211, 153, 0.75) !important; }
-  .cm-line.cm-diff-line-added .cm-content { background: transparent; }
-  .cm-diff-removed { background: rgba(248, 113, 113, 0.18); color: #fecaca; border-left: 3px solid rgba(248, 113, 113, 0.75); padding: 2px 8px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; margin: 2px 6px 4px; white-space: pre-wrap; }
-  .cm-diff-removed strong { font-weight: 600; }
+  .cm-line.cm-diff-line-added::before { color: rgba(52, 211, 153, 0.9); }
+  .cm-line.cm-diff-line-context { border-left: 3px solid rgba(148, 163, 184, 0.35); }
+  .cm-line.cm-diff-line-context::before { color: rgba(148, 163, 184, 0.55); }
+  .cm-diff-line-removed {
+    position: relative;
+    margin: 0;
+    padding: 2px 10px 2px calc(var(--diff-marker-width) + 10px);
+    border-left: 3px solid rgba(248, 113, 113, 0.7);
+    background: rgba(248, 113, 113, 0.18);
+    color: #fecaca;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    white-space: pre;
+    line-height: inherit;
+  }
+  .cm-diff-line-removed::before {
+    content: attr(data-diff-marker);
+    position: absolute;
+    left: 0;
+    width: var(--diff-marker-width);
+    text-align: center;
+    font-weight: 600;
+    color: rgba(248, 113, 113, 0.9);
+  }
+  .cm-diff-removed-text { display: block; white-space: pre; }
 </style>
 
 <div class="fe-root">

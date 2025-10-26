@@ -201,3 +201,9 @@ Bundle #2 was originally created because bundle #1 appeared to lack the decorati
 
 **Lesson:**
 When working with ES modules and facet-based extension systems like CodeMirror 6, all components must import from the exact same module instance. Separate bundles, even if they contain identical CodeMirror source code, create incompatible class instances with separate internal registries. Always verify that exports are truly missing from a bundle before creating a duplicate—often the classes exist internally and only need to be added to the export statement.
+
+## 4. Styling considerations (26 Oct 2025 update)
+- `diff_decorations.js` now tags each rendered line with `data-diff-marker` while the deletion widget produces a DOM node that mimics a native CM6 line.  
+- `template.html` applies shared gutter styling through `.cm-diff-line` / `.cm-diff-line-removed`, rendering `│`, `+`, or `−` via pseudo-elements so we never mutate document text directly.  
+- Added lines keep the existing green highlight; context lines receive a faint vertical bar, and removed blocks align with editor line-height to prevent line-number drift.  
+- Because the widget mimics line structure, Android selection and CM6 scrolling remain unaffected—the widget is marked `ignoreEvent()` to keep native gestures intact.
