@@ -207,3 +207,4 @@ When working with ES modules and facet-based extension systems like CodeMirror 6
 - `template.html` applies shared gutter styling through `.cm-diff-line` / `.cm-diff-line-removed`, rendering `│`, `+`, or `−` via pseudo-elements so we never mutate document text directly.  
 - Added lines keep the existing green highlight; context lines receive a faint vertical bar, and removed blocks align with editor line-height to prevent line-number drift.  
 - Because the widget mimics line structure, Android selection and CM6 scrolling remain unaffected—the widget is marked `ignoreEvent()` to keep native gestures intact.
+- The removal widget shares the theme’s typography/background, uses zero vertical padding, and collapses adjacent `cm-widgetBuffer` spacers so no extra gap appears around deleted blocks; `--diff-del-gap` governs any optional trailing space.

@@ -22,6 +22,7 @@
     --diff-del-border: rgba(248, 113, 113, 0.7);
     --diff-del-marker: rgba(248, 113, 113, 0.9);
     --diff-del-fg: inherit;
+    --diff-del-gap: 0px;
   }
   .fe-root { display: flex; flex-direction: column; height: 100%; background:var(--bg); color:var(--fg); }
   .fe-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
@@ -84,8 +85,8 @@
   .cm-line.cm-diff-line-context::before { color: var(--diff-context-marker); }
   .cm-diff-line-removed {
     position: relative;
-    margin: 0;
-    padding: 2px 10px 2px calc(var(--diff-marker-width) + 10px);
+    margin: 0 0 var(--diff-del-gap, 0);
+    padding: 0 10px 0 calc(var(--diff-marker-width) + 10px);
     border-left: 3px solid var(--diff-del-border);
     background: var(--diff-del-bg);
     color: var(--diff-del-fg);
@@ -103,6 +104,10 @@
     color: var(--diff-del-marker);
   }
   .cm-diff-removed-text { display: block; white-space: pre; }
+  .cm-diff-line-removed + .cm-widgetBuffer,
+  .cm-widgetBuffer + .cm-diff-line-removed {
+    height: 0 !important;
+  }
 </style>
 
 <div class="fe-root">

@@ -65,7 +65,7 @@ export function createDiffController(options = {}) {
     }
     toDOM() {
       const lineEl = document.createElement('div');
-      lineEl.className = 'cm-diff-line-removed';
+      lineEl.className = 'cm-diff-line cm-diff-line-removed';
       lineEl.setAttribute('data-diff-marker', '−');
 
       const content = document.createElement('span');
