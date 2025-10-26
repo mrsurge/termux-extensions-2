@@ -108,4 +108,96 @@ This note documents the current inline git diff implementation powering the `app
 
 **Diagnostic hook:** Use the browser console to call `window.__cm6Diff.refresh(true)` or inspect `window.__cm6Diff.currentSummary()` while looking at a tracked file to confirm whether the decoration layer is receiving data.  
 
-This document should give any contributor enough context to audit the current inline diff pipeline and trace issues across the backend, fetch layer, decorations, and UI surface.하세요.
+This document should give any contributor enough context to audit the current inline diff pipeline and trace issues across the backend, fetch layer, decorations, and UI surface.
+
+---
+
+## 8. Critical Bug Fix (26 Oct 2025 22:00 UTC)
+
+### Issue: Inline Diffs Not Rendering in UI
+
+**Problem:**
+The inline diff decorations were completely failing to appear in the editor despite all backend endpoints working correctly and returning proper diff data. The decoration system was silently failing without any console errors.
+
+**Root Cause:**
+The application was using **two separate CodeMirror bundles** with incompatible module instances:
+
+1. **Bundle #1** (`/static/vendor/codemirror.1/codemirror.bundle.js`):
+   - Used by `main.js` to create the EditorView and EditorState instances
+   - Provided language packs, themes, and core editor functionality
+   - Already exported `StateField` and `StateEffect`
+   - **Missing exports:** `Decoration`, `WidgetType`, `RangeSetBuilder`
+
+2. **Bundle #2** (`/static/vendor/codemirror.2/cm_state_view.bundle.js`):
+   - Used exclusively by `diff_decorations.js`
+   - Created specifically to provide state/view/decoration APIs
+   - Exported `Decoration`, `StateField`, `StateEffect`, `WidgetType`, `RangeSetBuilder`, `EditorView`
+
+The critical issue: `diff_decorations.js` created a `StateField` that called `EditorView.decorations.from()` using the `EditorView` class from bundle #2, but the actual editor instance running in the browser was created from bundle #1's `EditorView`. Because these were separate module instances with their own internal state and facet registries, the decoration provider never connected to the actual editor view. The StateField's `provide: field => EditorView.decorations.from(field)` was registering with bundle #2's facet system, while bundle #1's EditorView instance was looking for decorations in its own separate facet registry.
+
+**Investigation:**
+1. Verified backend `/api/app/file_editor_cm6/diff` endpoint returned correct hunk data
+2. Confirmed `fetchDiffPayload` successfully retrieved diff payloads
+3. Checked that `diffController.extension` was being added to editor extensions array
+4. Discovered the module mismatch by tracing import paths in both files
+5. Confirmed that all required classes (`Decoration`, `WidgetType`, `RangeSetBuilder`) existed internally in bundle #1 but were not exported
+
+**Solution:**
+The fix required two surgical changes to unify all CodeMirror imports under a single bundle:
+
+1. **Modified `app/static/vendor/codemirror.1/codemirror.bundle.js` (line 30696):**
+   
+   Added three missing class exports to the export statement:
+   ```javascript
+   // Before:
+   export { Compartment, EditorState, EditorView$1 as EditorView, LanguageSupport, 
+            SearchQuery, StateEffect, StateField, Transaction, ... };
+   
+   // After:
+   export { Compartment, Decoration, EditorState, EditorView$1 as EditorView, 
+            LanguageSupport, RangeSetBuilder, SearchQuery, StateEffect, StateField, 
+            Transaction, WidgetType, ... };
+   ```
+   
+   The classes were already present in the bundle at:
+   - `Decoration` class at line 5544
+   - `WidgetType` class at line 5450  
+   - `RangeSetBuilder` class at line 3487
+
+2. **Modified `app/apps/file_editor_cm6/static/js/diff_decorations.js` (line 10):**
+   
+   Changed the import source from the separate bundle to the unified bundle:
+   ```javascript
+   // Before:
+   import {
+     EditorView, StateEffect, StateField, RangeSetBuilder, Decoration, WidgetType,
+   } from '/static/vendor/codemirror.2/cm_state_view.bundle.js';
+   
+   // After:
+   import {
+     EditorView, StateEffect, StateField, RangeSetBuilder, Decoration, WidgetType,
+   } from '/static/vendor/codemirror.1/codemirror.bundle.js';
+   ```
+
+**Result:**
+All CodeMirror classes now share the same module instance. The `StateField` created by `diff_decorations.js` uses the same `EditorView.decorations` facet that the actual editor instance recognizes, allowing the decoration system to function correctly. The inline diffs now render as intended:
+- Added lines appear with green background highlighting and left border
+- Deleted lines render as red block widgets showing the removed content
+- The status bar displays `Δ +n −m` summary when diffs are present
+
+**Verification:**
+```bash
+# Confirmed exports are present:
+$ node -e "import('./app/static/vendor/codemirror.1/codemirror.bundle.js').then(cm => {
+    console.log('Decoration:', typeof cm.Decoration);
+    console.log('WidgetType:', typeof cm.WidgetType);  
+    console.log('RangeSetBuilder:', typeof cm.RangeSetBuilder);
+  })"
+# Output: All show 'function'
+```
+
+**Historical Note:**
+Bundle #2 was originally created because bundle #1 appeared to lack the decoration APIs. However, this was a misconception—the classes existed but simply weren't exported. The proper solution was to export them from the primary bundle rather than maintaining a second incompatible bundle. Bundle #2 can now be deprecated since bundle #1 provides all necessary functionality.
+
+**Lesson:**
+When working with ES modules and facet-based extension systems like CodeMirror 6, all components must import from the exact same module instance. Separate bundles, even if they contain identical CodeMirror source code, create incompatible class instances with separate internal registries. Always verify that exports are truly missing from a bundle before creating a duplicate—often the classes exist internally and only need to be added to the export statement.
