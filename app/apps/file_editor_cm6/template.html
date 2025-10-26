@@ -13,6 +13,15 @@
     --muted: var(--muted-foreground, #9ca3af);
     --primary: var(--primary, #3b82f6);
     --diff-marker-width: 1.65rem;
+    --diff-add-bg: rgba(52, 211, 153, 0.22);
+    --diff-add-border: rgba(52, 211, 153, 0.75);
+    --diff-add-marker: rgba(52, 211, 153, 0.9);
+    --diff-context-border: rgba(148, 163, 184, 0.35);
+    --diff-context-marker: rgba(148, 163, 184, 0.55);
+    --diff-del-bg: rgba(248, 113, 113, 0.18);
+    --diff-del-border: rgba(248, 113, 113, 0.7);
+    --diff-del-marker: rgba(248, 113, 113, 0.9);
+    --diff-del-fg: inherit;
   }
   .fe-root { display: flex; flex-direction: column; height: 100%; background:var(--bg); color:var(--fg); }
   .fe-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
@@ -69,18 +78,18 @@
     opacity: 0.85;
     color: rgba(148, 163, 184, 0.65);
   }
-  .cm-line.cm-diff-line-added { background: rgba(52, 211, 153, 0.22) !important; border-left: 3px solid rgba(52, 211, 153, 0.75) !important; }
-  .cm-line.cm-diff-line-added::before { color: rgba(52, 211, 153, 0.9); }
-  .cm-line.cm-diff-line-context { border-left: 3px solid rgba(148, 163, 184, 0.35); }
-  .cm-line.cm-diff-line-context::before { color: rgba(148, 163, 184, 0.55); }
+  .cm-line.cm-diff-line-added { background: var(--diff-add-bg) !important; border-left: 3px solid var(--diff-add-border) !important; }
+  .cm-line.cm-diff-line-added::before { color: var(--diff-add-marker); }
+  .cm-line.cm-diff-line-context { border-left: 3px solid var(--diff-context-border); }
+  .cm-line.cm-diff-line-context::before { color: var(--diff-context-marker); }
   .cm-diff-line-removed {
     position: relative;
     margin: 0;
     padding: 2px 10px 2px calc(var(--diff-marker-width) + 10px);
-    border-left: 3px solid rgba(248, 113, 113, 0.7);
-    background: rgba(248, 113, 113, 0.18);
-    color: #fecaca;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    border-left: 3px solid var(--diff-del-border);
+    background: var(--diff-del-bg);
+    color: var(--diff-del-fg);
+    font: inherit;
     white-space: pre;
     line-height: inherit;
   }
@@ -91,7 +100,7 @@
     width: var(--diff-marker-width);
     text-align: center;
     font-weight: 600;
-    color: rgba(248, 113, 113, 0.9);
+    color: var(--diff-del-marker);
   }
   .cm-diff-removed-text { display: block; white-space: pre; }
 </style>
