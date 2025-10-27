@@ -1,6 +1,6 @@
-# code_cm6 Inline Diff Pipeline (status: 26 Oct 2025)
+# code_cm6 Inline Diff Pipeline (status: 27 Oct 2025)
 
-This note documents the current inline git diff implementation powering the `app/apps/file_editor_cm6` CodeMirror 6 editor. Paths and line numbers reference the working tree committed on 26 Oct 2025.
+This note documents the current inline git diff implementation powering the `app/apps/file_editor_cm6` CodeMirror 6 editor. Paths and line numbers reference the working tree as of 27 Oct 2025.
 
 ---
 
@@ -208,4 +208,88 @@ When working with ES modules and facet-based extension systems like CodeMirror 6
 - Added lines keep the existing green highlight; context lines receive a faint vertical bar, and removed blocks align with editor line-height to prevent line-number drift.  
 - Because the widget mimics line structure, Android selection and CM6 scrolling remain unaffected—the widget is marked `ignoreEvent()` to keep native gestures intact.
 - The removal widget shares the theme’s typography/background, uses zero vertical padding, and collapses adjacent `cm-widgetBuffer` spacers so no extra gap appears around deleted blocks; `--diff-del-gap` governs any optional trailing space.
-- When a new document opens while diffs are enabled, `bindView()` now clears leftover decorations and immediately refreshes so old ranges can’t be applied to the new document (prevents `ChangeSet.mapPos` range errors).
+
+---
+
+## 9. Word Wrap Feature Enhancement (27 Oct 2025 02:00 UTC)
+
+### Issue: Deletion Widgets Not Inheriting Word Wrap Setting
+
+**Problem:**
+Deleted lines rendered as block widgets had hardcoded `white-space: pre` in CSS, causing them to always use horizontal overflow regardless of the user's word wrap preference. The editor lines would wrap when `EditorView.lineWrapping` was enabled, but deletion widgets remained unwrapped, creating an inconsistent editing experience.
+
+**Root Cause:**
+CodeMirror's `EditorView.lineWrapping` extension only affects `.cm-line` elements (actual editor lines). Widget elements created by `RemovedLineWidget` are standalone DOM nodes with their own styling, completely independent of the editor's line-wrapping system. The CSS explicitly set `white-space: pre` on both `.cm-diff-line-removed` and `.cm-diff-removed-text`, with no mechanism to detect or respond to the user's wrap preference.
+
+**Solution Approach:**
+Implemented **dynamic CSS class approach** where widgets receive a `cm-diff-wrap` class when word wrapping is enabled, allowing CSS to conditionally apply `white-space: pre-wrap`.
+
+**Implementation Details:**
+
+1. **Modified `diff_decorations.js`:**
+   - Added `getWordWrap` callback parameter to `createDiffController` options (line 27)
+   - Default implementation returns `false` if not provided
+   - Updated `RemovedLineWidget` constructor to accept `(text, wordWrap)` parameters
+   - In `RemovedLineWidget.toDOM()`, conditionally add `cm-diff-wrap` class:
+     ```javascript
+     if (this.wordWrap) {
+       lineEl.classList.add('cm-diff-wrap');
+     }
+     ```
+   - Updated `buildDecorations` to accept `getWordWrap` callback
+   - Query current wrap state: `const wordWrap = getWordWrap();`
+   - Pass wrap state to each widget: `new RemovedLineWidget(line.text || '', wordWrap)`
+
+2. **Modified `template.html` CSS:**
+   - Added conditional wrapping rules (lines 107‑108):
+     ```css
+     .cm-diff-line-removed.cm-diff-wrap { white-space: pre-wrap; word-break: break-word; }
+     .cm-diff-line-removed.cm-diff-wrap .cm-diff-removed-text { white-space: pre-wrap; word-break: break-word; }
+     ```
+   - These rules override the default `white-space: pre` when the `cm-diff-wrap` class is present
+
+3. **Modified `main.js`:**
+   - Updated controller initialization (line 157):
+     ```javascript
+     const diffController = createDiffController({
+       fetchDiff: fetchDiffPayload,
+       onStatus: handleDiffStatus,
+       getWordWrap: () => wordWrap,
+     });
+     ```
+   - Updated word wrap toggle handler (lines 950‑953):
+     ```javascript
+     bindMenuToggle(miToggleWrap, () => {
+       wordWrap = !wordWrap;
+       applyMenuState();
+       createView(getText());
+       if (showInlineDiffs && currentPath && currentPathExists) {
+         diffController.refresh(true);  // Rebuild decorations with new wrap state
+       }
+       persistEditorPreferences({ wordWrap });
+     });
+     ```
+
+**Result:**
+- When word wrap is OFF: Deleted lines use `white-space: pre` (horizontal overflow)
+- When word wrap is ON: Deleted lines use `white-space: pre-wrap` (text wraps at viewport edge)
+- Toggling word wrap immediately refreshes diff decorations with the new setting
+- The wrap state is queried live via callback, ensuring consistency
+- Deleted line widgets now match the editor's wrapping behavior exactly
+
+**Flow:**
+1. User toggles "View → Word Wrap"
+2. `wordWrap` variable updates (true/false)
+3. Editor view is recreated with/without `EditorView.lineWrapping` extension
+4. `diffController.refresh(true)` is called
+5. Controller calls `buildDecorations()` which invokes `getWordWrap()`
+6. Each `RemovedLineWidget` is instantiated with current `wordWrap` state
+7. Widget's `toDOM()` adds or omits `cm-diff-wrap` class accordingly
+8. CSS applies appropriate `white-space` rule based on class presence
+
+**Benefits:**
+- Clean separation of concerns (CSS handles styling, JS provides state)
+- No inline styles (easier to maintain and override)
+- Follows CodeMirror's pattern of using classes for state-dependent styling
+- Minimal performance impact (decorations already rebuild frequently)
+- User preference respected and persisted across sessions
