@@ -93,7 +93,10 @@ export function createDiffController(options = {}) {
   function bindView(view) {
     controllerView = view;
     if (enabled) {
-      applyDecorations(currentDecorations, null, { silentStatus: true });
+      // If decorations come from another document, discard them until we fetch fresh diffs.
+      currentDecorations = Decoration.none;
+      controllerView.dispatch({ effects: [clearDiffEffect.of(null)] });
+      refresh(true);
     } else {
       clearDecorations();
     }

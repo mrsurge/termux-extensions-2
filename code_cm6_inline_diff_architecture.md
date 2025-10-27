@@ -208,3 +208,4 @@ When working with ES modules and facet-based extension systems like CodeMirror 6
 - Added lines keep the existing green highlight; context lines receive a faint vertical bar, and removed blocks align with editor line-height to prevent line-number drift.  
 - Because the widget mimics line structure, Android selection and CM6 scrolling remain unaffected—the widget is marked `ignoreEvent()` to keep native gestures intact.
 - The removal widget shares the theme’s typography/background, uses zero vertical padding, and collapses adjacent `cm-widgetBuffer` spacers so no extra gap appears around deleted blocks; `--diff-del-gap` governs any optional trailing space.
+- When a new document opens while diffs are enabled, `bindView()` now clears leftover decorations and immediately refreshes so old ranges can’t be applied to the new document (prevents `ChangeSet.mapPos` range errors).
