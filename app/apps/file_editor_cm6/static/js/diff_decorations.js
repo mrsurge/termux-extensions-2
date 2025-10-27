@@ -59,6 +59,10 @@ export function createDiffController(options = {}) {
     attributes: { 'data-diff-marker': '│' },
   });
 
+  const linePlainDeco = Decoration.line({
+    class: 'cm-diff-line cm-diff-line-plain',
+  });
+
   class RemovedLineWidget extends WidgetType {
     constructor(text, wordWrap) {
       super();
@@ -163,6 +167,7 @@ export function createDiffController(options = {}) {
           RangeSetBuilder,
           lineAddedDeco,
           lineContextDeco,
+          linePlainDeco,
           RemovedLineWidget,
           getWordWrap,
         );
@@ -247,6 +252,7 @@ function buildDecorations(
   RangeSetBuilder,
   lineAddedDeco,
   lineContextDeco,
+  linePlainDeco,
   RemovedLineWidget,
   getWordWrap,
 ) {
@@ -258,27 +264,81 @@ function buildDecorations(
   const wordWrap = getWordWrap();
   const builder = new RangeSetBuilder();
   const doc = view.state.doc;
+  
+  // Build a map of line numbers to their diff types
+  const lineDecorations = new Map();
+  const deletionWidgets = [];
+  
   for (const hunk of hunks) {
     let newLine = Math.max(1, hunk.newStart || 1);
     for (const line of hunk.lines || []) {
       const kind = line.type;
       if (kind === 'add' || kind === 'context') {
-        const lineInfo = safeLine(doc, newLine);
-        if (lineInfo) {
-          const deco = kind === 'add' ? lineAddedDeco : lineContextDeco;
-          builder.add(lineInfo.from, lineInfo.from, deco);
-        }
+        const deco = kind === 'add' ? lineAddedDeco : lineContextDeco;
+        lineDecorations.set(newLine, deco);
         newLine += 1;
       } else if (kind === 'del') {
-        const anchorLine = safeLine(doc, newLine > 0 ? newLine : 1);
-        const pos = anchorLine ? anchorLine.from : doc.length;
-        builder.add(pos, pos, Decoration.widget({
-          side: -1,
-          block: true,
-          widget: new RemovedLineWidget(line.text || '', wordWrap),
-        }));
+        deletionWidgets.push({
+          line: newLine > 0 ? newLine : 1,
+          text: line.text || '',
+        });
       }
     }
+  }
+  
+  // Sort deletion widgets by line number
+  deletionWidgets.sort((a, b) => a.line - b.line);
+  
+  // Apply decorations in sorted order (line by line)
+  let widgetIndex = 0;
+  for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
+    const lineInfo = safeLine(doc, lineNum);
+    if (!lineInfo) continue;
+    
+    // Add any deletion widgets that come before this line
+    while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line < lineNum) {
+      const widget = deletionWidgets[widgetIndex];
+      const anchorLine = safeLine(doc, widget.line);
+      const pos = anchorLine ? anchorLine.from : doc.length;
+      builder.add(pos, pos, Decoration.widget({
+        side: -1,
+        block: true,
+        widget: new RemovedLineWidget(widget.text, wordWrap),
+      }));
+      widgetIndex++;
+    }
+    
+    // Add deletion widgets at the start of this line (before line decorations)
+    while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line === lineNum) {
+      const widget = deletionWidgets[widgetIndex];
+      builder.add(lineInfo.from, lineInfo.from, Decoration.widget({
+        side: -1,
+        block: true,
+        widget: new RemovedLineWidget(widget.text, wordWrap),
+      }));
+      widgetIndex++;
+    }
+    
+    // Add the plain decoration (for alignment)
+    builder.add(lineInfo.from, lineInfo.from, linePlainDeco);
+    
+    // Then add specific diff decoration if this line has one
+    if (lineDecorations.has(lineNum)) {
+      builder.add(lineInfo.from, lineInfo.from, lineDecorations.get(lineNum));
+    }
+  }
+  
+  // Add any remaining deletion widgets after the last line
+  while (widgetIndex < deletionWidgets.length) {
+    const widget = deletionWidgets[widgetIndex];
+    const anchorLine = safeLine(doc, widget.line);
+    const pos = anchorLine ? anchorLine.from : doc.length;
+    builder.add(pos, pos, Decoration.widget({
+      side: -1,
+      block: true,
+      widget: new RemovedLineWidget(widget.text, wordWrap),
+    }));
+    widgetIndex++;
   }
 
   return builder.finish();
