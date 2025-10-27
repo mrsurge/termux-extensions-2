@@ -293,3 +293,101 @@ Implemented **dynamic CSS class approach** where widgets receive a `cm-diff-wrap
 - Follows CodeMirror's pattern of using classes for state-dependent styling
 - Minimal performance impact (decorations already rebuild frequently)
 - User preference respected and persisted across sessions
+
+---
+
+## 10. Alignment Fix: Universal Left Padding (27 Oct 2025 05:00 UTC)
+
+### Issue: Non-Decorated Lines Misaligned with Diff Lines
+
+**Problem:**
+Lines without diff decorations (plain lines) were visually offset from lines with diff decorations (added/context/removed). In Python code with indentation, this created a misaligned, hard-to-read appearance where plain lines started approximately 4 characters to the left of diff-decorated lines.
+
+**Root Cause:**
+Only lines with the `.cm-diff-line-added` or `.cm-diff-line-context` classes received the left padding to accommodate the diff marker gutter. Plain lines had no decoration applied at all, so they started at column 0.
+
+**CSS Analysis:**
+```css
+.cm-line.cm-diff-line { 
+  padding-left: calc(var(--diff-marker-width) + 0.35rem); 
+}
+```
+
+This padding (approximately 2rem or 32px, equivalent to 4 characters) was only applied to lines that received a diff decoration class. Regular lines had no class, no padding, and therefore no offset.
+
+**Solution:**
+Created a new "plain line" decoration that applies to ALL lines when inline diffs are enabled, ensuring universal left padding.
+
+**Implementation:**
+
+1. **Modified `diff_decorations.js`:**
+   - Added `linePlainDeco` constant (lines 62-64):
+     ```javascript
+     const linePlainDeco = Decoration.line({
+       class: 'cm-diff-line cm-diff-line-plain',
+     });
+     ```
+   - Modified `buildDecorations` to apply plain decoration to every line (lines 248-345)
+   - Key algorithm change: Process decorations in strict position order
+     - Build Map of line numbers → specific decorations
+     - Collect deletion widgets in array
+     - Sort deletion widgets by line number
+     - Walk through lines 1 to N:
+       - Add deletion widgets that come before/at this line
+       - Add plain decoration (every line)
+       - Add specific decoration if line has diff
+     - Add remaining deletion widgets after last line
+
+2. **Modified `template.html` CSS:**
+   - Added transparent border for alignment (line 86):
+     ```css
+     .cm-line.cm-diff-line-plain { border-left: 3px solid transparent; }
+     ```
+   - This ensures plain lines have the same 3px border as diff lines, but invisible
+   
+   - Fine-tuned deletion widget padding (line 90):
+     ```css
+     padding: 0 10px 0 calc(var(--diff-marker-width) + 6px);
+     ```
+   - Reduced from original `+ 10px` to `+ 6px` for pixel-perfect alignment
+
+**Technical Challenge: RangeSetBuilder Sort Order**
+
+CodeMirror's `RangeSetBuilder` requires decorations to be added in strictly ascending position order. Initial implementation failed with error: "Ranges must be added sorted by `from` position and `startSide`"
+
+**Problem:** We were adding all line decorations (1→N), then all deletion widgets, but deletion widgets could be anchored at earlier line positions already processed.
+
+**Solution:** Interleave deletion widgets with line decorations during the single-pass line loop. Since deletion widgets use `side: -1` (appear before position), they must be added BEFORE their anchor line's decorations.
+
+**Result:**
+✓ All lines have consistent left padding (4 spaces worth)
+✓ Plain lines have invisible 3px transparent border
+✓ Diff lines have visible 3px colored border
+✓ Deletion widgets aligned with pixel-perfect precision
+✓ Python indentation (and all code) displays perfectly aligned
+✓ Decorations are unselectable (don't interfere with text selection)
+✓ No performance impact (CodeMirror handles line decorations efficiently)
+
+**Flow:**
+1. When diffs are enabled, `buildDecorations` is called
+2. Parse hunks into `lineDecorations` Map and `deletionWidgets` array
+3. Sort `deletionWidgets` by line number
+4. For each line 1 to doc.lines:
+   - Add deletion widgets before/at this line (side: -1)
+   - Add plain decoration (alignment padding)
+   - Add specific decoration if line has diff
+5. Add remaining deletion widgets after last line
+6. CodeMirror renders with perfect alignment
+
+**CSS Box Model:**
+- Before (misaligned): Plain lines had no border, diff lines had 3px border
+- After (aligned): All lines have 3px border (visible or transparent)
+- Deletion widgets: Padding reduced by 4px for perfect text alignment
+
+**Lessons Learned:**
+- CodeMirror's decoration system requires strict position ordering
+- Multiple decorations can layer at same position (plain + specific)
+- Deletion widgets with `side: -1` must precede their anchor line's decorations
+- Transparent borders maintain layout without visual impact
+- Pixel-perfect alignment requires fine-tuning padding values
+
