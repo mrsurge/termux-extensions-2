@@ -176,6 +176,18 @@ class HistoryStore:
         with self._lock:
             return self._data.get("active_project")
 
+    def set_terminal_shell_id(self, shell_id: Optional[str]) -> Optional[str]:
+        """Store the current terminal shell ID."""
+        with self._lock:
+            self._data["terminal_shell_id"] = shell_id
+            self._save_locked()
+            return shell_id
+
+    def get_terminal_shell_id(self) -> Optional[str]:
+        """Get the stored terminal shell ID."""
+        with self._lock:
+            return self._data.get("terminal_shell_id")
+
     def set_last_file(self, project_path: str, file_path: Optional[str]) -> Optional[str]:
         normalized = self._normalize_file_path(file_path) if file_path else None
         with self._lock:

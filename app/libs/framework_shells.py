@@ -794,7 +794,8 @@ class FrameworkShellManager:
         with path.open("rb") as fh:
             fh.seek(-to_read, os.SEEK_END)
             data = fh.read().decode("utf-8", errors="replace")
-        return data.splitlines()[-lines:]
+        # Use splitlines(keepends=True) to preserve line terminators
+        return data.splitlines(keepends=True)[-lines:]
 
 
 # ----------------------------------------------------------------------

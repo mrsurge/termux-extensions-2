@@ -21,11 +21,15 @@ export function createTerminalDrawer(options = {}) {
   let shellId = null;
   let fitAddon = null;
   let isOpen = false;
+  let isFullscreen = false;
 
   const drawer = document.getElementById('terminal-drawer');
   const container = document.getElementById('terminal-container');
+  const header = drawer?.querySelector('.terminal-header');
   const toggleBtn = document.getElementById('terminal-toggle');
   const closeBtn = document.getElementById('terminal-close');
+  const collapseBtn = document.getElementById('terminal-collapse');
+  const fullscreenBtn = document.getElementById('terminal-fullscreen');
 
   /**
    * Load xterm.js dynamically
@@ -68,9 +72,42 @@ export function createTerminalDrawer(options = {}) {
   }
 
   /**
-   * Create a new terminal shell session
+   * Get or create a terminal shell session
    */
-  async function createShell() {
+  async function getOrCreateShell() {
+    // Try to restore previous shell from app's history store
+    try {
+      const stateRes = await fetch('/api/app/file_editor_cm6/terminal/shell-id');
+      const stateResult = await stateRes.json();
+      
+      if (stateResult.ok && stateResult.data.shell_id) {
+        const savedShellId = stateResult.data.shell_id;
+        
+        // Check if saved shell still exists
+        const shellRes = await fetch(`/api/app/file_editor_cm6/terminal/${savedShellId}`);
+        const shellResult = await shellRes.json();
+        
+        if (shellResult.ok && shellResult.data.status === 'running') {
+          console.log('Reconnecting to existing shell:', savedShellId);
+          return savedShellId;
+        } else {
+          console.log('Saved shell no longer running, cleaning up state');
+          // Clear invalid shell ID from state
+          await fetch('/api/app/file_editor_cm6/terminal/shell-id', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shell_id: null }),
+          });
+        }
+      }
+    } catch (err) {
+      console.log('No saved shell found:', err);
+    }
+    
+    // Clean up any orphaned code-editor-terminal shells
+    await cleanupOrphanedShells();
+    
+    // Create new shell
     const cwd = getCurrentProjectPath();
     const res = await fetch('/api/app/file_editor_cm6/terminal/create', {
       method: 'POST',
@@ -83,7 +120,44 @@ export function createTerminalDrawer(options = {}) {
       throw new Error(result.error || 'Failed to create terminal shell');
     }
 
-    return result.data.id;
+    const newShellId = result.data.id;
+    
+    // Save to app's history store
+    await fetch('/api/app/file_editor_cm6/terminal/shell-id', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shell_id: newShellId }),
+    });
+    
+    console.log('Created new shell:', newShellId);
+    
+    return newShellId;
+  }
+
+  /**
+   * Clean up orphaned terminal shells
+   */
+  async function cleanupOrphanedShells() {
+    try {
+      const res = await fetch('/api/framework_shells');
+      const result = await res.json();
+      
+      if (result.ok) {
+        const orphanedShells = result.data.filter(shell => 
+          shell.label === 'code-editor-terminal'
+        );
+        
+        console.log(`Found ${orphanedShells.length} orphaned terminal shells, cleaning up...`);
+        
+        for (const shell of orphanedShells) {
+          await fetch(`/api/app/file_editor_cm6/terminal/${shell.id}`, {
+            method: 'DELETE',
+          }).catch(err => console.error('Failed to cleanup shell:', shell.id, err));
+        }
+      }
+    } catch (err) {
+      console.error('Failed to cleanup orphaned shells:', err);
+    }
   }
 
   /**
@@ -96,6 +170,13 @@ export function createTerminalDrawer(options = {}) {
       await fetch(`/api/app/file_editor_cm6/terminal/${shellId}`, {
         method: 'DELETE',
       });
+      
+      // Clear from app's history store
+      await fetch('/api/app/file_editor_cm6/terminal/shell-id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shell_id: null }),
+      });
     } catch (err) {
       console.error('Failed to destroy terminal shell:', err);
     }
@@ -104,11 +185,29 @@ export function createTerminalDrawer(options = {}) {
   }
 
   /**
-   * Connect WebSocket to PTY
+   * Connect WebSocket to PTY and preload history
    */
-  function connectWebSocket(id) {
+  async function connectWebSocket(id) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${location.host}/ws/app/file_editor_cm6/terminal/${id}`;
+
+    // Preload persisted log tail so history survives refresh/reopen
+    if (term) {
+      try {
+        const res = await fetch(`/api/app/file_editor_cm6/terminal/${id}?logs=true&tail=2000`);
+        const result = await res.json();
+        
+        if (result.ok && result.data.logs && Array.isArray(result.data.logs.stdout_tail)) {
+          const priming = result.data.logs.stdout_tail.join('');
+          if (priming) {
+            term.write(priming);
+            console.log('Preloaded terminal history:', result.data.logs.stdout_tail.length, 'lines');
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to preload terminal history:', err);
+      }
+    }
 
     const socket = new WebSocket(url);
 
@@ -210,13 +309,13 @@ export function createTerminalDrawer(options = {}) {
 
     // Create shell if doesn't exist
     if (!shellId) {
-      shellId = await createShell();
+      shellId = await getOrCreateShell();
       console.log('Shell created:', shellId);
     }
 
-    // Connect WebSocket if not connected
+    // Connect WebSocket if not connected (preload history first)
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      ws = connectWebSocket(shellId);
+      ws = await connectWebSocket(shellId);
     }
 
     // Fit terminal to drawer size and manually send initial resize
@@ -286,6 +385,87 @@ export function createTerminalDrawer(options = {}) {
     }
   }
 
+  /**
+   * Toggle fullscreen mode
+   */
+  function toggleFullscreen() {
+    isFullscreen = !isFullscreen;
+    drawer.classList.toggle('fullscreen', isFullscreen);
+    
+    // Update button icon
+    if (fullscreenBtn) {
+      fullscreenBtn.textContent = isFullscreen ? '⛶' : '⛶';
+      fullscreenBtn.title = isFullscreen ? 'Exit fullscreen' : 'Toggle fullscreen';
+    }
+    
+    // Refit terminal after resize
+    if (fitAddon && isOpen) {
+      setTimeout(() => {
+        fitAddon.fit();
+        if (shellId && term) {
+          fetch(`/api/app/file_editor_cm6/terminal/${shellId}/resize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cols: term.cols, rows: term.rows }),
+          }).catch(console.error);
+        }
+      }, 350);
+    }
+  }
+
+  /**
+   * Enable manual resize by dragging header
+   */
+  function enableManualResize() {
+    if (!header || !drawer) return;
+
+    let startY = 0;
+    let startHeight = 0;
+    let isResizing = false;
+
+    header.addEventListener('mousedown', (e) => {
+      // Only resize on header span, not buttons
+      if (e.target.tagName === 'BUTTON') return;
+      
+      isResizing = true;
+      startY = e.clientY;
+      startHeight = drawer.offsetHeight;
+      
+      document.body.style.cursor = 'ns-resize';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      
+      const deltaY = startY - e.clientY;
+      const newHeight = Math.max(100, Math.min(window.innerHeight - 40, startHeight + deltaY));
+      
+      drawer.style.height = `${newHeight}px`;
+      
+      // Refit terminal during resize
+      if (fitAddon) {
+        fitAddon.fit();
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      
+      isResizing = false;
+      document.body.style.cursor = '';
+      
+      // Send final size to backend
+      if (shellId && term) {
+        fetch(`/api/app/file_editor_cm6/terminal/${shellId}/resize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cols: term.cols, rows: term.rows }),
+        }).catch(console.error);
+      }
+    });
+  }
+
   // Wire up UI events
   if (toggleBtn) {
     toggleBtn.addEventListener('click', toggle);
@@ -294,6 +474,17 @@ export function createTerminalDrawer(options = {}) {
   if (closeBtn) {
     closeBtn.addEventListener('click', destroy);
   }
+
+  if (collapseBtn) {
+    collapseBtn.addEventListener('click', close);
+  }
+
+  if (fullscreenBtn) {
+    fullscreenBtn.addEventListener('click', toggleFullscreen);
+  }
+
+  // Enable draggable resize
+  enableManualResize();
 
   // Notify ready
   onReady();

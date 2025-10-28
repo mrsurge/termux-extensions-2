@@ -100,18 +100,33 @@ def register_terminal_routes(bp, sock):
         """
         Get terminal shell session information.
         
+        Query params:
+            logs: Include log tails (default: false)
+            tail: Number of lines to include (default: 200)
+        
         Args:
             shell_id: Shell session ID
         
         Returns:
-            Shell metadata
+            Shell metadata with optional log tails
         """
         try:
-            info = get_shell_info(shell_id)
-            if info:
-                return jsonify({"ok": True, "data": info})
-            else:
+            mgr = _manager()
+            rec = mgr.get_shell(shell_id)
+            if not rec:
                 return jsonify({"ok": False, "error": "Shell not found"}), 404
+            
+            # Parse query params
+            include_logs = request.args.get('logs', 'false').lower() in {'1', 'true', 'yes'}
+            tail_lines = 200
+            try:
+                if request.args.get('tail'):
+                    tail_lines = max(0, int(request.args.get('tail')))
+            except ValueError:
+                pass
+            
+            info = mgr.describe(rec, include_logs=include_logs, tail_lines=tail_lines)
+            return jsonify({"ok": True, "data": info})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
     

@@ -119,17 +119,20 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: 300px;
+    height: 340px;
     background: var(--card, #0b0f1a);
     border-top: 2px solid var(--border, #333);
     transform: translateY(100%);
-    transition: transform 0.3s ease;
+    transition: transform 0.3s ease, height 0.3s ease;
     z-index: 100;
     display: flex;
     flex-direction: column;
   }
   .terminal-drawer.open {
     transform: translateY(0);
+  }
+  .terminal-drawer.fullscreen {
+    height: calc(100vh - 80px) !important;
   }
   .terminal-header {
     display: flex;
@@ -138,12 +141,15 @@
     padding: 6px 12px;
     border-bottom: 1px solid var(--border, #333);
     background: var(--bg, #0b0f1a);
+    cursor: ns-resize;
+    user-select: none;
   }
   .terminal-header span {
     flex: 1;
     font-weight: 600;
     font-size: 0.9rem;
     color: var(--foreground, #e5e7eb);
+    cursor: ns-resize;
   }
   .terminal-header button {
     background: transparent;
@@ -163,6 +169,21 @@
     min-height: 0;
     overflow: hidden;
     padding: 8px;
+    position: relative;
+  }
+  /* Custom scrollbar for xterm - solid and wide */
+  #terminal-container .xterm-viewport::-webkit-scrollbar {
+    width: 29px;
+  }
+  #terminal-container .xterm-viewport::-webkit-scrollbar-track {
+    background: var(--bg, #0b0f1a);
+  }
+  #terminal-container .xterm-viewport::-webkit-scrollbar-thumb {
+    background: var(--border, #333);
+    border-radius: 5px;
+  }
+  #terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground, #9ca3af);
   }
 </style>
 
@@ -251,6 +272,8 @@
   <div id="terminal-drawer" class="terminal-drawer">
     <div class="terminal-header">
       <span>Terminal</span>
+      <button id="terminal-fullscreen" title="Toggle fullscreen" aria-label="Fullscreen">⛶</button>
+      <button id="terminal-collapse" title="Collapse terminal" aria-label="Collapse">▼</button>
       <button id="terminal-close" title="Destroy terminal" aria-label="Close terminal">✕</button>
     </div>
     <div id="terminal-container"></div>

@@ -399,3 +399,25 @@ def remove_file_history():
         return jsonify({"ok": True, "data": {"removed": removed}})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+@file_editor_cm6_bp.get('/terminal/shell-id')
+def get_terminal_shell_id():
+    """Get the stored terminal shell ID."""
+    try:
+        shell_id = _history_store.get_terminal_shell_id()
+        return jsonify({"ok": True, "data": {"shell_id": shell_id}})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@file_editor_cm6_bp.post('/terminal/shell-id')
+def set_terminal_shell_id():
+    """Store the terminal shell ID."""
+    data = request.get_json(silent=True) or {}
+    shell_id = data.get('shell_id')
+    
+    try:
+        _history_store.set_terminal_shell_id(shell_id)
+        return jsonify({"ok": True, "data": {"shell_id": shell_id}})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": str(e)}), 500
