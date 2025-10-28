@@ -7,7 +7,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request
 from flask_sock import Sock
 
-from .core_read import init_watcher, subscribe, unsubscribe, push_save_ack
+from .core_read import init_watcher, subscribe, unsubscribe, push_save_ack, emit_diff_changed
 from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .history_store import HistoryStore
 from .explorer_helper import set_project_root, get_project_root, list_dir, mark_git_cache_dirty
@@ -175,6 +175,9 @@ def write_file_route():
 
         # Send save acknowledgement to prevent self-echo
         push_save_ack(str(rel_path), op_id, client_id, file_meta)
+
+        # Notify diff subscribers of change
+        emit_diff_changed(str(rel_path), file_meta["sha256"])
 
         # Refresh caches so explorer + diff stay accurate
         mark_git_cache_dirty(project_root)

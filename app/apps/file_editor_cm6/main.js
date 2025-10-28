@@ -570,6 +570,11 @@ function handleWSMessage(msg) {
       statusEl.textContent = 'Saved';
       setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
     }
+  } else if (type === 'diff_changed') {
+    if (diffController && showInlineDiffs && currentPath) {
+      diffController.invalidateCacheForPath(currentPath);
+      diffController.refresh(true);
+    }
   }
 }
 

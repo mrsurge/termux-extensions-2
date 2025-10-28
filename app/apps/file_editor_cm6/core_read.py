@@ -235,6 +235,12 @@ def _do_handle_fs_event(raw_event):
             "language": lang,
             "sha256": file_meta["sha256"]
         })
+        
+        _emit_event({
+            "type": "diff_changed",
+            "path": path,
+            "sha256": file_meta["sha256"]
+        })
     except (FileNotFoundError, IsADirectoryError):
         pass # File might have been deleted
 
@@ -355,4 +361,13 @@ def push_git_status(status: dict) -> None:
         "type": "git_status",
         "path": "git_status", # Dummy path
         **status
+    })
+
+def emit_diff_changed(path: str, sha256: str) -> None:
+    """Notifies subscribers that diff state may have changed for a file."""
+    norm = _norm_path(path)
+    _emit_event({
+        "type": "diff_changed",
+        "path": norm,
+        "sha256": sha256
     })
