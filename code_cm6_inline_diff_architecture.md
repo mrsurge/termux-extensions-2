@@ -1,6 +1,10 @@
-# code_cm6 Inline Diff Pipeline (status: 27 Oct 2025)
+# code_cm6 Inline Diff Pipeline (status: 28 Oct 2025)
 
-This note documents the current inline git diff implementation powering the `app/apps/file_editor_cm6` CodeMirror 6 editor. Paths and line numbers reference the working tree as of 27 Oct 2025.
+> **NOTE**: This document contains historical implementation details. For the latest complete technical documentation, see [CODE_CM6_DOCUMENTATION.md](CODE_CM6_DOCUMENTATION.md).
+
+This note documents the inline git diff implementation powering the `app/apps/file_editor_cm6` CodeMirror 6 editor. Paths and line numbers reference the working tree as of 28 Oct 2025.
+
+**Update (Oct 28, 2025)**: Diffs now refresh in real-time via WebSocket `diff_changed` events. The polling cycle has been eliminated.
 
 ---
 

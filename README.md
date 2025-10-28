@@ -10,6 +10,35 @@ While this framework can assist users unfamiliar with shell scripting, its prima
 
 This project aims to break through that plateau by creating a fluid, intuitive, and **touch-friendly interface** for navigating and controlling the Termux multitasking environment. It draws inspiration from the philosophy of frameworks like *Oh My Zsh* and *Oh My Fish*—which enhance the shell experience with smart helpers and plugins—and adapts that spirit to a graphical, touch-centric paradigm.
 
+## Architecture Overview
+
+### WebSocket Infrastructure
+
+The framework uses a unified WebSocket proxy architecture for real-time communication:
+
+- **Main App Proxy**: All WebSocket connections to app workers are routed through the main application at paths matching `/ws/app/<app_name>/*`
+- **Worker Discovery**: Workers expose their port via the `X-App-Worker-Port` response header, allowing clients to dynamically discover backend URLs
+- **Bidirectional Proxying**: The main app establishes WebSocket connections to workers and forwards traffic in both directions using `simple-websocket` client connections
+- **Session Isolation**: Each app worker runs in its own process with dedicated WebSocket routes registered via `flask-sock`
+
+### On-Demand App Workers
+
+Application backends are launched on-demand in isolated framework shell processes:
+
+- **Resource Efficiency**: Workers only run when their app is active, minimizing memory and CPU usage
+- **Process Isolation**: Each worker has its own Python interpreter, preventing conflicts and enabling clean restarts
+- **Automatic Lifecycle**: The supervisor tracks worker health, cleans up orphaned processes, and handles graceful shutdowns
+- **Port Management**: Workers bind to dynamic ports assigned by the framework, with the main app maintaining a registry
+
+### Framework Shells
+
+Long-running background processes are managed via the framework shells subsystem:
+
+- **PTY Support**: Interactive shells use pseudo-terminals for full terminal emulation with ANSI escape codes
+- **Log Persistence**: stdout/stderr are captured to `~/.cache/te_framework/logs/` and survive restarts
+- **Health Monitoring**: The `/api/framework/runtime/metrics` endpoint aggregates CPU, memory, and process stats
+- **Automatic Cleanup**: The supervisor terminates all framework shells on shutdown, preventing orphaned processes
+
 ## Quick Start
 
 The framework now ships with a bootstrap helper tailored for Termux devices. On a fresh Termux install you can get up and running with:
@@ -110,6 +139,7 @@ Notes:
 ## Key Features
 
 *   **On-Demand App Backends:** Application backends are launched in their own isolated processes on-demand, ensuring efficient resource usage and stability.
+*   **WebSocket Proxy Architecture:** Unified WebSocket routing through the main app enables seamless real-time communication with worker processes.
 *   **Web-Based UI:** A clean, modern interface accessible from any local browser.
 *   **Session Management:** The Sessions & Shortcuts extension controls active shells, launches shortcuts (now with the universal picker), and renames or kills sessions without leaving the UI.
 *   **Background Framework Shells:** Long-running jobs (aria2, distro helpers, etc.) are tracked with health checks, log tails, a cleanup action, and inline debug consoles.
@@ -119,9 +149,18 @@ Notes:
 *   **Embedded Terminal App:** A full-page app built atop framework shells offers multi-terminal management with xterm.js, WebSocket streaming, and soft-key controls directly in the browser.
 *   **Easy Installation:** Designed to be installed as a standard Debian package via `apt`.
 
-## Code OSS App
+## Code CM6 App
 
-One of the bundled apps wraps `code-server` in a mobile-friendly façade. The app keeps a single code-server instance alive, mirrors its explorer tree into a lightweight CM6 viewer, and persists editor/UI preferences on disk so behaviour is identical across browsers. For a detailed technical breakdown, see [`CODE_OSS_APP_README.md`](CODE_OSS_APP_README.md).
+One of the bundled apps is a full-featured CodeMirror 6 editor (`file_editor_cm6`) that provides a native-feeling code editing experience optimized for mobile devices. Key features include:
+
+- **Real-time file change notifications** via WebSocket (`/ws/app/file_editor_cm6/read`)
+- **Live inline Git diffs** with automatic refresh triggered by saves and external changes
+- **Embedded terminal drawer** with session persistence, history replay, and PTY streaming
+- **Android-native selection mode** with long-press detection and contenteditable overlay
+- **Project-based file management** with explorer drawer and recent files tracking
+- **Disk-backed preferences** for themes, view options, and editor settings
+
+For detailed technical documentation, see [`README_code_cm6.md`](README_code_cm6.md).
 
 ## Persistent State Store
 
