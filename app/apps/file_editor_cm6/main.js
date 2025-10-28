@@ -5,6 +5,7 @@
 import * as CM from '/static/vendor/codemirror.1/codemirror.bundle.js';
 import { initExplorerUI } from './static/js/explorer.js';
 import { createDiffController } from './static/js/diff_decorations.js';
+import { createTerminalDrawer } from './static/js/terminal.js';
 
 // Core
 const EditorState = CM.EditorState;
@@ -329,7 +330,6 @@ function setText(t) { createView(t); }
 function markUnsaved(flag) {
   unsaved = !!flag;
   fileNameEl.classList.toggle('fe-unsaved', unsaved);
-  statusEl.textContent = unsaved ? 'Unsaved changes' : '';
 }
 
 // ---------- API helpers ----------
@@ -977,6 +977,24 @@ bindMenuToggle(miToggleDiffs, () => {
   }
   persistEditorPreferences({ showInlineDiffs });
 });
+
+// Initialize terminal drawer
+const terminal = createTerminalDrawer({
+  onReady: () => console.log('Terminal drawer ready'),
+  getCurrentProjectPath: () => {
+    if (!currentPath) return null;
+    // Extract directory from file path
+    const lastSlash = currentPath.lastIndexOf('/');
+    return lastSlash > 0 ? currentPath.substring(0, lastSlash) : null;
+  },
+});
+
+// Bind terminal toggle menu item
+const miToggleTerminal = requireEl('#mi-toggle-terminal');
+bindMenuToggle(miToggleTerminal, () => {
+  terminal.toggle();
+});
+
 bindMenuToggle(miFind, () => { if (view && openSearchPanel) openSearchPanel(view); });
 bindMenuToggle(miGoto, () => { const input = window.prompt('Go to line'); const line = Number.parseInt(input || '', 10); if (!Number.isNaN(line)) { const ln = Math.max(1, line); const pos = view.state.doc.line(ln).from; view.dispatch({ selection:{anchor:pos}, scrollIntoView:true }); view.focus(); } });
 
@@ -1006,6 +1024,12 @@ function reobserve() {
 document.addEventListener('keydown', (e) => {
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
   const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+  // Ctrl/Cmd+`: Toggle Terminal
+  if (cmdOrCtrl && e.key === '`') {
+    e.preventDefault();
+    terminal.toggle();
+  }
 
   // Ctrl/Cmd+S: Save
   if (cmdOrCtrl && e.key === 's') {

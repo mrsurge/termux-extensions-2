@@ -27,6 +27,7 @@ from app.libs.bookmarks import bookmarks_bp
 from app.libs.app_manager import ensure_app_running
 from app.libs.app_lifecycle import start_background_tasks
 from flask_sock import Sock
+from simple_websocket import Client as WSClient, ConnectionClosed
 
 app = Flask(__name__)
 app.register_blueprint(framework_shells_bp)
@@ -681,9 +682,6 @@ def _before_request_init():
 
 @app.route('/api/app/<app_id>/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
 def proxy_app_request(app_id, subpath):
-    # If it's a WebSocket handshake, don't proxy it—just end here.
-    if request.headers.get("Upgrade", "").lower() == "websocket":
-        return "", 404
     try:
         app_info = ensure_app_running(app_id)
     except (ValueError, RuntimeError) as e:
@@ -725,6 +723,96 @@ def proxy_app_request(app_id, subpath):
         return resp_stream
     except requests.exceptions.RequestException as e:
         return jsonify({"ok": False, "error": f"Failed to connect to app worker: {e}"}), 502
+
+@sock.route('/ws/app/<app_id>/<path:subpath>')
+def proxy_app_websocket(client_ws, app_id, subpath):
+    """
+    Generic WebSocket proxy for app workers.
+    Forwards WebSocket connections from clients to the appropriate worker process.
+    
+    Convention: All worker WebSockets must use /ws/<route> pattern.
+    Client connects to: /ws/app/<app_id>/<route>
+    Proxied to worker: /ws/<route>
+    """
+    try:
+        app_info = ensure_app_running(app_id)
+    except (ValueError, RuntimeError) as e:
+        try:
+            client_ws.close()
+        except:
+            pass
+        return
+
+    if not app_info or not app_info.get('port'):
+        try:
+            client_ws.close()
+        except:
+            pass
+        return
+
+    port = app_info['port']
+    
+    # Build worker WebSocket URL following /ws/<route> convention
+    query_string = request.query_string.decode('utf-8')
+    worker_url = f"ws://127.0.0.1:{port}/ws/{subpath}"
+    if query_string:
+        worker_url += f"?{query_string}"
+
+    # Connect to worker WebSocket
+    worker_ws = None
+    try:
+        worker_ws = WSClient.connect(worker_url)
+    except Exception as e:
+        try:
+            client_ws.close()
+        except:
+            pass
+        return
+
+    # Bidirectional message forwarding
+    def forward_client_to_worker():
+        """Forward messages from client to worker"""
+        try:
+            while True:
+                msg = client_ws.receive()
+                if msg is None:
+                    break
+                worker_ws.send(msg)
+        except ConnectionClosed:
+            pass
+        finally:
+            try:
+                worker_ws.close()
+            except:
+                pass
+
+    def forward_worker_to_client():
+        """Forward messages from worker to client"""
+        try:
+            while True:
+                msg = worker_ws.receive()
+                if msg is None:
+                    break
+                client_ws.send(msg)
+        except ConnectionClosed:
+            pass
+        finally:
+            try:
+                client_ws.close()
+            except:
+                pass
+
+    # Start bidirectional forwarding in threads
+    import threading
+    client_thread = threading.Thread(target=forward_client_to_worker, daemon=True)
+    worker_thread = threading.Thread(target=forward_worker_to_client, daemon=True)
+    
+    client_thread.start()
+    worker_thread.start()
+    
+    # Wait for both threads to complete
+    client_thread.join()
+    worker_thread.join()
 
 if __name__ == '__main__':
     print("--- Loading Services ---")

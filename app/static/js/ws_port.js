@@ -11,9 +11,10 @@
 
   async function buildWsUrl(appId, path, clientId) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const port  = await getWsPort(appId);
+    // Use proxied WebSocket route through main app instead of direct worker connection
+    // This works for both local and remote clients
     return (
-      `${proto}//${location.hostname}:${port}/ws/read` +
+      `${proto}//${location.host}/ws/app/${encodeURIComponent(appId)}/read` +
       `?path=${encodeURIComponent(path)}` +
       `&client_id=${encodeURIComponent(clientId)}`
     );

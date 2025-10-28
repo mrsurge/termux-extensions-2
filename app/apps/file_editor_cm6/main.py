@@ -13,9 +13,13 @@ from .history_store import HistoryStore
 from .explorer_helper import set_project_root, get_project_root, list_dir, mark_git_cache_dirty
 from .diff_helper import collect_diff, invalidate_diff_cache
 from .preferences_store import PreferencesStore
+from .terminal_backend import register_terminal_routes
 
 file_editor_cm6_bp = Blueprint('file_editor_cm6', __name__)
 sock = Sock()
+
+# Register terminal routes and WebSocket handler
+register_terminal_routes(file_editor_cm6_bp, sock)
 
 # Initialize history store (project root managed by explorer_helper)
 _history_store = HistoryStore()

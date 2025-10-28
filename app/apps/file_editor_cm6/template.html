@@ -39,6 +39,7 @@
   .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
   .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 15; }
   .fe-dropdown.show { display: block; }
+  #recent-files-dd { left: auto; right: 0; }
   .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; cursor: pointer; font-size: 0.9rem; align-items: center; }
   .fe-dd-item[data-checkable="true"] { position: relative; padding-left: 32px; }
   .fe-dd-item[data-checkable="true"]::before { content: ''; position: absolute; left: 12px; width: 1em; text-align: center; color: var(--primary, #3b82f6); }
@@ -111,6 +112,58 @@
   .cm-widgetBuffer + .cm-diff-line-removed {
     height: 0 !important;
   }
+
+  /* Terminal drawer styles */
+  .terminal-drawer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 300px;
+    background: var(--card, #0b0f1a);
+    border-top: 2px solid var(--border, #333);
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+  }
+  .terminal-drawer.open {
+    transform: translateY(0);
+  }
+  .terminal-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border, #333);
+    background: var(--bg, #0b0f1a);
+  }
+  .terminal-header span {
+    flex: 1;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--foreground, #e5e7eb);
+  }
+  .terminal-header button {
+    background: transparent;
+    border: none;
+    color: var(--muted-foreground, #9ca3af);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 1rem;
+  }
+  .terminal-header button:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--foreground, #e5e7eb);
+  }
+  #terminal-container {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 8px;
+  }
 </style>
 
 <div class="fe-root">
@@ -137,7 +190,7 @@
       <button id="recent-files-btn" class="fe-btn" style="margin: 0;" disabled>Recent Files ▾</button>
       <div id="recent-files-dd" class="fe-dropdown"></div>
     </div>
-    <span id="fe-status" class="fe-status"></span>
+    <span id="fe-status" class="fe-status" style="display: none;"></span>
   </div>
 
   <div class="fe-menubar">
@@ -172,6 +225,7 @@
         <div class="fe-dd-item" id="mi-toggle-wrap" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Word Wrap</span></div>
         <div class="fe-dd-item" id="mi-toggle-autosave" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Save</span></div>
         <div class="fe-dd-item" id="mi-toggle-diffs" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Show Inline Diffs</span></div>
+        <div class="fe-dd-item" id="mi-toggle-terminal"><span>Toggle Terminal</span><span class="fe-kbd">Ctrl/Cmd+`</span></div>
         <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
         <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
       </div>
@@ -191,6 +245,15 @@
     <div id="select-surface" contenteditable="true" spellcheck="false"></div>
     <button id="select-exit" class="fe-btn">Exit select mode</button>
     <div id="select-tip">Long-press to select. Tap “Exit select mode” to return.</div>
+  </div>
+
+  <!-- Terminal Drawer -->
+  <div id="terminal-drawer" class="terminal-drawer">
+    <div class="terminal-header">
+      <span>Terminal</span>
+      <button id="terminal-close" title="Destroy terminal" aria-label="Close terminal">✕</button>
+    </div>
+    <div id="terminal-container"></div>
   </div>
 
   <div id="fe-confirm" class="fe-modal" aria-hidden="true">
