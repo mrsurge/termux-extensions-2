@@ -62,8 +62,6 @@ export default function initTerminalApp(root, api, host) {
     const ws = state.ws;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(seq);
-    } else if (state.activeId) {
-      api.post(`shells/${state.activeId}/input`, { data: seq, newline: false }).catch(() => {});
     }
   }
 
@@ -111,7 +109,7 @@ export default function initTerminalApp(root, api, host) {
 
   function wsUrlFor(id) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${location.host}/api/app/terminal/ws/${id}`;
+    return `${proto}//${location.host}/ws/app/terminal/terminal/${id}`;
   }
 
   function disposeSession() {
@@ -212,8 +210,8 @@ export default function initTerminalApp(root, api, host) {
     try {
       const detail = await api.get(`shells/${id}?logs=true&tail=${INITIAL_TAIL}`);
       if (detail && detail.logs && Array.isArray(detail.logs.stdout_tail)) {
-        const priming = detail.logs.stdout_tail.join('\n');
-        if (priming) term.write(priming + '\n');
+        const priming = detail.logs.stdout_tail.join('');
+        if (priming) term.write(priming);
       }
     } catch (_) {}
 
@@ -248,8 +246,6 @@ export default function initTerminalApp(root, api, host) {
       }
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(payload);
-      } else if (state.activeId) {
-        api.post(`shells/${state.activeId}/input`, { data: payload, newline: false }).catch(() => {});
       }
     });
 

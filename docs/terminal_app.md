@@ -28,10 +28,11 @@ All responses use the `{ "ok": true|false, ... }` envelope.
 | `DELETE /api/app/terminal/shells/<id>` | Remove the shell, forcing termination and deleting logs/metadata. |
 
 ### WebSocket
-`register_ws_routes(app)` wires `/api/app/terminal/ws/<id>` using the global `Sock`
-instance. The route:
-1. Subscribes to PTY output (`manager.subscribe_output`), streaming chunks to the
-   browser until disconnect.
+A module-level `Sock` exposes `/ws/terminal/<id>` inside the worker. Browsers
+connect through the main proxy at `/ws/app/terminal/terminal/<id>`, which forwards
+traffic to the worker route. The handler:
+1. Subscribes to PTY output (`manager.subscribe_output`) and streams chunks until
+   the socket closes.
 2. Relays incoming WebSocket messages back to the PTY input.
 3. Cleans up subscriptions/threads when the socket closes.
 
@@ -48,9 +49,6 @@ instance. The route:
 - **Log Priming**: When a shell is selected the frontend requests
   `GET /shells/<id>?logs=true&tail=2000` to pre-fill the terminal with recent output
   so context survives reloads.
-- **Fallback Input Path**: If the WebSocket isn’t ready, `POST /shells/<id>/input`
-  is used as a backup channel.
-
 ## Template Highlights (`template.html`)
 - Defines a responsive layout with a list drawer and terminal pane.
 - Includes buttons for spawning, refreshing, and shell actions.

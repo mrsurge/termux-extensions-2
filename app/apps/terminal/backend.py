@@ -7,11 +7,13 @@ import shutil
 from typing import Any
 
 from flask import Blueprint, jsonify, request
+from flask_sock import Sock
 
 # Reuse the core framework shells manager/config
 from app.libs.framework_shells import _manager
 
 bp = Blueprint("terminal_app", __name__)
+sock = Sock()
 
 
 def mgr():
@@ -25,7 +27,7 @@ def _default_shell_command() -> list[str]:
     return ["sh", "-i"]
 
 
-@bp.route("/shells", methods=["GET"]) 
+@bp.route("/shells", methods=["GET"])
 def list_shells() -> Any:
     """List framework shells created by this app (label == 'terminal-app')."""
     m = mgr()
@@ -33,7 +35,7 @@ def list_shells() -> Any:
     return jsonify({"ok": True, "data": records})
 
 
-@bp.route("/shells", methods=["POST"]) 
+@bp.route("/shells", methods=["POST"])
 def create_shell() -> Any:
     """Spawn a new PTY-backed interactive shell as a framework shell.
 
@@ -57,7 +59,7 @@ def create_shell() -> Any:
     return jsonify({"ok": True, "data": data}), 201
 
 
-@bp.route("/shells/<shell_id>", methods=["GET"]) 
+@bp.route("/shells/<shell_id>", methods=["GET"])
 def get_shell(shell_id: str) -> Any:
     m = mgr()
     rec = m.get_shell(shell_id)
@@ -74,7 +76,7 @@ def get_shell(shell_id: str) -> Any:
     return jsonify({"ok": True, "data": data})
 
 
-@bp.route("/shells/<shell_id>/input", methods=["POST"]) 
+@bp.route("/shells/<shell_id>/input", methods=["POST"])
 def send_input(shell_id: str) -> Any:
     """Send input (string) to the PTY of a shell.
 
@@ -101,7 +103,7 @@ def send_input(shell_id: str) -> Any:
     return jsonify({"ok": True, "data": {"id": shell_id}})
 
 
-@bp.route("/shells/<shell_id>/resize", methods=["POST"]) 
+@bp.route("/shells/<shell_id>/resize", methods=["POST"])
 def resize_shell(shell_id: str) -> Any:
     payload = request.get_json(silent=True) or {}
     cols = int(payload.get("cols") or 80)
@@ -113,7 +115,7 @@ def resize_shell(shell_id: str) -> Any:
     return jsonify({"ok": True, "data": {"id": shell_id, "cols": cols, "rows": rows}})
 
 
-@bp.route("/shells/<shell_id>/action", methods=["POST"]) 
+@bp.route("/shells/<shell_id>/action", methods=["POST"])
 def shell_action(shell_id: str) -> Any:
     payload = request.get_json(silent=True) or {}
     action = str(payload.get("action") or "").lower()
@@ -134,7 +136,7 @@ def shell_action(shell_id: str) -> Any:
     return jsonify({"ok": True, "data": m.describe(record)})
 
 
-@bp.route("/shells/<shell_id>", methods=["DELETE"]) 
+@bp.route("/shells/<shell_id>", methods=["DELETE"])
 def delete_shell(shell_id: str) -> Any:
     m = mgr()
     try:
@@ -147,51 +149,50 @@ def delete_shell(shell_id: str) -> Any:
 
 
 # WebSocket wiring for streaming PTY output and receiving input
-# This registers with the app-level Sock instance exposed via app.config["SOCK"].
 
-def register_ws_routes(app):
-    sock = app.config.get("SOCK")
-    if not sock:
+
+@sock.route('/ws/terminal/<shell_id>')
+def terminal_ws(ws, shell_id: str):  # type: ignore[no-redef]
+    m = _manager()
+    try:
+        q = m.subscribe_output(shell_id)
+    except Exception:
+        try:
+            ws.close()
+        except Exception:
+            pass
         return
 
-    @sock.route("/api/app/terminal/ws/<shell_id>")
-    def terminal_ws(ws, shell_id: str):  # type: ignore[no-redef]
-        m = _manager()
-        try:
-            q = m.subscribe_output(shell_id)
-        except Exception:
-            ws.close()
-            return
-        stop = threading.Event()
+    stop = threading.Event()
 
-        def sender():
-            import queue as _q
-            while not stop.is_set():
-                try:
-                    chunk = q.get(timeout=0.5)
-                except _q.Empty:
-                    continue
-                try:
-                    ws.send(chunk)
-                except Exception:
-                    stop.set()
-                    break
-
-        t = threading.Thread(target=sender, daemon=True)
-        t.start()
-        try:
-            while not stop.is_set():
-                msg = ws.receive()
-                if msg is None:
-                    break
-                try:
-                    m.write_to_pty(shell_id, msg)
-                except Exception:
-                    pass
-        finally:
-            stop.set()
+    def sender():
+        import queue as _q
+        while not stop.is_set():
             try:
-                t.join(timeout=1.0)
+                chunk = q.get(timeout=0.5)
+            except _q.Empty:
+                continue
+            try:
+                ws.send(chunk)
+            except Exception:
+                stop.set()
+                break
+
+    t = threading.Thread(target=sender, daemon=True)
+    t.start()
+    try:
+        while not stop.is_set():
+            msg = ws.receive()
+            if msg is None:
+                break
+            try:
+                m.write_to_pty(shell_id, msg)
             except Exception:
                 pass
-            m.unsubscribe_output(shell_id, q)
+    finally:
+        stop.set()
+        try:
+            t.join(timeout=1.0)
+        except Exception:
+            pass
+        m.unsubscribe_output(shell_id, q)

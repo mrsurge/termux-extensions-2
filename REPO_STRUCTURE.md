@@ -1,80 +1,81 @@
 # Repository Structure
 
-This document provides an annotated view of the `termux-extensions-2` repository structure.
+This document outlines the layout of the `termux-extensions-2` repository with an emphasis on the current Code CM6 editor stack and supporting infrastructure.
 
 ```
 .
-├── AGENTS.md - Internal documentation for agent-based development.
-├── auto_save_implementation.md - Technical specification for the bi-directional editor sync feature.
-├── build/ - Build-related configuration files.
-│   └── config.gypi - Configuration for node-gyp builds.
-├── CODE_OSS_APP_README.md - Technical overview of the Code OSS application wrapper.
-├── CODE_OSS_APP_TODO.md - To-do list and feature planning for the Code-OSS app.
-├── docs/ - Design notes, specifications, and deep-dive documents.
-├── GEMINI.md - Context and operating instructions for the Gemini Code Assistant.
-├── node_modules/ - (Directory) Node.js dependencies for frontend tooling or extensions.
-├── README.md - Main project README with setup and usage instructions.
-├── requirements.txt - Python dependencies for the Flask backend.
-├── scripts/ - Shell scripts for bootstrapping, process management, and framework interaction.
-│   ├── bootstrap_termux.sh - Sets up a fresh Termux environment with all dependencies.
-│   ├── browse.sh - Utility script to open URLs.
-│   ├── get_system_stats.sh - Retrieves and displays system metrics.
-│   ├── init.sh - Sourced by `.bashrc` to register interactive shells with the framework.
-│   ├── list_path_execs.sh - Lists executables in the system PATH.
-│   ├── list_sessions.sh - Lists active framework shell sessions.
-│   ├── list_shortcuts.sh - Lists user-defined shortcuts.
-│   ├── manage_helper.sh - Helper script for various management tasks.
-│   ├── run_framework.sh - Main entrypoint script to start the framework supervisor.
-│   ├── run_in_session.sh - Executes a command within a specific framework shell.
-│   └── vendor_cm6.sh - Script to vendor CodeMirror 6 assets.
-├── temp/ - (Directory) Temporary file storage.
-├── TODO.md - General project-wide to-do list.
-├── wsgi.py - WSGI entrypoint for deploying the Flask app with Gunicorn.
-├── app/
-│   ├── __init__.py - Initializes the `app` package.
-│   ├── main.py - Main Flask application entrypoint; bootstraps and registers blueprints.
-│   ├── supervisor.py - Manages the lifecycle of the entire framework and its background services.
-│   ├── utils.py - General utility functions for the application.
-│   ├── apps/ - (Directory) Contains self-contained, full-page applications.
-│   │   ├── code_oss/ - The Code OSS editor application.
-│   │   │   ├── __init__.py - Initializes the `code_oss` app package.
-│   │   │   ├── backend.py - Flask blueprint; manages `code-server` lifecycle and the event bridge.
-│   │   │   ├── editor.py - Handles all file I/O operations (read, write) for the editor.
-│   │   │   ├── history_store.py - Manages recent project and file history on disk.
-│   │   │   ├── manifest.json - Describes the Code OSS app to the framework.
-│   │   │   ├── preferences_store.py - Manages editor and UI preferences on disk.
-│   │   │   ├── template.html - Main HTML template for the Code OSS app.
-│   │   │   ├── static/ - Static assets for the Code OSS app.
-│   │   │   │   ├── css/ - Stylesheets for the Code OSS app.
-│   │   │   │   ├── js/ - JavaScript for the Code OSS app.
-│   │   │   │   │   └── ide_fullpage.js - Core frontend logic for the CM6 editor, explorer, and event handling.
-│   │   │   │   └── vendor/ - (Directory) Vendored Monaco editor assets.
-│   │   │   └── bridge_extension/ - VS Code web extension that runs inside `code-server`.
-│   │   │       └── extension.js - Captures VS Code events and forwards them to the Flask backend.
-│   │   ├── terminal/ - A full-featured terminal application.
-│   │   │   ├── backend.py - Flask backend for the terminal app, likely handling PTY spawning.
-│   │   │   ├── main.js - Frontend JavaScript for the terminal UI (using xterm.js).
-│   │   │   └── manifest.json - Describes the Terminal app to the framework.
-│   │   └── ... (other applications like file_explorer, settings, etc.)
-│   ├── extensions/ - (Directory) Contains modular extensions that add functionality.
-│   │   ├── apps/ - An extension for managing other apps.
-│   │   ├── network_tools/ - Provides network diagnostic tools.
-│   │   ├── process_manager/ - UI for viewing and managing system processes.
-│   │   ├── sessions_and_shortcuts/ - Manages terminal sessions and user-defined shortcuts.
-│   │   └── system_stats/ - Displays real-time system statistics.
-│   ├── libs/ - (Directory) Shared Python libraries and services for the backend.
-│   │   ├── app_lifecycle.py - Manages the lifecycle of individual applications.
-│   │   ├── app_manager.py - Discovers and loads app modules.
-│   │   ├── framework_shells.py - Core logic for managing background shell processes.
-│   │   ├── jobs.py - A system for managing and reporting progress on background jobs.
-│   │   └── ... (other shared libraries)
-│   ├── static/ - (Directory) Global static assets for the main UI.
-│   │   ├── js/ - Shared JavaScript utilities.
-│   │   │   ├── file_picker.js - The universal file picker modal component.
-│   │   │   └── te_state.js - The client-side state-store helper.
-│   │   └── vendor/ - (Directory) Third-party frontend libraries (CodeMirror, xterm.js, etc.).
-│   └── templates/ - (Directory) Global Flask templates for the main application shell.
-│       ├── app_shell.html - The main single-page application shell.
-│       └── index.html - The main landing page.
-└── ...
+├── AGENTS.md                      # Operating instructions for agents working on the repo
+├── CHANGELOG_2025_10_28.md        # Latest release notes for the Code CM6 milestone
+├── CODE_CM6_DOCUMENTATION.md      # Complete technical reference for the Code CM6 app
+├── README.md                      # Project overview, setup, and architecture summary
+├── README_code_cm6.md             # Quick-start guide for the Code CM6 editor
+├── REPO_STRUCTURE.md              # (This file) Detailed repository map
+├── auto_save_implementation.md    # Spec for future bi-directional editor sync work
+├── code_cm6_inline_diff_architecture.md # Inline diff implementation deep dive
+├── code_cm6_todo.md               # Active backlog for the Code CM6 roadmap
+├── docs/                          # Global documentation (framework shell internals, state store, etc.)
+├── requirements.txt               # Python dependencies for Flask backend
+├── scripts/                       # Bootstrap and helper scripts for Termux integration
+│   ├── bootstrap_termux.sh        # One-step setup for fresh Termux installs
+│   ├── run_framework.sh           # Launches the supervisor entrypoint
+│   └── ...
+├── app/                           # Main Flask application package
+│   ├── main.py                    # Root Flask entrypoint + WebSocket proxy
+│   ├── supervisor.py              # Framework supervisor and lifecycle management
+│   ├── libs/                      # Shared Python libraries
+│   │   ├── framework_shells.py    # PTY shell lifecycle + log streaming helpers
+│   │   ├── app_manager.py         # Discovers apps and manages worker processes
+│   │   └── ...
+│   ├── extensions/                # Modular dashboard extensions
+│   │   ├── sessions_and_shortcuts/
+│   │   ├── system_stats/
+│   │   └── ...
+│   ├── apps/                      # Bundled full-page applications
+│   │   ├── file_editor_cm6/       # "Code CM6" editor (current flagship)
+│   │   │   ├── manifest.json      # Registers the app with the framework shell
+│   │   │   ├── main.py            # Flask blueprint + REST and WebSocket routes
+│   │   │   ├── core_read.py       # File watcher + WebSocket diff notifications
+│   │   │   ├── core_write.py      # Write handler with diff cache invalidation
+│   │   │   ├── diff_helper.py     # Git diff orchestration and caching
+│   │   │   ├── explorer_helper.py # File tree generation and metadata enrichment
+│   │   │   ├── history_store.py   # Disk-backed recent project/file history
+│   │   │   ├── preferences_store.py # Disk-backed editor/view preferences
+│   │   │   ├── terminal_shell.py  # Framework shell helpers for the embedded terminal
+│   │   │   ├── terminal_backend.py# Terminal REST + WebSocket adapter
+│   │   │   ├── template.html      # App HTML shell, drawers, and header layout
+│   │   │   └── static/
+│   │   │       └── js/
+│   │   │           ├── diff_decorations.js # CodeMirror 6 inline diff controller
+│   │   │           ├── explorer.js         # Explorer drawer UI + bridge handshake
+│   │   │           ├── explorer.css        # Drawer styling (exports as CSS string)
+│   │   │           └── terminal.js         # xterm.js lifecycle + shell persistence
+│   │   ├── terminal/             # Standalone terminal app (legacy but maintained)
+│   │   ├── file_editor/          # Legacy CM5 editor (kept for compatibility)
+│   │   ├── file_editor_monaco/   # Monaco-based editor (deprecated)
+│   │   ├── code_oss/             # Code OSS wrapper (deprecated; retained for reference)
+│   │   └── ...                   # Additional bundled apps (distro manager, etc.)
+│   └── templates/                # Global Flask templates for the SPA shell
+│       ├── app_shell.html
+│       └── index.html
+└── wsgi.py                       # WSGI entrypoint for Gunicorn deployments
 ```
+
+### Notes on Deprecated Apps
+
+- `app/apps/code_oss/` and `app/apps/file_editor_monaco/` remain in the tree for historical reference but are no longer the primary editor experience. New development targets `file_editor_cm6/`.
+- When trimming unused assets, ensure documentation and navigation (Apps extension) reflect any removals.
+
+### Key Documentation
+
+- `CODE_CM6_DOCUMENTATION.md` — Authoritative source for Code CM6 architecture, WebSocket proxying, diff pipeline, terminal drawer, and roadmap items.
+- `code_cm6_todo.md` — Live backlog with completion dates for shipped features.
+- `code_cm6_inline_diff_architecture.md` — Historical record of the diff pipeline (kept for reference).
+- `CHANGELOG_2025_10_28.md` — Latest milestone summary; use it when updating other docs.
+
+### Script Highlights
+
+- `scripts/bootstrap_termux.sh` — Installs system packages, Python deps, and shell hooks on a fresh Termux device.
+- `scripts/run_framework.sh` — Preferred entrypoint for the supervisor; generates `TE_RUN_ID` and manages cleanup.
+- `scripts/vendor_cm6.sh` — Vends CodeMirror 6 assets into `app/static/vendor`.
+
+Update this file whenever major directories move, new apps are added, or deprecated components are removed.
