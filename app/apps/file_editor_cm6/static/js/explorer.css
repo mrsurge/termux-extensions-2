@@ -3,7 +3,8 @@
 /* explorer.css - File Explorer Drawer Styles */
 
 :root {
-  --drawer-width: 75vw; /* New width: 75% of viewport width */
+  --drawer-width: 100vw; /* Change from 75vw to 100vw for full width
+*/
 }
 
 /* Drawer container - positioned off-screen by default */
@@ -15,7 +16,6 @@
   bottom: 0;
   background: var(--card);
   backdrop-filter: blur(12px);
-  border-right: 1px solid var(--border);
   transform: translateX(0); /* Initial transform */
   transition: transform 0.3s ease;
   z-index: 100;
@@ -232,26 +232,59 @@
   border-color: rgba(96, 165, 250, 0.6);
 }
 
-.fe-tree-node.fe-git-modified[data-kind="dir"] {
-  border-color: rgba(249, 115, 22, 0.6);
-}
+     /* Modified directories: orange border */
+     .fe-tree-node.fe-git-modified[data-kind="dir"] {
+       border-color: rgba(249, 115, 22, 0.8);  /* orange border */
+     }
 
-.fe-tree-node.fe-git-untracked[data-kind="dir"] {
-  border-color: rgba(52, 211, 153, 0.6);
-}
+     /* Untracked directories: blue background */
+     .fe-tree-node.fe-git-untracked[data-kind="dir"] {
+       background: rgba(59, 130, 246, 0.15);  /* blue background */
+       border-color: rgba(59, 130, 246, 0.4); /* optional: blue border too
+   */
+     }
 
-.fe-tree-node.fe-git-modified[data-kind="file"] {
-  background: rgba(249, 115, 22, 0.12);
-}
+     /* Modified files: orange background */
+     .fe-tree-node.fe-git-modified[data-kind="file"] {
+       background: rgba(249, 115, 22, 0.15);  /* orange background */
+     }
 
-.fe-tree-node.fe-git-untracked[data-kind="file"] {
-  background: rgba(52, 211, 153, 0.12);
-}
+     /* Untracked files: blue background */
+     .fe-tree-node.fe-git-untracked[data-kind="file"] {
+       background: rgba(59, 130, 246, 0.15);  /* blue background */
+     }
 
-.fe-tree-node.fe-git-modified[data-kind="file"]:hover {
-  background: rgba(249, 115, 22, 0.18);
-}
+     /* Hover states */
+     .fe-tree-node.fe-git-modified[data-kind="file"]:hover {
+       background: rgba(249, 115, 22, 0.22);
+     }
 
-.fe-tree-node.fe-git-untracked[data-kind="file"]:hover {
-  background: rgba(52, 211, 153, 0.18);
-}
+     .fe-tree-node.fe-git-untracked[data-kind="file"]:hover {
+       background: rgba(59, 130, 246, 0.22);
+     }
+
+     .fe-git-badge {
+       display: inline-flex;
+       align-items: center;
+       justify-content: center;
+       width: 1.3em;
+       height: 1.3em;
+       margin-left: 6px;
+       font-size: 0.75em;
+       font-weight: 300;           /* Thin weight */
+       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+   Helvetica, Arial, sans-serif;  /* Thin sans-serif */
+       border-radius: 50%;         /* Makes it circular */
+       line-height: 1;
+       background: transparent;    /* No background fill */
+     }
+
+     .fe-git-badge-modified {
+       border: 1.5px solid #c2410c;  /* Dark orange thin border */
+       color: #ea580c;               /* Orange-ish letter */
+     }
+
+     .fe-git-badge-untracked {
+       border: 1.5px solid #1e40af;  /* Dark blue thin border */
+       color: #2563eb;               /* Blue-ish letter */
+     }

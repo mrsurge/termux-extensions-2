@@ -460,7 +460,22 @@ function applyEntryStyling(labelEl, entry) {
   if (entry.isSymlink) {
     labelEl.classList.add('fe-entry-symlink');
   }
-}
+
+       // ADD THIS SECTION for badges on files only
+       if (entry.kind === 'file' && entry.gitStatus) {
+         if (entry.gitStatus === 'modified') {
+           const badge = document.createElement('span');
+           badge.className = 'fe-git-badge fe-git-badge-modified';
+           badge.textContent = 'M';
+           labelEl.appendChild(badge);
+         } else if (entry.gitStatus === 'untracked') {
+           const badge = document.createElement('span');
+           badge.className = 'fe-git-badge fe-git-badge-untracked';
+           badge.textContent = 'U';
+           labelEl.appendChild(badge);
+         }
+       }
+     }
 
 // These functions will be provided by main.js
 function openFile(absPath) {
