@@ -56,7 +56,7 @@ Several in-depth references live in `docs/`:
 - `framework_shells.md` describes the lifecycle management API and metrics published by the supervisor.
 - `state_store.md` explains the persistent browser-side storage exposed through `/api/state`.
 - `shared_file_picker.md` outlines the universal picker component reused across apps and extensions.
-- `terminal_app.md` and `distro_design.md` cover the architecture of major bundled apps.
+- `docs/apps/terminal/terminal_app.md` and `docs/planning/distro_design.md` cover the architecture of major bundled apps.
 - `termux_lm_setup_termux.md` steps through the Termux bootstrap script invoked by `scripts/bootstrap_termux.sh`.
 
 These documents are invaluable when extending the framework or debugging the runtime.

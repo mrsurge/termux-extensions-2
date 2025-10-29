@@ -51,7 +51,7 @@ cd termux-extensions-2
 ./scripts/bootstrap_termux.sh
 ```
 
-The script (see [`docs/termux_lm_setup_termux.md`](docs/termux_lm_setup_termux.md)) checks that you are running `bash`, installs required Termux packages (including `llama-cpp`), installs Python requirements, ensures `scripts/init.sh` is sourced from `~/.bashrc`, and links a `start-te` helper into `~/bin/`.
+The script (see [`docs/apps/termux_lm/termux_lm_setup_termux.md`](docs/apps/termux_lm/termux_lm_setup_termux.md)) checks that you are running `bash`, installs required Termux packages (including `llama-cpp`), installs Python requirements, ensures `scripts/init.sh` is sourced from `~/.bashrc`, and links a `start-te` helper into `~/bin/`.
 
 After the bootstrap completes, open a new shell (so `.bashrc` reloads) and launch the supervisor:
 
@@ -166,5 +166,5 @@ For detailed technical documentation, see [`README_code_cm6.md`](README_code_cm6
 
 Front-end settings that need to survive browser reloads (framework tokens, custom
 session names, picker preferences, etc.) use the shared `/api/state` endpoints via
-`window.teState`. See [`docs/state_store.md`](docs/state_store.md) for details on the
+`window.teState`. See [`docs/core/state_store.md`](docs/core/state_store.md) for details on the
 available helper methods and storage format.

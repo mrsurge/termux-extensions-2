@@ -86,4 +86,4 @@ pkg install llama-cpp-backend-opencl
 Run `llama-server --help` to verify installation, then point Termux-LM to your GGUF model.
 
 ---
-Keep this file alongside `docs/termux_lm_overview.md` for quick pointers while developing.
+Keep this file alongside `./termux_lm_overview.md` for quick pointers while developing.

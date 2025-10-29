@@ -36,7 +36,7 @@ block populates the framework shell before invoking container commands.
 
 ## 2. State Machine
 
-Containers move through the states outlined in `docs/distro_states.md`:
+Containers move through the states outlined in `./distro_states.md`:
 
 Offline ↔ Mounted ↔ Running (with transient Starting/Stopping and an Error state).
 

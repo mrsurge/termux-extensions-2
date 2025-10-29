@@ -82,9 +82,9 @@ Extensions leverage these helpers rather than executing arbitrary shell commands
 In addition, frontend components rely on two shared utilities:
 
 - **`window.teFilePicker`** — the universal picker modal described in
-  `docs/shared_file_picker.md`.
+  `docs/core/shared_file_picker.md`.
 - **`window.teState`** — the state-store helper described in
-  `docs/state_store.md`.
+  `docs/core/state_store.md`.
 
 These tools keep UX and persistence consistent across the platform.
 
