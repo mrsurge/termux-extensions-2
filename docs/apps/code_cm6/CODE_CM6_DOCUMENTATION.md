@@ -1,6 +1,6 @@
 # Code CM6 — Complete Technical Documentation
 
-**Last updated**: October 28, 2025
+**Last updated**: October 29, 2025
 
 ---
 
@@ -31,6 +31,7 @@ The `file_editor_cm6` app is a full-featured CodeMirror 6 editor bundled with Te
 - **Real-time**: WebSocket-driven file changes, diff updates, and terminal streaming
 - **Persistent**: Disk-backed project state, terminal session recovery, preference storage
 - **Isolated**: Runs in its own framework worker process for stability
+- **Git-aware**: Built-in branch controls, footer staging/commit/push helpers, and backend Git status APIs
 
 ---
 
@@ -194,10 +195,11 @@ tear down watcher, restart with new root
 
 ### Git Integration
 - ✅ Inline diff decorations (additions/deletions)
-- ✅ Git status in file explorer (modified/untracked/staged)
-- ✅ Executable file detection
-- ✅ Zero-context diff parsing
-- ✅ 5-second result caching
+- ✅ Git badges in the explorer tree (modified / staged / untracked / executable)
+- ✅ Branch dropdown in the menubar (lists current branch, checkout existing, create new)
+- ✅ Explorer footer with Stage/Unstage/Commit/Push/Pull actions and live status summary
+- ✅ Backend Git API (`/git/status`, `/git/stage_all`, `/git/unstage_all`, `/git/commit`, `/git/push`, `/git/pull`) powered by `git_helper.py`
+- ✅ Zero-context diff parsing with 5-second caching to keep inline decorations fresh
 
 ### Project Management
 - ✅ Project root selection via file picker
@@ -234,6 +236,7 @@ tear down watcher, restart with new root
 - Initializes `flask-sock` for WebSocket support
 - Syncs project root from history store on boot
 - Orchestrates file I/O, diff generation, terminal management
+- Exposes Git REST API (`/git/status`, `/git/stage_all`, `/git/unstage_all`, `/git/commit`, `/git/push`, `/git/pull`)
 - Emits WebSocket events via `core_read` and `core_write`
 
 **Key Functions**:
@@ -302,6 +305,23 @@ tear down watcher, restart with new root
     "summary": {"added": 3, "removed": 3}
 }
 ```
+
+### `git_helper.py` — Git Command Toolkit
+**Location**: `app/apps/file_editor_cm6/git_helper.py`
+
+**Responsibilities**:
+- Validates repositories (including brand-new repos without commits)
+- Lists, creates, and checks out branches
+- Produces status snapshots (branch, ahead/behind, staged/unstaged/untracked)
+- Implements stage/unstage/commit/push/pull helpers consumed by REST endpoints
+
+**Key Functions**:
+- `list_branches(project_root)` → `GitBranches`
+- `get_status(project_root)` → `GitStatus`
+- `stage_all(...)`, `unstage_all(...)` (falls back to `git rm --cached` when no commits exist)
+- `commit_changes(...)`, `push_changes(...)`, `pull_changes(...)`
+
+**Consumers**: Git REST endpoints in `main.py` and the explorer footer UI.
 
 ### `history_store.py` — State Persistence
 **Location**: `app/apps/file_editor_cm6/history_store.py`
@@ -551,6 +571,7 @@ term.write(lines.join(''));  // Lines already have terminators
 - Manages recent files list
 - Handles file/folder selection
 - Displays missing file indicators
+- Hosts the Git footer (Stage/Unstage/Commit/Push/Pull controls) and keeps the summary in sync with backend status
 
 **Git Status Indicators**:
 - Modified: Yellow/orange tint
@@ -563,6 +584,15 @@ term.write(lines.join(''));  // Lines already have terminators
 - Shows `(missing)` for deleted files
 - Click to open (if exists) or show error
 - Remove button to clean up list
+
+### `git_menu.js` — Branch Menu Controller
+**Location**: `app/apps/file_editor_cm6/static/js/git_menu.js`
+
+**Responsibilities**:
+- Fetches `/git/branches` to populate the branch dropdown
+- Calls `/git/checkout` and `/git/branch` to switch or create branches
+- Updates the menubar label to reflect the active branch
+- Emits toasts on success/failure; defers all heavy lifting to the backend
 
 ---
 
@@ -588,6 +618,20 @@ term.write(lines.join(''));  // Lines already have terminators
 | `GET` | `/api/app/file_editor_cm6/explorer/list?dir=<rel>` | Lists directory contents |
 | `GET` | `/api/app/file_editor_cm6/history/files` | Gets recent files for project |
 | `DELETE` | `/api/app/file_editor_cm6/history/file?path=<abs>` | Removes file from recents |
+
+### Git Operations
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/app/file_editor_cm6/git/branches` | Lists branches and current HEAD |
+| `POST` | `/api/app/file_editor_cm6/git/branch` | Creates and checks out a new branch |
+| `POST` | `/api/app/file_editor_cm6/git/checkout` | Checks out an existing branch |
+| `GET` | `/api/app/file_editor_cm6/git/status` | Returns git summary (ahead/behind/staged/etc.) |
+| `POST` | `/api/app/file_editor_cm6/git/stage_all` | Stages all tracked/untracked changes |
+| `POST` | `/api/app/file_editor_cm6/git/unstage_all` | Clears the index (falls back to `git rm --cached` when no commits) |
+| `POST` | `/api/app/file_editor_cm6/git/commit` | Commits staged changes (`{message, amend?}`) |
+| `POST` | `/api/app/file_editor_cm6/git/push` | Pushes to remote (optional `{remote, branch, force}`) |
+| `POST` | `/api/app/file_editor_cm6/git/pull` | Pulls from remote (optional `{remote, branch, rebase}`) |
 
 ### Terminal Operations
 
@@ -825,6 +869,13 @@ Removes from registry
 - Implemented WebSocket proxy architecture in main app
 - Added orphaned shell cleanup on terminal drawer open
 - Updated framework_shells to use `splitlines(keepends=True)`
+
+### October 29, 2025
+- Added menubar branch dropdown backed by `/git/branches`, `/git/checkout`, `/git/branch`
+- Implemented explorer Git footer with Stage/Unstage/Commit/Push/Pull controls
+- Expanded `git_helper.py` with status/stage/commit/push/pull helpers that work on fresh repos
+- Introduced Git REST API surface (`/git/status`, `/git/stage_all`, `/git/unstage_all`, `/git/commit`, `/git/push`, `/git/pull`)
+- Updated documentation & TODO checklist to reflect Git bootstrap progress
 
 ### October 27, 2025
 - Fixed diff decoration Python indentation alignment

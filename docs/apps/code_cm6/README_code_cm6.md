@@ -13,6 +13,7 @@ The `file_editor_cm6` app is a full-featured CodeMirror 6 editor optimized for m
 - **Real-time file change notifications** via WebSocket
 - **Live inline Git diffs** with instant updates on save/external changes
 - **Embedded terminal drawer** with session persistence and history replay
+- **Branch dropdown + Git footer** for Stage/Unstage/Commit/Push/Pull directly in the explorer
 - **Android-native selection mode** with long-press detection
 - **Project-based file management** with explorer drawer
 - **Disk-backed preferences** for themes and editor settings
@@ -37,7 +38,15 @@ file_editor_cm6 Worker
 - [Inline Diff Architecture](code_cm6_inline_diff_architecture.md)
 - [Changelog (Oct 28, 2025)](CHANGELOG_2025_10_28.md)
 
-### Recent Updates (October 28, 2025)
+### Recent Updates
+
+**October 29, 2025**
+
+- ✅ Added menubar branch dropdown (list, checkout, create)
+- ✅ Added explorer footer with Stage/Unstage/Commit/Push/Pull buttons and live status summary
+- ✅ Expanded `git_helper.py` + REST API to support new Git UI workflows
+
+**October 28, 2025**
 
 - ✅ Real-time inline diffs via WebSocket `diff_changed` events
 - ✅ Embedded terminal with PTY streaming and 2000-line history replay
@@ -47,4 +56,4 @@ file_editor_cm6 Worker
 
 ---
 
-**Last Updated**: October 28, 2025
+**Last Updated**: October 29, 2025
