@@ -12,7 +12,18 @@ from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .history_store import HistoryStore
 from .explorer_helper import set_project_root, get_project_root, list_dir, mark_git_cache_dirty
 from .diff_helper import collect_diff, invalidate_diff_cache
-from .git_helper import GitError, list_branches as git_list_branches, checkout_branch as git_checkout_branch, create_branch as git_create_branch_helper
+from .git_helper import (
+    GitError,
+    list_branches as git_list_branches,
+    checkout_branch as git_checkout_branch,
+    create_branch as git_create_branch_helper,
+    get_status as git_get_status,
+    stage_all as git_stage_all,
+    unstage_all as git_unstage_all,
+    commit_changes as git_commit_changes,
+    push_changes as git_push_changes,
+    pull_changes as git_pull_changes,
+)
 from .preferences_store import PreferencesStore
 from .terminal_backend import register_terminal_routes
 
@@ -58,6 +69,18 @@ def _get_active_project_root() -> Path:
         raise GitError(f'Project "{project_path}" not found')
     set_project_root(project_path)
     return project
+
+
+def _status_to_payload(status) -> dict:
+    return {
+        "branch": status.branch,
+        "detached": status.detached,
+        "ahead": status.ahead,
+        "behind": status.behind,
+        "staged": status.staged,
+        "unstaged": status.unstaged,
+        "untracked": status.untracked,
+    }
 
 def _build_state_payload() -> dict:
     project_path = _history_store.get_active_project()
@@ -305,6 +328,78 @@ def git_create_branch_route():
         project_root = _get_active_project_root()
         info = git_create_branch_helper(project_root, name)
         return jsonify({"ok": True, "data": {"current": info.current, "branches": info.branches}})
+    except GitError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+@file_editor_cm6_bp.get('/git/status')
+def git_status_route():
+    try:
+        project_root = _get_active_project_root()
+        status = git_get_status(project_root)
+        return jsonify({"ok": True, "data": _status_to_payload(status)})
+    except GitError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@file_editor_cm6_bp.post('/git/stage_all')
+def git_stage_all_route():
+    try:
+        project_root = _get_active_project_root()
+        status = git_stage_all(project_root)
+        return jsonify({"ok": True, "data": _status_to_payload(status)})
+    except GitError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@file_editor_cm6_bp.post('/git/unstage_all')
+def git_unstage_all_route():
+    try:
+        project_root = _get_active_project_root()
+        status = git_unstage_all(project_root)
+        return jsonify({"ok": True, "data": _status_to_payload(status)})
+    except GitError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@file_editor_cm6_bp.post('/git/commit')
+def git_commit_route():
+    data = request.get_json(silent=True) or {}
+    message = (data.get('message') or '').strip()
+    amend = bool(data.get('amend'))
+    if not message:
+        return jsonify({"ok": False, "error": "Commit message required"}), 400
+    try:
+        project_root = _get_active_project_root()
+        status = git_commit_changes(project_root, message, amend=amend)
+        return jsonify({"ok": True, "data": _status_to_payload(status)})
+    except GitError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@file_editor_cm6_bp.post('/git/push')
+def git_push_route():
+    data = request.get_json(silent=True) or {}
+    remote = (data.get('remote') or '').strip() or None
+    branch = (data.get('branch') or '').strip() or None
+    force = bool(data.get('force'))
+    try:
+        project_root = _get_active_project_root()
+        status = git_push_changes(project_root, remote=remote, branch=branch, force=force)
+        return jsonify({"ok": True, "data": _status_to_payload(status)})
+    except GitError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@file_editor_cm6_bp.post('/git/pull')
+def git_pull_route():
+    data = request.get_json(silent=True) or {}
+    remote = (data.get('remote') or '').strip() or None
+    branch = (data.get('branch') or '').strip() or None
+    rebase = bool(data.get('rebase'))
+    try:
+        project_root = _get_active_project_root()
+        status = git_pull_changes(project_root, remote=remote, branch=branch, rebase=rebase)
+        return jsonify({"ok": True, "data": _status_to_payload(status)})
     except GitError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 

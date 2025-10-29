@@ -190,13 +190,23 @@
 
 <div class="fe-root">
   <aside id="fe-drawer" class="fe-drawer">
-          <header class="fe-drawer-head">
-            
-            <span id="fe-project-label"></span>
-            <button id="fe-open-project" class="fe-btn" title="Open Project">Open Project…</button>
-            <button id="fe-drawer-close" class="fe-btn">✕</button>
-          </header>    <div class="fe-drawer-body">
+    <header class="fe-drawer-head">
+      <span id="fe-project-label"></span>
+      <button id="fe-open-project" class="fe-btn" title="Open Project">Open Project…</button>
+      <button id="fe-drawer-close" class="fe-btn">✕</button>
+    </header>
+    <div class="fe-drawer-body">
       <ul id="fe-file-tree" class="fe-tree" data-project=""></ul>
+      <footer class="fe-git-footer">
+        <div id="fe-git-summary" class="fe-git-summary">Git status unavailable.</div>
+        <div class="fe-git-actions">
+          <button id="fe-git-stage" class="fe-btn" type="button">Stage All</button>
+          <button id="fe-git-unstage" class="fe-btn" type="button">Unstage All</button>
+          <button id="fe-git-commit" class="fe-btn" type="button">Commit…</button>
+          <button id="fe-git-push" class="fe-btn" type="button">Push</button>
+          <button id="fe-git-pull" class="fe-btn" type="button">Pull</button>
+        </div>
+      </footer>
     </div>
   </aside>
   <div class="fe-drawer-backdrop" id="fe-drawer-backdrop"></div>

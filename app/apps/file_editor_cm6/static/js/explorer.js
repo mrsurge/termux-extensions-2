@@ -4,6 +4,10 @@
 let currentProjectPath = '';
 let cachedState = null;
 const expandedDirs = new Set();
+let gitStatusCache = null;
+let gitSummaryEl = null;
+let gitButtons = null;
+let treeElement = null;
 
 const GIT_STATUS_CLASS_MAP = {
   modified: 'fe-git-modified',
@@ -67,6 +71,16 @@ export async function initExplorerUI() {
   const drawerOpenBtn = document.getElementById('fe-drawer-open');
   const drawerBackdrop = document.getElementById('fe-drawer-backdrop');
   const treeEl = document.getElementById('fe-file-tree');
+  treeElement = treeEl;
+  gitSummaryEl = document.getElementById('fe-git-summary');
+  gitButtons = {
+    stage: document.getElementById('fe-git-stage'),
+    unstage: document.getElementById('fe-git-unstage'),
+    commit: document.getElementById('fe-git-commit'),
+    push: document.getElementById('fe-git-push'),
+    pull: document.getElementById('fe-git-pull'),
+  };
+  setGitControlsEnabled(false);
 
   const state = await refreshCurrentProject(true);
   await renderRecentMenu(state);
@@ -74,6 +88,7 @@ export async function initExplorerUI() {
     await renderTreeRoot(treeEl);
     syncExpandedDirsFromTree(treeEl);
   }
+  await refreshGitStatus(false);
 
   window.addEventListener('cm6:recents-updated', (ev) => {
     const detailState = ev?.detail;
@@ -84,6 +99,27 @@ export async function initExplorerUI() {
   });
 
   btnOpenProject?.addEventListener('click', openProjectPrompt);
+
+  if (gitButtons) {
+    gitButtons.stage?.addEventListener('click', () => handleGitAction('/git/stage_all', {}));
+    gitButtons.unstage?.addEventListener('click', () => handleGitAction('/git/unstage_all', {}));
+    gitButtons.commit?.addEventListener('click', async () => {
+      if (!gitStatusCache || !gitStatusCache.staged?.length) {
+        toast('No staged changes to commit.');
+        return;
+      }
+      const message = prompt('Commit message');
+      if (!message) return;
+      const trimmed = message.trim();
+      if (!trimmed) {
+        toast('Commit message cannot be empty.');
+        return;
+      }
+      await handleGitAction('/git/commit', { message: trimmed });
+    });
+    gitButtons.push?.addEventListener('click', () => handleGitAction('/git/push', {}));
+    gitButtons.pull?.addEventListener('click', () => handleGitAction('/git/pull', {}));
+  }
 
   // Toggle drawer function matching old IDE
   async function toggleDrawer(open) {
@@ -125,6 +161,12 @@ async function refreshCurrentProject(forceRefresh = false) {
 
   currentProjectPath = state?.activeProjectExists ? state.activeProject : '';
 
+  if (!currentProjectPath) {
+    gitStatusCache = null;
+    renderGitSummary(null, 'Select a project to enable git actions.');
+    setGitControlsEnabled(false);
+  }
+
   if (label) {
     if (state?.activeProject) {
       const display = state.activeProjectExists
@@ -141,6 +183,81 @@ async function refreshCurrentProject(forceRefresh = false) {
   }
 
   return state;
+}
+
+function setGitControlsEnabled(enabled) {
+  if (!gitButtons) return;
+  Object.values(gitButtons).forEach((btn) => {
+    if (btn) btn.disabled = !enabled;
+  });
+}
+
+function renderGitSummary(status, message) {
+  if (!gitSummaryEl) return;
+  if (!status) {
+    gitSummaryEl.textContent = message || 'Git status unavailable.';
+    return;
+  }
+
+  const { branch, detached, ahead, behind } = status;
+  const stagedCount = Array.isArray(status.staged) ? status.staged.length : 0;
+  const unstagedCount = Array.isArray(status.unstaged) ? status.unstaged.length : 0;
+  const untrackedCount = Array.isArray(status.untracked) ? status.untracked.length : 0;
+  const bits = [];
+  bits.push(detached ? 'DETACHED HEAD' : branch || '(no branch)');
+  if (ahead) bits.push(`↑${ahead}`);
+  if (behind) bits.push(`↓${behind}`);
+  const counts = `staged ${stagedCount} · changes ${unstagedCount} · untracked ${untrackedCount}`;
+  gitSummaryEl.textContent = `${bits.join(' ')} · ${counts}`;
+}
+
+async function refreshGitStatus(showToast = true) {
+  if (!currentProjectPath) return;
+  try {
+    const data = await gitRequest('/git/status');
+    gitStatusCache = data;
+    renderGitSummary(data);
+    setGitControlsEnabled(true);
+  } catch (err) {
+    gitStatusCache = null;
+    renderGitSummary(null, err.message);
+    setGitControlsEnabled(false);
+    if (showToast) toast(err.message || 'Git status unavailable');
+  }
+}
+
+async function handleGitAction(endpoint, payload) {
+  if (!currentProjectPath) {
+    toast('Select a project first.');
+    return;
+  }
+  try {
+    setGitControlsEnabled(false);
+    const data = await gitRequest(endpoint, payload);
+    gitStatusCache = data;
+    renderGitSummary(data);
+    if (treeElement) {
+      await refreshTree(treeElement);
+      return;
+    }
+  } catch (err) {
+    toast(err.message || 'Git action failed');
+  } finally {
+    setGitControlsEnabled(true);
+  }
+}
+
+async function gitRequest(path, body) {
+  const resp = await fetch(`/api/app/file_editor_cm6${path}`, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await resp.json().catch(() => null);
+  if (!json || json.ok === false) {
+    throw new Error(json?.error || resp.statusText || 'Git request failed');
+  }
+  return json.data || {};
 }
 
 async function openProjectPrompt() {
@@ -327,6 +444,7 @@ async function refreshTree(treeEl) {
   syncExpandedDirsFromTree(treeEl);
   await renderTreeRoot(treeEl);
   await restoreExpandedDirs(treeEl);
+  await refreshGitStatus(false);
 }
 
 function syncExpandedDirsFromTree(treeEl) {
