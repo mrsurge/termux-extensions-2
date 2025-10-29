@@ -96,7 +96,8 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: visible;
+  overflow-y: hidden;
 }
 
 /* File tree */
@@ -105,12 +106,13 @@
   margin: 0;
   padding: 8px;
   overflow-y: auto;
+  overflow-x: visible;
   flex: 1;
 }
 
 .fe-tree li {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 20px 1fr;    /* twisty column + text column*/
   gap: 6px;
   padding: 6px 8px;
   cursor: pointer;
@@ -120,6 +122,15 @@
   font-size: 0.9rem;
   border-left: 3px solid transparent;
   border: 1px solid transparent;
+  margin-left: 30px;
+  align-items: center;
+}
+
+/* Make nested ul span the full width */
+.fe-tree li > ul {
+  grid-column: 1 / -1;         /* Span both grid columns */
+  margin: 0;
+  padding: 0;
 }
 
 .fe-tree li:hover {
@@ -149,11 +160,14 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;  /* Add this if not present - critical for ellipsis to
+    work */
 }
 
 /* Nested tree indentation */
 .fe-tree .fe-tree {
-  padding-left: 16px;
+  padding-left: 0;
+  width: 100%;
 }
 
 .fe-dd-item-missing {
