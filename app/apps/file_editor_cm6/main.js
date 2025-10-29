@@ -6,6 +6,7 @@ import * as CM from '/static/vendor/codemirror.1/codemirror.bundle.js';
 import { initExplorerUI } from './static/js/explorer.js';
 import { createDiffController } from './static/js/diff_decorations.js';
 import { createTerminalDrawer } from './static/js/terminal.js';
+import { initBranchMenu } from './static/js/git_menu.js';
 
 // Core
 const EditorState = CM.EditorState;
@@ -250,6 +251,7 @@ let currentModeLanguage = null;
 let cachedProjectRoot = null;
 let editorState = null;
 let cachedPreferences = null;
+let branchMenuHandle = null;
 
 // WebSocket and autosave state
 let ws = null;
@@ -842,6 +844,9 @@ function closeAllMenus() {
   menuViewDD.classList.remove('show');
   menuThemeDD.classList.remove('show');
   recentFilesDD.classList.remove('show');
+  if (branchMenuHandle && typeof branchMenuHandle.close === 'function') {
+    branchMenuHandle.close();
+  }
 }
 function bindMenuToggle(el, action) {
   if (!el) return;
@@ -876,11 +881,11 @@ function bindThemeMenu() {
   });
 }
 
-menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show');}});
-menuEditBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show');}});
-menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuViewDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show');}});
-menuThemeBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuThemeDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show');}});
-recentFilesBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = recentFilesDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show');}});
+menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuEditBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuViewDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuThemeBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuThemeDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+recentFilesBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = recentFilesDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
 document.addEventListener('click', () => closeAllMenus());
 
 bindMenuToggle(miNew, () => {
@@ -1179,6 +1184,8 @@ async function main() {
   await initExplorerUI().catch(e => {
     console.error('Failed to initialize explorer UI:', e);
   });
+
+  branchMenuHandle = initBranchMenu();
 
   // Apply host-side fallback preferences while we wait for disk-backed settings.
   applyPreferencesFromStore(cachedPreferences);

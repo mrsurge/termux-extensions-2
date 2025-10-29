@@ -12,6 +12,7 @@ from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .history_store import HistoryStore
 from .explorer_helper import set_project_root, get_project_root, list_dir, mark_git_cache_dirty
 from .diff_helper import collect_diff, invalidate_diff_cache
+from .git_helper import GitError, list_branches as git_list_branches, checkout_branch as git_checkout_branch, create_branch as git_create_branch_helper
 from .preferences_store import PreferencesStore
 from .terminal_backend import register_terminal_routes
 
@@ -47,6 +48,16 @@ try:
     _ensure_project_root_synced()
 except Exception:
     pass
+
+def _get_active_project_root() -> Path:
+    project_path = _history_store.get_active_project()
+    if not project_path:
+        raise GitError('No project selected')
+    project = Path(project_path)
+    if not project.exists():
+        raise GitError(f'Project "{project_path}" not found')
+    set_project_root(project_path)
+    return project
 
 def _build_state_payload() -> dict:
     project_path = _history_store.get_active_project()
@@ -259,6 +270,43 @@ def project_current():
     """Get the current project root."""
     root = _history_store.get_active_project() or str(get_project_root())
     return jsonify({"ok": True, "data": {"path": str(root)}})
+
+@file_editor_cm6_bp.get('/git/branches')
+def git_branches():
+    try:
+        project_root = _get_active_project_root()
+        info = git_list_branches(project_root)
+        return jsonify({"ok": True, "data": {"current": info.current, "branches": info.branches}})
+    except GitError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@file_editor_cm6_bp.post('/git/checkout')
+def git_checkout_route():
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({"ok": False, "error": "Branch name required"}), 400
+    try:
+        project_root = _get_active_project_root()
+        info = git_checkout_branch(project_root, name)
+        return jsonify({"ok": True, "data": {"current": info.current, "branches": info.branches}})
+    except GitError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@file_editor_cm6_bp.post('/git/branch')
+def git_create_branch_route():
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({"ok": False, "error": "Branch name required"}), 400
+    try:
+        project_root = _get_active_project_root()
+        info = git_create_branch_helper(project_root, name)
+        return jsonify({"ok": True, "data": {"current": info.current, "branches": info.branches}})
+    except GitError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 @file_editor_cm6_bp.get('/state')
 def get_project_state():

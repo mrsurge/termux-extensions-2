@@ -40,6 +40,7 @@
   .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 15; }
   .fe-dropdown.show { display: block; }
   #recent-files-dd { left: auto; right: 0; }
+  #menu-branch-dd { left: auto; right: 0; }
   .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; cursor: pointer; font-size: 0.9rem; align-items: center; }
   .fe-dd-item[data-checkable="true"] { position: relative; padding-left: 32px; }
   .fe-dd-item[data-checkable="true"]::before { content: ''; position: absolute; left: 12px; width: 1em; text-align: center; color: var(--primary, #3b82f6); }
@@ -258,6 +259,10 @@
         <div class="fe-dd-item" data-theme="one-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>One Dark</span></div>
         <div class="fe-dd-item" data-theme="termux" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Termux</span></div>
       </div>
+    </div>
+    <div class="fe-menu" id="menu-branch" style="margin-left: auto;">
+      <button class="fe-menu-btn" id="menu-branch-btn">Branch ▾</button>
+      <div class="fe-dropdown" id="menu-branch-dd"></div>
     </div>
   </div>
 
