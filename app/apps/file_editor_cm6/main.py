@@ -26,12 +26,18 @@ from .git_helper import (
 )
 from .preferences_store import PreferencesStore
 from .terminal_backend import register_terminal_routes
+from .agent_routes import register_agent_routes
+from .agent_ws import register_agent_websocket
 
 file_editor_cm6_bp = Blueprint('file_editor_cm6', __name__)
 sock = Sock()
 
 # Register terminal routes and WebSocket handler
 register_terminal_routes(file_editor_cm6_bp, sock)
+
+# Register agent routes and WebSocket handler
+register_agent_routes(file_editor_cm6_bp)
+register_agent_websocket(sock)
 
 # Initialize history store (project root managed by explorer_helper)
 _history_store = HistoryStore()
