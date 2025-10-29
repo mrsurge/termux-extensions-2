@@ -7,6 +7,7 @@ import { initExplorerUI } from './static/js/explorer.js';
 import { createDiffController } from './static/js/diff_decorations.js';
 import { createTerminalDrawer } from './static/js/terminal.js';
 import { initBranchMenu } from './static/js/git_menu.js';
+import { initAgentDrawer } from './static/js/agent_drawer.js';
 
 // Core
 const EditorState = CM.EditorState;
@@ -252,6 +253,7 @@ let cachedProjectRoot = null;
 let editorState = null;
 let cachedPreferences = null;
 let branchMenuHandle = null;
+let agentDrawerHandle = null;
 
 // WebSocket and autosave state
 let ws = null;
@@ -1186,6 +1188,7 @@ async function main() {
   });
 
   branchMenuHandle = initBranchMenu();
+  agentDrawerHandle = initAgentDrawer();
 
   // Apply host-side fallback preferences while we wait for disk-backed settings.
   applyPreferencesFromStore(cachedPreferences);

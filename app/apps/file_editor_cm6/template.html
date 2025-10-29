@@ -186,6 +186,208 @@
   #terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
     background: var(--muted-foreground, #9ca3af);
   }
+  .fe-agent-toggle { font-size: 1.1rem; line-height: 1; }
+  .fe-git-actions .fe-btn {
+    flex: 0 0 auto;
+    font-size: 0.8rem;
+    padding: 5px 10px;
+  }
+
+  /* Agent drawer */
+  .agent-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    transform: translateX(100%);
+    transition: transform 0.35s ease;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    background: rgba(7, 11, 19, 0.98);
+    backdrop-filter: blur(12px);
+    color: var(--foreground, #e5e7eb);
+    border-left: 1px solid var(--border);
+  }
+
+  .agent-drawer.open {
+    transform: translateX(0);
+  }
+
+  .agent-drawer.agent-drawer--fullscreen {
+    width: 100vw;
+  }
+
+  .agent-drawer__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(4, 7, 12, 0.9);
+  }
+
+  .agent-drawer__title {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .agent-drawer__actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .agent-drawer__body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    overflow-y: auto;
+  }
+
+  .agent-section {
+    border: 1px solid rgba(37, 50, 75, 0.4);
+    border-radius: 10px;
+    padding: 16px;
+    background: rgba(6, 10, 18, 0.85);
+  }
+
+  .agent-section h3 {
+    margin: 0 0 12px;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: rgba(229, 231, 235, 0.7);
+  }
+
+  .agent-session-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+
+  .agent-session-list__item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(37, 50, 75, 0.35);
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+
+  .agent-session-list__item:hover {
+    background: rgba(59, 130, 246, 0.25);
+  }
+
+  .agent-session-list__item--empty {
+    text-align: center;
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  .agent-transcript {
+    border: 1px solid rgba(59, 130, 246, 0.15);
+    border-radius: 8px;
+    padding: 16px;
+    background: rgba(5, 9, 15, 0.85);
+    max-height: 360px;
+    overflow-y: auto;
+  }
+
+  .agent-transcript__placeholder {
+    text-align: center;
+    opacity: 0.5;
+    margin-top: 40px;
+  }
+
+  .agent-transcript__placeholder {
+    text-align: center;
+    opacity: 0.5;
+    margin-top: 40px;
+  }
+
+  .agent-transcript__bubble {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(59, 130, 246, 0.18);
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+
+  .agent-transcript__bubble--user {
+    background: rgba(37, 214, 158, 0.2);
+    border-left: 3px solid rgba(16, 185, 129, 0.8);
+  }
+
+  .agent-composer {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .agent-composer__textarea {
+    width: 100%;
+    min-height: 90px;
+    resize: vertical;
+    border-radius: 8px;
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    background: rgba(4, 7, 12, 0.95);
+    color: var(--foreground, #e5e7eb);
+    padding: 10px;
+    font: inherit;
+  }
+
+  .agent-composer__toolbar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .agent-composer__option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: rgba(229, 231, 235, 0.8);
+  }
+
+  .agent-composer__select {
+    background: rgba(4, 7, 12, 0.9);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 6px;
+    color: inherit;
+    padding: 4px 8px;
+  }
+
+  .agent-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .agent-stats div {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+  }
+
+  .agent-stats dt {
+    font-weight: 600;
+    color: rgba(229, 231, 235, 0.7);
+  }
+
+  .agent-stats dd {
+    margin: 0;
+  }
+
 </style>
 
 <div class="fe-root">
@@ -274,6 +476,7 @@
       <button class="fe-menu-btn" id="menu-branch-btn">Branch ▾</button>
       <div class="fe-dropdown" id="menu-branch-dd"></div>
     </div>
+    <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Agent drawer">💬</button>
   </div>
 
   <div class="fe-editor-container" id="editor-container">
@@ -293,6 +496,59 @@
     </div>
     <div id="terminal-container"></div>
   </div>
+
+  <!-- Agent Drawer -->
+  <aside id="agent-drawer" class="agent-drawer" aria-hidden="true">
+    <header class="agent-drawer__header">
+      <div class="agent-drawer__title">Agent Sessions</div>
+      <div class="agent-drawer__actions">
+        <button class="fe-btn" id="agent-new-session">New Session</button>
+        <button class="fe-btn" id="agent-refresh">Refresh</button>
+        <button class="fe-btn" id="agent-collapse">Collapse</button>
+        <button class="fe-btn" id="agent-fullscreen">Fullscreen</button>
+        <button class="fe-btn" id="agent-close">✕</button>
+      </div>
+    </header>
+    <div class="agent-drawer__body">
+      <section class="agent-section agent-section--sessions" aria-label="Agent sessions">
+        <h3>Sessions</h3>
+        <ul id="agent-session-list" class="agent-session-list">
+          <li class="agent-session-list__item agent-session-list__item--empty">No sessions yet</li>
+        </ul>
+      </section>
+      <section class="agent-section agent-section--transcript" aria-label="Agent transcript">
+        <h3>Transcript</h3>
+        <div class="agent-transcript" id="agent-transcript">
+          <div class="agent-transcript__placeholder">Start a session to see the conversation stream here.</div>
+        </div>
+        <div class="agent-composer">
+          <textarea id="agent-input" class="agent-composer__textarea" placeholder="Message the agent..."></textarea>
+          <div class="agent-composer__toolbar">
+            <label class="agent-composer__option">
+              <span>Target</span>
+              <select id="agent-target" class="agent-composer__select">
+                <option value="codex">Codex</option>
+                <option value="gemini">Gemini</option>
+              </select>
+            </label>
+            <label class="agent-composer__option">
+              <input type="checkbox" id="agent-attach-file" /> Attach active file context
+            </label>
+            <button class="fe-btn" id="agent-send">Send</button>
+          </div>
+        </div>
+      </section>
+      <section class="agent-section agent-section--stats" aria-label="Agent stats">
+        <h3>Session Details</h3>
+        <dl class="agent-stats" id="agent-stats">
+          <div><dt>Status</dt><dd>Idle</dd></div>
+          <div><dt>CPU</dt><dd>—</dd></div>
+          <div><dt>Memory</dt><dd>—</dd></div>
+          <div><dt>Uptime</dt><dd>—</dd></div>
+        </dl>
+      </section>
+    </div>
+  </aside>
 
   <div id="fe-confirm" class="fe-modal" aria-hidden="true">
     <div class="fe-modal-card" style="max-width: 520px;">
