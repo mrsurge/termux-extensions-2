@@ -17,107 +17,234 @@ from app.libs.framework_shells import _manager
 
 class CodexAdapter:
     """
-    Protocol adapter for Codex CLI (app-server mode).
-    Translates between normalized messages and Codex-specific format.
+    Protocol adapter for Codex MCP server.
+    Implements full MCP (Model Context Protocol) flow.
     """
+    
+    # Track conversation IDs per session
+    _conversations = {}
     
     @staticmethod
     def to_agent(normalized: dict, context: Optional[dict] = None) -> dict:
         """
-        Convert normalized frontend message to Codex format.
+        Convert normalized frontend message to Codex MCP tool call.
+        
+        MCP flow:
+        1. Initialize (sent automatically on connection)
+        2. tools/call with "codex" or "codex-reply" tool
         
         Normalized format:
             {"id": "42", "action": "chat", "text": "...", "context": {...}}
         
-        Codex format:
-            {"id": "42", "type": "send_user_turn", "params": {...}}
+        Codex MCP format (JSON-RPC 2.0 tool call):
+            {"jsonrpc": "2.0", "id": 42, "method": "tools/call", "params": {...}}
         """
         msg_id = normalized.get('id')
-        action = normalized.get('action', 'chat')
         text = normalized.get('text', '')
         ctx = context or normalized.get('context', {})
+        session_id = normalized.get('session', 'default')
         
-        # Build items array
-        items = []
+        # Check if we have an existing conversation for this session
+        conversation_id = CodexAdapter._conversations.get(session_id)
         
-        # Add context if available
-        if ctx.get('file_path') and ctx.get('file_content'):
-            items.append({
-                'type': 'context',
-                'path': ctx['file_path'],
-                'content': ctx['file_content'],
-                'language': ctx.get('language', ''),
-                'git_status': ctx.get('git_status', 'clean')
-            })
+        if conversation_id:
+            # Continue existing conversation
+            tool_name = 'codex-reply'
+            tool_params = {
+                'conversationId': conversation_id,
+                'prompt': text
+            }
+        else:
+            # Start new conversation
+            tool_name = 'codex'
+            tool_params = {
+                'prompt': text,
+                'cwd': ctx.get('cwd', os.path.expanduser('~'))
+            }
+            
+            # Add file context if available
+            if ctx.get('file_path') and ctx.get('file_content'):
+                tool_params['prompt'] = f"""File: {ctx['file_path']}
+Language: {ctx.get('language', 'unknown')}
+
+Content:
+```
+{ctx['file_content']}
+```
+
+{text}"""
         
-        # Add user message
-        items.append({
-            'type': 'text',
-            'text': text
-        })
-        
-        # Build Codex message
-        codex_msg = {
+        # Build MCP tool call
+        mcp_msg = {
+            'jsonrpc': '2.0',
             'id': msg_id,
-            'type': 'send_user_turn',
+            'method': 'tools/call',
             'params': {
-                'model': normalized.get('model', 'gpt-5-codex'),
-                'effort': normalized.get('effort', 'medium'),
-                'summary': text[:50],  # First 50 chars as summary
-                'items': items,
-                'cwd': ctx.get('cwd', os.path.expanduser('~')),
-                'metadata': {
-                    'session': normalized.get('session', 'default')
-                }
+                'name': tool_name,
+                'arguments': tool_params
             }
         }
         
-        # Add optional schema for structured output
-        if normalized.get('output_schema'):
-            codex_msg['params']['final_output_json_schema'] = normalized['output_schema']
-        
-        return codex_msg
+        return mcp_msg
     
     @staticmethod
-    def from_agent(codex_msg: dict) -> dict:
+    def from_agent(mcp_msg: dict) -> dict:
         """
-        Convert Codex response to normalized format.
+        Convert Codex MCP response to normalized format.
         
-        Codex format:
-            {"id": "42", "event": "token", "data": {"text": "..."}}
-        
-        Normalized format:
-            {"id": "42", "event": "token", "text": "..."}
+        MCP responses can be:
+        - Initialization result
+        - Tool call result (with conversationId)
+        - Progress notifications
+        - Errors
         """
-        msg_id = codex_msg.get('id')
-        event = codex_msg.get('event')
-        data = codex_msg.get('data', {})
+        # Handle initialization response
+        if mcp_msg.get('result', {}).get('serverInfo', {}).get('name') == 'codex-mcp-server':
+            return {
+                'id': str(mcp_msg.get('id')),
+                'event': 'initialized',
+                'agent': 'codex',
+                'result': mcp_msg['result']
+            }
         
-        normalized = {
-            'id': msg_id,
-            'event': event,
-            'agent': 'codex'
-        }
+        # Handle tool call result
+        if 'result' in mcp_msg:
+            result = mcp_msg['result']
+            
+            # Extract conversation ID if present (for first message)
+            if isinstance(result, dict) and 'conversationId' in result:
+                # Store conversation ID for future messages
+                conv_id = result['conversationId']
+                # We need to know which session this belongs to - this is tricky
+                # For now, we'll include it in the response and let the handler deal with it
+                return {
+                    'id': str(mcp_msg.get('id')),
+                    'event': 'conversation_started',
+                    'agent': 'codex',
+                    'conversationId': conv_id
+                }
+            
+            # Handle content/response
+            if isinstance(result, list):
+                # MCP returns tool results as array of content blocks
+                for item in result:
+                    if item.get('type') == 'text':
+                        return {
+                            'id': str(mcp_msg.get('id')),
+                            'event': 'final',
+                            'agent': 'codex',
+                            'text': item.get('text', ''),
+                            'ok': True
+                        }
+            
+            return {
+                'id': str(mcp_msg.get('id')),
+                'event': 'result',
+                'agent': 'codex',
+                'result': result
+            }
         
-        # Map event-specific data
-        if event == 'token':
-            normalized['text'] = data.get('text', '')
-        elif event == 'diff':
-            normalized['path'] = data.get('path')
-            normalized['patch'] = data.get('patch')
-        elif event == 'tool_call':
-            normalized['tool'] = data.get('name')
-            normalized['args'] = data.get('args', {})
-        elif event == 'planning':
-            normalized['summary'] = data.get('summary')
-        elif event == 'final':
-            normalized['ok'] = data.get('ok', True)
-            normalized['output'] = data.get('output', {})
-        elif event == 'error':
-            normalized['error'] = data.get('message')
-            normalized['kind'] = data.get('kind', 'terminal')
+        # Handle notifications (streaming, progress, etc.)
+        if 'method' in mcp_msg:
+            method = mcp_msg['method']
+            params = mcp_msg.get('params', {})
+            
+            # Codex-specific event notifications
+            if method == 'codex/event':
+                msg_data = params.get('msg', {})
+                event_type = msg_data.get('type')
+                request_id = params.get('_meta', {}).get('requestId')
+                
+                # Handle different Codex event types
+                if event_type == 'agent_message_delta':
+                    # Streaming token
+                    return {
+                        'id': str(request_id),
+                        'event': 'token',
+                        'agent': 'codex',
+                        'text': msg_data.get('delta', '')
+                    }
+                elif event_type == 'agent_message':
+                    # Full message (for final check)
+                    return {
+                        'id': str(request_id),
+                        'event': 'message',
+                        'agent': 'codex',
+                        'text': msg_data.get('message', '')
+                    }
+                elif event_type == 'agent_reasoning_delta':
+                    # Reasoning tokens
+                    return {
+                        'id': str(request_id),
+                        'event': 'planning',
+                        'agent': 'codex',
+                        'summary': msg_data.get('delta', '')
+                    }
+                elif event_type == 'task_complete':
+                    # Task finished
+                    return {
+                        'id': str(request_id),
+                        'event': 'final',
+                        'agent': 'codex',
+                        'ok': True,
+                        'output': {'message': msg_data.get('last_agent_message', '')}
+                    }
+                elif event_type == 'session_configured':
+                    # Session started - extract session_id for conversation tracking
+                    return {
+                        'id': str(request_id),
+                        'event': 'conversation_started',
+                        'agent': 'codex',
+                        'conversationId': msg_data.get('session_id')
+                    }
+                # Ignore other event types for now
+                return None
+            
+            # MCP progress notifications
+            if method == 'notifications/progress':
+                return {
+                    'id': str(params.get('progressToken', '')),
+                    'event': 'progress',
+                    'agent': 'codex',
+                    'progress': params.get('progress', 0),
+                    'total': params.get('total', 100)
+                }
+            
+            # MCP message notification
+            if method == 'notifications/message':
+                return {
+                    'id': str(mcp_msg.get('id', '')),
+                    'event': 'message',
+                    'agent': 'codex',
+                    'level': params.get('level', 'info'),
+                    'text': params.get('message', '')
+                }
+            
+            # Generic notification - ignore unknown ones
+            return None
         
-        return normalized
+        # Handle errors
+        if 'error' in mcp_msg:
+            error = mcp_msg['error']
+            return {
+                'id': str(mcp_msg.get('id')),
+                'event': 'error',
+                'agent': 'codex',
+                'error': error.get('message'),
+                'code': error.get('code')
+            }
+        
+        return {'event': 'unknown', 'agent': 'codex'}
+    
+    @staticmethod
+    def store_conversation_id(session_id: str, conversation_id: str):
+        """Store conversation ID for a session."""
+        CodexAdapter._conversations[session_id] = conversation_id
+    
+    @staticmethod
+    def clear_conversation(session_id: str):
+        """Clear conversation ID for a session."""
+        CodexAdapter._conversations.pop(session_id, None)
 
 
 class GeminiAdapter:
@@ -274,21 +401,24 @@ class AgentBridge:
         
         # Build command
         if agent_type == 'codex':
-            command = ['codex', 'app-server']
+            command = ['codex', 'mcp-server']
         elif agent_type == 'gemini':
             command = ['gemini', '--experimental-acp']
         
         # Spawn via framework shell PTY
-        shell = self.manager.spawn_shell_pty(
+        shell_record = self.manager.spawn_shell_pty(
             command,
             label=f"agent-{agent_type}-{session_id[:8]}",
             cwd=cwd
         )
         
-        # Store session mapping
-        self._sessions[session_id] = shell['id']
+        # Convert to dict for return
+        shell_dict = self.manager.describe(shell_record)
         
-        return shell
+        # Store session mapping
+        self._sessions[session_id] = shell_dict['id']
+        
+        return shell_dict
     
     def get_or_create_agent(self, session_id: str, agent_type: str, cwd: str) -> dict:
         """

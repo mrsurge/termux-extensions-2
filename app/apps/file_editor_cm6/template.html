@@ -244,7 +244,7 @@
     flex-direction: column;
     gap: 16px;
     padding: 16px;
-    overflow-y: auto;
+    overflow: hidden;
   }
 
   .agent-section {
@@ -252,6 +252,22 @@
     border-radius: 10px;
     padding: 16px;
     background: rgba(6, 10, 18, 0.85);
+  }
+
+  .agent-section--sessions {
+    flex: 0 0 auto;
+  }
+
+  .agent-section--transcript {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .agent-section--stats {
+    flex: 0 0 auto;
+    margin-top: auto;
   }
 
   .agent-section h3 {
@@ -279,10 +295,19 @@
     background: rgba(37, 50, 75, 0.35);
     cursor: pointer;
     font-size: 0.85rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
   }
 
   .agent-session-list__item:hover {
     background: rgba(59, 130, 246, 0.25);
+  }
+
+  .agent-session-list__item--active {
+    background: rgba(59, 130, 246, 0.3);
+    border-left: 3px solid #3b82f6;
   }
 
   .agent-session-list__item--empty {
@@ -291,19 +316,28 @@
     pointer-events: none;
   }
 
+  .agent-session-delete {
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 1.2rem;
+    padding: 0 4px;
+    line-height: 1;
+    opacity: 0.6;
+  }
+
+  .agent-session-delete:hover {
+    opacity: 1;
+  }
+
   .agent-transcript {
+    flex: 1;
     border: 1px solid rgba(59, 130, 246, 0.15);
     border-radius: 8px;
     padding: 16px;
     background: rgba(5, 9, 15, 0.85);
-    max-height: 360px;
     overflow-y: auto;
-  }
-
-  .agent-transcript__placeholder {
-    text-align: center;
-    opacity: 0.5;
-    margin-top: 40px;
   }
 
   .agent-transcript__placeholder {
@@ -326,10 +360,49 @@
     border-left: 3px solid rgba(16, 185, 129, 0.8);
   }
 
+  .agent-transcript__bubble--assistant {
+    background: rgba(59, 130, 246, 0.1);
+    border-left: 3px solid #3b82f6;
+    white-space: pre-wrap;
+  }
+
+  .agent-transcript__bubble--system {
+    background: rgba(156, 163, 175, 0.1);
+    border-left: 3px solid #9ca3af;
+    font-size: 0.85em;
+    opacity: 0.8;
+  }
+
+  .agent-transcript__bubble--error {
+    background: rgba(239, 68, 68, 0.1);
+    border-left: 3px solid #ef4444;
+    color: #fca5a5;
+  }
+
+  .agent-transcript__bubble--diff {
+    background: rgba(34, 197, 94, 0.1);
+    border-left: 3px solid #22c55e;
+  }
+
+  .agent-transcript__bubble--diff pre {
+    margin: 8px 0;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 0.8em;
+  }
+
+  .agent-transcript__bubble--diff button {
+    margin-top: 8px;
+  }
+
   .agent-composer {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    margin-top: 16px;
+    margin-top: 16px;
   }
 
   .agent-composer__textarea {

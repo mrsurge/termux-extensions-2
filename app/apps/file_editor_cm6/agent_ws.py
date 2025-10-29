@@ -95,6 +95,28 @@ def register_agent_websocket(sock):
                 pass
             return
         
+        # Initialize MCP for Codex
+        if agent_type == 'codex':
+            try:
+                init_msg = {
+                    'jsonrpc': '2.0',
+                    'id': 'init-mcp',
+                    'method': 'initialize',
+                    'params': {
+                        'protocolVersion': '2024-11-05',
+                        'capabilities': {},
+                        'clientInfo': {
+                            'name': 'code_cm6',
+                            'version': '1.0.0'
+                        }
+                    }
+                }
+                shell_id = bridge._sessions.get(session_id)
+                if shell_id:
+                    bridge.manager.write_to_pty(shell_id, json.dumps(init_msg) + '\n')
+            except Exception as e:
+                print(f'Failed to initialize Codex MCP: {e}')
+        
         stop_event = threading.Event()
         line_buffer = ""
         
@@ -125,6 +147,11 @@ def register_agent_websocket(sock):
                     normalized = bridge.parse_agent_output(agent_type, line)
                     
                     if normalized:
+                        # Store conversation ID for Codex MCP
+                        if normalized.get('event') == 'conversation_started' and normalized.get('conversationId'):
+                            from .agent_bridge import CodexAdapter
+                            CodexAdapter.store_conversation_id(session_id, normalized['conversationId'])
+                        
                         try:
                             ws.send(json.dumps(normalized))
                         except Exception:
