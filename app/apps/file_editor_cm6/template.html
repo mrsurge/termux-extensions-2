@@ -575,6 +575,123 @@
     margin: 0;
   }
 
+  .agent-approval-settings {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    gap: 16px;
+  }
+
+  .agent-approval-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .agent-approval-checkbox input[type="checkbox"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .agent-approval-checkbox input[type="checkbox"]:disabled ~ span {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Agent Session Config Modal */
+  .agent-session-config {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .agent-config-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .agent-config-field span {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: rgba(229, 231, 235, 0.9);
+  }
+
+  .agent-config-field input[type="text"],
+  .agent-config-field select {
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #e5e7eb;
+    font-size: 0.9rem;
+  }
+
+  .agent-config-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 8px 0;
+  }
+
+  .agent-config-checkbox {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    cursor: pointer;
+    padding: 10px;
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+
+  .agent-config-checkbox:hover {
+    background: rgba(59, 130, 246, 0.1);
+  }
+
+  .agent-config-checkbox input[type="checkbox"] {
+    margin-top: 3px;
+    flex-shrink: 0;
+  }
+
+  .agent-config-checkbox div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .agent-config-checkbox strong {
+    font-size: 0.9rem;
+    color: #e5e7eb;
+  }
+
+  .agent-config-checkbox small {
+    font-size: 0.75rem;
+    color: rgba(229, 231, 235, 0.6);
+    line-height: 1.3;
+  }
+
+  .agent-config-checkbox input[type="checkbox"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .agent-config-checkbox:has(input:disabled) {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .agent-config-checkbox:has(input:disabled):hover {
+    background: transparent;
+  }
+
+  /* Session modal needs higher z-index than agent drawer (200) */
+  #agent-session-modal {
+    z-index: 250;
+  }
+
 </style>
 
 <div class="fe-root">
@@ -736,6 +853,55 @@
       </section>
     </div>
   </aside>
+
+  <!-- Agent Session Config Modal -->
+  <div id="agent-session-modal" class="fe-modal" aria-hidden="true">
+    <div class="fe-modal-card" style="max-width: 420px;">
+      <div class="fe-modal-header">
+        <strong>New Agent Session</strong>
+        <span style="flex:1"></span>
+        <button id="agent-session-modal-close" class="fe-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="fe-modal-body">
+        <div class="agent-session-config">
+          <label class="agent-config-field">
+            <span>Session Name (optional)</span>
+            <input type="text" id="agent-session-name" placeholder="e.g., Bug fix for login" />
+          </label>
+          
+          <label class="agent-config-field">
+            <span>Agent</span>
+            <select id="agent-session-type">
+              <option value="codex">Codex</option>
+              <option value="gemini">Gemini</option>
+            </select>
+          </label>
+          
+          <div class="agent-config-divider"></div>
+          
+          <label class="agent-config-checkbox">
+            <input type="checkbox" id="agent-session-auto" />
+            <div>
+              <strong>Auto-approve commands</strong>
+              <small>Sets approval-policy to "on-request" and sandbox to "workspace-write"</small>
+            </div>
+          </label>
+          
+          <label class="agent-config-checkbox" id="agent-session-full-label">
+            <input type="checkbox" id="agent-session-full" disabled />
+            <div>
+              <strong>Full system access</strong>
+              <small>Escalates sandbox to "danger-full-access" (use with caution!)</small>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="fe-modal-actions">
+        <button id="agent-session-cancel" class="fe-btn">Cancel</button>
+        <button id="agent-session-create" class="fe-btn fe-btn-primary">Create Session</button>
+      </div>
+    </div>
+  </div>
 
   <div id="fe-confirm" class="fe-modal" aria-hidden="true">
     <div class="fe-modal-card" style="max-width: 520px;">

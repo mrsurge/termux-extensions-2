@@ -62,6 +62,12 @@ class CodexAdapter:
                 'cwd': ctx.get('cwd', os.path.expanduser('~'))
             }
             
+            # Add approval policy and sandbox settings if provided
+            if ctx.get('approval_policy'):
+                tool_params['approval-policy'] = ctx['approval_policy']
+            if ctx.get('sandbox'):
+                tool_params['sandbox'] = ctx['sandbox']
+            
             # Add file context if available
             if ctx.get('file_path') and ctx.get('file_content'):
                 tool_params['prompt'] = f"""File: {ctx['file_path']}

@@ -24,6 +24,16 @@ export function initAgentDrawer() {
   const targetSelect = document.getElementById('agent-target');
   const attachFileCheck = document.getElementById('agent-attach-file');
   const statsEl = document.getElementById('agent-stats');
+  
+  // Session config modal elements
+  const sessionModal = document.getElementById('agent-session-modal');
+  const sessionModalClose = document.getElementById('agent-session-modal-close');
+  const sessionNameInput = document.getElementById('agent-session-name');
+  const sessionTypeSelect = document.getElementById('agent-session-type');
+  const sessionAutoCheck = document.getElementById('agent-session-auto');
+  const sessionFullCheck = document.getElementById('agent-session-full');
+  const sessionCancelBtn = document.getElementById('agent-session-cancel');
+  const sessionCreateBtn = document.getElementById('agent-session-create');
 
   if (!drawer || !toggle) {
     return { open: () => {}, close: () => {} };
@@ -34,7 +44,7 @@ export function initAgentDrawer() {
   let messageIdCounter = 0;
   let currentAssistantBubble = null;
   let currentPlanningSection = null;
-  let sessions = {}; // ui-session-id -> { conversationId, messages[], createdAt, cwd }
+  let sessions = {}; // ui-session-id -> { name, conversationId, messages[], createdAt, cwd, auto, fullAccess }
   let activeSessionId = null;
   let isCreatingSession = false;
   
@@ -99,7 +109,31 @@ export function initAgentDrawer() {
     return null;
   }
 
-  async function createSession(agent = 'codex') {
+  function showSessionModal() {
+    // Reset modal fields
+    if (sessionNameInput) sessionNameInput.value = '';
+    if (sessionTypeSelect) sessionTypeSelect.value = 'codex';
+    if (sessionAutoCheck) sessionAutoCheck.checked = false;
+    if (sessionFullCheck) {
+      sessionFullCheck.checked = false;
+      sessionFullCheck.disabled = true;
+    }
+    
+    // Show modal
+    if (sessionModal) {
+      sessionModal.setAttribute('aria-hidden', 'false');
+      sessionModal.style.display = 'flex';
+    }
+  }
+  
+  function hideSessionModal() {
+    if (sessionModal) {
+      sessionModal.setAttribute('aria-hidden', 'true');
+      sessionModal.style.display = 'none';
+    }
+  }
+
+  async function createSessionFromModal() {
     // Prevent simultaneous session creation
     if (isCreatingSession) {
       console.warn('Session creation already in progress');
@@ -107,8 +141,15 @@ export function initAgentDrawer() {
     }
     
     isCreatingSession = true;
+    hideSessionModal();
     
     try {
+      // Get values from modal
+      const sessionName = sessionNameInput?.value?.trim() || null;
+      const agent = sessionTypeSelect?.value || 'codex';
+      const auto = sessionAutoCheck?.checked || false;
+      const fullAccess = sessionFullCheck?.checked || false;
+      
       // Ensure shared shell is connected (will spawn if needed)
       if (sharedShell.status !== 'Connected') {
         await connectSharedShell();
@@ -117,14 +158,17 @@ export function initAgentDrawer() {
       const sessionId = generateSessionId();
       const projectRoot = await getProjectRoot();
       
-      // Create UI session (conversationId will come from Codex on first message)
+      // Create UI session with approval settings
       const session = {
         id: sessionId,
+        name: sessionName,  // Custom name
         conversationId: null,  // Will be set by Codex "conversation_started" event
         messages: [],
         createdAt: Date.now(),
         cwd: projectRoot,
-        agent: agent
+        agent: agent,
+        auto: auto,  // Store per-session
+        fullAccess: fullAccess  // Store per-session
       };
       
       sessions[sessionId] = session;
@@ -132,7 +176,8 @@ export function initAgentDrawer() {
       switchToSession(sessionId);
       saveSessionsToDisk();
       
-      notify(`Created new ${agent} session` + (projectRoot ? ` in ${projectRoot.split('/').pop()}` : ''));
+      const settingsDesc = auto ? (fullAccess ? ' (auto, full access)' : ' (auto)') : '';
+      notify(`Created new ${agent} session${settingsDesc}` + (projectRoot ? ` in ${projectRoot.split('/').pop()}` : ''));
     } finally {
       isCreatingSession = false;
     }
@@ -148,9 +193,10 @@ export function initAgentDrawer() {
     li.dataset.sessionId = session.id;
     
     const timestamp = session.createdAt ? new Date(session.createdAt).toLocaleTimeString() : new Date().toLocaleTimeString();
+    const displayName = session.name || `${session.agent || 'codex'} - ${timestamp}`;
     
     li.innerHTML = `
-      <span>${session.agent || 'codex'} - ${timestamp}</span>
+      <span>${displayName}</span>
       <button class="agent-session-delete" data-session-id="${session.id}">×</button>
     `;
     
@@ -408,7 +454,7 @@ export function initAgentDrawer() {
     }
   }
 
-  function sendMessage(text) {
+  async function sendMessage(text) {
     if (!activeSessionId) {
       notify('No active session. Create a new session first.');
       return;
@@ -417,10 +463,16 @@ export function initAgentDrawer() {
     const session = sessions[activeSessionId];
     if (!session) return;
     
-    // Check if shared shell is connected
+    // Auto-spawn shared shell if not connected (deterministic user action)
     if (sharedShell.status !== 'Connected') {
-      notify('Not connected. Please wait or reconnect.');
-      return;
+      notify('Starting agent server...');
+      try {
+        await connectSharedShell();
+      } catch (e) {
+        notify('Failed to start agent server');
+        console.error('Failed to connect shell:', e);
+        return;
+      }
     }
     
     const message = {
@@ -432,6 +484,17 @@ export function initAgentDrawer() {
       cwd: session.cwd,
       session: session.id
     };
+    
+    // Add approval settings for first message (new conversation)
+    if (!session.conversationId && (session.auto || session.fullAccess)) {
+      message.context = message.context || {};
+      if (session.auto) {
+        message.context.approval_policy = 'on-request';
+      }
+      if (session.auto || session.fullAccess) {
+        message.context.sandbox = session.fullAccess ? 'danger-full-access' : 'workspace-write';
+      }
+    }
     
     // Attach file context if enabled
     if (attachFileCheck?.checked && window.currentPath) {
@@ -786,11 +849,14 @@ export function initAgentDrawer() {
         for (const [sessionId, sessionData] of Object.entries(savedSessions)) {
           sessions[sessionId] = {
             id: sessionData.id,
+            name: sessionData.name,
             conversationId: sessionData.conversationId,  // Codex conversation ID
             messages: sessionData.messages || [],
             createdAt: sessionData.createdAt,
             cwd: sessionData.cwd,
-            agent: sessionData.agent || 'codex'
+            agent: sessionData.agent || 'codex',
+            auto: sessionData.auto || false,
+            fullAccess: sessionData.fullAccess || false
           };
           
           addSessionToList(sessions[sessionId]);
@@ -816,11 +882,14 @@ export function initAgentDrawer() {
     for (const [id, session] of Object.entries(sessions)) {
       toSave[id] = {
         id: session.id,
+        name: session.name,
         conversationId: session.conversationId,  // Codex conversation ID
         messages: session.messages,
         createdAt: session.createdAt,
         cwd: session.cwd,
-        agent: session.agent || 'codex'
+        agent: session.agent || 'codex',
+        auto: session.auto || false,
+        fullAccess: session.fullAccess || false
       };
     }
     
@@ -850,7 +919,7 @@ export function initAgentDrawer() {
       }).catch(e => console.error('Failed to save shell state:', e));
     }
   }
-
+  
   // Event listeners
   toggle.addEventListener('click', toggleDrawer);
   closeBtn?.addEventListener('click', closeDrawer);
@@ -866,8 +935,7 @@ export function initAgentDrawer() {
   });
 
   newSessionBtn?.addEventListener('click', () => {
-    const agent = targetSelect?.value || 'codex';
-    createSession(agent);
+    showSessionModal();
   });
 
   // Refresh button now triggers manual reconnection
@@ -894,6 +962,20 @@ export function initAgentDrawer() {
       sendBtn?.click();
     }
   });
+  
+  // Session modal handlers
+  sessionModalClose?.addEventListener('click', hideSessionModal);
+  sessionCancelBtn?.addEventListener('click', hideSessionModal);
+  sessionCreateBtn?.addEventListener('click', createSessionFromModal);
+  
+  sessionAutoCheck?.addEventListener('change', () => {
+    if (sessionFullCheck) {
+      sessionFullCheck.disabled = !sessionAutoCheck.checked;
+      if (!sessionAutoCheck.checked) {
+        sessionFullCheck.checked = false;
+      }
+    }
+  });
 
   // Initialize
   loadSessions();
@@ -901,6 +983,5 @@ export function initAgentDrawer() {
   return {
     open: openDrawer,
     close: closeDrawer,
-    createSession,
   };
 }
