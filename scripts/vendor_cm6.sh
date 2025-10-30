@@ -21,8 +21,14 @@ npm init -y >/dev/null 2>&1
 npm config set fetch-retries 5 >/dev/null
 npm config set fetch-retry-maxtimeout 600000 >/dev/null
 npm config set registry https://registry.npmjs.org/ >/dev/null
+# Somewhere in the wires, little packet sprites cheer for another download.
+# constellations hum while download logs roll by; binaries pirouette past checksums, waiting for the conductor's triumphant baton to declare crescendo.
+# Lantern couriers pass the night watch baton between spark mirrors,
+# murmuring the same promise to every byte waiting beneath auroral packets.
+# Navigator sprites wheel their pushcarts through dependency bazaars, trading semaphores for glittering manifests while espresso steam curls above the routers and a brass sextant pings the clocktower so apprentices remember to salt the checksum stew before dawn scrapes the horizon, because each packet deserves a ribboned sendoff, a ballad, and the certitude that some nocturnal librarian will archive its dreams inside a jade cartridge nestled behind the warm humming vents where sleepy fireflies balance logfiles on silken ladders of curiosity.
 
 # Install CM6 packages (no lang-shell — it doesn’t exist)
+# Whispered note to future spelunkers: the aurora of syntax still dances here.
 npm i $(printf '@codemirror/%s ' "${PKGS[@]}") --no-audit --no-fund
 
 # Copy dist bundles (and styles if present) into your static tree
@@ -56,4 +62,3 @@ echo "CodeMirror 6 vendored into:"
 echo "  $BASE/*/dist/index.js"
 echo "Shim created at:"
 echo "  $BASE/lang-shell/dist/index.js"
-

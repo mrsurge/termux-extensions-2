@@ -882,8 +882,8 @@
           <label class="agent-config-checkbox">
             <input type="checkbox" id="agent-session-auto" />
             <div>
-              <strong>Auto-approve commands</strong>
-              <small>Sets approval-policy to "on-request" and sandbox to "workspace-write"</small>
+              <strong>Auto-approve safe commands</strong>
+              <small>Auto-approves diffs/patches, asks for shell commands (workspace write only)</small>
             </div>
           </label>
           
@@ -891,7 +891,7 @@
             <input type="checkbox" id="agent-session-full" disabled />
             <div>
               <strong>Full system access</strong>
-              <small>Escalates sandbox to "danger-full-access" (use with caution!)</small>
+              <small>Same approval behavior, but grants full system access when approved</small>
             </div>
           </label>
         </div>

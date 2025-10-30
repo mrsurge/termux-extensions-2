@@ -488,11 +488,17 @@ export function initAgentDrawer() {
     // Add approval settings for first message (new conversation)
     if (!session.conversationId && (session.auto || session.fullAccess)) {
       message.context = message.context || {};
-      if (session.auto) {
+      
+      // Approval policy - on-request means auto-approve diffs, ask for shell commands
+      if (session.auto || session.fullAccess) {
         message.context.approval_policy = 'on-request';
       }
-      if (session.auto || session.fullAccess) {
-        message.context.sandbox = session.fullAccess ? 'danger-full-access' : 'workspace-write';
+      
+      // Sandbox mode - controls what Codex can access when commands ARE approved
+      if (session.fullAccess) {
+        message.context.sandbox = 'danger-full-access';  // Full system access
+      } else if (session.auto) {
+        message.context.sandbox = 'workspace-write';  // Workspace only
       }
     }
     
