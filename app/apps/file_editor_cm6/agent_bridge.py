@@ -44,8 +44,8 @@ class CodexAdapter:
         ctx = context or normalized.get('context', {})
         session_id = normalized.get('session', 'default')
         
-        # Check if we have an existing conversation for this session
-        conversation_id = CodexAdapter._conversations.get(session_id)
+        # Check if conversationId was passed from frontend (for session restore)
+        conversation_id = normalized.get('conversationId') or CodexAdapter._conversations.get(session_id)
         
         if conversation_id:
             # Continue existing conversation
@@ -155,9 +155,9 @@ Content:
                 event_type = msg_data.get('type')
                 request_id = params.get('_meta', {}).get('requestId')
                 
-                # Handle different Codex event types
+                # DIRECT USER RESPONSES - these get normal bubbles
                 if event_type == 'agent_message_delta':
-                    # Streaming token
+                    # Streaming token - DIRECT RESPONSE
                     return {
                         'id': str(request_id),
                         'event': 'token',
@@ -165,40 +165,73 @@ Content:
                         'text': msg_data.get('delta', '')
                     }
                 elif event_type == 'agent_message':
-                    # Full message (for final check)
-                    return {
-                        'id': str(request_id),
-                        'event': 'message',
-                        'agent': 'codex',
-                        'text': msg_data.get('message', '')
-                    }
+                    # Full message - DIRECT RESPONSE (ignore, we use deltas)
+                    return None
+                
+                # EVERYTHING ELSE - terminal/console style
                 elif event_type == 'agent_reasoning_delta':
-                    # Reasoning tokens
+                    # Reasoning tokens - SYSTEM MESSAGE
                     return {
                         'id': str(request_id),
-                        'event': 'planning',
+                        'event': 'system',
                         'agent': 'codex',
-                        'summary': msg_data.get('delta', '')
+                        'text': msg_data.get('delta', '')
+                    }
+                elif event_type == 'agent_reasoning':
+                    # Full reasoning - SYSTEM MESSAGE (ignore, we use deltas)
+                    return None
+                elif event_type == 'agent_reasoning_section_break':
+                    # Section break - SYSTEM MESSAGE
+                    return {
+                        'id': str(request_id),
+                        'event': 'system',
+                        'agent': 'codex',
+                        'text': '\n'
+                    }
+                elif event_type == 'task_started':
+                    # Task starting - SYSTEM MESSAGE
+                    return {
+                        'id': str(request_id),
+                        'event': 'system',
+                        'agent': 'codex',
+                        'text': '[Task started]'
                     }
                 elif event_type == 'task_complete':
-                    # Task finished
+                    # Task finished - SYSTEM MESSAGE + final marker
                     return {
                         'id': str(request_id),
                         'event': 'final',
                         'agent': 'codex',
-                        'ok': True,
-                        'output': {'message': msg_data.get('last_agent_message', '')}
+                        'ok': True
                     }
                 elif event_type == 'session_configured':
-                    # Session started - extract session_id for conversation tracking
+                    # Session started - store conversation ID but don't show
                     return {
                         'id': str(request_id),
                         'event': 'conversation_started',
                         'agent': 'codex',
                         'conversationId': msg_data.get('session_id')
                     }
-                # Ignore other event types for now
+                elif event_type == 'exec_approval_request':
+                    # Command needs approval - IGNORE (elicitation/create is the real one)
+                    return None
+                # Ignore everything else (token_count, etc.)
                 return None
+            
+            # Elicitation requests (approval mechanism)
+            if method == 'elicitation/create':
+                params_data = params
+                return {
+                    'id': str(mcp_msg.get('id', '')),
+                    'event': 'elicitation',
+                    'agent': 'codex',
+                    'elicitation_id': mcp_msg.get('id'),
+                    'message': params_data.get('message'),
+                    'call_id': params_data.get('codex_call_id'),
+                    'command': params_data.get('codex_command'),
+                    'cwd': params_data.get('codex_cwd'),
+                    'tool_call_id': params_data.get('codex_mcp_tool_call_id')
+                }
             
             # MCP progress notifications
             if method == 'notifications/progress':

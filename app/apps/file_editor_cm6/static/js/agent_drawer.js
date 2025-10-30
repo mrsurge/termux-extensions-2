@@ -29,14 +29,15 @@ export function initAgentDrawer() {
     return { open: () => {}, close: () => {} };
   }
 
-  // State management
   let isOpen = false;
   let isFullscreen = false;
   let ws = null;
   let messageIdCounter = 0;
   let currentAssistantBubble = null;
+  let currentPlanningSection = null; // Track planning section
   let sessions = {}; // sessionId -> { id, agent, messages, ws, stats }
   let activeSessionId = null;
+  let isCreatingSession = false;  // Prevent simultaneous session creation
 
   function updateAria() {
     drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
@@ -47,6 +48,11 @@ export function initAgentDrawer() {
     drawer.classList.add('open');
     isOpen = true;
     updateAria();
+    
+    // Load sessions on first open
+    if (Object.keys(sessions).length === 0) {
+      loadSessions();
+    }
     
     // Reconnect active session if needed
     if (activeSessionId && sessions[activeSessionId]) {
@@ -80,39 +86,72 @@ export function initAgentDrawer() {
     return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  function createSession(agent = 'codex') {
-    const sessionId = generateSessionId();
-    const session = {
-      id: sessionId,
-      agent: agent,
-      messages: [],
-      ws: null,
-      stats: { status: 'Created', agent }
-    };
+  async function createSession(agent = 'codex') {
+    // Prevent simultaneous session creation
+    if (isCreatingSession) {
+      console.warn('Session creation already in progress');
+      return;
+    }
     
-    sessions[sessionId] = session;
-    addSessionToList(session);
-    switchToSession(sessionId);
-    connectSession(sessionId);
+    isCreatingSession = true;
     
-    notify(`Created new ${agent} session`);
+    try {
+      const sessionId = generateSessionId();
+      
+      // Get project root from state
+      let projectRoot = null;
+      try {
+        const resp = await fetch('/api/app/file_editor_cm6/state');
+        const data = await resp.json();
+        if (data.ok && data.data?.activeProjectExists) {
+          projectRoot = data.data.activeProject;
+        }
+      } catch (e) {
+        console.error('Failed to get project root:', e);
+      }
+      
+      const session = {
+        id: sessionId,
+        agent: agent,
+        messages: [],
+        ws: null,
+        stats: { status: 'Created', agent },
+        createdAt: Date.now(),
+        cwd: projectRoot
+      };
+      
+      sessions[sessionId] = session;
+      addSessionToList(session);
+      switchToSession(sessionId);
+      connectSession(sessionId);
+      saveSessionsToDisk();
+      
+      notify(`Created new ${agent} session` + (projectRoot ? ` in ${projectRoot.split('/').pop()}` : ''));
+    } finally {
+      isCreatingSession = false;
+    }
   }
 
-  function addSessionToList(session) {
+  function addSessionToList(session, isStale = false) {
     // Remove empty placeholder
     const empty = sessionList?.querySelector('.agent-session-list__item--empty');
     if (empty) empty.remove();
     
     const li = document.createElement('li');
     li.className = 'agent-session-list__item';
+    if (isStale) li.classList.add('agent-session-list__item--stale');
     li.dataset.sessionId = session.id;
+    
+    const timestamp = session.createdAt ? new Date(session.createdAt).toLocaleTimeString() : new Date().toLocaleTimeString();
+    const staleIndicator = isStale ? ' <span class="agent-session-stale-badge">⚠ Stale</span>' : '';
+    
     li.innerHTML = `
-      <span>${session.agent} - ${new Date().toLocaleTimeString()}</span>
+      <span>${session.agent} - ${timestamp}${staleIndicator}</span>
       <button class="agent-session-delete" data-session-id="${session.id}">×</button>
     `;
     
     li.addEventListener('click', (e) => {
-      if (!e.target.classList.contains('agent-session-delete')) {
+      if (!e.target.classList.contains('agent-session-delete') && !isStale) {
         switchToSession(session.id);
       }
     });
@@ -130,6 +169,15 @@ export function initAgentDrawer() {
     const session = sessions[sessionId];
     if (!session) return;
     
+    // Terminate framework shell properly
+    if (session.shell_id) {
+      fetch(`/api/framework_shells/${session.shell_id}`, {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ force: 1 })  // Force terminate
+      }).catch(e => console.error('Failed to terminate shell:', e));
+    }
+    
     // Close WebSocket
     if (session.ws) {
       session.ws.close();
@@ -141,6 +189,7 @@ export function initAgentDrawer() {
     
     // Remove from state
     delete sessions[sessionId];
+    saveSessionsToDisk();
     
     // Switch to another session or show empty
     const remaining = Object.keys(sessions);
@@ -158,7 +207,7 @@ export function initAgentDrawer() {
     notify('Session deleted');
   }
 
-  function switchToSession(sessionId) {
+  async function switchToSession(sessionId) {
     const session = sessions[sessionId];
     if (!session) return;
     
@@ -181,13 +230,48 @@ export function initAgentDrawer() {
       targetSelect.value = session.agent;
     }
     
-    // Reconnect if needed
-    if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
-      connectSession(sessionId);
+    // Check if shell is still alive before reconnecting
+    if (session.shell_id) {
+      try {
+        const resp = await fetch(`/api/framework_shells/${session.shell_id}`);
+        const data = await resp.json();
+        
+        if (data.ok && data.data?.alive) {
+          // Shell is alive - reconnect WebSocket if needed
+          if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
+            connectSession(sessionId);
+          }
+        } else {
+          // Shell is dead - mark as stale
+          session.stats.status = 'Stale';
+          updateStats(session.stats);
+          const li = sessionList?.querySelector(`[data-session-id="${sessionId}"]`);
+          if (li) {
+            li.classList.add('agent-session-list__item--stale');
+            const staleIndicator = ' <span class="agent-session-stale-badge">⚠ Stale</span>';
+            const span = li.querySelector('span');
+            if (span && !span.innerHTML.includes('Stale')) {
+              span.innerHTML += staleIndicator;
+            }
+          }
+          notify('Session shell is no longer running');
+        }
+      } catch (e) {
+        console.error('Failed to check shell status:', e);
+        // On error, try to reconnect anyway
+        if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
+          connectSession(sessionId);
+        }
+      }
+    } else {
+      // No shell_id yet - reconnect to create one
+      if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
+        connectSession(sessionId);
+      }
     }
   }
 
-  function connectSession(sessionId) {
+  async function connectSession(sessionId) {
     const session = sessions[sessionId];
     if (!session) return;
     
@@ -196,9 +280,24 @@ export function initAgentDrawer() {
       session.ws.close();
     }
     
+    // Get project root from state if not stored
+    let projectRoot = session.cwd;
+    if (!projectRoot) {
+      try {
+        const resp = await fetch('/api/app/file_editor_cm6/state');
+        const data = await resp.json();
+        if (data.ok && data.data?.activeProjectExists) {
+          projectRoot = data.data.activeProject;
+          session.cwd = projectRoot;  // Store it
+          saveSessionsToDisk();
+        }
+      } catch (e) {
+        console.error('Failed to get project root:', e);
+      }
+    }
+    
     // Get current file context
     const currentFile = window.currentPath || null;
-    const projectRoot = window.currentProjectPath || null;
     
     // Build WebSocket URL
     const wsUrl = new URL('/ws/app/file_editor_cm6/agent', window.location.href);
@@ -252,9 +351,14 @@ export function initAgentDrawer() {
         if (isActive) appendAssistantToken(msg.text);
         break;
         
+      case 'system':
+        session.messages.push({ type: 'system', text: msg.text });
+        if (isActive) appendSystemToken(msg.text);
+        break;
+        
       case 'planning':
         session.messages.push({ type: 'planning', summary: msg.summary });
-        if (isActive) addSystemMessage(`Planning: ${msg.summary}`);
+        if (isActive) appendPlanningToken(msg.summary);
         break;
         
       case 'tool_call':
@@ -265,6 +369,12 @@ export function initAgentDrawer() {
       case 'diff':
         session.messages.push({ type: 'diff', path: msg.path, patch: msg.patch });
         if (isActive) addDiffMessage(msg.path, msg.patch);
+        break;
+        
+      case 'elicitation':
+      case 'approval_request':
+        session.messages.push({ type: 'approval', ...msg });
+        if (isActive) showApprovalRequest(msg);
         break;
         
       case 'final':
@@ -278,7 +388,23 @@ export function initAgentDrawer() {
         if (isActive) addErrorMessage(msg.error);
         break;
         
-      case 'result':
+      case 'connected':
+        // Store shell_id for proper termination
+        if (msg.shell_id) {
+          session.shell_id = msg.shell_id;
+          session.stats.status = 'Connected';
+          saveSessionsToDisk();
+          updateStats(session.stats);
+        }
+        break;
+        
+      case 'conversation_started':
+        // Store conversation ID for continuing the conversation
+        if (msg.conversationId) {
+          session.conversationId = msg.conversationId;
+          saveSessionsToDisk();
+        }
+        break;
         // Stats or capabilities
         if (msg.result) {
           Object.assign(session.stats, msg.result);
@@ -308,7 +434,9 @@ export function initAgentDrawer() {
       id: String(++messageIdCounter),
       action: 'chat',
       text: text,
-      target: session.agent
+      target: session.agent,
+      session: activeSessionId,
+      conversationId: session.conversationId  // Pass conversationId to backend
     };
     
     // Attach file context if enabled
@@ -368,6 +496,21 @@ export function initAgentDrawer() {
           transcript?.appendChild(planBubble);
           break;
           
+        case 'system':
+          // System messages (reasoning, etc) - render in terminal style
+          assistantBubble = null;
+          const sysBubble = document.createElement('div');
+          sysBubble.className = 'agent-transcript__planning';
+          sysBubble.innerHTML = '<span class="agent-transcript__planning-label">⚙</span><span class="agent-transcript__planning-text">' + msg.text + '</span>';
+          transcript?.appendChild(sysBubble);
+          break;
+          
+        case 'approval':
+          // Approval requests - recreate the UI
+          assistantBubble = null;
+          showApprovalRequest(msg);
+          break;
+          
         case 'tool_call':
           assistantBubble = null;
           const toolBubble = document.createElement('div');
@@ -407,6 +550,11 @@ export function initAgentDrawer() {
     const placeholder = transcript?.querySelector('.agent-transcript__placeholder');
     if (placeholder) placeholder.remove();
     
+    // Finish planning section if active
+    if (currentPlanningSection) {
+      currentPlanningSection = null;
+    }
+    
     if (!currentAssistantBubble) {
       currentAssistantBubble = document.createElement('div');
       currentAssistantBubble.className = 'agent-transcript__bubble agent-transcript__bubble--assistant';
@@ -417,8 +565,36 @@ export function initAgentDrawer() {
     transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
   }
 
+  function appendSystemToken(text) {
+    // Remove placeholder
+    const placeholder = transcript?.querySelector('.agent-transcript__placeholder');
+    if (placeholder) placeholder.remove();
+    
+    // Create or reuse system section
+    if (!currentPlanningSection) {
+      currentPlanningSection = document.createElement('div');
+      currentPlanningSection.className = 'agent-transcript__planning';
+      currentPlanningSection.innerHTML = '<span class="agent-transcript__planning-label">⚙</span><span class="agent-transcript__planning-text"></span>';
+      transcript?.appendChild(currentPlanningSection);
+    }
+    
+    // Append to system text
+    const textSpan = currentPlanningSection.querySelector('.agent-transcript__planning-text');
+    if (textSpan) {
+      textSpan.textContent += text;
+    }
+    
+    transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
+  }
+
+  function appendPlanningToken(text) {
+    // Alias to appendSystemToken for backwards compatibility
+    appendSystemToken(text);
+  }
+
   function finishAssistantMessage() {
     currentAssistantBubble = null;
+    currentPlanningSection = null;
   }
 
   function addSystemMessage(text) {
@@ -449,6 +625,94 @@ export function initAgentDrawer() {
     transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
   }
 
+  function showApprovalRequest(msg) {
+    const bubble = document.createElement('div');
+    bubble.className = 'agent-transcript__bubble agent-transcript__bubble--approval';
+    bubble.dataset.elicitationId = msg.elicitation_id || msg.call_id;
+    
+    const commandStr = Array.isArray(msg.command) ? msg.command.join(' ') : msg.command;
+    const reason = msg.reason || msg.message || 'Command requires approval';
+    
+    bubble.innerHTML = `
+      <div class="agent-approval-header">
+        <strong>⚠ Approval Required</strong>
+      </div>
+      <div class="agent-approval-reason">${reason}</div>
+      <div class="agent-approval-command">
+        <strong>Command:</strong>
+        <code>${commandStr}</code>
+      </div>
+      <div class="agent-approval-cwd">
+        <strong>Directory:</strong> <code>${msg.cwd || 'unknown'}</code>
+      </div>
+      <div class="agent-approval-actions">
+        <button class="fe-btn agent-approval-btn agent-approval-btn--approve">✓ Approve</button>
+        <button class="fe-btn agent-approval-btn agent-approval-btn--deny">✗ Deny</button>
+      </div>
+    `;
+    
+    // Add event listeners
+    const approveBtn = bubble.querySelector('.agent-approval-btn--approve');
+    const denyBtn = bubble.querySelector('.agent-approval-btn--deny');
+    
+    approveBtn?.addEventListener('click', () => {
+      sendApprovalResponse(msg.elicitation_id, true, msg);
+      bubble.classList.add('agent-transcript__bubble--approval-approved');
+      approveBtn.disabled = true;
+      denyBtn.disabled = true;
+      approveBtn.textContent = '✓ Approved';
+    });
+    
+    denyBtn?.addEventListener('click', () => {
+      sendApprovalResponse(msg.elicitation_id, false, msg);
+      bubble.classList.add('agent-transcript__bubble--approval-denied');
+      approveBtn.disabled = true;
+      denyBtn.disabled = true;
+      denyBtn.textContent = '✗ Denied';
+    });
+    
+    transcript?.appendChild(bubble);
+    transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
+  }
+
+  function sendApprovalResponse(elicitationId, approved, originalMsg) {
+    if (!activeSessionId) return;
+    
+    const session = sessions[activeSessionId];
+    if (!session) {
+      notify('Cannot send approval - session not found');
+      return;
+    }
+    
+    // Send JSON-RPC response with decision field
+    // Codex expects: {"decision": "approved"} or {"decision": "denied"}
+    const response = {
+      jsonrpc: '2.0',
+      id: elicitationId,
+      result: {
+        decision: approved ? 'approved' : 'denied'
+      }
+    };
+    
+    // Send as raw message to agent (bypassing normal adapter)
+    fetch('/api/app/file_editor_cm6/agent/send_raw', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        session_id: activeSessionId,
+        message: JSON.stringify(response)
+      })
+    }).then(r => r.json()).then(j => {
+      if (!j.ok) {
+        notify('Failed to send approval: ' + (j.error || 'Unknown error'));
+      }
+    }).catch(e => {
+      notify('Failed to send approval: ' + e.message);
+    });
+    
+    notify(approved ? 'Command approved' : 'Command denied');
+  }
+
   function updateStats(stats) {
     if (!statsEl) return;
     
@@ -463,14 +727,81 @@ export function initAgentDrawer() {
 
   async function loadSessions() {
     try {
-      const resp = await fetch('/api/app/file_editor_cm6/agent/list');
+      // Load from backend preferences
+      const resp = await fetch('/api/app/file_editor_cm6/preferences/get?key=agent_sessions');
       const json = await resp.json();
+      
       if (json.ok && json.data) {
-        // Future: restore sessions from backend
-        // For now, just start fresh
+        const savedSessions = JSON.parse(json.data);
+        
+        // Restore sessions - assume alive until proven otherwise
+        for (const [sessionId, sessionData] of Object.entries(savedSessions)) {
+          // Restore session object
+          sessions[sessionId] = {
+            ...sessionData,
+            ws: null,  // WebSocket will reconnect on use
+            stats: { status: 'Restored', agent: sessionData.agent }
+          };
+          
+          // Add to UI (not stale)
+          addSessionToList(sessions[sessionId], false);
+        }
+        
+        // If we have sessions, switch to first one
+        const sessionIds = Object.keys(sessions);
+        if (sessionIds.length > 0) {
+          switchToSession(sessionIds[0]);
+        }
       }
     } catch (e) {
       console.error('Failed to load sessions:', e);
+    }
+  }
+
+  function saveSessionsToDisk() {
+    // Save sessions to backend preferences (without ws and heavy objects)
+    const toSave = {};
+    for (const [id, session] of Object.entries(sessions)) {
+      toSave[id] = {
+        id: session.id,
+        agent: session.agent,
+        messages: session.messages,
+        createdAt: session.createdAt,
+        conversationId: session.conversationId,
+        cwd: session.cwd,
+        shell_id: session.shell_id  // Save shell_id!
+      };
+    }
+    
+    fetch('/api/app/file_editor_cm6/preferences/set', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        key: 'agent_sessions',
+        value: JSON.stringify(toSave)
+      })
+    }).catch(e => console.error('Failed to save sessions:', e));
+  }
+
+  function cleanupStaleSessions() {
+    const staleItems = sessionList?.querySelectorAll('.agent-session-list__item--stale');
+    staleItems?.forEach(item => {
+      const sessionId = item.dataset.sessionId;
+      if (sessionId && sessions[sessionId]) {
+        delete sessions[sessionId];
+        item.remove();
+      }
+    });
+    
+    saveSessionsToDisk();
+    notify('Stale sessions cleaned up');
+    
+    // Show empty if no sessions left
+    if (Object.keys(sessions).length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'agent-session-list__item agent-session-list__item--empty';
+      empty.textContent = 'No sessions yet';
+      sessionList?.appendChild(empty);
     }
   }
 
@@ -494,7 +825,7 @@ export function initAgentDrawer() {
   });
 
   refreshBtn?.addEventListener('click', () => {
-    loadSessions();
+    cleanupStaleSessions();
   });
 
   sendBtn?.addEventListener('click', () => {

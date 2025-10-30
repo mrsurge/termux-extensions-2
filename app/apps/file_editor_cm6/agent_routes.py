@@ -192,3 +192,100 @@ def register_agent_routes(bp):
             })
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
+    
+    @bp.post('/agent/send_raw')
+    def agent_send_raw():
+        """
+        Send raw JSON message to agent (for approval responses, etc).
+        
+        Body (JSON):
+            session_id: Session ID (required)
+            message: Raw JSON string to send (required)
+        
+        Returns:
+            Success confirmation
+        """
+        bridge = get_bridge()
+        data = request.get_json(silent=True) or {}
+        
+        session_id = data.get('session_id')
+        message = data.get('message')
+        
+        if not session_id or not message:
+            return jsonify({"ok": False, "error": "Missing session_id or message"}), 400
+        
+        try:
+            # Get shell ID for this session
+            shell_id = bridge._sessions.get(session_id)
+            if not shell_id:
+                return jsonify({"ok": False, "error": "Session not found"}), 404
+            
+            # Write raw message to PTY
+            bridge.manager.write_to_pty(shell_id, message + '\n')
+            
+            return jsonify({"ok": True, "data": {"session_id": session_id}})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    
+    @bp.get('/preferences/get')
+    def preferences_get():
+        """Get a preference value by key."""
+        from flask import current_app
+        import os
+        import json
+        
+        key = request.args.get('key')
+        if not key:
+            return jsonify({"ok": False, "error": "Missing key parameter"}), 400
+        
+        try:
+            # Store preferences in app's data directory
+            prefs_dir = os.path.join(os.path.expanduser('~'), '.codex', 'app_prefs')
+            os.makedirs(prefs_dir, exist_ok=True)
+            prefs_file = os.path.join(prefs_dir, 'code_cm6.json')
+            
+            if os.path.exists(prefs_file):
+                with open(prefs_file, 'r') as f:
+                    prefs = json.load(f)
+                    value = prefs.get(key)
+                    return jsonify({"ok": True, "data": value})
+            else:
+                return jsonify({"ok": True, "data": None})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    
+    @bp.post('/preferences/set')
+    def preferences_set():
+        """Set a preference value by key."""
+        import os
+        import json
+        
+        data = request.get_json(silent=True) or {}
+        key = data.get('key')
+        value = data.get('value')
+        
+        if not key:
+            return jsonify({"ok": False, "error": "Missing key"}), 400
+        
+        try:
+            # Store preferences in app's data directory
+            prefs_dir = os.path.join(os.path.expanduser('~'), '.codex', 'app_prefs')
+            os.makedirs(prefs_dir, exist_ok=True)
+            prefs_file = os.path.join(prefs_dir, 'code_cm6.json')
+            
+            # Load existing prefs
+            prefs = {}
+            if os.path.exists(prefs_file):
+                with open(prefs_file, 'r') as f:
+                    prefs = json.load(f)
+            
+            # Update
+            prefs[key] = value
+            
+            # Save
+            with open(prefs_file, 'w') as f:
+                json.dump(prefs, f, indent=2)
+            
+            return jsonify({"ok": True, "data": {"key": key}})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500

@@ -70,6 +70,18 @@ def register_agent_websocket(sock):
         try:
             agent = bridge.get_or_create_agent(session_id, agent_type, cwd)
             shell_id = agent['id']
+            
+            # Send shell metadata to frontend
+            try:
+                ws.send(json.dumps({
+                    'event': 'connected',
+                    'agent': agent_type,
+                    'shell_id': shell_id,
+                    'cwd': cwd
+                }))
+            except:
+                pass
+                
         except Exception as e:
             try:
                 ws.send(json.dumps({
@@ -177,12 +189,14 @@ def register_agent_websocket(sock):
                     msg_agent_type = message.get('target', agent_type)
                     
                     # Enrich context if file path provided
-                    context = None
+                    context = {'cwd': cwd} if cwd else {}
                     if file_path or message.get('file'):
-                        context = enrich_context(
+                        file_context = enrich_context(
                             file_path=message.get('file') or file_path,
                             project_root=cwd
                         )
+                        if file_context:
+                            context.update(file_context)
                     
                     # Write to agent with protocol translation
                     bridge.write_message(session_id, msg_agent_type, message, context)
