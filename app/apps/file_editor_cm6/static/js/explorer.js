@@ -240,11 +240,19 @@ async function handleGitAction(endpoint, payload) {
       await refreshTree(treeElement);
     }
     
-    // After commit, refresh diff context for currently open file
-    // (HEAD has changed, so diff baseline is stale)
-    if (endpoint === '/git/commit' && window.__cm6Diff && window.currentPath) {
-      window.__cm6Diff.invalidateCacheForPath(window.currentPath);
-      window.__cm6Diff.refresh(true);
+    // After commit: reload current file (HEAD changed, diff baseline stale)
+    if (endpoint === '/git/commit' && typeof window.__cm6ReloadCurrentFile === 'function') {
+      await window.__cm6ReloadCurrentFile();
+    }
+    
+    // After push: reload file AND close drawer (push is usually final git action)
+    if (endpoint === '/git/push' && typeof window.__cm6ReloadCurrentFile === 'function') {
+      await window.__cm6ReloadCurrentFile();
+      // Close drawer to show the updated file
+      const root = document.querySelector('.fe-drawer');
+      if (root) {
+        root.classList.remove('drawer-open');
+      }
     }
     
     return;

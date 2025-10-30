@@ -2,6 +2,7 @@
 
 // Code Viewer (CM6) — dual-surface editor with native Android selection mode.
 // Imports resolve to files produced by scripts/vendor_cm6.sh
+// comment for testing in-line git refreshes
 import * as CM from '/static/vendor/codemirror.1/codemirror.bundle.js';
 import { initExplorerUI } from './static/js/explorer.js';
 import { createDiffController } from './static/js/diff_decorations.js';
@@ -456,6 +457,18 @@ async function syncEditorState(forceRefresh = false) {
 }
 
 window.__cm6SyncState = syncEditorState;
+
+// Expose function to reload current file (for git operations)
+window.__cm6ReloadCurrentFile = async function() {
+  if (currentPath) {
+    await openFile(currentPath);
+  }
+};
+
+// Expose currentPath getter
+Object.defineProperty(window, 'currentPath', {
+  get: () => currentPath
+});
 
 async function ensureProjectContext() {
   const state = await syncEditorState(!cachedProjectRoot);
