@@ -238,8 +238,16 @@ async function handleGitAction(endpoint, payload) {
     renderGitSummary(data);
     if (treeElement) {
       await refreshTree(treeElement);
-      return;
     }
+    
+    // After commit, refresh diff context for currently open file
+    // (HEAD has changed, so diff baseline is stale)
+    if (endpoint === '/git/commit' && window.__cm6Diff && window.currentPath) {
+      window.__cm6Diff.invalidateCacheForPath(window.currentPath);
+      window.__cm6Diff.refresh(true);
+    }
+    
+    return;
   } catch (err) {
     toast(err.message || 'Git action failed');
   } finally {
