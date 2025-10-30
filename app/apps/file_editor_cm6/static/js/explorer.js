@@ -1,5 +1,5 @@
 // app/apps/file_editor_cm6/static/js/explorer.js
-
+// diff test... please ignore this comment
 // explorer.js - File Explorer Drawer for CM6 Editor
 let currentProjectPath = '';
 let cachedState = null;
