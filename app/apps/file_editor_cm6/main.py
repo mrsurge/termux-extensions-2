@@ -28,6 +28,7 @@ from .preferences_store import PreferencesStore
 from .terminal_backend import register_terminal_routes
 from .agent_routes import register_agent_routes
 from .agent_ws import register_agent_websocket
+from . import edit_tracker
 
 file_editor_cm6_bp = Blueprint('file_editor_cm6', __name__)
 sock = Sock()
@@ -62,7 +63,8 @@ def _ensure_project_root_synced() -> Path:
 
 # Sync the initial project root on module import.
 try:
-    _ensure_project_root_synced()
+    project_root = _ensure_project_root_synced()
+    edit_tracker.set_project_root(project_root)
 except Exception:
     pass
 
@@ -289,6 +291,7 @@ def project_open():
         _history_store.touch_project(str(abs_path))
         _history_store.set_active_project(str(abs_path))
         invalidate_diff_cache(abs_path)
+        edit_tracker.set_project_root(abs_path)
         state = _build_state_payload()
         return jsonify({"ok": True, "data": {"path": str(abs_path), "state": state}})
     except Exception as e:
@@ -569,4 +572,68 @@ def set_terminal_shell_id():
         return jsonify({"ok": True, "data": {"shell_id": shell_id}})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+@file_editor_cm6_bp.get('/edit_tracker/status')
+def get_edit_tracker_status():
+    """Get current edit tracker status."""
+    try:
+        status = edit_tracker.get_tracking_status()
+        return jsonify({"ok": True, "data": status})
+    except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+@sock.route('/ws/edit_tracker')
+def edit_tracker_ws(ws):
+    """WebSocket endpoint for edit tracking events."""
+    import queue as _queue
+    import threading
+    
+    # Subscribe to edit tracker events
+    event_queue = _queue.Queue()
+    
+    def queue_callback(event):
+        try:
+            event_queue.put(event)
+        except Exception:
+            pass
+    
+    token = edit_tracker.subscribe(queue_callback)
+    stop_event = threading.Event()
+    
+    def forward_events_to_ws():
+        """Forward edit tracker events to WebSocket"""
+        while not stop_event.is_set():
+            try:
+                event = event_queue.get(timeout=0.5)
+            except _queue.Empty:
+                continue
+            
+            try:
+                ws.send(json.dumps(event))
+            except Exception:
+                stop_event.set()
+                break
+    
+    # Start forwarding thread
+    forward_thread = threading.Thread(target=forward_events_to_ws, daemon=True)
+    forward_thread.start()
+    
+    try:
+        # Keep connection alive (receive ping/pong)
+        while not stop_event.is_set():
+            msg = ws.receive()
+            if msg is None:
+                break
+    finally:
+        # Clean up
+        stop_event.set()
+        
+        try:
+            forward_thread.join(timeout=1.0)
+        except Exception:
+            pass
+        
+        try:
+            edit_tracker.unsubscribe(token)
+        except Exception:
+            pass

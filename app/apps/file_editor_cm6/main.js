@@ -79,6 +79,7 @@ const selectTip = requireEl('#select-tip');
 const fileNameEl = requireEl('#fe-file-name');
 const filePathEl = requireEl('#fe-file-path');
 const statusEl = requireEl('#fe-status');
+const editTrackerStatusEl = requireEl('#edit-tracker-status');
 
 // Menus (ids must match template.html)
 const menuFileBtn = requireEl('#menu-file-btn');
@@ -114,6 +115,7 @@ const miToggleSyntax  = requireEl('#mi-toggle-syntax');
 const miToggleWrap    = requireEl('#mi-toggle-wrap');
 const miToggleAutosave = requireEl('#mi-toggle-autosave');
 const miToggleDiffs  = requireEl('#mi-toggle-diffs');
+const miTrackEdits   = requireEl('#mi-track-edits');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
 
@@ -162,6 +164,130 @@ const diffController = createDiffController({
   getWordWrap: () => wordWrap,
 });
 window.__cm6Diff = diffController;
+
+// ---------- Edit Tracker ----------
+function connectEditTracker() {
+  if (editTrackerWS) return; // Already connected
+  
+  const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProto}//${window.location.host}/ws/app/file_editor_cm6/edit_tracker`;
+  
+  editTrackerWS = new WebSocket(wsUrl);
+  
+  editTrackerWS.onopen = () => {
+    console.log('[EditTracker] Connected');
+  };
+  
+  editTrackerWS.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      handleEditTrackerEvent(data);
+    } catch (e) {
+      console.error('[EditTracker] Parse error:', e);
+    }
+  };
+  
+  editTrackerWS.onerror = (err) => {
+    console.error('[EditTracker] WebSocket error:', err);
+  };
+  
+  editTrackerWS.onclose = () => {
+    console.log('[EditTracker] Disconnected');
+    editTrackerWS = null;
+    updateEditTrackerStatus({ active: false, shells: [], last_edit: null });
+  };
+}
+
+function disconnectEditTracker() {
+  if (editTrackerWS) {
+    editTrackerWS.close();
+    editTrackerWS = null;
+  }
+  updateEditTrackerStatus({ active: false, shells: [], last_edit: null });
+}
+
+function handleEditTrackerEvent(data) {
+  if (data.event === 'tracking_status') {
+    updateEditTrackerStatus(data);
+  } else if (data.event === 'edit_tracked') {
+    if (trackAgentEdits) {
+      autoJumpToEdit(data.path, data.line);
+    }
+  }
+}
+
+function updateEditTrackerStatus(status) {
+  if (status.active && status.shells && status.shells.length > 0) {
+    const shellTypes = status.shells.map(s => s.type).join(', ');
+    editTrackerStatusEl.textContent = `🤖 Tracking (${status.shells.length} ${shellTypes})`;
+    editTrackerStatusEl.style.display = '';
+  } else {
+    editTrackerStatusEl.textContent = '';
+    editTrackerStatusEl.style.display = 'none';
+  }
+}
+
+async function autoJumpToEdit(path, line) {
+  try {
+    // Open file if not already open
+    if (currentPath !== path) {
+      await openFile(path);
+    }
+    
+    // Wait a tick for editor to be ready
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    // Scroll to line and flash highlight
+    if (editorView && line > 0) {
+      const docLines = editorView.state.doc.lines;
+      if (line <= docLines) {
+        const lineObj = editorView.state.doc.line(line);
+        const pos = lineObj.from;
+        
+        // Scroll into view
+        editorView.dispatch({
+          selection: { anchor: pos, head: pos },
+          scrollIntoView: true,
+        });
+        
+        // Flash highlight effect
+        flashLine(line);
+      }
+    }
+  } catch (e) {
+    console.error('[EditTracker] Auto-jump failed:', e);
+  }
+}
+
+function flashLine(lineNumber) {
+  if (!editorView) return;
+  
+  const lineObj = editorView.state.doc.line(lineNumber);
+  const flashDeco = CM.Decoration.line({ class: 'cm-edit-flash' });
+  const decoSet = CM.RangeSetBuilder.of([flashDeco.range(lineObj.from)]);
+  
+  const flashField = CM.StateField.define({
+    create: () => decoSet,
+    update: (value) => value,
+    provide: field => CM.EditorView.decorations.from(field),
+  });
+  
+  // Add decoration
+  editorView.dispatch({
+    effects: CM.StateEffect.appendConfig.of(flashField),
+  });
+  
+  // Remove after 1 second
+  setTimeout(() => {
+    try {
+      editorView.dispatch({
+        effects: CM.StateEffect.reconfigure.of([]),
+      });
+    } catch (e) {
+      // Ignore if view is destroyed
+    }
+  }, 1000);
+}
 
 // ---------- small utils ----------
 function simplifyAbsolute(path) {
@@ -247,6 +373,7 @@ let showSyntaxHighlight = true;
 let wordWrap = false;
 let autoSaveEnabled = true;
 let showInlineDiffs = true;
+let trackAgentEdits = false;
 let currentTheme = 'cm6-dark';
 let lastPickerPath = HOME_DIR;
 let currentModeLanguage = null;
@@ -258,6 +385,7 @@ let agentDrawerHandle = null;
 
 // WebSocket and autosave state
 let ws = null;
+let editTrackerWS = null;
 let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 let lastSha256 = null;
 let inflightOpId = null;
@@ -357,6 +485,7 @@ function applyPreferencesFromStore(payload) {
   wordWrap = !!editorPrefs.wordWrap;
   autoSaveEnabled = editorPrefs.autoSave !== false;
   showInlineDiffs = editorPrefs.showInlineDiffs !== false;
+  trackAgentEdits = !!editorPrefs.trackAgentEdits;
   const themeId = editorPrefs.theme;
   currentTheme = (themeId && THEMES[themeId]) ? themeId : 'cm6-dark';
   if (editorState) {
@@ -371,6 +500,7 @@ function applyMenuState() {
   setMenuChecked(miToggleWrap, wordWrap);
   setMenuChecked(miToggleAutosave, autoSaveEnabled);
   setMenuChecked(miToggleDiffs, showInlineDiffs);
+  setMenuChecked(miTrackEdits, trackAgentEdits);
   selectSurface.classList.toggle('wrap', wordWrap);
 }
 
@@ -402,6 +532,13 @@ async function loadPreferences(initialPayload = null) {
   const payload = initialPayload || await fetchPreferencesFromServer();
   applyPreferencesFromStore(payload);
   diffController.setEnabled(showInlineDiffs);
+  
+  // Connect/disconnect edit tracker based on preference
+  if (trackAgentEdits) {
+    connectEditTracker();
+  } else {
+    disconnectEditTracker();
+  }
 }
 
 async function persistEditorPreferences(partialEditor = null) {
@@ -996,6 +1133,16 @@ bindMenuToggle(miToggleDiffs, () => {
     diffController.refresh(true);
   }
   persistEditorPreferences({ showInlineDiffs });
+});
+bindMenuToggle(miTrackEdits, () => {
+  trackAgentEdits = !trackAgentEdits;
+  applyMenuState();
+  if (trackAgentEdits) {
+    connectEditTracker();
+  } else {
+    disconnectEditTracker();
+  }
+  persistEditorPreferences({ trackAgentEdits });
 });
 
 // Initialize terminal drawer

@@ -114,6 +114,17 @@
     height: 0 !important;
   }
 
+  /* Edit tracker flash animation */
+  .cm-edit-flash {
+    background-color: rgba(255, 200, 0, 0.3);
+    animation: edit-flash 1s ease-out;
+  }
+  
+  @keyframes edit-flash {
+    0% { background-color: rgba(255, 200, 0, 0.5); }
+    100% { background-color: transparent; }
+  }
+
   /* Terminal drawer styles */
   .terminal-drawer {
     position: fixed;
@@ -729,6 +740,7 @@
       <div id="recent-files-dd" class="fe-dropdown"></div>
     </div>
     <span id="fe-status" class="fe-status" style="display: none;"></span>
+    <span id="edit-tracker-status" class="fe-status" style="display: none; margin-left: 0.5rem;"></span>
   </div>
 
   <div class="fe-menubar">
@@ -763,6 +775,7 @@
         <div class="fe-dd-item" id="mi-toggle-wrap" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Word Wrap</span></div>
         <div class="fe-dd-item" id="mi-toggle-autosave" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Save</span></div>
         <div class="fe-dd-item" id="mi-toggle-diffs" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Show Inline Diffs</span></div>
+        <div class="fe-dd-item" id="mi-track-edits" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Track Agent Edits</span></div>
         <div class="fe-dd-item" id="mi-toggle-terminal"><span>Toggle Terminal</span><span class="fe-kbd">Ctrl/Cmd+`</span></div>
         <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
         <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>

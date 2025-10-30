@@ -19,6 +19,7 @@ import threading
 import uuid
 from flask import request
 from .agent_bridge import get_bridge, enrich_context
+from . import edit_tracker
 
 # Global registry of shared shells: agent_type -> (session_id, shell_id)
 _shared_shells = {}
@@ -208,6 +209,9 @@ def register_agent_websocket(sock):
         forward_thread = threading.Thread(target=forward_agent_to_ws, daemon=True)
         forward_thread.start()
         
+        # Register shell for edit tracking
+        edit_tracker.register_shell_watcher(shell_id, 'agent')
+        
         try:
             # Forward WebSocket → Agent
             while not stop_event.is_set():
@@ -257,6 +261,9 @@ def register_agent_websocket(sock):
         finally:
             # Clean up
             stop_event.set()
+            
+            # Unregister shell from edit tracking
+            edit_tracker.unregister_shell_watcher(shell_id)
             
             try:
                 forward_thread.join(timeout=1.0)

@@ -10,6 +10,7 @@ from threading import Thread, Lock, Timer
 from typing import Callable, Dict, Optional
 
 from .core_write import _get_file_meta
+from . import edit_tracker
 
 try:
     from watchdog.observers import Observer
@@ -241,6 +242,10 @@ def _do_handle_fs_event(raw_event):
             "path": path,
             "sha256": file_meta["sha256"]
         })
+        
+        # Notify edit tracker of file modification
+        edit_tracker.on_file_modified(path)
+        
     except (FileNotFoundError, IsADirectoryError):
         pass # File might have been deleted
 

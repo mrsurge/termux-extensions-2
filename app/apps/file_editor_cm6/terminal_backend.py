@@ -10,6 +10,7 @@ import threading
 from flask import jsonify, request
 from app.libs.framework_shells import _manager
 from .terminal_shell import create_editor_shell, destroy_editor_shell, resize_editor_shell, get_shell_info
+from . import edit_tracker
 
 
 def register_terminal_routes(bp, sock):
@@ -179,6 +180,9 @@ def register_terminal_routes(bp, sock):
         forward_thread = threading.Thread(target=forward_pty_to_ws, daemon=True)
         forward_thread.start()
         
+        # Register shell for edit tracking
+        edit_tracker.register_shell_watcher(shell_id, 'terminal')
+        
         try:
             # Forward WebSocket → PTY
             while not stop_event.is_set():
@@ -193,6 +197,10 @@ def register_terminal_routes(bp, sock):
         finally:
             # Clean up
             stop_event.set()
+            
+            # Unregister shell from edit tracking
+            edit_tracker.unregister_shell_watcher(shell_id)
+            
             try:
                 forward_thread.join(timeout=1.0)
             except Exception:
