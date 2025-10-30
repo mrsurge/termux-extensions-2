@@ -20,24 +20,24 @@ The agent drawer provides an interface for interacting with AI coding agents (Co
 
 ```
 ┌─────────────────────────────────────────┐
-│ Frontend: Multiple UI Sessions         │
-│  - Session 1: "Bug fix"                │
-│  - Session 2: "Add feature"            │
-│  - Session 3: "Refactor code"          │
+│ Frontend: Multiple UI Sessions                 │
+│  - Session 1: "Bug fix"                        │
+│  - Session 2: "Add feature"                    │
+│  - Session 3: "Refactor code"                  │
 └─────────────────────────────────────────┘
                  ↓ (multiplexed)
 ┌─────────────────────────────────────────┐
-│ Backend: ONE Framework Shell            │
-│  Shell: codex mcp-server                │
-│  Session ID: shared-codex-abc123        │
+│ Backend: ONE Framework Shell                   │
+│  Shell: codex mcp-server                       │
+│  Session ID: shared-codex-abc123               │
 └─────────────────────────────────────────┘
                  ↓ (conversationId routing)
 ┌─────────────────────────────────────────┐
-│ Codex CLI: Multiple Conversations       │
-│  - conversationId: uuid-1               │
-│  - conversationId: uuid-2               │
-│  - conversationId: uuid-3               │
-│  Storage: ~/.codex/sessions/            │
+│ Codex CLI: Multiple Conversations              │
+│  - conversationId: uuid-1                      │
+│  - conversationId: uuid-2                      │
+│  - conversationId: uuid-3                      │
+│  Storage: ~/.codex/sessions/                   │
 └─────────────────────────────────────────┘
 ```
 
