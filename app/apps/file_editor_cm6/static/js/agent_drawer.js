@@ -489,12 +489,12 @@ export function initAgentDrawer() {
     if (!session.conversationId && (session.auto || session.fullAccess)) {
       message.context = message.context || {};
       
-      // Approval policy - on-request means auto-approve diffs, ask for shell commands
+      // Approval policy - 'never' means auto-approve all operations (YOLO mode)
       if (session.auto || session.fullAccess) {
-        message.context.approval_policy = 'on-request';
+        message.context.approval_policy = 'never';
       }
       
-      // Sandbox mode - controls what Codex can access when commands ARE approved
+      // Sandbox mode - controls what Codex can access
       if (session.fullAccess) {
         message.context.sandbox = 'danger-full-access';  // Full system access
       } else if (session.auto) {

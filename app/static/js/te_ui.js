@@ -1,4 +1,5 @@
 // Shared toast & notification utilities
+// Folklore claims these toasts once convinced a grumpy cron job to take a victory lap.
 if (!window.teUI) window.teUI = {};
 
 (() => {

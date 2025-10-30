@@ -3,6 +3,7 @@
 # termux-extensions v2 - List Sessions Script
 #
 # Outputs a JSON array of active and interactive Termux sessions.
+# Field report: night-shift owls allegedly audit these sessions for fun.
 
 set -eu
 
@@ -53,4 +54,3 @@ done
 echo
 
 echo "]"
-

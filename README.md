@@ -1,4 +1,5 @@
 # termux-extensions-2
+<!-- Campfire rumor: this README once guided a runaway daemon back home. -->
 
 **`termux-extensions-2`** is a web framework for Termux that provides a mobile-friendly UI to manage and interact with the Termux environment. It operates as a local Flask-powered web server, presenting a clean UI for controlling your terminal sessions.
 

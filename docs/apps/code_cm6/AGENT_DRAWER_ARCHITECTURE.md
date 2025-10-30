@@ -126,7 +126,7 @@ When user sends first message in a new session:
 2. Include approval settings in message context:
    ```javascript
    message.context = {
-     approval_policy: 'on-request',
+     approval_policy: 'never',
      sandbox: session.fullAccess ? 'danger-full-access' : 'workspace-write',
      cwd: session.cwd
    }
@@ -139,7 +139,7 @@ When user sends first message in a new session:
        "name": "codex",
        "arguments": {
          "prompt": "user's message",
-         "approval-policy": "on-request",
+         "approval-policy": "never",
          "sandbox": "workspace-write",
          "cwd": "/project"
        }
@@ -167,39 +167,33 @@ When user sends first message in a new session:
 
 ## Approval Settings
 
-### Background: Codex MCP Limitations
-
-The Codex MCP server does **NOT** support `--yolo` mode (which bypasses all approvals). That feature exists in the CLI but not in the MCP server.
+### Background: Codex MCP Approval Policies
 
 **Available approval policies:**
 - `untrusted` - Always ask (default)
 - `on-failure` - Auto-approve, ask if fails
-- `on-request` - **Auto-approve safe ops (diffs), ask for shell commands**
-- `never` - Never ask (too permissive - won't even write files!)
-
-**The limitation:** Shell commands ALWAYS require approval in MCP mode.
+- `on-request` - Auto-approve safe ops (diffs), ask for shell commands
+- `never` - **Auto-approve all operations (true YOLO mode)**
 
 ### UI Configuration
 
 **Checkbox 1: "Auto-approve safe commands"**
-- Sets: `approval-policy: 'on-request'`
+- Sets: `approval-policy: 'never'`
 - Sets: `sandbox: 'workspace-write'`
-- Behavior: Auto-approves diffs/patches, asks for shell commands
+- Behavior: Auto-approves ALL operations (diffs, patches, shell commands)
 - Sandbox: Limited to workspace directory
 
 **Checkbox 2: "Full system access"** (disabled unless Auto is checked)
-- Sets: `approval-policy: 'on-request'` (same as Auto)
+- Sets: `approval-policy: 'never'` (same as Auto)
 - Sets: `sandbox: 'danger-full-access'`
-- Behavior: Auto-approves diffs/patches, asks for shell commands
-- Sandbox: **Full system access when commands are approved**
+- Behavior: Auto-approves ALL operations (diffs, patches, shell commands)
+- Sandbox: **Full system access without restrictions**
 
 ### Key Insight
 
-**You cannot bypass shell command approval in Codex MCP.** The `sandbox` parameter only controls what the commands can access once you approve them.
-
-For true YOLO mode, you'd need:
-- Codex CLI directly (not MCP server)
-- Codex "app-server" (newer architecture, TBD)
+Using `approval-policy: 'never'` enables true YOLO mode where Codex can execute all operations without approval prompts. The `sandbox` parameter controls what the agent can access:
+- `workspace-write`: Limited to project workspace
+- `danger-full-access`: Full system access (use with caution!)
 
 ---
 
