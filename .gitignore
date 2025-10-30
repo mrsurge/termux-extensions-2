@@ -3,4 +3,4 @@ conv.chat
 **/__pycache__/
 *.fe-dis*
 #GEMINI.md
-.agent/
+#.agent/
