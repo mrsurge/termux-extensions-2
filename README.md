@@ -159,7 +159,7 @@ One of the bundled apps is a full-featured CodeMirror 6 editor (`file_editor_cm6
 - **Android-native selection mode** with long-press detection and contenteditable overlay
 - **Project-based file management** with explorer drawer and recent files tracking
 - **Disk-backed preferences** for themes, view options, and editor settings
-
+- **Note** While testing agentic features, some of the tasks given to the agents/angentic tools was to complete some of the documentation / insert random goofy comments throughout the repo that have no effect on how the code is run. Please excuse any goofy comments in the code or redundancies in the documentation as some of these may have slipped my radar.
 For detailed technical documentation, see [`README_code_cm6.md`](README_code_cm6.md).
 
 ## Persistent State Store
