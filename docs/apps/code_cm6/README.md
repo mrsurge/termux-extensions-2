@@ -9,8 +9,9 @@
 - `CM6_NATIVE_SELECTION.md` — Notes on the Android-native selection implementation.
 - `code_cm6_todo.md` — Active TODO list and backlog.
 
-## Agent Integration (NEW)
+## Agent Integration
 
-- `agent_integration.md` — **Complete architecture documentation** for Codex/Gemini agent integration.
+- `AGENT_DRAWER_ARCHITECTURE.md` — **Complete architecture documentation** for the agent drawer (shared shell pattern, session management, approval settings).
+- `agent_integration.md` — **Original agent integration documentation** for Codex/Gemini.
 - `agent_quick_reference.md` — **Quick API reference** for WebSocket and REST endpoints.
 - `agent_implementation_summary.md` — **Implementation summary** and backend overview.

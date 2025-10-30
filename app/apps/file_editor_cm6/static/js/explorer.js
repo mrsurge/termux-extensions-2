@@ -246,9 +246,12 @@ async function handleGitAction(endpoint, payload) {
     }
     
     // After push: reload file AND close drawer (push is usually final git action)
+    // NOTE: The drawer close doesn't work yet - intention is to close drawer after push
+    // since users rarely perform additional git actions after pushing. The file reload
+    // works correctly, but the drawer close mechanism needs investigation.
     if (endpoint === '/git/push' && typeof window.__cm6ReloadCurrentFile === 'function') {
       await window.__cm6ReloadCurrentFile();
-      // Close drawer to show the updated file
+      // Close drawer to show the updated file (currently not working)
       const root = document.querySelector('.fe-drawer');
       if (root) {
         root.classList.remove('drawer-open');
