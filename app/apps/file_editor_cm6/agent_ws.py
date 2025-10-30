@@ -5,14 +5,23 @@ WebSocket endpoint for agent communication.
 
 Provides bidirectional WebSocket relay between browser and agent processes,
 with protocol normalization and line-buffered JSON parsing.
+
+Architecture:
+- ONE shared framework shell per agent type (codex, gemini)
+- Multiple UI sessions share the same shell process
+- Sessions are multiplexed via conversationId in messages
 """
 
 import json
+import os
 import queue
 import threading
 import uuid
 from flask import request
 from .agent_bridge import get_bridge, enrich_context
+
+# Global registry of shared shells: agent_type -> (session_id, shell_id)
+_shared_shells = {}
 
 
 def register_agent_websocket(sock):
@@ -28,28 +37,28 @@ def register_agent_websocket(sock):
         """
         WebSocket endpoint for bidirectional agent communication.
         
+        ONE shared shell per agent type - multiple UI sessions multiplex via conversationId.
+        
         Query parameters:
-            session: Session ID (optional, auto-generated if not provided)
             agent: Agent type - 'codex' or 'gemini' (default: 'codex')
             cwd: Working directory (optional, defaults to home)
             file: Current file path for context enrichment (optional)
         
         Message Flow:
-            Frontend → WebSocket → Bridge → Agent Process
-            Agent Process → Bridge → WebSocket → Frontend
+            Frontend → WebSocket → Bridge → Shared Agent Process
+            Shared Agent Process → Bridge → WebSocket → Frontend
         
-        Frontend sends normalized messages:
-            {"id":"42","action":"chat","text":"Explain this code","target":"codex"}
+        Frontend sends normalized messages with conversationId:
+            {"id":"42","action":"chat","text":"Explain","conversationId":"abc-123"}
         
         Frontend receives normalized events:
             {"id":"42","event":"token","text":"partial..."}
-            {"id":"42","event":"diff","path":"/file.py","patch":"@@..."}
-            {"id":"42","event":"final","ok":true,"output":{...}}
+            {"id":"42","event":"conversation_started","conversationId":"abc-123"}
         """
         bridge = get_bridge()
+        global _shared_shells
         
         # Parse query parameters
-        session_id = request.args.get('session', str(uuid.uuid4()))
         agent_type = request.args.get('agent', 'codex')
         cwd = request.args.get('cwd', None)
         file_path = request.args.get('file', None)
@@ -66,32 +75,57 @@ def register_agent_websocket(sock):
                 pass
             return
         
-        # Get or spawn agent
-        try:
-            agent = bridge.get_or_create_agent(session_id, agent_type, cwd)
-            shell_id = agent['id']
+        # Get or create THE SINGLE shared shell for this agent type
+        session_id = None
+        shell_id = None
+        
+        if agent_type in _shared_shells:
+            session_id, shell_id = _shared_shells[agent_type]
             
-            # Send shell metadata to frontend
+            # Check if shell is still alive
             try:
-                ws.send(json.dumps({
-                    'event': 'connected',
-                    'agent': agent_type,
-                    'shell_id': shell_id,
-                    'cwd': cwd
-                }))
-            except:
-                pass
+                shell = bridge.manager.describe(shell_id)
+                if not shell or not shell.get('alive'):
+                    # Shell died - need to respawn
+                    session_id = None
+                    shell_id = None
+                    del _shared_shells[agent_type]
+            except Exception:
+                session_id = None
+                shell_id = None
+                if agent_type in _shared_shells:
+                    del _shared_shells[agent_type]
+        
+        # Spawn shared shell if needed
+        if not shell_id:
+            try:
+                session_id = f'shared-{agent_type}-{uuid.uuid4().hex[:8]}'
+                agent = bridge.spawn_agent(agent_type, cwd or os.path.expanduser('~'), session_id)
+                shell_id = agent['id']
+                _shared_shells[agent_type] = (session_id, shell_id)
                 
-        except Exception as e:
-            try:
-                ws.send(json.dumps({
-                    'event': 'error',
-                    'error': f'Failed to spawn agent: {str(e)}'
-                }))
-                ws.close()
-            except:
-                pass
-            return
+            except Exception as e:
+                try:
+                    ws.send(json.dumps({
+                        'event': 'error',
+                        'error': f'Failed to spawn agent: {str(e)}'
+                    }))
+                    ws.close()
+                except:
+                    pass
+                return
+        
+        # Send shell metadata to frontend
+        try:
+            ws.send(json.dumps({
+                'event': 'connected',
+                'agent': agent_type,
+                'shell_id': shell_id,
+                'session_id': session_id,  # Shared session ID for send_raw endpoint
+                'cwd': cwd
+            }))
+        except:
+            pass
         
         # Subscribe to agent output
         try:

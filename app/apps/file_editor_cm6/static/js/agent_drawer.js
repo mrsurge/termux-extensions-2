@@ -1,5 +1,5 @@
 // app/apps/file_editor_cm6/static/js/agent_drawer.js
-// Agent drawer with WebSocket backend integration and multi-session support
+// Agent drawer with shared shell architecture - ONE MCP server for all sessions
 
 function notify(message) {
   if (window.host && typeof window.host.toast === 'function') {
@@ -31,13 +31,21 @@ export function initAgentDrawer() {
 
   let isOpen = false;
   let isFullscreen = false;
-  let ws = null;
   let messageIdCounter = 0;
   let currentAssistantBubble = null;
-  let currentPlanningSection = null; // Track planning section
-  let sessions = {}; // sessionId -> { id, agent, messages, ws, stats }
+  let currentPlanningSection = null;
+  let sessions = {}; // ui-session-id -> { conversationId, messages[], createdAt, cwd }
   let activeSessionId = null;
-  let isCreatingSession = false;  // Prevent simultaneous session creation
+  let isCreatingSession = false;
+  
+  // SHARED SHELL STATE - ONE shell for all Codex sessions
+  let sharedShell = {
+    shell_id: null,
+    session_id: null,  // Backend session ID for send_raw endpoint
+    ws: null,
+    agent: 'codex',
+    status: 'Disconnected'  // 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
+  };
 
   function updateAria() {
     drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
@@ -49,17 +57,9 @@ export function initAgentDrawer() {
     isOpen = true;
     updateAria();
     
-    // Load sessions on first open
+    // Load sessions on first open (UI only - no auto-connection)
     if (Object.keys(sessions).length === 0) {
       loadSessions();
-    }
-    
-    // Reconnect active session if needed
-    if (activeSessionId && sessions[activeSessionId]) {
-      const session = sessions[activeSessionId];
-      if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
-        connectSession(activeSessionId);
-      }
     }
   }
 
@@ -71,7 +71,7 @@ export function initAgentDrawer() {
     isFullscreen = false;
     updateAria();
     
-    // Keep sessions alive - don't disconnect on close
+    // Keep shell and sessions alive - don't disconnect
   }
 
   function toggleDrawer() {
@@ -85,6 +85,19 @@ export function initAgentDrawer() {
   function generateSessionId() {
     return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
+  
+  async function getProjectRoot() {
+    try {
+      const resp = await fetch('/api/app/file_editor_cm6/state');
+      const data = await resp.json();
+      if (data.ok && data.data?.activeProjectExists) {
+        return data.data.activeProject;
+      }
+    } catch (e) {
+      console.error('Failed to get project root:', e);
+    }
+    return null;
+  }
 
   async function createSession(agent = 'codex') {
     // Prevent simultaneous session creation
@@ -96,34 +109,27 @@ export function initAgentDrawer() {
     isCreatingSession = true;
     
     try {
-      const sessionId = generateSessionId();
-      
-      // Get project root from state
-      let projectRoot = null;
-      try {
-        const resp = await fetch('/api/app/file_editor_cm6/state');
-        const data = await resp.json();
-        if (data.ok && data.data?.activeProjectExists) {
-          projectRoot = data.data.activeProject;
-        }
-      } catch (e) {
-        console.error('Failed to get project root:', e);
+      // Ensure shared shell is connected (will spawn if needed)
+      if (sharedShell.status !== 'Connected') {
+        await connectSharedShell();
       }
       
+      const sessionId = generateSessionId();
+      const projectRoot = await getProjectRoot();
+      
+      // Create UI session (conversationId will come from Codex on first message)
       const session = {
         id: sessionId,
-        agent: agent,
+        conversationId: null,  // Will be set by Codex "conversation_started" event
         messages: [],
-        ws: null,
-        stats: { status: 'Created', agent },
         createdAt: Date.now(),
-        cwd: projectRoot
+        cwd: projectRoot,
+        agent: agent
       };
       
       sessions[sessionId] = session;
       addSessionToList(session);
       switchToSession(sessionId);
-      connectSession(sessionId);
       saveSessionsToDisk();
       
       notify(`Created new ${agent} session` + (projectRoot ? ` in ${projectRoot.split('/').pop()}` : ''));
@@ -132,26 +138,24 @@ export function initAgentDrawer() {
     }
   }
 
-  function addSessionToList(session, isStale = false) {
+  function addSessionToList(session) {
     // Remove empty placeholder
     const empty = sessionList?.querySelector('.agent-session-list__item--empty');
     if (empty) empty.remove();
     
     const li = document.createElement('li');
     li.className = 'agent-session-list__item';
-    if (isStale) li.classList.add('agent-session-list__item--stale');
     li.dataset.sessionId = session.id;
     
     const timestamp = session.createdAt ? new Date(session.createdAt).toLocaleTimeString() : new Date().toLocaleTimeString();
-    const staleIndicator = isStale ? ' <span class="agent-session-stale-badge">⚠ Stale</span>' : '';
     
     li.innerHTML = `
-      <span>${session.agent} - ${timestamp}${staleIndicator}</span>
+      <span>${session.agent || 'codex'} - ${timestamp}</span>
       <button class="agent-session-delete" data-session-id="${session.id}">×</button>
     `;
     
     li.addEventListener('click', (e) => {
-      if (!e.target.classList.contains('agent-session-delete') && !isStale) {
+      if (!e.target.classList.contains('agent-session-delete')) {
         switchToSession(session.id);
       }
     });
@@ -168,20 +172,6 @@ export function initAgentDrawer() {
   function deleteSession(sessionId) {
     const session = sessions[sessionId];
     if (!session) return;
-    
-    // Terminate framework shell properly
-    if (session.shell_id) {
-      fetch(`/api/framework_shells/${session.shell_id}`, {
-        method: 'DELETE',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ force: 1 })  // Force terminate
-      }).catch(e => console.error('Failed to terminate shell:', e));
-    }
-    
-    // Close WebSocket
-    if (session.ws) {
-      session.ws.close();
-    }
     
     // Remove from DOM
     const li = sessionList?.querySelector(`[data-session-id="${sessionId}"]`);
@@ -205,9 +195,11 @@ export function initAgentDrawer() {
     }
     
     notify('Session deleted');
+    
+    // NOTE: Don't terminate shared shell - it's used by all sessions
   }
 
-  async function switchToSession(sessionId) {
+  function switchToSession(sessionId) {
     const session = sessions[sessionId];
     if (!session) return;
     
@@ -222,120 +214,127 @@ export function initAgentDrawer() {
     // Render messages
     renderMessages(session.messages);
     
-    // Update stats
-    updateStats(session.stats);
-    
     // Update target selector
     if (targetSelect) {
-      targetSelect.value = session.agent;
+      targetSelect.value = session.agent || 'codex';
     }
     
-    // Check if shell is still alive before reconnecting
-    if (session.shell_id) {
-      try {
-        const resp = await fetch(`/api/framework_shells/${session.shell_id}`);
-        const data = await resp.json();
-        
-        if (data.ok && data.data?.alive) {
-          // Shell is alive - reconnect WebSocket if needed
-          if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
-            connectSession(sessionId);
-          }
-        } else {
-          // Shell is dead - mark as stale
-          session.stats.status = 'Stale';
-          updateStats(session.stats);
-          const li = sessionList?.querySelector(`[data-session-id="${sessionId}"]`);
-          if (li) {
-            li.classList.add('agent-session-list__item--stale');
-            const staleIndicator = ' <span class="agent-session-stale-badge">⚠ Stale</span>';
-            const span = li.querySelector('span');
-            if (span && !span.innerHTML.includes('Stale')) {
-              span.innerHTML += staleIndicator;
-            }
-          }
-          notify('Session shell is no longer running');
-        }
-      } catch (e) {
-        console.error('Failed to check shell status:', e);
-        // On error, try to reconnect anyway
-        if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
-          connectSession(sessionId);
-        }
-      }
-    } else {
-      // No shell_id yet - reconnect to create one
-      if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
-        connectSession(sessionId);
-      }
-    }
+    // Update stats display
+    updateStats({
+      status: sharedShell.status,
+      agent: session.agent || 'codex',
+      conversationId: session.conversationId
+    });
   }
 
-  async function connectSession(sessionId) {
-    const session = sessions[sessionId];
-    if (!session) return;
-    
-    // Close existing connection
-    if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-      session.ws.close();
+  async function connectSharedShell() {
+    if (sharedShell.status === 'Connected' || sharedShell.status === 'Connecting') {
+      console.log('Already connected or connecting');
+      return;
     }
     
-    // Get project root from state if not stored
-    let projectRoot = session.cwd;
-    if (!projectRoot) {
-      try {
-        const resp = await fetch('/api/app/file_editor_cm6/state');
-        const data = await resp.json();
-        if (data.ok && data.data?.activeProjectExists) {
-          projectRoot = data.data.activeProject;
-          session.cwd = projectRoot;  // Store it
-          saveSessionsToDisk();
+    sharedShell.status = 'Connecting';
+    updateShellStatus();
+    notify('Connecting to Codex MCP server...');
+    
+    try {
+      const projectRoot = await getProjectRoot();
+      
+      // Build WebSocket URL (no session param - backend manages shared shell)
+      const wsUrl = new URL('/ws/app/file_editor_cm6/agent', window.location.href);
+      wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
+      wsUrl.searchParams.set('agent', sharedShell.agent);
+      if (projectRoot) wsUrl.searchParams.set('cwd', projectRoot);
+      
+      sharedShell.ws = new WebSocket(wsUrl.toString());
+      
+      sharedShell.ws.onopen = () => {
+        sharedShell.status = 'Connected';
+        updateShellStatus();
+        notify('Codex MCP server connected');
+      };
+      
+      sharedShell.ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        
+        // Store shell metadata from backend
+        if (msg.event === 'connected') {
+          if (msg.shell_id) {
+            sharedShell.shell_id = msg.shell_id;
+          }
+          if (msg.session_id) {
+            sharedShell.session_id = msg.session_id;  // For send_raw endpoint
+          }
+          saveShellState();
         }
-      } catch (e) {
-        console.error('Failed to get project root:', e);
-      }
+        
+        // Route message to active session
+        if (activeSessionId) {
+          handleAgentMessage(activeSessionId, msg);
+        }
+      };
+      
+      sharedShell.ws.onerror = (error) => {
+        sharedShell.status = 'Error';
+        updateShellStatus();
+        notify('Agent connection error');
+        console.error('Agent WS error:', error);
+      };
+      
+      sharedShell.ws.onclose = () => {
+        sharedShell.status = 'Disconnected';
+        sharedShell.ws = null;
+        updateShellStatus();
+        notify('Agent disconnected');
+      };
+      
+    } catch (e) {
+      sharedShell.status = 'Error';
+      updateShellStatus();
+      notify('Failed to connect to agent');
+      console.error('Connection error:', e);
+      throw e;
+    }
+  }
+  
+  async function disconnectShell() {
+    if (!sharedShell.shell_id) {
+      notify('No active shell to disconnect');
+      return;
     }
     
-    // Get current file context
-    const currentFile = window.currentPath || null;
+    // Close WebSocket
+    if (sharedShell.ws) {
+      sharedShell.ws.close();
+      sharedShell.ws = null;
+    }
     
-    // Build WebSocket URL
-    const wsUrl = new URL('/ws/app/file_editor_cm6/agent', window.location.href);
-    wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
-    wsUrl.searchParams.set('session', sessionId);
-    wsUrl.searchParams.set('agent', session.agent);
-    if (currentFile) wsUrl.searchParams.set('file', currentFile);
-    if (projectRoot) wsUrl.searchParams.set('cwd', projectRoot);
+    // Terminate framework shell
+    try {
+      await fetch(`/api/framework_shells/${sharedShell.shell_id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ force: 1 }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (e) {
+      console.error('Failed to terminate shell:', e);
+    }
     
-    notify(`Connecting to ${session.agent}...`);
-    session.stats.status = 'Connecting';
-    updateStats(session.stats);
+    sharedShell.shell_id = null;
+    sharedShell.status = 'Disconnected';
+    updateShellStatus();
+    saveShellState();
     
-    session.ws = new WebSocket(wsUrl.toString());
-    
-    session.ws.onopen = () => {
-      notify(`Connected to ${session.agent}`);
-      session.stats.status = 'Connected';
-      updateStats(session.stats);
-    };
-    
-    session.ws.onmessage = (event) => {
-      handleAgentMessage(sessionId, JSON.parse(event.data));
-    };
-    
-    session.ws.onerror = (error) => {
-      notify('Agent connection error');
-      console.error('Agent WS error:', error);
-      session.stats.status = 'Error';
-      updateStats(session.stats);
-    };
-    
-    session.ws.onclose = () => {
-      notify('Agent disconnected');
-      session.stats.status = 'Disconnected';
-      updateStats(session.stats);
-      session.ws = null;
-    };
+    notify('Codex MCP server stopped');
+  }
+  
+  function updateShellStatus() {
+    // Update stats display with shell status
+    updateStats({
+      status: sharedShell.status,
+      agent: sharedShell.agent,
+      shell_id: sharedShell.shell_id
+    });
   }
 
   function handleAgentMessage(sessionId, msg) {
@@ -389,27 +388,22 @@ export function initAgentDrawer() {
         break;
         
       case 'connected':
-        // Store shell_id for proper termination
-        if (msg.shell_id) {
-          session.shell_id = msg.shell_id;
-          session.stats.status = 'Connected';
-          saveSessionsToDisk();
-          updateStats(session.stats);
-        }
+        // Shared shell connected - already handled in connectSharedShell
         break;
         
       case 'conversation_started':
-        // Store conversation ID for continuing the conversation
+        // Store Codex conversation ID for this UI session
         if (msg.conversationId) {
           session.conversationId = msg.conversationId;
           saveSessionsToDisk();
+          if (isActive) {
+            notify(`Conversation started: ${msg.conversationId.substring(0, 8)}...`);
+          }
         }
         break;
-        // Stats or capabilities
-        if (msg.result) {
-          Object.assign(session.stats, msg.result);
-          if (isActive) updateStats(session.stats);
-        }
+        
+      default:
+        // Ignore unknown events
         break;
     }
   }
@@ -423,10 +417,9 @@ export function initAgentDrawer() {
     const session = sessions[activeSessionId];
     if (!session) return;
     
-    if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
-      notify('Agent not connected. Reconnecting...');
-      connectSession(activeSessionId);
-      setTimeout(() => sendMessage(text), 1000);
+    // Check if shared shell is connected
+    if (sharedShell.status !== 'Connected') {
+      notify('Not connected. Please wait or reconnect.');
       return;
     }
     
@@ -434,9 +427,10 @@ export function initAgentDrawer() {
       id: String(++messageIdCounter),
       action: 'chat',
       text: text,
-      target: session.agent,
-      session: activeSessionId,
-      conversationId: session.conversationId  // Pass conversationId to backend
+      target: session.agent || 'codex',
+      conversationId: session.conversationId,  // null for first message, UUID for replies
+      cwd: session.cwd,
+      session: session.id
     };
     
     // Attach file context if enabled
@@ -447,8 +441,8 @@ export function initAgentDrawer() {
     // Store user message
     session.messages.push({ type: 'user', text });
     
-    // Send to agent
-    session.ws.send(JSON.stringify(message));
+    // Send via shared WebSocket
+    sharedShell.ws.send(JSON.stringify(message));
     
     // Show in transcript
     const bubble = document.createElement('div');
@@ -457,6 +451,8 @@ export function initAgentDrawer() {
     transcript?.appendChild(bubble);
     composer.value = '';
     transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
+    
+    saveSessionsToDisk();
   }
 
   function renderMessages(messages) {
@@ -467,10 +463,26 @@ export function initAgentDrawer() {
     }
     
     let assistantBubble = null;
+    let systemBuffer = '';  // Accumulate consecutive system messages
+    
+    const flushSystemBuffer = () => {
+      if (systemBuffer) {
+        const sysBubble = document.createElement('div');
+        sysBubble.className = 'agent-transcript__planning';
+        const textSpan = document.createElement('span');
+        textSpan.className = 'agent-transcript__planning-text';
+        textSpan.textContent = systemBuffer;  // Use textContent to avoid HTML parsing
+        sysBubble.innerHTML = '<span class="agent-transcript__planning-label">⚙</span>';
+        sysBubble.appendChild(textSpan);
+        transcript?.appendChild(sysBubble);
+        systemBuffer = '';
+      }
+    };
     
     messages.forEach(msg => {
       switch (msg.type) {
         case 'user':
+          flushSystemBuffer();
           assistantBubble = null;
           const userBubble = document.createElement('div');
           userBubble.className = 'agent-transcript__bubble agent-transcript__bubble--user';
@@ -479,6 +491,7 @@ export function initAgentDrawer() {
           break;
           
         case 'token':
+          flushSystemBuffer();
           if (!assistantBubble) {
             assistantBubble = document.createElement('div');
             assistantBubble.className = 'agent-transcript__bubble agent-transcript__bubble--assistant';
@@ -489,6 +502,7 @@ export function initAgentDrawer() {
           break;
           
         case 'planning':
+          flushSystemBuffer();
           assistantBubble = null;
           const planBubble = document.createElement('div');
           planBubble.className = 'agent-transcript__bubble agent-transcript__bubble--system';
@@ -497,21 +511,19 @@ export function initAgentDrawer() {
           break;
           
         case 'system':
-          // System messages (reasoning, etc) - render in terminal style
+          // Accumulate consecutive system messages
           assistantBubble = null;
-          const sysBubble = document.createElement('div');
-          sysBubble.className = 'agent-transcript__planning';
-          sysBubble.innerHTML = '<span class="agent-transcript__planning-label">⚙</span><span class="agent-transcript__planning-text">' + msg.text + '</span>';
-          transcript?.appendChild(sysBubble);
+          systemBuffer += msg.text;
           break;
           
         case 'approval':
-          // Approval requests - recreate the UI
+          flushSystemBuffer();
           assistantBubble = null;
           showApprovalRequest(msg);
           break;
           
         case 'tool_call':
+          flushSystemBuffer();
           assistantBubble = null;
           const toolBubble = document.createElement('div');
           toolBubble.className = 'agent-transcript__bubble agent-transcript__bubble--system';
@@ -520,20 +532,26 @@ export function initAgentDrawer() {
           break;
           
         case 'diff':
+          flushSystemBuffer();
           assistantBubble = null;
           addDiffMessage(msg.path, msg.patch);
           break;
           
         case 'error':
+          flushSystemBuffer();
           assistantBubble = null;
           addErrorMessage(msg.error);
           break;
           
         case 'final':
+          flushSystemBuffer();
           assistantBubble = null;
           break;
       }
     });
+    
+    // Flush any remaining system messages
+    flushSystemBuffer();
     
     transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'instant' });
   }
@@ -684,6 +702,12 @@ export function initAgentDrawer() {
       return;
     }
     
+    // Check if shared shell is connected
+    if (!sharedShell.session_id) {
+      notify('Cannot send approval - not connected to agent');
+      return;
+    }
+    
     // Send JSON-RPC response with decision field
     // Codex expects: {"decision": "approved"} or {"decision": "denied"}
     const response = {
@@ -694,12 +718,12 @@ export function initAgentDrawer() {
       }
     };
     
-    // Send as raw message to agent (bypassing normal adapter)
+    // Send via shared session using send_raw endpoint
     fetch('/api/app/file_editor_cm6/agent/send_raw', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        session_id: activeSessionId,
+        session_id: sharedShell.session_id,  // Use shared shell's session_id
         message: JSON.stringify(response)
       })
     }).then(r => r.json()).then(j => {
@@ -727,49 +751,76 @@ export function initAgentDrawer() {
 
   async function loadSessions() {
     try {
-      // Load from backend preferences
-      const resp = await fetch('/api/app/file_editor_cm6/preferences/get?key=agent_sessions');
-      const json = await resp.json();
+      // Load shared shell state (both shell_id and session_id)
+      const shellResp = await fetch('/api/app/file_editor_cm6/preferences/get?key=codex_shell_state');
+      const shellJson = await shellResp.json();
       
-      if (json.ok && json.data) {
-        const savedSessions = JSON.parse(json.data);
+      if (shellJson.ok && shellJson.data) {
+        const savedState = JSON.parse(shellJson.data);
         
-        // Restore sessions - assume alive until proven otherwise
+        // Check if framework shell is still alive
+        if (savedState.shell_id) {
+          try {
+            const checkResp = await fetch(`/api/framework_shells/${savedState.shell_id}`);
+            const checkData = await checkResp.json();
+            
+            if (checkData.ok && checkData.data?.alive) {
+              sharedShell.shell_id = savedState.shell_id;
+              sharedShell.session_id = savedState.session_id;
+              sharedShell.status = 'Disconnected';  // Can reconnect, but not auto-connecting
+            }
+          } catch (e) {
+            console.error('Failed to check shell status:', e);
+          }
+        }
+      }
+      
+      // Load UI sessions from disk
+      const sessResp = await fetch('/api/app/file_editor_cm6/preferences/get?key=agent_sessions');
+      const sessJson = await sessResp.json();
+      
+      if (sessJson.ok && sessJson.data) {
+        const savedSessions = JSON.parse(sessJson.data);
+        
+        // Restore sessions (UI only - no auto-connection)
         for (const [sessionId, sessionData] of Object.entries(savedSessions)) {
-          // Restore session object
           sessions[sessionId] = {
-            ...sessionData,
-            ws: null,  // WebSocket will reconnect on use
-            stats: { status: 'Restored', agent: sessionData.agent }
+            id: sessionData.id,
+            conversationId: sessionData.conversationId,  // Codex conversation ID
+            messages: sessionData.messages || [],
+            createdAt: sessionData.createdAt,
+            cwd: sessionData.cwd,
+            agent: sessionData.agent || 'codex'
           };
           
-          // Add to UI (not stale)
-          addSessionToList(sessions[sessionId], false);
+          addSessionToList(sessions[sessionId]);
         }
         
-        // If we have sessions, switch to first one
+        // Switch to first session (UI only - no connection)
         const sessionIds = Object.keys(sessions);
         if (sessionIds.length > 0) {
           switchToSession(sessionIds[0]);
         }
       }
+      
+      updateShellStatus();
+      
     } catch (e) {
       console.error('Failed to load sessions:', e);
     }
   }
 
   function saveSessionsToDisk() {
-    // Save sessions to backend preferences (without ws and heavy objects)
+    // Save sessions to backend preferences (conversationId is the key!)
     const toSave = {};
     for (const [id, session] of Object.entries(sessions)) {
       toSave[id] = {
         id: session.id,
-        agent: session.agent,
+        conversationId: session.conversationId,  // Codex conversation ID
         messages: session.messages,
         createdAt: session.createdAt,
-        conversationId: session.conversationId,
         cwd: session.cwd,
-        shell_id: session.shell_id  // Save shell_id!
+        agent: session.agent || 'codex'
       };
     }
     
@@ -782,26 +833,21 @@ export function initAgentDrawer() {
       })
     }).catch(e => console.error('Failed to save sessions:', e));
   }
-
-  function cleanupStaleSessions() {
-    const staleItems = sessionList?.querySelectorAll('.agent-session-list__item--stale');
-    staleItems?.forEach(item => {
-      const sessionId = item.dataset.sessionId;
-      if (sessionId && sessions[sessionId]) {
-        delete sessions[sessionId];
-        item.remove();
-      }
-    });
-    
-    saveSessionsToDisk();
-    notify('Stale sessions cleaned up');
-    
-    // Show empty if no sessions left
-    if (Object.keys(sessions).length === 0) {
-      const empty = document.createElement('li');
-      empty.className = 'agent-session-list__item agent-session-list__item--empty';
-      empty.textContent = 'No sessions yet';
-      sessionList?.appendChild(empty);
+  
+  function saveShellState() {
+    // Save shared shell state (both shell_id and session_id)
+    if (sharedShell.shell_id) {
+      fetch('/api/app/file_editor_cm6/preferences/set', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          key: 'codex_shell_state',
+          value: JSON.stringify({
+            shell_id: sharedShell.shell_id,
+            session_id: sharedShell.session_id
+          })
+        })
+      }).catch(e => console.error('Failed to save shell state:', e));
     }
   }
 
@@ -824,8 +870,13 @@ export function initAgentDrawer() {
     createSession(agent);
   });
 
-  refreshBtn?.addEventListener('click', () => {
-    cleanupStaleSessions();
+  // Refresh button now triggers manual reconnection
+  refreshBtn?.addEventListener('click', async () => {
+    if (sharedShell.status === 'Connected') {
+      notify('Already connected');
+    } else {
+      await connectSharedShell();
+    }
   });
 
   sendBtn?.addEventListener('click', () => {
