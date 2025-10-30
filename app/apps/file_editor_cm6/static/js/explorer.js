@@ -561,6 +561,9 @@ async function onTreeClick(ev) {
   } else {
     // File clicked - open it
     openFileRel(rel, currentProjectPath);
+    // Close drawer after opening file
+    const root = document.querySelector('.fe-root');
+    root?.classList.remove('drawer-open');
   }
 }
 
