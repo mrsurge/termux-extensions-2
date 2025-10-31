@@ -170,6 +170,7 @@ export function initAgentDrawer() {
         id: sessionId,
         name: sessionName,  // Custom name
         conversationId: null,  // Will be set by Codex "conversation_started" event
+        shell_id: null,  // Track which framework shell this session used
         messages: [],
         createdAt: Date.now(),
         cwd: projectRoot,
@@ -384,6 +385,18 @@ export function initAgentDrawer() {
         if (msg.event === 'connected') {
           if (msg.shell_id) {
             sharedShell.shell_id = msg.shell_id;
+            // Update active session with current shell_id
+            if (activeSessionId && sessions[activeSessionId]) {
+              const needsHistoryRestore = sessions[activeSessionId].shell_id && 
+                                          sessions[activeSessionId].shell_id !== msg.shell_id;
+              sessions[activeSessionId].shell_id = msg.shell_id;
+              
+              // If shell changed and session has history, flag for restoration
+              if (needsHistoryRestore && sessions[activeSessionId].messages.length > 0) {
+                sessions[activeSessionId].needsHistoryRestore = true;
+                console.log('[Agent] Shell changed - history restore needed');
+              }
+            }
           }
           if (msg.session_id) {
             sharedShell.session_id = msg.session_id;  // For send_raw endpoint
@@ -569,6 +582,17 @@ export function initAgentDrawer() {
       session: session.id
     };
     
+    // Check if history restoration is needed (shell changed)
+    if (session.needsHistoryRestore) {
+      console.log('[Agent] Restoring conversation history...');
+      const historyContext = buildHistoryContext(session);
+      message.context = message.context || {};
+      message.context.base_instructions = historyContext;
+      session.needsHistoryRestore = false;
+      session.conversationId = null; // Start fresh conversation with history
+      notify('Restoring conversation context...');
+    }
+    
     // Add approval settings for first message (new conversation)
     if (!session.conversationId && (session.auto || session.fullAccess)) {
       message.context = message.context || {};
@@ -606,6 +630,39 @@ export function initAgentDrawer() {
     transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
     
     saveSessionsToDisk();
+  }
+
+  function buildHistoryContext(session) {
+    /**
+     * Build base-instructions for history restoration.
+     * Formats previous conversation as system context.
+     */
+    if (!session.messages || session.messages.length === 0) {
+      return '';
+    }
+    
+    let instructions = 'You are resuming a conversation. Here is the context from the previous session:\n\n';
+    let userMessages = [];
+    let assistantMessages = [];
+    
+    session.messages.forEach(msg => {
+      if (msg.type === 'user') {
+        userMessages.push(msg.text);
+      } else if (msg.type === 'token' || msg.type === 'final') {
+        assistantMessages.push(msg.text);
+      }
+    });
+    
+    // Build complete turn-by-turn conversation history
+    const numTurns = Math.min(userMessages.length, assistantMessages.length);
+    for (let i = 0; i < numTurns; i++) {
+      instructions += `User: ${userMessages[i]}\n`;
+      instructions += `Assistant: ${assistantMessages[i]}\n\n`;
+    }
+    
+    instructions += 'Continue the conversation naturally, maintaining context from the above history.';
+    
+    return instructions;
   }
 
   function renderMessages(messages) {
@@ -930,9 +987,15 @@ export function initAgentDrawer() {
               sharedShell.shell_id = savedState.shell_id;
               sharedShell.session_id = savedState.session_id;
               sharedShell.status = 'Disconnected';  // Can reconnect, but not auto-connecting
+            } else {
+              // Shell is dead - clear saved state
+              console.log('[Agent] Saved shell is dead, clearing state');
+              saveShellState();  // Save empty state
             }
           } catch (e) {
             console.error('Failed to check shell status:', e);
+            // Shell doesn't exist - clear saved state
+            saveShellState();
           }
         }
       }
@@ -950,6 +1013,7 @@ export function initAgentDrawer() {
             id: sessionData.id,
             name: sessionData.name,
             conversationId: sessionData.conversationId,  // Codex conversation ID
+            shell_id: sessionData.shell_id,  // Track framework shell
             messages: sessionData.messages || [],
             createdAt: sessionData.createdAt,
             cwd: sessionData.cwd,
@@ -983,6 +1047,7 @@ export function initAgentDrawer() {
         id: session.id,
         name: session.name,
         conversationId: session.conversationId,  // Codex conversation ID
+        shell_id: session.shell_id,  // Framework shell ID
         messages: session.messages,
         createdAt: session.createdAt,
         cwd: session.cwd,

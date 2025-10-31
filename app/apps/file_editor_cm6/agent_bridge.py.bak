@@ -4,7 +4,7 @@
 Agent Bridge - Protocol normalization layer for Codex and Gemini agents.
 
 Provides a unified API for the frontend while handling protocol translation
-between Codex app-server and Gemini ACP formats. Uses framework shells for
+between Codex app-server (JSONL) and Gemini ACP formats. Uses framework shells for
 process lifecycle management.
 """
 
@@ -17,64 +17,35 @@ from app.libs.framework_shells import _manager
 
 class CodexAdapter:
     """
-    Protocol adapter for Codex MCP server.
-    Implements full MCP (Model Context Protocol) flow.
+    Protocol adapter for Codex app-server mode.
+    Implements JSONL (newline-delimited JSON) protocol over STDIN/STDOUT.
     """
-    
-    # Track conversation IDs per session
-    _conversations = {}
     
     @staticmethod
     def to_agent(normalized: dict, context: Optional[dict] = None) -> dict:
         """
-        Convert normalized frontend message to Codex MCP tool call.
+        Convert normalized frontend message to Codex app-server turn request.
         
-        MCP flow:
-        1. Initialize (sent automatically on connection)
-        2. tools/call with "codex" or "codex-reply" tool
+        App-server protocol:
+        - Send one JSON object per line to STDIN
+        - Receive event stream on STDOUT
         
         Normalized format:
             {"id": "42", "action": "chat", "text": "...", "context": {...}}
         
-        Codex MCP format (JSON-RPC 2.0 tool call):
-            {"jsonrpc": "2.0", "id": 42, "method": "tools/call", "params": {...}}
+        Codex app-server format (JSONL):
+            {"id": "42", "type": "send-user-turn", "params": {...}}
         """
         msg_id = normalized.get('id')
         text = normalized.get('text', '')
         ctx = context or normalized.get('context', {})
-        session_id = normalized.get('session', 'default')
         
-        # Check if conversationId was passed from frontend (for session restore)
-        conversation_id = normalized.get('conversationId') or CodexAdapter._conversations.get(session_id)
+        # Build user turn items
+        items = [{'type': 'text', 'text': text}]
         
-        if conversation_id:
-            # Continue existing conversation
-            tool_name = 'codex-reply'
-            tool_params = {
-                'conversationId': conversation_id,
-                'prompt': text
-            }
-        else:
-            # Start new conversation
-            tool_name = 'codex'
-            tool_params = {
-                'prompt': text,
-                'cwd': ctx.get('cwd', os.path.expanduser('~'))
-            }
-            
-            # Add base-instructions for history restoration
-            if ctx.get('base_instructions'):
-                tool_params['base-instructions'] = ctx['base_instructions']
-            
-            # Add approval policy and sandbox settings if provided
-            if ctx.get('approval_policy'):
-                tool_params['approval-policy'] = ctx['approval_policy']
-            if ctx.get('sandbox'):
-                tool_params['sandbox'] = ctx['sandbox']
-            
-            # Add file context if available
-            if ctx.get('file_path') and ctx.get('file_content'):
-                tool_params['prompt'] = f"""File: {ctx['file_path']}
+        # Add file context if available
+        if ctx.get('file_path') and ctx.get('file_content'):
+            items[0]['text'] = f"""File: {ctx['file_path']}
 Language: {ctx.get('language', 'unknown')}
 
 Content:
@@ -84,23 +55,33 @@ Content:
 
 {text}"""
         
-        # Build MCP tool call
-        mcp_msg = {
-            'jsonrpc': '2.0',
+        # Build app-server turn request
+        turn_msg = {
             'id': msg_id,
-            'method': 'tools/call',
+            'type': 'send-user-turn',
             'params': {
-                'name': tool_name,
-                'arguments': tool_params
+                'model': ctx.get('model', 'gpt-5-codex'),
+                'effort': ctx.get('effort', 'medium'),
+                'items': items,
+                'cwd': ctx.get('cwd', os.path.expanduser('~'))
             }
         }
         
-        return mcp_msg
+        # Add approval policy if provided (maps to Codex config)
+        # Note: app-server doesn't have direct approval-policy param,
+        # but we can include it in metadata for future use
+        if ctx.get('approval_policy') or ctx.get('sandbox'):
+            turn_msg['metadata'] = {
+                'approval_policy': ctx.get('approval_policy'),
+                'sandbox': ctx.get('sandbox')
+            }
+        
+        return turn_msg
     
     @staticmethod
-    def from_agent(mcp_msg: dict) -> dict:
+    def from_agent(app_server_msg: dict) -> Optional[dict]:
         """
-        Convert Codex MCP response to normalized format.
+        Convert Codex app-server event to normalized format.
         
         MCP responses can be:
         - Initialization result
@@ -137,14 +118,28 @@ Content:
             # Handle content/response
             if isinstance(result, list):
                 # MCP returns tool results as array of content blocks
+                # Check if this is an error response
+                is_error = mcp_msg.get('result', {}).get('isError', False)
+                
                 for item in result:
                     if item.get('type') == 'text':
+                        text = item.get('text', '')
+                        
+                        # Special handling for "Session not found" errors
+                        if is_error and 'Session not found' in text and 'conversation_id' in text:
+                            return {
+                                'id': str(mcp_msg.get('id')),
+                                'event': 'session_not_found',
+                                'agent': 'codex',
+                                'error': text
+                            }
+                        
                         return {
                             'id': str(mcp_msg.get('id')),
-                            'event': 'final',
+                            'event': 'error' if is_error else 'final',
                             'agent': 'codex',
-                            'text': item.get('text', ''),
-                            'ok': True
+                            'text': text,
+                            'ok': not is_error
                         }
             
             return {
@@ -414,6 +409,7 @@ class AgentBridge:
     """
     Main bridge coordinator for agent processes.
     Manages agent lifecycle via framework shells and handles protocol translation.
+    Uses consistent label-based shell lookup to ensure singleton per agent type.
     """
     
     def __init__(self):
@@ -424,9 +420,49 @@ class AgentBridge:
             'gemini': GeminiAdapter
         }
     
+    def _get_agent_label(self, agent_type: str) -> str:
+        """Get consistent label for agent shell."""
+        return f"agent-{agent_type}-shared"
+    
+    def find_or_spawn_agent(self, agent_type: str, cwd: str) -> dict:
+        """
+        Find existing agent shell by label or spawn new one.
+        Ensures only ONE shell per agent type across all workers.
+        
+        Args:
+            agent_type: 'codex' or 'gemini'
+            cwd: Working directory (project root)
+        
+        Returns:
+            Shell metadata with 'id' and 'session_id'
+        
+        Raises:
+            ValueError: If agent_type is not supported
+        """
+        if agent_type not in self._adapters:
+            raise ValueError(f"Unknown agent type: {agent_type}")
+        
+        label = self._get_agent_label(agent_type)
+        session_id = f'shared-{agent_type}'
+        
+        # Try to find existing shell
+        existing = self.manager.find_shell_by_label(label, status='running')
+        if existing:
+            # Store session mapping
+            self._sessions[session_id] = existing.id
+            return {
+                'id': existing.id,
+                'session_id': session_id,
+                'alive': True
+            }
+        
+        # Spawn new shell
+        return self.spawn_agent(agent_type, cwd, session_id)
+    
     def spawn_agent(self, agent_type: str, cwd: str, session_id: str) -> dict:
         """
         Spawn a new agent process via framework shells.
+        Uses consistent label pattern to enable singleton enforcement.
         
         Args:
             agent_type: 'codex' or 'gemini'
@@ -448,14 +484,15 @@ class AgentBridge:
         elif agent_type == 'gemini':
             command = ['gemini', '--experimental-acp']
         
-        # Spawn via framework shell PTY with consistent label for shared shells
-        # Use 'shared-c' suffix for shared shells (discoverable across restarts)
-        label_suffix = 'shared-c' if 'shared' in session_id else session_id[:8]
+        # Use consistent label for singleton enforcement
+        label = self._get_agent_label(agent_type)
         
+        # Spawn via framework shell PTY (will reuse existing if label matches)
         shell_record = self.manager.spawn_shell_pty(
             command,
-            label=f"agent-{agent_type}-{label_suffix}",
-            cwd=cwd
+            label=label,
+            cwd=cwd,
+            autostart=True
         )
         
         # Convert to dict for return
@@ -464,7 +501,11 @@ class AgentBridge:
         # Store session mapping
         self._sessions[session_id] = shell_dict['id']
         
-        return shell_dict
+        return {
+            'id': shell_dict['id'],
+            'session_id': session_id,
+            'alive': shell_dict.get('alive', False)
+        }
     
     def get_or_create_agent(self, session_id: str, agent_type: str, cwd: str) -> dict:
         """

@@ -77,10 +77,21 @@ def register_agent_websocket(sock):
             return
         
         # Get or create THE SINGLE shared shell for this agent type
+        # First, try to find existing shell by label (survives worker restarts)
+        label = f"agent-{agent_type}-shared-c"  # Consistent label for shared shell
         session_id = None
         shell_id = None
         
-        if agent_type in _shared_shells:
+        # Try to find existing shell by label
+        existing_shell = bridge.manager.find_shell_by_label(label, status='running')
+        if existing_shell:
+            shell_id = existing_shell.id
+            session_id = f'shared-{agent_type}'
+            _shared_shells[agent_type] = (session_id, shell_id)
+            print(f'[Agent WS] Found existing {agent_type} shell: {shell_id}')
+        
+        # Fallback: check in-memory registry
+        elif agent_type in _shared_shells:
             session_id, shell_id = _shared_shells[agent_type]
             
             # Check if shell is still alive
