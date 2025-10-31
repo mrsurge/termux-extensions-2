@@ -22,10 +22,15 @@ export function initAgentDrawer() {
   const sendBtn = document.getElementById('agent-send');
   const transcript = document.getElementById('agent-transcript');
   const composer = document.getElementById('agent-input');
-  const sessionList = document.getElementById('agent-session-list');
+  const currentSessionCard = document.getElementById('agent-current-session-card');
   const targetSelect = document.getElementById('agent-target');
   const attachFileCheck = document.getElementById('agent-attach-file');
   const statsEl = document.getElementById('agent-stats');
+  
+  // Sessions list modal elements
+  const sessionsModal = document.getElementById('agent-sessions-modal');
+  const sessionsModalClose = document.getElementById('agent-sessions-modal-close');
+  const sessionsModalList = document.getElementById('agent-sessions-modal-list');
   
   // Session config modal elements
   const sessionModal = document.getElementById('agent-session-modal');
@@ -186,60 +191,127 @@ export function initAgentDrawer() {
   }
 
   function addSessionToList(session) {
-    // Remove empty placeholder
-    const empty = sessionList?.querySelector('.agent-session-list__item--empty');
-    if (empty) empty.remove();
+    // This is now deprecated - sessions are only shown in the modal
+    // Kept for backward compatibility during refactor
+  }
+
+  function updateCurrentSessionCard() {
+    if (!activeSessionId || !sessions[activeSessionId]) {
+      currentSessionCard.innerHTML = '<div class="agent-current-session-card__placeholder">No active session</div>';
+      return;
+    }
     
-    const li = document.createElement('li');
-    li.className = 'agent-session-list__item';
-    li.dataset.sessionId = session.id;
-    
-    const timestamp = session.createdAt ? new Date(session.createdAt).toLocaleTimeString() : new Date().toLocaleTimeString();
+    const session = sessions[activeSessionId];
+    const timestamp = session.createdAt ? new Date(session.createdAt).toLocaleTimeString() : '';
     const displayName = session.name || `${session.agent || 'codex'} - ${timestamp}`;
+    const messageCount = session.messages?.length || 0;
+    const agentName = session.agent || 'codex';
     
-    li.innerHTML = `
-      <span>${displayName}</span>
-      <button class="agent-session-delete" data-session-id="${session.id}">×</button>
+    currentSessionCard.innerHTML = `
+      <div class="agent-current-session-card__name">
+        <span class="agent-current-session-card__status"></span>
+        ${displayName}
+      </div>
+      <div class="agent-current-session-card__meta">
+        ${messageCount} message${messageCount !== 1 ? 's' : ''} • ${agentName}
+      </div>
     `;
+  }
+
+  function showSessionsModal() {
+    renderSessionsModal();
+    sessionsModal.style.display = 'flex';
+  }
+
+  function hideSessionsModal() {
+    sessionsModal.style.display = 'none';
+  }
+
+  function renderSessionsModal() {
+    sessionsModalList.innerHTML = '';
     
-    li.addEventListener('click', (e) => {
-      if (!e.target.classList.contains('agent-session-delete')) {
-        switchToSession(session.id);
+    const sessionIds = Object.keys(sessions);
+    
+    if (sessionIds.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'agent-sessions-modal-list__empty';
+      empty.textContent = 'No sessions yet';
+      sessionsModalList.appendChild(empty);
+      return;
+    }
+    
+    sessionIds.forEach(sessionId => {
+      const session = sessions[sessionId];
+      const timestamp = session.createdAt ? new Date(session.createdAt).toLocaleTimeString() : '';
+      const displayName = session.name || `${session.agent || 'codex'} - ${timestamp}`;
+      const messageCount = session.messages?.length || 0;
+      const agentName = session.agent || 'codex';
+      const isActive = sessionId === activeSessionId;
+      
+      const li = document.createElement('li');
+      li.className = 'agent-sessions-modal-list__item';
+      if (isActive) {
+        li.classList.add('agent-sessions-modal-list__item--active');
       }
+      li.dataset.sessionId = sessionId;
+      
+      li.innerHTML = `
+        <div class="agent-sessions-modal-list__info">
+          <div class="agent-sessions-modal-list__name">
+            ${isActive ? '<span class="agent-current-session-card__status"></span>' : ''}
+            ${displayName}
+          </div>
+          <div class="agent-sessions-modal-list__meta">
+            ${messageCount} message${messageCount !== 1 ? 's' : ''} • ${agentName}
+          </div>
+        </div>
+        <button class="agent-sessions-modal-list__delete" data-session-id="${sessionId}">✕</button>
+      `;
+      
+      // Click session to switch
+      li.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('agent-sessions-modal-list__delete')) {
+          switchToSession(sessionId);
+          hideSessionsModal();
+        }
+      });
+      
+      // Click X to delete
+      const deleteBtn = li.querySelector('.agent-sessions-modal-list__delete');
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteSession(sessionId);
+      });
+      
+      sessionsModalList.appendChild(li);
     });
-    
-    const deleteBtn = li.querySelector('.agent-session-delete');
-    deleteBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      deleteSession(session.id);
-    });
-    
-    sessionList?.appendChild(li);
+  }
+
+  function addSessionToList(session) {
+    // Deprecated - keeping for backward compatibility
   }
 
   function deleteSession(sessionId) {
     const session = sessions[sessionId];
     if (!session) return;
     
-    // Remove from DOM
-    const li = sessionList?.querySelector(`[data-session-id="${sessionId}"]`);
-    if (li) li.remove();
-    
     // Remove from state
     delete sessions[sessionId];
     saveSessionsToDisk();
     
-    // Switch to another session or show empty
+    // Switch to another session or clear
     const remaining = Object.keys(sessions);
     if (remaining.length > 0) {
       switchToSession(remaining[0]);
     } else {
       activeSessionId = null;
       clearTranscript();
-      const empty = document.createElement('li');
-      empty.className = 'agent-session-list__item agent-session-list__item--empty';
-      empty.textContent = 'No sessions yet';
-      sessionList?.appendChild(empty);
+      updateCurrentSessionCard();
+    }
+    
+    // Re-render modal if open
+    if (sessionsModal.style.display === 'flex') {
+      renderSessionsModal();
     }
     
     notify('Session deleted');
@@ -254,10 +326,8 @@ export function initAgentDrawer() {
     // Update active session
     activeSessionId = sessionId;
     
-    // Update UI active state
-    sessionList?.querySelectorAll('.agent-session-list__item').forEach(li => {
-      li.classList.toggle('agent-session-list__item--active', li.dataset.sessionId === sessionId);
-    });
+    // Update current session card
+    updateCurrentSessionCard();
     
     // Render messages
     renderMessages(session.messages);
@@ -966,6 +1036,15 @@ export function initAgentDrawer() {
   newSessionBtn?.addEventListener('click', () => {
     showSessionModal();
   });
+  
+  // Current session card - click to show sessions modal
+  currentSessionCard?.addEventListener('click', () => {
+    showSessionsModal();
+  });
+  
+  // Sessions modal handlers
+  sessionsModalClose?.addEventListener('click', hideSessionsModal);
+  sessionsModal?.querySelector('.agent-modal__backdrop')?.addEventListener('click', hideSessionsModal);
 
   // Refresh button now triggers manual reconnection
   refreshBtn?.addEventListener('click', async () => {
@@ -992,7 +1071,7 @@ export function initAgentDrawer() {
     }
   });
   
-  // Session modal handlers
+  // Session config modal handlers
   sessionModalClose?.addEventListener('click', hideSessionModal);
   sessionCancelBtn?.addEventListener('click', hideSessionModal);
   sessionCreateBtn?.addEventListener('click', createSessionFromModal);

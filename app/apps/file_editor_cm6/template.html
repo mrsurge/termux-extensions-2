@@ -539,6 +539,171 @@
     color: rgba(229, 231, 235, 0.7);
   }
 
+  /* Current Session Card */
+  .agent-current-session-card {
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(37, 50, 75, 0.35);
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .agent-current-session-card:hover {
+    background: rgba(59, 130, 246, 0.25);
+  }
+
+  .agent-current-session-card__placeholder {
+    text-align: center;
+    opacity: 0.6;
+    font-size: 0.85rem;
+  }
+
+  .agent-current-session-card__name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .agent-current-session-card__status {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10b981;
+  }
+
+  .agent-current-session-card__meta {
+    font-size: 0.75rem;
+    opacity: 0.7;
+  }
+
+  /* Sessions Modal */
+  .agent-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .agent-modal__backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .agent-modal__content {
+    position: relative;
+    background: var(--card, #0b0f1a);
+    border-radius: 8px;
+    border: 1px solid var(--border, #333);
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  }
+
+  .agent-modal__header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border, #333);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .agent-modal__header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+
+  .agent-modal__body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .agent-sessions-modal-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .agent-sessions-modal-list__item {
+    padding: 12px;
+    border-radius: 6px;
+    background: rgba(37, 50, 75, 0.35);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.2s;
+  }
+
+  .agent-sessions-modal-list__item:hover {
+    background: rgba(59, 130, 246, 0.25);
+  }
+
+  .agent-sessions-modal-list__item--active {
+    background: rgba(59, 130, 246, 0.3);
+  }
+
+  .agent-sessions-modal-list__empty {
+    text-align: center;
+    opacity: 0.6;
+    padding: 20px;
+  }
+
+  .agent-sessions-modal-list__info {
+    flex: 1;
+  }
+
+  .agent-sessions-modal-list__name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .agent-sessions-modal-list__meta {
+    font-size: 0.75rem;
+    opacity: 0.7;
+  }
+
+  .agent-sessions-modal-list__delete {
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 1.2rem;
+    padding: 4px 8px;
+    line-height: 1;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+  }
+
+  .agent-sessions-modal-list__delete:hover {
+    opacity: 1;
+  }
+
   .agent-session-list {
     list-style: none;
     margin: 0;
@@ -1088,11 +1253,11 @@
       </div>
     </header>
     <div class="agent-drawer__body">
-      <section class="agent-section agent-section--sessions" aria-label="Agent sessions">
-        <h3>Sessions</h3>
-        <ul id="agent-session-list" class="agent-session-list">
-          <li class="agent-session-list__item agent-session-list__item--empty">No sessions yet</li>
-        </ul>
+      <section class="agent-section agent-section--current-session" aria-label="Current agent session">
+        <h3>Current Session</h3>
+        <div id="agent-current-session-card" class="agent-current-session-card">
+          <div class="agent-current-session-card__placeholder">No active session</div>
+        </div>
       </section>
       <section class="agent-section agent-section--transcript" aria-label="Agent transcript">
         <h3>Transcript</h3>
@@ -1123,6 +1288,22 @@
       </footer>
     </div>
   </aside>
+
+  <!-- Sessions List Modal -->
+  <div id="agent-sessions-modal" class="agent-modal" style="display: none;">
+    <div class="agent-modal__backdrop"></div>
+    <div class="agent-modal__content">
+      <header class="agent-modal__header">
+        <h2>Sessions</h2>
+        <button class="fe-btn" id="agent-sessions-modal-close">✕</button>
+      </header>
+      <div class="agent-modal__body">
+        <ul id="agent-sessions-modal-list" class="agent-sessions-modal-list">
+          <li class="agent-sessions-modal-list__empty">No sessions yet</li>
+        </ul>
+      </div>
+    </div>
+  </div>
 
   <!-- Agent Session Config Modal -->
   <div id="agent-session-modal" class="fe-modal" aria-hidden="true">
