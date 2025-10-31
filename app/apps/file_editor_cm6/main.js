@@ -10,6 +10,7 @@ import { createTerminalDrawer } from './static/js/terminal.js';
 import { initBranchMenu } from './static/js/git_menu.js';
 import { initAgentDrawer } from './static/js/agent_drawer.js';
 import ReconnectingWebSocket from './static/js/reconnecting_websocket.js';
+import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
 
 // Core
 const EditorState = CM.EditorState;
@@ -1361,6 +1362,40 @@ async function getCurrentProjectRoot(forceRefresh = false) {
 }
 
 async function main() {
+  // Responsive layout manager - detects viewport and applies layout class
+  const layoutManager = {
+    init() {
+      this.update();
+      window.addEventListener('resize', () => this.update());
+      window.addEventListener('orientationchange', () => setTimeout(() => this.update(), 100));
+    },
+    
+    update() {
+      const isDesktop = window.matchMedia('(min-width: 768px) and (orientation: landscape)').matches;
+      const root = document.querySelector('.fe-root');
+      
+      if (isDesktop) {
+        root.classList.add('layout-desktop');
+        root.classList.remove('layout-mobile');
+      } else {
+        root.classList.add('layout-mobile');
+        root.classList.remove('layout-desktop');
+      }
+      
+      // Trigger resize for CodeMirror and terminal
+      window.dispatchEvent(new Event('resize'));
+    }
+  };
+
+  // Initialize layout manager
+  layoutManager.init();
+
+  // Load saved layout preferences
+  loadLayoutPreferences();
+
+  // Initialize resize handles
+  initResizeManager();
+
   // Initialize explorer first to get project context
   await initExplorerUI().catch(e => {
     console.error('Failed to initialize explorer UI:', e);

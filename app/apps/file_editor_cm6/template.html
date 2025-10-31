@@ -25,6 +25,253 @@
     --diff-del-gap: 0px;
   }
   .fe-root { display: flex; flex-direction: column; height: 100%; background:var(--bg); color:var(--fg); }
+
+  /* ========================================
+     RESPONSIVE LAYOUT: Desktop (Landscape)
+     ======================================== */
+
+  .fe-root.layout-desktop {
+    display: grid;
+    grid-template-columns: var(--explorer-width, 430px) 1fr var(--agent-width, 400px);
+    grid-template-rows: auto auto 1fr auto;
+    height: 95vh;
+  }
+
+  /* Toolbar spans full width */
+  .layout-desktop .fe-toolbar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  /* Menubar spans full width */
+  .layout-desktop .fe-menubar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  /* Explorer becomes left sidebar - ALWAYS VISIBLE in desktop */
+  .layout-desktop .fe-drawer {
+    position: static !important;
+    transform: none !important;
+    left: auto;
+    top: auto;
+    bottom: auto;
+    width: 100%;
+    grid-column: 1;
+    grid-row: 3 / 5;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+
+  /* Hide drawer toggle button and close button in desktop */
+  .layout-desktop #fe-drawer-open,
+  .layout-desktop #fe-drawer-close {
+    display: none;
+  }
+
+  /* Hide backdrop in desktop mode */
+  .layout-desktop .fe-drawer-backdrop {
+    display: none !important;
+  }
+
+  /* Editor in middle column */
+  .layout-desktop .fe-editor-container {
+    grid-column: 2;
+    grid-row: 3;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Agent becomes right sidebar */
+  .layout-desktop .agent-drawer {
+    position: static !important;
+    transform: none !important;
+    right: auto;
+    top: auto;
+    bottom: auto;
+    width: 100%;
+    grid-column: 3;
+    grid-row: 3 / 5;
+    border-left: 1px solid var(--border);
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+    overflow-y: auto;
+    z-index: 50;
+  }
+
+  /* When agent is "closed" (open class NOT present) */
+  .layout-desktop .agent-drawer:not(.open) {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  /* Adjust grid when agent is closed */
+  .layout-desktop:has(.agent-drawer:not(.open)) {
+    grid-template-columns: var(--explorer-width, 430px) 1fr 0px;
+  }
+
+  /* Terminal is tiled in editor column only in desktop mode */
+  .layout-desktop .terminal-drawer {
+    position: static !important;
+    transform: none !important;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    grid-column: 2;
+    grid-row: 4;
+    height: var(--terminal-height, 340px);
+    border-top: 2px solid var(--border);
+    transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
+  }
+
+  /* When terminal is "closed" (open class NOT present) */
+  .layout-desktop .terminal-drawer:not(.open) {
+    opacity: 0;
+    visibility: hidden;
+    height: 0;
+    border: none;
+    pointer-events: none;
+  }
+
+  /* Adjust grid when terminal is closed in desktop */
+  .layout-desktop:has(.terminal-drawer:not(.open)) {
+    grid-template-rows: auto auto 1fr 0px;
+  }
+
+  /* Fix z-index for dropdowns in desktop mode */
+  .layout-desktop .fe-dropdown {
+    z-index: 150;
+  }
+
+  /* ========================================
+     RESPONSIVE LAYOUT: Mobile (Portrait)
+     ======================================== */
+
+  .fe-root.layout-mobile {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 1fr auto;
+    height: 100vh;
+  }
+
+  .layout-mobile .fe-toolbar {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .layout-mobile .fe-menubar {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .layout-mobile .fe-editor-container {
+    grid-column: 1;
+    grid-row: 3;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Terminal becomes tiled in mobile mode */
+  .layout-mobile .terminal-drawer {
+    position: static !important;
+    transform: none !important;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    grid-column: 1;
+    grid-row: 4;
+    height: var(--terminal-height, 340px);
+    border-top: 2px solid var(--border);
+    transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
+  }
+
+  /* When terminal is "closed" (open class NOT present) */
+  .layout-mobile .terminal-drawer:not(.open) {
+    opacity: 0;
+    visibility: hidden;
+    height: 0;
+    border: none;
+    pointer-events: none;
+  }
+
+  /* Adjust grid when terminal is closed */
+  .layout-mobile:has(.terminal-drawer:not(.open)) {
+    grid-template-rows: auto auto 1fr 0px;
+  }
+
+  /* ========================================
+     RESIZE HANDLES
+     ======================================== */
+
+  .resize-handle {
+    background: transparent;
+    position: relative;
+    z-index: 50;
+    transition: background 0.2s;
+    user-select: none;
+  }
+
+  .resize-handle:hover,
+  .resize-handle.dragging {
+    background: var(--primary, #3b82f6);
+  }
+
+  /* Hide all handles by default */
+  .resize-handle {
+    display: none;
+  }
+
+  /* Explorer resize handle (vertical, desktop only) */
+  .layout-desktop .resize-handle--explorer {
+    display: block;
+    width: 5px;
+    cursor: col-resize;
+    grid-column: 1;
+    grid-row: 3 / 5;
+    justify-self: end;
+    margin-left: -5px;
+  }
+
+  /* Agent resize handle (vertical, desktop only) */
+  .layout-desktop .resize-handle--agent {
+    display: block;
+    width: 5px;
+    cursor: col-resize;
+    grid-column: 3;
+    grid-row: 3 / 5;
+    justify-self: start;
+    margin-right: -5px;
+  }
+
+  /* Terminal resize handle (horizontal, desktop only - in editor column) */
+  .layout-desktop .resize-handle--terminal {
+    display: block;
+    height: 5px;
+    cursor: row-resize;
+    grid-column: 2;
+    grid-row: 4;
+    align-self: start;
+    margin-top: -5px;
+  }
+
+  /* Terminal resize handle (horizontal, mobile only) */
+  .layout-mobile .resize-handle--terminal {
+    display: block;
+    height: 5px;
+    cursor: row-resize;
+    grid-column: 1;
+    grid-row: 4;
+    align-self: start;
+    margin-top: -5px;
+  }
+
+  /* Hide resize handles when panels are closed */
+  .layout-desktop .agent-drawer:not(.open) ~ .resize-handle--agent,
+  .layout-desktop .terminal-drawer:not(.open) ~ .resize-handle--terminal,
+  .layout-mobile .terminal-drawer:not(.open) ~ .resize-handle--terminal {
+    display: none;
+  }
+
   .fe-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
   .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .fe-file-name { font-size: 1rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -567,23 +814,28 @@
 
   .agent-stats {
     display: flex;
-    flex-direction: column;
-    gap: 10px;
+    align-items: center;
+    gap: 16px;
+    font-size: 0.8rem;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
 
-  .agent-stats div {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.85rem;
+  .agent-stats__status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ef4444;
+    flex-shrink: 0;
   }
 
-  .agent-stats dt {
-    font-weight: 600;
+  .agent-stats__status-dot.connected {
+    background: #22c55e;
+  }
+
+  .agent-stats span {
     color: rgba(229, 231, 235, 0.7);
-  }
-
-  .agent-stats dd {
-    margin: 0;
   }
 
   .agent-approval-settings {
@@ -728,6 +980,9 @@
   </aside>
   <div class="fe-drawer-backdrop" id="fe-drawer-backdrop"></div>
 
+  <!-- Resize handle for explorer (desktop only) -->
+  <div class="resize-handle resize-handle--explorer" data-panel="explorer"></div>
+
   <div class="fe-toolbar">
     <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer">☰</button>
     <div class="fe-title-block">
@@ -803,6 +1058,9 @@
     <div id="select-tip">Long-press to select. Tap “Exit select mode” to return.</div>
   </div>
 
+  <!-- Resize handle for terminal (mobile only) -->
+  <div class="resize-handle resize-handle--terminal" data-panel="terminal"></div>
+
   <!-- Terminal Drawer -->
   <div id="terminal-drawer" class="terminal-drawer">
     <div class="terminal-header">
@@ -814,15 +1072,15 @@
     <div id="terminal-container"></div>
   </div>
 
+  <!-- Resize handle for agent (desktop only) -->
+  <div class="resize-handle resize-handle--agent" data-panel="agent"></div>
+
   <!-- Agent Drawer -->
   <aside id="agent-drawer" class="agent-drawer" aria-hidden="true">
     <header class="agent-drawer__header">
       <div class="agent-drawer__title">Agent Sessions</div>
       <div class="agent-drawer__actions">
         <button class="fe-btn" id="agent-new-session">New Session</button>
-        <button class="fe-btn" id="agent-refresh">Refresh</button>
-        <button class="fe-btn" id="agent-collapse">Collapse</button>
-        <button class="fe-btn" id="agent-fullscreen">Fullscreen</button>
         <button class="fe-btn" id="agent-close">✕</button>
       </div>
     </header>
@@ -855,15 +1113,11 @@
           </div>
         </div>
       </section>
-      <section class="agent-section agent-section--stats" aria-label="Agent stats">
-        <h3>Session Details</h3>
-        <dl class="agent-stats" id="agent-stats">
-          <div><dt>Status</dt><dd>Idle</dd></div>
-          <div><dt>CPU</dt><dd>—</dd></div>
-          <div><dt>Memory</dt><dd>—</dd></div>
-          <div><dt>Uptime</dt><dd>—</dd></div>
-        </dl>
-      </section>
+      <footer class="agent-stats" id="agent-stats">
+        <div class="agent-stats__status-dot" id="agent-status-dot"></div>
+        <span>Session: <span id="agent-status-text">Disconnected</span></span>
+        <span>Agent: <span id="agent-type-text">—</span></span>
+      </footer>
     </div>
   </aside>
 

@@ -1,6 +1,8 @@
 // app/apps/file_editor_cm6/static/js/agent_drawer.js
 // Agent drawer with shared shell architecture - ONE MCP server for all sessions
 
+import ReconnectingWebSocket from './reconnecting_websocket.js';
+
 function notify(message) {
   if (window.host && typeof window.host.toast === 'function') {
     window.host.toast(message);
@@ -292,7 +294,12 @@ export function initAgentDrawer() {
       wsUrl.searchParams.set('agent', sharedShell.agent);
       if (projectRoot) wsUrl.searchParams.set('cwd', projectRoot);
       
-      sharedShell.ws = new WebSocket(wsUrl.toString());
+      sharedShell.ws = new ReconnectingWebSocket(wsUrl.toString(), {
+        maxRetries: 10,
+        reconnectInterval: 2000,
+        maxReconnectInterval: 30000,
+        debug: true
+      });
       
       sharedShell.ws.onopen = () => {
         sharedShell.status = 'Connected';
@@ -332,6 +339,13 @@ export function initAgentDrawer() {
         sharedShell.ws = null;
         updateShellStatus();
         notify('Agent disconnected');
+      };
+
+      sharedShell.ws.onreconnect = (attempt, delay) => {
+        console.log(`[Agent] Reconnecting in ${delay}ms...`);
+        notify(`Reconnecting to agent (attempt ${attempt})...`);
+        sharedShell.status = 'Reconnecting';
+        updateShellStatus();
       };
       
     } catch (e) {
@@ -807,15 +821,24 @@ export function initAgentDrawer() {
   }
 
   function updateStats(stats) {
-    if (!statsEl) return;
+    const statusDot = document.getElementById('agent-status-dot');
+    const statusText = document.getElementById('agent-status-text');
+    const agentTypeText = document.getElementById('agent-type-text');
     
-    statsEl.innerHTML = `
-      <div><dt>Status</dt><dd>${stats.status || 'Idle'}</dd></div>
-      <div><dt>Agent</dt><dd>${stats.agent || '—'}</dd></div>
-      <div><dt>CPU</dt><dd>${stats.cpu_percent ? stats.cpu_percent.toFixed(1) + '%' : '—'}</dd></div>
-      <div><dt>Memory</dt><dd>${stats.rss_mb ? stats.rss_mb.toFixed(1) + ' MB' : '—'}</dd></div>
-      <div><dt>Uptime</dt><dd>${stats.uptime ? Math.floor(stats.uptime) + 's' : '—'}</dd></div>
-    `;
+    if (!statusDot || !statusText || !agentTypeText) return;
+    
+    // Update status dot and text
+    const status = stats.status || 'Disconnected';
+    statusText.textContent = status;
+    
+    if (status === 'Connected') {
+      statusDot.classList.add('connected');
+    } else {
+      statusDot.classList.remove('connected');
+    }
+    
+    // Update agent type
+    agentTypeText.textContent = stats.agent || '—';
   }
 
   async function loadSessions() {

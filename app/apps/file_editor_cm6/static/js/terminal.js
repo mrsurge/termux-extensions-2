@@ -1,5 +1,7 @@
 // app/apps/file_editor_cm6/static/js/terminal.js
 
+import ReconnectingWebSocket from './reconnecting_websocket.js';
+
 /**
  * Terminal drawer for the code editor.
  * Embeds xterm.js with WebSocket PTY streaming.
@@ -209,7 +211,12 @@ export function createTerminalDrawer(options = {}) {
       }
     }
 
-    const socket = new WebSocket(url);
+    const socket = new ReconnectingWebSocket(url, {
+      maxRetries: 15,
+      reconnectInterval: 500,
+      maxReconnectInterval: 5000,
+      debug: true
+    });
 
     socket.onopen = () => {
       console.log('Terminal WebSocket connected');
@@ -228,6 +235,12 @@ export function createTerminalDrawer(options = {}) {
     socket.onclose = () => {
       console.log('Terminal WebSocket closed');
       ws = null;
+    };
+
+    socket.onreconnect = (attempt) => {
+      if (term) {
+        term.writeln(`\r\nReconnecting (attempt ${attempt})...`);
+      }
     };
 
     return socket;
