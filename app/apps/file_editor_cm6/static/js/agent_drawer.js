@@ -171,6 +171,7 @@ export function initAgentDrawer() {
         name: sessionName,  // Custom name
         conversationId: null,  // Will be set by Codex "conversation_started" event
         shell_id: null,  // Track which framework shell this session used
+        needsHistoryRestore: false,
         messages: [],
         createdAt: Date.now(),
         cwd: projectRoot,
@@ -497,10 +498,17 @@ export function initAgentDrawer() {
     let shouldSave = false;
     
     switch (msg.event) {
-      case 'token':
-        session.messages.push({ type: 'token', text: msg.text, agent: msg.agent });
-        if (isActive) appendAssistantToken(msg.text);
+      case 'token': {
+        const chunk = msg.text || '';
+        let pendingEntry = session.messages[session.messages.length - 1];
+        if (!pendingEntry || pendingEntry.type !== 'assistant_pending') {
+          pendingEntry = { type: 'assistant_pending', text: '', __pending: true };
+          session.messages.push(pendingEntry);
+        }
+        pendingEntry.text += chunk;
+        if (isActive) appendAssistantToken(chunk);
         break;
+      }
         
       case 'system':
         session.messages.push({ type: 'system', text: msg.text });
@@ -534,7 +542,19 @@ export function initAgentDrawer() {
         break;
         
       case 'final':
-        session.messages.push({ type: 'final', output: msg.output });
+        {
+          let pendingEntry = session.messages[session.messages.length - 1];
+          const pendingText = pendingEntry && pendingEntry.type === 'assistant_pending' ? pendingEntry.text : '';
+          const finalText = msg.text || msg.output || pendingText;
+
+          if (pendingEntry && pendingEntry.type === 'assistant_pending') {
+            pendingEntry.type = 'assistant';
+            pendingEntry.text = finalText;
+            delete pendingEntry.__pending;
+          } else if (finalText) {
+            session.messages.push({ type: 'assistant', text: finalText });
+          }
+        }
         if (isActive) finishAssistantMessage();
         notify('Agent completed');
         shouldSave = true;
@@ -657,31 +677,30 @@ export function initAgentDrawer() {
      * Build base-instructions for history restoration.
      * Formats previous conversation as system context.
      */
-    if (!session.messages || session.messages.length === 0) {
+    const history = Array.isArray(session.messages) ? session.messages : [];
+    if (history.length === 0) {
       return '';
     }
-    
-    let instructions = 'You are resuming a conversation. Here is the context from the previous session:\n\n';
-    let userMessages = [];
-    let assistantMessages = [];
-    
-    session.messages.forEach(msg => {
-      if (msg.type === 'user') {
-        userMessages.push(msg.text);
-      } else if (msg.type === 'token' || msg.type === 'final') {
-        assistantMessages.push(msg.text);
+
+    let instructions = 'You are resuming an existing collaboration. Use the following conversation history to maintain continuity.\n\n';
+
+    history.forEach(msg => {
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'user' && msg.text) {
+        instructions += `User: ${msg.text}\n`;
+      } else if (msg.type === 'assistant' && msg.text) {
+        instructions += `Assistant: ${msg.text}\n\n`;
+      } else if (msg.type === 'final') {
+        const text = msg.text || msg.output;
+        if (text) {
+          instructions += `Assistant: ${text}\n\n`;
+        }
+      } else if (msg.type === 'system' && msg.text) {
+        instructions += `System: ${msg.text}\n`;
       }
     });
-    
-    // Build complete turn-by-turn conversation history
-    const numTurns = Math.min(userMessages.length, assistantMessages.length);
-    for (let i = 0; i < numTurns; i++) {
-      instructions += `User: ${userMessages[i]}\n`;
-      instructions += `Assistant: ${assistantMessages[i]}\n\n`;
-    }
-    
-    instructions += 'Continue the conversation naturally, maintaining context from the above history.';
-    
+
+    instructions += '\nContinue the conversation naturally, keeping the above history in mind.';
     return instructions;
   }
 
@@ -752,14 +771,26 @@ export function initAgentDrawer() {
           showApprovalRequest(msg);
           break;
           
-        case 'tool_call':
+      case 'tool_call':
+        flushSystemBuffer();
+        assistantBubble = null;
+        const toolBubble = document.createElement('div');
+        toolBubble.className = 'agent-transcript__bubble agent-transcript__bubble--system';
+        toolBubble.textContent = `Tool: ${msg.tool}`;
+        transcript?.appendChild(toolBubble);
+        break;
+
+        case 'assistant':
+        case 'assistant_pending':
           flushSystemBuffer();
           assistantBubble = null;
-          const toolBubble = document.createElement('div');
-          toolBubble.className = 'agent-transcript__bubble agent-transcript__bubble--system';
-          toolBubble.textContent = `Tool: ${msg.tool}`;
-          transcript?.appendChild(toolBubble);
-          break;
+          if (typeof msg.text === 'string' && msg.text.length > 0) {
+            const assistantStatic = document.createElement('div');
+            assistantStatic.className = 'agent-transcript__bubble agent-transcript__bubble--assistant';
+            assistantStatic.textContent = msg.text;
+            transcript?.appendChild(assistantStatic);
+          }
+        break;
           
         case 'diff':
           flushSystemBuffer();
@@ -1005,10 +1036,20 @@ export function initAgentDrawer() {
             const checkResp = await fetch(`/api/framework_shells/${savedState.shell_id}`);
             const checkData = await checkResp.json();
             
-            if (checkData.ok && checkData.data?.alive) {
-              sharedShell.shell_id = savedState.shell_id;
-              sharedShell.session_id = savedState.session_id;
-              sharedShell.status = 'Available';  // Shell running, no active websocket yet
+            if (checkData.ok && checkData.data) {
+              const shellInfo = checkData.data;
+              const alive = shellInfo.stats?.alive ?? (shellInfo.status === 'running' && !!shellInfo.pid);
+              
+              if (alive) {
+                sharedShell.shell_id = savedState.shell_id;
+                sharedShell.session_id = savedState.session_id;
+                sharedShell.status = 'Available';  // Shell running, no active websocket yet
+              } else {
+                sharedShell.shell_id = null;
+                sharedShell.session_id = null;
+                sharedShell.status = 'Disconnected';
+                saveShellState();  // Save empty state
+              }
             } else {
               // Shell is dead - clear saved state
               console.log('[Agent] Saved shell is dead, clearing state');
@@ -1042,12 +1083,13 @@ export function initAgentDrawer() {
             name: sessionData.name,
             conversationId: sessionData.conversationId,  // Codex conversation ID
             shell_id: sessionData.shell_id,  // Track framework shell
-            messages: sessionData.messages || [],
+            messages: sanitizeMessages(sessionData.messages || []),
             createdAt: sessionData.createdAt,
             cwd: sessionData.cwd,
             agent: sessionData.agent || 'codex',
             auto: sessionData.auto || false,
-            fullAccess: sessionData.fullAccess || false
+            fullAccess: sessionData.fullAccess || false,
+            needsHistoryRestore: false
           };
           
           addSessionToList(sessions[sessionId]);
@@ -1067,6 +1109,43 @@ export function initAgentDrawer() {
     }
   }
 
+  function sanitizeMessages(messages) {
+    if (!Array.isArray(messages)) return [];
+    const sanitized = [];
+    for (const msg of messages) {
+      if (!msg || typeof msg !== 'object') continue;
+      switch (msg.type) {
+        case 'token':
+          // Skip transient streaming tokens
+          continue;
+        case 'final': {
+          const text = msg.text || msg.output || '';
+          if (text) {
+            sanitized.push({ type: 'assistant', text });
+          }
+          continue;
+        }
+        case 'assistant':
+        case 'assistant_pending': {
+          const text = msg.text || '';
+          if (text) {
+            sanitized.push({ type: 'assistant', text });
+          }
+          continue;
+        }
+        case 'system':
+        case 'user':
+          if (typeof msg.text === 'string') {
+            sanitized.push({ type: msg.type, text: msg.text });
+          }
+          continue;
+        default:
+          sanitized.push(msg);
+      }
+    }
+    return sanitized;
+  }
+
   function saveSessionsToDisk() {
     // Save sessions to backend preferences (conversationId is the key!)
     const toSave = {};
@@ -1076,7 +1155,7 @@ export function initAgentDrawer() {
         name: session.name,
         conversationId: session.conversationId,  // Codex conversation ID
         shell_id: session.shell_id,  // Framework shell ID
-        messages: session.messages,
+        messages: sanitizeMessages(session.messages),
         createdAt: session.createdAt,
         cwd: session.cwd,
         agent: session.agent || 'codex',
