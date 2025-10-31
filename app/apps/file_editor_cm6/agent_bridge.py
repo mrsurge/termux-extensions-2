@@ -547,6 +547,11 @@ class AgentBridge:
         if shell_id:
             self.manager.unsubscribe_output(shell_id, queue)
     
+    def attach_session(self, session_id: str, shell_id: str):
+        """Attach an existing shell to a session mapping."""
+        if session_id and shell_id:
+            self._sessions[session_id] = shell_id
+    
     def terminate_agent(self, session_id: str):
         """Stop agent process gracefully."""
         shell_id = self._sessions.get(session_id)

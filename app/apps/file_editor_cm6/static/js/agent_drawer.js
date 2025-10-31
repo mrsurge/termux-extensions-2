@@ -359,11 +359,12 @@ export function initAgentDrawer() {
     try {
       const projectRoot = await getProjectRoot();
       
-      // Build WebSocket URL (no session param - backend manages shared shell)
+      // Build WebSocket URL; reuse saved session when available for shared shell
       const wsUrl = new URL('/ws/app/file_editor_cm6/agent', window.location.href);
       wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
       wsUrl.searchParams.set('agent', sharedShell.agent);
       if (projectRoot) wsUrl.searchParams.set('cwd', projectRoot);
+      if (sharedShell.session_id) wsUrl.searchParams.set('session', sharedShell.session_id);
       
       sharedShell.ws = new ReconnectingWebSocket(wsUrl.toString(), {
         maxRetries: 10,
@@ -387,14 +388,15 @@ export function initAgentDrawer() {
             sharedShell.shell_id = msg.shell_id;
             // Update active session with current shell_id
             if (activeSessionId && sessions[activeSessionId]) {
-              const needsHistoryRestore = sessions[activeSessionId].shell_id && 
-                                          sessions[activeSessionId].shell_id !== msg.shell_id;
+              const previousShellId = sessions[activeSessionId].shell_id;
+              const needsHistoryRestore = previousShellId && previousShellId !== msg.shell_id;
               sessions[activeSessionId].shell_id = msg.shell_id;
               
               // If shell changed and session has history, flag for restoration
               if (needsHistoryRestore && sessions[activeSessionId].messages.length > 0) {
                 sessions[activeSessionId].needsHistoryRestore = true;
                 console.log('[Agent] Shell changed - history restore needed');
+                notify('Agent session restarted, restoring history…');
               }
             }
           }
@@ -402,6 +404,12 @@ export function initAgentDrawer() {
             sharedShell.session_id = msg.session_id;  // For send_raw endpoint
           }
           saveShellState();
+        }
+        
+        if (msg.event === 'shell_replaced' && activeSessionId && sessions[activeSessionId]) {
+          sessions[activeSessionId].needsHistoryRestore = true;
+          console.log('[Agent] Shell replaced event received, forcing history restore');
+          notify('Agent session restarted, restoring history…');
         }
         
         // Route message to active session
@@ -486,6 +494,7 @@ export function initAgentDrawer() {
     
     // Only process if this is the active session
     const isActive = sessionId === activeSessionId;
+    let shouldSave = false;
     
     switch (msg.event) {
       case 'token':
@@ -496,38 +505,45 @@ export function initAgentDrawer() {
       case 'system':
         session.messages.push({ type: 'system', text: msg.text });
         if (isActive) appendSystemToken(msg.text);
+        shouldSave = true;
         break;
         
       case 'planning':
         session.messages.push({ type: 'planning', summary: msg.summary });
         if (isActive) appendPlanningToken(msg.summary);
+        shouldSave = true;
         break;
         
       case 'tool_call':
         session.messages.push({ type: 'tool_call', tool: msg.tool, args: msg.args });
         if (isActive) addSystemMessage(`Tool: ${msg.tool}`);
+        shouldSave = true;
         break;
         
       case 'diff':
         session.messages.push({ type: 'diff', path: msg.path, patch: msg.patch });
         if (isActive) addDiffMessage(msg.path, msg.patch);
+        shouldSave = true;
         break;
         
       case 'elicitation':
       case 'approval_request':
         session.messages.push({ type: 'approval', ...msg });
         if (isActive) showApprovalRequest(msg);
+        shouldSave = true;
         break;
         
       case 'final':
         session.messages.push({ type: 'final', output: msg.output });
         if (isActive) finishAssistantMessage();
         notify('Agent completed');
+        shouldSave = true;
         break;
         
       case 'error':
         session.messages.push({ type: 'error', error: msg.error });
         if (isActive) addErrorMessage(msg.error);
+        shouldSave = true;
         break;
         
       case 'connected':
@@ -548,6 +564,10 @@ export function initAgentDrawer() {
       default:
         // Ignore unknown events
         break;
+    }
+
+    if (shouldSave) {
+      saveSessionsToDisk();
     }
   }
 
@@ -958,7 +978,9 @@ export function initAgentDrawer() {
     const status = stats.status || 'Disconnected';
     statusText.textContent = status;
     
-    if (status === 'Connected') {
+    const isActive = status === 'Connected' || status === 'Available';
+    
+    if (isActive) {
       statusDot.classList.add('connected');
     } else {
       statusDot.classList.remove('connected');
@@ -986,15 +1008,21 @@ export function initAgentDrawer() {
             if (checkData.ok && checkData.data?.alive) {
               sharedShell.shell_id = savedState.shell_id;
               sharedShell.session_id = savedState.session_id;
-              sharedShell.status = 'Disconnected';  // Can reconnect, but not auto-connecting
+              sharedShell.status = 'Available';  // Shell running, no active websocket yet
             } else {
               // Shell is dead - clear saved state
               console.log('[Agent] Saved shell is dead, clearing state');
+              sharedShell.shell_id = null;
+              sharedShell.session_id = null;
+              sharedShell.status = 'Disconnected';
               saveShellState();  // Save empty state
             }
           } catch (e) {
             console.error('Failed to check shell status:', e);
             // Shell doesn't exist - clear saved state
+            sharedShell.shell_id = null;
+            sharedShell.session_id = null;
+            sharedShell.status = 'Disconnected';
             saveShellState();
           }
         }

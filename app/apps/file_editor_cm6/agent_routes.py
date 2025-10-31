@@ -6,6 +6,7 @@ REST API endpoints for agent management.
 Provides endpoints to spawn, list, describe, and terminate agent processes.
 """
 
+import json
 from flask import jsonify, request
 from .agent_bridge import get_bridge
 
@@ -227,39 +228,60 @@ def register_agent_routes(bp):
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
     
+    # Preferences storage helpers (shared by GET/SET) ---------------------------------
+    import threading
+    from pathlib import Path
+
+    _PREFS_LOCK = threading.Lock()
+    _PREFS_DIR = Path.home() / '.codex' / 'app_prefs'
+    _PREFS_FILE = _PREFS_DIR / 'code_cm6.json'
+
+    def _load_preferences() -> dict:
+        with _PREFS_LOCK:
+            if not _PREFS_FILE.exists():
+                return {}
+            try:
+                content = _PREFS_FILE.read_text(encoding='utf-8')
+                if not content.strip():
+                    return {}
+                data = json.loads(content)
+                if isinstance(data, dict):
+                    return data
+            except json.JSONDecodeError:
+                # Corrupt file: back up and reset
+                backup = _PREFS_FILE.with_suffix('.corrupt')
+                try:
+                    _PREFS_FILE.replace(backup)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            return {}
+
+    def _save_preferences(prefs: dict) -> None:
+        _PREFS_DIR.mkdir(parents=True, exist_ok=True)
+        tmp_path = _PREFS_FILE.with_suffix('.tmp')
+        with _PREFS_LOCK:
+            payload = json.dumps(prefs, indent=2)
+            tmp_path.write_text(payload, encoding='utf-8')
+            tmp_path.replace(_PREFS_FILE)
+
     @bp.get('/preferences/get')
     def preferences_get():
         """Get a preference value by key."""
-        from flask import current_app
-        import os
-        import json
-        
         key = request.args.get('key')
         if not key:
             return jsonify({"ok": False, "error": "Missing key parameter"}), 400
         
         try:
-            # Store preferences in app's data directory
-            prefs_dir = os.path.join(os.path.expanduser('~'), '.codex', 'app_prefs')
-            os.makedirs(prefs_dir, exist_ok=True)
-            prefs_file = os.path.join(prefs_dir, 'code_cm6.json')
-            
-            if os.path.exists(prefs_file):
-                with open(prefs_file, 'r') as f:
-                    prefs = json.load(f)
-                    value = prefs.get(key)
-                    return jsonify({"ok": True, "data": value})
-            else:
-                return jsonify({"ok": True, "data": None})
+            prefs = _load_preferences()
+            return jsonify({"ok": True, "data": prefs.get(key)})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
     
     @bp.post('/preferences/set')
     def preferences_set():
         """Set a preference value by key."""
-        import os
-        import json
-        
         data = request.get_json(silent=True) or {}
         key = data.get('key')
         value = data.get('value')
@@ -268,24 +290,9 @@ def register_agent_routes(bp):
             return jsonify({"ok": False, "error": "Missing key"}), 400
         
         try:
-            # Store preferences in app's data directory
-            prefs_dir = os.path.join(os.path.expanduser('~'), '.codex', 'app_prefs')
-            os.makedirs(prefs_dir, exist_ok=True)
-            prefs_file = os.path.join(prefs_dir, 'code_cm6.json')
-            
-            # Load existing prefs
-            prefs = {}
-            if os.path.exists(prefs_file):
-                with open(prefs_file, 'r') as f:
-                    prefs = json.load(f)
-            
-            # Update
+            prefs = _load_preferences()
             prefs[key] = value
-            
-            # Save
-            with open(prefs_file, 'w') as f:
-                json.dump(prefs, f, indent=2)
-            
+            _save_preferences(prefs)
             return jsonify({"ok": True, "data": {"key": key}})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500

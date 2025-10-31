@@ -23,6 +23,7 @@ from . import edit_tracker
 
 # Global registry of shared shells: agent_type -> (session_id, shell_id)
 _shared_shells = {}
+_initialized_shells = set()
 
 
 def register_agent_websocket(sock):
@@ -63,6 +64,7 @@ def register_agent_websocket(sock):
         agent_type = request.args.get('agent', 'codex')
         cwd = request.args.get('cwd', None)
         file_path = request.args.get('file', None)
+        requested_session_id = request.args.get('session', None)
         
         # Validate agent type
         if agent_type not in ['codex', 'gemini']:
@@ -79,43 +81,43 @@ def register_agent_websocket(sock):
         # Get or create THE SINGLE shared shell for this agent type
         # First, try to find existing shell by label (survives worker restarts)
         label = f"agent-{agent_type}-shared-c"  # Consistent label for shared shell
-        session_id = None
+        session_id = requested_session_id
         shell_id = None
         
-        # Try to find existing shell by label
+        # Try to find existing shell by label (survives worker restarts)
         existing_shell = bridge.manager.find_shell_by_label(label, status='running')
         if existing_shell:
             shell_id = existing_shell.id
-            session_id = f'shared-{agent_type}'
+            if not session_id:
+                cached = _shared_shells.get(agent_type)
+                session_id = cached[0] if cached else f'shared-{agent_type}'
+            bridge.attach_session(session_id, shell_id)
             _shared_shells[agent_type] = (session_id, shell_id)
             print(f'[Agent WS] Found existing {agent_type} shell: {shell_id}')
+        else:
+            # Fallback: use in-memory registry if still valid
+            cached = _shared_shells.get(agent_type)
+            if cached:
+                cached_session, cached_shell = cached
+                record = bridge.manager.get_shell(cached_shell)
+                if record and record.status == 'running':
+                    shell_id = cached_shell
+                    session_id = session_id or cached_session
+                    bridge.attach_session(session_id, shell_id)
+                else:
+                    _shared_shells.pop(agent_type, None)
+                    _initialized_shells.discard(cached_shell)
         
-        # Fallback: check in-memory registry
-        elif agent_type in _shared_shells:
-            session_id, shell_id = _shared_shells[agent_type]
-            
-            # Check if shell is still alive
-            try:
-                shell = bridge.manager.describe(shell_id)
-                if not shell or not shell.get('alive'):
-                    # Shell died - need to respawn
-                    session_id = None
-                    shell_id = None
-                    del _shared_shells[agent_type]
-            except Exception:
-                session_id = None
-                shell_id = None
-                if agent_type in _shared_shells:
-                    del _shared_shells[agent_type]
+        original_shell_id = shell_id
         
         # Spawn shared shell if needed
         if not shell_id:
             try:
-                session_id = f'shared-{agent_type}-{uuid.uuid4().hex[:8]}'
-                agent = bridge.spawn_agent(agent_type, cwd or os.path.expanduser('~'), session_id)
-                shell_id = agent['id']
+                session_id = session_id or f'shared-{agent_type}-{uuid.uuid4().hex[:8]}'
+                shell_info = bridge.spawn_agent(agent_type, cwd or os.path.expanduser('~'), session_id)
+                shell_id = shell_info['id']
+                bridge.attach_session(session_id, shell_id)
                 _shared_shells[agent_type] = (session_id, shell_id)
-                
             except Exception as e:
                 try:
                     ws.send(json.dumps({
@@ -136,6 +138,14 @@ def register_agent_websocket(sock):
                 'session_id': session_id,  # Shared session ID for send_raw endpoint
                 'cwd': cwd
             }))
+            if original_shell_id and original_shell_id != shell_id:
+                ws.send(json.dumps({
+                    'event': 'shell_replaced',
+                    'agent': agent_type,
+                    'old_shell_id': original_shell_id,
+                    'shell_id': shell_id,
+                    'session_id': session_id
+                }))
         except:
             pass
         
@@ -153,8 +163,8 @@ def register_agent_websocket(sock):
                 pass
             return
         
-        # Initialize MCP for Codex
-        if agent_type == 'codex':
+        # Initialize MCP for Codex once per shell lifetime
+        if agent_type == 'codex' and shell_id and shell_id not in _initialized_shells:
             try:
                 init_msg = {
                     'jsonrpc': '2.0',
@@ -172,6 +182,7 @@ def register_agent_websocket(sock):
                 shell_id = bridge._sessions.get(session_id)
                 if shell_id:
                     bridge.manager.write_to_pty(shell_id, json.dumps(init_msg) + '\n')
+                    _initialized_shells.add(shell_id)
             except Exception as e:
                 print(f'Failed to initialize Codex MCP: {e}')
         

@@ -533,6 +533,22 @@ class FrameworkShellManager:
             self.sweep()
             return self._load_record(shell_id)
 
+    def find_shell_by_label(self, label: str, status: Optional[str] = "running") -> Optional[ShellRecord]:
+        """Find the first shell matching the given label and optional status."""
+        if not label:
+            return None
+        with self._lock:
+            self.sweep()
+            for record in self._iter_records():
+                if record.label != label:
+                    continue
+                if status and record.status != status:
+                    continue
+                if status == "running" and not self._is_pid_alive(record.pid):
+                    continue
+                return record
+            return None
+
     def spawn_shell(
         self,
         command: Iterable[str],
@@ -545,6 +561,10 @@ class FrameworkShellManager:
         with self._lock:
             from app.libs import app_lifecycle
             self.sweep()
+            if label:
+                existing = self.find_shell_by_label(label, status="running")
+                if existing:
+                    return existing
             is_app_worker = (label or "").startswith("app-worker:")
             limit = self.max_app_shells if is_app_worker else self.max_service_shells
             if limit and self._active_shell_count(app_shell=is_app_worker) >= limit:
@@ -562,7 +582,7 @@ class FrameworkShellManager:
                     else:
                         raise RuntimeError("Maximum app shell count reached and all running apps are locked.")
                 else:
-                     raise RuntimeError(f"Maximum service shell count ({self.max_service_shells}) reached.")
+                    raise RuntimeError(f"Maximum service shell count ({self.max_service_shells}) reached.")
 
             record = self._create_record(
                 command,
@@ -585,6 +605,10 @@ class FrameworkShellManager:
         with self._lock:
             from app.libs import app_lifecycle
             self.sweep()
+            if label:
+                existing = self.find_shell_by_label(label, status="running")
+                if existing:
+                    return existing
             is_app_worker = (label or "").startswith("app-worker:")
             limit = self.max_app_shells if is_app_worker else self.max_service_shells
             if limit and self._active_shell_count(app_shell=is_app_worker) >= limit:
@@ -958,4 +982,3 @@ def terminate_shell_group() -> Any:
     except Exception as exc:
         return jsonify({"ok": False, "error": f"Failed to terminate group: {exc}"}), 500
     return jsonify({"ok": True, "data": {"terminated_count": count}})
-
