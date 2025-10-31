@@ -9,6 +9,7 @@ import { createDiffController } from './static/js/diff_decorations.js';
 import { createTerminalDrawer } from './static/js/terminal.js';
 import { initBranchMenu } from './static/js/git_menu.js';
 import { initAgentDrawer } from './static/js/agent_drawer.js';
+import ReconnectingWebSocket from './static/js/reconnecting_websocket.js';
 
 // Core
 const EditorState = CM.EditorState;
@@ -172,7 +173,13 @@ function connectEditTracker() {
   const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${wsProto}//${window.location.host}/ws/app/file_editor_cm6/edit_tracker`;
   
-  editTrackerWS = new WebSocket(wsUrl);
+  editTrackerWS = new ReconnectingWebSocket(wsUrl, {
+    maxRetries: 10,
+    reconnectInterval: 1000,
+    maxReconnectInterval: 30000,
+    reconnectDecay: 1.5,
+    debug: true
+  });
   
   editTrackerWS.onopen = () => {
     console.log('[EditTracker] Connected');
@@ -193,8 +200,11 @@ function connectEditTracker() {
   
   editTrackerWS.onclose = () => {
     console.log('[EditTracker] Disconnected');
-    editTrackerWS = null;
     updateEditTrackerStatus({ active: false, shells: [], last_edit: null });
+  };
+  
+  editTrackerWS.onreconnect = (attempt, delay) => {
+    console.log(`[EditTracker] Reconnecting (attempt ${attempt}) in ${delay}ms...`);
   };
 }
 
@@ -234,8 +244,8 @@ async function autoJumpToEdit(path, line) {
       await openFile(path);
     }
     
-    // Wait a tick for editor to be ready
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // Wait 3 seconds for editor and file to fully load
+    await new Promise(resolve => setTimeout(resolve, 3000));
     
     // Scroll to line and flash highlight
     if (editorView && line > 0) {
@@ -646,7 +656,13 @@ async function openWebSocket(path) {
   }
 
   try {
-    ws = new WebSocket(wsUrl);
+    ws = new ReconnectingWebSocket(wsUrl, {
+      maxRetries: 20,
+      reconnectInterval: 1000,
+      maxReconnectInterval: 10000,
+      reconnectDecay: 1.3,
+      debug: false
+    });
   } catch (err) {
     console.error('Failed to open WebSocket:', err);
     statusEl.textContent = 'WebSocket unavailable';
@@ -677,7 +693,10 @@ async function openWebSocket(path) {
 
   ws.onclose = () => {
     console.log('WebSocket closed');
-    ws = null;
+  };
+  
+  ws.onreconnect = (attempt, delay) => {
+    console.log(`[FileRead] Reconnecting (attempt ${attempt}) in ${delay}ms...`);
   };
 }
 

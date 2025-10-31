@@ -327,13 +327,17 @@ async function renderRecentMenu(state) {
   try {
     const s = state || await getEditorState(false);
     cachedState = s;
-    const files = s?.recents || [];
+    const allFiles = s?.recents || [];
+    
+    // Filter out currently open file
+    const currentPath = window.currentPath || '';
+    const files = allFiles.filter(entry => entry.path !== currentPath);
 
     if (files.length === 0) {
       ddBtn.disabled = true;
       const emptyItem = document.createElement('div');
       emptyItem.className = 'fe-dd-item';
-      emptyItem.textContent = 'No recent files';
+      emptyItem.textContent = currentPath ? 'No other recent files' : 'No recent files';
       emptyItem.style.opacity = '0.5';
       dd.appendChild(emptyItem);
       return;
@@ -341,6 +345,7 @@ async function renderRecentMenu(state) {
 
     ddBtn.disabled = false;
 
+    // Files are already sorted by most recent first from backend
     files.forEach(entry => {
       const div = document.createElement('div');
       div.className = 'fe-dd-item';
@@ -382,6 +387,28 @@ async function renderRecentMenu(state) {
       div.appendChild(x);
       dd.appendChild(div);
     });
+    
+    // Add separator and "Clear All" button
+    const separator = document.createElement('div');
+    separator.style.borderTop = '1px solid var(--border, #333)';
+    separator.style.margin = '4px 0';
+    dd.appendChild(separator);
+    
+    const clearAllDiv = document.createElement('div');
+    clearAllDiv.className = 'fe-dd-item';
+    clearAllDiv.textContent = 'Clear All';
+    clearAllDiv.style.color = 'var(--destructive, #ef4444)';
+    clearAllDiv.style.cursor = 'pointer';
+    clearAllDiv.style.textAlign = 'center';
+    
+    clearAllDiv.addEventListener('click', async () => {
+      if (!confirm('Clear all recent files?')) return;
+      await clearAllRecents();
+      dd.classList.remove('show');
+    });
+    
+    dd.appendChild(clearAllDiv);
+    
   } catch (e) {
     console.error('Failed to render recent menu:', e);
   }
@@ -397,6 +424,24 @@ async function removeRecent(path) {
     window.dispatchEvent(new CustomEvent('cm6:recents-updated', { detail: updatedState }));
   } catch (e) {
     console.error('Failed to remove recent file:', e);
+  }
+}
+
+async function clearAllRecents() {
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/history/files/all', { method: 'DELETE' });
+    const json = await resp.json();
+    if (json.ok) {
+      const updatedState = await getEditorState(true);
+      renderRecentMenu(updatedState);
+      window.dispatchEvent(new CustomEvent('cm6:recents-updated', { detail: updatedState }));
+      toast('All recent files cleared');
+    } else {
+      toast(`Failed to clear recents: ${json.error}`);
+    }
+  } catch (e) {
+    console.error('Failed to clear all recents:', e);
+    toast('Failed to clear recents');
   }
 }
 

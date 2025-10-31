@@ -552,6 +552,16 @@ def remove_file_history():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@file_editor_cm6_bp.delete('/history/files/all')
+def clear_all_file_history():
+    """Clear all recent files for the active project."""
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    try:
+        cleared = _history_store.clear_all_files(str(project_root))
+        return jsonify({"ok": True, "data": {"cleared": cleared}})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @file_editor_cm6_bp.get('/terminal/shell-id')
 def get_terminal_shell_id():
     """Get the stored terminal shell ID."""

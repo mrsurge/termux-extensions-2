@@ -150,6 +150,18 @@ class HistoryStore:
             self._save_locked()
             return True
 
+    def clear_all_files(self, project_path: str) -> bool:
+        """Clear all recent files for a project."""
+        with self._lock:
+            projects: Dict[str, Dict[str, object]] = self._data.setdefault("projects", {})
+            project_entry = projects.get(project_path)
+            if not project_entry:
+                return False
+            project_entry["files"] = []
+            project_entry["last_file"] = None
+            self._save_locked()
+            return True
+
     def list_projects(self) -> List[Dict[str, object]]:
         with self._lock:
             return list(self._data.get("recent_projects", []))
