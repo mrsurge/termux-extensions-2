@@ -34,7 +34,8 @@
     display: grid;
     grid-template-columns: var(--explorer-width, 430px) 1fr var(--agent-width, 400px);
     grid-template-rows: auto auto 1fr auto;
-    height: 95vh;
+    height: 93vh;
+    overflow: hidden;
   }
 
   /* Toolbar spans full width */
@@ -151,7 +152,8 @@
     display: grid;
     grid-template-columns: 1fr;
     grid-template-rows: auto auto 1fr auto;
-    height: 100vh;
+    height: 94vh;
+    overflow: hidden;
   }
 
   .layout-mobile .fe-toolbar {
@@ -183,6 +185,7 @@
     height: var(--terminal-height, 340px);
     border-top: 2px solid var(--border);
     transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
+    z-index: 50;
   }
 
   /* When terminal is "closed" (open class NOT present) */
