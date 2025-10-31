@@ -15,6 +15,7 @@ The `file_editor_cm6` app provides a native-feeling code editing experience with
 - **Embedded terminal drawer** with session persistence and history replay
 - **Branch dropdown + Git footer** for Stage/Unstage/Commit/Push/Pull directly in the explorer
 - **AI Agent Integration** with Codex/Gemini via shared shell architecture
+- **Convergent responsive layout** that adapts between desktop and mobile contexts
 - **Android-native selection mode** with long-press detection
 - **Project-based file management** with explorer drawer
 - **Disk-backed preferences** for themes and editor settings
@@ -41,6 +42,7 @@ file_editor_cm6 Worker
 ### Core Documentation
 
 - [CODE_CM6_DOCUMENTATION.md](CODE_CM6_DOCUMENTATION.md) — Comprehensive technical reference (architecture, realtime diffs, terminal drawer, roadmap)
+- [RESPONSIVE_LAYOUT.md](RESPONSIVE_LAYOUT.md) — **Convergent layout architecture** for desktop and mobile
 - [CHANGELOG_2025_10_28.md](CHANGELOG_2025_10_28.md) — Latest release notes (Oct 28-30, 2025)
 - [code_cm6_inline_diff_architecture.md](code_cm6_inline_diff_architecture.md) — Deep dive into the inline diff pipeline
 - [CM6_NATIVE_SELECTION.md](CM6_NATIVE_SELECTION.md) — Android-native selection implementation
@@ -56,6 +58,13 @@ file_editor_cm6 Worker
 ---
 
 ## Recent Updates
+
+**October 31, 2025**
+
+- ✅ Convergent responsive layout system (tiled desktop, overlay mobile)
+- ✅ ReconnectingWebSocket for terminal and agent drawer
+- ✅ Resizable panels with drag handles and localStorage persistence
+- ✅ Z-index hierarchy fixes for proper layering
 
 **October 30, 2025**
 
@@ -80,5 +89,5 @@ file_editor_cm6 Worker
 
 ---
 
-**Last Updated**: October 30, 2025
+**Last Updated**: October 31, 2025
 
