@@ -7,7 +7,7 @@ _running_apps: Dict[str, Dict] = {}
 _lock = threading.RLock()
 
 # --- Lifecycle Configuration ---
-APP_TTL_SECONDS = 1800  # 30 minutes
+DEFAULT_APP_TTL_SECONDS = 1800  # 30 minutes default
 CLEANUP_INTERVAL_SECONDS = 60  # 1 minute
 
 # --- Background Cleanup Thread ---
@@ -16,20 +16,22 @@ def _background_cleanup(app):
     """Periodically checks for and terminates old, unlocked apps."""
     with app.app_context():
         from app.libs.framework_shells import _manager as get_framework_shell_manager
+        from flask import current_app
         while True:
             time.sleep(CLEANUP_INTERVAL_SECONDS)
             manager = get_framework_shell_manager()
+            app_ttl_seconds = current_app.config.get("APP_TTL_SECONDS", DEFAULT_APP_TTL_SECONDS)
             with _lock:
                 now = time.time()
                 stale_apps = []
                 for shell_id, app_info in list(_running_apps.items()):
                     if not app_info.get("locked"):
                         age = now - app_info.get("created_at", now)
-                        if age > APP_TTL_SECONDS:
+                        if age > app_ttl_seconds:
                             stale_apps.append(shell_id)
                 
                 if stale_apps:
-                    print(f"[AppLifecycle] Cleaning up {len(stale_apps)} stale app(s)...")
+                    print(f"[AppLifecycle] Cleaning up {len(stale_apps)} stale app(s) (TTL: {app_ttl_seconds}s)...")
                     for shell_id in stale_apps:
                         terminate_app(manager, shell_id)
 

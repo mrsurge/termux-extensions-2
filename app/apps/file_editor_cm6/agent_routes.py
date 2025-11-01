@@ -7,6 +7,7 @@ Provides endpoints to spawn, list, describe, and terminate agent processes.
 """
 
 import json
+import time
 from flask import jsonify, request
 from .agent_bridge import get_bridge
 
@@ -258,5 +259,239 @@ def register_agent_routes(bp):
             prefs[key] = value
             save_preferences(prefs)
             return jsonify({"ok": True, "data": {"key": key}})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    
+    # --- Session Management Endpoints ---
+    
+    @bp.get('/agent/sessions')
+    def list_agent_sessions():
+        """
+        List all agent sessions with summary metadata.
+        
+        Returns:
+            List of sessions (no full message history)
+        
+        Example:
+            GET /api/app/file_editor_cm6/agent/sessions
+            
+            Response:
+            {
+              "ok": true,
+              "data": [
+                {
+                  "id": "session-123",
+                  "name": "Project Debug",
+                  "agent": "codex",
+                  "conversationId": "abc...",
+                  "messageCount": 15,
+                  "createdAt": 1730000000,
+                  "cwd": "/home/user/project",
+                  "auto": false,
+                  "fullAccess": false
+                }
+              ]
+            }
+        """
+        from .agent_session_store import list_sessions
+        try:
+            sessions = list_sessions()
+            return jsonify({"ok": True, "data": sessions})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    
+    @bp.get('/agent/session/<session_id>')
+    def get_agent_session(session_id):
+        """
+        Get full session data including message transcript.
+        
+        Args:
+            session_id: Session ID
+        
+        Returns:
+            Complete session with all messages
+        
+        Example:
+            GET /api/app/file_editor_cm6/agent/session/session-123
+            
+            Response:
+            {
+              "ok": true,
+              "data": {
+                "id": "session-123",
+                "name": "Project Debug",
+                "agent": "codex",
+                "conversationId": "abc...",
+                "messages": [...],
+                "createdAt": 1730000000,
+                "version": 42
+              }
+            }
+        """
+        from .agent_session_store import get_session
+        try:
+            session = get_session(session_id)
+            if not session:
+                return jsonify({"ok": False, "error": "Session not found"}), 404
+            return jsonify({"ok": True, "data": session})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    
+    @bp.post('/agent/sessions')
+    def create_agent_session():
+        """
+        Create a new agent session.
+        
+        Body (JSON):
+            name: Session name (required)
+            agent: Agent type - 'codex' or 'gemini' (optional, default: 'codex')
+            cwd: Working directory (optional)
+            auto: Auto-approval enabled (optional, default: false)
+            fullAccess: Full filesystem access (optional, default: false)
+        
+        Returns:
+            Created session
+        
+        Example:
+            POST /api/app/file_editor_cm6/agent/sessions
+            {"name":"Debug Session","agent":"codex","cwd":"/home/user/project"}
+            
+            Response:
+            {
+              "ok": true,
+              "data": {
+                "id": "session-123",
+                "name": "Debug Session",
+                "agent": "codex",
+                "messages": [],
+                "createdAt": 1730000000
+              }
+            }
+        """
+        from .agent_session_store import create_session
+        import uuid
+        
+        data = request.get_json(silent=True) or {}
+        name = data.get('name')
+        if not name:
+            return jsonify({"ok": False, "error": "Missing required field: name"}), 400
+        
+        agent = data.get('agent', 'codex')
+        if agent not in ['codex', 'gemini']:
+            return jsonify({"ok": False, "error": f"Invalid agent type: {agent}"}), 400
+        
+        session_id = f"session-{uuid.uuid4().hex[:12]}"
+        cwd = data.get('cwd')
+        auto = data.get('auto', False)
+        fullAccess = data.get('fullAccess', False)
+        
+        try:
+            session = create_session(
+                session_id=session_id,
+                name=name,
+                agent=agent,
+                cwd=cwd,
+                auto=auto,
+                fullAccess=fullAccess
+            )
+            return jsonify({"ok": True, "data": session}), 201
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    
+    @bp.delete('/agent/session/<session_id>')
+    def delete_agent_session(session_id):
+        """
+        Delete a session.
+        
+        Args:
+            session_id: Session ID
+        
+        Returns:
+            Success confirmation
+        
+        Example:
+            DELETE /api/app/file_editor_cm6/agent/session/session-123
+            
+            Response:
+            {
+              "ok": true,
+              "data": {"session_id": "session-123"}
+            }
+        """
+        from .agent_session_store import delete_session
+        try:
+            deleted = delete_session(session_id)
+            if not deleted:
+                return jsonify({"ok": False, "error": "Session not found"}), 404
+            return jsonify({"ok": True, "data": {"session_id": session_id}})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    
+    @bp.post('/agent/session/<session_id>/send')
+    def send_to_agent_session(session_id):
+        """
+        Send a user message to an agent session.
+        
+        This enqueues the message for processing. The response will be
+        streamed back via WebSocket.
+        
+        Body (JSON):
+            text: User message text (required)
+            attachFile: Attach current file context (optional, default: false)
+        
+        Args:
+            session_id: Session ID
+        
+        Returns:
+            Message acknowledgement
+        
+        Example:
+            POST /api/app/file_editor_cm6/agent/session/session-123/send
+            {"text":"Explain this function","attachFile":true}
+            
+            Response:
+            {
+              "ok": true,
+              "data": {
+                "session_id": "session-123",
+                "messageId": "msg-456",
+                "queued": true
+              }
+            }
+        """
+        from .agent_session_store import get_session, append_message
+        import uuid
+        
+        data = request.get_json(silent=True) or {}
+        text = data.get('text')
+        if not text:
+            return jsonify({"ok": False, "error": "Missing required field: text"}), 400
+        
+        try:
+            session = get_session(session_id)
+            if not session:
+                return jsonify({"ok": False, "error": "Session not found"}), 404
+            
+            # Append user message to session
+            message_id = f"msg-{uuid.uuid4().hex[:12]}"
+            message = {
+                'id': message_id,
+                'type': 'user',
+                'text': text,
+                'timestamp': time.time()
+            }
+            append_message(session_id, message)
+            
+            # TODO: Trigger agent processing via WebSocket or queue
+            # For now, the WebSocket handler will pick this up
+            
+            return jsonify({
+                "ok": True,
+                "data": {
+                    "session_id": session_id,
+                    "messageId": message_id,
+                    "queued": True
+                }
+            })
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500

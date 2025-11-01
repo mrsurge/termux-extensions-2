@@ -19,7 +19,7 @@ import threading
 import uuid
 from flask import request
 from .agent_bridge import get_bridge, enrich_context
-from .agent_session_store import get_session, update_session, clear_conversation_id
+from .agent_session_store import get_session, clear_conversation_id
 from . import edit_tracker
 
 # Global registry of shared shells: agent_type -> (session_id, shell_id)
@@ -275,14 +275,92 @@ def register_agent_websocket(sock):
                         if normalized.get('event') == 'conversation_started' and normalized.get('conversationId'):
                             target_session = session_key or session_id
                             from .agent_bridge import CodexAdapter
+                            from .agent_session_store import update_session_metadata
                             CodexAdapter.store_conversation_id(target_session, normalized['conversationId'])
                             bridge.note_conversation(target_session, normalized['conversationId'])
                             if session_key:
-                                update_session(session_key, conversationId=normalized['conversationId'], shell_id=shell_id)
+                                # Persist conversation ID immediately
+                                update_session_metadata(session_key, conversationId=normalized['conversationId'], shell_id=shell_id)
                             with request_map_lock:
                                 if request_id is not None:
                                     request_session_map.pop(str(request_id), None)
 
+                        # Persist agent messages to session
+                        if session_key:
+                            event_type = normalized.get('event')
+                            from .agent_session_store import append_message
+                            import time
+                            
+                            try:
+                                # Handle different message types
+                                if event_type == 'token':
+                                    # Streaming assistant response - for now, skip persistence of tokens
+                                    # We'll persist the final message on 'final' event
+                                    pass
+                                
+                                elif event_type == 'final':
+                                    # Complete assistant response
+                                    final_text = normalized.get('text', '')
+                                    print(f"[Agent WS] Persisting final message for session {session_key}: {len(final_text)} chars")
+                                    append_message(session_key, {
+                                        'id': f"msg-{request_id}",
+                                        'type': 'assistant',
+                                        'text': final_text,
+                                        'timestamp': time.time()
+                                    })
+                                    print(f"[Agent WS] Successfully persisted assistant message")
+                                
+                                elif event_type == 'system':
+                                    # System messages (planning, etc.)
+                                    append_message(session_key, {
+                                        'id': str(uuid.uuid4()),
+                                        'type': 'system',
+                                        'text': normalized.get('text', ''),
+                                        'timestamp': time.time()
+                                    })
+                                
+                                elif event_type == 'error':
+                                    # Error messages
+                                    append_message(session_key, {
+                                        'id': str(uuid.uuid4()),
+                                        'type': 'error',
+                                        'error': normalized.get('error', ''),
+                                        'timestamp': time.time()
+                                    })
+                                
+                                elif event_type == 'planning':
+                                    # Planning messages
+                                    append_message(session_key, {
+                                        'id': str(uuid.uuid4()),
+                                        'type': 'planning',
+                                        'summary': normalized.get('summary', ''),
+                                        'timestamp': time.time()
+                                    })
+                                
+                                elif event_type == 'tool_call':
+                                    # Tool usage
+                                    append_message(session_key, {
+                                        'id': str(uuid.uuid4()),
+                                        'type': 'tool_call',
+                                        'tool': normalized.get('tool', ''),
+                                        'args': normalized.get('args', {}),
+                                        'timestamp': time.time()
+                                    })
+                                
+                                elif event_type == 'diff':
+                                    # Diff messages
+                                    append_message(session_key, {
+                                        'id': str(uuid.uuid4()),
+                                        'type': 'diff',
+                                        'path': normalized.get('path', ''),
+                                        'patch': normalized.get('patch', ''),
+                                        'timestamp': time.time()
+                                    })
+                                
+                            except Exception as e:
+                                print(f"[Agent WS] Failed to persist agent message: {e}")
+                        
+                        # Clean up request map AFTER persistence
                         if normalized.get('event') in ('final', 'error') and request_id is not None:
                             with request_map_lock:
                                 request_session_map.pop(str(request_id), None)
@@ -364,7 +442,9 @@ def register_agent_websocket(sock):
                         clear_conversation_id(chat_session_id)
                         stored_conversation = None
 
-                    update_session(chat_session_id, shell_id=shell_id)
+                    # Persist shell_id update immediately
+                    from .agent_session_store import update_session_metadata
+                    update_session_metadata(chat_session_id, shell_id=shell_id)
 
                     # Enrich context if file path provided
                     context = {'cwd': cwd} if cwd else {}
@@ -415,6 +495,20 @@ def register_agent_websocket(sock):
                     if req_id is not None:
                         with request_map_lock:
                             request_session_map[str(req_id)] = chat_session_id
+
+                    # Persist user message to session (BEFORE sending to agent)
+                    from .agent_session_store import append_message
+                    import time
+                    user_msg_id = str(uuid.uuid4())
+                    try:
+                        append_message(chat_session_id, {
+                            'id': user_msg_id,
+                            'type': 'user',
+                            'text': message.get('text', ''),
+                            'timestamp': time.time()
+                        })
+                    except Exception as e:
+                        print(f"[Agent WS] Failed to persist user message: {e}")
 
                     # Write to agent with protocol translation
                     bridge.write_message(session_id, msg_agent_type, message, context)

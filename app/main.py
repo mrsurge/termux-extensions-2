@@ -120,6 +120,17 @@ def _save_settings(payload: dict) -> dict:
     return payload
 
 
+def _apply_settings_to_config():
+    """Load settings from disk and apply relevant values to app.config."""
+    settings = _load_settings()
+    if settings.get("TE_MAX_SERVICE_SHELLS") is not None:
+        app.config["TE_MAX_SERVICE_SHELLS"] = int(settings["TE_MAX_SERVICE_SHELLS"])
+    if settings.get("TE_MAX_APP_SHELLS") is not None:
+        app.config["TE_MAX_APP_SHELLS"] = int(settings["TE_MAX_APP_SHELLS"])
+    if settings.get("APP_TTL_SECONDS") is not None:
+        app.config["APP_TTL_SECONDS"] = int(settings["APP_TTL_SECONDS"])
+
+
 def _load_state_store() -> dict:
     with STATE_STORE_LOCK:
         try:
@@ -632,6 +643,10 @@ def _ensure_initialized():
         if _initialized:
             return
         try:
+            _apply_settings_to_config()
+        except Exception as e:
+            print(f"Error loading settings: {e}")
+        try:
             load_services()
         except Exception as e:
             print(f"Error loading services: {e}")
@@ -815,6 +830,8 @@ def proxy_app_websocket(client_ws, app_id, subpath):
     worker_thread.join()
 
 if __name__ == '__main__':
+    print("--- Loading Settings ---")
+    _apply_settings_to_config()
     print("--- Loading Services ---")
     load_services()
     print("--- Loading Extensions ---")
