@@ -125,6 +125,13 @@ def register_agent_websocket(sock):
             bridge.attach_session(session_id, shell_id)
             _shared_shells[agent_type] = (session_id, shell_id)
             print(f'[Agent WS] Found existing {agent_type} shell: {shell_id}')
+            # FIX 1: Populate CodexAdapter._conversations from disk on connection
+            if requested_session_id:
+                from .agent_bridge import CodexAdapter
+                saved = get_session(requested_session_id)
+                if saved and saved.get('conversationId'):
+                    CodexAdapter.store_conversation_id(requested_session_id, saved['conversationId'])
+                    print(f"[Agent WS] Restored conversation ID {saved['conversationId'][:8]}... for session {requested_session_id}")
         else:
             # Fallback: use in-memory registry if still valid
             cached = _shared_shells.get(agent_type)
@@ -135,6 +142,13 @@ def register_agent_websocket(sock):
                     shell_id = cached_shell
                     session_id = session_id or cached_session
                     bridge.attach_session(session_id, shell_id)
+                    # FIX 1: Restore conversation ID mapping for cached shell
+                    if requested_session_id:
+                        from .agent_bridge import CodexAdapter
+                        saved = get_session(requested_session_id)
+                        if saved and saved.get('conversationId'):
+                            CodexAdapter.store_conversation_id(requested_session_id, saved['conversationId'])
+                            print(f"[Agent WS] Restored conversation ID {saved['conversationId'][:8]}... for session {requested_session_id}")
                 else:
                     _shared_shells.pop(agent_type, None)
                     _initialized_shells.discard(cached_shell)
@@ -323,17 +337,21 @@ def register_agent_websocket(sock):
                         history_instructions, history_transcript = _build_history_payload(saved_session.get('messages', []))
                         stored_conversation = saved_session.get('conversationId')
                         saved_shell = saved_session.get('shell_id')
-                        if history_transcript and saved_shell and saved_shell != shell_id:
-                            needs_restore = True
-                        elif history_transcript and not stored_conversation:
-                            needs_restore = True
-                        else:
-                            try:
-                                from .agent_bridge import CodexAdapter
-                                if history_transcript and stored_conversation and not CodexAdapter._conversations.get(chat_session_id):
-                                    needs_restore = True
-                            except Exception:
-                                pass
+
+                        # FIX 2: Simplified needs_restore logic
+                        # Restore conversation if:
+                        # 1. Shell ID changed (server restarted), OR
+                        # 2. No conversation ID stored at all, OR
+                        # 3. Conversation ID not in memory (defensive check)
+                        from .agent_bridge import CodexAdapter
+
+                        if history_transcript:
+                            if saved_shell and saved_shell != shell_id:
+                                needs_restore = True
+                            elif not stored_conversation:
+                                needs_restore = True
+                            elif not CodexAdapter._conversations.get(chat_session_id):
+                                needs_restore = True
 
                         if saved_session.get('fullAccess'):
                             approval_policy = 'never'
@@ -362,16 +380,24 @@ def register_agent_websocket(sock):
                         context.setdefault('approval_policy', approval_policy)
                     if sandbox:
                         context.setdefault('sandbox', sandbox)
-                    if needs_restore and history_instructions:
-                        context['base_instructions'] = history_instructions
 
+                    # FIX 3: Proper conversation ID routing
+                    print(f"[DEBUG] needs_restore={needs_restore}, has_transcript={bool(history_transcript)}, stored_conv={stored_conversation}, chat_session={chat_session_id}")
                     if needs_restore and history_transcript:
+                        print(f"[DEBUG] Restoring conversation with history ({len(history_transcript)} chars)")
                         message['text'] = f"{history_transcript}\n\nUser: {message.get('text', '')}"
                         message['conversationId'] = None
                     elif stored_conversation:
+                        print(f"[DEBUG] Using existing conversation ID: {stored_conversation[:8]}...")
                         message['conversationId'] = stored_conversation
+                        from .agent_bridge import CodexAdapter
+                        if not CodexAdapter._conversations.get(chat_session_id):
+                            CodexAdapter.store_conversation_id(chat_session_id, stored_conversation)
                     else:
+                        print(f"[DEBUG] New conversation (no history)")
                         message['conversationId'] = None
+
+                    print(f"[DEBUG] Final message conversationId: {message.get('conversationId')}")
 
                     bridge.set_session_state(chat_session_id, {
                         'history_instructions': history_instructions,

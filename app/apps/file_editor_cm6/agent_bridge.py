@@ -526,8 +526,6 @@ class AgentBridge:
                 # If a history restore is pending, attach base instructions and
                 # clear any cached conversation data before sending the message.
                 if session_state.get('needs_restore') and session_state.get('history_transcript'):
-                    if session_state.get('history_instructions'):
-                        context['base_instructions'] = session_state['history_instructions']
                     transcript = session_state.get('history_transcript') or ''
                     if transcript:
                         message['text'] = f"{transcript}\n\nUser: {message.get('text', '')}"
