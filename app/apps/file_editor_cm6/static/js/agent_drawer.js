@@ -64,6 +64,20 @@ export function initAgentDrawer() {
     status: 'Disconnected'  // 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
   };
 
+  let saveDebounceTimer = null;
+
+  function debouncedSave() {
+    clearTimeout(saveDebounceTimer);
+    saveDebounceTimer = setTimeout(() => {
+      saveSessionsToDisk();
+    }, 1000);
+  }
+
+  window.addEventListener('beforeunload', () => {
+    clearTimeout(saveDebounceTimer);
+    saveSessionsToDisk();
+  });
+
   function updateAria() {
     drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
   }
@@ -416,8 +430,11 @@ export function initAgentDrawer() {
               }
             }
 
-            if (activeSessionId) {
-              handleAgentMessage(activeSessionId, msg);
+            const targetSessionId = msg.session || activeSessionId;
+            if (targetSessionId && sessions[targetSessionId]) {
+              handleAgentMessage(targetSessionId, msg);
+            } else if (targetSessionId) {
+              console.warn('[Agent] Received message for unknown session:', targetSessionId, msg);
             }
           };
 
@@ -522,6 +539,7 @@ export function initAgentDrawer() {
         }
         pendingEntry.text += chunk;
         if (isActive) appendAssistantToken(chunk);
+        debouncedSave();
         break;
       }
         
@@ -572,7 +590,8 @@ export function initAgentDrawer() {
         }
         if (isActive) finishAssistantMessage();
         notify('Agent completed');
-        shouldSave = true;
+        clearTimeout(saveDebounceTimer);
+        saveSessionsToDisk();
         break;
         
       case 'error':
