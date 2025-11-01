@@ -419,6 +419,7 @@ class AgentBridge:
     def __init__(self):
         self.manager = _manager()
         self._sessions: Dict[str, str] = {}  # session_id -> shell_id
+        self._session_state: Dict[str, Dict[str, Any]] = {}
         self._adapters = {
             'codex': CodexAdapter,
             'gemini': GeminiAdapter
@@ -508,7 +509,50 @@ class AgentBridge:
         
         # Get adapter
         adapter = self._adapters[agent_type]
-        
+
+        chat_session_id = message.get('session')
+
+        session_state = None
+        if agent_type == 'codex':
+            if chat_session_id:
+                session_state = self._session_state.get(chat_session_id)
+            if session_state is None:
+                session_state = self._session_state.get(session_id)
+
+        if agent_type == 'codex':
+            context = context or {}
+
+            if session_state:
+                # If a history restore is pending, attach base instructions and
+                # clear any cached conversation data before sending the message.
+                if session_state.get('needs_restore') and session_state.get('history_transcript'):
+                    if session_state.get('history_instructions'):
+                        context['base_instructions'] = session_state['history_instructions']
+                    transcript = session_state.get('history_transcript') or ''
+                    if transcript:
+                        message['text'] = f"{transcript}\n\nUser: {message.get('text', '')}"
+                    if session_state.get('approval_policy'):
+                        context.setdefault('approval_policy', session_state['approval_policy'])
+                    if session_state.get('sandbox'):
+                        context.setdefault('sandbox', session_state['sandbox'])
+                    target_key = chat_session_id or session_id
+                    CodexAdapter.clear_conversation(target_key)
+                    message['conversationId'] = None
+                    session_state['needs_restore'] = False
+                    session_state['conversation_id'] = None
+
+                # Enforce stored conversation ID if we have one
+                stored_conv = session_state.get('conversation_id')
+                if stored_conv:
+                    message['conversationId'] = stored_conv
+                elif 'conversationId' in message and message['conversationId']:
+                    # If we don't have a stored conversation, ensure None is sent
+                    message['conversationId'] = None
+            else:
+                # No session state tracked yet; ensure we clear stale IDs
+                if message.get('conversationId'):
+                    message['conversationId'] = None
+
         # Translate to agent format
         agent_msg = adapter.to_agent(message, context)
         
@@ -546,6 +590,20 @@ class AgentBridge:
         shell_id = self._sessions.get(session_id)
         if shell_id:
             self.manager.unsubscribe_output(shell_id, queue)
+
+    def set_session_state(self, session_id: str, state: Dict[str, Any]):
+        self._session_state[session_id] = state
+
+    def clear_session_state(self, session_id: str):
+        self._session_state.pop(session_id, None)
+
+    def note_conversation(self, session_id: str, conversation_id: str):
+        state = self._session_state.setdefault(session_id, {})
+        state['conversation_id'] = conversation_id
+
+    def update_session_shell(self, session_id: str, shell_id: str):
+        state = self._session_state.setdefault(session_id, {})
+        state['shell_id'] = shell_id
     
     def attach_session(self, session_id: str, shell_id: str):
         """Attach an existing shell to a session mapping."""

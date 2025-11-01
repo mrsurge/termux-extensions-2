@@ -171,7 +171,6 @@ export function initAgentDrawer() {
         name: sessionName,  // Custom name
         conversationId: null,  // Will be set by Codex "conversation_started" event
         shell_id: null,  // Track which framework shell this session used
-        needsHistoryRestore: false,
         messages: [],
         createdAt: Date.now(),
         cwd: projectRoot,
@@ -348,105 +347,121 @@ export function initAgentDrawer() {
   }
 
   async function connectSharedShell() {
-    if (sharedShell.status === 'Connected' || sharedShell.status === 'Connecting') {
-      console.log('Already connected or connecting');
-      return;
+    if (sharedShell.status === 'Connected' && sharedShell.shell_id && sharedShell.ws) {
+      return sharedShell.connectPromise || Promise.resolve();
+    }
+
+    if (sharedShell.connectPromise) {
+      return sharedShell.connectPromise;
     }
     
     sharedShell.status = 'Connecting';
     updateShellStatus();
     notify('Connecting to Codex MCP server...');
-    
-    try {
-      const projectRoot = await getProjectRoot();
-      
-      // Build WebSocket URL; reuse saved session when available for shared shell
-      const wsUrl = new URL('/ws/app/file_editor_cm6/agent', window.location.href);
-      wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
-      wsUrl.searchParams.set('agent', sharedShell.agent);
-      if (projectRoot) wsUrl.searchParams.set('cwd', projectRoot);
-      if (sharedShell.session_id) wsUrl.searchParams.set('session', sharedShell.session_id);
-      
-      sharedShell.ws = new ReconnectingWebSocket(wsUrl.toString(), {
-        maxRetries: 10,
-        reconnectInterval: 2000,
-        maxReconnectInterval: 30000,
-        debug: true
-      });
-      
-      sharedShell.ws.onopen = () => {
-        sharedShell.status = 'Connected';
-        updateShellStatus();
-        notify('Codex MCP server connected');
-      };
-      
-      sharedShell.ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        
-        // Store shell metadata from backend
-        if (msg.event === 'connected') {
-          if (msg.shell_id) {
-            sharedShell.shell_id = msg.shell_id;
-            // Update active session with current shell_id
-            if (activeSessionId && sessions[activeSessionId]) {
-              const previousShellId = sessions[activeSessionId].shell_id;
-              const needsHistoryRestore = previousShellId && previousShellId !== msg.shell_id;
-              sessions[activeSessionId].shell_id = msg.shell_id;
-              
-              // If shell changed and session has history, flag for restoration
-              if (needsHistoryRestore && sessions[activeSessionId].messages.length > 0) {
-                sessions[activeSessionId].needsHistoryRestore = true;
-                console.log('[Agent] Shell changed - history restore needed');
-                notify('Agent session restarted, restoring history…');
+
+    sharedShell.connectPromise = (async () => {
+      try {
+        const projectRoot = await getProjectRoot();
+
+        // Build WebSocket URL; reuse saved session when available for shared shell
+        const wsUrl = new URL('/ws/app/file_editor_cm6/agent', window.location.href);
+        wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
+        wsUrl.searchParams.set('agent', sharedShell.agent);
+        if (projectRoot) wsUrl.searchParams.set('cwd', projectRoot);
+        if (sharedShell.session_id) wsUrl.searchParams.set('session', sharedShell.session_id);
+
+        await new Promise((resolve, reject) => {
+          const socket = new ReconnectingWebSocket(wsUrl.toString(), {
+            maxRetries: 10,
+            reconnectInterval: 2000,
+            maxReconnectInterval: 30000,
+            debug: true
+          });
+
+          let initialHandshakeComplete = false;
+
+          const cleanup = () => {
+            socket.onopen = null;
+            socket.onmessage = null;
+            socket.onerror = null;
+            socket.onclose = null;
+            socket.onreconnect = null;
+          };
+
+          socket.onopen = () => {
+            sharedShell.status = 'Connected';
+            sharedShell.ws = socket;
+            updateShellStatus();
+            notify('Codex MCP server connected');
+          };
+
+          socket.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+
+            if (msg.event === 'connected') {
+              if (msg.shell_id) {
+                sharedShell.shell_id = msg.shell_id;
+                if (activeSessionId && sessions[activeSessionId]) {
+                  sessions[activeSessionId].shell_id = msg.shell_id;
+                }
+              }
+              if (msg.session_id) {
+                sharedShell.session_id = msg.session_id;
+              }
+              saveShellState();
+
+              if (!initialHandshakeComplete) {
+                initialHandshakeComplete = true;
+                resolve();
               }
             }
-          }
-          if (msg.session_id) {
-            sharedShell.session_id = msg.session_id;  // For send_raw endpoint
-          }
-          saveShellState();
-        }
-        
-        if (msg.event === 'shell_replaced' && activeSessionId && sessions[activeSessionId]) {
-          sessions[activeSessionId].needsHistoryRestore = true;
-          console.log('[Agent] Shell replaced event received, forcing history restore');
-          notify('Agent session restarted, restoring history…');
-        }
-        
-        // Route message to active session
-        if (activeSessionId) {
-          handleAgentMessage(activeSessionId, msg);
-        }
-      };
-      
-      sharedShell.ws.onerror = (error) => {
-        sharedShell.status = 'Error';
-        updateShellStatus();
-        notify('Agent connection error');
-        console.error('Agent WS error:', error);
-      };
-      
-      sharedShell.ws.onclose = () => {
-        sharedShell.status = 'Disconnected';
-        sharedShell.ws = null;
-        updateShellStatus();
-        notify('Agent disconnected');
-      };
 
-      sharedShell.ws.onreconnect = (attempt, delay) => {
-        console.log(`[Agent] Reconnecting in ${delay}ms...`);
-        notify(`Reconnecting to agent (attempt ${attempt})...`);
-        sharedShell.status = 'Reconnecting';
-        updateShellStatus();
-      };
-      
-    } catch (e) {
-      sharedShell.status = 'Error';
-      updateShellStatus();
-      notify('Failed to connect to agent');
-      console.error('Connection error:', e);
-      throw e;
-    }
+            if (activeSessionId) {
+              handleAgentMessage(activeSessionId, msg);
+            }
+          };
+
+          socket.onerror = (error) => {
+            if (!initialHandshakeComplete) {
+              cleanup();
+              sharedShell.status = 'Error';
+              sharedShell.ws = null;
+              updateShellStatus();
+              notify('Agent connection error');
+              reject(error);
+            } else {
+              sharedShell.status = 'Error';
+              updateShellStatus();
+              notify('Agent connection error');
+              console.error('Agent WS error:', error);
+            }
+            console.error('Agent WS error:', error);
+          };
+
+          socket.onclose = () => {
+            sharedShell.status = 'Disconnected';
+            sharedShell.ws = null;
+            updateShellStatus();
+            notify('Agent disconnected');
+            if (!initialHandshakeComplete) {
+              cleanup();
+              reject(new Error('Agent connection closed before handshake'));
+            }
+          };
+
+          socket.onreconnect = (attempt, delay) => {
+            console.log(`[Agent] Reconnecting in ${delay}ms...`);
+            notify(`Reconnecting to agent (attempt ${attempt})...`);
+            sharedShell.status = 'Reconnecting';
+            updateShellStatus();
+          };
+        });
+      } finally {
+        sharedShell.connectPromise = null;
+      }
+    })();
+
+    return sharedShell.connectPromise;
   }
   
   async function disconnectShell() {
@@ -611,27 +626,15 @@ export function initAgentDrawer() {
         return;
       }
     }
-    
     const message = {
       id: String(++messageIdCounter),
       action: 'chat',
       text: text,
       target: session.agent || 'codex',
-      conversationId: session.conversationId,  // null for first message, UUID for replies
+      conversationId: session.conversationId || null,  // Ensure null after reset
       cwd: session.cwd,
       session: session.id
     };
-    
-    // Check if history restoration is needed (shell changed)
-    if (session.needsHistoryRestore) {
-      console.log('[Agent] Restoring conversation history...');
-      const historyContext = buildHistoryContext(session);
-      message.context = message.context || {};
-      message.context.base_instructions = historyContext;
-      session.needsHistoryRestore = false;
-      session.conversationId = null; // Start fresh conversation with history
-      notify('Restoring conversation context...');
-    }
     
     // Add approval settings for first message (new conversation)
     if (!session.conversationId && (session.auto || session.fullAccess)) {
@@ -670,38 +673,6 @@ export function initAgentDrawer() {
     transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
     
     saveSessionsToDisk();
-  }
-
-  function buildHistoryContext(session) {
-    /**
-     * Build base-instructions for history restoration.
-     * Formats previous conversation as system context.
-     */
-    const history = Array.isArray(session.messages) ? session.messages : [];
-    if (history.length === 0) {
-      return '';
-    }
-
-    let instructions = 'You are resuming an existing collaboration. Use the following conversation history to maintain continuity.\n\n';
-
-    history.forEach(msg => {
-      if (!msg || typeof msg !== 'object') return;
-      if (msg.type === 'user' && msg.text) {
-        instructions += `User: ${msg.text}\n`;
-      } else if (msg.type === 'assistant' && msg.text) {
-        instructions += `Assistant: ${msg.text}\n\n`;
-      } else if (msg.type === 'final') {
-        const text = msg.text || msg.output;
-        if (text) {
-          instructions += `Assistant: ${text}\n\n`;
-        }
-      } else if (msg.type === 'system' && msg.text) {
-        instructions += `System: ${msg.text}\n`;
-      }
-    });
-
-    instructions += '\nContinue the conversation naturally, keeping the above history in mind.';
-    return instructions;
   }
 
   function renderMessages(messages) {
@@ -1083,14 +1054,13 @@ export function initAgentDrawer() {
             name: sessionData.name,
             conversationId: sessionData.conversationId,  // Codex conversation ID
             shell_id: sessionData.shell_id,  // Track framework shell
-            messages: sanitizeMessages(sessionData.messages || []),
-            createdAt: sessionData.createdAt,
-            cwd: sessionData.cwd,
-            agent: sessionData.agent || 'codex',
-            auto: sessionData.auto || false,
-            fullAccess: sessionData.fullAccess || false,
-            needsHistoryRestore: false
-          };
+        messages: sanitizeMessages(sessionData.messages || []),
+        createdAt: sessionData.createdAt,
+        cwd: sessionData.cwd,
+        agent: sessionData.agent || 'codex',
+        auto: sessionData.auto || false,
+        fullAccess: sessionData.fullAccess || false
+      };
           
           addSessionToList(sessions[sessionId]);
         }

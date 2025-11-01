@@ -19,11 +19,40 @@ import threading
 import uuid
 from flask import request
 from .agent_bridge import get_bridge, enrich_context
+from .agent_session_store import get_session, update_session, clear_conversation_id
 from . import edit_tracker
 
 # Global registry of shared shells: agent_type -> (session_id, shell_id)
 _shared_shells = {}
 _initialized_shells = set()
+
+
+def _build_history_payload(messages):
+    if not isinstance(messages, list) or not messages:
+        return '', ''
+
+    transcript_lines = []
+    for entry in messages:
+        if not isinstance(entry, dict):
+            continue
+        text = entry.get('text') or entry.get('output')
+        if not text:
+            continue
+        msg_type = entry.get('type')
+        if msg_type == 'user':
+            transcript_lines.append(f'User: {text}')
+        elif msg_type in ('assistant', 'final'):
+            transcript_lines.append(f'Assistant: {text}')
+        elif msg_type == 'system':
+            transcript_lines.append(f'System: {text}')
+
+    transcript = '\n'.join(transcript_lines)
+    base_instructions = (
+        "Resume the prior conversation.\n"
+        "You will receive the previous transcript followed by the user's latest message.\n"
+        "Use that transcript to maintain continuity."
+    )
+    return base_instructions, transcript
 
 
 def register_agent_websocket(sock):
@@ -59,6 +88,8 @@ def register_agent_websocket(sock):
         """
         bridge = get_bridge()
         global _shared_shells
+        request_session_map = {}
+        request_map_lock = threading.Lock()
         
         # Parse query parameters
         agent_type = request.args.get('agent', 'codex')
@@ -129,6 +160,8 @@ def register_agent_websocket(sock):
                     pass
                 return
         
+        bridge.update_session_shell(session_id, shell_id)
+
         # Send shell metadata to frontend
         try:
             ws.send(json.dumps({
@@ -216,10 +249,29 @@ def register_agent_websocket(sock):
                     normalized = bridge.parse_agent_output(agent_type, line)
                     
                     if normalized:
+                        request_id = normalized.get('id')
+                        session_key = None
+                        if request_id is not None:
+                            with request_map_lock:
+                                session_key = request_session_map.get(str(request_id))
+                        if session_key:
+                            normalized.setdefault('session', session_key)
+
                         # Store conversation ID for Codex MCP
                         if normalized.get('event') == 'conversation_started' and normalized.get('conversationId'):
+                            target_session = session_key or session_id
                             from .agent_bridge import CodexAdapter
-                            CodexAdapter.store_conversation_id(session_id, normalized['conversationId'])
+                            CodexAdapter.store_conversation_id(target_session, normalized['conversationId'])
+                            bridge.note_conversation(target_session, normalized['conversationId'])
+                            if session_key:
+                                update_session(session_key, conversationId=normalized['conversationId'], shell_id=shell_id)
+                            with request_map_lock:
+                                if request_id is not None:
+                                    request_session_map.pop(str(request_id), None)
+
+                        if normalized.get('event') in ('final', 'error') and request_id is not None:
+                            with request_map_lock:
+                                request_session_map.pop(str(request_id), None)
                         
                         try:
                             ws.send(json.dumps(normalized))
@@ -247,7 +299,55 @@ def register_agent_websocket(sock):
                     
                     # Override target if specified in message
                     msg_agent_type = message.get('target', agent_type)
-                    
+
+                    chat_session_id = message.get('session') or requested_session_id or session_id
+                    if not chat_session_id:
+                        try:
+                            ws.send(json.dumps({
+                                'event': 'error',
+                                'error': 'Missing session identifier for agent message'
+                            }))
+                        except Exception:
+                            pass
+                        continue
+
+                    saved_session = get_session(chat_session_id)
+                    history_instructions = ''
+                    history_transcript = ''
+                    needs_restore = False
+                    approval_policy = None
+                    sandbox = None
+                    stored_conversation = None
+
+                    if saved_session:
+                        history_instructions, history_transcript = _build_history_payload(saved_session.get('messages', []))
+                        stored_conversation = saved_session.get('conversationId')
+                        saved_shell = saved_session.get('shell_id')
+                        if history_transcript and saved_shell and saved_shell != shell_id:
+                            needs_restore = True
+                        elif history_transcript and not stored_conversation:
+                            needs_restore = True
+                        else:
+                            try:
+                                from .agent_bridge import CodexAdapter
+                                if history_transcript and stored_conversation and not CodexAdapter._conversations.get(chat_session_id):
+                                    needs_restore = True
+                            except Exception:
+                                pass
+
+                        if saved_session.get('fullAccess'):
+                            approval_policy = 'never'
+                            sandbox = 'danger-full-access'
+                        elif saved_session.get('auto'):
+                            approval_policy = 'never'
+                            sandbox = 'workspace-write'
+
+                    if needs_restore:
+                        clear_conversation_id(chat_session_id)
+                        stored_conversation = None
+
+                    update_session(chat_session_id, shell_id=shell_id)
+
                     # Enrich context if file path provided
                     context = {'cwd': cwd} if cwd else {}
                     if file_path or message.get('file'):
@@ -257,7 +357,39 @@ def register_agent_websocket(sock):
                         )
                         if file_context:
                             context.update(file_context)
-                    
+
+                    if approval_policy:
+                        context.setdefault('approval_policy', approval_policy)
+                    if sandbox:
+                        context.setdefault('sandbox', sandbox)
+                    if needs_restore and history_instructions:
+                        context['base_instructions'] = history_instructions
+
+                    if needs_restore and history_transcript:
+                        message['text'] = f"{history_transcript}\n\nUser: {message.get('text', '')}"
+                        message['conversationId'] = None
+                    elif stored_conversation:
+                        message['conversationId'] = stored_conversation
+                    else:
+                        message['conversationId'] = None
+
+                    bridge.set_session_state(chat_session_id, {
+                        'history_instructions': history_instructions,
+                        'history_transcript': history_transcript,
+                        'needs_restore': needs_restore,
+                        'approval_policy': approval_policy,
+                        'sandbox': sandbox,
+                        'conversation_id': (None if needs_restore else stored_conversation),
+                        'shell_id': shell_id,
+                    })
+
+                    bridge.update_session_shell(chat_session_id, shell_id)
+
+                    req_id = message.get('id')
+                    if req_id is not None:
+                        with request_map_lock:
+                            request_session_map[str(req_id)] = chat_session_id
+
                     # Write to agent with protocol translation
                     bridge.write_message(session_id, msg_agent_type, message, context)
                     
