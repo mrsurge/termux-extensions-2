@@ -1,4 +1,4 @@
-I WILL NEVER, EVER, IN A MILLION YEARS, EVER EVER, NEVER, CHECK OFF A SINGLE ITEM IN THE TO-DO LIST. CHECK MARKS ARE RESERVED STRICTLY FOR THE USER.
+I WILL NEVER, EVER, IN A MILLION YEARS, EVER EVER, NEVER, CHECK OFF A SINGLE ITEM IN THE TO-DO LIST. CHECK MARKS ARE RESERVED STRICTLY FOR THE USER
 I WILL NEVER EVER EVER EVER EVER CHECK ANYTHING OFF ON THE TO-DO LIST. EVER.
 I will never move on to the next item on the to-do list until it's either checked off by the user or the user explicitly instructs me to do so.
 
@@ -10,6 +10,17 @@ This document provides context for the `termux-extensions-2` project, a web fram
 *   **Backend:** Python, Flask, Gunicorn
 *   **Frontend:** Vanilla JavaScript, HTML, CSS
 *   **Real-time:** WebSockets (via `flask-sock`) for the terminal app.
+  ## JavaScript Convention
+  - JavaScript is ONLY for:
+    1. Displaying what the backend sends
+    2. Capturing user input and sending to backend
+    3. WebSocket message routing (no processing!)
+  - JavaScript must NOT:
+    1. Store state (backend owns all state)
+    2. Process/transform data (backend does this)
+    3. Implement business logic
+    4. Make decisions
+  - If you write more than 100 lines of JS, you're doing it wrong.
 ### Architecture
 The framework is built on a modular architecture where features are encapsulated in self-contained **extensions** (under `app/extensions/`) or full-page **apps** (under `app/apps/`). The main Flask application discovers, loads, and serves these modules.
 A key architectural feature is the **on-demand app backend architecture**. To ensure resource efficiency and process isolation, app backends are launched on-demand in their own framework shells. A generic reverse proxy in the main application forwards requests to the correct worker process.
