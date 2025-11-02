@@ -78,8 +78,36 @@ export function initAgentDrawer() {
     isOpen = true;
     updateAria();
     
-    // Sessions loaded on-demand when modal opens
-    // No auto-loading to keep drawer open fast
+    // Check for existing shell on drawer open
+    checkExistingShell();
+  }
+  
+  async function checkExistingShell() {
+    try {
+      const resp = await fetch('/api/app/file_editor_cm6/agent/shell/status');
+      const result = await resp.json();
+      
+      if (result.ok && result.data) {
+        // Shell exists and is alive
+        const shellInfo = result.data;
+        sharedShell.shell_id = shellInfo.shell_id;
+        sharedShell.status = 'Available';  // Shell running, not connected yet
+        
+        updateStats({
+          status: 'Available',
+          agent: 'codex'
+        });
+      } else {
+        // No active shell
+        sharedShell.status = 'Disconnected';
+        updateStats({
+          status: 'Disconnected',
+          agent: '—'
+        });
+      }
+    } catch (e) {
+      console.error('[Agent Drawer] Failed to check shell status:', e);
+    }
   }
 
   function closeDrawer() {

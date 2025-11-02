@@ -495,3 +495,52 @@ def register_agent_routes(bp):
             })
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
+    
+    @bp.get('/agent/shell/status')
+    def get_agent_shell_status():
+        """
+        Check if there's an active Codex MCP server shell.
+        
+        Returns shell info if one exists, otherwise returns None.
+        
+        Example:
+            GET /api/app/file_editor_cm6/agent/shell/status
+            
+            Response:
+            {
+              "ok": true,
+              "data": {
+                "shell_id": "fs_1762043953_7cd3f985",
+                "status": "running",
+                "alive": true
+              }
+            }
+        """
+        from app.libs.framework_shells import _manager
+        
+        try:
+            # Get the manager instance
+            mgr = _manager()
+            
+            # Find active Codex MCP shells
+            shells = mgr.list_shells()
+            codex_shell = None
+            
+            for shell in shells:
+                # Check if this is a Codex MCP server shell (note: space not hyphen)
+                # shell.command is a List[str], so join and check
+                command_str = ' '.join(shell.command) if isinstance(shell.command, list) else str(shell.command)
+                if 'codex mcp-server' in command_str:
+                    # Check if shell is running (status == 'running' and has PID)
+                    if shell.status == 'running' and shell.pid:
+                        codex_shell = {
+                            'shell_id': shell.id,
+                            'status': shell.status,
+                            'alive': True,
+                            'pid': shell.pid
+                        }
+                        break
+            
+            return jsonify({"ok": True, "data": codex_shell})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
