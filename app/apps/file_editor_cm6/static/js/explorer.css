@@ -119,10 +119,10 @@
   border-radius: 8px;
   transition: background 0.15s;
   color: #e5e7eb;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   border-left: 3px solid transparent;
   border: 1px solid transparent;
-  margin-left: 30px;
+  margin-left: 20px;
   align-items: center;
 }
 

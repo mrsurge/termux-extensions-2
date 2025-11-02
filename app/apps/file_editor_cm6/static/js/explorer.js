@@ -60,6 +60,12 @@ window.__cm6RefreshRecents = (state) => {
   renderRecentMenu(state);
 };
 
+window.__cm6RefreshExplorer = async () => {
+  if (treeElement && currentProjectPath) {
+    await refreshTree(treeElement);
+  }
+};
+
 export async function initExplorerUI() {
   const backdrop = document.getElementById('fe-backdrop');
   backdrop?.addEventListener('click', () => toggleDrawer(false));

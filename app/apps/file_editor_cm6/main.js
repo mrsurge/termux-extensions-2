@@ -249,14 +249,14 @@ async function autoJumpToEdit(path, line) {
     await new Promise(resolve => setTimeout(resolve, 3000));
     
     // Scroll to line and flash highlight
-    if (editorView && line > 0) {
-      const docLines = editorView.state.doc.lines;
+    if (view && line > 0) {
+      const docLines = view.state.doc.lines;
       if (line <= docLines) {
-        const lineObj = editorView.state.doc.line(line);
+        const lineObj = view.state.doc.line(line);
         const pos = lineObj.from;
         
         // Scroll into view
-        editorView.dispatch({
+        view.dispatch({
           selection: { anchor: pos, head: pos },
           scrollIntoView: true,
         });
@@ -271,9 +271,9 @@ async function autoJumpToEdit(path, line) {
 }
 
 function flashLine(lineNumber) {
-  if (!editorView) return;
+  if (!view) return;
   
-  const lineObj = editorView.state.doc.line(lineNumber);
+  const lineObj = view.state.doc.line(lineNumber);
   const flashDeco = CM.Decoration.line({ class: 'cm-edit-flash' });
   const decoSet = CM.RangeSetBuilder.of([flashDeco.range(lineObj.from)]);
   
@@ -284,14 +284,14 @@ function flashLine(lineNumber) {
   });
   
   // Add decoration
-  editorView.dispatch({
+  view.dispatch({
     effects: CM.StateEffect.appendConfig.of(flashField),
   });
   
   // Remove after 1 second
   setTimeout(() => {
     try {
-      editorView.dispatch({
+      view.dispatch({
         effects: CM.StateEffect.reconfigure.of([]),
       });
     } catch (e) {
@@ -398,6 +398,7 @@ let agentDrawerHandle = null;
 let ws = null;
 let editTrackerWS = null;
 let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+let explorerRefreshTimer = null;
 let lastSha256 = null;
 let inflightOpId = null;
 let saveDebounceTimer = null;
@@ -736,6 +737,8 @@ function handleWSMessage(msg) {
       if (showInlineDiffs) {
         diffController.refresh(true);
       }
+      // Refresh explorer on file changes (debounced)
+      scheduleExplorerRefresh();
     }
   } else if (type === 'save_ack') {
     if (msg.op_id === inflightOpId) {
@@ -749,7 +752,22 @@ function handleWSMessage(msg) {
       diffController.invalidateCacheForPath(currentPath);
       diffController.refresh(true);
     }
+    // Refresh explorer on file changes (debounced)
+    scheduleExplorerRefresh();
   }
+}
+
+function scheduleExplorerRefresh() {
+  if (explorerRefreshTimer) {
+    clearTimeout(explorerRefreshTimer);
+  }
+  explorerRefreshTimer = setTimeout(() => {
+    if (typeof window.__cm6RefreshExplorer === 'function') {
+      window.__cm6RefreshExplorer().catch(err => {
+        console.error('Failed to refresh explorer:', err);
+      });
+    }
+  }, 500);
 }
 
 // ---------- File ops ----------
