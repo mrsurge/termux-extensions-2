@@ -1,30 +1,39 @@
 import json
 import time
 import threading
+from pathlib import Path
 from typing import Dict, Any, Optional, List
-
-from .agent_preferences import load_preferences, save_preferences
 
 _session_lock = threading.RLock()
 
+# Dedicated file for agent sessions (separate from app preferences)
+_SESSIONS_DIR = Path.home() / '.codex' / 'agent_sessions'
+_SESSIONS_FILE = _SESSIONS_DIR / 'sessions.json'
+
 
 def load_session_map() -> Dict[str, Any]:
-    prefs = load_preferences()
-    raw = prefs.get('agent_sessions')
-    if not raw:
+    """Load all sessions from dedicated sessions file."""
+    if not _SESSIONS_FILE.exists():
         return {}
-    if isinstance(raw, dict):
-        return raw
     try:
-        return json.loads(raw)
+        content = _SESSIONS_FILE.read_text(encoding='utf-8')
+        if not content.strip():
+            return {}
+        data = json.loads(content)
+        if isinstance(data, dict):
+            return data
     except Exception:
-        return {}
+        pass
+    return {}
 
 
 def save_session_map(data: Dict[str, Any]) -> None:
-    prefs = load_preferences()
-    prefs['agent_sessions'] = json.dumps(data)
-    save_preferences(prefs)
+    """Save all sessions to dedicated sessions file."""
+    _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = _SESSIONS_FILE.with_suffix('.tmp')
+    payload = json.dumps(data, indent=2)
+    tmp_path.write_text(payload, encoding='utf-8')
+    tmp_path.replace(_SESSIONS_FILE)
 
 
 def get_session(session_id: str) -> Optional[Dict[str, Any]]:

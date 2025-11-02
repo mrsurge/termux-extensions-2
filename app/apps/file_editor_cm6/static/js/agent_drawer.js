@@ -1094,8 +1094,7 @@ export function initAgentDrawer() {
     }
   });
 
-  // Initialize
-  loadSessions();
+  // Initialize - sessions loaded on-demand when drawer opens
 
   return {
     open: openDrawer,
