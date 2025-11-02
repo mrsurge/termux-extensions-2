@@ -24,6 +24,9 @@ class CodexAdapter:
     # Track conversation IDs per session
     _conversations = {}
     
+    # Track last complete message per request (for persistence)
+    _last_messages = {}
+    
     @staticmethod
     def to_agent(normalized: dict, context: Optional[dict] = None) -> dict:
         """
@@ -175,7 +178,7 @@ Content:
                         'text': msg_data.get('delta', '')
                     }
                 elif event_type == 'agent_message':
-                    # Full message - DIRECT RESPONSE (ignore, we use deltas)
+                    # Full message - not sent to UI (we use deltas for streaming)
                     return None
                 
                 # EVERYTHING ELSE - terminal/console style
@@ -207,11 +210,13 @@ Content:
                         'text': '[Task started]'
                     }
                 elif event_type == 'task_complete':
-                    # Task finished - SYSTEM MESSAGE + final marker
+                    # Task finished - use last_agent_message from the event itself
+                    complete_text = msg_data.get('last_agent_message', '')
                     return {
                         'id': str(request_id),
                         'event': 'final',
                         'agent': 'codex',
+                        'text': complete_text,  # Include full message for backend persistence
                         'ok': True
                     }
                 elif event_type == 'session_configured':

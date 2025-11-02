@@ -281,9 +281,7 @@ def register_agent_websocket(sock):
                             if session_key:
                                 # Persist conversation ID immediately
                                 update_session_metadata(session_key, conversationId=normalized['conversationId'], shell_id=shell_id)
-                            with request_map_lock:
-                                if request_id is not None:
-                                    request_session_map.pop(str(request_id), None)
+                            # DON'T remove from request_session_map yet - we need it for 'final' event!
 
                         # Persist agent messages to session
                         if session_key:
@@ -301,14 +299,12 @@ def register_agent_websocket(sock):
                                 elif event_type == 'final':
                                     # Complete assistant response
                                     final_text = normalized.get('text', '')
-                                    print(f"[Agent WS] Persisting final message for session {session_key}: {len(final_text)} chars")
                                     append_message(session_key, {
                                         'id': f"msg-{request_id}",
                                         'type': 'assistant',
                                         'text': final_text,
                                         'timestamp': time.time()
                                     })
-                                    print(f"[Agent WS] Successfully persisted assistant message")
                                 
                                 elif event_type == 'system':
                                     # System messages (planning, etc.)

@@ -351,8 +351,6 @@ export function initAgentDrawer() {
   }
 
   async function switchToSession(sessionId) {
-    notify(`Loading session ${sessionId}...`);
-    
     // Fetch full session transcript from backend
     let session;
     try {
@@ -363,13 +361,6 @@ export function initAgentDrawer() {
         return;
       }
       session = result.data;
-      notify(`Loaded: ${session.id} - ${session.messages?.length || 0} msgs`);
-      
-      // DEBUG: Show actual message types
-      if (session.messages && session.messages.length > 0) {
-        const types = session.messages.map(m => m.type).join(', ');
-        notify(`Msg types: ${types}`);
-      }
     } catch (e) {
       console.error('Failed to fetch session:', e);
       notify('Error loading session');
@@ -559,20 +550,9 @@ export function initAgentDrawer() {
 
   function handleAgentMessage(sessionId, msg) {
     // Backend already persisted - just update UI
-    console.log('[Agent Drawer] Received message:', msg.event, 'for session:', sessionId, 'active:', activeSessionId);
-    
-    // DEBUG: Show message received
-    if (msg.event !== 'token') {
-      notify(`Got ${msg.event} event`);
-    }
-    
     // Only render if this is the active session
     const isActive = sessionId === activeSessionId;
-    if (!isActive) {
-      console.log('[Agent Drawer] Ignoring message - not active session');
-      notify(`Ignoring ${msg.event} - not active`);
-      return;
-    }
+    if (!isActive) return;
     
     switch (msg.event) {
       case 'token': {
@@ -724,32 +704,14 @@ export function initAgentDrawer() {
   }
 
   function renderMessages(messages) {
-    try {
-      console.log('[Agent Drawer] renderMessages called with', messages?.length, 'messages');
-      notify(`Rendering ${messages?.length || 0} messages`);
-      
-      // DEBUG: Check if transcript element exists
-      if (!transcript) {
-        notify('ERROR: transcript element not found!');
-        return;
-      }
-      
-      clearTranscript();
-    } catch (err) {
-      notify(`ERROR in renderMessages start: ${err.message}`);
+    if (!transcript) {
+      console.error('[Agent Drawer] transcript element not found');
       return;
     }
+    
+    clearTranscript();
     
     if (!messages || messages.length === 0) {
-      console.log('[Agent Drawer] No messages to render');
-      notify('Returning early - no messages');
-      return;
-    }
-    
-    try {
-      notify(`About to loop through ${messages.length} msgs`);
-    } catch (err) {
-      notify(`ERROR checking messages.length: ${err.message}`);
       return;
     }
     
@@ -770,11 +732,7 @@ export function initAgentDrawer() {
       }
     };
     
-    messages.forEach((msg, idx) => {
-      if (idx === 0) {
-        notify(`First msg type: ${msg.type}`);
-      }
-      
+    messages.forEach((msg) => {
       switch (msg.type) {
         case 'user':
           flushSystemBuffer();
@@ -783,7 +741,6 @@ export function initAgentDrawer() {
           userBubble.className = 'agent-transcript__bubble agent-transcript__bubble--user';
           userBubble.textContent = msg.text;
           transcript?.appendChild(userBubble);
-          notify(`Added user bubble`);
           break;
           
         case 'token':
@@ -831,15 +788,11 @@ export function initAgentDrawer() {
         case 'assistant_pending':
           flushSystemBuffer();
           assistantBubble = null;
-          notify(`Assistant msg text: ${msg.text?.substring(0, 20) || 'NO TEXT'}`);
           if (typeof msg.text === 'string' && msg.text.length > 0) {
             const assistantStatic = document.createElement('div');
             assistantStatic.className = 'agent-transcript__bubble agent-transcript__bubble--assistant';
             assistantStatic.textContent = msg.text;
             transcript?.appendChild(assistantStatic);
-            notify('Added assistant bubble');
-          } else {
-            notify(`Skipped assistant: type=${typeof msg.text}, len=${msg.text?.length}`);
           }
         break;
           
@@ -865,19 +818,12 @@ export function initAgentDrawer() {
     // Flush any remaining system messages
     flushSystemBuffer();
     
-    // DEBUG: Check if elements were actually added
-    const childCount = transcript?.childElementCount || 0;
-    notify(`Transcript has ${childCount} children now`);
-    
     transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'instant' });
   }
 
   function clearTranscript() {
     if (transcript) {
       transcript.innerHTML = '';
-      notify(`Cleared transcript (exists: ${!!transcript})`);
-    } else {
-      notify('ERROR: transcript is null in clearTranscript!');
     }
     currentAssistantBubble = null;
   }
