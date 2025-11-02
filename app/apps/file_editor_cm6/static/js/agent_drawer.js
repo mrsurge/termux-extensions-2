@@ -108,6 +108,34 @@ export function initAgentDrawer() {
     } catch (e) {
       console.error('[Agent Drawer] Failed to check shell status:', e);
     }
+    
+    // Try to restore last active session
+    try {
+      const prefResp = await fetch('/api/app/file_editor_cm6/preferences/get?key=last_active_session_id');
+      const prefResult = await prefResp.json();
+      
+      if (prefResult.ok && prefResult.data) {
+        const lastSessionId = prefResult.data;
+        
+        // Try to load that session
+        try {
+          await switchToSession(lastSessionId);
+        } catch (e) {
+          // Session no longer exists - clear preference
+          console.log('[Agent Drawer] Last session no longer exists, clearing preference');
+          await fetch('/api/app/file_editor_cm6/preferences/set', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              key: 'last_active_session_id',
+              value: null
+            })
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[Agent Drawer] Failed to restore last session:', e);
+    }
   }
 
   function closeDrawer() {
@@ -360,12 +388,26 @@ export function initAgentDrawer() {
       return;
     }
     
-    // If this was the active session, clear UI
+    // If this was the active session, clear UI and preference
     if (sessionId === activeSessionId) {
       activeSessionId = null;
       activeSessionName = 'No Session';
       clearTranscript();
       updateCurrentSessionCard();
+      
+      // Clear saved preference
+      try {
+        await fetch('/api/app/file_editor_cm6/preferences/set', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            key: 'last_active_session_id',
+            value: null
+          })
+        });
+      } catch (e) {
+        console.error('Failed to clear session preference:', e);
+      }
     }
     
     // Re-render modal if open
@@ -398,6 +440,20 @@ export function initAgentDrawer() {
     // Update active session
     activeSessionId = session.id;
     activeSessionName = session.name || 'Unnamed Session';
+    
+    // Save as last active session for persistence across page refreshes
+    try {
+      await fetch('/api/app/file_editor_cm6/preferences/set', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          key: 'last_active_session_id',
+          value: session.id
+        })
+      });
+    } catch (e) {
+      console.error('Failed to save active session preference:', e);
+    }
     
     // Update current session card
     updateCurrentSessionCard();
