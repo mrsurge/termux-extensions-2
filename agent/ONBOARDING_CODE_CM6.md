@@ -85,9 +85,7 @@ Consult these when working on specific features:
 
 | Document | Purpose | When to Read |
 |----------|---------|--------------|
-| `AGENT_DRAWER_ARCHITECTURE.md` | Shared shell + sessions | **Working on agent features** |
-| `agent_integration.md` | Original design docs | Historical context |
-| `agent_quick_reference.md` | API reference | Implementing agent calls |
+| `CODE_CM6_COMPLETE.md` | Complete agent architecture | **Working on agent features** |
 
 ### Specialized Topics
 
@@ -105,7 +103,7 @@ Consult these when working on specific features:
 
 1. **[GEMINI.md](/GEMINI.md)** — Understand the framework
 2. **[docs/apps/code_cm6/README.md](/docs/apps/code_cm6/README.md)** — Understand code_cm6
-3. **[docs/apps/code_cm6/AGENT_DRAWER_ARCHITECTURE.md](/docs/apps/code_cm6/AGENT_DRAWER_ARCHITECTURE.md)** — If working on agents
+3. **[docs/apps/code_cm6/CODE_CM6_COMPLETE.md](/docs/apps/code_cm6/CODE_CM6_COMPLETE.md)** — Complete technical reference
 
 **Then use the comprehensive docs as reference when implementing specific features.**
 
@@ -128,11 +126,12 @@ Consult these when working on specific features:
 - WebSocket streams `file_changed` and `diff_changed` events
 - Frontend auto-reloads or updates diffs without user action
 
-### 4. Shared Shell Architecture (Agents)
-- **ONE** framework shell per agent type (Codex, Gemini)
-- Multiple UI sessions multiplex through shared shell
-- Sessions differentiated by Codex `conversationId`
-- **No auto-spawn policy** - shells only created on explicit user action (code behavior, not agent behavior)
+### 4. Backend-Driven Agent Architecture
+- **Backend owns all state** - sessions, messages, transcripts stored on disk
+- **Frontend is display-only** - browser renders backend snapshots
+- Sessions persist in `~/.codex/agent_sessions/sessions.json`
+- Framework shell lifecycle managed automatically
+- Conversation restoration on MCP server restart
 
 ### 5. Inline Diff Pipeline
 ```
@@ -148,11 +147,12 @@ Git repository → diff_helper.py → WebSocket → diff_decorations.js → Code
 
 ## Common Gotchas
 
-1. **Understand the no auto-spawn policy** - Framework shells are only created on deterministic user actions (Send button, etc.), not on navigation/page load
+1. **Agent state lives in backend** - Frontend never mutates session data, only displays it
 2. **Use `window.teFilePicker`** - Don't create custom file pickers
 3. **Check `AGENTS.md`** - Contains user-specific conventions (like never checking off TODO items)
 4. **Framework shells are cleaned on exit** - Don't rely on persistence across framework restarts
 5. **WebSocket connections are proxied** - Don't hardcode ports, use relative URLs
+6. **Agent sessions separate from preferences** - Different files to avoid conflicts
 
 ---
 
@@ -184,6 +184,6 @@ termux-extensions-2/
 
 ---
 
-**Last Updated**: October 30, 2025
+**Last Updated**: November 2, 2025
 
 **Pro Tip**: Start with `GEMINI.md` and `docs/apps/code_cm6/README.md`, then use this guide to navigate deeper into specific areas as needed!

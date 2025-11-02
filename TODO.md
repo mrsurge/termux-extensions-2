@@ -23,12 +23,13 @@
 
 ## Code CM6 — Agent Ops / Assistant Drawer
 
-- [ ] Unified agent drawer architecture with collapse/fullscreen, persistent session restore, and a defined JSON-RPC API between UI and agents.
-- [ ] Codex CLI integration: launch in app-server mode via framework shells, bridge STDIO JSON-RPC to drawer websocket, expose controls for start/stop/reset and logging.
-- [ ] Gemini CLI integration: support streaming JSON and STDIO, share config with `termux_llm`, implement buffering/back-pressure.
-- [ ] Agent/sub-agent collaboration overlays: CM6 decorations marking agent edits, stored attribution metadata, toggleable visibility.
-- [ ] Open Interpreter / termux_llm synergy: allow multi-model orchestration, provide safety rails and cancellation paths for runaway tasks.
-- [ ] Telemetry & persistence: disk-backed transcripts/config, export/import, lightweight latency/token counters in the drawer header.
+- [x] Backend-driven agent persistence: 100% of session state lives on backend (Nov 2, 2025)
+- [x] Codex MCP integration: WebSocket bridge to framework shell, message routing, conversation restoration
+- [x] Active session restoration: Auto-restore last active session on page reload
+- [x] Session management: Create/switch/delete via REST API
+- [ ] Agent/sub-agent collaboration overlays: CM6 decorations marking agent edits, stored attribution metadata, toggleable visibility
+- [ ] Open Interpreter / termux_llm synergy: allow multi-model orchestration, provide safety rails and cancellation paths for runaway tasks
+- [ ] Telemetry & persistence: export/import transcripts, lightweight latency/token counters in drawer header
 
 ## Documentation Organization
 
