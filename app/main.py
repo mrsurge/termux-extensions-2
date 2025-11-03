@@ -518,6 +518,10 @@ def _maybe_upgrade_to_websocket(app_id: str, normalized_path: str) -> bool:
 def serve_extension_file(ext_dir, filename):
     return send_from_directory(os.path.join(app.root_path, 'extensions', ext_dir), filename)
 
+@app.route('/apps/<app_dir>/<path:filename>')
+def serve_app_file(app_dir, filename):
+    return send_from_directory(os.path.join(app.root_path, 'apps', app_dir), filename)
+
 @app.route('/api/extensions')
 def get_extensions():
     return jsonify({"ok": True, "data": current_app.config.get('LOADED_EXTENSIONS', [])})

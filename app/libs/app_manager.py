@@ -39,26 +39,46 @@ def ensure_app_running(app_id):
     if not app_manifest:
         raise ValueError(f"App '{app_id}' not found")
 
-    backend_module = app_manifest.get('entrypoints', {}).get('backend_blueprint')
-    if not backend_module:
-        # No backend, nothing to start
+    entrypoints = app_manifest.get('entrypoints', {})
+    backend_module = entrypoints.get('backend_blueprint')
+    asgi_app_target = entrypoints.get('asgi_app')
+
+    asgi_hosted = entrypoints.get('asgi_hosted', False)
+
+    if not backend_module and not asgi_app_target:
+        # No backend defined; nothing to start
         return {"message": "No backend to start"}
 
+    if asgi_hosted:
+        # App is served directly by the main ASGI host; no worker required.
+        return {"message": "ASGI hosted"}
+
     port = find_free_port()
-    backend_module_path = os.path.join(current_app.root_path, 'apps', app_manifest['_dir'], backend_module)
     project_root = os.path.join(current_app.root_path, '..')
-    
+
     env = {
         "PYTHONPATH": f"{os.environ.get('PYTHONPATH', '')}:{project_root}"
     }
-    command = [
-        "python",
-        "-m",
-        "app.libs.app_worker",
-        "--app-id", app_id,
-        "--port", str(port),
-        "--backend-module", backend_module_path
-    ]
+
+    if asgi_app_target:
+        module_spec = f"app.apps.{app_manifest['_dir']}.main:{asgi_app_target}"
+        command = [
+            "uvicorn",
+            module_spec,
+            "--host", "127.0.0.1",
+            "--port", str(port),
+            "--log-level", "warning",
+        ]
+    else:
+        backend_module_path = os.path.join(current_app.root_path, 'apps', app_manifest['_dir'], backend_module)
+        command = [
+            "python",
+            "-m",
+            "app.libs.app_worker",
+            "--app-id", app_id,
+            "--port", str(port),
+            "--backend-module", backend_module_path
+        ]
 
     manager = get_framework_shell_manager()
     shell = manager.spawn_shell(command, label=f"app-worker:{app_id}", cwd=project_root, env=env)

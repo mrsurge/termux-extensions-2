@@ -51,6 +51,14 @@ def _kill_process_group(pid: int, sig: signal.Signals) -> None:
 
 
 def run(argv: List[str]) -> int:
+    asgi_mode = False
+    host_args: List[str] = []
+    for arg in argv:
+        if arg == "--asgi":
+            asgi_mode = True
+            continue
+        host_args.append(arg)
+
     run_id = _ensure_run_id()
     os.environ.setdefault("TE_SUPERVISOR_PID", str(os.getpid()))
     print(f"[supervisor] Starting framework run {run_id}")
@@ -61,11 +69,25 @@ def run(argv: List[str]) -> int:
     except Exception as exc:  # pragma: no cover - best effort
         print(f"[supervisor] Failed to write run-id file: {exc}", file=sys.stderr)
 
-    cmd = [sys.executable, "-m", "app.main", *argv]
+    if asgi_mode:
+        print("[supervisor] Launching ASGI host (uvicorn)")
+        cmd = [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "app.asgi_main:asgi_app",
+            "--host",
+            os.environ.get("TE_ASGI_HOST", "0.0.0.0"),
+            "--port",
+            os.environ.get("TE_ASGI_PORT", "8088"),
+            *host_args,
+        ]
+    else:
+        cmd = [sys.executable, "-m", "app.main", *host_args]
     try:
         proc = subprocess.Popen(cmd, preexec_fn=os.setsid)
     except OSError as exc:
-        print(f"[supervisor] Failed to start Flask host: {exc}", file=sys.stderr)
+        print(f"[supervisor] Failed to start framework host: {exc}", file=sys.stderr)
         return 1
 
     shutting_down = False
@@ -89,7 +111,7 @@ def run(argv: List[str]) -> int:
         exit_code = proc.wait()
 
     if exit_code not in (0, None):
-        print(f"[supervisor] Flask host exited with code {exit_code}")
+        print(f"[supervisor] Framework host exited with code {exit_code}")
 
     # Give the host process group a moment to stop gracefully.
     if proc.poll() is None:

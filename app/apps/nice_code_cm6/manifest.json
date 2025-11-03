@@ -5,7 +5,9 @@
   "description": "Python-first CodeMirror editor built with NiceGUI.",
   "entrypoints": {
     "backend_blueprint": "main.py",
-    "frontend_template": "template.html"
+    "frontend_template": "template.html",
+    "asgi_app": "asgi_app",
+    "asgi_hosted": true
   },
   "icon_emoji": "🧑\u200d💻",
   "category": "editor",

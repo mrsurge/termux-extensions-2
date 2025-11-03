@@ -14,14 +14,15 @@ from nicegui import ui
 import nicegui.nicegui as nicegui_runtime
 
 APP_ID = "nice_code_cm6"
+# Public mount point for the NiceGUI app.
+UI_ROOT = "/apps/nice_code_cm6/ui"
 
 bp = Blueprint(APP_ID, __name__)
 _pages_registered = False
 
-# Ensure engine.io path matches the framework proxy configuration.
-# NiceGUI defaults to '/_nicegui_ws/socket.io', but we set it explicitly so
-# future mount point tweaks cannot break the WS upgrade.
-nicegui_runtime.sio_app.engineio_path = "/_nicegui_ws/socket.io"
+# Engine.IO path must be absolute (with leading slash) when app is mounted
+# Starlette's Mount will handle the full path: /apps/nice_code_cm6/ui/socket.io
+nicegui_runtime.sio_app.engineio_path = "/socket.io"
 
 
 def _register_pages() -> None:
@@ -31,7 +32,27 @@ def _register_pages() -> None:
         return
     _pages_registered = True
 
-    @ui.page("/ui")
+    if not nicegui_app.config.has_run_config:
+        nicegui_app.config.add_run_config(
+            reload=False,
+            title="Code CM6",
+            viewport="width=device-width, initial-scale=1",
+            favicon=None,
+            dark=False,
+            language="en-US",
+            binding_refresh_interval=0.1,
+            reconnect_timeout=3.0,
+            message_history_length=1000,
+            cache_control_directives='public, max-age=31536000, immutable, stale-while-revalidate=31536000',
+            tailwind=True,
+            prod_js=True,
+            show_welcome_message=False,
+        )
+
+    # Ensure URL generation and WebSocket routing respect the mounted root.
+    nicegui_app.router.root_path = UI_ROOT
+
+    @ui.page("/")
     def code_cm6_page() -> None:
         """Phase 1 placeholder UI rendered via NiceGUI."""
         with ui.header().classes(
@@ -60,11 +81,11 @@ def _register_pages() -> None:
                     """
                 )
 
-    @ui.page("/")
-    def root_redirect() -> None:
-        """Redirect visitors hitting the worker root."""
-        ui.run_javascript("window.location.replace('/api/app/nice_code_cm6/ui');")
-        ui.label("Loading Code CM6 …").classes("px-4 py-6 text-slate-500")
+    @ui.page("/ui")
+    def legacy_redirect() -> None:
+        """Maintain compatibility with the older '/ui' path."""
+        ui.run_javascript(f"window.location.replace('{UI_ROOT}/');")
+        ui.label("Redirecting …").classes("px-4 py-6 text-slate-500")
 
 
 @bp.get("/status")
@@ -90,3 +111,12 @@ def run_worker(*, host: str, port: int, flask_app=None, **_) -> None:
         native=False,
         title="Code CM6 (NiceGUI)",
     )
+
+
+def get_asgi_app():
+    """Expose the NiceGUI ASGI application for unified hosting."""
+    _register_pages()
+    return nicegui_app
+
+
+asgi_app = get_asgi_app()
