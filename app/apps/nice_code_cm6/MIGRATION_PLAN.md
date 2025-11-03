@@ -58,7 +58,7 @@ app/apps/nice_code_cm6/
 ├── modules/
 │   ├── native/                # Built-in modules
 │   │   ├── explorer.py        # File browser
-│   │   ├── editor.py          # CM6 wrapper
+│   │   ├── editor.py          # Editor (uses ui.codemirror)
 │   │   ├── terminal.py        # Terminal integration
 │   │   ├── agent_drawer.py    # Agent UI
 │   │   ├── file_header.py     # Path display
@@ -67,12 +67,10 @@ app/apps/nice_code_cm6/
 │       ├── git_panel.py       # Git integration
 │       ├── search_panel.py    # Find/replace
 │       └── ...                # Future plugins
-├── core/
-│   ├── layout_manager.py      # Responsive layout logic
-│   ├── state_manager.py       # App state (disk-backed)
-│   └── module_loader.py       # Dynamic module loading
-└── static/
-    └── cm6/                   # CodeMirror 6 assets
+└── core/
+    ├── layout_manager.py      # Responsive layout logic
+    ├── state_manager.py       # App state (disk-backed)
+    └── module_loader.py       # Dynamic module loading
 ```
 
 **Module Interface:**
@@ -107,11 +105,11 @@ class Module:
 
 ## Key Decisions
 
-### ✅ Decision 1: Keep CodeMirror 6
-**Rationale:** CM6 touch support is excellent, no need to reinvent  
-**Implementation:** Wrap CM6 in minimal NiceGUI custom component  
+### ✅ Decision 1: Use NiceGUI's Built-in CodeMirror
+**Rationale:** NiceGUI provides `ui.codemirror` out of the box - no manual asset management!  
+**Implementation:** Use `ui.codemirror(value=file_text, language='python')`  
 **Logic:** All file operations, state management in Python  
-**CM6 Role:** Display server only (text in, edits out)
+**CodeMirror Role:** Display/edit widget only (Python owns state)
 
 ### ✅ Decision 2: Feature Parity + Modularity
 **Rationale:** Proven UX, but engineered for extensibility  
@@ -181,35 +179,34 @@ class Module:
 
 ### Phase 3: Editor Integration
 
-**Goal:** Embed CM6 into NiceGUI
+**Goal:** Implement editor using NiceGUI's built-in CodeMirror
 
-**Keep:**
-- CodeMirror 6 viewport (HTML/JS widget)
-- Touch selection (already works!)
-- Syntax highlighting
-- Mobile keyboard handling
+**Use:**
+- `ui.codemirror()` - Built-in NiceGUI component (no manual assets!)
+- Syntax highlighting (100+ languages supported)
+- Themes (50+ themes available)
+- Line wrapping, whitespace highlighting
 
 **Create:**
-- `modules/native/editor.py` - NiceGUI wrapper
-- `static/cm6/` - CM6 assets (HTML template)
+- `modules/native/editor.py` - Editor module
 - Python API: `editor.open(file)`, `editor.save()`, `editor.get_text()`
 
 **Tasks:**
 - [ ] Create `modules/native/editor.py`
-- [ ] Create CM6 HTML template (minimal JS)
-- [ ] Implement `ui.html()` embedding
-- [ ] REST API: Read file → load into CM6
-- [ ] REST API: Save CM6 text → write file
+- [ ] Use `ui.codemirror(value=text, language=lang)` 
+- [ ] Detect language from file extension
+- [ ] Read file → load into codemirror
+- [ ] Save button → write codemirror.value to disk
 - [ ] Event: File opened (notify other modules)
 - [ ] Event: File saved (notify other modules)
 
 **Deliverable:** Working editor with Python state control
 
 **Success Criteria:**
-- Open file from explorer → loads in CM6
-- Edit text
-- Save (Ctrl+S or button) → persists to disk
-- CM6 just displays, Python owns state
+- Open file from explorer → loads in editor
+- Edit text with syntax highlighting
+- Save (button/shortcut) → persists to disk
+- Python owns all state (no client-side storage)
 
 ---
 
