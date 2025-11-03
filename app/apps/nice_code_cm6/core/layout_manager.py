@@ -25,19 +25,19 @@ class LayoutManager:
 
         with header_secondary:
             ui.element().classes(
-                "w-full bg-slate-900/80 px-4 py-2 border-b border-slate-800 flex items-center justify-between"
+                "w-full bg-slate-900/80 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between"
             )
             file_header_zone = header_secondary
 
         with header_tertiary:
             container = ui.row().classes(
-                "w-full items-center justify-between bg-slate-900/80 px-4 py-2 border-b border-slate-800"
+                "w-full items-center justify-between bg-slate-900/80 px-3 py-1.5 border-b border-slate-800 gap-2 text-xs"
             )
             with container:
-                explorer_btn = ui.button(icon="folder_open", on_click=lambda: self.toggle_explorer()).classes("md:hidden")
+                explorer_btn = ui.button(icon="folder_open", on_click=lambda: self.toggle_explorer()).props("flat dense size=sm").classes("md:hidden")
                 explorer_btn.tooltip("Toggle Explorer")
-                menu_header_zone = ui.element().classes("flex-1")
-                agent_btn = ui.button(icon="smart_toy", on_click=lambda: self.toggle_agent()).classes("md:hidden")
+                menu_header_zone = ui.element().classes("flex-1 text-xs")
+                agent_btn = ui.button(icon="smart_toy", on_click=lambda: self.toggle_agent()).props("flat dense size=sm").classes("md:hidden")
                 agent_btn.tooltip("Toggle Agent")
 
         body_container.classes("relative flex-1 flex overflow-hidden")

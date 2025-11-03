@@ -15,19 +15,19 @@ class MenuHeaderModule(Module):
 
     def render(self, container: ui.element) -> None:
         with container:
-            with ui.row().classes("gap-2"):
-                ui.button("File").props("flat")
-                ui.button("Edit").props("flat")
+            with ui.row().classes("gap-1 items-center text-xs"):
+                ui.button("File").props("flat dense size=sm")
+                ui.button("Edit").props("flat dense size=sm")
                 
                 # View menu with dropdown
-                with ui.button("View").props("flat"):
+                with ui.button("View").props("flat dense size=sm"):
                     with ui.menu() as view_menu:
                         ui.menu_item(
                             "Toggle Terminal",
                             on_click=lambda: self._toggle_terminal()
-                        )
+                        ).classes("text-xs")
                 
-                ui.button("Theme").props("flat")
+                ui.button("Theme").props("flat dense size=sm")
     
     def _toggle_terminal(self) -> None:
         """Toggle terminal visibility via layout manager."""

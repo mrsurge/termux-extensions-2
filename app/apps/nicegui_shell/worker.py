@@ -35,19 +35,19 @@ def build_shell(load_fn: Callable[[ShellContext], None], app_id: str) -> None:
 
     with root:
         header_primary = ui.row().classes(
-            "w-full items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900"
+            "w-full items-center gap-2 px-3 py-2 border-b border-slate-800 bg-slate-900"
         )
         with header_primary:
-            ui.button("Home", on_click=handle_home).props("flat")
-            ui.button("Reload", on_click=handle_reload).props("flat")
-            ui.button("Toast", on_click=lambda: ui.notify("Shell toast"))
-            ui.label(f"NiceGUI Shell · {app_id}").classes("text-sm text-slate-300")
+            ui.button("Home", on_click=handle_home).props("flat dense")
+            ui.button("Reload", on_click=handle_reload).props("flat dense")
+            ui.button("Toast", on_click=lambda: ui.notify("Shell toast")).props("flat dense")
+            ui.label(f"NiceGUI Shell · {app_id}").classes("text-xs text-slate-300")
 
         header_secondary = ui.element().classes(
-            "w-full border-b border-slate-800 bg-slate-900/70 px-4 py-2"
+            "w-full border-b border-slate-800 bg-slate-900/70 px-3 py-1.5"
         )
         header_tertiary = ui.element().classes(
-            "w-full border-b border-slate-800 bg-slate-900/60 px-4 py-2"
+            "w-full border-b border-slate-800 bg-slate-900/60 px-3 py-1.5"
         )
 
         body_container = ui.element().classes("flex-1 w-full overflow-hidden").style("max-width: 100vw;")
