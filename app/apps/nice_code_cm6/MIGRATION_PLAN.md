@@ -34,7 +34,7 @@ Build a **modular, Python-first** code editor with:
 │          │                          │               │
 |          ├──────────────────────────┤               | 
 │          |   5. TERMINAL            |               |
-|              (Dynamic Tiling)      |               │
+|          |    (Dynamic Tiling)      |               │
 └─────────────────────────────────────────────────────┘
 ```
 
