@@ -1,6 +1,15 @@
 import os
 import json
-from flask import Blueprint, jsonify, render_template, send_from_directory, current_app
+from flask import (
+    Blueprint,
+    jsonify,
+    render_template,
+    send_from_directory,
+    current_app,
+    redirect,
+    request,
+    abort,
+)
 from app.libs.app_manager import ensure_app_running
 from app.libs import app_lifecycle
 from app.libs.framework_shells import _manager as get_framework_shell_manager
@@ -93,7 +102,24 @@ def get_apps():
 
 @apps_bp.route('/app/<app_id>')
 def app_shell(app_id):
-    """Renders a generic shell for a single-page app."""
+    """Renders the appropriate shell for an app."""
+    loaded_apps = current_app.config.get('LOADED_APPS', [])
+    manifest = next((app for app in loaded_apps if app.get('id') == app_id), None)
+    if not manifest:
+        return abort(404)
+
+    entrypoints = manifest.get('entrypoints', {})
+    if entrypoints.get('nicegui_shell'):
+        app_info = ensure_app_running(app_id)
+        port = app_info.get('port') if isinstance(app_info, dict) else None
+        if not port:
+            return abort(502)
+
+        host_only = request.host.split(':')[0]
+        scheme = request.scheme
+        redirect_url = f"{scheme}://{host_only}:{port}/"
+        return redirect(redirect_url)
+
     return render_template('app_shell.html', app_id=app_id)
 
 @apps_bp.route('/apps/<path:app_dir>/<path:filename>')

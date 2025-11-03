@@ -1,0 +1,12 @@
+{
+  "name": "Code CM6 (NiceGUI)",
+  "id": "nice_code_cm6",
+  "icon_emoji": "\ud83d\udcac",
+  "version": "0.1.0",
+  "description": "Standalone NiceGUI scaffold for the Code CM6 experience.",
+  "author": "mrSurge",
+  "entrypoints": {
+    "nicegui_module": "ui.py",
+    "nicegui_shell": true
+  }
+}
