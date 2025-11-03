@@ -12,7 +12,7 @@ class ExplorerModule(Module):
 
     def render(self, container: ui.element) -> None:
         with container:
-            with ui.card().classes("flex h-full flex-col bg-slate-900/60"):
-                ui.label("Explorer").classes("text-sm text-slate-200")
+            with ui.card().classes("h-full w-full flex flex-col bg-slate-900/60 p-0 m-0"):
+                ui.label("Explorer").classes("text-sm text-slate-200 p-4")
                 ui.separator()
-                ui.label("(File tree coming soon)").classes("text-xs text-slate-400")
+                ui.label("(File tree coming soon)").classes("text-xs text-slate-400 p-4")

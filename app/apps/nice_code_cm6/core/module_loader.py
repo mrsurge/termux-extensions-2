@@ -21,14 +21,18 @@ def _iter_module_classes(package_path: str, package_name: str) -> Sequence[Type[
     return classes
 
 
-def load_native_modules() -> List[Module]:
+def load_native_modules(layout_manager=None) -> List[Module]:
     """Instantiate all native modules shipped with the app."""
     modules: List[Module] = []
     for cls in _iter_module_classes(
         package_path="app.apps.nice_code_cm6.modules.native",
         package_name="app.apps.nice_code_cm6.modules.native",
     ):
-        instance = cls()
+        # Pass layout_manager to MenuHeaderModule
+        if cls.__name__ == "MenuHeaderModule" and layout_manager:
+            instance = cls(layout_manager=layout_manager)
+        else:
+            instance = cls()
         instance.on_mount()
         modules.append(instance)
     return modules

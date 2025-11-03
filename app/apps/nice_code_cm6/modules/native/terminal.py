@@ -12,7 +12,8 @@ class TerminalModule(Module):
 
     def render(self, container: ui.element) -> None:
         with container:
-            with ui.card().classes("flex h-full flex-col bg-slate-900/70"):
-                ui.label("Terminal").classes("text-sm text-slate-200")
+            # Full width terminal with no padding
+            with ui.card().classes("h-full w-full bg-slate-900/70 p-0 m-0"):
+                ui.label("Terminal").classes("text-sm text-slate-200 p-4")
                 ui.separator()
-                ui.label("(Terminal streaming coming soon)").classes("text-xs text-slate-400")
+                ui.label("(Terminal streaming coming soon)").classes("text-xs text-slate-400 p-4")
