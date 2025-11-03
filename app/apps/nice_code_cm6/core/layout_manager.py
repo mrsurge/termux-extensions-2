@@ -24,15 +24,15 @@ class LayoutManager:
         
         with container:
             # Header section
-            headers = ui.column().classes("w-full gap-2 flex-shrink-0 p-2")
+            headers = ui.column().classes("w-full gap-1 flex-shrink-0")
             with headers:
                 file_header_zone = ui.element().classes(
-                    "w-full rounded-lg bg-slate-900/80 px-4 py-2"
+                    "w-full bg-slate-900/80 px-4 py-2 border-b border-slate-800"
                 )
                 
                 # Menu header with drawer controls
                 menu_header_container = ui.row().classes(
-                    "w-full items-center justify-between rounded-lg bg-slate-900/80 px-4 py-2"
+                    "w-full items-center justify-between bg-slate-900/80 px-4 py-2 border-b border-slate-800"
                 )
                 with menu_header_container:
                     # Left: Explorer toggle button (mobile only)

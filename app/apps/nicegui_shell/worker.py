@@ -22,7 +22,7 @@ def build_shell(load_fn: Callable[[ui.element], None], app_id: str) -> None:
 
     root = ui.element().classes(
         "flex flex-col w-full h-screen bg-slate-950 text-slate-100 overflow-hidden"
-    )
+    ).style("max-width: 100vw; width: 100vw;")
 
     with root:
         with ui.row().classes(
@@ -33,11 +33,11 @@ def build_shell(load_fn: Callable[[ui.element], None], app_id: str) -> None:
             ui.button("Toast", on_click=lambda: ui.notify("Shell toast"))
             ui.label(f"NiceGUI Shell · {app_id}").classes("text-sm text-slate-300")
 
-        body = ui.element().classes("flex-1 w-full overflow-hidden")
+        body = ui.element().classes("flex-1 w-full overflow-hidden").style("max-width: 100vw;")
         with body:
-            inner = ui.element().classes("w-full h-full overflow-auto")
+            inner = ui.element().classes("w-full h-full overflow-hidden").style("max-width: 100vw;")
             with inner:
-                canvas = ui.element().classes("h-full w-full p-4")
+                canvas = ui.element().classes("h-full w-full p-0 m-0").style("max-width: 100vw;")
                 try:
                     load_fn(canvas)
                 except Exception as exc:  # pragma: no cover - surface to UI
@@ -65,9 +65,10 @@ def main(argv: list[str] | None = None) -> None:
     builder = import_builder(args.module)
     ui.add_head_html(
         """<style>
-html, body {margin: 0; height: 100%; overflow: hidden; background: #020617;}
+html, body {margin: 0; padding: 0; height: 100%; overflow: hidden; background: #020617;}
 body {color: #e2e8f0; font-family: 'Inter', sans-serif;}
-#app {height: 100%;}
+#app {height: 100%; width: 100%; max-width: 100vw;}
+.nicegui-content {width: 100% !important; max-width: 100% !important; padding: 0 !important; margin: 0 !important;}
 </style>"""
     )
     build_shell(builder, args.app_id)
