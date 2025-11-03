@@ -79,7 +79,7 @@ I will follow a structured, multi-step, approval-based workflow for every new ta
 *   **Step 4: Subsequent Interactions**
     *   After the initial three-step workflow for a task is complete, our interaction for that same task can become more fluid and relaxed.
     *   However, the core principle of **Express Consent** always applies. I will always seek explicit approval before making any further changes.
-- **Agent Workflow Summary**
+* **Agent Workflow Summary**
   1. **Restate & Confirm Understanding**
   2. **Investigate & Propose Plan**
   3. **Execute Approved Plan**
