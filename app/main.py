@@ -27,7 +27,7 @@ from app.libs.bookmarks import bookmarks_bp
 from app.libs.app_manager import ensure_app_running
 from app.libs.app_lifecycle import start_background_tasks
 from flask_sock import Sock
-from simple_websocket import Client as WSClient, ConnectionClosed
+from simple_websocket import Client as WSClient, ConnectionClosed, Server
 
 app = Flask(__name__)
 app.register_blueprint(framework_shells_bp)
@@ -55,6 +55,9 @@ except Exception:  # pragma: no cover - psutil may be unavailable.
 # Pre-initialize to avoid NameError if imported differently
 loaded_extensions = []
 loaded_apps = []
+_SPECIAL_WORKER_HTTP_ROUTES: set[str] = set()
+_SPECIAL_WORKER_WS_ROUTES: set[tuple[str, bool]] = set()
+_SPECIAL_WORKER_WS_RAW: dict[str, bool] = {}
 
 SETTINGS_FILE = Path(os.path.expanduser('~/.cache/termux_extensions/settings.json'))
 STATE_STORE_FILE = Path(os.path.expanduser('~/.cache/termux_extensions/state_store.json'))
@@ -402,6 +405,115 @@ def load_apps():
     return apps
 
 
+def _register_worker_http_route(app_id: str, path: str):
+    """Register an HTTP proxy route for a worker-specific prefix."""
+    normalized = path.lstrip('/')
+    route = f"/{normalized}"
+    endpoint_base = f"proxy_app_http_{app_id}_{normalized.replace('/', '_')}"
+
+    def handle_root(app_id=app_id, normalized=normalized):
+        target = normalized
+        if _maybe_upgrade_to_websocket(app_id, target):
+            return ''
+        return proxy_app_request(app_id, normalized)
+
+    def handle_subpath(subpath, app_id=app_id, normalized=normalized):
+        target = f"{normalized}/{subpath}" if subpath else normalized
+        if _maybe_upgrade_to_websocket(app_id, target):
+            return ''
+        return proxy_app_request(app_id, target)
+
+    app.add_url_rule(
+        route,
+        endpoint=endpoint_base,
+        view_func=handle_root,
+        methods=['GET', 'POST', 'OPTIONS'],
+    )
+    app.add_url_rule(
+        f"{route}/<path:subpath>",
+        endpoint=f"{endpoint_base}_sub",
+        view_func=handle_subpath,
+        methods=['GET', 'POST', 'OPTIONS'],
+    )
+
+
+def _register_worker_ws_route(app_id: str, path: str, raw: bool):
+    """Register a WebSocket proxy route for a worker path."""
+    normalized = path.lstrip('/')
+    route = f"/{normalized}"
+    _SPECIAL_WORKER_WS_RAW.setdefault(normalized, raw)
+
+    def handler(client_ws, app_id=app_id, normalized=normalized, raw=raw):
+        try:
+            with open("/tmp/nice_code_cm6_ws_proxy.log", "a", encoding="utf-8") as fh:
+                fh.write(f"handler invoked for app={app_id} path={normalized} raw={raw} qs={request.query_string.decode('utf-8')}\\n")
+        except Exception:
+            pass
+        return _proxy_app_websocket(client_ws, app_id, normalized, raw=raw)
+
+    endpoint_name = f"ws_proxy_{app_id}_{normalized.replace('/', '_')}_{'raw' if raw else 'norm'}"
+    sock.route(route, endpoint=endpoint_name)(handler)
+
+
+def _register_worker_proxy_routes(manifest: dict):
+    """Install HTTP/WS proxy routes declared in an app manifest."""
+    proxy_cfg = manifest.get('worker_proxy') or {}
+    app_id = manifest.get('id')
+    if not app_id:
+        return
+
+    ws_entries = proxy_cfg.get('websocket') or []
+    for entry in ws_entries:
+        if isinstance(entry, str):
+            path = entry
+            raw = False
+        elif isinstance(entry, dict):
+            path = entry.get('path')
+            raw = bool(entry.get('raw'))
+        else:
+            continue
+        if not path:
+            continue
+        normalized = path.lstrip('/')
+        key = (normalized, raw)
+        if key in _SPECIAL_WORKER_WS_ROUTES:
+            continue
+        _SPECIAL_WORKER_WS_ROUTES.add(key)
+        _register_worker_ws_route(app_id, normalized, raw=raw)
+
+    http_paths = proxy_cfg.get('http') or []
+    for path in http_paths:
+        if not isinstance(path, str):
+            continue
+        normalized = path.lstrip('/')
+        if normalized in _SPECIAL_WORKER_HTTP_ROUTES:
+            continue
+        _SPECIAL_WORKER_HTTP_ROUTES.add(normalized)
+        _register_worker_http_route(app_id, normalized)
+
+
+def _maybe_upgrade_to_websocket(app_id: str, normalized_path: str) -> bool:
+    """Detect WS upgrade attempts hitting HTTP routes and hand them to the WS proxy."""
+    if normalized_path not in _SPECIAL_WORKER_WS_RAW:
+        return False
+    upgrade = request.headers.get('Upgrade', '')
+    connection = request.headers.get('Connection', '')
+    if 'websocket' not in upgrade.lower() or 'upgrade' not in connection.lower():
+        return False
+    raw_flag = _SPECIAL_WORKER_WS_RAW.get(normalized_path, False)
+    try:
+        with open('/tmp/nice_code_cm6_ws_proxy.log', 'a', encoding='utf-8') as fh:
+            fh.write(
+                f"upgrade reroute app={app_id} path={normalized_path} raw={raw_flag} "
+                f"headers={{'Upgrade': '{upgrade}', 'Connection': '{connection}'}}\\n"
+            )
+    except Exception:
+        pass
+    server_ws = Server.accept(request.environ)
+    _proxy_app_websocket(server_ws, app_id, normalized_path, raw=raw_flag)
+    return True
+
+
 @app.route('/extensions/<path:ext_dir>/<path:filename>')
 def serve_extension_file(ext_dir, filename):
     return send_from_directory(os.path.join(app.root_path, 'extensions', ext_dir), filename)
@@ -662,6 +774,11 @@ def _ensure_initialized():
                 app.config['LOADED_APPS'] = loaded_apps
         except Exception as e:
             print(f"Error loading apps: {e}")
+        try:
+            for manifest in app.config.get('LOADED_APPS', []):
+                _register_worker_proxy_routes(manifest)
+        except Exception as e:
+            print(f"Error registering worker proxy routes: {e}")
         _initialized = True
 
 @app.before_request
@@ -739,6 +856,7 @@ def proxy_app_request(app_id, subpath):
     except requests.exceptions.RequestException as e:
         return jsonify({"ok": False, "error": f"Failed to connect to app worker: {e}"}), 502
 
+
 @sock.route('/ws/app/<app_id>/<path:subpath>')
 def proxy_app_websocket(client_ws, app_id, subpath):
     """
@@ -748,6 +866,17 @@ def proxy_app_websocket(client_ws, app_id, subpath):
     Convention: All worker WebSockets must use /ws/<route> pattern.
     Client connects to: /ws/app/<app_id>/<route>
     Proxied to worker: /ws/<route>
+    """
+    return _proxy_app_websocket(client_ws, app_id, subpath, raw=False)
+
+
+def _proxy_app_websocket(client_ws, app_id, subpath, *, raw: bool):
+    """
+    Lower-level WebSocket proxy helper with optional raw path support.
+    
+    When raw=True the worker path is used as-is (no /ws/ prefix). This is needed
+    for servers like NiceGUI that mount websocket handlers outside the /ws/*
+    namespace.
     """
     try:
         app_info = ensure_app_running(app_id)
@@ -769,15 +898,31 @@ def proxy_app_websocket(client_ws, app_id, subpath):
     
     # Build worker WebSocket URL following /ws/<route> convention
     query_string = request.query_string.decode('utf-8')
-    worker_url = f"ws://127.0.0.1:{port}/ws/{subpath}"
+    worker_path = subpath if raw else f"ws/{subpath}"
+    worker_url = f"ws://127.0.0.1:{port}/{worker_path}"
     if query_string:
         worker_url += f"?{query_string}"
+
+    # Pass along critical headers (cookies, auth) so the worker can resume sessions
+    connect_headers = {}
+    cookie_header = request.headers.get('Cookie')
+    if cookie_header:
+        connect_headers['Cookie'] = cookie_header
+    origin_header = request.headers.get('Origin')
+    if origin_header:
+        connect_headers['Origin'] = origin_header
 
     # Connect to worker WebSocket
     worker_ws = None
     try:
-        worker_ws = WSClient.connect(worker_url)
+        headers_arg = connect_headers or None
+        worker_ws = WSClient.connect(worker_url, headers=headers_arg)
     except Exception as e:
+        try:
+            with open("/tmp/nice_code_cm6_ws_proxy.log", "a", encoding="utf-8") as fh:
+                fh.write(f"connect failed app={app_id} url={worker_url} error={e}\\n")
+        except Exception:
+            pass
         try:
             client_ws.close()
         except:
@@ -829,6 +974,7 @@ def proxy_app_websocket(client_ws, app_id, subpath):
     client_thread.join()
     worker_thread.join()
 
+
 if __name__ == '__main__':
     print("--- Loading Settings ---")
     _apply_settings_to_config()
@@ -841,6 +987,9 @@ if __name__ == '__main__':
     print("--- Loading Apps ---")
     loaded_apps = load_apps()
     app.config['LOADED_APPS'] = loaded_apps
+    print("--- Registering worker proxy routes ---")
+    for manifest in loaded_apps:
+        _register_worker_proxy_routes(manifest)
     print(f"Loaded {len(loaded_apps)} apps.")
     print("--- Starting Server ---")
     # Production-like settings for the built-in server (still not recommended for production)

@@ -1,0 +1,28 @@
+{
+  "id": "nice_code_cm6",
+  "name": "Code CM6 (NiceGUI)",
+  "version": "0.1.0",
+  "description": "Python-first CodeMirror editor built with NiceGUI.",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html"
+  },
+  "icon_emoji": "🧑\u200d💻",
+  "category": "editor",
+  "worker_proxy": {
+    "http": [
+      "_nicegui",
+      "_nicegui_ws"
+    ],
+    "websocket": [
+      {
+        "path": "_nicegui/ws",
+        "raw": true
+      },
+      {
+        "path": "_nicegui_ws/socket.io",
+        "raw": true
+      }
+    ]
+  }
+}

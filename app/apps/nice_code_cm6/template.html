@@ -1,0 +1,38 @@
+<style>
+  .nice-code-wrapper {
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 56px);
+    background: #0f172a;
+    display: flex;
+  }
+  .nice-code-frame {
+    flex: 1;
+    border: none;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+  }
+  @media (max-width: 720px) {
+    .nice-code-wrapper {
+      height: calc(100vh - 48px);
+    }
+  }
+</style>
+
+<div class="nice-code-wrapper">
+  <iframe
+    class="nice-code-frame"
+    src="/api/app/nice_code_cm6/ui"
+    title="Code CM6 (NiceGUI)"
+    allow="clipboard-write; clipboard-read"
+  ></iframe>
+</div>
+
+<noscript>
+  <p style="padding: 1rem; color: #e2e8f0;">
+    JavaScript is required to load the NiceGUI interface.
+    <a href="/api/app/nice_code_cm6/ui" style="color: #38bdf8;">Open directly</a>
+  </p>
+</noscript>
+
