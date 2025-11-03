@@ -17,6 +17,7 @@ class LayoutManager:
         self.explorer_visible = False
         self.agent_visible = False
         self.terminal_visible = False  # Default to closed
+        self._agent_drawer = None
 
     def render(self, *, header_container: ui.element, body_container: ui.element) -> None:
         """Render responsive layout with a unified header and scrollable body."""
@@ -96,11 +97,11 @@ class LayoutManager:
                         "fixed md:relative inset-y-0 right-0 z-50"
                         " w-80"
                         " transform transition-transform duration-300"
-                        " translate-x-full"
                         # Desktop: static right tile (+35% width: 346px)
                         " md:flex md:flex-shrink-0"
                         " bg-slate-950/95 md:bg-transparent"
                         " shadow-2xl md:shadow-none"
+                        " translate-x-full md:hidden md:opacity-0 md:pointer-events-none"
                     )
                     # Custom width for desktop (346px = 256px * 1.35)
                     ui.add_head_html("""
@@ -111,11 +112,7 @@ class LayoutManager:
                         </style>
                     """)
                     agent_drawer.classes("agent-drawer-width")
-                    agent_drawer.bind_visibility_from(
-                        self,
-                        "agent_visible",
-                        backward=lambda v: "translate-x-0 md:flex" if v else "translate-x-full md:hidden",
-                    )
+                    self._agent_drawer = agent_drawer
 
                 # Mobile drawer backdrop (only visible when drawers open)
                 backdrop = ui.element()
@@ -145,6 +142,8 @@ class LayoutManager:
                 if zone is not None:
                     module.render(zone)
 
+        self._apply_agent_state()
+
     def toggle_explorer(self) -> None:
         """Toggle explorer drawer visibility."""
         self.explorer_visible = not self.explorer_visible
@@ -156,6 +155,7 @@ class LayoutManager:
         self.agent_visible = not self.agent_visible
         if self.agent_visible:
             self.explorer_visible = False  # Close other drawer
+        self._apply_agent_state()
 
     def toggle_terminal(self) -> None:
         """Toggle terminal visibility."""
@@ -165,3 +165,18 @@ class LayoutManager:
         """Close all mobile drawers."""
         self.explorer_visible = False
         self.agent_visible = False
+        self._apply_agent_state()
+
+    def _apply_agent_state(self) -> None:
+        if not self._agent_drawer:
+            return
+        if self.agent_visible:
+            self._agent_drawer.classes(
+                add="translate-x-0 md:flex md:flex-shrink-0 md:opacity-100 md:pointer-events-auto",
+                remove="translate-x-full md:hidden md:opacity-0 md:pointer-events-none",
+            )
+        else:
+            self._agent_drawer.classes(
+                add="translate-x-full md:hidden md:opacity-0 md:pointer-events-none",
+                remove="translate-x-0 md:flex md:flex-shrink-0 md:opacity-100 md:pointer-events-auto",
+            )
