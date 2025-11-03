@@ -113,7 +113,7 @@ request_mode_switch() {
     if curl -fsS -m 5 -o "$tmp" -X POST \
       -H 'Content-Type: application/json' \
       -d "{\"host\": \"$target\"}" \
-      "http://127.0.0.1:8080/api/framework/runtime/bind"; then
+      "http://127.0.0.1:8088/api/framework/runtime/bind"; then
       echo "[run_framework] Requested host switch to $target"
       rm -f "$tmp"
       return 0

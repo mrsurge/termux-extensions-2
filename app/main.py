@@ -844,4 +844,4 @@ if __name__ == '__main__':
     print(f"Loaded {len(loaded_apps)} apps.")
     print("--- Starting Server ---")
     # Production-like settings for the built-in server (still not recommended for production)
-    app.run(host='0.0.0.0', port=8080, debug=False)
+    app.run(host='0.0.0.0', port=8088, debug=False)
