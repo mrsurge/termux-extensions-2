@@ -32,8 +32,9 @@ Build a **modular, Python-first** code editor with:
 │ EXPLORER │      (CM6 Viewport)      │    DRAWER     │
 │          │                          │    (overlay)  │
 │          │                          │               │
-├──────────┴──────────────────────────┴───────────────┤
-│ 5. TERMINAL (Dynamic Tiling)                        │
+|          ├──────────────────────────┤               | 
+│          |   5. TERMINAL            |               |
+|              (Dynamic Tiling)      |               │
 └─────────────────────────────────────────────────────┘
 ```
 
