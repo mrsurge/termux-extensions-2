@@ -40,82 +40,94 @@ class LayoutManager:
                     agent_btn = ui.button(
                         icon="smart_toy",
                         on_click=lambda: self.toggle_agent(),
-                    ).props("flat dense size=sm").classes("md:hidden")
+                    ).props("flat dense size=sm")
                     agent_btn.tooltip("Toggle Agent")
 
         with body_container:
+            body_container.classes("relative flex-1 flex flex-col overflow-hidden")
             main_container = ui.element().classes("relative flex flex-1 w-full min-h-0")
             with main_container:
-                # Explorer drawer (mobile: overlay, desktop: static tile)
-                explorer_drawer = ui.element()
-                explorer_drawer.classes(
-                    # Mobile: fixed overlay drawer
-                    "fixed md:relative inset-y-0 left-0 z-50"
-                    " w-80"
-                    " transform transition-transform duration-300"
-                    " -translate-x-full md:translate-x-0"
-                    # Desktop: static left tile (doubled width: 512px)
-                    " md:flex md:flex-shrink-0"
-                    " bg-slate-950/95 md:bg-transparent"
-                    " shadow-2xl md:shadow-none"
-                )
-                # Custom width for desktop (384px = 512px * 0.75, or 256px * 1.5)
-                ui.add_head_html("""
-                    <style>
-                    @media (min-width: 768px) {
-                        .explorer-drawer-width { width: 384px !important; }
-                    }
-                    </style>
-                """)
-                explorer_drawer.classes("explorer-drawer-width")
-                explorer_drawer.bind_visibility_from(self, "explorer_visible", 
-                                                      backward=lambda v: "translate-x-0" if v else "-translate-x-full")
-                
-                # Main editor area with terminal
-                editor_container = ui.column().classes("flex-1 flex flex-col overflow-hidden gap-0 min-h-0")
-                with editor_container:
-                    # Editor zone (takes remaining space, must have min-h-0 for flex)
-                    editor_zone = ui.element().classes("flex-1 w-full overflow-hidden min-h-0")
+                content_row = ui.element().classes("flex-1 flex flex-row min-h-0")
+                with content_row:
+                    # Explorer drawer (mobile: overlay, desktop: static tile)
+                    explorer_drawer = ui.element()
+                    explorer_drawer.classes(
+                        # Mobile: fixed overlay drawer
+                        "fixed md:relative inset-y-0 left-0 z-50"
+                        " w-80"
+                        " transform transition-transform duration-300"
+                        " -translate-x-full md:translate-x-0"
+                        # Desktop: static left tile (doubled width: 512px)
+                        " md:flex md:flex-shrink-0"
+                        " bg-slate-950/95 md:bg-transparent"
+                        " shadow-2xl md:shadow-none"
+                    )
+                    # Custom width for desktop (384px = 512px * 0.75, or 256px * 1.5)
+                    ui.add_head_html("""
+                        <style>
+                        @media (min-width: 768px) {
+                            .explorer-drawer-width { width: 384px !important; }
+                        }
+                        </style>
+                    """)
+                    explorer_drawer.classes("explorer-drawer-width")
+                    explorer_drawer.bind_visibility_from(
+                        self,
+                        "explorer_visible",
+                        backward=lambda v: "translate-x-0" if v else "-translate-x-full",
+                    )
                     
-                    # Terminal zone (collapsible, normally closed)
-                    terminal_zone = ui.element().classes("flex-shrink-0 overflow-auto w-full")
-                    terminal_zone.bind_visibility_from(self, "terminal_visible")
-                    # Set height when visible
-                    terminal_zone.style("height: 240px")
+                    # Main editor area with terminal
+                    editor_container = ui.column().classes("flex-1 flex flex-col overflow-hidden gap-0 min-h-0 min-w-0")
+                    with editor_container:
+                        # Editor zone (takes remaining space, must have min-h-0 for flex)
+                        editor_zone = ui.element().classes("flex-1 w-full overflow-hidden min-h-0")
+                        
+                        # Terminal zone (collapsible, normally closed)
+                        terminal_zone = ui.element().classes("flex-shrink-0 overflow-auto w-full")
+                        terminal_zone.bind_visibility_from(self, "terminal_visible")
+                        # Set height when visible
+                        terminal_zone.style("height: 240px")
 
-                # Agent drawer (mobile: overlay, desktop: static tile)
-                agent_drawer = ui.element()
-                agent_drawer.classes(
-                    # Mobile: fixed overlay drawer
-                    "fixed md:relative inset-y-0 right-0 z-50"
-                    " w-80"
-                    " transform transition-transform duration-300"
-                    " translate-x-full md:translate-x-0"
-                    # Desktop: static right tile (+35% width: 346px)
-                    " md:flex md:flex-shrink-0"
-                    " bg-slate-950/95 md:bg-transparent"
-                    " shadow-2xl md:shadow-none"
+                    # Agent drawer (mobile: overlay, desktop: static tile)
+                    agent_drawer = ui.element()
+                    agent_drawer.classes(
+                        # Mobile: fixed overlay drawer
+                        "fixed md:relative inset-y-0 right-0 z-50"
+                        " w-80"
+                        " transform transition-transform duration-300"
+                        " translate-x-full"
+                        # Desktop: static right tile (+35% width: 346px)
+                        " md:flex md:flex-shrink-0"
+                        " bg-slate-950/95 md:bg-transparent"
+                        " shadow-2xl md:shadow-none"
+                    )
+                    # Custom width for desktop (346px = 256px * 1.35)
+                    ui.add_head_html("""
+                        <style>
+                        @media (min-width: 768px) {
+                            .agent-drawer-width { width: 346px !important; }
+                        }
+                        </style>
+                    """)
+                    agent_drawer.classes("agent-drawer-width")
+                    agent_drawer.bind_visibility_from(
+                        self,
+                        "agent_visible",
+                        backward=lambda v: "translate-x-0 md:flex" if v else "translate-x-full md:hidden",
+                    )
+
+                # Mobile drawer backdrop (only visible when drawers open)
+                backdrop = ui.element()
+                backdrop.classes(
+                    "md:hidden fixed inset-0 bg-black/50 z-40"
                 )
-                # Custom width for desktop (346px = 256px * 1.35)
-                ui.add_head_html("""
-                    <style>
-                    @media (min-width: 768px) {
-                        .agent-drawer-width { width: 346px !important; }
-                    }
-                    </style>
-                """)
-                agent_drawer.classes("agent-drawer-width")
-                agent_drawer.bind_visibility_from(self, "agent_visible",
-                                                   backward=lambda v: "translate-x-0" if v else "translate-x-full")
-
-            # Mobile drawer backdrop (only visible when drawers open)
-            backdrop = ui.element()
-            backdrop.classes(
-                "md:hidden fixed inset-0 bg-black/50 z-40"
-            )
-            backdrop.bind_visibility_from(self, "explorer_visible", 
-                                          backward=lambda v: v or self.agent_visible)
-            backdrop.on("click", lambda: self.close_all_drawers())
+                backdrop.bind_visibility_from(
+                    self,
+                    "explorer_visible",
+                    backward=lambda v: v or self.agent_visible,
+                )
+                backdrop.on("click", lambda: self.close_all_drawers())
 
             # Zone mapping
             zones = {
