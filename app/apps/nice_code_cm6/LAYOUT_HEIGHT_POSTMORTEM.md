@@ -138,6 +138,8 @@ in the same flex column, preventing future modules from collapsing.
   recreate the collapse.
 * **Modals / popovers** are fine as long as they live inside the main container or use
   NiceGUI’s overlay primitives.
+* **Serving over plain HTTP** (desktop → mobile) now falls back to `visualViewport.height` so
+  the layout behaves the same as when the worker runs on-device with keyboard overlay support.
 
 With this baseline in place we can safely proceed to feature parity migration, agent drawer
 work, and the rest of the NiceGUI integration without revisiting height regressions.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import importlib
 import sys
 from contextlib import suppress
@@ -85,8 +86,8 @@ def main(argv: list[str] | None = None) -> None:
     ui.add_head_html(
         """<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <style>
-:root { --vk-offset: 0px; --shell-header-height: 0px; }
-html, body {margin: 0; padding: 0; height: 100%; overflow: hidden; background: #020617;}
+:root { --vk-offset: 0px; --shell-header-height: 0px; --app-height: 100vh; }
+html, body {margin: 0; padding: 0; height: var(--app-height); overflow: hidden; background: #020617;}
 body {color: #e2e8f0; font-family: 'Inter', sans-serif;}
 #app {height: 100%; display: flex; flex-direction: column; max-width: 100vw;}
 .nicegui-content {flex: 1 1 auto; display: flex !important; flex-direction: column !important; width: 100% !important; max-width: 100% !important; padding: 0 !important; margin: 0 !important;}
@@ -108,11 +109,14 @@ input, textarea, select {font-size: 16px;}
   let mutationObserver;
 
   function updateMetrics() {
+    const vv = window.visualViewport;
+    const viewportHeight = vv ? vv.height : window.innerHeight;
+    root.style.setProperty('--app-height', viewportHeight + 'px');
+
     let offset = 0;
     if (vk && vk.boundingRect) {
       offset = vk.boundingRect.height || 0;
-    } else if (window.visualViewport) {
-      const vv = window.visualViewport;
+    } else if (vv) {
       offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
     }
     root.style.setProperty('--vk-offset', offset + 'px');
@@ -163,7 +167,23 @@ input, textarea, select {font-size: 16px;}
     print(f"[nicegui_shell] Rendering app {args.app_id}")
     build_shell(builder, args.app_id)
 
-    ui.run(host=args.host, port=args.port, reload=False, show=False, native=False)
+    certfile = os.getenv("TE_SSL_CERT")
+    keyfile = os.getenv("TE_SSL_KEY")
+
+    run_kwargs: dict[str, object] = dict(
+        host=args.host,
+        port=args.port,
+        reload=False,
+        show=False,
+        native=False,
+    )
+
+    if certfile and keyfile:
+        run_kwargs["ssl_certfile"] = certfile
+        run_kwargs["ssl_keyfile"] = keyfile
+        print(f"[nicegui_shell] Running with TLS cert={certfile} key={keyfile}")
+
+    ui.run(**run_kwargs)
 
 
 if __name__ == "__main__":
