@@ -6,12 +6,21 @@ import argparse
 import importlib
 import sys
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import Callable
 
 from nicegui import app as nicegui_app, ui
 
 
-def build_shell(load_fn: Callable[[ui.element], None], app_id: str) -> None:
+@dataclass
+class ShellContext:
+    header_primary: ui.element
+    header_secondary: ui.element
+    header_tertiary: ui.element
+    body: ui.element
+
+
+def build_shell(load_fn: Callable[[ShellContext], None], app_id: str) -> None:
     """Construct the shared shell layout and embed the app UI."""
 
     def handle_home() -> None:
@@ -25,25 +34,41 @@ def build_shell(load_fn: Callable[[ui.element], None], app_id: str) -> None:
     ).style("max-width: 100vw; width: 100vw;")
 
     with root:
-        with ui.row().classes(
+        header_primary = ui.row().classes(
             "w-full items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900"
-        ):
+        )
+        with header_primary:
             ui.button("Home", on_click=handle_home).props("flat")
             ui.button("Reload", on_click=handle_reload).props("flat")
             ui.button("Toast", on_click=lambda: ui.notify("Shell toast"))
             ui.label(f"NiceGUI Shell · {app_id}").classes("text-sm text-slate-300")
 
-        body = ui.element().classes("flex-1 w-full overflow-hidden").style("max-width: 100vw;")
-        with body:
-            inner = ui.element().classes("w-full h-full overflow-hidden").style("max-width: 100vw;")
+        header_secondary = ui.element().classes(
+            "w-full border-b border-slate-800 bg-slate-900/70 px-4 py-2"
+        )
+        header_tertiary = ui.element().classes(
+            "w-full border-b border-slate-800 bg-slate-900/60 px-4 py-2"
+        )
+
+        body_container = ui.element().classes("flex-1 w-full overflow-hidden").style("max-width: 100vw;")
+        with body_container:
+            inner = ui.element().classes("w-full h-full overflow-auto").style("max-width: 100vw;")
             with inner:
                 canvas = ui.element().classes("h-full w-full p-0 m-0").style("max-width: 100vw;")
-                try:
-                    load_fn(canvas)
-                except Exception as exc:  # pragma: no cover - surface to UI
-                    ui.notification(f"Failed to load app module: {exc}", close_button='OK')
-                    with canvas:
-                        ui.label("App failed to load (see logs).").classes("text-red-400")
+
+        context = ShellContext(
+            header_primary=header_primary,
+            header_secondary=header_secondary,
+            header_tertiary=header_tertiary,
+            body=canvas,
+        )
+
+        try:
+            load_fn(context)
+        except Exception as exc:  # pragma: no cover - surface to UI
+            ui.notification(f"Failed to load app module: {exc}", close_button='OK')
+            with canvas:
+                ui.label("App failed to load (see logs).").classes("text-red-400")
 
 
 def import_builder(module_path: str) -> Callable[[ui.column], None]:
@@ -63,6 +88,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     builder = import_builder(args.module)
+
     ui.add_head_html(
         """<style>
 html, body {margin: 0; padding: 0; height: 100%; overflow: hidden; background: #020617;}
@@ -71,7 +97,9 @@ body {color: #e2e8f0; font-family: 'Inter', sans-serif;}
 .nicegui-content {width: 100% !important; max-width: 100% !important; padding: 0 !important; margin: 0 !important;}
 </style>"""
     )
+    print(f"[nicegui_shell] Rendering app {args.app_id}")
     build_shell(builder, args.app_id)
+
     ui.run(host=args.host, port=args.port, reload=False, show=False, native=False)
 
 

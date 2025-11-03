@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from flask import (
     Blueprint,
     jsonify,
@@ -115,6 +116,7 @@ def app_shell(app_id):
         if not port:
             return abort(502)
 
+        time.sleep(2.0)
         host_only = request.host.split(':')[0]
         scheme = request.scheme
         redirect_url = f"{scheme}://{host_only}:{port}/"

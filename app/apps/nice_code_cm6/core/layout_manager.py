@@ -18,42 +18,30 @@ class LayoutManager:
         self.agent_visible = False
         self.terminal_visible = False  # Default to closed
 
-    def render(self, container: ui.element) -> None:
+    def render(self, *, body_container: ui.element, header_secondary: ui.element, header_tertiary: ui.element) -> None:
         """Render responsive layout with drawers for mobile."""
-        container.classes("flex h-full w-full flex-col overflow-hidden p-0 m-0")
-        
-        with container:
-            # Header section
-            headers = ui.column().classes("w-full gap-1 flex-shrink-0")
-            with headers:
-                file_header_zone = ui.element().classes(
-                    "w-full bg-slate-900/80 px-4 py-2 border-b border-slate-800"
-                )
-                
-                # Menu header with drawer controls
-                menu_header_container = ui.row().classes(
-                    "w-full items-center justify-between bg-slate-900/80 px-4 py-2 border-b border-slate-800"
-                )
-                with menu_header_container:
-                    # Left: Explorer toggle button (mobile only)
-                    explorer_btn = ui.button(
-                        icon="folder_open", 
-                        on_click=lambda: self.toggle_explorer()
-                    ).classes("md:hidden")
-                    explorer_btn.tooltip("Toggle Explorer")
-                    
-                    # Center: Menu header zone
-                    menu_header_zone = ui.element().classes("flex-1")
-                    
-                    # Right: Agent drawer toggle button (mobile only)
-                    agent_btn = ui.button(
-                        icon="smart_toy",
-                        on_click=lambda: self.toggle_agent()
-                    ).classes("md:hidden")
-                    agent_btn.tooltip("Toggle Agent")
+        header_secondary.clear()
+        header_tertiary.clear()
 
-            # Main content area with drawers
-            main_container = ui.element().classes("relative flex-1 flex overflow-hidden")
+        with header_secondary:
+            ui.element().classes(
+                "w-full bg-slate-900/80 px-4 py-2 border-b border-slate-800 flex items-center justify-between"
+            )
+            file_header_zone = header_secondary
+
+        with header_tertiary:
+            container = ui.row().classes(
+                "w-full items-center justify-between bg-slate-900/80 px-4 py-2 border-b border-slate-800"
+            )
+            with container:
+                explorer_btn = ui.button(icon="folder_open", on_click=lambda: self.toggle_explorer()).classes("md:hidden")
+                explorer_btn.tooltip("Toggle Explorer")
+                menu_header_zone = ui.element().classes("flex-1")
+                agent_btn = ui.button(icon="smart_toy", on_click=lambda: self.toggle_agent()).classes("md:hidden")
+                agent_btn.tooltip("Toggle Agent")
+
+        body_container.classes("relative flex-1 flex overflow-hidden")
+        with body_container as main_container:
             with main_container:
                 # Explorer drawer (mobile: overlay, desktop: static tile)
                 explorer_drawer = ui.element()
