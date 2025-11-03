@@ -7,6 +7,7 @@ import pkgutil
 from typing import List, Sequence, Type
 
 from .module import Module
+from ..modules.native.editor import EditorModule
 
 
 def _iter_module_classes(package_path: str, package_name: str) -> Sequence[Type[Module]]:
@@ -21,18 +22,45 @@ def _iter_module_classes(package_path: str, package_name: str) -> Sequence[Type[
     return classes
 
 
-def load_native_modules(layout_manager=None) -> List[Module]:
+def load_native_modules(
+    *,
+    layout_manager=None,
+    project_context=None,
+    state_store=None,
+) -> List[Module]:
     """Instantiate all native modules shipped with the app."""
     modules: List[Module] = []
     for cls in _iter_module_classes(
         package_path="app.apps.nice_code_cm6.modules.native",
         package_name="app.apps.nice_code_cm6.modules.native",
     ):
-        # Pass layout_manager to MenuHeaderModule
-        if cls.__name__ == "MenuHeaderModule" and layout_manager:
-            instance = cls(layout_manager=layout_manager)
+        if cls.__name__ == "MenuHeaderModule":
+            instance = cls(layout_manager=layout_manager, project_context=project_context)
+        elif cls.__name__ == "ExplorerModule":
+            instance = cls(
+                layout_manager=layout_manager,
+                project_context=project_context,
+                state_store=state_store,
+            )
+        elif cls.__name__ == "EditorModule":
+            instance = cls(project_context=project_context, state_store=state_store)
         else:
             instance = cls()
-        instance.on_mount()
         modules.append(instance)
+
+    editor_module = next((m for m in modules if isinstance(m, EditorModule)), None)
+    explorer_module = next((m for m in modules if getattr(m, "key", None) == "explorer"), None)
+    menu_module = next((m for m in modules if getattr(m, "key", None) == "menu_header"), None)
+
+    if explorer_module and hasattr(explorer_module, "attach_editor"):
+        explorer_module.attach_editor(editor_module)
+
+    if menu_module:
+        if hasattr(menu_module, "attach_explorer"):
+            menu_module.attach_explorer(explorer_module)
+        if hasattr(menu_module, "attach_project_context"):
+            menu_module.attach_project_context(project_context)
+
+    for instance in modules:
+        instance.on_mount()
     return modules

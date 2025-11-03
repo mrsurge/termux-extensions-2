@@ -12,6 +12,8 @@ from typing import Callable
 
 from nicegui import app as nicegui_app, ui
 
+# SHELL SERVES AS SHARED BLUEPRINT FOR ALL NICEGUI APPS.
+# KEEP CHANGES GENERIC AND REUSABLE ACROSS MODULES.
 
 @dataclass
 class ShellContext:
@@ -96,6 +98,10 @@ body {color: #e2e8f0; font-family: 'Inter', sans-serif;}
 .main-scroll {flex: 1 1 auto; display: flex; flex-direction: column; box-sizing: border-box; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--vk-offset)); background: #020617;}
 .scroll-inner {flex: 1 1 auto; display: flex; flex-direction: column; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding-bottom: var(--vk-offset);}
 .app-body {flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;}
+@media (max-width: 767.98px) {
+  .te-mobile-header-offset {top: var(--shell-header-height) !important; bottom: 0 !important;}
+  .te-mobile-drawer-padding {padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--vk-offset));}
+}
 input, textarea, select {font-size: 16px;}
 </style>"""
     )

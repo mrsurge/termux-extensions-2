@@ -1,19 +1,20 @@
 #!/bin/env python
 # main.py (project_root)
 import errno
+import importlib
+import importlib.util
 import json
 import os
+import re
+import signal
 import subprocess
 import sys
 import threading
-import importlib.util
-import traceback
-import traceback
 import time
+import traceback
 import uuid
-import signal
 from pathlib import Path
-from typing import List
+from typing import Dict, Iterable, List, Optional
 
 # Add project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,11 +22,11 @@ sys.path.insert(0, project_root)
 
 from flask import Flask, render_template, jsonify, send_from_directory, send_file, request, current_app, Response
 import requests
-from app.libs.framework_shells import framework_shells_bp, _manager, FrameworkShellManager
-from app.libs.jobs import jobs_bp
-from app.libs.bookmarks import bookmarks_bp
-from app.libs.app_manager import ensure_app_running
 from app.libs.app_lifecycle import start_background_tasks
+from app.libs.app_manager import ensure_app_running
+from app.libs.bookmarks import bookmarks_bp
+from app.libs.framework_shells import FrameworkShellManager, _manager, framework_shells_bp
+from app.libs.jobs import jobs_bp
 from flask_sock import Sock
 from simple_websocket import Client as WSClient, ConnectionClosed
 
@@ -59,6 +60,12 @@ loaded_apps = []
 SETTINGS_FILE = Path(os.path.expanduser('~/.cache/termux_extensions/settings.json'))
 STATE_STORE_FILE = Path(os.path.expanduser('~/.cache/termux_extensions/state_store.json'))
 STATE_STORE_LOCK = threading.RLock()
+FRAMEWORK_LOG_ROOT = Path(os.path.expanduser("~/.cache/te_framework/logs"))
+LOG_MONITOR_ENABLED = os.getenv("TE_MONITOR_FRAMEWORK_LOGS", "1").lower() not in {"0", "false", "no"}
+LOG_MONITOR_POLL_SECONDS = float(os.getenv("TE_MONITOR_FRAMEWORK_LOGS_INTERVAL", "1.0"))
+LOG_MONITOR_REPLAY = os.getenv("TE_MONITOR_FRAMEWORK_LOGS_REPLAY", "0").lower() in {"1", "true", "yes"}
+_log_monitor_thread: Optional["FrameworkShellLogMonitor"] = None
+
 
 # Ensure importlib-based imports and spec-based module loads receive the current run id
 # This allows extension/app modules to access TE_RUN_ID at import time (as a global)
@@ -187,6 +194,130 @@ def _collect_interactive_session_stats(run_id: str | None) -> dict[str, object]:
         sid = meta.get('SID') or meta_path.parent.name
         matching_sids.append(sid)
     return {"total": total, "matching_run": matching, "sids": matching_sids}
+
+
+class FrameworkShellLogMonitor(threading.Thread):
+    """Background tailer that scans framework shell logs for Python stack traces."""
+
+    TRACEBACK_HEADER = re.compile(r"Traceback \(most recent call last\):")
+
+    def __init__(
+        self,
+        base_dir: Path,
+        poll_interval: float = 1.0,
+        replay_existing: bool = False,
+    ) -> None:
+        super().__init__(name="FrameworkShellLogMonitor", daemon=True)
+        self.base_dir = base_dir
+        self.poll_interval = max(0.25, poll_interval)
+        self.replay_existing = replay_existing
+        self._stop_event = threading.Event()
+        self._positions: Dict[Path, int] = {}
+        self._capturing: Dict[Path, bool] = {}
+        self._buffers: Dict[Path, List[str]] = {}
+
+    # ----------------------------------------------------------------- control
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    # ----------------------------------------------------------------- helpers
+    def _iter_log_files(self) -> Iterable[Path]:
+        if not self.base_dir.is_dir():
+            return []
+        log_paths: List[Path] = []
+        for fs_dir in self.base_dir.glob("fs-*"):
+            if not fs_dir.is_dir():
+                continue
+            for log_path in fs_dir.rglob("*.log"):
+                if log_path.is_file():
+                    log_paths.append(log_path)
+        for fs_dir in self.base_dir.glob("fs_*"):
+            if not fs_dir.is_dir():
+                continue
+            for log_path in fs_dir.rglob("*.log"):
+                if log_path.is_file():
+                    log_paths.append(log_path)
+        return log_paths
+
+    def _init_file_state(self, path: Path) -> None:
+        if path in self._positions:
+            return
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            return
+        self._positions[path] = 0 if self.replay_existing else size
+        self._capturing[path] = False
+        self._buffers[path] = []
+
+    def _cleanup_file_state(self, path: Path) -> None:
+        self._positions.pop(path, None)
+        self._capturing.pop(path, None)
+        self._buffers.pop(path, None)
+
+    def _flush_traceback(self, path: Path) -> None:
+        buffer = self._buffers.get(path)
+        if not buffer:
+            return
+        print(f"[FrameworkLogMonitor] Stack trace detected in {path}:")
+        for line in buffer:
+            print(line)
+        print("-" * 60)
+        self._buffers[path] = []
+        self._capturing[path] = False
+
+    def _handle_line(self, path: Path, line: str) -> None:
+        capturing = self._capturing.get(path, False)
+        if not capturing and self.TRACEBACK_HEADER.search(line):
+            capturing = True
+            self._capturing[path] = True
+            self._buffers[path] = [line]
+            return
+        if capturing:
+            self._buffers.setdefault(path, []).append(line)
+            # Python stack traces end with a non-indented line (exception message) followed by blank line or other text.
+            is_blank = not line.strip()
+            looks_like_exception = bool(line and not line.startswith((" ", "\t")))
+            if is_blank or looks_like_exception:
+                self._flush_traceback(path)
+
+    def _process_file(self, path: Path) -> None:
+        self._init_file_state(path)
+        if path not in self._positions:
+            return
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as fh:
+                fh.seek(self._positions[path])
+                for raw_line in fh:
+                    line = raw_line.rstrip("\n")
+                    self._handle_line(path, line)
+                self._positions[path] = fh.tell()
+        except FileNotFoundError:
+            self._cleanup_file_state(path)
+        except Exception as exc:
+            print(f"[FrameworkLogMonitor] Error tailing {path}: {exc}")
+
+    # ----------------------------------------------------------------- thread
+    def run(self) -> None:
+        if not self.base_dir.exists():
+            print(f"[FrameworkLogMonitor] Base directory {self.base_dir} does not exist; waiting for creation.")
+        while not self._stop_event.is_set():
+            for log_path in self._iter_log_files():
+                self._process_file(log_path)
+            self._stop_event.wait(self.poll_interval)
+
+
+def _start_framework_shell_log_monitor() -> Optional[FrameworkShellLogMonitor]:
+    if not LOG_MONITOR_ENABLED:
+        return None
+    monitor = FrameworkShellLogMonitor(
+        FRAMEWORK_LOG_ROOT,
+        poll_interval=LOG_MONITOR_POLL_SECONDS,
+        replay_existing=LOG_MONITOR_REPLAY,
+    )
+    monitor.start()
+    print(f"[FrameworkLogMonitor] Watching framework shell logs under {FRAMEWORK_LOG_ROOT} (poll={LOG_MONITOR_POLL_SECONDS}s, replay={LOG_MONITOR_REPLAY})")
+    return monitor
 
 def _scandir_entries(path: str, include_hidden: bool) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
@@ -842,6 +973,8 @@ if __name__ == '__main__':
     loaded_apps = load_apps()
     app.config['LOADED_APPS'] = loaded_apps
     print(f"Loaded {len(loaded_apps)} apps.")
+    print("--- Starting Framework Shell Log Monitor ---")
+    _log_monitor_thread = _start_framework_shell_log_monitor()
     print("--- Starting Server ---")
     # Production-like settings for the built-in server (still not recommended for production)
     app.run(host='0.0.0.0', port=8088, debug=False)

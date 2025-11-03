@@ -71,11 +71,136 @@ function requireEl(selector, scope=document) {
   return el;
 }
 
+function initVirtualKeyboardAdjustments({ root, agentDrawer, composer, transcript, editorSurface }) {
+  if (!root) return;
+
+  const docEl = document.documentElement;
+  const viewport = window.visualViewport;
+
+  const getViewportHeight = () => {
+    if (viewport) return viewport.height;
+    return window.innerHeight || docEl.clientHeight || 0;
+  };
+
+  let baselineHeight = getViewportHeight() || window.innerHeight || docEl.clientHeight || 0;
+  let activeContext = null; // 'agent' | 'editor' | null
+  let keyboardActive = false;
+
+  const applyClasses = () => {
+    const agentActive = keyboardActive && activeContext === 'agent';
+    const editorActive = keyboardActive && activeContext === 'editor';
+    root.classList.toggle('keyboard-open', keyboardActive);
+    root.classList.toggle('keyboard-agent', agentActive);
+    root.classList.toggle('keyboard-editor', editorActive);
+    root.style.height = '';
+    root.style.maxHeight = '';
+    root.style.overflow = '';
+    if (document.body) {
+      document.body.classList.toggle('keyboard-locked', keyboardActive);
+    }
+    if (agentDrawer) {
+      agentDrawer.classList.toggle('agent-drawer--keyboard', agentActive);
+    }
+  };
+
+  const scrollTranscriptToEnd = () => {
+    if (!transcript) return;
+    requestAnimationFrame(() => {
+      transcript.scrollTop = transcript.scrollHeight;
+    });
+  };
+
+  const updateInset = () => {
+    const currentHeight = getViewportHeight();
+    if (!currentHeight) return;
+
+    if (!keyboardActive && currentHeight > baselineHeight) {
+      baselineHeight = currentHeight;
+    }
+
+    let inset = Math.round(baselineHeight - currentHeight);
+    if (inset < 0) inset = 0;
+
+    if (inset < 80) {
+      inset = 0;
+      baselineHeight = currentHeight;
+    }
+
+    docEl.style.setProperty('--keyboard-inset', `${inset}px`);
+
+    const shouldActivate = inset > 0 && activeContext !== null;
+    if (shouldActivate !== keyboardActive) {
+      keyboardActive = shouldActivate;
+      applyClasses();
+    } else if (!shouldActivate) {
+      applyClasses();
+    }
+
+    if (keyboardActive && activeContext === 'agent') {
+      scrollTranscriptToEnd();
+    }
+  };
+
+  const setContext = (context) => {
+    if (activeContext === context) return;
+    activeContext = context;
+    applyClasses();
+    updateInset();
+  };
+
+  const clearContext = (context) => {
+    if (activeContext !== context) return;
+    activeContext = null;
+    applyClasses();
+    updateInset();
+  };
+
+  composer?.addEventListener('focus', () => setContext('agent'));
+  composer?.addEventListener('pointerdown', () => setContext('agent'));
+  composer?.addEventListener('blur', () => clearContext('agent'));
+
+  if (root && editorSurface) {
+    root.addEventListener('focusin', (event) => {
+      if (editorSurface.contains(event.target)) {
+        setContext('editor');
+      }
+    });
+
+    root.addEventListener('focusout', (event) => {
+      if (editorSurface.contains(event.target) && (!event.relatedTarget || !editorSurface.contains(event.relatedTarget))) {
+        clearContext('editor');
+      }
+    });
+  }
+
+  const onViewportChange = () => updateInset();
+
+  if (viewport) {
+    viewport.addEventListener('resize', onViewportChange);
+    viewport.addEventListener('scroll', onViewportChange);
+  } else {
+    window.addEventListener('resize', onViewportChange);
+  }
+
+  window.addEventListener('orientationchange', () => {
+    setTimeout(() => {
+      baselineHeight = getViewportHeight() || window.innerHeight || baselineHeight;
+      updateInset();
+    }, 250);
+  });
+
+  updateInset();
+}
+
 const container = requireEl('#editor-container');
 const cmHost = requireEl('#cm6-host');
 const selectSurface = requireEl('#select-surface');
 const selectExit = requireEl('#select-exit');
 const selectTip = requireEl('#select-tip');
+const root = requireEl('.fe-root');
+const agentDrawerEl = requireEl('#agent-drawer');
+const agentTranscript = requireEl('#agent-transcript');
+const agentComposer = requireEl('#agent-input');
 
 // Title/status & chrome
 const fileNameEl = requireEl('#fe-file-name');
@@ -126,6 +251,14 @@ const confirmClose = requireEl('#fe-confirm-close');
 const btnDiscard   = requireEl('#fe-discard');
 const btnSaveConfirm = requireEl('#fe-save-confirm');
 const btnCancel    = requireEl('#fe-cancel');
+
+initVirtualKeyboardAdjustments({
+  root,
+  agentDrawer: agentDrawerEl,
+  composer: agentComposer,
+  transcript: agentTranscript,
+  editorSurface: cmHost,
+});
 
 async function fetchDiffPayload(path) {
   if (!path) return { hunks: [], summary: { tracked: false } };

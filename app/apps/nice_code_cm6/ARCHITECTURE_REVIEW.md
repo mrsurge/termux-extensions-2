@@ -15,18 +15,19 @@ _Last updated: November 3, 2025_
 
 #### Processes
 - Shell label: `asgi-app:nice_code_cm6`
-- Command: `python app/apps/nicegui_shell/worker.py --app-id nice_code_cm6 --module app.apps.nice_code_cm6.ui --port <dynamic>`
+- Command: `python app/apps/nicegui_shell/worker.py --app-id nice_code_cm6 --module app.apps.nice_code_cm6.nccm6 --port <dynamic>`
 - NiceGUI serves everything (HTML, CSS, Socket.IO) directly; no reverse proxy required.
 
 ### Module Architecture
 ```
 app/apps/nice_code_cm6/
 ├── manifest.json
-├── ui.py                       # Bootstraps modules + layout
+├── nccm6.py                    # Bootstraps modules + layout
 ├── core/
 │   ├── module.py               # Base Module contract
 │   ├── module_loader.py        # Reflective loader (native modules)
-│   └── layout_manager.py       # Phase-1 layout grid
+│   ├── layout_manager.py       # Phase-1 layout grid
+│   └── project_context.py      # Project root resolution & guardrails
 ├── modules/
 │   ├── native/
 │   │   ├── file_header.py
@@ -36,6 +37,9 @@ app/apps/nice_code_cm6/
 │   │   ├── terminal.py
 │   │   └── agent_drawer.py
 │   └── third_party/            # Reserved for future plugin modules
+├── helpers/
+│   ├── explorer_backend.py     # File tree backing services
+│   └── state_store.py          # JSON-backed settings cache
 └── static/cm6/                 # Placeholder for CM6 assets
 ```
 
@@ -58,17 +62,16 @@ app/apps/nice_code_cm6/
   same flex column so the explorer/editor/agent stack inherits the full height beneath the headers.
 
 ### Current UI State
-- Header rows display “Untitled • No file selected” and placeholder menu buttons.
-- Explorer, Editor, Agent Drawer, and Terminal areas render stub cards; layouts fill the entire viewport.
-- “Show Toast” button in the editor module (and in the shell) confirms WebSocket/event loop wiring.
+- Header rows expose File / Edit / View menus with project actions and terminal toggle.
+- Explorer lists the active project tree, persists expansion/recents, and opens files in the editor.
+- Editor loads CodeMirror 6, tracks the last-opened file, and updates from explorer selections.
+- Agent drawer and terminal remain placeholders pending feature parity work.
 
 ### Outstanding Work
-- Flesh out each module:
-  - Explorer: real file tree + navigation API
-  - Editor: CM6 integration using NiceGUI `ui.html` wrapper
-  - Agent Drawer & terminal: connect to framework services
-- Implement state management (open file path, selections, etc.) in `core/state_manager.py` (not yet created).
-- Introduce responsive behavior (drawer overlays on mobile) via future layout manager enhancements.
+- Explorer: implement git actions (stage/commit/push) and richer context menus.
+- Editor: surface save/write-back, diagnostics, and CM6 extensions.
+- Agent Drawer & terminal: connect to framework services and streaming backends.
+- Broaden state persistence (editor settings, layout preferences) atop `helpers/state_store.py`.
 - Add NiceGUI-based shell controls (lock, quit, recents) to match the existing Flask shell features.
 
 ### Testing Notes

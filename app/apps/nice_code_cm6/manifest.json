@@ -6,7 +6,7 @@
   "description": "Standalone NiceGUI scaffold for the Code CM6 experience.",
   "author": "mrSurge",
   "entrypoints": {
-    "nicegui_module": "ui.py",
+    "nicegui_module": "nccm6.py",
     "nicegui_shell": true
   }
 }

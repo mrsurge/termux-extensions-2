@@ -23,8 +23,24 @@
     --diff-del-marker: rgba(248, 113, 113, 0.9);
     --diff-del-fg: inherit;
     --diff-del-gap: 0px;
+    --keyboard-inset: 0px;
+    --keyboard-gap: 16px;
   }
   .fe-root { display: flex; flex-direction: column; height: 100%; background:var(--bg); color:var(--fg); }
+
+  body.keyboard-locked {
+    overflow: hidden;
+    overscroll-behavior: contain;
+  }
+
+  .fe-root.keyboard-open {
+    padding-bottom: var(--keyboard-inset, 0px);
+    overscroll-behavior: contain;
+  }
+
+  .fe-root.keyboard-editor .cm-editor .cm-scroller {
+    padding-bottom: calc(var(--keyboard-inset, 0px) + 24px);
+  }
 
   /* ========================================
      RESPONSIVE LAYOUT: Desktop (Landscape)
@@ -478,6 +494,85 @@
 
   .agent-drawer.agent-drawer--fullscreen {
     width: 100vw;
+  }
+
+  .agent-transcript-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
+  }
+
+  .agent-drawer.agent-drawer--keyboard {
+    overflow: hidden;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-drawer__body {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-section {
+    pointer-events: none;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-section--current-session,
+  .agent-drawer.agent-drawer--keyboard .agent-section--stats {
+    opacity: 0;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-section--transcript {
+    pointer-events: auto;
+    position: absolute;
+    inset: 16px 16px calc(var(--keyboard-inset, 0px) + 16px) 16px;
+    margin: 0;
+    padding: 16px;
+    border-radius: 14px;
+    background: rgba(6, 10, 18, 0.95);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    box-shadow: 0 22px 45px rgba(0, 0, 0, 0.55);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-section--transcript h3 {
+    display: none;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-transcript-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-transcript {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 14px;
+    background: transparent;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-transcript > * {
+    width: 100%;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-composer {
+    position: static;
+    background: rgba(4, 7, 12, 0.92);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    border-radius: 12px;
+    padding: 12px;
+    margin: 0;
+    gap: 12px;
+    pointer-events: auto;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-composer__textarea {
+    min-height: 74px;
   }
 
   .agent-drawer__header {
@@ -945,6 +1040,8 @@
     gap: 10px;
     margin-top: 16px;
     margin-top: 16px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
+    font-size: 0.85rem;
   }
 
   .agent-composer__textarea {
@@ -956,7 +1053,9 @@
     background: rgba(4, 7, 12, 0.95);
     color: var(--foreground, #e5e7eb);
     padding: 10px;
-    font: inherit;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
+    font-size: 0.95em;
+    box-sizing: border-box;
   }
 
   .agent-composer__toolbar {
@@ -1263,23 +1362,22 @@
       </section>
       <section class="agent-section agent-section--transcript" aria-label="Agent transcript">
         <h3>Transcript</h3>
-        <div class="agent-transcript" id="agent-transcript">
-          <div class="agent-transcript__placeholder">Start a session to see the conversation stream here.</div>
-        </div>
-        <div class="agent-composer">
-          <textarea id="agent-input" class="agent-composer__textarea" placeholder="Message the agent..."></textarea>
-          <div class="agent-composer__toolbar">
-            <label class="agent-composer__option">
-              <span>Target</span>
-              <select id="agent-target" class="agent-composer__select">
-                <option value="codex">Codex</option>
-                <option value="gemini">Gemini</option>
-              </select>
-            </label>
-            <label class="agent-composer__option">
-              <input type="checkbox" id="agent-attach-file" /> Attach active file context
-            </label>
-            <button class="fe-btn" id="agent-send">Send</button>
+        <div class="agent-transcript-panel">
+          <div class="agent-transcript" id="agent-transcript">
+            <div class="agent-transcript__placeholder">Start a session to see the conversation stream here.</div>
+          </div>
+          <div class="agent-composer">
+            <textarea id="agent-input" class="agent-composer__textarea" placeholder="Message the agent..."></textarea>
+            <div class="agent-composer__toolbar">
+              <label class="agent-composer__option">
+                <span>Target</span>
+                <select id="agent-target" class="agent-composer__select">
+                  <option value="codex">Codex</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </label>
+              <button class="fe-btn" id="agent-send">Send</button>
+            </div>
           </div>
         </div>
       </section>

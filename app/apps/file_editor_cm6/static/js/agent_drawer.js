@@ -24,7 +24,6 @@ export function initAgentDrawer() {
   const composer = document.getElementById('agent-input');
   const currentSessionCard = document.getElementById('agent-current-session-card');
   const targetSelect = document.getElementById('agent-target');
-  const attachFileCheck = document.getElementById('agent-attach-file');
   const statsEl = document.getElementById('agent-stats');
   
   // Sessions list modal elements
@@ -767,11 +766,6 @@ export function initAgentDrawer() {
       } else if (session.auto) {
         message.context.sandbox = 'workspace-write';
       }
-    }
-    
-    // Attach file context if enabled
-    if (attachFileCheck?.checked && window.currentPath) {
-      message.file = window.currentPath;
     }
     
     // Backend will persist user message - just show in UI optimistically

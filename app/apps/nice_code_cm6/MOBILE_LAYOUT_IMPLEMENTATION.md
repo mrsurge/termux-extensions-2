@@ -124,6 +124,8 @@ transform transition-transform duration-300  /* Smooth slide */
 md:flex md:flex-shrink-0 md:w-64  /* 256px width tile */
 bg-slate-950/95 md:bg-transparent  /* Dark backdrop mobile, clear desktop */
 shadow-2xl md:shadow-none          /* Shadow on mobile only */
+te-mobile-header-offset            /* Offset overlay below shell header on mobile */
+te-mobile-drawer-padding           /* Keyboard + safe-area padding on mobile */
 ```
 
 **Agent Drawer:**
@@ -140,6 +142,8 @@ translate-x-full md:translate-x-0  /* Hidden right on mobile, visible desktop */
 md:flex md:flex-shrink-0 md:w-64
 bg-slate-950/95 md:bg-transparent
 shadow-2xl md:shadow-none
+te-mobile-header-offset
+te-mobile-drawer-padding
 ```
 
 **Terminal Zone:**
@@ -157,28 +161,64 @@ md:hidden                 /* Hidden on desktop */
 fixed inset-0             /* Full screen overlay */
 bg-black/50               /* Semi-transparent black */
 z-40                      /* Below drawers (z-50), above content */
+opacity-0 pointer-events-none transition-opacity duration-200
+te-mobile-header-offset
 ```
 
-### Binding Strategy
+### State Synchronization Helpers
 
-NiceGUI's reactive binding used for dynamic visibility:
+The drawers and backdrop now share explicit helpers so we can keep Tailwind classes in sync without relying on
+transform-returning visibility bindings (which were brittle on mobile):
 
 ```python
-# Explorer drawer transform
-explorer_drawer.bind_visibility_from(
-    self, "explorer_visible",
-    backward=lambda v: "translate-x-0" if v else "-translate-x-full"
-)
+def _apply_explorer_state(self) -> None:
+    if not self._explorer_drawer:
+        return
+    if self.explorer_visible:
+        self._explorer_drawer.classes(
+            add="translate-x-0 pointer-events-auto",
+            remove="-translate-x-full pointer-events-none",
+        )
+    else:
+        self._explorer_drawer.classes(
+            add="-translate-x-full pointer-events-none",
+            remove="translate-x-0 pointer-events-auto",
+        )
+    self._update_backdrop()
 
-# Terminal visibility
-terminal_zone.bind_visibility_from(self, "terminal_visible")
+def _apply_agent_state(self) -> None:
+    if not self._agent_drawer:
+        return
+    if self.agent_visible:
+        self._agent_drawer.classes(
+            add="translate-x-0 pointer-events-auto md:flex md:flex-shrink-0 md:opacity-100 md:pointer-events-auto",
+            remove="translate-x-full pointer-events-none md:hidden md:opacity-0 md:pointer-events-none",
+        )
+    else:
+        self._agent_drawer.classes(
+            add="translate-x-full pointer-events-none md:hidden md:opacity-0 md:pointer-events-none",
+            remove="translate-x-0 pointer-events-auto md:flex md:flex-shrink-0 md:opacity-100 md:pointer-events-auto",
+        )
+    self._update_backdrop()
 
-# Backdrop visibility (shown when any drawer is open)
-backdrop.bind_visibility_from(
-    self, "explorer_visible",
-    backward=lambda v: v or self.agent_visible
-)
+def _update_backdrop(self) -> None:
+    if not self._backdrop:
+        return
+    if self.explorer_visible or self.agent_visible:
+        self._backdrop.classes(
+            add="opacity-100 pointer-events-auto",
+            remove="opacity-0 pointer-events-none",
+        )
+    else:
+        self._backdrop.classes(
+            add="opacity-0 pointer-events-none",
+            remove="opacity-100 pointer-events-auto",
+        )
 ```
+
+`terminal_zone.bind_visibility_from(self, "terminal_visible")` still controls the collapsible terminal tile; no changes needed there.
+
+> **Shared Shell Helpers:** `.te-mobile-header-offset` and `.te-mobile-drawer-padding` live in the shell CSS (`app/apps/nicegui_shell/worker.py`). They keep overlays anchored beneath the combined shell/app headers on phones and preserve the safe-area + virtual-keyboard inset. Apply them to any future mobile overlays so they don’t slide under the header.
 
 ## Header Buttons
 
@@ -189,10 +229,9 @@ ui.button(icon="folder_open", on_click=lambda: self.toggle_explorer())
     .tooltip("Toggle Explorer")
 ```
 
-**Agent Toggle (Mobile Only):**
+**Agent Toggle (All Breakpoints):**
 ```python
 ui.button(icon="smart_toy", on_click=lambda: self.toggle_agent())
-    .classes("md:hidden")
     .tooltip("Toggle Agent")
 ```
 
@@ -234,8 +273,8 @@ cd /home/mrsurge/Documents/code_cm62
 ### Desktop Testing
 1. **Resize browser** to > 768px width
 2. **Verify:**
-   - Explorer and Agent tiles visible by default
-   - No toggle buttons in header
+   - Explorer tile remains visible without needing a toggle
+   - Agent button stays in the header; clicking it slides the agent panel in/out
    - Terminal toggle still visible
    - Terminal expands/collapses at bottom
 
