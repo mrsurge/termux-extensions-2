@@ -12,7 +12,6 @@ def build_ui(context) -> None:
     modules = load_native_modules(layout_manager=manager)
     manager.modules = modules
     manager.render(
+        header_container=context.header_app,
         body_container=context.body,
-        header_secondary=context.header_secondary,
-        header_tertiary=context.header_tertiary,
     )

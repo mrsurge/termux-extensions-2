@@ -18,30 +18,33 @@ class LayoutManager:
         self.agent_visible = False
         self.terminal_visible = False  # Default to closed
 
-    def render(self, *, body_container: ui.element, header_secondary: ui.element, header_tertiary: ui.element) -> None:
-        """Render responsive layout with drawers for mobile."""
-        header_secondary.clear()
-        header_tertiary.clear()
+    def render(self, *, header_container: ui.element, body_container: ui.element) -> None:
+        """Render responsive layout with a unified header and scrollable body."""
+        header_container.clear()
+        body_container.clear()
 
-        with header_secondary:
-            ui.element().classes(
-                "w-full bg-slate-900/80 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between"
+        with header_container:
+            header_row = ui.row().classes(
+                "w-full items-center justify-between gap-2 px-3 py-1.5 text-xs md:text-sm"
             )
-            file_header_zone = header_secondary
+            with header_row:
+                file_header_zone = ui.element().classes("flex items-center gap-2 min-w-0 truncate")
+                controls_row = ui.row().classes("items-center gap-1 md:gap-2")
+                with controls_row:
+                    explorer_btn = ui.button(
+                        icon="folder_open",
+                        on_click=lambda: self.toggle_explorer(),
+                    ).props("flat dense size=sm").classes("md:hidden")
+                    explorer_btn.tooltip("Toggle Explorer")
+                    menu_header_zone = ui.element().classes("flex items-center gap-1 md:gap-2")
+                    agent_btn = ui.button(
+                        icon="smart_toy",
+                        on_click=lambda: self.toggle_agent(),
+                    ).props("flat dense size=sm").classes("md:hidden")
+                    agent_btn.tooltip("Toggle Agent")
 
-        with header_tertiary:
-            container = ui.row().classes(
-                "w-full items-center justify-between bg-slate-900/80 px-3 py-1.5 border-b border-slate-800 gap-2 text-xs"
-            )
-            with container:
-                explorer_btn = ui.button(icon="folder_open", on_click=lambda: self.toggle_explorer()).props("flat dense size=sm").classes("md:hidden")
-                explorer_btn.tooltip("Toggle Explorer")
-                menu_header_zone = ui.element().classes("flex-1 text-xs")
-                agent_btn = ui.button(icon="smart_toy", on_click=lambda: self.toggle_agent()).props("flat dense size=sm").classes("md:hidden")
-                agent_btn.tooltip("Toggle Agent")
-
-        body_container.classes("relative flex-1 flex overflow-hidden")
-        with body_container as main_container:
+        with body_container:
+            main_container = ui.element().classes("relative flex w-full h-full min-h-0")
             with main_container:
                 # Explorer drawer (mobile: overlay, desktop: static tile)
                 explorer_drawer = ui.element()

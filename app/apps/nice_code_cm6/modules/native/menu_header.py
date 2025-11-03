@@ -15,7 +15,7 @@ class MenuHeaderModule(Module):
 
     def render(self, container: ui.element) -> None:
         with container:
-            with ui.row().classes("gap-1 items-center text-xs"):
+            with ui.row().classes("gap-1 items-center text-xs justify-end"):
                 ui.button("File").props("flat dense size=sm")
                 ui.button("Edit").props("flat dense size=sm")
                 

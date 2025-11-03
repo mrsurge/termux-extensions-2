@@ -16,4 +16,4 @@ class FileHeaderModule(Module):
 
     def render(self, container: ui.element) -> None:
         with container:
-            ui.label("Untitled • No file selected").classes("text-xs text-slate-300")
+            ui.label("Untitled • No file selected").classes("text-xs text-slate-300 truncate")
