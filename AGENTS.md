@@ -2,7 +2,7 @@ I WILL NEVER, EVER, IN A MILLION YEARS, EVER EVER, NEVER, CHECK OFF A SINGLE ITE
 I WILL NEVER EVER EVER EVER EVER CHECK ANYTHING OFF ON THE TO-DO LIST. EVER.
 I will never move on to the next item on the to-do list until it's either checked off by the user or the user explicitly instructs me to do so.
 
-# Gemini Code Assistant Context
+# AGENT Code Assistant Context
 This document provides context for the `termux-extensions-2` project, a web framework for Termux that provides a mobile-friendly UI to manage and interact with the Termux environment.
 ## Project Overview
 `termux-extensions-2` is a Flask-based web framework for Termux that provides a mobile-friendly UI to manage and interact with the Termux environment. It operates as a local web server, presenting a clean UI for controlling your terminal sessions. The core functionality is delivered through a system of "extensions" and "apps" that leverage standard command-line tools to provide rich, interactive control over your Termux sessions.
@@ -10,17 +10,18 @@ This document provides context for the `termux-extensions-2` project, a web fram
 *   **Backend:** Python, Flask, Gunicorn
 *   **Frontend:** Vanilla JavaScript, HTML, CSS
 *   **Real-time:** WebSockets (via `flask-sock`) for the terminal app.
-  ## JavaScript Convention
-  - JavaScript is ONLY for:
-    1. Displaying what the backend sends
-    2. Capturing user input and sending to backend
-    3. WebSocket message routing (no processing!)
-  - JavaScript must NOT:
-    1. Store state (backend owns all state)
-    2. Process/transform data (backend does this)
-    3. Implement business logic
-    4. Make decisions
-  - If you write more than 100 lines of JS, you're doing it wrong.
+## JavaScript Convention
+- JavaScript is ONLY for:
+  1. Displaying what the backend sends
+  2. Capturing user input and sending to backend
+  3. WebSocket message routing (no processing!)
+- JavaScript must NOT:
+  1. Store state (backend owns all state)
+  2. Process/transform data (backend does this)
+  3. Implement business logic
+  4. Make decisions
+- If you write more than 100 lines of JS, YOUR'E DOING IT WRONG. (Is what I must think to myself)
+- There are special exceptions where javascript is the front end for an editor (like Code CM6) But even in these cases the JS code is intended as a complex web "display server" like a display server is to a desktop environment.  It just displays the state for the user... it doesn't manage it.
 ### Architecture
 The framework is built on a modular architecture where features are encapsulated in self-contained **extensions** (under `app/extensions/`) or full-page **apps** (under `app/apps/`). The main Flask application discovers, loads, and serves these modules.
 A key architectural feature is the **on-demand app backend architecture**. To ensure resource efficiency and process isolation, app backends are launched on-demand in their own framework shells. A generic reverse proxy in the main application forwards requests to the correct worker process.
@@ -53,18 +54,14 @@ The framework includes a number of features for diagnostics and runtime manageme
 *   **Runtime Metrics API:** A REST API endpoint at `/api/framework/runtime/metrics` provides detailed runtime information.
 *   **Settings App:** A dedicated app for diagnostics, framework shell management, and other settings.
 ## Agent Operating Instructions
-- **Agent Workflow**
-  1. **Restate & Confirm Understanding**
-  2. **Investigate & Propose Plan**
-  3. **Execute Approved Plan**
-  4. **Subsequent Interactions**
+
 - **Aesthetics and Styling**: Do not modify styling, layouts, themes, or other project aesthetics without the user's explicit consent. There is no implied consent for visual changes.
 **NUMBER ONE RULE:** I MUST **NEVER EVER FOR ANY REASON UNDER ANY CIRCUMSTANCE UNLESS EXPLICITLY INSTRUCTED TO, USE GIT. THIS COMMAND MUST ALWAYS BE EXPLICIT AND NEVER IMPLIED.**
 ### Core Operating Principles & Interaction Workflow
 **1. Safety Protocol: Unsandboxed Execution**
 *   **Mandate:** I operate in an unsandboxed environment ("YOLO mode"). All actions that modify the file system or execute commands are performed directly on the user's system.
 *   **Express Consent Required:** I will **NEVER** make any changes to the codebase or file system without the user's explicit, expressed consent for a specific, detailed plan. There is no implied consent.
-**2. Standard Workflow**
+**2.Agent Standard Workflow**
 I will follow a structured, multi-step, approval-based workflow for every new task to ensure clarity, accuracy, and user control.
 *   **Step 1: Restate & Confirm Understanding**
     *   When a new task is given, my first action is to restate the prompt in a clear, structured format to confirm my understanding. This is the **"Prompt Approval"** stage.
@@ -82,3 +79,8 @@ I will follow a structured, multi-step, approval-based workflow for every new ta
 *   **Step 4: Subsequent Interactions**
     *   After the initial three-step workflow for a task is complete, our interaction for that same task can become more fluid and relaxed.
     *   However, the core principle of **Express Consent** always applies. I will always seek explicit approval before making any further changes.
+- **Agent Workflow Summary**
+  1. **Restate & Confirm Understanding**
+  2. **Investigate & Propose Plan**
+  3. **Execute Approved Plan**
+  4. **Subsequent Interactions**
