@@ -46,9 +46,9 @@ def build_shell(load_fn: Callable[[ShellContext], None], app_id: str) -> None:
 
     main_scroll = ui.element("div").classes(
         "main-scroll flex-1 w-full overflow-auto overscroll-contain text-slate-100"
-    ).style("max-width: 100vw;")
+    ).style("max-width: 100vw; height: 100%; min-height: 0;")
     with main_scroll:
-        canvas = ui.element().classes("app-body flex-1 w-full min-h-0 flex flex-col").style("max-width: 100vw;")
+        canvas = ui.element().classes("app-body flex-1 w-full min-h-0 flex flex-col").style("max-width: 100vw; height: 100%; min-height: 0;")
 
     context = ShellContext(
         header_primary=header_primary,
@@ -90,7 +90,9 @@ html, body {margin: 0; padding: 0; height: 100%; overflow: hidden; background: #
 body {color: #e2e8f0; font-family: 'Inter', sans-serif;}
 #app {height: 100%; display: flex; flex-direction: column; max-width: 100vw;}
 .nicegui-content {flex: 1 1 auto; display: flex !important; flex-direction: column !important; width: 100% !important; max-width: 100% !important; padding: 0 !important; margin: 0 !important;}
-.main-scroll {flex: 1 1 auto; display: flex; flex-direction: column; margin-top: var(--shell-header-height); height: calc(100dvh - var(--shell-header-height)); box-sizing: border-box; padding-bottom: env(safe-area-inset-bottom, 0px); background: #020617;}
+.q-page-container, .q-page {display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;}
+.q-page > div, .nicegui-page, .nicegui-page-content {display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;}
+.main-scroll {flex: 1 1 auto; display: flex; flex-direction: column; box-sizing: border-box; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--vk-offset)); background: #020617;}
 .scroll-inner {flex: 1 1 auto; display: flex; flex-direction: column; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding-bottom: var(--vk-offset);}
 .app-body {flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;}
 input, textarea, select {font-size: 16px;}

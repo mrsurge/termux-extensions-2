@@ -44,7 +44,7 @@ class LayoutManager:
                     agent_btn.tooltip("Toggle Agent")
 
         with body_container:
-            main_container = ui.element().classes("relative flex w-full h-full min-h-0")
+            main_container = ui.element().classes("relative flex flex-1 w-full min-h-0")
             with main_container:
                 # Explorer drawer (mobile: overlay, desktop: static tile)
                 explorer_drawer = ui.element()
