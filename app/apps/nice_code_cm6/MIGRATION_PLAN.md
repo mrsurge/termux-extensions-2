@@ -309,6 +309,8 @@ def on_agent_message(ws_data):
 - [ ] Implement responsive layout (mobile vs desktop)
 - [ ] Drawer behavior (mobile: full-screen, desktop: tiles)
 - [ ] Overlay system (agent drawer + third-party modules)
+- [ ] Keep shell wrappers (`.nicegui-content`, `.q-page*`, local wrapper divs) in the same flex
+      column to avoid height collapse—no manual viewport math.
 
 **Deliverable:** Complete responsive layout system
 

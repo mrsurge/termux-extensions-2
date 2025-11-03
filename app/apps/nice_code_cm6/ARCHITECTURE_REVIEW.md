@@ -54,6 +54,8 @@ app/apps/nice_code_cm6/
 - Inline toast button verifies the NiceGUI runtime without needing app-specific modules.
 - Body canvas delegates to the target app’s `build_ui` module.
 - Global `<style>` ensures true edge-to-edge rendering without white borders or scroll gaps.
+- Quasar/NiceGUI wrappers (`.q-page-container`, `.q-page`, `.nicegui-page*`) are forced into the
+  same flex column so the explorer/editor/agent stack inherits the full height beneath the headers.
 
 ### Current UI State
 - Header rows display “Untitled • No file selected” and placeholder menu buttons.

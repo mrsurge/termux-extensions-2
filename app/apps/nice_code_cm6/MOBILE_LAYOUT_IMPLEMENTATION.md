@@ -104,6 +104,11 @@ def close_all_drawers(self) -> None:
 ```
 
 ### CSS Classes Breakdown
+> **Layout Shell Note:** The NiceGUI shell forces `.q-page-container`, `.q-page`, and the local
+> wrapper divs into a shared flex column. The layout manager’s `main_container` and each module
+> zone must keep `flex-1 min-h-0` so the explorer/editor/agent stack consumes the full height
+> beneath the shared headers. The keyboard padding lives in the shell CSS; no module should
+> reintroduce viewport height math.
 
 **Explorer Drawer:**
 ```css
