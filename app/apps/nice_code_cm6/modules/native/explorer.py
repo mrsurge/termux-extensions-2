@@ -140,14 +140,86 @@ class ExplorerModule(Module):
         for entry in entries:
             self._render_entry(entry, level)
 
+    def _compute_directory_git_status(self, entry: dict) -> str:
+        """Compute inherited git status for directories based on children."""
+        if entry["kind"] != "dir":
+            return entry.get("gitStatus", "clean")
+        
+        try:
+            child_data = self.state.list_directory(entry["rel"])
+            children = child_data.get("entries", [])
+            
+            has_modified = False
+            has_untracked = False
+            has_staged_only = True
+            
+            for child in children:
+                if child["kind"] == "dir":
+                    child_status = self._compute_directory_git_status(child)
+                else:
+                    child_status = child.get("gitStatus", "clean")
+                
+                if child_status in ["modified", "staged_modified"]:
+                    has_modified = True
+                    has_staged_only = False
+                elif child_status == "untracked":
+                    has_untracked = True
+                    has_staged_only = False
+                elif child_status not in ["staged", "added", "clean"]:
+                    has_staged_only = False
+            
+            # Priority: modified > mixed > untracked > staged
+            if has_modified and has_untracked:
+                return "mixed_modified_untracked"
+            elif has_modified:
+                return "modified"
+            elif has_untracked:
+                return "untracked"
+            elif not has_staged_only and any(c.get("gitStatus") in ["staged", "added"] for c in children):
+                return "clean"  # Mixed staged + clean = neutral
+            elif any(c.get("gitStatus") in ["staged", "added"] for c in children):
+                return "staged"
+            
+            return "clean"
+        except Exception:
+            return entry.get("gitStatus", "clean")
+
+    def _get_card_background(self, git_status: str) -> str:
+        """Return background gradient based on git status."""
+        backgrounds = {
+            "modified": "linear-gradient(145deg, rgba(249,115,22,0.35), rgba(234,88,12,0.25))",  # Orange
+            "staged_modified": "linear-gradient(145deg, rgba(249,115,22,0.35), rgba(234,88,12,0.25))",  # Orange
+            "untracked": "linear-gradient(145deg, rgba(168,85,247,0.30), rgba(147,51,234,0.20))",  # Purple
+            "staged": "linear-gradient(145deg, rgba(34,197,94,0.30), rgba(22,163,74,0.20))",  # Green
+            "added": "linear-gradient(145deg, rgba(34,197,94,0.30), rgba(22,163,74,0.20))",  # Green
+            "mixed_modified_untracked": "linear-gradient(145deg, rgba(249,115,22,0.35), rgba(168,85,247,0.30))",  # Orange-purple
+            "clean": "linear-gradient(145deg, rgba(30,41,59,0.97), rgba(15,23,42,0.94))",  # Default dark
+        }
+        return backgrounds.get(git_status, backgrounds["clean"])
+
     def _render_entry(self, entry: dict, level: int) -> None:
         is_dir = entry["kind"] == "dir"
         is_expanded = self.state.is_expanded(entry["rel"]) if is_dir else False
 
-        margin_left = max(0, level * 14)
-        with ui.element("div").classes("nc-explorer-card w-full").style(
-            f"margin-left: {margin_left}px; width: calc(100% - {margin_left}px)"
-        ):
+        # Compute git status (with inheritance for directories)
+        git_status = self._compute_directory_git_status(entry) if is_dir else entry.get("gitStatus", "clean")
+        background = self._get_card_background(git_status)
+
+        margin_left = max(0, level * 8)
+        card_style = (
+            f"margin-left: {margin_left}px;"
+            f"width: calc(100% - {margin_left}px);"
+            f"background: {background};"
+            "border: 1px solid rgba(148,163,184,0.28);"
+            "border-radius: 18px;"
+            "padding: 12px 14px;"
+            "box-shadow: 0 18px 28px rgba(15,23,42,0.55);"
+            "color: rgba(226,232,240,0.96);"
+            "margin-bottom: 8px;"
+            "display: flex;"
+            "flex-direction: column;"
+        )
+        with ui.element("div").classes("nc-explorer-card w-full").style(card_style):
             with ui.row().classes("nc-explorer-card-header w-full items-center gap-2"):
                 if is_dir:
                     twisty = ui.label("▾" if is_expanded else "▸").classes("nc-explorer-twisty text-xs")
@@ -184,7 +256,15 @@ class ExplorerModule(Module):
             if is_dir and is_expanded:
                 try:
                     child_data = self.state.list_directory(entry["rel"])
-                    with ui.column().classes("nc-explorer-card-children"):
+                    child_style = (
+                        "margin-top: 6px;"
+                        "border-left: 1px solid rgba(148,163,184,0.18);"
+                        "padding-left: 12px;"
+                        "display: flex;"
+                        "flex-direction: column;"
+                        "gap: 4px;"
+                    )
+                    with ui.column().classes("nc-explorer-card-children").style(child_style):
                         self._render_directory_contents(entry["rel"], child_data.get("entries", []), level + 1)
                 except Exception:
                     pass
@@ -279,49 +359,16 @@ class ExplorerModule(Module):
         ui.add_head_html(
             """
             <style>
-            .nc-explorer-card {
-                background: linear-gradient(145deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.92));
-                border: 1px solid rgba(148, 163, 184, 0.22);
-                border-radius: 18px;
-                padding: 12px 14px;
-                box-shadow: 0 18px 28px rgba(15, 23, 42, 0.55);
-                margin-bottom: 12px;
-                display: flex;
-                flex-direction: column;
-                transition: border-color 0.2s ease, transform 0.2s ease;
-                color: rgba(226, 232, 240, 0.92);
-            }
-            .nc-explorer-card-header {
-                cursor: pointer;
-                color: inherit;
-            }
-            .nc-explorer-card-header:hover {
-                color: rgba(248, 250, 252, 0.98);
-            }
-            .nc-explorer-card:hover {
-                border-color: rgba(148, 163, 184, 0.38);
-                transform: translateY(-1px);
-            }
-            .nc-explorer-card .q-card__section {
-                background: transparent !important;
-                padding: 0 !important;
-            }
+            .nc-explorer-card-header { cursor: pointer; color: inherit; }
+            .nc-explorer-card-header:hover { color: rgba(248, 250, 252, 0.98); }
+            .nc-explorer-card:hover { border-color: rgba(148, 163, 184, 0.38); transform: translateY(-1px); }
             .nc-explorer-twisty {
                 width: 18px;
                 color: rgba(191, 219, 254, 0.8);
                 cursor: pointer;
                 user-select: none;
             }
-            .nc-explorer-card-children {
-                margin-top: 10px;
-                border-left: 1px solid rgba(148, 163, 184, 0.18);
-                padding-left: 14px;
-                display: flex;
-                flex-direction: column;
-            }
-            .nc-explorer-card * {
-                color: inherit;
-            }
+            .nc-explorer-card * { color: inherit; }
             </style>
             """
         )

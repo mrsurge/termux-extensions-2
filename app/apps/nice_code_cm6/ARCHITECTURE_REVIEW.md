@@ -63,7 +63,8 @@ app/apps/nice_code_cm6/
 
 ### Current UI State
 - Header rows expose File / Edit / View menus with project actions and terminal toggle.
-- Explorer lists the active project tree, persists expansion/recents, and opens files in the editor.
+- Explorer renders the project tree as full-width gradient cards, persists expansion/recents, and opens files in the editor.
+- Project root + recent files live in the shared `StateStore`, with `ProjectContext` enforcing on-disk boundaries.
 - Editor loads CodeMirror 6, tracks the last-opened file, and updates from explorer selections.
 - Agent drawer and terminal remain placeholders pending feature parity work.
 

@@ -138,11 +138,11 @@ class Module:
 **Goal:** Get NiceGUI running within framework
 
 **Tasks:**
-- [ ] Create `manifest.json` (app registration)
-- [ ] Create `main.py` (minimal NiceGUI app)
-- [ ] Test: App loads at `/app/nice_code_cm6`
-- [ ] Test: Worker process spawns correctly
-- [ ] Create basic layout structure (empty containers)
+- [x] Create `manifest.json` (app registration)
+- [x] Create `main.py` (minimal NiceGUI app)
+- [x] Test: App loads at `/app/nice_code_cm6`
+- [x] Test: Worker process spawns correctly
+- [x] Create basic layout structure (empty containers)
 
 **Deliverable:** "Hello TE-2" skeleton app
 
@@ -162,11 +162,11 @@ class Module:
 - `file_editor_cm6/main.js` (JS explorer rendering ❌)
 
 **Tasks:**
-- [ ] Create `modules/native/explorer.py`
-- [ ] Implement directory listing (REST API)
-- [ ] Implement tree/list rendering (NiceGUI)
-- [ ] Click handler: Open file
-- [ ] Touch-friendly list items
+- [x] Create `modules/native/explorer.py`
+- [x] Implement directory listing (REST API)
+- [x] Implement tree/list rendering (NiceGUI)
+- [x] Click handler: Open file
+- [x] Touch-friendly list items
 - [ ] Breadcrumb navigation
 - [ ] Home/up/back buttons
 
@@ -195,10 +195,10 @@ class Module:
 - Python API: `editor.open(file)`, `editor.save()`, `editor.get_text()`
 
 **Tasks:**
-- [ ] Create `modules/native/editor.py`
+- [x] Create `modules/native/editor.py`
 - [ ] Create CM6 HTML template (minimal JS)
 - [ ] Implement `ui.html()` embedding
-- [ ] REST API: Read file → load into CM6
+- [x] REST API: Read file → load into CM6
 - [ ] REST API: Save CM6 text → write file
 - [ ] Event: File opened (notify other modules)
 - [ ] Event: File saved (notify other modules)
@@ -305,11 +305,11 @@ def on_agent_message(ws_data):
 
 **Tasks:**
 - [ ] Create `modules/native/file_header.py` (current file path)
-- [ ] Create `modules/native/menu_header.py` (actions + icons)
-- [ ] Implement responsive layout (mobile vs desktop)
-- [ ] Drawer behavior (mobile: full-screen, desktop: tiles)
-- [ ] Overlay system (agent drawer + third-party modules)
-- [ ] Keep shell wrappers (`.nicegui-content`, `.q-page*`, local wrapper divs) in the same flex
+- [x] Create `modules/native/menu_header.py` (actions + icons)
+- [x] Implement responsive layout (mobile vs desktop)
+- [x] Drawer behavior (mobile: full-screen, desktop: tiles)
+- [x] Overlay system (agent drawer + third-party modules)
+- [x] Keep shell wrappers (`.nicegui-content`, `.q-page*`, local wrapper divs) in the same flex
       column to avoid height collapse—no manual viewport math.
 
 **Deliverable:** Complete responsive layout system
@@ -349,8 +349,8 @@ for module in modules:
 ```
 
 **Tasks:**
-- [ ] Create `core/module_loader.py`
-- [ ] Implement module discovery
+- [x] Create `core/module_loader.py`
+- [x] Implement module discovery
 - [ ] Implement event system (file open/save/close)
 - [ ] Implement try-loop insertion points
 - [ ] Document module API for third-party devs

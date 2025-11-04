@@ -58,6 +58,8 @@ def load_native_modules(
     if menu_module:
         if hasattr(menu_module, "attach_explorer"):
             menu_module.attach_explorer(explorer_module)
+        if hasattr(menu_module, "attach_editor"):
+            menu_module.attach_editor(editor_module)
         if hasattr(menu_module, "attach_project_context"):
             menu_module.attach_project_context(project_context)
 
