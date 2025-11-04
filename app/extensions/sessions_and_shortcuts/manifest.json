@@ -1,0 +1,11 @@
+{
+  "name": "Sessions & Shortcuts",
+  "version": "0.1.0",
+  "description": "View and interact with active Termux sessions and run shortcuts.",
+  "author": "Gemini",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  }
+}

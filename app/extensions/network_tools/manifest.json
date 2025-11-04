@@ -1,0 +1,11 @@
+{
+  "name": "Network Tools",
+  "version": "0.1.0",
+  "description": "A graphical frontend for common network utilities like ping and traceroute.",
+  "author": "Gemini",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  }
+}

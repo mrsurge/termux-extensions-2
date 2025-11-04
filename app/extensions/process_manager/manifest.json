@@ -1,0 +1,11 @@
+{
+  "name": "Process Manager",
+  "version": "0.1.0",
+  "description": "View and manage running processes.",
+  "author": "PROCESS_MANAGER_AGENT",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  }
+}

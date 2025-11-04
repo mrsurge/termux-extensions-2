@@ -1,0 +1,11 @@
+{
+  "name": "App Launcher",
+  "version": "0.1.0",
+  "description": "A launcher for full-page applications.",
+  "author": "Gemini",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  }
+}

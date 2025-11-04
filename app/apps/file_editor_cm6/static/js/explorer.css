@@ -1,0 +1,334 @@
+/* app/apps/file_editor_cm6/static/js/explorer.css */
+
+/* explorer.css - File Explorer Drawer Styles */
+
+:root {
+  --drawer-width: 100vw; /* Change from 75vw to 100vw for full width
+*/
+}
+
+/* Drawer container - positioned off-screen by default */
+.fe-drawer {
+  position: fixed;
+  top: 0;
+  left: calc(-1 * var(--drawer-width)); /* Position off-screen by its own width */
+  width: var(--drawer-width);
+  bottom: 0;
+  background: var(--card);
+  backdrop-filter: blur(12px);
+  transform: translateX(0); /* Initial transform */
+  transition: transform 0.3s ease;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Show drawer by sliding it in when root has drawer-open class */
+.fe-root.drawer-open .fe-drawer {
+  transform: translateX(var(--drawer-width)); /* Slide in by its own width */
+}
+
+/* Backdrop overlay */
+.fe-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  z-index: 99;
+}
+
+.fe-root.drawer-open .fe-drawer-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Drawer header */
+.fe-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(from var(--border) r g b / 0.2);
+}
+
+.fe-label-missing {
+  color: #f87171;
+}
+
+.drawer-action {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.drawer-action:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: #3b82f6;
+}
+
+.drawer-close {
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  background: transparent;
+  color: #e5e7eb;
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+  transition: all 0.2s;
+}
+
+.drawer-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Drawer body */
+.fe-drawer-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-x: visible;
+  overflow-y: hidden;
+}
+
+/* File tree */
+.fe-tree {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  overflow-y: auto;
+  overflow-x: visible;
+  flex: 1;
+}
+
+.fe-tree li {
+  display: grid;
+  grid-template-columns: 20px 1fr;    /* twisty column + text column*/
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s;
+  color: #e5e7eb;
+  font-size: 0.8rem;
+  border-left: 3px solid transparent;
+  border: 1px solid transparent;
+  margin-left: 20px;
+  align-items: center;
+}
+
+/* Make nested ul span the full width */
+.fe-tree li > ul {
+  grid-column: 1 / -1;         /* Span both grid columns */
+  margin: 0;
+  padding: 0;
+}
+
+.fe-tree li:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.fe-tree-twisty {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--muted, #9ca3af);
+  cursor: pointer;
+  transition: transform 0.2s ease-out;
+}
+
+.fe-tree-node[data-open="true"] .fe-tree-twisty {
+  transform: rotate(90deg);
+}
+
+.fe-tree-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;  /* Add this if not present - critical for ellipsis to
+    work */
+}
+
+/* Nested tree indentation */
+.fe-tree .fe-tree {
+  padding-left: 0;
+  width: 100%;
+}
+
+.fe-dd-item-missing {
+  opacity: 0.65;
+  font-style: italic;
+}
+
+.fe-tree-empty {
+  padding: 12px;
+  color: rgba(229, 231, 235, 0.6);
+  font-style: italic;
+}
+
+.fe-tree-label {
+  transition: color 0.15s ease;
+}
+
+.fe-entry-dir {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.fe-entry-exec {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.fe-entry-file {
+  color: rgba(229, 231, 235, 0.88);
+}
+
+.fe-entry-symlink::after {
+  content: ' ↗';
+  font-size: 0.75em;
+  opacity: 0.7;
+}
+
+.fe-tree-node.fe-git-modified {
+  border-left-color: #f97316;
+}
+
+.fe-tree-node.fe-git-staged {
+  border-left-color: #34d399;
+}
+
+.fe-tree-node.fe-git-staged-modified {
+  border-left-color: #22d3ee;
+}
+
+.fe-tree-node.fe-git-added {
+  border-left-color: #8b5cf6;
+}
+
+.fe-tree-node.fe-git-deleted {
+  border-left-color: #f87171;
+}
+
+.fe-tree-node.fe-git-renamed {
+  border-left-color: #facc15;
+}
+
+.fe-tree-node.fe-git-untracked {
+  border-left-color: #f59e0b;
+}
+
+.fe-tree-node.fe-git-ignored {
+  border-left-color: #6b7280;
+}
+
+.fe-tree-node.fe-git-conflict {
+  border-left-color: #ef4444;
+}
+
+.fe-tree-node[data-kind="dir"] {
+  border-color: rgba(96, 165, 250, 0.35);
+}
+
+.fe-tree-node[data-kind="dir"]:hover {
+  border-color: rgba(96, 165, 250, 0.6);
+}
+
+     /* Modified directories: orange border */
+     .fe-tree-node.fe-git-modified[data-kind="dir"] {
+       border-color: rgba(249, 115, 22, 0.8);  /* orange border */
+     }
+
+     /* Untracked directories: blue background */
+     .fe-tree-node.fe-git-untracked[data-kind="dir"] {
+       background: rgba(59, 130, 246, 0.15);  /* blue background */
+       border-color: rgba(59, 130, 246, 0.4); /* optional: blue border too
+   */
+     }
+
+     /* Modified files: orange background */
+     .fe-tree-node.fe-git-modified[data-kind="file"] {
+       background: rgba(249, 115, 22, 0.15);  /* orange background */
+     }
+
+     /* Untracked files: blue background */
+     .fe-tree-node.fe-git-untracked[data-kind="file"] {
+       background: rgba(59, 130, 246, 0.15);  /* blue background */
+     }
+
+     /* Hover states */
+     .fe-tree-node.fe-git-modified[data-kind="file"]:hover {
+       background: rgba(249, 115, 22, 0.22);
+     }
+
+.fe-tree-node.fe-git-untracked[data-kind="file"]:hover {
+  background: rgba(59, 130, 246, 0.22);
+}
+
+.fe-git-footer {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: rgba(8, 11, 18, 0.85);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fe-git-summary {
+  font-size: 0.75rem;
+  color: rgba(229, 231, 235, 0.7);
+  min-height: 1.2em;
+}
+
+.fe-git-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fe-git-actions .fe-btn {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  padding: 5px 10px;
+}
+
+     .fe-git-badge {
+       display: inline-flex;
+       align-items: center;
+       justify-content: center;
+       width: 1.3em;
+       height: 1.3em;
+       margin-left: 6px;
+       font-size: 0.75em;
+       font-weight: 300;           /* Thin weight */
+       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+   Helvetica, Arial, sans-serif;  /* Thin sans-serif */
+       border-radius: 50%;         /* Makes it circular */
+       line-height: 1;
+       background: transparent;    /* No background fill */
+     }
+
+     .fe-git-badge-modified {
+       border: 1.5px solid #c2410c;  /* Dark orange thin border */
+       color: #ea580c;               /* Orange-ish letter */
+     }
+
+     .fe-git-badge-untracked {
+       border: 1.5px solid #1e40af;  /* Dark blue thin border */
+       color: #2563eb;               /* Blue-ish letter */
+     }

@@ -1,0 +1,11 @@
+{
+  "name": "System Stats",
+  "version": "0.1.0",
+  "description": "Displays live CPU and Memory usage.",
+  "author": "Gemini",
+  "entrypoints": {
+    "backend_blueprint": null,
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  }
+}

@@ -1,0 +1,21 @@
+<div class="apps-launcher">
+  <div class="apps-toolbar">
+    <button id="apps-refresh-btn" class="apps-btn">Refresh</button>
+  </div>
+  <div id="apps-grid" class="apps-grid">
+    <!-- App icons will be rendered here by main.js -->
+  </div>
+</div>
+
+<style>
+  .apps-launcher { display: flex; flex-direction: column; gap: 12px; }
+  .apps-toolbar { display: flex; justify-content: flex-end; }
+  .apps-btn { background: var(--secondary); color: var(--secondary-foreground); border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+  .apps-btn:hover { background: var(--primary); color: var(--primary-foreground); }
+  .apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+  .app-card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); cursor: pointer; text-align: center; }
+  .app-card:hover { outline: 1px solid var(--ring); }
+  .app-icon { width: 56px; height: 56px; border-radius: 12px; display: grid; place-items: center; background: var(--secondary); color: var(--foreground); font-size: 28px; }
+  .app-title { font-size: 0.95em; font-weight: 600; color: var(--foreground); word-break: break-word; }
+  .apps-empty { color: var(--muted-foreground); font-style: italic; }
+</style>

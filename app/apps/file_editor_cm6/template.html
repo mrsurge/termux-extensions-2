@@ -1,0 +1,1475 @@
+<!-- app/apps/file_editor_cm6/template.html -->
+
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<title>Code Viewer (CM6)</title>
+<link rel="stylesheet" href="/apps/file_editor_cm6/static/js/explorer.css" />
+<style>
+  :root {
+    --fg: var(--foreground, #e5e7eb);
+    --bg: var(--background, #0b0f1a);
+    --card: var(--card, #0b0f1a);
+    --border: var(--border, #333);
+    --muted: var(--muted-foreground, #9ca3af);
+    --primary: var(--primary, #3b82f6);
+    --diff-marker-width: 1.65rem;
+    --diff-add-bg: rgba(52, 211, 153, 0.22);
+    --diff-add-border: rgba(52, 211, 153, 0.75);
+    --diff-add-marker: rgba(52, 211, 153, 0.9);
+    --diff-context-border: rgba(148, 163, 184, 0.35);
+    --diff-context-marker: rgba(148, 163, 184, 0.55);
+    --diff-del-bg: rgba(248, 113, 113, 0.18);
+    --diff-del-border: rgba(248, 113, 113, 0.7);
+    --diff-del-marker: rgba(248, 113, 113, 0.9);
+    --diff-del-fg: inherit;
+    --diff-del-gap: 0px;
+    --keyboard-inset: 0px;
+    --keyboard-gap: 16px;
+  }
+  .fe-root { display: flex; flex-direction: column; height: 100%; background:var(--bg); color:var(--fg); }
+
+  body.keyboard-locked {
+    overflow: hidden;
+    overscroll-behavior: contain;
+  }
+
+  .fe-root.keyboard-open {
+    padding-bottom: var(--keyboard-inset, 0px);
+    overscroll-behavior: contain;
+  }
+
+  .fe-root.keyboard-editor .cm-editor .cm-scroller {
+    padding-bottom: calc(var(--keyboard-inset, 0px) + 24px);
+  }
+
+  /* ========================================
+     RESPONSIVE LAYOUT: Desktop (Landscape)
+     ======================================== */
+
+  .fe-root.layout-desktop {
+    display: grid;
+    grid-template-columns: var(--explorer-width, 430px) 1fr var(--agent-width, 400px);
+    grid-template-rows: auto auto 1fr auto;
+    height: 93vh;
+    overflow: hidden;
+  }
+
+  /* Toolbar spans full width */
+  .layout-desktop .fe-toolbar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  /* Menubar spans full width */
+  .layout-desktop .fe-menubar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  /* Explorer becomes left sidebar - ALWAYS VISIBLE in desktop */
+  .layout-desktop .fe-drawer {
+    position: static !important;
+    transform: none !important;
+    left: auto;
+    top: auto;
+    bottom: auto;
+    width: 100%;
+    grid-column: 1;
+    grid-row: 3 / 5;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+
+  /* Hide drawer toggle button and close button in desktop */
+  .layout-desktop #fe-drawer-open,
+  .layout-desktop #fe-drawer-close {
+    display: none;
+  }
+
+  /* Hide backdrop in desktop mode */
+  .layout-desktop .fe-drawer-backdrop {
+    display: none !important;
+  }
+
+  /* Editor in middle column */
+  .layout-desktop .fe-editor-container {
+    grid-column: 2;
+    grid-row: 3;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Agent becomes right sidebar */
+  .layout-desktop .agent-drawer {
+    position: static !important;
+    transform: none !important;
+    right: auto;
+    top: auto;
+    bottom: auto;
+    width: 100%;
+    grid-column: 3;
+    grid-row: 3 / 5;
+    border-left: 1px solid var(--border);
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+    overflow-y: auto;
+    z-index: 50;
+  }
+
+  /* When agent is "closed" (open class NOT present) */
+  .layout-desktop .agent-drawer:not(.open) {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  /* Adjust grid when agent is closed */
+  .layout-desktop:has(.agent-drawer:not(.open)) {
+    grid-template-columns: var(--explorer-width, 430px) 1fr 0px;
+  }
+
+  /* Terminal is tiled in editor column only in desktop mode */
+  .layout-desktop .terminal-drawer {
+    position: static !important;
+    transform: none !important;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    grid-column: 2;
+    grid-row: 4;
+    height: var(--terminal-height, 340px);
+    border-top: 2px solid var(--border);
+    transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
+  }
+
+  /* When terminal is "closed" (open class NOT present) */
+  .layout-desktop .terminal-drawer:not(.open) {
+    opacity: 0;
+    visibility: hidden;
+    height: 0;
+    border: none;
+    pointer-events: none;
+  }
+
+  /* Adjust grid when terminal is closed in desktop */
+  .layout-desktop:has(.terminal-drawer:not(.open)) {
+    grid-template-rows: auto auto 1fr 0px;
+  }
+
+  /* Fix z-index for dropdowns in desktop mode */
+  .layout-desktop .fe-dropdown {
+    z-index: 150;
+  }
+
+  /* ========================================
+     RESPONSIVE LAYOUT: Mobile (Portrait)
+     ======================================== */
+
+  .fe-root.layout-mobile {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 1fr auto;
+    height: 94vh;
+    overflow: hidden;
+  }
+
+  .layout-mobile .fe-toolbar {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .layout-mobile .fe-menubar {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .layout-mobile .fe-editor-container {
+    grid-column: 1;
+    grid-row: 3;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Terminal becomes tiled in mobile mode */
+  .layout-mobile .terminal-drawer {
+    position: static !important;
+    transform: none !important;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    grid-column: 1;
+    grid-row: 4;
+    height: var(--terminal-height, 340px);
+    border-top: 2px solid var(--border);
+    transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
+    z-index: 50;
+  }
+
+  /* When terminal is "closed" (open class NOT present) */
+  .layout-mobile .terminal-drawer:not(.open) {
+    opacity: 0;
+    visibility: hidden;
+    height: 0;
+    border: none;
+    pointer-events: none;
+  }
+
+  /* Adjust grid when terminal is closed */
+  .layout-mobile:has(.terminal-drawer:not(.open)) {
+    grid-template-rows: auto auto 1fr 0px;
+  }
+
+  /* ========================================
+     RESIZE HANDLES
+     ======================================== */
+
+  .resize-handle {
+    background: transparent;
+    position: relative;
+    z-index: 50;
+    transition: background 0.2s;
+    user-select: none;
+  }
+
+  .resize-handle:hover,
+  .resize-handle.dragging {
+    background: var(--primary, #3b82f6);
+  }
+
+  /* Hide all handles by default */
+  .resize-handle {
+    display: none;
+  }
+
+  /* Explorer resize handle (vertical, desktop only) */
+  .layout-desktop .resize-handle--explorer {
+    display: block;
+    width: 5px;
+    cursor: col-resize;
+    grid-column: 1;
+    grid-row: 3 / 5;
+    justify-self: end;
+    margin-left: -5px;
+  }
+
+  /* Agent resize handle (vertical, desktop only) */
+  .layout-desktop .resize-handle--agent {
+    display: block;
+    width: 5px;
+    cursor: col-resize;
+    grid-column: 3;
+    grid-row: 3 / 5;
+    justify-self: start;
+    margin-right: -5px;
+  }
+
+  /* Terminal resize handle (horizontal, desktop only - in editor column) */
+  .layout-desktop .resize-handle--terminal {
+    display: block;
+    height: 5px;
+    cursor: row-resize;
+    grid-column: 2;
+    grid-row: 4;
+    align-self: start;
+    margin-top: -5px;
+  }
+
+  /* Terminal resize handle (horizontal, mobile only) */
+  .layout-mobile .resize-handle--terminal {
+    display: block;
+    height: 5px;
+    cursor: row-resize;
+    grid-column: 1;
+    grid-row: 4;
+    align-self: start;
+    margin-top: -5px;
+  }
+
+  /* Hide resize handles when panels are closed */
+  .layout-desktop .agent-drawer:not(.open) ~ .resize-handle--agent,
+  .layout-desktop .terminal-drawer:not(.open) ~ .resize-handle--terminal,
+  .layout-mobile .terminal-drawer:not(.open) ~ .resize-handle--terminal {
+    display: none;
+  }
+
+  .fe-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
+  .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .fe-file-name { font-size: 1rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fe-file-name.fe-unsaved::after { content: ' *'; color: var(--primary, #3b82f6); }
+  .fe-file-path { font-size: 0.75rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fe-btn { padding: 6px 10px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; flex-shrink: 0; align-self: center; }
+  .fe-btn:hover { border-color: var(--primary, #3b82f6); }
+  .fe-status { font-size: 0.75rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
+  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 13px; }
+  .fe-menu { position: relative; }
+  .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; }
+  .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
+  .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 15; }
+  .fe-dropdown.show { display: block; }
+  #recent-files-dd { left: auto; right: 0; }
+  #menu-branch-dd { left: auto; right: 0; }
+  .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; cursor: pointer; font-size: 0.9rem; align-items: center; }
+  .fe-dd-item[data-checkable="true"] { position: relative; padding-left: 32px; }
+  .fe-dd-item[data-checkable="true"]::before { content: ''; position: absolute; left: 12px; width: 1em; text-align: center; color: var(--primary, #3b82f6); }
+  .fe-dd-item[data-checkable="true"].fe-menu-item-checked::before { content: '✓'; }
+  .fe-dd-item.fe-menu-item-checked { color: var(--primary, #3b82f6); }
+  .fe-dd-item:hover { background: rgba(255,255,255,0.06); }
+  .fe-kbd { opacity: .6; font-size: 12px; }
+  .fe-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 20; }
+  .fe-modal.show { display: flex; }
+  .fe-modal-card { width: min(800px, 92vw); max-height: 80vh; background: var(--card, #0b0f1a); color: var(--foreground, #e5e7eb); border: 1px solid var(--border, #333); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
+  .fe-modal-header { display: flex; align-items: center; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border, #333); }
+  .fe-confirm-body { padding: 16px; }
+  .fe-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px; border-top: 1px solid var(--border, #333); }
+
+.fe-drawer-head { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--border); }
+  #fe-project-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  #fe-open-project { margin-left: auto; }
+
+  /* CM6-specific styles */
+  .fe-editor-container { position:relative; flex:1; min-height:0; }
+  #cm6-host { position:absolute; inset:0; display:flex; }
+  .cm-editor { flex:1; height:100%; }
+  #select-surface { position:absolute; inset:0; display:none; padding:12px; overflow:auto;
+                    background:var(--bg); color:var(--fg);
+                    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+                    white-space:pre; }
+  #select-surface.wrap { white-space:pre-wrap; word-break:break-word; }
+  #select-exit { position:absolute; right:12px; bottom:12px; display:none; }
+  #select-tip { position:absolute; left:12px; bottom:12px; font-size:.8rem; color:var(--muted); display:none; }
+  .cm-line.cm-diff-line { position: relative; padding-left: calc(var(--diff-marker-width) + 0.35rem); }
+  .cm-line.cm-diff-line::before {
+    content: attr(data-diff-marker);
+    position: absolute;
+    left: 0;
+    width: var(--diff-marker-width);
+    text-align: center;
+    font-weight: 600;
+    opacity: 0.85;
+    color: rgba(148, 163, 184, 0.65);
+  }
+  .cm-line.cm-diff-line-added { background: var(--diff-add-bg) !important; border-left: 3px solid var(--diff-add-border) !important; }
+  .cm-line.cm-diff-line-added::before { color: var(--diff-add-marker); }
+  .cm-line.cm-diff-line-context { border-left: 3px solid var(--diff-context-border); }
+  .cm-line.cm-diff-line-context::before { color: var(--diff-context-marker); }
+  .cm-line.cm-diff-line-plain { border-left: 3px solid transparent; }
+  .cm-diff-line-removed {
+    position: relative;
+    margin: 0 0 var(--diff-del-gap, 0);
+    padding: 0 10px 0 calc(var(--diff-marker-width) + 6px);
+    border-left: 3px solid var(--diff-del-border);
+    background: var(--diff-del-bg);
+    color: var(--diff-del-fg);
+    font: inherit;
+    white-space: pre;
+    line-height: inherit;
+  }
+  .cm-diff-line-removed::before {
+    content: attr(data-diff-marker);
+    position: absolute;
+    left: 0;
+    width: var(--diff-marker-width);
+    text-align: center;
+    font-weight: 600;
+    color: var(--diff-del-marker);
+  }
+  .cm-diff-removed-text { display: block; white-space: pre; }
+  .cm-diff-line-removed.cm-diff-wrap { white-space: pre-wrap; word-break: break-word; }
+  .cm-diff-line-removed.cm-diff-wrap .cm-diff-removed-text { white-space: pre-wrap; word-break: break-word; }
+  .cm-diff-line-removed + .cm-widgetBuffer,
+  .cm-widgetBuffer + .cm-diff-line-removed {
+    height: 0 !important;
+  }
+
+  /* Edit tracker flash animation */
+  .cm-edit-flash {
+    background-color: rgba(255, 200, 0, 0.3);
+    animation: edit-flash 1s ease-out;
+  }
+  
+  @keyframes edit-flash {
+    0% { background-color: rgba(255, 200, 0, 0.5); }
+    100% { background-color: transparent; }
+  }
+
+  /* Terminal drawer styles */
+  .terminal-drawer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 340px;
+    background: var(--card, #0b0f1a);
+    border-top: 2px solid var(--border, #333);
+    transform: translateY(100%);
+    transition: transform 0.3s ease, height 0.3s ease;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+  }
+  .terminal-drawer.open {
+    transform: translateY(0);
+  }
+  .terminal-drawer.fullscreen {
+    height: calc(100vh - 80px) !important;
+  }
+  .terminal-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border, #333);
+    background: var(--bg, #0b0f1a);
+    cursor: ns-resize;
+    user-select: none;
+  }
+  .terminal-header span {
+    flex: 1;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--foreground, #e5e7eb);
+    cursor: ns-resize;
+  }
+  .terminal-header button {
+    background: transparent;
+    border: none;
+    color: var(--muted-foreground, #9ca3af);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 1rem;
+  }
+  .terminal-header button:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--foreground, #e5e7eb);
+  }
+  #terminal-container {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 8px;
+    position: relative;
+  }
+  /* Custom scrollbar for xterm - solid and wide */
+  #terminal-container .xterm-viewport::-webkit-scrollbar {
+    width: 29px;
+  }
+  #terminal-container .xterm-viewport::-webkit-scrollbar-track {
+    background: var(--bg, #0b0f1a);
+  }
+  #terminal-container .xterm-viewport::-webkit-scrollbar-thumb {
+    background: var(--border, #333);
+    border-radius: 5px;
+  }
+  #terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground, #9ca3af);
+  }
+  .fe-agent-toggle { font-size: 1.1rem; line-height: 1; }
+  .fe-git-actions .fe-btn {
+    flex: 0 0 auto;
+    font-size: 0.8rem;
+    padding: 5px 10px;
+  }
+
+  /* Agent drawer */
+  .agent-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    transform: translateX(100%);
+    transition: transform 0.35s ease;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    background: rgba(7, 11, 19, 0.98);
+    backdrop-filter: blur(12px);
+    color: var(--foreground, #e5e7eb);
+    border-left: 1px solid var(--border);
+  }
+
+  .agent-drawer.open {
+    transform: translateX(0);
+  }
+
+  .agent-drawer.agent-drawer--fullscreen {
+    width: 100vw;
+  }
+
+  .agent-transcript-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
+  }
+
+  .agent-drawer.agent-drawer--keyboard {
+    overflow: hidden;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-drawer__body {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-section {
+    pointer-events: none;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-section--current-session,
+  .agent-drawer.agent-drawer--keyboard .agent-section--stats {
+    opacity: 0;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-section--transcript {
+    pointer-events: auto;
+    position: absolute;
+    inset: 16px 16px calc(var(--keyboard-inset, 0px) + 16px) 16px;
+    margin: 0;
+    padding: 16px;
+    border-radius: 14px;
+    background: rgba(6, 10, 18, 0.95);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    box-shadow: 0 22px 45px rgba(0, 0, 0, 0.55);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-section--transcript h3 {
+    display: none;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-transcript-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-transcript {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 14px;
+    background: transparent;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-transcript > * {
+    width: 100%;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-composer {
+    position: static;
+    background: rgba(4, 7, 12, 0.92);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    border-radius: 12px;
+    padding: 12px;
+    margin: 0;
+    gap: 12px;
+    pointer-events: auto;
+  }
+
+  .agent-drawer.agent-drawer--keyboard .agent-composer__textarea {
+    min-height: 74px;
+  }
+
+  .agent-drawer__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(4, 7, 12, 0.9);
+  }
+
+  .agent-drawer__title {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .agent-drawer__actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .agent-drawer__body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    overflow: hidden;
+  }
+
+  .agent-section {
+    border: 1px solid rgba(37, 50, 75, 0.4);
+    border-radius: 10px;
+    padding: 16px;
+    background: rgba(6, 10, 18, 0.85);
+  }
+
+  .agent-section--sessions {
+    flex: 0 0 auto;
+  }
+
+  .agent-section--transcript {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .agent-section--stats {
+    flex: 0 0 auto;
+    margin-top: auto;
+  }
+
+  .agent-section h3 {
+    margin: 0 0 12px;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: rgba(229, 231, 235, 0.7);
+  }
+
+  /* Current Session Card */
+  .agent-current-session-card {
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(37, 50, 75, 0.35);
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .agent-current-session-card:hover {
+    background: rgba(59, 130, 246, 0.25);
+  }
+
+  .agent-current-session-card__placeholder {
+    text-align: center;
+    opacity: 0.6;
+    font-size: 0.85rem;
+  }
+
+  .agent-current-session-card__name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .agent-current-session-card__status {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10b981;
+  }
+
+  .agent-current-session-card__meta {
+    font-size: 0.75rem;
+    opacity: 0.7;
+  }
+
+  /* Sessions Modal */
+  .agent-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .agent-modal__backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .agent-modal__content {
+    position: relative;
+    background: var(--card, #0b0f1a);
+    border-radius: 8px;
+    border: 1px solid var(--border, #333);
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  }
+
+  .agent-modal__header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border, #333);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .agent-modal__header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+
+  .agent-modal__body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .agent-sessions-modal-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .agent-sessions-modal-list__item {
+    padding: 12px;
+    border-radius: 6px;
+    background: rgba(37, 50, 75, 0.35);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.2s;
+  }
+
+  .agent-sessions-modal-list__item:hover {
+    background: rgba(59, 130, 246, 0.25);
+  }
+
+  .agent-sessions-modal-list__item--active {
+    background: rgba(59, 130, 246, 0.3);
+  }
+
+  .agent-sessions-modal-list__empty {
+    text-align: center;
+    opacity: 0.6;
+    padding: 20px;
+  }
+
+  .agent-sessions-modal-list__info {
+    flex: 1;
+  }
+
+  .agent-sessions-modal-list__name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .agent-sessions-modal-list__meta {
+    font-size: 0.75rem;
+    opacity: 0.7;
+  }
+
+  .agent-sessions-modal-list__delete {
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 1.2rem;
+    padding: 4px 8px;
+    line-height: 1;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+  }
+
+  .agent-sessions-modal-list__delete:hover {
+    opacity: 1;
+  }
+
+  .agent-session-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+
+  .agent-session-list__item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(37, 50, 75, 0.35);
+    cursor: pointer;
+    font-size: 0.85rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .agent-session-list__item:hover {
+    background: rgba(59, 130, 246, 0.25);
+  }
+
+  .agent-session-list__item--active {
+    background: rgba(59, 130, 246, 0.3);
+    /* Removed border-left to avoid conflict with message bubble styling */
+  }
+
+  .agent-session-list__item--stale {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: rgba(239, 68, 68, 0.1);
+  }
+
+  .agent-session-stale-badge {
+    color: #f59e0b;
+    font-size: 0.75rem;
+    margin-left: 4px;
+  }
+
+  .agent-session-list__item--empty {
+    text-align: center;
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  .agent-session-delete {
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 1.2rem;
+    padding: 0 4px;
+    line-height: 1;
+    opacity: 0.6;
+  }
+
+  .agent-session-delete:hover {
+    opacity: 1;
+  }
+
+  .agent-transcript {
+    flex: 1;
+    border: 1px solid rgba(59, 130, 246, 0.15);
+    border-radius: 8px;
+    padding: 16px;
+    background: rgba(5, 9, 15, 0.85);
+    overflow-y: auto;
+  }
+
+  .agent-transcript__placeholder {
+    text-align: center;
+    opacity: 0.5;
+    margin-top: 40px;
+  }
+
+  .agent-transcript__planning {
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.2);
+    border-left: 2px solid rgba(156, 163, 175, 0.5);
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    opacity: 0.7;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .agent-transcript__planning-label {
+    color: #9ca3af;
+    flex-shrink: 0;
+  }
+
+  .agent-transcript__planning-text {
+    color: #d1d5db;
+    white-space: pre-wrap;
+    flex: 1;
+  }
+
+  .agent-transcript__bubble {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(59, 130, 246, 0.18);
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+
+  .agent-transcript__bubble--user {
+    background: rgba(37, 214, 158, 0.2);
+    border-left: 3px solid rgba(16, 185, 129, 0.8);
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
+  }
+
+  .agent-transcript__bubble--assistant {
+    background: rgba(59, 130, 246, 0.1);
+    border-left: 3px solid #3b82f6;
+    white-space: pre-wrap;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
+  }
+
+  .agent-transcript__bubble--system {
+    background: rgba(156, 163, 175, 0.1);
+    border-left: 3px solid #9ca3af;
+    font-size: 0.85em;
+    opacity: 0.8;
+  }
+
+  .agent-transcript__bubble--error {
+    background: rgba(239, 68, 68, 0.1);
+    border-left: 3px solid #ef4444;
+    color: #fca5a5;
+  }
+
+  .agent-transcript__bubble--diff {
+    background: rgba(34, 197, 94, 0.1);
+    border-left: 3px solid #22c55e;
+  }
+
+  .agent-transcript__bubble--diff pre {
+    margin: 8px 0;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 0.8em;
+  }
+
+  .agent-transcript__bubble--diff button {
+    margin-top: 8px;
+  }
+
+  .agent-transcript__bubble--approval {
+    background: rgba(245, 158, 11, 0.1);
+    border-left: 3px solid #f59e0b;
+  }
+
+  .agent-approval-header {
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: #f59e0b;
+  }
+
+  .agent-approval-reason {
+    margin-bottom: 8px;
+    font-size: 0.9em;
+  }
+
+  .agent-approval-command,
+  .agent-approval-cwd {
+    margin-bottom: 8px;
+    font-size: 0.85em;
+  }
+
+  .agent-approval-command code,
+  .agent-approval-cwd code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    display: block;
+    margin-top: 4px;
+    word-break: break-all;
+  }
+
+  .agent-approval-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .agent-approval-btn {
+    flex: 1;
+    padding: 8px;
+    font-weight: bold;
+  }
+
+  .agent-approval-btn--approve {
+    background: rgba(34, 197, 94, 0.2);
+    border: 1px solid #22c55e;
+    color: #22c55e;
+  }
+
+  .agent-approval-btn--approve:hover:not(:disabled) {
+    background: rgba(34, 197, 94, 0.3);
+  }
+
+  .agent-approval-btn--deny {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid #ef4444;
+    color: #ef4444;
+  }
+
+  .agent-approval-btn--deny:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.3);
+  }
+
+  .agent-approval-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .agent-transcript__bubble--approval-approved {
+    border-left-color: #22c55e;
+  }
+
+  .agent-transcript__bubble--approval-denied {
+    border-left-color: #ef4444;
+  }
+
+  .agent-composer {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 16px;
+    margin-top: 16px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
+    font-size: 0.85rem;
+  }
+
+  .agent-composer__textarea {
+    width: 100%;
+    min-height: 90px;
+    resize: vertical;
+    border-radius: 8px;
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    background: rgba(4, 7, 12, 0.95);
+    color: var(--foreground, #e5e7eb);
+    padding: 10px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
+    font-size: 0.95em;
+    box-sizing: border-box;
+  }
+
+  .agent-composer__toolbar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .agent-composer__option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: rgba(229, 231, 235, 0.8);
+  }
+
+  .agent-composer__select {
+    background: rgba(4, 7, 12, 0.9);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 6px;
+    color: inherit;
+    padding: 4px 8px;
+  }
+
+  .agent-stats {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 0.8rem;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .agent-stats__status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ef4444;
+    flex-shrink: 0;
+  }
+
+  .agent-stats__status-dot.connected {
+    background: #22c55e;
+  }
+
+  .agent-stats span {
+    color: rgba(229, 231, 235, 0.7);
+  }
+
+  .agent-approval-settings {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    gap: 16px;
+  }
+
+  .agent-approval-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .agent-approval-checkbox input[type="checkbox"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .agent-approval-checkbox input[type="checkbox"]:disabled ~ span {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Agent Session Config Modal */
+  .agent-session-config {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .agent-config-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .agent-config-field span {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: rgba(229, 231, 235, 0.9);
+  }
+
+  .agent-config-field input[type="text"],
+  .agent-config-field select {
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #e5e7eb;
+    font-size: 0.9rem;
+  }
+
+  .agent-config-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 8px 0;
+  }
+
+  .agent-config-checkbox {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    cursor: pointer;
+    padding: 10px;
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+
+  .agent-config-checkbox:hover {
+    background: rgba(59, 130, 246, 0.1);
+  }
+
+  .agent-config-checkbox input[type="checkbox"] {
+    margin-top: 3px;
+    flex-shrink: 0;
+  }
+
+  .agent-config-checkbox div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .agent-config-checkbox strong {
+    font-size: 0.9rem;
+    color: #e5e7eb;
+  }
+
+  .agent-config-checkbox small {
+    font-size: 0.75rem;
+    color: rgba(229, 231, 235, 0.6);
+    line-height: 1.3;
+  }
+
+  .agent-config-checkbox input[type="checkbox"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .agent-config-checkbox:has(input:disabled) {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .agent-config-checkbox:has(input:disabled):hover {
+    background: transparent;
+  }
+
+  /* Session modal needs higher z-index than agent drawer (200) */
+  #agent-session-modal {
+    z-index: 250;
+  }
+
+</style>
+
+<div class="fe-root">
+  <aside id="fe-drawer" class="fe-drawer">
+    <header class="fe-drawer-head">
+      <span id="fe-project-label"></span>
+      <button id="fe-open-project" class="fe-btn" title="Open Project">Open Project…</button>
+      <button id="fe-drawer-close" class="fe-btn">✕</button>
+    </header>
+    <div class="fe-drawer-body">
+      <ul id="fe-file-tree" class="fe-tree" data-project=""></ul>
+      <footer class="fe-git-footer">
+        <div id="fe-git-summary" class="fe-git-summary">Git status unavailable.</div>
+        <div class="fe-git-actions">
+          <button id="fe-git-stage" class="fe-btn" type="button">Stage All</button>
+          <button id="fe-git-unstage" class="fe-btn" type="button">Unstage All</button>
+          <button id="fe-git-commit" class="fe-btn" type="button">Commit…</button>
+          <button id="fe-git-push" class="fe-btn" type="button">Push</button>
+          <button id="fe-git-pull" class="fe-btn" type="button">Pull</button>
+        </div>
+      </footer>
+    </div>
+  </aside>
+  <div class="fe-drawer-backdrop" id="fe-drawer-backdrop"></div>
+
+  <!-- Resize handle for explorer (desktop only) -->
+  <div class="resize-handle resize-handle--explorer" data-panel="explorer"></div>
+
+  <div class="fe-toolbar">
+    <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer">☰</button>
+    <div class="fe-title-block">
+      <div id="fe-file-name" class="fe-file-name" title="Current file">Untitled</div>
+      <div id="fe-file-path" class="fe-file-path" title="Current path">No file open</div>
+    </div>
+
+    <div class="fe-menu" style="position: relative; margin-left: auto;">
+      <button id="recent-files-btn" class="fe-btn" style="margin: 0;" disabled>Recent Files ▾</button>
+      <div id="recent-files-dd" class="fe-dropdown"></div>
+    </div>
+    <span id="fe-status" class="fe-status" style="display: none;"></span>
+    <span id="edit-tracker-status" class="fe-status" style="display: none; margin-left: 0.5rem;"></span>
+  </div>
+
+  <div class="fe-menubar">
+    <div class="fe-menu" id="menu-file">
+      <button class="fe-menu-btn" id="menu-file-btn">File ▾</button>
+      <div class="fe-dropdown" id="menu-file-dd">
+        <div class="fe-dd-item" id="mi-new"><span>New</span><span class="fe-kbd">Ctrl/Cmd+N</span></div>
+        <div class="fe-dd-item" id="mi-open"><span>Open…</span><span class="fe-kbd">Ctrl/Cmd+O</span></div>
+        <div class="fe-dd-item" id="mi-save"><span>Save</span><span class="fe-kbd">Ctrl/Cmd+S</span></div>
+        <div class="fe-dd-item" id="mi-saveas"><span>Save As…</span><span class="fe-kbd">Ctrl/Cmd+Shift+S</span></div>
+        <div class="fe-dd-item" id="mi-close"><span>Close</span></div>
+        <div class="fe-dd-item" id="mi-quit"><span>Quit (Clear State)</span></div>
+      </div>
+    </div>
+    <div class="fe-menu" id="menu-edit">
+      <button class="fe-menu-btn" id="menu-edit-btn">Edit ▾</button>
+      <div class="fe-dropdown" id="menu-edit-dd">
+        <div class="fe-dd-item" id="mi-undo"><span>Undo</span><span class="fe-kbd">Ctrl/Cmd+Z</span></div>
+        <div class="fe-dd-item" id="mi-redo"><span>Redo</span><span class="fe-kbd">Ctrl/Cmd+Y</span></div>
+        <div class="fe-dd-item" id="mi-cut"><span>Cut</span><span class="fe-kbd">Ctrl/Cmd+X</span></div>
+        <div class="fe-dd-item" id="mi-copy"><span>Copy</span><span class="fe-kbd">Ctrl/Cmd+C</span></div>
+        <div class="fe-dd-item" id="mi-paste"><span>Paste</span><span class="fe-kbd">Ctrl/Cmd+V</span></div>
+        <div class="fe-dd-item" id="mi-selectall"><span>Select All</span><span class="fe-kbd">Ctrl/Cmd+A</span></div>
+      </div>
+    </div>
+    <div class="fe-menu" id="menu-view">
+      <button class="fe-menu-btn" id="menu-view-btn">View ▾</button>
+      <div class="fe-dropdown" id="menu-view-dd">
+        <div class="fe-dd-item" id="mi-toggle-lines" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Show Line Numbers</span></div>
+        <div class="fe-dd-item" id="mi-toggle-shading" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Line Shading</span></div>
+        <div class="fe-dd-item" id="mi-toggle-syntax" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Syntax Highlighting</span></div>
+        <div class="fe-dd-item" id="mi-toggle-wrap" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Word Wrap</span></div>
+        <div class="fe-dd-item" id="mi-toggle-autosave" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Save</span></div>
+        <div class="fe-dd-item" id="mi-toggle-diffs" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Show Inline Diffs</span></div>
+        <div class="fe-dd-item" id="mi-track-edits" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Track Agent Edits</span></div>
+        <div class="fe-dd-item" id="mi-toggle-terminal"><span>Toggle Terminal</span><span class="fe-kbd">Ctrl/Cmd+`</span></div>
+        <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
+        <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
+      </div>
+    </div>
+    <div class="fe-menu" id="menu-theme">
+      <button class="fe-menu-btn" id="menu-theme-btn">Themes ▾</button>
+      <div class="fe-dropdown" id="menu-theme-dd">
+        <div class="fe-dd-item" data-theme="cm6-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Dark (Default)</span></div>
+        <div class="fe-dd-item" data-theme="one-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>One Dark</span></div>
+        <div class="fe-dd-item" data-theme="termux" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Termux</span></div>
+      </div>
+    </div>
+    <div class="fe-menu" id="menu-branch" style="margin-left: auto;">
+      <button class="fe-menu-btn" id="menu-branch-btn">Branch ▾</button>
+      <div class="fe-dropdown" id="menu-branch-dd"></div>
+    </div>
+    <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Agent drawer">💬</button>
+  </div>
+
+  <div class="fe-editor-container" id="editor-container">
+    <div id="cm6-host"></div>
+    <div id="select-surface" contenteditable="true" spellcheck="false"></div>
+    <button id="select-exit" class="fe-btn">Exit select mode</button>
+    <div id="select-tip">Long-press to select. Tap “Exit select mode” to return.</div>
+  </div>
+
+  <!-- Resize handle for terminal (mobile only) -->
+  <div class="resize-handle resize-handle--terminal" data-panel="terminal"></div>
+
+  <!-- Terminal Drawer -->
+  <div id="terminal-drawer" class="terminal-drawer">
+    <div class="terminal-header">
+      <span>Terminal</span>
+      <button id="terminal-fullscreen" title="Toggle fullscreen" aria-label="Fullscreen">⛶</button>
+      <button id="terminal-collapse" title="Collapse terminal" aria-label="Collapse">▼</button>
+      <button id="terminal-close" title="Destroy terminal" aria-label="Close terminal">✕</button>
+    </div>
+    <div id="terminal-container"></div>
+  </div>
+
+  <!-- Resize handle for agent (desktop only) -->
+  <div class="resize-handle resize-handle--agent" data-panel="agent"></div>
+
+  <!-- Agent Drawer -->
+  <aside id="agent-drawer" class="agent-drawer" aria-hidden="true">
+    <header class="agent-drawer__header">
+      <div class="agent-drawer__title">Agent Sessions</div>
+      <div class="agent-drawer__actions">
+        <button class="fe-btn" id="agent-new-session">New Session</button>
+        <button class="fe-btn" id="agent-close">✕</button>
+      </div>
+    </header>
+    <div class="agent-drawer__body">
+      <section class="agent-section agent-section--current-session" aria-label="Current agent session">
+        <h3>Current Session</h3>
+        <div id="agent-current-session-card" class="agent-current-session-card">
+          <div class="agent-current-session-card__placeholder">No active session</div>
+        </div>
+      </section>
+      <section class="agent-section agent-section--transcript" aria-label="Agent transcript">
+        <h3>Transcript</h3>
+        <div class="agent-transcript-panel">
+          <div class="agent-transcript" id="agent-transcript">
+            <div class="agent-transcript__placeholder">Start a session to see the conversation stream here.</div>
+          </div>
+          <div class="agent-composer">
+            <textarea id="agent-input" class="agent-composer__textarea" placeholder="Message the agent..."></textarea>
+            <div class="agent-composer__toolbar">
+              <label class="agent-composer__option">
+                <span>Target</span>
+                <select id="agent-target" class="agent-composer__select">
+                  <option value="codex">Codex</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </label>
+              <button class="fe-btn" id="agent-send">Send</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <footer class="agent-stats" id="agent-stats">
+        <div class="agent-stats__status-dot" id="agent-status-dot"></div>
+        <span>Session: <span id="agent-status-text">Disconnected</span></span>
+        <span>Agent: <span id="agent-type-text">—</span></span>
+      </footer>
+    </div>
+  </aside>
+
+  <!-- Sessions List Modal -->
+  <div id="agent-sessions-modal" class="agent-modal" style="display: none;">
+    <div class="agent-modal__backdrop"></div>
+    <div class="agent-modal__content">
+      <header class="agent-modal__header">
+        <h2>Sessions</h2>
+        <button class="fe-btn" id="agent-sessions-modal-close">✕</button>
+      </header>
+      <div class="agent-modal__body">
+        <ul id="agent-sessions-modal-list" class="agent-sessions-modal-list">
+          <li class="agent-sessions-modal-list__empty">No sessions yet</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent Session Config Modal -->
+  <div id="agent-session-modal" class="fe-modal" aria-hidden="true">
+    <div class="fe-modal-card" style="max-width: 420px;">
+      <div class="fe-modal-header">
+        <strong>New Agent Session</strong>
+        <span style="flex:1"></span>
+        <button id="agent-session-modal-close" class="fe-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="fe-modal-body">
+        <div class="agent-session-config">
+          <label class="agent-config-field">
+            <span>Session Name (optional)</span>
+            <input type="text" id="agent-session-name" placeholder="e.g., Bug fix for login" />
+          </label>
+          
+          <label class="agent-config-field">
+            <span>Agent</span>
+            <select id="agent-session-type">
+              <option value="codex">Codex</option>
+              <option value="gemini">Gemini</option>
+            </select>
+          </label>
+          
+          <div class="agent-config-divider"></div>
+          
+          <label class="agent-config-checkbox">
+            <input type="checkbox" id="agent-session-auto" />
+            <div>
+              <strong>Auto-approve safe commands</strong>
+              <small>Auto-approves diffs/patches, asks for shell commands (workspace write only)</small>
+            </div>
+          </label>
+          
+          <label class="agent-config-checkbox" id="agent-session-full-label">
+            <input type="checkbox" id="agent-session-full" disabled />
+            <div>
+              <strong>Full system access</strong>
+              <small>Same approval behavior, but grants full system access when approved</small>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="fe-modal-actions">
+        <button id="agent-session-cancel" class="fe-btn">Cancel</button>
+        <button id="agent-session-create" class="fe-btn fe-btn-primary">Create Session</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fe-confirm" class="fe-modal" aria-hidden="true">
+    <div class="fe-modal-card" style="max-width: 520px;">
+      <div class="fe-modal-header">
+        <strong>Unsaved Changes</strong>
+        <span style="flex:1"></span>
+        <button id="fe-confirm-close" class="fe-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="fe-confirm-body">
+        <p>You have unsaved changes. Save them before continuing?</p>
+      </div>
+      <div class="fe-confirm-actions">
+        <button id="fe-discard" class="fe-btn">Discard</button>
+        <button id="fe-save-confirm" class="fe-btn">Save</button>
+        <button id="fe-cancel" class="fe-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="module" src="main.js"></script>

@@ -1,0 +1,14 @@
+{
+  "name": "Code Viewer (CM6)",
+  "id": "file_editor_cm6",
+  "icon_emoji": "\ud83d\udcd1",
+  "version": "0.1.0",
+  "description": "A full-page CodeMirror 6 editor with native Android selection mode (long-press).",
+  "author": "mrSurge",
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  },
+  "fullscreen": true
+}

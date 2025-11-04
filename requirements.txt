@@ -1,0 +1,7 @@
+Flask
+gunicorn
+flask-sock
+simple-websocket
+libarchive-c>=5.1
+requests
+libarchive
