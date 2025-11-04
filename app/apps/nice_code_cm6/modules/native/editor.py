@@ -217,6 +217,10 @@ class EditorModule(Module):
         self._current_file = absolute
         self._is_dirty = False
         
+        # Detect and set language based on file extension
+        language = self._detect_language(absolute.name)
+        self._editor.set_language(language)
+        
         # Get file metadata
         file_meta = _get_file_meta(absolute)
         self._current_base_sha256 = file_meta.get("sha256")
@@ -250,6 +254,70 @@ class EditorModule(Module):
                 print(f"[EditorModule] Failed to start file watcher: {e}")
 
     # ----------------------------------------------------------------- helpers
+    def _detect_language(self, filename: str) -> str:
+        """Detect language based on file extension."""
+        ext_to_lang = {
+            # Python
+            '.py': 'python',
+            '.pyw': 'python',
+            '.pyi': 'python',
+            # JavaScript/TypeScript
+            '.js': 'javascript',
+            '.jsx': 'javascript',
+            '.ts': 'typescript',
+            '.tsx': 'typescript',
+            '.mjs': 'javascript',
+            '.cjs': 'javascript',
+            # Web
+            '.html': 'html',
+            '.htm': 'html',
+            '.css': 'css',
+            '.scss': 'css',
+            '.sass': 'css',
+            '.less': 'css',
+            # Markup
+            '.json': 'json',
+            '.xml': 'xml',
+            '.yaml': 'yaml',
+            '.yml': 'yaml',
+            '.toml': 'toml',
+            '.md': 'markdown',
+            '.markdown': 'markdown',
+            # Shell
+            '.sh': 'shell',
+            '.bash': 'shell',
+            '.zsh': 'shell',
+            # C/C++
+            '.c': 'c',
+            '.h': 'c',
+            '.cpp': 'cpp',
+            '.hpp': 'cpp',
+            '.cc': 'cpp',
+            '.cxx': 'cpp',
+            # Java/Kotlin
+            '.java': 'java',
+            '.kt': 'kotlin',
+            # Go
+            '.go': 'go',
+            # Rust
+            '.rs': 'rust',
+            # Ruby
+            '.rb': 'ruby',
+            # PHP
+            '.php': 'php',
+            # SQL
+            '.sql': 'sql',
+            # Config files
+            '.conf': 'shell',
+            '.cfg': 'shell',
+            '.ini': 'shell',
+        }
+        
+        # Get extension (lowercase)
+        ext = '.' + filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+        
+        return ext_to_lang.get(ext, 'plaintext')
+
     def _load_initial_document(self) -> None:
         if not (self.project_context and self.state_store):
             return

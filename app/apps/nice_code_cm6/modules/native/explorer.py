@@ -56,19 +56,19 @@ class ExplorerModule(Module):
 
     def _render_header(self) -> None:
         with ui.row().classes(
-            "w-full items-center justify-between px-3 py-2 border-b border-slate-700 bg-slate-800"
-        ):
-            with ui.row().classes("flex-1 items-center gap-2 min-w-0"):
-                ui.icon("folder_open").classes("text-blue-400 text-sm flex-shrink-0")
+            "w-full items-center justify-between border-b border-slate-700 bg-slate-800"
+        ).style("padding: 2px;"):
+            with ui.row().classes("flex-1 items-center gap-1 min-w-0"):
+                ui.icon("folder_open").classes("text-blue-400 text-xs flex-shrink-0")
                 project_text = str(self.state.get_project()) if self.project_label is None else self.project_label.text
                 self.project_label = ui.label(project_text).classes("text-xs text-slate-300 truncate")
 
             with ui.row().classes("gap-1 flex-shrink-0"):
-                with ui.button(icon="history", on_click=self._show_recents_menu).props("flat dense size=sm"):
+                with ui.button(icon="history", on_click=self._show_recents_menu).props("flat dense size=xs"):
                     ui.tooltip("Recent Files")
-                with ui.button(icon="create_new_folder", on_click=self.open_project_prompt).props("flat dense size=sm"):
+                with ui.button(icon="create_new_folder", on_click=self.open_project_prompt).props("flat dense size=xs"):
                     ui.tooltip("Change Project Root")
-                with ui.button(icon="refresh", on_click=self._refresh_tree).props("flat dense size=sm"):
+                with ui.button(icon="refresh", on_click=self._refresh_tree).props("flat dense size=xs"):
                     ui.tooltip("Refresh Explorer")
 
         if self.project_label:
@@ -88,16 +88,16 @@ class ExplorerModule(Module):
 
         with self.git_summary_container:
             if git_status:
-                with ui.row().classes("w-full items-center justify-between px-3 py-1"):
-                    with ui.row().classes("items-center gap-2"):
-                        ui.icon("git_branch").classes("text-purple-400 text-sm")
+                with ui.row().classes("w-full items-center justify-between").style("padding: 2px;"):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.icon("git_branch").classes("text-purple-400 text-xs")
                         ui.label(git_status.branch).classes("text-xs text-slate-200")
                         if git_status.ahead > 0:
                             ui.label(f"↑{git_status.ahead}").classes("text-xs text-green-400")
                         if git_status.behind > 0:
                             ui.label(f"↓{git_status.behind}").classes("text-xs text-orange-400")
 
-                    with ui.row().classes("items-center gap-2 text-xs"):
+                    with ui.row().classes("items-center gap-1 text-xs"):
                         if git_status.staged:
                             ui.label(f"S:{len(git_status.staged)}").classes("text-green-400")
                         if git_status.unstaged:
@@ -105,14 +105,14 @@ class ExplorerModule(Module):
                         if git_status.untracked:
                             ui.label(f"U:{len(git_status.untracked)}").classes("text-gray-400")
 
-                with ui.row().classes("w-full gap-1 px-3 py-1"):
+                with ui.row().classes("w-full gap-1").style("padding: 2px;"):
                     ui.button("Stage", on_click=self._git_stage_all).props("dense size=xs flat").classes("text-xs")
                     ui.button("Unstage", on_click=self._git_unstage_all).props("dense size=xs flat").classes("text-xs")
                     ui.button("Commit", on_click=self._git_commit).props("dense size=xs flat").classes("text-xs")
                     ui.button("Push", on_click=self._git_push).props("dense size=xs flat").classes("text-xs")
                     ui.button("Pull", on_click=self._git_pull).props("dense size=xs flat").classes("text-xs")
             else:
-                with ui.row().classes("w-full px-3 py-1"):
+                with ui.row().classes("w-full").style("padding: 2px;"):
                     ui.label("Not a git repository").classes("text-xs text-slate-500")
 
     def _render_file_tree(self) -> None:
@@ -286,7 +286,7 @@ class ExplorerModule(Module):
                 "flex-direction: column;"
             )
         with ui.element("div").classes("nc-explorer-card w-full").style(card_style):
-            with ui.row().classes("nc-explorer-card-header w-full items-center gap-2"):
+            with ui.row().classes("nc-explorer-card-header w-full items-center gap-1").style("padding: 2px;"):
                 if is_dir:
                     twisty = ui.label("▾" if is_expanded else "▸").classes("nc-explorer-twisty text-xs")
                     twisty.on("click", lambda e=entry: self._toggle_directory(e))
