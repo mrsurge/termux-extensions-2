@@ -801,37 +801,55 @@ def _before_request_init():
     start_background_tasks(app)
 
 
-# @app.route('/api/create_directory', methods=['POST'])
-# def create_directory():
-#     """Creates a new directory at a given path."""
-#     data = request.get_json()
-#     if not data or 'path' not in data or 'name' not in data:
-#         return jsonify({'error': 'Path and name are required.'}), 400
-# 
-#     base_path = os.path.expanduser(data['path'])
-#     new_dir_name = data['name']
-# 
-#     # Basic security: ensure we are still within the home directory
-#     if not os.path.abspath(base_path).startswith(os.path.expanduser('~')):
-#         return jsonify({'error': 'Access denied'}), 403
-#     
-#     # Prevent invalid directory names
-#     if '/' in new_dir_name or '..' in new_dir_name:
-#         return jsonify({'error': 'Invalid directory name'}), 400
-# 
-#     try:
-#         os.makedirs(os.path.join(base_path, new_dir_name), exist_ok=True)
-#         return jsonify({'status': 'success'})
-#     except Exception as e:
-#         return jsonify({'error': str(e)}), 500
+@app.route('/api/app/file_explorer/mkdir', methods=['POST'])
+def file_explorer_mkdir():
+    """Create a new directory under the given base path (used by shared file picker)."""
+    data = request.get_json(silent=True) or {}
+    base_path = data.get('path')
+    new_dir_name = (data.get('name') or '').strip()
+    if not base_path or not new_dir_name:
+        return jsonify({"ok": False, "error": 'Path and name are required'}), 400
+
+    # Basic safety: stay under HOME and disallow path separators in name
+    home_dir = os.path.expanduser('~')
+    base_abs = os.path.abspath(os.path.expanduser(base_path))
+    if not base_abs.startswith(home_dir):
+        return jsonify({"ok": False, "error": 'Access denied'}), 403
+    if '/' in new_dir_name or '\\' in new_dir_name or '..' in new_dir_name:
+        return jsonify({"ok": False, "error": 'Invalid directory name'}), 400
+
+    target = os.path.join(base_abs, new_dir_name)
+    try:
+        os.makedirs(target, exist_ok=True)
+        return jsonify({"ok": True, "data": {"path": target}})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route('/api/app/<app_id>/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
 def proxy_app_request(app_id, subpath):
+    # Optional debug override propagation via query
+    dbg = request.args.get('debug')
+    dbg_port = request.args.get('debug_port')
+    old_dbg = os.environ.get('TE_NICEGUI_DEBUG')
+    old_port = os.environ.get('TE_NICEGUI_DEBUG_PORT')
     try:
+        if dbg or dbg_port:
+            os.environ['TE_NICEGUI_DEBUG'] = '1'
+            if dbg_port:
+                os.environ['TE_NICEGUI_DEBUG_PORT'] = str(dbg_port)
         app_info = ensure_app_running(app_id)
     except (ValueError, RuntimeError) as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        if old_dbg is None:
+            os.environ.pop('TE_NICEGUI_DEBUG', None)
+        else:
+            os.environ['TE_NICEGUI_DEBUG'] = old_dbg
+        if old_port is None:
+            os.environ.pop('TE_NICEGUI_DEBUG_PORT', None)
+        else:
+            os.environ['TE_NICEGUI_DEBUG_PORT'] = old_port
 
     if not app_info or not app_info.get('port'):
         # This can happen if the app has no backend

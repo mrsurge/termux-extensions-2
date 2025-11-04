@@ -54,7 +54,7 @@ Build a **modular, Python-first** code editor with:
 ```
 app/apps/nice_code_cm6/
 ├── manifest.json
-├── main.py                    # App entry point
+├── nccm6.py                   # ENTRY POINT - project root source of truth
 ├── modules/
 │   ├── native/                # Built-in modules
 │   │   ├── explorer.py        # File browser

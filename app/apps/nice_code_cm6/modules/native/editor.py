@@ -10,7 +10,6 @@ from nicegui import ui
 from nicegui.elements.codemirror import CodeMirror
 
 from ...core.module import Module
-from ...core.project_context import ProjectContext
 from ...helpers.state_store import StateStore
 from ...helpers.file_watcher import FileSubscription
 from ...helpers.autosave import AutosaveManager
@@ -37,10 +36,10 @@ class EditorModule(Module):
 
     def __init__(
         self,
-        project_context: Optional[ProjectContext] = None,
+        project_root: Optional[Path] = None,
         state_store: Optional[StateStore] = None,
     ):
-        self.project_context = project_context
+        self.project_root = project_root
         self.state_store = state_store
         self._editor: Optional[CodeMirror] = None
         self._file_label: Optional[ui.label] = None
@@ -94,8 +93,8 @@ class EditorModule(Module):
                 self._editor = editor
                 
                 # Initialize autosave manager
-                if self.project_context:
-                    self._autosave_manager = AutosaveManager(self.project_context.root_path)
+                if self.project_root:
+                    self._autosave_manager = AutosaveManager(self.project_root)
                 
                 self._load_initial_document()
                 self._load_theme()
@@ -192,7 +191,7 @@ class EditorModule(Module):
 
     def open_file(self, relative_path: str | Path) -> None:
         """Load a project file into the editor."""
-        if not self.project_context:
+        if not self.project_root:
             ui.notify("No project selected", type="warning")
             return
         if not self._editor:
@@ -200,8 +199,16 @@ class EditorModule(Module):
             return
 
         try:
-            absolute = self.project_context.ensure_within_root(relative_path)
-        except ValueError as exc:
+            # Validate path is within project root
+            candidate = Path(relative_path)
+            if candidate.is_absolute():
+                absolute = candidate.resolve()
+            else:
+                absolute = (self.project_root / candidate).resolve()
+            
+            if not str(absolute).startswith(str(self.project_root)):
+                raise ValueError(f"Path {absolute} is outside project root")
+        except Exception as exc:
             ui.notify(str(exc), type="negative")
             return
 
@@ -226,18 +233,18 @@ class EditorModule(Module):
         self._current_base_sha256 = file_meta.get("sha256")
         
         if self._file_label:
-            self._file_label.text = str(absolute.relative_to(self.project_context.root_path))
+            self._file_label.text = str(absolute.relative_to(self.project_root))
         if self.state_store:
             self.state_store.set_value(
                 "editor",
                 "last_file",
-                str(absolute.relative_to(self.project_context.root_path)),
+                str(absolute.relative_to(self.project_root)),
             )
         
         # Initialize watcher and subscribe to file changes
-        if self._live_updates_enabled and self.project_context:
+        if self._live_updates_enabled and self.project_root:
             try:
-                init_watcher(self.project_context.root_path)
+                init_watcher(self.project_root)
                 
                 # Stop previous subscription if any
                 if self._file_subscription:
@@ -319,7 +326,7 @@ class EditorModule(Module):
         return ext_to_lang.get(ext, 'plaintext')
 
     def _load_initial_document(self) -> None:
-        if not (self.project_context and self.state_store):
+        if not (self.project_root and self.state_store):
             return
         last_file = self.state_store.get_value("editor", "last_file")
         if last_file:
@@ -380,8 +387,8 @@ class EditorModule(Module):
         self._is_dirty = True
         
         # Schedule autosave if enabled
-        if self._autosave_enabled and self._autosave_manager and self.project_context:
-            rel_path = str(self._current_file.relative_to(self.project_context.root_path))
+        if self._autosave_enabled and self._autosave_manager and self.project_root:
+            rel_path = str(self._current_file.relative_to(self.project_root))
             op_id = uuid.uuid4().hex[:8]
             
             self._autosave_manager.schedule_save(

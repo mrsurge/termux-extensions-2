@@ -54,12 +54,13 @@ Inline styles (applied in Python) set background, border, shadow, padding, and f
 
 ### Project Controls
 - **History** menu: lists recent files captured by `ExplorerState.recent_files`.
-- **Change Project** prompts for a new root (guarded by `ProjectContext.set_root`).
+- **Change Project** prompts for a new root (writes to `StateStore`, ONLY place that modifies project root).
 - **Refresh** forces a git-cache refresh and rebuilds the card waterfall.
 
 ## Integration Points
 
-- Explorer state lives in `helpers/explorer_backend.py`.
+- **Project Root Management:** `nccm6.py` reads from `StateStore` on startup and passes `Path` to all modules.
+- Explorer state lives in `helpers/explorer_backend.py` - `set_project()` is the ONLY writer of project root.
 - Card rendering is defined in `modules/native/explorer.py`.
 - Layout toggles (mobile overlay vs desktop tile) are managed by `core/layout_manager.py`.
 - On mobile, the backdrop uses `.te-mobile-header-offset` to align with the shared shell header.

@@ -7,12 +7,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import List, Optional
 
-from typing import TYPE_CHECKING
-
 from .state_store import StateStore
-
-if TYPE_CHECKING:  # pragma: no cover - type hint convenience
-    from ..core.project_context import ProjectContext
 
 # Import the battle-tested helpers from file_editor_cm6
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "file_editor_cm6"))
@@ -56,7 +51,7 @@ class ExplorerState:
     """Global explorer state shared by the NiceGUI app."""
 
     def __init__(self) -> None:
-        self.project_context: Optional[ProjectContext] = None
+        self.project_root: Optional[Path] = None
         self.state_store: Optional[StateStore] = None
         self.expanded_dirs: set[str] = set()
         self.recent_files: List[str] = []
@@ -64,20 +59,15 @@ class ExplorerState:
         self._bound = False
 
     # ----------------------------------------------------------------- binding
-    def bind(self, project_context: "ProjectContext", state_store: StateStore) -> None:
-        if self._bound and self.project_context is project_context and self.state_store is state_store:
+    def bind(self, project_root: Path, state_store: StateStore) -> None:
+        if self._bound and self.project_root == project_root and self.state_store is state_store:
             return
-        self.project_context = project_context
+        self.project_root = project_root
         self.state_store = state_store
         data = state_store.get_section("explorer", {})
         self.expanded_dirs = set(data.get("expanded_dirs", []))
         self.recent_files = data.get("recent_files", [])
         self._bound = True
-        self._apply_project_root(project_context.root_path)
-
-    def _apply_project_root(self, root: Path) -> None:
-        with suppress(Exception):
-            set_project_root(str(root))
 
     def _persist(self) -> None:
         if not self.state_store:
@@ -90,19 +80,36 @@ class ExplorerState:
 
     # ----------------------------------------------------------------- project
     def set_project(self, path: str) -> Path:
-        if not self.project_context:
-            raise RuntimeError("Project context not bound")
-        root = self.project_context.set_root(path)
+        """Change project root - writes to StateStore and syncs legacy helper."""
+        if not self.state_store:
+            raise RuntimeError("State store not bound")
+        
+        # Validate and normalize path
+        root = Path(path).expanduser().resolve()
+        if not root.exists():
+            raise FileNotFoundError(f"Project root not found: {path}")
+        if not root.is_dir():
+            raise NotADirectoryError(f"Project root is not a directory: {path}")
+        
+        # Write to disk (ONLY place that writes project root)
+        self.state_store.set_value("project", "root", str(root))
+        
+        # Update in-memory state
+        self.project_root = root
         self.expanded_dirs.clear()
         self.recent_files.clear()
         self._persist()
-        self._apply_project_root(root)
+        
+        # Sync legacy helper
+        with suppress(Exception):
+            set_project_root(str(root))
+        
         return root
 
     def get_project(self) -> Path:
-        if not self.project_context:
-            raise RuntimeError("Project context not bound")
-        return self.project_context.root_path
+        if not self.project_root:
+            raise RuntimeError("Project root not bound")
+        return self.project_root
 
     # ---------------------------------------------------------------- directory
     def list_directory(self, rel: str = ".") -> dict:
@@ -134,9 +141,9 @@ class ExplorerState:
         self._persist()
 
     def recent_absolute_paths(self) -> List[Path]:
-        if not self.project_context:
+        if not self.project_root:
             return []
-        return [self.project_context.ensure_within_root(rel) for rel in self.recent_files]
+        return [(self.project_root / rel).resolve() for rel in self.recent_files]
 
     # ---------------------------------------------------------------------- git
     def get_git_status(self) -> Optional[GitStatus]:

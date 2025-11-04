@@ -23,11 +23,31 @@ apps_bp = Blueprint('apps', __name__)
 
 @apps_bp.route('/api/apps/<app_id>/start', methods=['POST'])
 def start_app(app_id):
+    payload = request.get_json(silent=True) or {}
+    debug = payload.get('debug') or request.args.get('debug')
+    debug_port = payload.get('debug_port') or request.args.get('debug_port')
+    # Temporarily set debug env for this launch
+    old_dbg = os.environ.get('TE_NICEGUI_DEBUG')
+    old_port = os.environ.get('TE_NICEGUI_DEBUG_PORT')
     try:
+        if debug or debug_port:
+            os.environ['TE_NICEGUI_DEBUG'] = '1'
+            if debug_port:
+                os.environ['TE_NICEGUI_DEBUG_PORT'] = str(debug_port)
         app_info = ensure_app_running(app_id)
         return jsonify({"ok": True, "data": app_info})
     except (ValueError, RuntimeError) as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        # Restore previous env
+        if old_dbg is None:
+            os.environ.pop('TE_NICEGUI_DEBUG', None)
+        else:
+            os.environ['TE_NICEGUI_DEBUG'] = old_dbg
+        if old_port is None:
+            os.environ.pop('TE_NICEGUI_DEBUG_PORT', None)
+        else:
+            os.environ['TE_NICEGUI_DEBUG_PORT'] = old_port
 
 @apps_bp.route('/api/apps/<app_id>/quit', methods=['POST'])
 def quit_app(app_id: str):
@@ -111,7 +131,30 @@ def app_shell(app_id):
 
     entrypoints = manifest.get('entrypoints', {})
     if entrypoints.get('nicegui_shell'):
-        app_info = ensure_app_running(app_id)
+        # Allow debug port override via query params
+        debug = request.args.get('debug')
+        debug_port = request.args.get('debug_port')
+        old_dbg = os.environ.get('TE_NICEGUI_DEBUG')
+        old_port = os.environ.get('TE_NICEGUI_DEBUG_PORT')
+        try:
+            if debug or debug_port:
+                os.environ['TE_NICEGUI_DEBUG'] = '1'
+                os.environ['TE_NICEGUI_DEBUG_PORT'] = str(debug_port or '12234')
+            # Propagate main app origin so worker can call /api/* back to main
+            host_only = request.host.split(':')[0]
+            scheme = request.scheme
+            os.environ['TE_MAIN_BASE_URL'] = f"{scheme}://{host_only}"
+            app_info = ensure_app_running(app_id)
+        finally:
+            os.environ.pop('TE_MAIN_BASE_URL', None)
+            if old_dbg is None:
+                os.environ.pop('TE_NICEGUI_DEBUG', None)
+            else:
+                os.environ['TE_NICEGUI_DEBUG'] = old_dbg
+            if old_port is None:
+                os.environ.pop('TE_NICEGUI_DEBUG_PORT', None)
+            else:
+                os.environ['TE_NICEGUI_DEBUG_PORT'] = old_port
         port = app_info.get('port') if isinstance(app_info, dict) else None
         if not port:
             return abort(502)

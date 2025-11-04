@@ -9,7 +9,6 @@ from typing import Optional
 from nicegui import ui
 
 from ...core.module import Module
-from ...core.project_context import ProjectContext
 from ...helpers.explorer_backend import ExplorerState, get_explorer_state
 from ...helpers.state_store import StateStore
 
@@ -20,15 +19,15 @@ class ExplorerModule(Module):
     def __init__(
         self,
         layout_manager=None,
-        project_context: Optional[ProjectContext] = None,
+        project_root: Optional[Path] = None,
         state_store: Optional[StateStore] = None,
     ):
         self.layout_manager = layout_manager
-        self.project_context = project_context
+        self.project_root = project_root
         self.state_store = state_store
         self.state: ExplorerState = get_explorer_state()
-        if project_context and state_store:
-            self.state.bind(project_context, state_store)
+        if project_root and state_store:
+            self.state.bind(project_root, state_store)
 
         self.tree_container: Optional[ui.element] = None
         self.git_summary_container: Optional[ui.element] = None
@@ -348,6 +347,12 @@ class ExplorerModule(Module):
 
     def _open_relative_file(self, relative_path: str, display_name: Optional[str] = None) -> None:
         self.state.add_recent_file(relative_path)
+        # Update per-project sidecar recents via orchestrator
+        try:
+            from ...nccm6 import get_orchestrator
+            get_orchestrator().record_file_open(relative_path)
+        except Exception:
+            pass
         if self._editor:
             self._editor.open_file(relative_path)
             if display_name:
@@ -377,13 +382,22 @@ class ExplorerModule(Module):
         ui.notify("Recent files cleared")
 
     async def open_project_prompt(self) -> None:
-        current = json.dumps(str(self.state.get_project()))
-        result = await ui.run_javascript(f'prompt("Enter project path:", {current})', timeout=30.0)
-        if result:
+        # Use shared JS file picker to select a project directory
+        from ...nccm6 import get_orchestrator
+        js = (
+            "return (async () => { try {"
+            "const res = await window.teFilePicker.openDirectory({ selectLabel: 'Use Folder' });"
+            "return res && res.path ? res.path : null;"
+            "} catch (e) { return null; } })();"
+        )
+        try:
+            selected = await ui.run_javascript(js, timeout=120.0)
+        except Exception:
+            selected = None
+        if selected:
             try:
-                self.state.set_project(result)
-                self.reload_for_new_project()
-                ui.notify(f"Project changed to: {result}")
+                get_orchestrator().open_project(selected)
+                ui.notify(f"Project changed to: {selected}")
             except Exception as exc:
                 ui.notify(f"Error: {exc}", type="negative")
 

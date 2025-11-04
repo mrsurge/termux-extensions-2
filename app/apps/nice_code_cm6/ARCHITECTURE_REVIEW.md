@@ -1,6 +1,6 @@
 ## NiceGUI Code CM6 — Architecture Review
 
-_Last updated: November 3, 2025_
+_Last updated: November 4, 2025_
 
 ### Overview
 - The Code CM6 app now runs as a **standalone NiceGUI worker** launched through a shared shell (`app/apps/nicegui_shell/worker.py`).
@@ -22,12 +22,11 @@ _Last updated: November 3, 2025_
 ```
 app/apps/nice_code_cm6/
 ├── manifest.json
-├── nccm6.py                    # Bootstraps modules + layout
+├── nccm6.py                    # ENTRY POINT - reads project root, bootstraps modules
 ├── core/
 │   ├── module.py               # Base Module contract
 │   ├── module_loader.py        # Reflective loader (native modules)
-│   ├── layout_manager.py       # Phase-1 layout grid
-│   └── project_context.py      # Project root resolution & guardrails
+│   └── layout_manager.py       # Phase-1 layout grid
 ├── modules/
 │   ├── native/
 │   │   ├── file_header.py
@@ -70,7 +69,8 @@ app/apps/nice_code_cm6/
 ### Current UI State
 - Header rows expose File / Edit / View menus with project actions, terminal toggle, and editor settings.
 - Explorer renders the project tree as full-width gradient cards with git status backgrounds (orange=modified, purple=untracked, green=staged).
-- Project root + recent files live in the shared `StateStore`, with `ProjectContext` enforcing on-disk boundaries.
+- **Project root management:** `nccm6.py` is the SINGLE SOURCE OF TRUTH - reads from `StateStore` on startup, passes `Path` to all modules.
+- **Project changes:** ONLY `ExplorerState.set_project()` writes to disk via dialog; no circular writes on startup.
 - Editor loads CodeMirror 6 with 12 themes (6 dark, 6 light), word wrap, zebra stripes, and live file streaming.
 - Live file updates: watches open files and auto-reloads on external changes (ON by default).
 - Autosave: debounced writes with SHA256 conflict detection (OFF by default).

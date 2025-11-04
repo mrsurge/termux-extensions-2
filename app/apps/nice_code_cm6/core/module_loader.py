@@ -25,7 +25,7 @@ def _iter_module_classes(package_path: str, package_name: str) -> Sequence[Type[
 def load_native_modules(
     *,
     layout_manager=None,
-    project_context=None,
+    project_root=None,
     state_store=None,
 ) -> List[Module]:
     """Instantiate all native modules shipped with the app."""
@@ -35,15 +35,15 @@ def load_native_modules(
         package_name="app.apps.nice_code_cm6.modules.native",
     ):
         if cls.__name__ == "MenuHeaderModule":
-            instance = cls(layout_manager=layout_manager, project_context=project_context)
+            instance = cls(layout_manager=layout_manager, project_root=project_root)
         elif cls.__name__ == "ExplorerModule":
             instance = cls(
                 layout_manager=layout_manager,
-                project_context=project_context,
+                project_root=project_root,
                 state_store=state_store,
             )
         elif cls.__name__ == "EditorModule":
-            instance = cls(project_context=project_context, state_store=state_store)
+            instance = cls(project_root=project_root, state_store=state_store)
         else:
             instance = cls()
         modules.append(instance)
@@ -60,8 +60,8 @@ def load_native_modules(
             menu_module.attach_explorer(explorer_module)
         if hasattr(menu_module, "attach_editor"):
             menu_module.attach_editor(editor_module)
-        if hasattr(menu_module, "attach_project_context"):
-            menu_module.attach_project_context(project_context)
+        if hasattr(menu_module, "attach_project_root"):
+            menu_module.attach_project_root(project_root)
 
     for instance in modules:
         instance.on_mount()

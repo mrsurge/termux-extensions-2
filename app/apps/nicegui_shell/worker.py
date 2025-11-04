@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from nicegui import app as nicegui_app, ui
+import json
 
 # SHELL SERVES AS SHARED BLUEPRINT FOR ALL NICEGUI APPS.
 # KEEP CHANGES GENERIC AND REUSABLE ACROSS MODULES.
@@ -83,7 +84,56 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--port", required=True, type=int)
     args = parser.parse_args(argv)
 
+    # Debug mode: force fixed port when enabled via env
+    dbg_port = os.getenv("TE_NICEGUI_DEBUG_PORT")
+    if not dbg_port and os.getenv("TE_NICEGUI_DEBUG", "").lower() in {"1", "true", "yes", "on"}:
+        dbg_port = "12234"
+    if dbg_port:
+        try:
+            args.port = int(dbg_port)
+            print(f"[nicegui_shell] Debug mode: forcing port {args.port}")
+        except Exception:
+            pass
+
     builder = import_builder(args.module)
+
+    # Expose shared JS (file picker) under a stable path
+    try:
+        app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        static_js_dir = os.path.join(app_dir, 'static', 'js')
+        if os.path.isdir(static_js_dir):
+            nicegui_app.add_static_files('/te-js', static_js_dir)
+    except Exception:
+        pass
+
+    # Configure API base for shared components to talk to main app
+    main_base = os.getenv("TE_MAIN_BASE_URL")
+    if main_base:
+        ui.add_head_html(
+            f"""
+<script>
+  window.TE_API_BASE = {json.dumps(main_base)};
+  (function() {{
+    const origFetch = window.fetch;
+    window.fetch = function(input, init) {{
+      try {{
+        const url = (typeof input === 'string') ? input : (input && input.url) || '';
+        if (url && url.startsWith('/api/')) {{
+          const rewritten = window.TE_API_BASE + url;
+          if (typeof input === 'string') return origFetch(rewritten, init);
+          const req = new Request(rewritten, input);
+          return origFetch(req, init);
+        }}
+      }} catch (e) {{}}
+      return origFetch(input, init);
+    }};
+  }})();
+</script>
+"""
+        )
+
+    # Load shared file picker as an ES module
+    ui.add_head_html('<script type="module" src="/te-js/file_picker.js"></script>')
 
     ui.add_head_html(
         """<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">

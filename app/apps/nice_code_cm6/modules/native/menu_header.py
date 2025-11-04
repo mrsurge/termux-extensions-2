@@ -7,16 +7,17 @@ from typing import Optional
 
 from nicegui import ui
 
+from pathlib import Path
+
 from ...core.module import Module
-from ...core.project_context import ProjectContext
 
 
 class MenuHeaderModule(Module):
     _styles_injected = False
 
-    def __init__(self, layout_manager=None, project_context: Optional[ProjectContext] = None):
+    def __init__(self, layout_manager=None, project_root: Optional[Path] = None):
         self.layout_manager = layout_manager
-        self.project_context = project_context
+        self.project_root = project_root
         self._explorer_module = None
         self._editor_module = None
 
@@ -31,8 +32,8 @@ class MenuHeaderModule(Module):
     def attach_editor(self, editor_module) -> None:
         self._editor_module = editor_module
 
-    def attach_project_context(self, project_context: ProjectContext | None) -> None:
-        self.project_context = project_context
+    def attach_project_root(self, project_root: Path | None) -> None:
+        self.project_root = project_root
 
     # ---------------------------------------------------------------- renderers
     def render(self, container: ui.element) -> None:
@@ -68,20 +69,11 @@ class MenuHeaderModule(Module):
 
     # ---------------------------------------------------------------- actions
     async def _open_project_via_prompt(self) -> None:
+        # Delegate to explorer module which has the proper dialog
         if self._explorer_module and hasattr(self._explorer_module, "open_project_prompt"):
             await self._explorer_module.open_project_prompt()
-            return
-        if not self.project_context:
-            ui.notify("Project context unavailable", type="warning")
-            return
-        current = json.dumps(str(self.project_context.root_path))
-        result = await ui.run_javascript(f'prompt("Enter project path:", {current})', timeout=30.0)
-        if result and self.project_context:
-            try:
-                self.project_context.set_root(result)
-                ui.notify(f"Project changed to: {result}")
-            except Exception as exc:
-                ui.notify(f"Error: {exc}", type="negative")
+        else:
+            ui.notify("Explorer not loaded", type="warning")
 
     def _refresh_explorer(self) -> None:
         if self._explorer_module and hasattr(self._explorer_module, "refresh_view"):
