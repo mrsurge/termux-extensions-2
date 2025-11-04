@@ -39,7 +39,13 @@ app/apps/nice_code_cm6/
 │   └── third_party/            # Reserved for future plugin modules
 ├── helpers/
 │   ├── explorer_backend.py     # File tree backing services
-│   └── state_store.py          # JSON-backed settings cache
+│   ├── state_store.py          # JSON-backed settings cache
+│   ├── core_read.py            # File watcher & subscriptions (from file_editor_cm6)
+│   ├── core_write.py           # Atomic writes with conflict detection
+│   ├── edit_tracker.py         # Agent/terminal edit tracking
+│   ├── diff_helper.py          # Git diff utilities
+│   ├── file_watcher.py         # NiceGUI subscription adapter
+│   └── autosave.py             # Autosave manager with debouncing
 └── static/cm6/                 # Placeholder for CM6 assets
 ```
 
@@ -62,28 +68,69 @@ app/apps/nice_code_cm6/
   same flex column so the explorer/editor/agent stack inherits the full height beneath the headers.
 
 ### Current UI State
-- Header rows expose File / Edit / View menus with project actions and terminal toggle.
-- Explorer renders the project tree as full-width gradient cards, persists expansion/recents, and opens files in the editor.
+- Header rows expose File / Edit / View menus with project actions, terminal toggle, and editor settings.
+- Explorer renders the project tree as full-width gradient cards with git status backgrounds (orange=modified, purple=untracked, green=staged).
 - Project root + recent files live in the shared `StateStore`, with `ProjectContext` enforcing on-disk boundaries.
-- Editor loads CodeMirror 6, tracks the last-opened file, and updates from explorer selections.
+- Editor loads CodeMirror 6 with 12 themes (6 dark, 6 light), word wrap, zebra stripes, and live file streaming.
+- Live file updates: watches open files and auto-reloads on external changes (ON by default).
+- Autosave: debounced writes with SHA256 conflict detection (OFF by default).
+- Edit tracker: infrastructure ready for terminal/agent integration (OFF by default).
 - Agent drawer and terminal remain placeholders pending feature parity work.
+
+### Completed Features
+- ✅ Git status card backgrounds (modified/untracked/staged)
+- ✅ 12 CodeMirror themes with theme picker
+- ✅ Word wrap toggle
+- ✅ Zebra stripe line shading
+- ✅ Live file streaming with watchdog
+- ✅ Autosave with debouncing (1.5s)
+- ✅ SHA256-based conflict detection
+- ✅ Find/Replace dialog UI
+- ✅ All settings persist to StateStore
 
 ### Outstanding Work
 - Explorer: implement git actions (stage/commit/push) and richer context menus.
-- Editor: surface save/write-back, diagnostics, and CM6 extensions.
+- Editor: manual save button, Find/Replace CM6 integration, diagnostics.
 - Agent Drawer & terminal: connect to framework services and streaming backends.
-- Broaden state persistence (editor settings, layout preferences) atop `helpers/state_store.py`.
+- Edit tracker: register shells when terminal/agent modules are active.
 - Add NiceGUI-based shell controls (lock, quit, recents) to match the existing Flask shell features.
 
 ### Testing Notes
 - Manual: start supervisor (`./scripts/run_framework.sh`), open `/app/nice_code_cm6`, click toast buttons.
 - Framework logs reside under `~/.cache/te_framework/logs/`; `asgi-app:nice_code_cm6` is the worker label.
 
+### Live Streaming Architecture
+
+**File Watcher System:**
+- Uses `watchdog` (or polling fallback) to monitor project files
+- Subscription-based event system with 100ms polling from NiceGUI timer
+- Self-echo suppression (300ms) prevents save flicker
+- Debounced events (150ms) reduce notification storms
+
+**Autosave Flow:**
+1. User types → mark editor dirty
+2. Cancel pending timer, schedule new save (1.5s)
+3. Timer fires → atomic write with SHA256 check
+4. On success → update base SHA256, emit save_ack
+5. Watcher receives save_ack → notify other subscribers
+
+**Conflict Resolution:**
+- Clean editor + external change → silent reload
+- Dirty editor + external change → show dialog ("Keep Mine" / "Reload")
+- Base SHA256 mismatch on save → conflict warning
+
+**Edit Tracker (Ready for Integration):**
+- Monitors terminal/agent shells for file modifications
+- Extracts line numbers from git diff
+- Will emit jump-to-line events when shells are registered
+
 ### Next Steps
-1. Build out the file explorer module with filesystem APIs.
-2. Embed CodeMirror 6 assets under `static/cm6/` and wrap them through NiceGUI.
+1. Implement git actions in explorer (stage/commit/push).
+2. Connect Find/Replace dialog to CM6 search addon.
 3. Port terminal streaming and agent drawer logic as Python modules.
-4. Expand the NiceGUI shell to include quit/lock buttons and recents overlay.
+4. Register shells with edit tracker when terminal/agent become active.
+5. Add manual "Save Now" button to File menu.
+6. Expand the NiceGUI shell to include quit/lock buttons and recents overlay.
 
 ---
-_This document covers the changes made since the repo reset (when NiceGUI files were reintroduced) up through the current modular layout stage._
+_Last updated: November 4, 2025 - Added live file streaming, autosave, and theme system._

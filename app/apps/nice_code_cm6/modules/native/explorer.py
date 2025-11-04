@@ -197,28 +197,94 @@ class ExplorerModule(Module):
         }
         return backgrounds.get(git_status, backgrounds["clean"])
 
+    def _get_translucent_background(self, git_status: str) -> str:
+        """Return translucent background (30% opacity) for files with changes."""
+        backgrounds = {
+            "modified": "rgba(249,115,22,0.30)",  # Orange translucent
+            "staged_modified": "rgba(249,115,22,0.30)",  # Orange translucent
+            "untracked": "rgba(168,85,247,0.30)",  # Purple translucent
+            "staged": "rgba(34,197,94,0.30)",  # Green translucent
+            "added": "rgba(34,197,94,0.30)",  # Green translucent
+            "mixed_modified_untracked": "rgba(208,100,130,0.30)",  # Mixed color translucent
+            "clean": "transparent",
+        }
+        return backgrounds.get(git_status, "transparent")
+
     def _render_entry(self, entry: dict, level: int) -> None:
         is_dir = entry["kind"] == "dir"
         is_expanded = self.state.is_expanded(entry["rel"]) if is_dir else False
 
         # Compute git status (with inheritance for directories)
         git_status = self._compute_directory_git_status(entry) if is_dir else entry.get("gitStatus", "clean")
-        background = self._get_card_background(git_status)
-
+        
+        # Determine if this entry needs a card
+        is_root = (level == 0 and is_dir)  # Root project directory
+        has_git_changes = git_status != "clean"
+        needs_card = is_root or is_dir or (not is_dir and has_git_changes)
+        
         margin_left = max(0, level * 8)
-        card_style = (
-            f"margin-left: {margin_left}px;"
-            f"width: calc(100% - {margin_left}px);"
-            f"background: {background};"
-            "border: 1px solid rgba(148,163,184,0.28);"
-            "border-radius: 18px;"
-            "padding: 12px 14px;"
-            "box-shadow: 0 18px 28px rgba(15,23,42,0.55);"
-            "color: rgba(226,232,240,0.96);"
-            "margin-bottom: 8px;"
-            "display: flex;"
-            "flex-direction: column;"
-        )
+        
+        # Build card style based on type
+        if is_root:
+            # Root project: full opaque card with gradient
+            background = self._get_card_background(git_status)
+            card_style = (
+                f"margin-left: {margin_left}px;"
+                f"width: calc(100% - {margin_left}px);"
+                f"background: {background};"
+                "border: 1px solid rgba(148,163,184,0.28);"
+                "border-radius: 18px;"
+                "padding: 12px 14px;"
+                "box-shadow: 0 18px 28px rgba(15,23,42,0.55);"
+                "color: rgba(226,232,240,0.96);"
+                "margin-bottom: 4px;"  # Tighter spacing for root children
+                "display: flex;"
+                "flex-direction: column;"
+            )
+        elif is_dir:
+            # Subdirectories: normal cards
+            background = self._get_card_background(git_status)
+            card_style = (
+                f"margin-left: {margin_left}px;"
+                f"width: calc(100% - {margin_left}px);"
+                f"background: {background};"
+                "border: 1px solid rgba(148,163,184,0.28);"
+                "border-radius: 18px;"
+                "padding: 12px 14px;"
+                "box-shadow: 0 18px 28px rgba(15,23,42,0.55);"
+                "color: rgba(226,232,240,0.96);"
+                "margin-bottom: 4px;"  # Tighter spacing for siblings
+                "display: flex;"
+                "flex-direction: column;"
+            )
+        elif has_git_changes:
+            # Files with changes: 30% opacity translucent fill, no border
+            background = self._get_translucent_background(git_status)
+            card_style = (
+                f"margin-left: {margin_left}px;"
+                f"width: calc(100% - {margin_left}px);"
+                f"background: {background};"
+                "border: none;"
+                "border-radius: 12px;"
+                "padding: 8px 10px;"
+                "color: rgba(226,232,240,0.96);"
+                "margin-bottom: 4px;"  # Consistent 4px spacing
+                "display: flex;"
+                "flex-direction: column;"
+            )
+        else:
+            # Clean files: naked (no card, just text)
+            card_style = (
+                f"margin-left: {margin_left}px;"
+                f"width: calc(100% - {margin_left}px);"
+                "background: transparent;"
+                "border: none;"
+                "padding: 6px 8px;"
+                "color: rgba(226,232,240,0.96);"
+                "margin-bottom: 4px;"  # Consistent 4px spacing
+                "display: flex;"
+                "flex-direction: column;"
+            )
         with ui.element("div").classes("nc-explorer-card w-full").style(card_style):
             with ui.row().classes("nc-explorer-card-header w-full items-center gap-2"):
                 if is_dir:
