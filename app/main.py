@@ -27,8 +27,37 @@ from app.libs.app_lifecycle import start_background_tasks
 from app.libs.app_manager import ensure_app_running
 from app.libs.bookmarks import bookmarks_bp
 
-# Create FastAPI app instance
-app = FastAPI()
+# Create FastAPI app instance with lifespan
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app_instance):
+    """Startup/shutdown logic for FastAPI app."""
+    # Startup
+    print("--- Loading Settings ---")
+    _apply_settings_to_config()
+    print("--- Loading Services ---")
+    load_services()
+    print("--- Loading Extensions ---")
+    global _loaded_extensions, loaded_apps
+    _loaded_extensions = load_extensions()
+    print(f"Loaded {len(_loaded_extensions)} extensions.")
+    print("--- Loading Apps ---")
+    loaded_apps = load_apps()
+    # Store in app_manager module so ensure_app_running can access it
+    from app.libs import app_manager
+    app_manager._LOADED_APPS = loaded_apps
+    print(f"Loaded {len(loaded_apps)} apps.")
+    print("--- Starting Framework Shell Log Monitor ---")
+    global _log_monitor_thread
+    _log_monitor_thread = _start_framework_shell_log_monitor()
+    
+    yield
+    
+    # Shutdown (if needed)
+    pass
+
+app = FastAPI(lifespan=lifespan)
 
 # Mount static files
 from fastapi.staticfiles import StaticFiles
@@ -62,7 +91,8 @@ except Exception:  # pragma: no cover - psutil may be unavailable.
     psutil = None  # type: ignore
 
 # Pre-initialize to avoid NameError if imported differently
-loaded_extensions = []
+_loaded_extensions = []
+loaded_extensions = []  # Keep for backwards compatibility
 loaded_apps = []
 
 SETTINGS_FILE = Path(os.path.expanduser('~/.cache/termux_extensions/settings.json'))
@@ -478,9 +508,11 @@ def load_services():
 
 def load_extensions():
     """Scans for extensions, loads their blueprints, and returns their manifests."""
+    print("[LOAD] Starting extension loading...")
     extensions = []
     extensions_dir = os.path.join(os.path.dirname(__file__), 'extensions')
     if not os.path.exists(extensions_dir):
+        print(f"[LOAD] Extensions directory not found: {extensions_dir}")
         return []
 
     for ext_name in os.listdir(extensions_dir):
@@ -490,6 +522,7 @@ def load_extensions():
         if not os.path.isdir(ext_path) or not os.path.exists(manifest_path):
             continue
 
+        print(f"[LOAD] Loading extension: {ext_name}")
         with open(manifest_path, 'r') as f:
             manifest = json.load(f)
             manifest['_ext_dir'] = ext_name
@@ -497,12 +530,14 @@ def load_extensions():
 
         backend_file = manifest.get('entrypoints', {}).get('backend_blueprint')
         if backend_file:
+            print(f"[LOAD]   - Found backend_blueprint: {backend_file}")
             module_name = f"app.extensions.{ext_name}.{backend_file.replace('.py', '')}"
             spec = importlib.util.spec_from_file_location(module_name, os.path.join(ext_path, backend_file))
             try:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)  # may raise anything
             except BaseException as e:
+                print(f"[LOAD ERROR] Failed to load extension '{ext_name}': {type(e).__name__}: {e}")
                 manifest['__load_error__'] = f"{type(e).__name__}: {e}"
                 manifest['__load_trace__'] = traceback.format_exc()[-2048:]
             else:
@@ -510,14 +545,16 @@ def load_extensions():
                 try:
                     for obj_name in dir(module):
                         obj = getattr(module, obj_name)
-                        if isinstance(obj, (Blueprint, APIRouter)):
+                        if isinstance(obj, APIRouter):
                             if ext_name == 'apps':
-                                app.include_router(obj, url_prefix='')
+                                app.include_router(obj)  # No prefix for apps
+                                print(f"[LOAD] Registered APIRouter from extension: {ext_name} (no prefix)")
                             else:
                                 app.include_router(obj, prefix=f"/api/ext/{ext_name}")
+                                print(f"[LOAD] Registered APIRouter from extension: {ext_name} -> /api/ext/{ext_name}")
                             break
                     else:
-                        manifest['__load_warning__'] = 'No Flask Blueprint found in backend module'
+                        manifest['__load_warning__'] = 'No APIRouter found in backend module'
                 except BaseException as e:
                     manifest['__load_error__'] = f"Blueprint registration failed: {type(e).__name__}: {e}"
                     manifest['__load_trace__'] = traceback.format_exc()[-2048:]
@@ -553,13 +590,45 @@ def load_apps():
     return apps
 
 
+@app.get('/extensions/{ext_dir}/{filename:path}')
+async def serve_extension_file(ext_dir: str, filename: str):
+    """Serve static files for extensions."""
+    ext_path = os.path.join(os.path.dirname(__file__), 'extensions', ext_dir, filename)
+    if not os.path.exists(ext_path):
+        raise HTTPException(status_code=404, detail="Extension file not found")
+    return FileResponse(ext_path)
+
+
 @app.get('/api/extensions')
 async def get_extensions():
     """Return list of loaded extensions."""
-    # Access the global variable set during startup
-    import app.main
-    exts = getattr(app.main, '_loaded_extensions', [])
-    return {"ok": True, "data": exts}
+    return {"ok": True, "data": _loaded_extensions}
+
+
+@app.post('/api/run_command')
+async def run_command_endpoint(payload: dict = Body(...)):
+    """Executes a shell command and returns its stdout."""
+    import subprocess
+    if not payload or 'command' not in payload:
+        raise HTTPException(status_code=400, detail='"command" field is required.')
+    
+    command = payload['command']
+    
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+        )
+        return {"ok": True, "data": {"stdout": result.stdout}}
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail={'ok': False, 'error': 'Command failed', 'stderr': e.stderr})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={'ok': False, 'error': str(e)})
 
 
 @app.get("/api/browse")
@@ -605,11 +674,12 @@ async def post_settings(payload: dict = Body(...)):
 
 
 @app.get("/api/state")
-async def get_state(keys: List[str] = Query(...)):
-    if not keys:
+async def get_state(key: List[str] = Query(...)):
+    """Get state values for one or more keys. Use ?key=x&key=y for multiple."""
+    if not key:
         raise HTTPException(status_code=400, detail="query parameter \"key\" is required")
     store = _load_state_store()
-    data = {key: store.get(key) for key in keys}
+    data = {k: store.get(k) for k in key}
     return {"ok": True, "data": data}
 
 @app.post("/api/state")
@@ -805,19 +875,6 @@ async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
 
 if __name__ == '__main__':
     import uvicorn
-    import app.main
-    print("--- Loading Settings ---")
-    _apply_settings_to_config()
-    print("--- Loading Services ---")
-    load_services()
-    print("--- Loading Extensions ---")
-    # Store in module-level variable so /api/extensions can access it
-    app.main._loaded_extensions = load_extensions()
-    print(f"Loaded {len(app.main._loaded_extensions)} extensions.")
-    print("--- Loading Apps ---")
-    loaded_apps = load_apps()
-    print(f"Loaded {len(loaded_apps)} apps.")
-    print("--- Starting Framework Shell Log Monitor ---")
-    _log_monitor_thread = _start_framework_shell_log_monitor()
     print("--- Starting ASGI Server ---")
+    # Lifespan handler will handle all initialization
     uvicorn.run("app.main:app", host='0.0.0.0', port=8088)

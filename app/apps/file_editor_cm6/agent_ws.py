@@ -17,7 +17,7 @@ import os
 import queue
 import threading
 import uuid
-from flask import request
+from fastapi import WebSocket
 from .agent_bridge import get_bridge, enrich_context
 from .agent_session_store import get_session, clear_conversation_id
 from . import edit_tracker

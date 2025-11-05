@@ -9,6 +9,14 @@ from fastapi.responses import JSONResponse
 import asyncio
 import anyio
 from .agent_ws import agent_websocket
+from .history_store import HistoryStore
+from .preferences_store import PreferencesStore
+from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty
+from .git_helper import GitError
+from . import edit_tracker
+from .diff_helper import invalidate_diff_cache
+from .core_read import init_watcher, push_save_ack, emit_diff_changed
+from .core_write import write_full, BaseMismatchError, _get_file_meta
 
 file_editor_cm6_bp = APIRouter()
 # sock = Sock()
@@ -167,7 +175,7 @@ def read_file(path: str = Query(...)):
         with open(expanded, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
         meta = _get_file_meta(Path(expanded))
-        return {"ok": True, "data": {"path": expanded, "content": content, "sha256": meta.get("sha256")}})
+        return {"ok": True, "data": {"path": expanded, "content": content, "sha256": meta.get("sha256")}}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

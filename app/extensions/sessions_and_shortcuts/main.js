@@ -285,7 +285,9 @@ async function fetchFrameworkShells() {
 
 async function fetchContainers() {
     try {
-        const data = await window.teFetch('/api/app/distro/containers');
+        // DISABLED: distro app not available in ASGI migration
+        // const data = await window.teFetch('/api/app/distro/containers');
+        const data = { ok: true, data: [] }; // Return empty list instead
         return Array.isArray(data) ? data : [];
     } catch (err) {
         console.error('Failed to load containers', err);

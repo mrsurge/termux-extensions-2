@@ -2,9 +2,12 @@ import os
 import socket
 import time
 from pathlib import Path
-from flask import current_app
 from app.libs.framework_shells import get_manager as get_framework_shell_manager
 from app.libs import app_lifecycle
+
+# Module-level storage for running apps (replaces Flask's current_app.config)
+_RUNNING_APPS = {}
+_LOADED_APPS = []
 
 def find_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -16,22 +19,21 @@ def ensure_app_running(app_id):
     Ensures an app's backend is running. If not, it spawns it.
     Returns the app's info (port, shell_id) or raises an exception.
     """
-    if 'RUNNING_APPS' not in current_app.config:
-        current_app.config['RUNNING_APPS'] = {}
-
-    if app_id in current_app.config['RUNNING_APPS']:
+    global _RUNNING_APPS
+    
+    if app_id in _RUNNING_APPS:
         # App is already running, verify the shell is alive
-        app_info = current_app.config['RUNNING_APPS'][app_id]
+        app_info = _RUNNING_APPS[app_id]
         manager = get_framework_shell_manager()
         shell = manager.get_shell(app_info.get('shell_id'))
         if shell and shell.status == 'running':
             return app_info
         # Shell is not running, remove it from the list and restart
-        current_app.config['RUNNING_APPS'].pop(app_id, None)
+        _RUNNING_APPS.pop(app_id, None)
 
     # Find the app's manifest
     app_manifest = None
-    for app_data in current_app.config.get('LOADED_APPS', []):
+    for app_data in _LOADED_APPS:
         if app_data.get('id') == app_id:
             app_manifest = app_data
             break
@@ -44,14 +46,15 @@ def ensure_app_running(app_id):
     nicegui_shell = entrypoints.get('nicegui_shell', False)
     backend_module = entrypoints.get('backend_blueprint')
 
-    project_root = os.path.join(current_app.root_path, '..')
+    # Go up 3 levels: app/libs/app_manager.py -> app/libs -> app -> project_root
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     env = {
         "PYTHONPATH": f"{os.environ.get('PYTHONPATH', '')}:{project_root}"
     }
 
     if nicegui_module and nicegui_shell:
         port = find_free_port()
-        shell_path = os.path.join(current_app.root_path, 'apps', 'nicegui_shell', 'worker.py')
+        shell_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'apps', 'nicegui_shell', 'worker.py')
         module_name = f"app.apps.{app_manifest['_dir']}.{Path(nicegui_module).stem}"
         command = [
             "python",
@@ -86,7 +89,7 @@ def ensure_app_running(app_id):
             raise RuntimeError(f"App worker failed to start: {error_output}")
 
         app_info = {"port": port, "shell_id": shell.id, "nicegui_shell": True}
-        current_app.config['RUNNING_APPS'][app_id] = app_info
+        _RUNNING_APPS[app_id] = app_info
         app_lifecycle.register_app(app_id, shell.id, port)
         return app_info
 
@@ -95,7 +98,7 @@ def ensure_app_running(app_id):
         return {"message": "No backend to start"}
 
     port = find_free_port()
-    backend_module_path = os.path.join(current_app.root_path, 'apps', app_manifest['_dir'], backend_module)
+    backend_module_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'apps', app_manifest['_dir'], backend_module)
     command = [
         "python",
         "-m",
@@ -126,6 +129,6 @@ def ensure_app_running(app_id):
         raise RuntimeError(f"App worker failed to start: {error_output}")
 
     app_info = {"port": port, "shell_id": shell.id}
-    current_app.config['RUNNING_APPS'][app_id] = app_info
+    _RUNNING_APPS[app_id] = app_info
     app_lifecycle.register_app(app_id, shell.id, port)
     return app_info

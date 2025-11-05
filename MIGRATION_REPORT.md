@@ -103,4 +103,40 @@
 - The `app/extensions/apps/main.py` file was refactored to use a global `loaded_apps` variable instead of `request.app.state.LOADED_APPS`. This was necessary to remove the dependency on the `request` object.
 - The `app/apps/file_editor_cm6/terminal_backend.py` file was not explicitly mentioned in the migration plan for the REST endpoints, but it was necessary to refactor it to remove the dependency on the `request` object.
 
+## Manual Fixes Required After Agent Migration
+
+**Baseline Commit (pre-migration):** ea3af7a8a4df895365983f18d1c89ec131738963  
+**Branch:** te-agsi
+
+The agent completed the bulk of the migration but left several critical issues that required manual fixing:
+
+### Commit: "Fix critical ASGI migration errors: add FastAPI instance, restore /api/extensions, mount static files, fix manager imports - extension routes still commented"
+**Branch:** te-agsi  
+**Commit Hash:** 9152103
+
+**Issues Fixed:**
+1. **Missing `app = FastAPI()` instance** - Agent removed the app initialization line causing NameError
+2. **Empty if statement bodies** - Agent deleted config setting logic but left empty if blocks causing IndentationError
+3. **Import errors** - Changed `_manager` to `get_manager` but missed several import statements throughout codebase
+4. **Missing `/api/extensions` route** - Agent commented out but didn't convert this route
+5. **No static file mounting** - FastAPI needs explicit StaticFiles mounting for `/static/*` paths
+6. **Missing FastAPI imports** - `Body`, `Request`, `Query`, `HTTPException` imports scattered or missing
+7. **Missing `sse-starlette` dependency** - Agent used it in jobs.py but didn't add to requirements.txt
+8. **Missing startup block** - Agent removed `if __name__ == '__main__'` without replacement
+9. **Settings persistence broken** - Converted `app.config` usage to new `get_setting()` helper function for disk-based settings
+10. **Uvicorn import issue** - Changed `uvicorn.run(app, ...)` to `uvicorn.run("app.main:app", ...)` to avoid module reference error
+11. **Extension serving broken** - `/extensions/<path>` route still commented out (not yet fixed)
+
+**Files Modified:**
+- app/main.py - Added app instance, imports, routes, static mounting, startup block
+- app/libs/framework_shells.py - Updated to read from disk settings via `get_setting()`
+- app/libs/app_lifecycle.py - Removed Flask app context, updated to use disk settings
+- app/libs/app_manager.py - Fixed `_manager` → `get_manager` import
+- Multiple files - Fixed `_manager` → `get_manager` imports across codebase
+- requirements.txt - Added `sse-starlette`
+
+**Still Outstanding:**
+- Extension static file serving route `/extensions/<ext_dir>/<filename>` not implemented
+- Two files not migrated by agent: `app/apps/file_editor_cm6/agent_routes.py`, `app/apps/file_explorer/file_explorer.py` (see ASGI_MIGRATION_SUPPLEMENTARY.md)
+
 

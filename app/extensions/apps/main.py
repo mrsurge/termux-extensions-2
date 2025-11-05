@@ -1,13 +1,21 @@
 import os
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
+
+# Get project root reliably - app module's parent
+import app
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(app.__file__)))
 import time
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from app.libs.app_manager import ensure_app_running
 from app.libs import app_lifecycle
 from app.libs.framework_shells import FrameworkShellManager, get_manager as get_framework_shell_manager
-from app.main import loaded_apps
+
+# Avoid circular import - will be accessed dynamically
+def get_loaded_apps():
+    """Get loaded apps from app.main module at runtime."""
+    import app.main
+    return app.main.loaded_apps
 
 apps_bp = APIRouter()
 
@@ -67,7 +75,7 @@ def get_running_apps(manager: FrameworkShellManager = Depends(get_framework_shel
     """Returns a list of all currently running app shells with stats."""
     running_apps = app_lifecycle.get_running_apps(manager)
     # We need to augment this with data from the main app manifests (like name and icon)
-    all_apps = {app['id']: app for app in loaded_apps}
+    all_apps = {app['id']: app for app in get_loaded_apps()}
     
     augmented_apps = []
     for app in running_apps:
@@ -85,12 +93,12 @@ def get_apps():
     This endpoint is now responsible for providing the list of available applications.
     The actual loading and blueprint registration still happens at startup in app/main.py.
     """
-    return {"ok": True, "data": loaded_apps}
+    return {"ok": True, "data": get_loaded_apps()}
 
 @apps_bp.get("/app/{app_id}", response_class=HTMLResponse)
 async def app_shell(app_id: str, request: Request):
     """Renders the appropriate shell for an app."""
-    manifest = next((app for app in loaded_apps if app.get('id') == app_id), None)
+    manifest = next((app for app in get_loaded_apps() if app.get('id') == app_id), None)
     if not manifest:
         raise HTTPException(status_code=404, detail="App not found")
 

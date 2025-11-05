@@ -12,10 +12,13 @@ from fastapi import APIRouter, Request, HTTPException, Body, Query, Depends
 import anyio
 from fastapi.responses import JSONResponse
 from .agent_bridge import get_bridge
+from app.libs.framework_shells import FrameworkShellManager, get_manager
 
 bp = APIRouter()
-    
-    @bp.post('/agent/create', status_code=201)
+
+@bp.post('/agent/create', status_code=201)
+async def agent_create(data: dict = Body(...)):
+    """
     Create a new agent session.
 
     Example:
@@ -33,8 +36,6 @@ bp = APIRouter()
             "alive": true
           }
         }
-
-
     """
     bridge = get_bridge()
     
@@ -66,9 +67,8 @@ bp = APIRouter()
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-    
-    @bp.get('/agent/list')
+
+@bp.get('/agent/list')
 async def agent_list():
     """
     List all active agent sessions.
@@ -100,7 +100,7 @@ async def agent_list():
         raise HTTPException(status_code=500, detail=str(e))
     
     
-    @bp.get('/agent/{session_id}')
+@bp.get('/agent/{session_id}')
 async def agent_info(session_id: str):
     """
     Get agent session information and statistics.
@@ -139,7 +139,7 @@ async def agent_info(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
     
     
-    @bp.delete('/agent/{session_id}')
+@bp.delete('/agent/{session_id}')
 async def agent_terminate(session_id: str):
     """
     Terminate an agent session.
@@ -164,7 +164,7 @@ async def agent_terminate(session_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-    @bp.post('/agent/send_raw')
+@bp.post('/agent/send_raw')
 async def agent_send_raw(data: dict = Body(...)):
     """
     Send raw JSON message to agent (for approval responses, etc).
@@ -190,7 +190,7 @@ async def agent_send_raw(data: dict = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-    @bp.get('/preferences/get')
+@bp.get('/preferences/get')
 async def preferences_get(key: str = Query(...)):
     """Get a preference value by key."""
     from .agent_preferences import load_preferences
@@ -203,7 +203,7 @@ async def preferences_get(key: str = Query(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-    @bp.post('/preferences/set')
+@bp.post('/preferences/set')
 async def preferences_set(data: dict = Body(...)):
     """Set a preference value by key."""
     from .agent_preferences import load_preferences, save_preferences
@@ -223,7 +223,7 @@ async def preferences_set(data: dict = Body(...)):
     
     # --- Session Management Endpoints ---
     
-    @bp.get('/agent/sessions')
+@bp.get('/agent/sessions')
 async def list_agent_sessions():
     """
     List all agent sessions with summary metadata.
@@ -256,7 +256,7 @@ async def list_agent_sessions():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-    @bp.get('/agent/session/{session_id}')
+@bp.get('/agent/session/{session_id}')
 async def get_agent_session(session_id: str):
     """
     Get full session data including message transcript.
@@ -287,25 +287,26 @@ async def get_agent_session(session_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-    @bp.post('/agent/sessions', status_code=201)
+@bp.post('/agent/sessions', status_code=201)
 async def create_agent_session(data: dict = Body(...)):
-        Create a new agent session.
+    """
+    Create a new agent session.
     
-        Example:
-            POST /api/app/file_editor_cm6/agent/sessions
-            {"name":"Debug Session","agent":"codex","cwd":"/home/user/project"}
-            
-            Response:
-            {
-              "ok": true,
-              "data": {
-                "id": "session-123",
-                "name": "Debug Session",
-                "agent": "codex",
-                "messages": [],
-                "createdAt": 1730000000
-              }
-            }
+    Example:
+        POST /api/app/file_editor_cm6/agent/sessions
+        {"name":"Debug Session","agent":"codex","cwd":"/home/user/project"}
+        
+        Response:
+        {
+          "ok": true,
+          "data": {
+            "id": "session-123",
+            "name": "Debug Session",
+            "agent": "codex",
+            "messages": [],
+            "createdAt": 1730000000
+          }
+        }
     
     """
     from .agent_session_store import create_session
@@ -338,7 +339,7 @@ async def create_agent_session(data: dict = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-    @bp.delete('/agent/session/{session_id}')
+@bp.delete('/agent/session/{session_id}')
 async def delete_agent_session(session_id: str):
     """
     Delete a session.
@@ -361,7 +362,7 @@ async def delete_agent_session(session_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-    @bp.post('/agent/session/{session_id}/send')
+@bp.post('/agent/session/{session_id}/send')
 async def send_to_agent_session(session_id: str, data: dict = Body(...)):
     """
     Send a user message to an agent session.
@@ -415,8 +416,6 @@ async def send_to_agent_session(session_id: str, data: dict = Body(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-    from app.libs.framework_shells import FrameworkShellManager, get_manager
 
 @bp.get('/agent/shell/status')
 async def get_agent_shell_status(mgr: FrameworkShellManager = Depends(get_manager)):
