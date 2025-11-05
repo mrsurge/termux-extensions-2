@@ -11,11 +11,22 @@ import anyio
 from .agent_ws import agent_websocket
 from .history_store import HistoryStore
 from .preferences_store import PreferencesStore
-from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty
-from .git_helper import GitError
+from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir
+from .git_helper import (
+    GitError,
+    list_branches as git_list_branches,
+    checkout_branch as git_checkout_branch,
+    create_branch as git_create_branch_helper,
+    get_status as git_get_status,
+    stage_all as git_stage_all,
+    unstage_all as git_unstage_all,
+    commit_changes as git_commit_changes,
+    push_changes as git_push_changes,
+    pull_changes as git_pull_changes,
+)
 from . import edit_tracker
-from .diff_helper import invalidate_diff_cache
-from .core_read import init_watcher, push_save_ack, emit_diff_changed
+from .diff_helper import invalidate_diff_cache, collect_diff
+from .core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
 from .core_write import write_full, BaseMismatchError, _get_file_meta
 
 file_editor_cm6_bp = APIRouter()

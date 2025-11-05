@@ -71,3 +71,74 @@ NEXT STEPS:
 
 --------------------------------------------------------------------------------
 
+[2025-11-05 18:33:28 UTC]
+COMMIT: e16cde6 -> 95ea688
+BRANCH: te-agsi
+HEAD STATUS: 95ea688
+
+--------------------------------------------------------------------------------
+BUG: Worker Routes Return 404 (Wrong APIRouter Selected)
+--------------------------------------------------------------------------------
+
+SYMPTOMS:
+  - App loads successfully (worker starts)
+  - GET /api/app/file_editor_cm6/state returns 404 Not Found
+  - GET /api/app/file_editor_cm6/git/branches returns 404 Not Found
+  - Only 17 routes registered instead of expected 48+
+  - Worker log shows only agent_routes_bp loaded (13 routes)
+
+ROOT CAUSE:
+  - app_worker.py loops through dir(module) looking for ANY APIRouter
+  - Finds 'agent_routes_bp' first (alphabetically before 'file_editor_cm6_bp')
+  - Stops at first match, never loads main router
+  - agent_routes_bp is a sub-router included IN file_editor_cm6_bp
+  - Result: Only agent routes registered, missing all main app routes
+
+CONVERSATION SUMMARY:
+  1. User reported routes returning 404 despite worker starting
+  2. Agent added diagnostics to app_worker.py (Phase 1 of plan)
+  3. Diagnostics revealed only agent_routes_bp (13 routes) being loaded
+  4. Agent identified alphabetical ordering issue in router selection
+  5. Proposed fix: Look for router matching {app_id}_bp naming pattern
+  6. User approved fix implementation
+  7. Agent modified app_worker.py to prioritize exact name match
+  8. User restarted framework, routes now load correctly
+  9. New issue discovered: Some routes return 500 (missing imports)
+
+FILES MODIFIED:
+  - app/libs/app_worker.py
+      * Added expected_router_name = f"{args.app_id}_bp"
+      * Changed loop to look for exact name match instead of first APIRouter
+      * Added detailed DEBUG logging for router discovery
+      * Updated error message to indicate expected router name
+
+FIX APPLIED:
+  ✓ app_worker.py now looks for router with exact name match
+  ✓ Prioritizes file_editor_cm6_bp over sub-routers
+  ✓ 48 routes now registered (44 app routes + 4 FastAPI built-ins)
+  ✓ Worker starts successfully with correct router
+
+VERIFICATION (After Restart):
+  - DEBUG: Found APIRouter 'file_editor_cm6_bp' with 44 routes → SUCCESS
+  - DEBUG: FastAPI app has 48 total routes → SUCCESS
+  - GET /api/app/file_editor_cm6/state → 200 OK ✓
+  - GET /api/app/file_editor_cm6/read → 200 OK ✓
+  - POST /api/app/file_editor_cm6/write → 200 OK ✓
+  - POST /api/app/file_editor_cm6/state/file_activity → 200 OK ✓
+
+REMAINING ISSUES:
+  ✗ GET /api/app/file_editor_cm6/diff → 500 Internal Server Error
+      Error: NameError: name 'collect_diff' is not defined (line 494)
+  ✗ GET /api/app/file_editor_cm6/git/status → 500 Internal Server Error
+  ✗ GET /api/app/file_editor_cm6/git/branches → 500 Internal Server Error
+  ✗ GET /api/app/file_editor_cm6/explorer/list → 500 Internal Server Error
+  ✗ Root cause: Missing function imports in main.py for route handlers
+
+NEXT STEPS:
+  - Add missing import: collect_diff from diff_helper
+  - Add missing git helper function imports
+  - Add missing explorer helper function imports
+  - Test all routes return 200 after import fixes
+
+--------------------------------------------------------------------------------
+
