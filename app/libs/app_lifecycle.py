@@ -14,13 +14,17 @@ CLEANUP_INTERVAL_SECONDS = 60  # 1 minute
 
 def _background_cleanup(app):
     """Periodically checks for and terminates old, unlocked apps."""
-    with app.app_context():
-        from app.libs.framework_shells import _manager as get_framework_shell_manager
-        from flask import current_app
-        while True:
-            time.sleep(CLEANUP_INTERVAL_SECONDS)
-            manager = get_framework_shell_manager()
-            app_ttl_seconds = current_app.config.get("APP_TTL_SECONDS", DEFAULT_APP_TTL_SECONDS)
+    from app.libs.framework_shells import get_manager as get_framework_shell_manager
+    from app.main import get_setting
+    
+    while True:
+        time.sleep(CLEANUP_INTERVAL_SECONDS)
+        manager = get_framework_shell_manager()
+        app_ttl_seconds = get_setting("APP_TTL_SECONDS", DEFAULT_APP_TTL_SECONDS)
+        if app_ttl_seconds is not None:
+            app_ttl_seconds = int(app_ttl_seconds)
+        else:
+            app_ttl_seconds = DEFAULT_APP_TTL_SECONDS
             with _lock:
                 now = time.time()
                 stale_apps = []

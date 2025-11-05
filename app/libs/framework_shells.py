@@ -29,7 +29,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from flask import Blueprint, current_app, jsonify, request
+from fastapi import APIRouter, Depends, Request, HTTPException, Header, Body, Query
+
+framework_shells_bp = APIRouter()
 
 
 
@@ -823,130 +825,116 @@ class FrameworkShellManager:
 
 
 # ----------------------------------------------------------------------
-# Flask blueprint
+
+
+# FastAPI blueprint
+
+
+
+
 
 from app.libs.shell_groups import terminate_group
 
-framework_shells_bp = Blueprint("framework_shells", __name__)
+_manager_instance: Optional[FrameworkShellManager] = None
+_manager_lock = threading.Lock()
 
+def get_manager() -> FrameworkShellManager:
+    global _manager_instance
+    if _manager_instance is None:
+        with _manager_lock:
+            if _manager_instance is None:
+                base_dir_setting = os.getenv("TE_FRAMEWORK_SHELL_DIR")
+                base_dir = Path(base_dir_setting) if base_dir_setting else None
+                # Try to get from settings file first, then fall back to env vars
+                try:
+                    from app.main import get_setting
+                    max_app_shells = get_setting("TE_MAX_APP_SHELLS")
+                    max_service_shells = get_setting("TE_MAX_SERVICE_SHELLS")
+                except Exception:
+                    max_app_shells = None
+                    max_service_shells = None
+                
+                # Fall back to environment variables
+                if max_app_shells is None:
+                    max_app_shells_setting = os.getenv("TE_MAX_APP_SHELLS")
+                    max_app_shells = int(max_app_shells_setting) if max_app_shells_setting else 5
+                else:
+                    max_app_shells = int(max_app_shells)
+                    
+                if max_service_shells is None:
+                    max_service_shells_setting = os.getenv("TE_MAX_SERVICE_SHELLS")
+                    max_service_shells = int(max_service_shells_setting) if max_service_shells_setting else 5
+                else:
+                    max_service_shells = int(max_service_shells)
+                token = os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
+                run_id = os.getenv("TE_RUN_ID")
+                _manager_instance = FrameworkShellManager(
+                    base_dir=base_dir,
+                    max_app_shells=max_app_shells,
+                    max_service_shells=max_service_shells,
+                    auth_token=token,
+                    run_id=run_id,
+                )
+    return _manager_instance
 
-def _manager() -> FrameworkShellManager:
-    cfg = current_app.config
-    base_dir_setting = cfg.get("TE_FRAMEWORK_SHELL_DIR") or os.getenv("TE_FRAMEWORK_SHELL_DIR")
-    base_dir = Path(base_dir_setting) if base_dir_setting else None
-    max_app_shells_setting = cfg.get("TE_MAX_APP_SHELLS") or os.getenv("TE_MAX_APP_SHELLS")
-    max_service_shells_setting = cfg.get("TE_MAX_SERVICE_SHELLS") or os.getenv("TE_MAX_SERVICE_SHELLS")
-    max_app_shells = int(max_app_shells_setting) if max_app_shells_setting else 5
-    max_service_shells = int(max_service_shells_setting) if max_service_shells_setting else 5
-    token = cfg.get("TE_FRAMEWORK_SHELL_TOKEN") or os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
-    run_id = cfg.get("TE_RUN_ID") or os.getenv("TE_RUN_ID")
-    mgr = current_app.config.get("TE_FRAMEWORK_SHELL_MANAGER")
-    if not isinstance(mgr, FrameworkShellManager):
-        mgr = FrameworkShellManager(
-            base_dir=base_dir,
-            max_app_shells=max_app_shells,
-            max_service_shells=max_service_shells,
-            auth_token=token,
-            run_id=run_id,
-        )
-        current_app.config["TE_FRAMEWORK_SHELL_MANAGER"] = mgr
-    else:
-        if run_id and mgr.run_id != run_id:
-            mgr.run_id = run_id
-            mgr.launcher_pid = os.getpid()
-            mgr._adopt_orphaned_shells()
-    return mgr
-
-
-def _check_mutation_auth() -> Optional[str]:
-    mgr = _manager()
-    if not mgr.auth_token:
-        return None
-    provided = request.headers.get("X-Framework-Key")
-    if provided == mgr.auth_token:
-        return None
-    return "Forbidden: invalid framework shell token"
-
-
-def _parse_tail_lines(default: int = LOG_TAIL_LINES) -> int:
-    try:
-        value = request.args.get("tail")
-        return max(0, int(value)) if value is not None else default
-    except ValueError:
-        return default
-
-
-@framework_shells_bp.route("/api/framework_shells", methods=["GET"])
-def list_framework_shells() -> Any:
-    mgr = _manager()
+@framework_shells_bp.get("/api/framework_shells")
+def list_framework_shells(mgr: FrameworkShellManager = Depends(get_manager)) -> Any:
     records = [mgr.describe(record) for record in mgr.list_shells()]
-    return jsonify({"ok": True, "data": records})
+    return {"ok": True, "data": records}
 
 
-@framework_shells_bp.route("/api/framework_shells", methods=["POST"])
-def create_framework_shell() -> Any:
-    error = _check_mutation_auth()
-    if error:
-        return jsonify({"ok": False, "error": error}), 403
-    payload = request.get_json(silent=True) or {}
+@framework_shells_bp.post("/api/framework_shells")
+async def create_framework_shell(mgr: FrameworkShellManager = Depends(get_manager), x_framework_key: Optional[str] = Header(None), payload: dict = Body(...)) -> Any:
+    if mgr.auth_token and x_framework_key != mgr.auth_token:
+        raise HTTPException(status_code=403, detail="Forbidden: invalid framework shell token")
     command = payload.get("command")
     if isinstance(command, str):
         command = shlex.split(command)
     if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
-        return jsonify({"ok": False, "error": "command must be a list of strings (or string)"}), 400
+        raise HTTPException(status_code=400, detail="command must be a list of strings (or string)")
     env = payload.get("env") or {}
     if not isinstance(env, dict):
-        return jsonify({"ok": False, "error": "env must be an object"}), 400
+        raise HTTPException(status_code=400, detail="env must be an object")
     label = payload.get("label")
     autostart = bool(payload.get("autostart", False))
     cwd = payload.get("cwd")
-    mgr = _manager()
     try:
         record = mgr.spawn_shell(command, cwd=cwd, env=env, label=label, autostart=autostart)
     except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 409
+        raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
-        return jsonify({"ok": False, "error": f"Failed to spawn shell: {exc}"}), 500
-    return jsonify({"ok": True, "data": mgr.describe(record)}), 201
+        raise HTTPException(status_code=500, detail=f"Failed to spawn shell: {exc}")
+    return {"ok": True, "data": mgr.describe(record)}
 
 
-@framework_shells_bp.route("/api/framework_shells/<shell_id>", methods=["GET"])
-def get_framework_shell(shell_id: str) -> Any:
-    mgr = _manager()
+@framework_shells_bp.get("/api/framework_shells/{shell_id}")
+def get_framework_shell(shell_id: str, mgr: FrameworkShellManager = Depends(get_manager), tail: int = Query(LOG_TAIL_LINES), logs: bool = Query(False)) -> Any:
     record = mgr.get_shell(shell_id)
     if not record:
-        return jsonify({"ok": False, "error": "Shell not found"}), 404
-    tail_lines = _parse_tail_lines()
-    include_logs = request.args.get("logs", "false").lower() in {"1", "true", "yes"}
-    return jsonify({"ok": True, "data": mgr.describe(record, include_logs=include_logs, tail_lines=tail_lines)})
+        raise HTTPException(status_code=404, detail="Shell not found")
+    return {"ok": True, "data": mgr.describe(record, include_logs=logs, tail_lines=tail)}
 
 
-@framework_shells_bp.route("/api/framework_shells/<shell_id>", methods=["DELETE"])
-def delete_framework_shell(shell_id: str) -> Any:
-    error = _check_mutation_auth()
-    if error:
-        return jsonify({"ok": False, "error": error}), 403
-    force = request.args.get("force", "false").lower() in {"1", "true", "yes"}
-    mgr = _manager()
+@framework_shells_bp.delete("/api/framework_shells/{shell_id}")
+def delete_framework_shell(shell_id: str, mgr: FrameworkShellManager = Depends(get_manager), x_framework_key: Optional[str] = Header(None), force: bool = Query(False)) -> Any:
+    if mgr.auth_token and x_framework_key != mgr.auth_token:
+        raise HTTPException(status_code=403, detail="Forbidden: invalid framework shell token")
     try:
         mgr.remove_shell(shell_id, force=force)
     except KeyError:
-        return jsonify({"ok": False, "error": "Shell not found"}), 404
+        raise HTTPException(status_code=404, detail="Shell not found")
     except Exception as exc:
-        return jsonify({"ok": False, "error": f"Failed to remove shell: {exc}"}), 500
-    return jsonify({"ok": True, "data": {"id": shell_id}})
+        raise HTTPException(status_code=500, detail=f"Failed to remove shell: {exc}")
+    return {"ok": True, "data": {"id": shell_id}}
 
 
-@framework_shells_bp.route("/api/framework_shells/<shell_id>/action", methods=["POST"])
-def framework_shell_action(shell_id: str) -> Any:
-    error = _check_mutation_auth()
-    if error:
-        return jsonify({"ok": False, "error": error}), 403
-    payload = request.get_json(silent=True) or {}
+@framework_shells_bp.post("/api/framework_shells/{shell_id}/action")
+async def framework_shell_action(shell_id: str, mgr: FrameworkShellManager = Depends(get_manager), x_framework_key: Optional[str] = Header(None), payload: dict = Body(...)) -> Any:
+    if mgr.auth_token and x_framework_key != mgr.auth_token:
+        raise HTTPException(status_code=403, detail="Forbidden: invalid framework shell token")
     action = (payload.get("action") or "").lower()
-    mgr = _manager()
     try:
         if action in {"stop", "terminate"}:
             record = mgr.terminate_shell(shell_id, force=False)
@@ -959,26 +947,23 @@ def framework_shell_action(shell_id: str) -> Any:
         elif action == "restart":
             record = mgr.restart_shell(shell_id)
         else:
-            return jsonify({"ok": False, "error": f"Unsupported action '{action}'"}), 400
+            raise HTTPException(status_code=400, detail=f"Unsupported action '{action}'")
     except KeyError:
-        return jsonify({"ok": False, "error": "Shell not found"}), 404
+        raise HTTPException(status_code=404, detail="Shell not found")
     except Exception as exc:
-        return jsonify({"ok": False, "error": f"Shell action failed: {exc}"}), 500
-    return jsonify({"ok": True, "data": mgr.describe(record)})
+        raise HTTPException(status_code=500, detail=f"Shell action failed: {exc}")
+    return {"ok": True, "data": mgr.describe(record)}
 
 
-@framework_shells_bp.route("/api/framework_shells/terminate_group", methods=["POST"])
-def terminate_shell_group() -> Any:
-    error = _check_mutation_auth()
-    if error:
-        return jsonify({"ok": False, "error": error}), 403
-    payload = request.get_json(silent=True) or {}
+@framework_shells_bp.post("/api/framework_shells/terminate_group")
+async def terminate_shell_group(mgr: FrameworkShellManager = Depends(get_manager), x_framework_key: Optional[str] = Header(None), payload: dict = Body(...)) -> Any:
+    if mgr.auth_token and x_framework_key != mgr.auth_token:
+        raise HTTPException(status_code=403, detail="Forbidden: invalid framework shell token")
     group = payload.get("group")
     if not isinstance(group, str) or not group:
-        return jsonify({"ok": False, "error": "group must be a non-empty string"}), 400
-    mgr = _manager()
+        raise HTTPException(status_code=400, detail="group must be a non-empty string")
     try:
         count = terminate_group(mgr, group)
     except Exception as exc:
-        return jsonify({"ok": False, "error": f"Failed to terminate group: {exc}"}), 500
-    return jsonify({"ok": True, "data": {"terminated_count": count}})
+        raise HTTPException(status_code=500, detail=f"Failed to terminate group: {exc}")
+    return {"ok": True, "data": {"terminated_count": count}}

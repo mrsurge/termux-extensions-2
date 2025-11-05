@@ -1,6 +1,9 @@
-Flask
-gunicorn
-flask-sock
+fastapi
+starlette
+uvicorn[standard]
+httpx
+websockets
+sse-starlette
 simple-websocket
 libarchive-c>=5.1
 requests

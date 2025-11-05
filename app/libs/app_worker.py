@@ -5,7 +5,8 @@ import os
 import sys
 from pathlib import Path
 
-from flask import Flask, Blueprint
+from fastapi import FastAPI, APIRouter
+import uvicorn
 
 def main():
     parser = argparse.ArgumentParser(description="Termux Extensions App Worker")
@@ -14,7 +15,7 @@ def main():
     parser.add_argument("--backend-module", required=True, help="The path to the backend module.")
     args = parser.parse_args()
 
-    app = Flask(__name__)
+    app = FastAPI()
 
     try:
         # Add project root to the Python path
@@ -28,29 +29,22 @@ def main():
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
-        blueprint_found = False
+        router_found = False
         for obj_name in dir(module):
             obj = getattr(module, obj_name)
-            if isinstance(obj, Blueprint):
-                app.register_blueprint(obj)
-                blueprint_found = True
+            if isinstance(obj, APIRouter):
+                app.include_router(obj)
+                router_found = True
                 break
         
-        if not blueprint_found:
-            raise RuntimeError(f"No Flask Blueprint found in {args.backend_module}")
-
-        sock_obj = getattr(module, "sock", None)
-        if sock_obj is not None and hasattr(sock_obj, "init_app"):
-            try:
-                sock_obj.init_app(app)
-            except Exception as sock_err:
-                raise RuntimeError(f"Failed to initialize WebSocket routes: {sock_err}") from sock_err
+        if not router_found:
+            raise RuntimeError(f"No FastAPI APIRouter found in {args.backend_module}")
 
     except Exception as e:
         print(f"Error loading app backend: {e}", file=sys.stderr)
         sys.exit(1)
 
-    app.run(host='127.0.0.1', port=args.port)
+    uvicorn.run(app, host='127.0.0.1', port=args.port)
 
 if __name__ == "__main__":
     main()

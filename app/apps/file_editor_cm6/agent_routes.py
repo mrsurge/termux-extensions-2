@@ -8,350 +8,289 @@ Provides endpoints to spawn, list, describe, and terminate agent processes.
 
 import json
 import time
-from flask import jsonify, request
+from fastapi import APIRouter, Request, HTTPException, Body, Query, Depends
+import anyio
+from fastapi.responses import JSONResponse
 from .agent_bridge import get_bridge
 
+bp = APIRouter()
+    
+    @bp.post('/agent/create', status_code=201)
+    Create a new agent session.
 
-def register_agent_routes(bp):
+    Example:
+        POST /api/app/file_editor_cm6/agent/create
+        {"agent":"codex","cwd":"/home/user/project"}
+        
+        Response:
+        {
+          "ok": true,
+          "data": {
+            "session_id": "abc123",
+            "shell_id": "fs_...",
+            "agent_type": "codex",
+            "cwd": "/home/user/project",
+            "alive": true
+          }
+        }
+
+
     """
-    Register agent REST API routes on the file_editor_cm6 blueprint.
+    bridge = get_bridge()
     
-    Args:
-        bp: Flask blueprint
-    """
+    agent_type = data.get('agent')
+    if not agent_type:
+        raise HTTPException(status_code=400, detail="Missing required field: agent")
     
-    @bp.post('/agent/create')
-    def agent_create():
-        """
-        Create a new agent session.
-        
-        Body (JSON):
-            agent: Agent type - 'codex' or 'gemini' (required)
-            cwd: Working directory (optional, defaults to home)
-            session: Session ID (optional, auto-generated if not provided)
-        
-        Returns:
-            Agent session info including shell ID
-        
-        Example:
-            POST /api/app/file_editor_cm6/agent/create
-            {"agent":"codex","cwd":"/home/user/project"}
-            
-            Response:
-            {
-              "ok": true,
-              "data": {
-                "session_id": "abc123",
-                "shell_id": "fs_...",
-                "agent_type": "codex",
-                "cwd": "/home/user/project",
-                "alive": true
-              }
+    if agent_type not in ['codex', 'gemini']:
+        raise HTTPException(status_code=400, detail=f"Invalid agent type: {agent_type}")
+    
+    cwd = data.get('cwd')
+    session_id = data.get('session')
+    
+    if not session_id:
+        import uuid
+        session_id = str(uuid.uuid4())
+    
+    try:
+        shell = await anyio.to_thread.run_sync(bridge.spawn_agent, agent_type, cwd, session_id)
+        return {
+            "ok": True,
+            "data": {
+                "session_id": session_id,
+                "shell_id": shell['id'],
+                "agent_type": agent_type,
+                "cwd": shell.get('cwd', ''),
+                "alive": shell.get('alive', True)
             }
-        """
-        bridge = get_bridge()
-        data = request.get_json(silent=True) or {}
-        
-        agent_type = data.get('agent')
-        if not agent_type:
-            return jsonify({"ok": False, "error": "Missing required field: agent"}), 400
-        
-        if agent_type not in ['codex', 'gemini']:
-            return jsonify({"ok": False, "error": f"Invalid agent type: {agent_type}"}), 400
-        
-        cwd = data.get('cwd')
-        session_id = data.get('session')
-        
-        if not session_id:
-            import uuid
-            session_id = str(uuid.uuid4())
-        
-        try:
-            shell = bridge.spawn_agent(agent_type, cwd, session_id)
-            return jsonify({
-                "ok": True,
-                "data": {
-                    "session_id": session_id,
-                    "shell_id": shell['id'],
-                    "agent_type": agent_type,
-                    "cwd": shell.get('cwd', ''),
-                    "alive": shell.get('alive', True)
-                }
-            }), 201
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
     
     @bp.get('/agent/list')
-    def agent_list():
-        """
-        List all active agent sessions.
+async def agent_list():
+    """
+    List all active agent sessions.
+
+    Example:
+        GET /api/app/file_editor_cm6/agent/list
         
-        Returns:
-            List of active agents with metadata
-        
-        Example:
-            GET /api/app/file_editor_cm6/agent/list
-            
-            Response:
+        Response:
+        {
+          "ok": true,
+          "data": [
             {
-              "ok": true,
-              "data": [
-                {
-                  "session_id": "abc123",
-                  "shell_id": "fs_...",
-                  "label": "agent-codex-abc123",
-                  "alive": true,
-                  "cwd": "/home/user/project",
-                  "uptime": 123.45
-                }
-              ]
+              "session_id": "abc123",
+              "shell_id": "fs_...",
+              "label": "agent-codex-abc123",
+              "alive": true,
+              "cwd": "/home/user/project",
+              "uptime": 123.45
             }
-        """
-        bridge = get_bridge()
-        
-        try:
-            agents = bridge.list_agents()
-            return jsonify({"ok": True, "data": agents})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+          ]
+        }
+    """
+    bridge = get_bridge()
+    
+    try:
+        agents = await anyio.to_thread.run_sync(bridge.list_agents)
+        return {"ok": True, "data": agents}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
     
-    @bp.get('/agent/<session_id>')
-    def agent_info(session_id):
-        """
-        Get agent session information and statistics.
+    @bp.get('/agent/{session_id}')
+async def agent_info(session_id: str):
+    """
+    Get agent session information and statistics.
+
+    Example:
+        GET /api/app/file_editor_cm6/agent/abc123
         
-        Args:
-            session_id: Agent session ID
+        Response:
+        {
+          "ok": true,
+          "data": {
+            "session_id": "abc123",
+            "alive": true,
+            "cpu_percent": 2.5,
+            "rss_mb": 45.2,
+            "uptime": 123.45,
+            "pid": 12345
+          }
+        }
+    """
+    bridge = get_bridge()
+    
+    try:
+        stats = await anyio.to_thread.run_sync(bridge.get_agent_stats, session_id)
+        if stats is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
         
-        Returns:
-            Agent metadata including resource stats
-        
-        Example:
-            GET /api/app/file_editor_cm6/agent/abc123
-            
-            Response:
-            {
-              "ok": true,
-              "data": {
-                "session_id": "abc123",
-                "alive": true,
-                "cpu_percent": 2.5,
-                "rss_mb": 45.2,
-                "uptime": 123.45,
-                "pid": 12345
-              }
+        return {
+            "ok": True,
+            "data": {
+                "session_id": session_id,
+                **stats
             }
-        """
-        bridge = get_bridge()
-        
-        try:
-            stats = bridge.get_agent_stats(session_id)
-            if stats is None:
-                return jsonify({"ok": False, "error": "Agent not found"}), 404
-            
-            return jsonify({
-                "ok": True,
-                "data": {
-                    "session_id": session_id,
-                    **stats
-                }
-            })
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
     
-    @bp.delete('/agent/<session_id>')
-    def agent_terminate(session_id):
-        """
-        Terminate an agent session.
+    @bp.delete('/agent/{session_id}')
+async def agent_terminate(session_id: str):
+    """
+    Terminate an agent session.
+
+    Example:
+        DELETE /api/app/file_editor_cm6/agent/abc123
         
-        Stops the agent process and cleans up resources.
-        
-        Args:
-            session_id: Agent session ID
-        
-        Returns:
-            Success confirmation
-        
-        Example:
-            DELETE /api/app/file_editor_cm6/agent/abc123
-            
-            Response:
-            {
-              "ok": true,
-              "data": {"session_id": "abc123"}
-            }
-        """
-        bridge = get_bridge()
-        
-        try:
-            bridge.terminate_agent(session_id)
-            return jsonify({
-                "ok": True,
-                "data": {"session_id": session_id}
-            })
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+        Response:
+        {
+          "ok": true,
+          "data": {"session_id": "abc123"}
+        }
+    """
+    bridge = get_bridge()
+    
+    try:
+        await anyio.to_thread.run_sync(bridge.terminate_agent, session_id)
+        return {
+            "ok": True,
+            "data": {"session_id": session_id}
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
     @bp.post('/agent/send_raw')
-    def agent_send_raw():
-        """
-        Send raw JSON message to agent (for approval responses, etc).
+async def agent_send_raw(data: dict = Body(...)):
+    """
+    Send raw JSON message to agent (for approval responses, etc).
+    """
+    bridge = get_bridge()
+    
+    session_id = data.get('session_id')
+    message = data.get('message')
+    
+    if not session_id or not message:
+        raise HTTPException(status_code=400, detail="Missing session_id or message")
+    
+    try:
+        # Get shell ID for this session
+        shell_id = await anyio.to_thread.run_sync(bridge._sessions.get, session_id)
+        if not shell_id:
+            raise HTTPException(status_code=404, detail="Session not found")
         
-        Body (JSON):
-            session_id: Session ID (required)
-            message: Raw JSON string to send (required)
+        # Write raw message to PTY
+        await anyio.to_thread.run_sync(bridge.manager.write_to_pty, shell_id, message + '\n')
         
-        Returns:
-            Success confirmation
-        """
-        bridge = get_bridge()
-        data = request.get_json(silent=True) or {}
-        
-        session_id = data.get('session_id')
-        message = data.get('message')
-        
-        if not session_id or not message:
-            return jsonify({"ok": False, "error": "Missing session_id or message"}), 400
-        
-        try:
-            # Get shell ID for this session
-            shell_id = bridge._sessions.get(session_id)
-            if not shell_id:
-                return jsonify({"ok": False, "error": "Session not found"}), 404
-            
-            # Write raw message to PTY
-            bridge.manager.write_to_pty(shell_id, message + '\n')
-            
-            return jsonify({"ok": True, "data": {"session_id": session_id}})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+        return {"ok": True, "data": {"session_id": session_id}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
     @bp.get('/preferences/get')
-    def preferences_get():
-        """Get a preference value by key."""
-        from .agent_preferences import load_preferences
-        key = request.args.get('key')
-        if not key:
-            return jsonify({"ok": False, "error": "Missing key parameter"}), 400
-        
-        try:
-            prefs = load_preferences()
-            return jsonify({"ok": True, "data": prefs.get(key)})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+async def preferences_get(key: str = Query(...)):
+    """Get a preference value by key."""
+    from .agent_preferences import load_preferences
+    if not key:
+        raise HTTPException(status_code=400, detail="Missing key parameter")
+    
+    try:
+        prefs = await anyio.to_thread.run_sync(load_preferences)
+        return {"ok": True, "data": prefs.get(key)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
     @bp.post('/preferences/set')
-    def preferences_set():
-        """Set a preference value by key."""
-        from .agent_preferences import load_preferences, save_preferences
-        data = request.get_json(silent=True) or {}
-        key = data.get('key')
-        value = data.get('value')
-        
-        if not key:
-            return jsonify({"ok": False, "error": "Missing key"}), 400
-        
-        try:
-            prefs = load_preferences()
-            prefs[key] = value
-            save_preferences(prefs)
-            return jsonify({"ok": True, "data": {"key": key}})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+async def preferences_set(data: dict = Body(...)):
+    """Set a preference value by key."""
+    from .agent_preferences import load_preferences, save_preferences
+    key = data.get('key')
+    value = data.get('value')
+    
+    if not key:
+        raise HTTPException(status_code=400, detail="Missing key")
+    
+    try:
+        prefs = await anyio.to_thread.run_sync(load_preferences)
+        prefs[key] = value
+        await anyio.to_thread.run_sync(save_preferences, prefs)
+        return {"ok": True, "data": {"key": key}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
     # --- Session Management Endpoints ---
     
     @bp.get('/agent/sessions')
-    def list_agent_sessions():
-        """
-        List all agent sessions with summary metadata.
+async def list_agent_sessions():
+    """
+    List all agent sessions with summary metadata.
+
+    Example:
+        GET /api/app/file_editor_cm6/agent/sessions
         
-        Returns:
-            List of sessions (no full message history)
-        
-        Example:
-            GET /api/app/file_editor_cm6/agent/sessions
-            
-            Response:
+        Response:
+        {
+          "ok": true,
+          "data": [
             {
-              "ok": true,
-              "data": [
-                {
-                  "id": "session-123",
-                  "name": "Project Debug",
-                  "agent": "codex",
-                  "conversationId": "abc...",
-                  "messageCount": 15,
-                  "createdAt": 1730000000,
-                  "cwd": "/home/user/project",
-                  "auto": false,
-                  "fullAccess": false
-                }
-              ]
+              "id": "session-123",
+              "name": "Project Debug",
+              "agent": "codex",
+              "conversationId": "abc...",
+              "messageCount": 15,
+              "createdAt": 1730000000,
+              "cwd": "/home/user/project",
+              "auto": false,
+              "fullAccess": false
             }
-        """
-        from .agent_session_store import list_sessions
-        try:
-            sessions = list_sessions()
-            return jsonify({"ok": True, "data": sessions})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+          ]
+        }
+    """
+    from .agent_session_store import list_sessions
+    try:
+        sessions = await anyio.to_thread.run_sync(list_sessions)
+        return {"ok": True, "data": sessions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
-    @bp.get('/agent/session/<session_id>')
-    def get_agent_session(session_id):
-        """
-        Get full session data including message transcript.
+    @bp.get('/agent/session/{session_id}')
+async def get_agent_session(session_id: str):
+    """
+    Get full session data including message transcript.
+
+    Example:
+        GET /api/app/file_editor_cm6/agent/session/session-123
         
-        Args:
-            session_id: Session ID
-        
-        Returns:
-            Complete session with all messages
-        
-        Example:
-            GET /api/app/file_editor_cm6/agent/session/session-123
-            
-            Response:
-            {
-              "ok": true,
-              "data": {
-                "id": "session-123",
-                "name": "Project Debug",
-                "agent": "codex",
-                "conversationId": "abc...",
-                "messages": [...],
-                "createdAt": 1730000000,
-                "version": 42
-              }
-            }
-        """
-        from .agent_session_store import get_session
-        try:
-            session = get_session(session_id)
-            if not session:
-                return jsonify({"ok": False, "error": "Session not found"}), 404
-            return jsonify({"ok": True, "data": session})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+        Response:
+        {
+          "ok": true,
+          "data": {
+            "id": "session-123",
+            "name": "Project Debug",
+            "agent": "codex",
+            "conversationId": "abc...",
+            "messages": [...],
+            "createdAt": 1730000000,
+            "version": 42
+          }
+        }
+    """
+    from .agent_session_store import get_session
+    try:
+        session = await anyio.to_thread.run_sync(get_session, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {"ok": True, "data": session}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
-    @bp.post('/agent/sessions')
-    def create_agent_session():
-        """
+    @bp.post('/agent/sessions', status_code=201)
+async def create_agent_session(data: dict = Body(...)):
         Create a new agent session.
-        
-        Body (JSON):
-            name: Session name (required)
-            agent: Agent type - 'codex' or 'gemini' (optional, default: 'codex')
-            cwd: Working directory (optional)
-            auto: Auto-approval enabled (optional, default: false)
-            fullAccess: Full filesystem access (optional, default: false)
-        
-        Returns:
-            Created session
-        
+    
         Example:
             POST /api/app/file_editor_cm6/agent/sessions
             {"name":"Debug Session","agent":"codex","cwd":"/home/user/project"}
@@ -367,180 +306,156 @@ def register_agent_routes(bp):
                 "createdAt": 1730000000
               }
             }
-        """
-        from .agent_session_store import create_session
-        import uuid
-        
-        data = request.get_json(silent=True) or {}
-        name = data.get('name')
-        if not name:
-            return jsonify({"ok": False, "error": "Missing required field: name"}), 400
-        
-        agent = data.get('agent', 'codex')
-        if agent not in ['codex', 'gemini']:
-            return jsonify({"ok": False, "error": f"Invalid agent type: {agent}"}), 400
-        
-        session_id = f"session-{uuid.uuid4().hex[:12]}"
-        cwd = data.get('cwd')
-        auto = data.get('auto', False)
-        fullAccess = data.get('fullAccess', False)
-        
-        try:
-            session = create_session(
-                session_id=session_id,
-                name=name,
-                agent=agent,
-                cwd=cwd,
-                auto=auto,
-                fullAccess=fullAccess
-            )
-            return jsonify({"ok": True, "data": session}), 201
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
     
-    @bp.delete('/agent/session/<session_id>')
-    def delete_agent_session(session_id):
-        """
-        Delete a session.
-        
-        Args:
-            session_id: Session ID
-        
-        Returns:
-            Success confirmation
-        
-        Example:
-            DELETE /api/app/file_editor_cm6/agent/session/session-123
-            
-            Response:
-            {
-              "ok": true,
-              "data": {"session_id": "session-123"}
-            }
-        """
-        from .agent_session_store import delete_session
-        try:
-            deleted = delete_session(session_id)
-            if not deleted:
-                return jsonify({"ok": False, "error": "Session not found"}), 404
-            return jsonify({"ok": True, "data": {"session_id": session_id}})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+    """
+    from .agent_session_store import create_session
+    import uuid
     
-    @bp.post('/agent/session/<session_id>/send')
-    def send_to_agent_session(session_id):
-        """
-        Send a user message to an agent session.
-        
-        This enqueues the message for processing. The response will be
-        streamed back via WebSocket.
-        
-        Body (JSON):
-            text: User message text (required)
-            attachFile: Attach current file context (optional, default: false)
-        
-        Args:
-            session_id: Session ID
-        
-        Returns:
-            Message acknowledgement
-        
-        Example:
-            POST /api/app/file_editor_cm6/agent/session/session-123/send
-            {"text":"Explain this function","attachFile":true}
-            
-            Response:
-            {
-              "ok": true,
-              "data": {
-                "session_id": "session-123",
-                "messageId": "msg-456",
-                "queued": true
-              }
-            }
-        """
-        from .agent_session_store import get_session, append_message
-        import uuid
-        
-        data = request.get_json(silent=True) or {}
-        text = data.get('text')
-        if not text:
-            return jsonify({"ok": False, "error": "Missing required field: text"}), 400
-        
-        try:
-            session = get_session(session_id)
-            if not session:
-                return jsonify({"ok": False, "error": "Session not found"}), 404
-            
-            # Append user message to session
-            message_id = f"msg-{uuid.uuid4().hex[:12]}"
-            message = {
-                'id': message_id,
-                'type': 'user',
-                'text': text,
-                'timestamp': time.time()
-            }
-            append_message(session_id, message)
-            
-            # TODO: Trigger agent processing via WebSocket or queue
-            # For now, the WebSocket handler will pick this up
-            
-            return jsonify({
-                "ok": True,
-                "data": {
-                    "session_id": session_id,
-                    "messageId": message_id,
-                    "queued": True
-                }
-            })
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+    name = data.get('name')
+    if not name:
+        raise HTTPException(status_code=400, detail="Missing required field: name")
     
-    @bp.get('/agent/shell/status')
-    def get_agent_shell_status():
-        """
-        Check if there's an active Codex MCP server shell.
+    agent = data.get('agent', 'codex')
+    if agent not in ['codex', 'gemini']:
+        raise HTTPException(status_code=400, detail=f"Invalid agent type: {agent}")
+    
+    session_id = f"session-{uuid.uuid4().hex[:12]}"
+    cwd = data.get('cwd')
+    auto = data.get('auto', False)
+    fullAccess = data.get('fullAccess', False)
+    
+    try:
+        session = await anyio.to_thread.run_sync(
+            create_session,
+            session_id=session_id,
+            name=name,
+            agent=agent,
+            cwd=cwd,
+            auto=auto,
+            fullAccess=fullAccess
+        )
+        return {"ok": True, "data": session}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    @bp.delete('/agent/session/{session_id}')
+async def delete_agent_session(session_id: str):
+    """
+    Delete a session.
+
+    Example:
+        DELETE /api/app/file_editor_cm6/agent/session/session-123
         
-        Returns shell info if one exists, otherwise returns None.
+        Response:
+        {
+          "ok": true,
+          "data": {"session_id": "session-123"}
+        }
+    """
+    from .agent_session_store import delete_session
+    try:
+        deleted = await anyio.to_thread.run_sync(delete_session, session_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {"ok": True, "data": {"session_id": session_id}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    @bp.post('/agent/session/{session_id}/send')
+async def send_to_agent_session(session_id: str, data: dict = Body(...)):
+    """
+    Send a user message to an agent session.
+
+    Example:
+        POST /api/app/file_editor_cm6/agent/session/session-123/send
+        {"text":"Explain this function","attachFile":true}
         
-        Example:
-            GET /api/app/file_editor_cm6/agent/shell/status
-            
-            Response:
-            {
-              "ok": true,
-              "data": {
-                "shell_id": "fs_1762043953_7cd3f985",
-                "status": "running",
-                "alive": true
-              }
+        Response:
+        {
+          "ok": true,
+          "data": {
+            "session_id": "session-123",
+            "messageId": "msg-456",
+            "queued": true
+          }
+        }
+    """
+    from .agent_session_store import get_session, append_message
+    import uuid
+    
+    text = data.get('text')
+    if not text:
+        raise HTTPException(status_code=400, detail="Missing required field: text")
+    
+    try:
+        session = await anyio.to_thread.run_sync(get_session, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Append user message to session
+        message_id = f"msg-{uuid.uuid4().hex[:12]}"
+        message = {
+            'id': message_id,
+            'type': 'user',
+            'text': text,
+            'timestamp': time.time()
+        }
+        await anyio.to_thread.run_sync(append_message, session_id, message)
+        
+        # TODO: Trigger agent processing via WebSocket or queue
+        # For now, the WebSocket handler will pick this up
+        
+        return {
+            "ok": True,
+            "data": {
+                "session_id": session_id,
+                "messageId": message_id,
+                "queued": True
             }
-        """
-        from app.libs.framework_shells import _manager
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    from app.libs.framework_shells import FrameworkShellManager, get_manager
+
+@bp.get('/agent/shell/status')
+async def get_agent_shell_status(mgr: FrameworkShellManager = Depends(get_manager)):
+    """
+    Check if there's an active Codex MCP server shell.
+
+    Example:
+        GET /api/app/file_editor_cm6/agent/shell/status
         
-        try:
-            # Get the manager instance
-            mgr = _manager()
-            
-            # Find active Codex MCP shells
-            shells = mgr.list_shells()
-            codex_shell = None
-            
-            for shell in shells:
-                # Check if this is a Codex MCP server shell (note: space not hyphen)
-                # shell.command is a List[str], so join and check
-                command_str = ' '.join(shell.command) if isinstance(shell.command, list) else str(shell.command)
-                if 'codex mcp-server' in command_str:
-                    # Check if shell is running (status == 'running' and has PID)
-                    if shell.status == 'running' and shell.pid:
-                        codex_shell = {
-                            'shell_id': shell.id,
-                            'status': shell.status,
-                            'alive': True,
-                            'pid': shell.pid
-                        }
-                        break
-            
-            return jsonify({"ok": True, "data": codex_shell})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+        Response:
+        {
+          "ok": true,
+          "data": {
+            "shell_id": "fs_1762043953_7cd3f985",
+            "status": "running",
+            "alive": true
+          }
+        }
+    """
+    try:
+        # Find active Codex MCP shells
+        shells = await anyio.to_thread.run_sync(mgr.list_shells)
+        codex_shell = None
+        
+        for shell in shells:
+            # Check if this is a Codex MCP server shell (note: space not hyphen)
+            # shell.command is a List[str], so join and check
+            command_str = ' '.join(shell.command) if isinstance(shell.command, list) else str(shell.command)
+            if 'codex mcp-server' in command_str:
+                # Check if shell is running (status == 'running' and has PID)
+                if shell.status == 'running' and shell.pid:
+                    codex_shell = {
+                        'shell_id': shell.id,
+                        'status': shell.status,
+                        'alive': True,
+                        'pid': shell.pid
+                    }
+                    break
+        
+        return {"ok": True, "data": codex_shell}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

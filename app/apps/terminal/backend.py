@@ -10,7 +10,7 @@ from flask import Blueprint, jsonify, request
 from flask_sock import Sock
 
 # Reuse the core framework shells manager/config
-from app.libs.framework_shells import _manager
+from app.libs.framework_shells import get_manager as _manager
 
 bp = Blueprint("terminal_app", __name__)
 sock = Sock()

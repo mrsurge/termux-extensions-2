@@ -1,3 +1,4 @@
+import anyio
 from __future__ import annotations
 
 import grp
@@ -10,21 +11,12 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, Request, HTTPException, Body, Query
+from fastapi.responses import JSONResponse
 
 from app.libs.jobs import JobCancelled, register_job_handler
 
-file_explorer_bp = Blueprint("file_explorer_app", __name__)
-
-HOME_DIR = Path(os.path.expanduser("~"))
-
-
-def _json_ok(data: Any, status: int = 200):
-    return jsonify({"ok": True, "data": data}), status
-
-
-def _json_err(message: str, status: int = 400):
-    return jsonify({"ok": False, "error": str(message)}), status
+file_explorer_bp = APIRouter()
 
 
 def _scandir_entries(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
@@ -215,111 +207,118 @@ def _chmod_recursive_local(target: str, mode_value: int) -> None:
     os.chmod(target, mode_value)
 
 
-@file_explorer_bp.route('/list', methods=['GET'])
-def list_directory():
-    raw_path = request.args.get('path') or str(HOME_DIR)
-    show_hidden = request.args.get('hidden', '0').lower() in {'1', 'true', 'yes', 'on'}
-    abs_path = Path(os.path.abspath(os.path.expanduser(raw_path)))
+@file_explorer_bp.get('/list')
+async def list_directory(path: str = Query(str(HOME_DIR)), hidden: bool = Query(False)):
+    """
+    List directory contents.
+
+    Example:
+        GET /api/app/file_explorer/list?path=~
+    """
+    abs_path = Path(os.path.abspath(os.path.expanduser(path)))
     try:
-        entries = _scandir_entries(abs_path, show_hidden)
+        entries = await anyio.to_thread.run_sync(_scandir_entries, abs_path, hidden)
     except PermissionError:
         try:
-            entries = _scandir_with_sudo(abs_path, show_hidden)
+            entries = await anyio.to_thread.run_sync(_scandir_with_sudo, abs_path, hidden)
         except FileNotFoundError:
-            return _json_err('Directory not found', 404)
+            raise HTTPException(status_code=404, detail='Directory not found')
         except PermissionError as exc:
-            return _json_err(str(exc) or 'Permission denied', 403)
+            raise HTTPException(status_code=403, detail=str(exc) or 'Permission denied')
         except Exception as exc:
-            return _json_err(str(exc), 500)
+            raise HTTPException(status_code=500, detail=str(exc))
     except FileNotFoundError:
-        return _json_err('Directory not found', 404)
+        raise HTTPException(status_code=404, detail='Directory not found')
     except NotADirectoryError:
-        return _json_err('Not a directory', 400)
+        raise HTTPException(status_code=400, detail='Not a directory')
     except Exception as exc:
-        return _json_err(str(exc), 500)
+        raise HTTPException(status_code=500, detail=str(exc))
     entries.sort(key=lambda item: (item.get('type') != 'directory', (item.get('name') or '').lower()))
-    return _json_ok(entries)
+    return {"ok": True, "data": entries}
 
 
-@file_explorer_bp.route('/mkdir', methods=['POST'])
-def make_directory():
-    data = request.get_json(silent=True) or {}
+@file_explorer_bp.post('/mkdir')
+async def make_directory(data: dict = Body(...)):
+    """
+    Create a directory.
+
+    Example:
+        POST /api/app/file_explorer/mkdir
+        {"path":"/tmp","name":"test_dir"}
+    """
     base = os.path.abspath(os.path.expanduser(data.get('path') or ''))
     name = (data.get('name') or '').strip()
     if not name or '/' in name or name in {'.', '..'}:
-        return _json_err('Invalid directory name', 400)
+        raise HTTPException(status_code=400, detail='Invalid directory name')
     if not os.path.isdir(base):
-        return _json_err('Base path is not a directory', 400)
+        raise HTTPException(status_code=400, detail='Base path is not a directory')
     target = os.path.abspath(os.path.join(base, name))
     try:
-        os.makedirs(target, exist_ok=False)
+        await anyio.to_thread.run_sync(os.makedirs, target, exist_ok=False)
     except FileExistsError:
-        return _json_err('A file or folder with that name already exists', 400)
+        raise HTTPException(status_code=400, detail='A file or folder with that name already exists')
     except PermissionError:
         try:
-            _run_sudo(['mkdir', '-p', target])
+            await anyio.to_thread.run_sync(_run_sudo, ['mkdir', '-p', target])
         except PermissionError as exc:
-            return _json_err(str(exc) or 'Permission denied', 403)
+            raise HTTPException(status_code=403, detail=str(exc) or 'Permission denied')
     except Exception as exc:
-        return _json_err(str(exc), 500)
-    return _json_ok({'created': os.path.basename(target)})
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"ok": True, "data": {'created': os.path.basename(target)}}
 
 
-@file_explorer_bp.route('/delete', methods=['POST'])
-def delete_path():
-    data = request.get_json(silent=True) or {}
+@file_explorer_bp.post('/delete')
+async def delete_path(data: dict = Body(...)):
     target = data.get('path')
     if not target:
-        return _json_err('Path is required', 400)
+        raise HTTPException(status_code=400, detail='Path is required')
     abs_target = os.path.abspath(os.path.expanduser(target))
     if not os.path.exists(abs_target):
-        return _json_err('File not found', 404)
+        raise HTTPException(status_code=404, detail='File not found')
     try:
         if os.path.isdir(abs_target) and not os.path.islink(abs_target):
-            shutil.rmtree(abs_target)
+            await anyio.to_thread.run_sync(shutil.rmtree, abs_target)
         else:
-            os.remove(abs_target)
+            await anyio.to_thread.run_sync(os.remove, abs_target)
     except PermissionError:
         try:
-            _run_sudo(['rm', '-rf', abs_target])
+            await anyio.to_thread.run_sync(_run_sudo, ['rm', '-rf', abs_target])
         except PermissionError as exc:
-            return _json_err(str(exc) or 'Permission denied', 403)
+            raise HTTPException(status_code=403, detail=str(exc) or 'Permission denied')
     except Exception as exc:
-        return _json_err(str(exc), 500)
-    return _json_ok({'deleted': abs_target})
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"ok": True, "data": {'deleted': abs_target}}
 
 
-@file_explorer_bp.route('/rename', methods=['POST'])
-def rename_path():
-    data = request.get_json(silent=True) or {}
+@file_explorer_bp.post('/rename')
+async def rename_path(data: dict = Body(...)):
     source = data.get('path')
     new_name = (data.get('name') or '').strip()
     if not source or not new_name:
-        return _json_err('Source path and new name are required', 400)
+        raise HTTPException(status_code=400, detail='Source path and new name are required')
     src_abs = os.path.abspath(os.path.expanduser(source))
     dest_dir = os.path.dirname(src_abs)
     dest_abs = os.path.join(dest_dir, new_name)
     if os.path.exists(dest_abs):
-        return _json_err('A file or folder with that name already exists', 400)
+        raise HTTPException(status_code=400, detail='A file or folder with that name already exists')
     try:
-        os.replace(src_abs, dest_abs)
+        await anyio.to_thread.run_sync(os.replace, src_abs, dest_abs)
     except PermissionError:
         try:
-            _run_sudo(['mv', src_abs, dest_abs])
+            await anyio.to_thread.run_sync(_run_sudo, ['mv', src_abs, dest_abs])
         except PermissionError as exc:
-            return _json_err(str(exc) or 'Permission denied', 403)
+            raise HTTPException(status_code=403, detail=str(exc) or 'Permission denied')
     except Exception as exc:
-        return _json_err(str(exc), 500)
-    return _json_ok({'renamed': os.path.basename(src_abs), 'to': os.path.basename(dest_abs)})
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"ok": True, "data": {'renamed': os.path.basename(src_abs), 'to': os.path.basename(dest_abs)}}
 
 
-@file_explorer_bp.route('/copy', methods=['POST'])
-def copy_path():
-    data = request.get_json(silent=True) or {}
+@file_explorer_bp.post('/copy')
+async def copy_path(data: dict = Body(...)):
     source = data.get('source')
     dest = data.get('dest')
     if not source or not dest:
-        return _json_err('Source and destination are required', 400)
+        raise HTTPException(status_code=400, detail='Source and destination are required')
     src_abs = os.path.abspath(os.path.expanduser(source))
     dest_abs = os.path.abspath(os.path.expanduser(dest))
     
@@ -330,128 +329,131 @@ def copy_path():
         # Destination is a directory, append source filename
         dest_abs = os.path.join(dest_abs, os.path.basename(src_abs))
         if os.path.exists(dest_abs):
-            return _json_err('Target already exists at destination', 400)
+            raise HTTPException(status_code=400, detail='Target already exists at destination')
     
     # Ensure parent directory exists
     dest_dir = os.path.dirname(dest_abs)
     if not os.path.exists(dest_dir):
-        return _json_err('Destination directory does not exist', 400)
+        raise HTTPException(status_code=400, detail='Destination directory does not exist')
     
     try:
         if os.path.isdir(src_abs) and not os.path.islink(src_abs):
-            shutil.copytree(src_abs, dest_abs)
+            await anyio.to_thread.run_sync(shutil.copytree, src_abs, dest_abs)
         else:
-            shutil.copy2(src_abs, dest_abs)
+            await anyio.to_thread.run_sync(shutil.copy2, src_abs, dest_abs)
     except PermissionError:
         try:
-            _run_sudo(['cp', '-r', src_abs, dest_abs])
+            await anyio.to_thread.run_sync(_run_sudo, ['cp', '-r', src_abs, dest_abs])
         except PermissionError as exc:
-            return _json_err(str(exc) or 'Copy failed', 500)
+            raise HTTPException(status_code=500, detail=str(exc) or 'Copy failed')
     except Exception as exc:
-        return _json_err(str(exc), 500)
-    return _json_ok({'copied': src_abs, 'to': dest_abs})
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"ok": True, "data": {'copied': src_abs, 'to': dest_abs}}
 
 
-@file_explorer_bp.route('/move', methods=['POST'])
-def move_path():
-    data = request.get_json(silent=True) or {}
+@file_explorer_bp.post('/move')
+async def move_path(data: dict = Body(...)):
     source = data.get('source')
     dest_dir = data.get('dest')
     if not source or not dest_dir:
-        return _json_err('Source and destination are required', 400)
+        raise HTTPException(status_code=400, detail='Source and destination are required')
     src_abs = os.path.abspath(os.path.expanduser(source))
     dest_dir_abs = os.path.abspath(os.path.expanduser(dest_dir))
     if not os.path.isdir(dest_dir_abs):
-        return _json_err('Destination is not a directory', 400)
+        raise HTTPException(status_code=400, detail='Destination is not a directory')
     dest_abs = os.path.join(dest_dir_abs, os.path.basename(src_abs))
     if os.path.exists(dest_abs):
-        return _json_err('Target already exists at destination', 400)
+        raise HTTPException(status_code=400, detail='Target already exists at destination')
     try:
-        os.replace(src_abs, dest_abs)
+        await anyio.to_thread.run_sync(os.replace, src_abs, dest_abs)
     except PermissionError:
         try:
-            _run_sudo(['mv', src_abs, dest_abs])
+            await anyio.to_thread.run_sync(_run_sudo, ['mv', src_abs, dest_abs])
         except PermissionError as exc:
-            return _json_err(str(exc) or 'Move failed', 500)
+            raise HTTPException(status_code=500, detail=str(exc) or 'Move failed')
     except Exception as exc:
-        return _json_err(str(exc), 500)
-    return _json_ok({'moved': src_abs, 'to': dest_abs})
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"ok": True, "data": {'moved': src_abs, 'to': dest_abs}}
 
 
-@file_explorer_bp.route('/resolve_symlink', methods=['GET'])
-def resolve_symlink():
+@file_explorer_bp.get('/resolve_symlink')
+async def resolve_symlink(path: str = Query(...)):
     """Resolve a symlink to its target path."""
-    path = request.args.get('path')
     if not path:
-        return _json_err('Path is required', 400)
+        raise HTTPException(status_code=400, detail='Path is required')
     
     abs_path = os.path.abspath(os.path.expanduser(path))
     if not os.path.exists(abs_path):
-        return _json_err('Path does not exist', 404)
+        raise HTTPException(status_code=404, detail='Path does not exist')
     
     if not os.path.islink(abs_path):
         # Not a symlink, return the path itself
-        return _json_ok({'path': abs_path, 'target': abs_path, 'is_symlink': False})
+        return {"ok": True, "data": {'path': abs_path, 'target': abs_path, 'is_symlink': False}}
     
     try:
         # Resolve the symlink
-        target = os.readlink(abs_path)
+        target = await anyio.to_thread.run_sync(os.readlink, abs_path)
         # If target is relative, make it absolute based on symlink's directory
         if not os.path.isabs(target):
             symlink_dir = os.path.dirname(abs_path)
             target = os.path.abspath(os.path.join(symlink_dir, target))
         
         # Check if target exists and what type it is
-        target_exists = os.path.exists(target)
+        target_exists = await anyio.to_thread.run_sync(os.path.exists, target)
         target_type = 'unknown'
         if target_exists:
-            if os.path.isdir(target):
+            if await anyio.to_thread.run_sync(os.path.isdir, target):
                 target_type = 'directory'
-            elif os.path.isfile(target):
+            elif await anyio.to_thread.run_sync(os.path.isfile, target):
                 target_type = 'file'
-            elif os.path.islink(target):
+            elif await anyio.to_thread.run_sync(os.path.islink, target):
                 target_type = 'symlink'  # Target is itself a symlink
         
-        return _json_ok({
+        return {"ok": True, "data": {
             'path': abs_path,
             'target': target,
             'is_symlink': True,
             'target_exists': target_exists,
             'target_type': target_type
-        })
+        }}
     except Exception as exc:
-        return _json_err(str(exc), 500)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
-@file_explorer_bp.route('/properties', methods=['GET'])
-def get_properties():
-    raw_path = request.args.get('path')
-    if not raw_path:
-        return _json_err('Path is required', 400)
+@file_explorer_bp.get('/properties')
+async def get_properties(path: str = Query(...)):
+    """
+    Get file or directory properties.
 
-    abs_path = os.path.abspath(os.path.expanduser(raw_path))
+    Example:
+        GET /api/app/file_explorer/properties?path=/tmp/test_dir
+    """
+    if not path:
+        raise HTTPException(status_code=400, detail='Path is required')
+
+    abs_path = os.path.abspath(os.path.expanduser(path))
     if not os.path.exists(abs_path) and not os.path.islink(abs_path):
-        return _json_err('Path not found', 404)
+        raise HTTPException(status_code=404, detail='Path not found')
 
     try:
-        stat_result = os.lstat(abs_path)
+        stat_result = await anyio.to_thread.run_sync(os.lstat, abs_path)
     except FileNotFoundError:
-        return _json_err('Path not found', 404)
+        raise HTTPException(status_code=404, detail='Path not found')
     except PermissionError as exc:
-        return _json_err(str(exc) or 'Permission denied', 403)
+        raise HTTPException(status_code=403, detail=str(exc) or 'Permission denied')
     except Exception as exc:
-        return _json_err(str(exc), 500)
+        raise HTTPException(status_code=500, detail=str(exc))
 
     mode_value = stat.S_IMODE(stat_result.st_mode)
     perms = _mode_to_permissions(mode_value)
 
     try:
-        owner_name = pwd.getpwuid(stat_result.st_uid).pw_name
+        owner_name = (await anyio.to_thread.run_sync(pwd.getpwuid, stat_result.st_uid)).pw_name
     except KeyError:
         owner_name = stat_result.st_uid
 
     try:
-        group_name = grp.getgrgid(stat_result.st_gid).gr_name
+        group_name = (await anyio.to_thread.run_sync(grp.getgrgid, stat_result.st_gid)).gr_name
     except KeyError:
         group_name = stat_result.st_gid
 
@@ -470,61 +472,59 @@ def get_properties():
         'group': group_name,
     }
 
-    return _json_ok(info)
+    return {"ok": True, "data": info}
 
 
-@file_explorer_bp.route('/chmod', methods=['POST'])
-def chmod_path():
-    data = request.get_json(silent=True) or {}
+@file_explorer_bp.post('/chmod')
+async def chmod_path(data: dict = Body(...)):
     target = data.get('path')
     mode_str = str(data.get('mode', '')).strip()
     if not target or not mode_str:
-        return _json_err('Path and mode are required', 400)
+        raise HTTPException(status_code=400, detail='Path and mode are required')
     target_abs = os.path.abspath(os.path.expanduser(target))
     try:
         mode_value = int(mode_str, 8)
     except Exception:
-        return _json_err('Invalid mode format', 400)
+        raise HTTPException(status_code=400, detail='Invalid mode format')
     recursive = bool(data.get('recursive'))
     try:
         if recursive and os.path.isdir(target_abs) and not os.path.islink(target_abs):
-            _chmod_recursive_local(target_abs, mode_value)
+            await anyio.to_thread.run_sync(_chmod_recursive_local, target_abs, mode_value)
         else:
-            os.chmod(target_abs, mode_value)
+            await anyio.to_thread.run_sync(os.chmod, target_abs, mode_value)
     except PermissionError:
         try:
             args = ['chmod']
             if recursive:
                 args.append('-R')
             args.extend([format(mode_value, '03o'), target_abs])
-            _run_sudo(args)
+            await anyio.to_thread.run_sync(_run_sudo, args)
         except PermissionError as exc:
-            return _json_err(str(exc) or 'Permission denied', 403)
+            raise HTTPException(status_code=403, detail=str(exc) or 'Permission denied')
     except Exception as exc:
-        return _json_err(str(exc), 500)
-    return _json_ok({'path': target_abs, 'mode': format(mode_value, '03o'), 'recursive': recursive})
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"ok": True, "data": {'path': target_abs, 'mode': format(mode_value, '03o'), 'recursive': recursive}}
 
 
-@file_explorer_bp.route('/extract', methods=['POST'])
-def extract_archive():
-    data = request.get_json(silent=True) or {}
+@file_explorer_bp.post('/extract')
+async def extract_archive(data: dict = Body(...)):
     source = data.get('source')
     directory = data.get('directory')
     if not source or not directory:
-        return _json_err('Source and destination are required', 400)
+        raise HTTPException(status_code=400, detail='Source and destination are required')
 
     source_abs = os.path.abspath(os.path.expanduser(source))
     dest_abs = os.path.abspath(os.path.expanduser(directory))
 
     if not os.path.isfile(source_abs):
-        return _json_err('Source archive not found', 404)
+        raise HTTPException(status_code=404, detail='Source archive not found')
     if not os.path.isdir(dest_abs):
-        return _json_err('Destination must be an existing directory', 400)
+        raise HTTPException(status_code=400, detail='Destination must be an existing directory')
 
     try:
-        shutil.unpack_archive(source_abs, dest_abs)
+        await anyio.to_thread.run_sync(shutil.unpack_archive, source_abs, dest_abs)
     except shutil.ReadError:
-        return _json_err('Unsupported or invalid archive format', 400)
+        raise HTTPException(status_code=400, detail='Unsupported or invalid archive format')
     except PermissionError:
         script = (
             'import shutil\n'
@@ -533,37 +533,36 @@ def extract_archive():
             'shutil.unpack_archive(source, dest)\n'
         )
         try:
-            _run_sudo(['python3', '-c', script])
+            await anyio.to_thread.run_sync(_run_sudo, ['python3', '-c', script])
         except PermissionError as exc:
-            return _json_err(str(exc) or 'Permission denied', 403)
+            raise HTTPException(status_code=403, detail=str(exc) or 'Permission denied')
         except Exception as exc:
-            return _json_err(str(exc), 500)
+            raise HTTPException(status_code=500, detail=str(exc))
     except FileNotFoundError:
-        return _json_err('Source archive not found', 404)
+        raise HTTPException(status_code=404, detail='Source archive not found')
     except Exception as exc:
-        return _json_err(str(exc), 500)
+        raise HTTPException(status_code=500, detail=str(exc))
 
-    return _json_ok({'extracted': source_abs, 'into': dest_abs})
+    return {"ok": True, "data": {'extracted': source_abs, 'into': dest_abs}}
 
 
-@file_explorer_bp.route('/chown', methods=['POST'])
-def chown_path():
-    data = request.get_json(silent=True) or {}
+@file_explorer_bp.post('/chown')
+async def chown_path(data: dict = Body(...)):
     target = data.get('path')
     user = (data.get('user') or '').strip()
     group = (data.get('group') or '').strip()
     if not target or (not user and not group):
-        return _json_err('Path and user/group required', 400)
+        raise HTTPException(status_code=400, detail='Path and user/group required')
     target_abs = os.path.abspath(os.path.expanduser(target))
     spec = f"{user}:{group}" if user and group else (user if user else f":{group}")
     try:
-        shutil.chown(target_abs, user or None, group or None)
+        await anyio.to_thread.run_sync(shutil.chown, target_abs, user or None, group or None)
     except Exception:
         try:
-            _run_sudo(['chown', spec, target_abs])
+            await anyio.to_thread.run_sync(_run_sudo, ['chown', spec, target_abs])
         except PermissionError as exc:
-            return _json_err(str(exc) or 'Permission denied', 403)
-    return _json_ok({'path': target_abs, 'owner': user or 'unchanged', 'group': group or 'unchanged'})
+            raise HTTPException(status_code=403, detail=str(exc) or 'Permission denied')
+    return {"ok": True, "data": {'path': target_abs, 'owner': user or 'unchanged', 'group': group or 'unchanged'}}
 
 
 

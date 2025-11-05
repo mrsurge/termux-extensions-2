@@ -20,23 +20,31 @@ from typing import Dict, Iterable, List, Optional
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from flask import Flask, render_template, jsonify, send_from_directory, send_file, request, current_app, Response
+from fastapi import FastAPI, Request, Query, Body, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 import requests
 from app.libs.app_lifecycle import start_background_tasks
 from app.libs.app_manager import ensure_app_running
 from app.libs.bookmarks import bookmarks_bp
-from app.libs.framework_shells import FrameworkShellManager, _manager, framework_shells_bp
-from app.libs.jobs import jobs_bp
-from flask_sock import Sock
-from simple_websocket import Client as WSClient, ConnectionClosed
 
-app = Flask(__name__)
-app.register_blueprint(framework_shells_bp)
-app.register_blueprint(jobs_bp, url_prefix="/api")
-app.register_blueprint(bookmarks_bp, url_prefix="/api")
-# Initialize WebSocket support and expose to modules
-sock = Sock(app)
-app.config["SOCK"] = sock
+# Create FastAPI app instance
+app = FastAPI()
+
+# Mount static files
+from fastapi.staticfiles import StaticFiles
+import os
+static_dir = os.path.join(os.path.dirname(__file__), 'static')
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+app.include_router(bookmarks_bp, prefix="/api")
+from app.libs.framework_shells import FrameworkShellManager, get_manager, framework_shells_bp
+
+app.include_router(framework_shells_bp)
+from app.libs.jobs import jobs_bp
+app.include_router(jobs_bp, prefix="/api")
+
+
 
 RUN_ID = os.environ.get("TE_RUN_ID")
 if not RUN_ID:
@@ -44,7 +52,7 @@ if not RUN_ID:
     os.environ["TE_RUN_ID"] = RUN_ID
 else:
     os.environ.setdefault("TE_RUN_ID", RUN_ID)
-app.config["TE_RUN_ID"] = RUN_ID
+
 
 APP_STARTED_AT = time.time()
 
@@ -127,15 +135,26 @@ def _save_settings(payload: dict) -> dict:
     return payload
 
 
-def _apply_settings_to_config():
-    """Load settings from disk and apply relevant values to app.config."""
+def get_setting(key: str, default=None):
+    """
+    Get a setting value from disk-persisted settings.
+    This allows components to read settings without accessing app.config.
+    
+    Args:
+        key: Setting key to retrieve
+        default: Default value if key not found
+        
+    Returns:
+        Setting value or default
+    """
     settings = _load_settings()
-    if settings.get("TE_MAX_SERVICE_SHELLS") is not None:
-        app.config["TE_MAX_SERVICE_SHELLS"] = int(settings["TE_MAX_SERVICE_SHELLS"])
-    if settings.get("TE_MAX_APP_SHELLS") is not None:
-        app.config["TE_MAX_APP_SHELLS"] = int(settings["TE_MAX_APP_SHELLS"])
-    if settings.get("APP_TTL_SECONDS") is not None:
-        app.config["APP_TTL_SECONDS"] = int(settings["APP_TTL_SECONDS"])
+    return settings.get(key, default)
+
+
+def _apply_settings_to_config():
+    """Legacy function - settings now read directly via get_setting()."""
+    pass
+        
 
 
 def _load_state_store() -> dict:
@@ -487,15 +506,15 @@ def load_extensions():
                 manifest['__load_error__'] = f"{type(e).__name__}: {e}"
                 manifest['__load_trace__'] = traceback.format_exc()[-2048:]
             else:
-                from flask import Blueprint
+                from fastapi import APIRouter
                 try:
                     for obj_name in dir(module):
                         obj = getattr(module, obj_name)
-                        if isinstance(obj, Blueprint):
+                        if isinstance(obj, (Blueprint, APIRouter)):
                             if ext_name == 'apps':
-                                app.register_blueprint(obj, url_prefix='')
+                                app.include_router(obj, url_prefix='')
                             else:
-                                app.register_blueprint(obj, url_prefix=f"/api/ext/{ext_name}")
+                                app.include_router(obj, prefix=f"/api/ext/{ext_name}")
                             break
                     else:
                         manifest['__load_warning__'] = 'No Flask Blueprint found in backend module'
@@ -506,9 +525,10 @@ def load_extensions():
 
 # --- Main Application Routes ---
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+
+@app.get("/")
+async def root():
+    return FileResponse(os.path.join(project_root, 'app', 'templates', 'index.html'))
 
 def load_apps():
     """Scans for apps, loads their blueprints (if any), and returns their manifests."""
@@ -533,145 +553,91 @@ def load_apps():
     return apps
 
 
-@app.route('/extensions/<path:ext_dir>/<path:filename>')
-def serve_extension_file(ext_dir, filename):
-    return send_from_directory(os.path.join(app.root_path, 'extensions', ext_dir), filename)
+@app.get('/api/extensions')
+async def get_extensions():
+    """Return list of loaded extensions."""
+    # Access the global variable set during startup
+    import app.main
+    exts = getattr(app.main, '_loaded_extensions', [])
+    return {"ok": True, "data": exts}
 
-@app.route('/api/extensions')
-def get_extensions():
-    return jsonify({"ok": True, "data": current_app.config.get('LOADED_EXTENSIONS', [])})
 
-@app.route('/api/run_command', methods=['POST'])
-def run_command_endpoint():
-    """Executes a shell command and returns its stdout."""
-    data = request.get_json()
-    if not data or 'command' not in data:
-        return jsonify({"ok": False, "error": '"command" field is required.'}), 400
-
-    command = data['command']
-
+@app.get("/api/browse")
+async def browse(
+    path: str = Query(None),
+    root: str = Query("home"),
+    sudo: bool = Query(False),
+    hidden: bool = Query(False),
+):
     try:
-        result = subprocess.run(
-            command, 
-            shell=True, 
-            capture_output=True, 
-            text=True, 
-            check=True
-        )
-        return jsonify({"ok": True, "data": {"stdout": result.stdout}})
-    except subprocess.CalledProcessError as e:
-        return jsonify({"ok": False, "error": 'Command failed', 'stderr': e.stderr}), 500
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-@app.route('/api/list_path_executables')
-def list_path_executables():
-    """Lists all unique executables on the user's PATH."""
-    output, error = run_script('list_path_execs.sh', app.root_path)
-    if error:
-        return jsonify({"ok": False, "error": error}), 500
-    try:
-        return jsonify({"ok": True, "data": json.loads(output)})
-    except json.JSONDecodeError:
-        return jsonify({"ok": False, "error": 'Failed to decode JSON from list_path_execs script.'}), 500
-
-@app.route('/api/browse')
-def browse_path():
-    """Browses a given path, defaulting to the user's home directory."""
-    path = request.args.get('path', '~')
-    root_param = request.args.get('root', 'home').lower()
-    # Expand the tilde and normalize the path to resolve `..` etc.
-    expanded_path, error_message = _resolve_browse_path(path, root_param)
-    if error_message:
-        status = 403 if error_message == 'Access denied' else 400
-        return jsonify({"ok": False, "error": error_message}), status
-    if not expanded_path:
-        return jsonify({"ok": False, "error": 'Invalid path'}), 400
-
-    hidden_flag = request.args.get('hidden', '').lower()
-    include_hidden = hidden_flag in {'1', 'true', 'yes', 'on'}
-
-    used_sudo = False
-    try:
-        entries = _scandir_entries(expanded_path, include_hidden)
-    except PermissionError:
-        try:
-            entries = _scandir_with_sudo(expanded_path, include_hidden)
-            used_sudo = True
-        except FileNotFoundError as exc:
-            return jsonify({"ok": False, "error": str(exc) or 'Directory not found'}), 404
-        except PermissionError as exc:
-            return jsonify({"ok": False, "error": str(exc) or 'Access denied'}), 403
-        except Exception as exc:
-            return jsonify({"ok": False, "error": str(exc) or 'Failed to browse directory'}), 500
-    except FileNotFoundError:
-        return jsonify({"ok": False, "error": 'Directory not found'}), 404
-    except OSError as exc:
-        if exc.errno == errno.ENOENT:
-            return jsonify({"ok": False, "error": 'Directory not found'}), 404
-        if exc.errno in {errno.EACCES, errno.EPERM}:
-            try:
-                entries = _scandir_with_sudo(expanded_path, include_hidden)
-                used_sudo = True
-            except PermissionError as inner:
-                return jsonify({"ok": False, "error": str(inner) or 'Access denied'}), 403
+        resolved, err = _resolve_browse_path(path, root)
+        if err:
+            raise HTTPException(status_code=400, detail=err)
+        
+        if sudo:
+            entries = _scandir_with_sudo(resolved, hidden)
         else:
-            return jsonify({"ok": False, "error": f'Unable to browse: {exc}'}), 500
+            entries = _scandir_entries(resolved, hidden)
+        
+        return {"ok": True, "data": {"path": resolved, "entries": entries}}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Directory not found")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    return jsonify({"ok": True, "data": entries, "meta": {"used_sudo": used_sudo}})
+@app.get("/api/settings")
+async def get_settings():
+    data = _load_settings()
+    return {"ok": True, "data": data}
 
-@app.route('/api/settings', methods=['GET', 'POST'])
-def settings_handler():
-    if request.method == 'GET':
-        data = _load_settings()
-        return jsonify({"ok": True, "data": data})
-
-    payload = request.get_json(silent=True)
+@app.post("/api/settings")
+async def post_settings(payload: dict = Body(...)):
     if not isinstance(payload, dict):
-        return jsonify({"ok": False, "error": 'JSON object required'}), 400
+        raise HTTPException(status_code=400, detail="JSON object required")
     try:
         saved = _save_settings(payload)
     except Exception as exc:
-        return jsonify({"ok": False, "error": f'Failed to save settings: {exc}'}), 500
-    return jsonify({"ok": True, "data": saved})
+        raise HTTPException(status_code=500, detail=f"Failed to save settings: {exc}")
+    return {"ok": True, "data": saved}
 
 
-@app.route('/api/state', methods=['GET', 'POST', 'DELETE'])
-def state_handler():
-    if request.method == 'GET':
-        keys = request.args.getlist('key')
-        if not keys:
-            return jsonify({"ok": False, "error": 'query parameter "key" is required'}), 400
-        store = _load_state_store()
-        data = {key: store.get(key) for key in keys}
-        return jsonify({"ok": True, "data": data})
 
-    if request.method == 'POST':
-        payload = request.get_json(silent=True)
-        if not isinstance(payload, dict):
-            return jsonify({"ok": False, "error": 'JSON object required'}), 400
-        key = payload.get('key')
-        if not isinstance(key, str) or not key.strip():
-            return jsonify({"ok": False, "error": '"key" must be a non-empty string'}), 400
-        merge = bool(payload.get('merge'))
-        value = payload.get('value')
-        store = _load_state_store()
-        if merge and isinstance(value, dict) and isinstance(store.get(key), dict):
-            merged = dict(store.get(key) or {})
-            merged.update(value)
-            store[key] = merged
-        else:
-            store[key] = value
-        try:
-            _save_state_store(store)
-        except Exception as exc:
-            return jsonify({"ok": False, "error": f'Failed to persist state: {exc}'}), 500
-        return jsonify({"ok": True, "data": store.get(key)})
-
-    # DELETE
-    keys = request.args.getlist('key')
+@app.get("/api/state")
+async def get_state(keys: List[str] = Query(...)):
     if not keys:
-        return jsonify({"ok": False, "error": 'query parameter "key" is required'}), 400
+        raise HTTPException(status_code=400, detail="query parameter \"key\" is required")
+    store = _load_state_store()
+    data = {key: store.get(key) for key in keys}
+    return {"ok": True, "data": data}
+
+@app.post("/api/state")
+async def post_state(payload: dict = Body(...)):
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    key = payload.get('key')
+    if not isinstance(key, str) or not key.strip():
+        raise HTTPException(status_code=400, detail="\"key\" must be a non-empty string")
+    merge = bool(payload.get('merge'))
+    value = payload.get('value')
+    store = _load_state_store()
+    if merge and isinstance(value, dict) and isinstance(store.get(key), dict):
+        merged = dict(store.get(key) or {})
+        merged.update(value)
+        store[key] = merged
+    else:
+        store[key] = value
+    try:
+        _save_state_store(store)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to persist state: {exc}")
+    return {"ok": True, "data": store.get(key)}
+
+@app.delete("/api/state")
+async def delete_state(keys: List[str] = Query(...)):
+    if not keys:
+        raise HTTPException(status_code=400, detail="query parameter \"key\" is required")
     store = _load_state_store()
     removed = 0
     for key in keys:
@@ -681,8 +647,8 @@ def state_handler():
     try:
         _save_state_store(store)
     except Exception as exc:
-        return jsonify({"ok": False, "error": f'Failed to persist state: {exc}'}), 500
-    return jsonify({"ok": True, "data": {"removed": removed}})
+        raise HTTPException(status_code=500, detail=f"Failed to persist state: {exc}")
+    return {"ok": True, "data": {"removed": removed}}
 
 def _terminate_framework_shells(manager: FrameworkShellManager) -> None:
     for record in list(manager.list_shells()):
@@ -692,64 +658,17 @@ def _terminate_framework_shells(manager: FrameworkShellManager) -> None:
             print(f"Failed to remove shell {record.id}: {exc}")
 
 
-@app.route('/api/framework/runtime/metrics')
-def framework_runtime_metrics():
-    mgr = _manager()
-    run_id = app.config.get("TE_RUN_ID")
-    data = {
-        "run_id": run_id,
-        "supervisor_pid": int(os.environ.get("TE_SUPERVISOR_PID", "0")) or None,
-        "app_pid": os.getpid(),
-        "started_at": APP_STARTED_AT,
-        "uptime": max(0.0, time.time() - APP_STARTED_AT),
-        "framework_shells": mgr.aggregate_resource_stats(),
-        "interactive_sessions": _collect_interactive_session_stats(run_id),
-        "process": None,
-    }
-    if psutil:
-        try:
-            proc = psutil.Process(os.getpid())  # type: ignore[arg-type]
-            with proc.oneshot():
-                data["process"] = {
-                    "cpu_percent": proc.cpu_percent(interval=0.0),
-                    "memory_rss": proc.memory_info().rss,
-                    "num_threads": proc.num_threads(),
-                }
-        except (psutil.NoSuchProcess, psutil.AccessDenied):  # type: ignore[attr-defined]
-            data["process"] = None
-    return jsonify({"ok": True, "data": data})
 
 
-@app.route('/api/framework/runtime/shutdown', methods=['POST'])
-def framework_runtime_shutdown():
-    token = request.headers.get("X-Framework-Key") or request.args.get("token")
-    expected = os.environ.get("TE_FRAMEWORK_SHELL_TOKEN")
-    if expected and token != expected:
-        return jsonify({"ok": False, "error": "Forbidden"}), 403
 
-    mgr = _manager()
-    _terminate_framework_shells(mgr)
 
-    supervisor_pid = int(os.environ.get("TE_SUPERVISOR_PID", "0") or 0)
-    if supervisor_pid:
-        try:
-            os.kill(supervisor_pid, signal.SIGTERM)
-        except OSError:
-            pass
-    else:
-        func = request.environ.get('werkzeug.server.shutdown')
-        if func:
-            func()
-
-    return jsonify({"ok": True, "data": {"message": "Shutdown initiated"}})
 
 
 
 # --- PWA: Service Worker ---
-@app.route('/sw.js')
-def service_worker():
-    # Serve the service worker from a deterministic path at the app root scope
-    return send_from_directory(os.path.join(app.root_path, 'static', 'js'), 'sw.js', mimetype='application/javascript')
+@app.get("/sw.js")
+async def sw():
+    return FileResponse(os.path.join(project_root, 'app', 'static', 'js', 'sw.js'), media_type='application/javascript')
 
 
 # --- Lazy initialization compatible with Flask 3.x (before_first_request removed) ---
@@ -784,197 +703,121 @@ def _ensure_initialized():
         try:
             if not loaded_extensions:
                 loaded_extensions = load_extensions()
-                app.config['LOADED_EXTENSIONS'] = loaded_extensions
+
         except Exception as e:
             print(f"Error loading extensions: {e}")
         try:
             if not loaded_apps:
                 loaded_apps = load_apps()
-                app.config['LOADED_APPS'] = loaded_apps
+
         except Exception as e:
             print(f"Error loading apps: {e}")
         _initialized = True
 
-@app.before_request
-def _before_request_init():
-    _ensure_initialized()
-    start_background_tasks(app)
 
 
-# @app.route('/api/create_directory', methods=['POST'])
-# def create_directory():
-#     """Creates a new directory at a given path."""
-#     data = request.get_json()
-#     if not data or 'path' not in data or 'name' not in data:
-#         return jsonify({'error': 'Path and name are required.'}), 400
-# 
-#     base_path = os.path.expanduser(data['path'])
-#     new_dir_name = data['name']
-# 
-#     # Basic security: ensure we are still within the home directory
-#     if not os.path.abspath(base_path).startswith(os.path.expanduser('~')):
-#         return jsonify({'error': 'Access denied'}), 403
-#     
-#     # Prevent invalid directory names
-#     if '/' in new_dir_name or '..' in new_dir_name:
-#         return jsonify({'error': 'Invalid directory name'}), 400
-# 
-#     try:
-#         os.makedirs(os.path.join(base_path, new_dir_name), exist_ok=True)
-#         return jsonify({'status': 'success'})
-#     except Exception as e:
-#         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/app/<app_id>/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
-def proxy_app_request(app_id, subpath):
-    try:
-        app_info = ensure_app_running(app_id)
-    except (ValueError, RuntimeError) as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
 
+
+import httpx
+import anyio
+
+@app.api_route('/api/app/{app_id}/{subpath:path}', methods=['GET','POST','PUT','DELETE','PATCH','OPTIONS'])
+async def proxy_app_request(app_id: str, subpath: str, request: Request):
+    # Call ensure_app_running (sync, wrap in anyio)
+    app_info = await anyio.to_thread.run_sync(ensure_app_running, app_id)
     if not app_info or not app_info.get('port'):
-        # This can happen if the app has no backend
-        return jsonify({"ok": False, "error": "App has no backend or is not running."}), 404
-
+        return JSONResponse({"ok": False, "error": "App has no backend or is not running."}, status_code=404)
+    
     port = app_info['port']
     url = f"http://127.0.0.1:{port}/{subpath}"
     
-    params = request.args.copy()
+    # Forward headers minus 'host'
+    headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
+    body = await request.body()
     
-    headers = {key: value for key, value in request.headers if key.lower() != 'host'}
-
-    try:
-        resp = requests.request(
+    async with httpx.AsyncClient() as client:
+        resp = await client.request(
             method=request.method,
             url=url,
+            params=request.query_params,
             headers=headers,
-            params=params,
-            data=request.get_data(),
-            cookies=request.cookies,
-            allow_redirects=False,
-            stream=True,
-            timeout=30
+            content=body,
+            timeout=30.0,
         )
-
-        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-        resp_headers = [(name, value) for name, value in resp.raw.headers.items() if name.lower() not in excluded_headers]
-
-        resp_stream = Response(
-            resp.iter_content(chunk_size=10 * 1024),
-            resp.status_code,
-            resp_headers,
-        )
-        resp_stream.headers["X-App-Worker-Port"] = str(port)
-        return resp_stream
-    except requests.exceptions.RequestException as e:
-        return jsonify({"ok": False, "error": f"Failed to connect to app worker: {e}"}), 502
-
-@sock.route('/ws/app/<app_id>/<path:subpath>')
-def proxy_app_websocket(client_ws, app_id, subpath):
-    """
-    Generic WebSocket proxy for app workers.
-    Forwards WebSocket connections from clients to the appropriate worker process.
     
-    Convention: All worker WebSockets must use /ws/<route> pattern.
-    Client connects to: /ws/app/<app_id>/<route>
-    Proxied to worker: /ws/<route>
-    """
-    try:
-        app_info = ensure_app_running(app_id)
-    except (ValueError, RuntimeError) as e:
-        try:
-            client_ws.close()
-        except:
-            pass
-        return
+    # Strip hop-by-hop headers
+    excluded = {'content-encoding', 'content-length', 'transfer-encoding', 'connection'}
+    resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+    
+    return StreamingResponse(
+        resp.iter_bytes(chunk_size=10240),
+        status_code=resp.status_code,
+        headers=resp_headers,
+    )
 
+from starlette.websockets import WebSocket, WebSocketDisconnect
+import websockets
+import asyncio
+
+@app.websocket('/ws/app/{app_id}/{route:path}')
+async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
+    await websocket.accept()
+    
+    # Call ensure_app_running (sync)
+    app_info = await anyio.to_thread.run_sync(ensure_app_running, app_id)
     if not app_info or not app_info.get('port'):
-        try:
-            client_ws.close()
-        except:
-            pass
+        await websocket.close()
         return
-
+    
     port = app_info['port']
+    query = websocket.scope['query_string'].decode('utf-8')
+    worker_url = f"ws://127.0.0.1:{port}/ws/{route}"
+    if query:
+        worker_url += f"?{query}"
     
-    # Build worker WebSocket URL following /ws/<route> convention
-    query_string = request.query_string.decode('utf-8')
-    worker_url = f"ws://127.0.0.1:{port}/ws/{subpath}"
-    if query_string:
-        worker_url += f"?{query_string}"
-
-    # Connect to worker WebSocket
-    worker_ws = None
     try:
-        worker_ws = WSClient.connect(worker_url)
-    except Exception as e:
-        try:
-            client_ws.close()
-        except:
-            pass
-        return
+        async with websockets.connect(worker_url) as worker_ws:
+            async def forward_client_to_worker():
+                try:
+                    async for msg in websocket.iter_text():
+                        await worker_ws.send(msg)
+                except WebSocketDisconnect:
+                    pass
+            
+            async def forward_worker_to_client():
+                try:
+                    async for msg in worker_ws:
+                        await websocket.send_text(msg)
+                except:
+                    pass
+            
+            await asyncio.gather(
+                forward_client_to_worker(),
+                forward_worker_to_client(),
+                return_exceptions=True,
+            )
+    except Exception:
+        await websocket.close()
 
-    # Bidirectional message forwarding
-    def forward_client_to_worker():
-        """Forward messages from client to worker"""
-        try:
-            while True:
-                msg = client_ws.receive()
-                if msg is None:
-                    break
-                worker_ws.send(msg)
-        except ConnectionClosed:
-            pass
-        finally:
-            try:
-                worker_ws.close()
-            except:
-                pass
 
-    def forward_worker_to_client():
-        """Forward messages from worker to client"""
-        try:
-            while True:
-                msg = worker_ws.receive()
-                if msg is None:
-                    break
-                client_ws.send(msg)
-        except ConnectionClosed:
-            pass
-        finally:
-            try:
-                client_ws.close()
-            except:
-                pass
-
-    # Start bidirectional forwarding in threads
-    import threading
-    client_thread = threading.Thread(target=forward_client_to_worker, daemon=True)
-    worker_thread = threading.Thread(target=forward_worker_to_client, daemon=True)
-    
-    client_thread.start()
-    worker_thread.start()
-    
-    # Wait for both threads to complete
-    client_thread.join()
-    worker_thread.join()
 
 if __name__ == '__main__':
+    import uvicorn
+    import app.main
     print("--- Loading Settings ---")
     _apply_settings_to_config()
     print("--- Loading Services ---")
     load_services()
     print("--- Loading Extensions ---")
-    loaded_extensions = load_extensions()
-    app.config['LOADED_EXTENSIONS'] = loaded_extensions
-    print(f"Loaded {len(loaded_extensions)} extensions.")
+    # Store in module-level variable so /api/extensions can access it
+    app.main._loaded_extensions = load_extensions()
+    print(f"Loaded {len(app.main._loaded_extensions)} extensions.")
     print("--- Loading Apps ---")
     loaded_apps = load_apps()
-    app.config['LOADED_APPS'] = loaded_apps
     print(f"Loaded {len(loaded_apps)} apps.")
     print("--- Starting Framework Shell Log Monitor ---")
     _log_monitor_thread = _start_framework_shell_log_monitor()
-    print("--- Starting Server ---")
-    # Production-like settings for the built-in server (still not recommended for production)
-    app.run(host='0.0.0.0', port=8088, debug=False)
+    print("--- Starting ASGI Server ---")
+    uvicorn.run("app.main:app", host='0.0.0.0', port=8088)

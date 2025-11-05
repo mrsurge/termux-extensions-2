@@ -10,14 +10,15 @@ from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
-from flask import Blueprint, Response, jsonify, request, stream_with_context
+from fastapi import APIRouter, Request, HTTPException, Response, Body, Query
+from sse_starlette.sse import EventSourceResponse
 
 __all__ = ["jobs_bp", "register_job_handler", "JobCancelled"]
 
 _JOBS_DIR = Path.home() / ".cache" / "termux_extensions"
 _JOBS_FILE = _JOBS_DIR / "jobs.json"
 
-jobs_bp = Blueprint("jobs", __name__)
+jobs_bp = APIRouter()
 
 
 class JobStatus:
@@ -359,71 +360,65 @@ def _noop_handler(ctx: JobContext, params: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-@jobs_bp.route("/jobs", methods=["POST"])
-def create_job_route():
-    payload = request.get_json(silent=True) or {}
+@jobs_bp.post("/jobs")
+async def create_job_route(payload: dict = Body(...)):
     job_type = payload.get("type")
     params = payload.get("params") or {}
     if not isinstance(job_type, str) or not job_type:
-        return jsonify({"ok": False, "error": "Job type is required"}), 400
+        raise HTTPException(status_code=400, detail="Job type is required")
     try:
         job = manager.create_job(job_type, params)
     except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    return jsonify({"ok": True, "data": job.to_public_dict()}), 202
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "data": job.to_public_dict()}
 
 
-@jobs_bp.route("/jobs", methods=["GET"])
+@jobs_bp.get("/jobs")
 def list_jobs_route():
     jobs = [job.to_public_dict() for job in manager.list_jobs().values()]
-    return jsonify({"ok": True, "data": jobs})
+    return {"ok": True, "data": jobs}
 
 
-@jobs_bp.route("/jobs/<job_id>", methods=["GET"])
+@jobs_bp.get("/jobs/{job_id}")
 def get_job_route(job_id: str):
     job = manager.get_job(job_id)
     if not job:
-        return jsonify({"ok": False, "error": "Job not found"}), 404
-    return jsonify({"ok": True, "data": job.to_public_dict()})
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"ok": True, "data": job.to_public_dict()}
 
 
-@jobs_bp.route("/jobs/<job_id>/cancel", methods=["POST"])
+@jobs_bp.post("/jobs/{job_id}/cancel")
 def cancel_job_route(job_id: str):
     try:
         job = manager.cancel_job(job_id)
     except KeyError:
-        return jsonify({"ok": False, "error": "Job not found"}), 404
-    return jsonify({"ok": True, "data": job.to_public_dict()})
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"ok": True, "data": job.to_public_dict()}
 
 
-@jobs_bp.route("/jobs/<job_id>", methods=["DELETE"])
+@jobs_bp.delete("/jobs/{job_id}")
 def delete_job_route(job_id: str):
     removed = manager.delete_job(job_id)
     if not removed:
-        return jsonify({"ok": False, "error": "Job is running or not found"}), 400
-    return jsonify({"ok": True, "data": None})
+        raise HTTPException(status_code=400, detail="Job is running or not found")
+    return {"ok": True, "data": None}
 
 
-@jobs_bp.route("/jobs/events", methods=["GET"])
-def jobs_events_stream():
-    job_id = request.args.get("job_id")
+@jobs_bp.get("/jobs/events")
+async def jobs_events_stream(job_id: Optional[str] = Query(None)):
     job_ids = [job_id] if job_id else None
     queue: Queue = Queue()
     listener = manager.add_listener(queue, job_ids)
 
-    def generate():
+    async def event_generator():
         try:
             while True:
                 try:
                     payload = queue.get(timeout=25)
+                    yield dict(data=json.dumps(payload))
                 except Empty:
-                    yield ": keep-alive\n\n"
-                    continue
-                yield f"data: {json.dumps(payload)}\n\n"
+                    yield dict(data="keep-alive")
         finally:
             manager.remove_listener(listener)
 
-    response = Response(stream_with_context(generate()), mimetype="text/event-stream")
-    response.headers["Cache-Control"] = "no-cache"
-    response.headers["X-Accel-Buffering"] = "no"
-    return response
+    return EventSourceResponse(event_generator())

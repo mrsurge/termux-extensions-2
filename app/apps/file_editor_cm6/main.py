@@ -4,41 +4,22 @@
 import os
 import json
 from pathlib import Path
-from flask import Blueprint, jsonify, request
-from flask_sock import Sock
+from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
+from fastapi.responses import JSONResponse
+import asyncio
+import anyio
+from .agent_ws import agent_websocket
 
-from .core_read import init_watcher, subscribe, unsubscribe, push_save_ack, emit_diff_changed
-from .core_write import write_full, BaseMismatchError, _get_file_meta
-from .history_store import HistoryStore
-from .explorer_helper import set_project_root, get_project_root, list_dir, mark_git_cache_dirty
-from .diff_helper import collect_diff, invalidate_diff_cache
-from .git_helper import (
-    GitError,
-    list_branches as git_list_branches,
-    checkout_branch as git_checkout_branch,
-    create_branch as git_create_branch_helper,
-    get_status as git_get_status,
-    stage_all as git_stage_all,
-    unstage_all as git_unstage_all,
-    commit_changes as git_commit_changes,
-    push_changes as git_push_changes,
-    pull_changes as git_pull_changes,
-)
-from .preferences_store import PreferencesStore
-from .terminal_backend import register_terminal_routes
-from .agent_routes import register_agent_routes
-from .agent_ws import register_agent_websocket
-from . import edit_tracker
+file_editor_cm6_bp = APIRouter()
+# sock = Sock()
 
-file_editor_cm6_bp = Blueprint('file_editor_cm6', __name__)
-sock = Sock()
+# # Register terminal routes and WebSocket handler
+# register_terminal_routes(file_editor_cm6_bp, sock)
 
-# Register terminal routes and WebSocket handler
-register_terminal_routes(file_editor_cm6_bp, sock)
-
-# Register agent routes and WebSocket handler
-register_agent_routes(file_editor_cm6_bp)
-register_agent_websocket(sock)
+# # Register agent routes and WebSocket handler
+from .agent_routes import bp as agent_routes_bp
+file_editor_cm6_bp.include_router(agent_routes_bp)
+file_editor_cm6_bp.add_api_websocket_route("/ws/agent", agent_websocket)
 
 # Initialize history store (project root managed by explorer_helper)
 _history_store = HistoryStore()
@@ -167,33 +148,31 @@ def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
     rel = resolved.relative_to(project_root_resolved)
     return rel.as_posix()
 
-@file_editor_cm6_bp.route('/')
+@file_editor_cm6_bp.get('/')
 def status_root():
-    return jsonify({"ok": True, "data": {"message": "File Editor CM6 app API ready"}})
+    return {"ok": True, "data": {"message": "File Editor CM6 app API ready"}}
 
 @file_editor_cm6_bp.get('/status')
 def status():
-    return jsonify({"ok": True, "data": {"message": "File Editor CM6 app API ready"}})
+    return {"ok": True, "data": {"message": "File Editor CM6 app API ready"}}
 
 @file_editor_cm6_bp.get('/read')
-def read_file():
-    path = request.args.get('path')
+def read_file(path: str = Query(...)):
     expanded, err = _expand_and_validate_path(path)
     if err:
-        return jsonify({"ok": False, "error": err}), 403
+        raise HTTPException(status_code=403, detail=err)
     if not os.path.isfile(expanded):
-        return jsonify({"ok": False, "error": 'File not found'}), 404
+        raise HTTPException(status_code=404, detail='File not found')
     try:
         with open(expanded, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
         meta = _get_file_meta(Path(expanded))
-        return jsonify({"ok": True, "data": {"path": expanded, "content": content, "sha256": meta.get("sha256")}})
+        return {"ok": True, "data": {"path": expanded, "content": content, "sha256": meta.get("sha256")}})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.post('/write')
-def write_file_route():
-    data = request.get_json(silent=True) or {}
+async def write_file_route(data: dict = Body(...)):
     path = data.get('path')
     content = data.get('content')
     client_id = data.get('client_id', 'unknown')
@@ -201,7 +180,7 @@ def write_file_route():
     base_sha256 = None
 
     if not path:
-        return jsonify({"ok": False, "error": "Path is required"}), 400
+        raise HTTPException(status_code=400, detail="Path is required")
 
     if data.get('base') and isinstance(data['base'], dict):
         base_sha256 = data['base'].get('sha256')
@@ -210,14 +189,14 @@ def write_file_route():
     try:
         rel_path = _normalize_rel_path(project_root, path)
     except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
     
     try:
         # Initialize watcher if not already running
         init_watcher(project_root)
 
         # Perform atomic write with optional conflict check
-        file_meta = write_full(project_root, str(rel_path), content, base_sha256=base_sha256)
+        file_meta = await anyio.to_thread.run_sync(write_full, project_root, str(rel_path), content, base_sha256=base_sha256)
 
         # Send save acknowledgement to prevent self-echo
         push_save_ack(str(rel_path), op_id, client_id, file_meta)
@@ -229,61 +208,75 @@ def write_file_route():
         mark_git_cache_dirty(project_root)
         invalidate_diff_cache(project_root, str(rel_path))
 
-        return jsonify({
+        return {
             "ok": True,
             "data": {
                 "mtime": file_meta["mtime"],
                 "size": file_meta["size"],
                 "sha256": file_meta["sha256"]
             }
-        })
+        }
     except BaseMismatchError as e:
-        return jsonify({
+        return JSONResponse(status_code=409, content={
             "ok": False,
             "error": "BASE_MISMATCH",
             "data": {
                 "current": e.current_meta
             }
-        }), 409
+        })
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@sock.route('/ws/read')
-def ws_read(ws):
+import asyncio
+
+@file_editor_cm6_bp.websocket('/ws/read')
+async def ws_read(websocket: WebSocket):
     """WebSocket endpoint for file change notifications."""
-    path = request.args.get('path')
-    client_id = request.args.get('client_id', 'unknown')
+    await websocket.accept()
+    path = websocket.query_params.get('path')
+    client_id = websocket.query_params.get('client_id', 'unknown')
 
     if not path:
-        ws.close(reason='Missing path parameter')
+        await websocket.close(reason='Missing path parameter')
         return
 
     project_root = get_project_root()
     try:
         rel_path = _normalize_rel_path(project_root, path)
     except ValueError:
-        ws.close(reason='Path outside project root')
+        await websocket.close(reason='Path outside project root')
         return
 
     # Initialize watcher if not already running
     init_watcher(project_root)
 
     # Subscribe to file changes
-    token = subscribe(str(rel_path), client_id, lambda event: ws.send(json.dumps(event)))
+    event_queue = asyncio.Queue()
+    token = subscribe(str(rel_path), client_id, lambda event: event_queue.put_nowait(event))
+
+    async def forward_events():
+        while True:
+            try:
+                event = await event_queue.get()
+                await websocket.send_text(json.dumps(event))
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                break
+
+    forward_task = asyncio.create_task(forward_events())
 
     try:
         # Keep connection alive and ignore incoming messages
-        while True:
-            msg = ws.receive()
-            if msg is None:
-                break
+        async for msg in websocket.iter_text():
+            pass
     finally:
+        forward_task.cancel()
         unsubscribe(token)
 
 @file_editor_cm6_bp.post('/project/open')
-def project_open():
+async def project_open(data: dict = Body(...)):
     """Open a project directory."""
-    data = request.get_json(silent=True) or {}
     path = (data.get('path') or '').strip()
 
     try:
@@ -293,61 +286,59 @@ def project_open():
         invalidate_diff_cache(abs_path)
         edit_tracker.set_project_root(abs_path)
         state = _build_state_payload()
-        return jsonify({"ok": True, "data": {"path": str(abs_path), "state": state}})
+        return {"ok": True, "data": {"path": str(abs_path), "state": state}}
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.get('/project/current')
 def project_current():
     """Get the current project root."""
     root = _history_store.get_active_project() or str(get_project_root())
-    return jsonify({"ok": True, "data": {"path": str(root)}})
+    return {"ok": True, "data": {"path": str(root)}}
 
 @file_editor_cm6_bp.get('/git/branches')
 def git_branches():
     try:
         project_root = _get_active_project_root()
         info = git_list_branches(project_root)
-        return jsonify({"ok": True, "data": {"current": info.current, "branches": info.branches}})
+        return {"ok": True, "data": {"current": info.current, "branches": info.branches}}
     except GitError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @file_editor_cm6_bp.post('/git/checkout')
-def git_checkout_route():
-    data = request.get_json(silent=True) or {}
+async def git_checkout_route(data: dict = Body(...)):
     name = (data.get('name') or '').strip()
     if not name:
-        return jsonify({"ok": False, "error": "Branch name required"}), 400
+        raise HTTPException(status_code=400, detail="Branch name required")
     try:
         project_root = _get_active_project_root()
         info = git_checkout_branch(project_root, name)
-        return jsonify({"ok": True, "data": {"current": info.current, "branches": info.branches}})
+        return {"ok": True, "data": {"current": info.current, "branches": info.branches}}
     except GitError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @file_editor_cm6_bp.post('/git/branch')
-def git_create_branch_route():
-    data = request.get_json(silent=True) or {}
+async def git_create_branch_route(data: dict = Body(...)):
     name = (data.get('name') or '').strip()
     if not name:
-        return jsonify({"ok": False, "error": "Branch name required"}), 400
+        raise HTTPException(status_code=400, detail="Branch name required")
     try:
         project_root = _get_active_project_root()
         info = git_create_branch_helper(project_root, name)
-        return jsonify({"ok": True, "data": {"current": info.current, "branches": info.branches}})
+        return {"ok": True, "data": {"current": info.current, "branches": info.branches}}
     except GitError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @file_editor_cm6_bp.get('/git/status')
 def git_status_route():
     try:
         project_root = _get_active_project_root()
         status = git_get_status(project_root)
-        return jsonify({"ok": True, "data": _status_to_payload(status)})
+        return {"ok": True, "data": _status_to_payload(status)}
     except GitError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @file_editor_cm6_bp.post('/git/stage_all')
@@ -355,9 +346,9 @@ def git_stage_all_route():
     try:
         project_root = _get_active_project_root()
         status = git_stage_all(project_root)
-        return jsonify({"ok": True, "data": _status_to_payload(status)})
+        return {"ok": True, "data": _status_to_payload(status)}
     except GitError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @file_editor_cm6_bp.post('/git/unstage_all')
@@ -365,58 +356,55 @@ def git_unstage_all_route():
     try:
         project_root = _get_active_project_root()
         status = git_unstage_all(project_root)
-        return jsonify({"ok": True, "data": _status_to_payload(status)})
+        return {"ok": True, "data": _status_to_payload(status)}
     except GitError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @file_editor_cm6_bp.post('/git/commit')
-def git_commit_route():
-    data = request.get_json(silent=True) or {}
+async def git_commit_route(data: dict = Body(...)):
     message = (data.get('message') or '').strip()
     amend = bool(data.get('amend'))
     if not message:
-        return jsonify({"ok": False, "error": "Commit message required"}), 400
+        raise HTTPException(status_code=400, detail="Commit message required")
     try:
         project_root = _get_active_project_root()
         status = git_commit_changes(project_root, message, amend=amend)
-        return jsonify({"ok": True, "data": _status_to_payload(status)})
+        return {"ok": True, "data": _status_to_payload(status)}
     except GitError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @file_editor_cm6_bp.post('/git/push')
-def git_push_route():
-    data = request.get_json(silent=True) or {}
+async def git_push_route(data: dict = Body(...)):
     remote = (data.get('remote') or '').strip() or None
     branch = (data.get('branch') or '').strip() or None
     force = bool(data.get('force'))
     try:
         project_root = _get_active_project_root()
         status = git_push_changes(project_root, remote=remote, branch=branch, force=force)
-        return jsonify({"ok": True, "data": _status_to_payload(status)})
+        return {"ok": True, "data": _status_to_payload(status)}
     except GitError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @file_editor_cm6_bp.post('/git/pull')
-def git_pull_route():
-    data = request.get_json(silent=True) or {}
+async def git_pull_route(data: dict = Body(...)):
     remote = (data.get('remote') or '').strip() or None
     branch = (data.get('branch') or '').strip() or None
     rebase = bool(data.get('rebase'))
     try:
         project_root = _get_active_project_root()
         status = git_pull_changes(project_root, remote=remote, branch=branch, rebase=rebase)
-        return jsonify({"ok": True, "data": _status_to_payload(status)})
+        return {"ok": True, "data": _status_to_payload(status)}
     except GitError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @file_editor_cm6_bp.get('/state')
 def get_project_state():
     """Return consolidated editor state."""
     state = _build_state_payload()
-    return jsonify({"ok": True, "data": state})
+    return {"ok": True, "data": state}
 
 
 @file_editor_cm6_bp.get('/preferences')
@@ -424,13 +412,12 @@ def get_preferences():
     """Return persisted editor/UI preferences."""
     project_path = _history_store.get_active_project()
     prefs = _preferences_store.get_preferences(project_path)
-    return jsonify({"ok": True, "data": prefs})
+    return {"ok": True, "data": prefs}
 
 
 @file_editor_cm6_bp.post('/preferences')
-def update_preferences():
+async def update_preferences(payload: dict = Body(...)):
     """Persist editor/UI preference changes."""
-    payload = request.get_json(silent=True) or {}
     editor = payload.get('editor')
     ui = payload.get('ui')
     project = payload.get('project')
@@ -449,66 +436,63 @@ def update_preferences():
         )
         # Return a fresh snapshot for convenience
         snapshot = _preferences_store.get_preferences(active_project)
-        return jsonify({"ok": True, "data": snapshot, "updated": updated})
+        return {"ok": True, "data": snapshot, "updated": updated}
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @file_editor_cm6_bp.post('/state/file_activity')
-def record_file_activity():
+async def record_file_activity(data: dict = Body(...)):
     """Persist last-opened file and recents for the active project."""
-    data = request.get_json(silent=True) or {}
     path = data.get('path')
     if not path:
-        return jsonify({"ok": False, "error": "Path is required"}), 400
+        raise HTTPException(status_code=400, detail="Path is required")
 
     project_path = data.get('project') or _history_store.get_active_project()
     if not project_path:
-        return jsonify({"ok": False, "error": "No project selected"}), 400
+        raise HTTPException(status_code=400, detail="No project selected")
 
     try:
         project_root_path = Path(project_path).expanduser().resolve()
         candidate_path = Path(path).expanduser().resolve()
         if not str(candidate_path).startswith(str(project_root_path)):
-            return jsonify({"ok": False, "error": "File is outside the project root"}), 400
+            raise HTTPException(status_code=400, detail="File is outside the project root")
 
         entry = _history_store.record_file_activity(project_path, str(candidate_path))
         state = _build_state_payload()
-        return jsonify({"ok": True, "data": {"entry": entry, "state": state}})
+        return {"ok": True, "data": {"entry": entry, "state": state}}
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @file_editor_cm6_bp.get('/diff')
-def get_diff():
+def get_diff(path: str = Query(...)):
     """Return git diff hunks for the requested file."""
-    path = request.args.get('path')
     if not path:
-        return jsonify({"ok": False, "error": "Path is required"}), 400
+        raise HTTPException(status_code=400, detail="Path is required")
 
     project_path = _history_store.get_active_project() or str(get_project_root())
     if not project_path:
-        return jsonify({"ok": False, "error": "No project selected"}), 400
+        raise HTTPException(status_code=400, detail="No project selected")
 
     project_root = Path(project_path).expanduser()
     if not project_root.exists():
-        return jsonify({"ok": False, "error": "Project directory not available"}), 404
+        raise HTTPException(status_code=404, detail="Project directory not available")
 
     try:
         rel = _normalize_rel_path(project_root, path)
     except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc))
 
     payload = collect_diff(project_root, rel)
-    return jsonify({"ok": True, "data": payload})
+    return {"ok": True, "data": payload}
 
 @file_editor_cm6_bp.get('/explorer/list')
-def explorer_list():
+def explorer_list(rel: str = Query('.')):
     """List directory contents for the file explorer."""
-    rel = request.args.get('dir', '.')
     try:
-        return jsonify({"ok": True, "data": list_dir(rel)})
+        return {"ok": True, "data": list_dir(rel)}
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.get('/history/files')
 def get_recent_files():
@@ -523,34 +507,31 @@ def get_recent_files():
                 **entry,
                 "exists": bool(entry_path and Path(entry_path).is_file()),
             })
-        return jsonify({"ok": True, "data": files})
+        return {"ok": True, "data": files}
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.post('/history/touch')
-def touch_file_history():
+async def touch_file_history(data: dict = Body(...)):
     """Add a file to the recent files list."""
-    data = request.get_json(silent=True) or {}
     path = data.get('path')
 
     project_root = _history_store.get_active_project() or str(get_project_root())
     try:
         entry = _history_store.record_file_activity(str(project_root), path)
-        return jsonify({"ok": True, "data": entry})
+        return {"ok": True, "data": entry}
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.delete('/history/file')
-def remove_file_history():
+def remove_file_history(path: str = Query(...)):
     """Remove a file from the recent files list."""
-    path = request.args.get('path')
-
     project_root = _history_store.get_active_project() or str(get_project_root())
     try:
         removed = _history_store.remove_file(str(project_root), path)
-        return jsonify({"ok": True, "data": {"removed": removed}})
+        return {"ok": True, "data": {"removed": removed}}
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.delete('/history/files/all')
 def clear_all_file_history():
@@ -558,91 +539,74 @@ def clear_all_file_history():
     project_root = _history_store.get_active_project() or str(get_project_root())
     try:
         cleared = _history_store.clear_all_files(str(project_root))
-        return jsonify({"ok": True, "data": {"cleared": cleared}})
+        return {"ok": True, "data": {"cleared": cleared}}
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.get('/terminal/shell-id')
 def get_terminal_shell_id():
     """Get the stored terminal shell ID."""
     try:
         shell_id = _history_store.get_terminal_shell_id()
-        return jsonify({"ok": True, "data": {"shell_id": shell_id}})
+        return {"ok": True, "data": {"shell_id": shell_id}}
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.post('/terminal/shell-id')
-def set_terminal_shell_id():
+async def set_terminal_shell_id(data: dict = Body(...)):
     """Store the terminal shell ID."""
-    data = request.get_json(silent=True) or {}
     shell_id = data.get('shell_id')
     
     try:
         _history_store.set_terminal_shell_id(shell_id)
-        return jsonify({"ok": True, "data": {"shell_id": shell_id}})
+        return {"ok": True, "data": {"shell_id": shell_id}}
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.get('/edit_tracker/status')
 def get_edit_tracker_status():
     """Get current edit tracker status."""
     try:
         status = edit_tracker.get_tracking_status()
-        return jsonify({"ok": True, "data": status})
+        return {"ok": True, "data": status}
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@sock.route('/ws/edit_tracker')
-def edit_tracker_ws(ws):
+@file_editor_cm6_bp.websocket('/ws/edit_tracker')
+async def edit_tracker_ws(websocket: WebSocket):
     """WebSocket endpoint for edit tracking events."""
-    import queue as _queue
-    import threading
+    await websocket.accept()
     
-    # Subscribe to edit tracker events
-    event_queue = _queue.Queue()
+    event_queue = asyncio.Queue()
     
     def queue_callback(event):
         try:
-            event_queue.put(event)
+            event_queue.put_nowait(event)
         except Exception:
             pass
     
     token = edit_tracker.subscribe(queue_callback)
-    stop_event = threading.Event()
     
-    def forward_events_to_ws():
+    async def forward_events_to_ws():
         """Forward edit tracker events to WebSocket"""
-        while not stop_event.is_set():
+        while True:
             try:
-                event = event_queue.get(timeout=0.5)
-            except _queue.Empty:
-                continue
-            
-            try:
-                ws.send(json.dumps(event))
+                event = await event_queue.get()
+                await websocket.send_text(json.dumps(event))
+            except asyncio.CancelledError:
+                break
             except Exception:
-                stop_event.set()
                 break
     
-    # Start forwarding thread
-    forward_thread = threading.Thread(target=forward_events_to_ws, daemon=True)
-    forward_thread.start()
+    forward_task = asyncio.create_task(forward_events_to_ws())
     
     try:
         # Keep connection alive (receive ping/pong)
-        while not stop_event.is_set():
-            msg = ws.receive()
-            if msg is None:
-                break
+        async for msg in websocket.iter_text():
+            pass
     finally:
         # Clean up
-        stop_event.set()
-        
-        try:
-            forward_thread.join(timeout=1.0)
-        except Exception:
-            pass
-        
+        forward_task.cancel()
         try:
             edit_tracker.unsubscribe(token)
         except Exception:

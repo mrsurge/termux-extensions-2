@@ -1,85 +1,73 @@
 import os
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 import time
-from flask import (
-    Blueprint,
-    jsonify,
-    render_template,
-    send_from_directory,
-    current_app,
-    redirect,
-    request,
-    abort,
-)
+from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from app.libs.app_manager import ensure_app_running
 from app.libs import app_lifecycle
-from app.libs.framework_shells import _manager as get_framework_shell_manager
+from app.libs.framework_shells import FrameworkShellManager, get_manager as get_framework_shell_manager
+from app.main import loaded_apps
 
-# This blueprint is managed by the dynamic loader in app/main.py
-# It is registered under the url_prefix /api/ext/apps
-apps_bp = Blueprint('apps', __name__)
-
+apps_bp = APIRouter()
 
 
-@apps_bp.route('/api/apps/<app_id>/start', methods=['POST'])
-def start_app(app_id):
+
+@apps_bp.post('/api/apps/{app_id}/start')
+def start_app(app_id: str):
     try:
         app_info = ensure_app_running(app_id)
-        return jsonify({"ok": True, "data": app_info})
+        return {"ok": True, "data": app_info}
     except (ValueError, RuntimeError) as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@apps_bp.route('/api/apps/<app_id>/quit', methods=['POST'])
-def quit_app(app_id: str):
+@apps_bp.post('/api/apps/{app_id}/quit')
+def quit_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """
     A new, specific endpoint for quitting an app.
     """
-    manager = get_framework_shell_manager()
     running_apps = app_lifecycle.get_running_apps(manager)
     app_to_quit = next((app for app in running_apps if app.get("app_id") == app_id), None)
 
     if not app_to_quit:
-        return jsonify({"ok": False, "error": "App is not running or already terminated."}), 404
+        raise HTTPException(status_code=404, detail="App is not running or already terminated.")
 
     shell_id = app_to_quit["shell_id"]
     terminated = app_lifecycle.terminate_app(manager, shell_id)
 
     if terminated:
-        return jsonify({"ok": True, "data": {"message": f"App {app_id} terminated."}})
+        return {"ok": True, "data": {"message": f"App {app_id} terminated."}}
     else:
-        return jsonify({"ok": False, "error": "Failed to terminate app."}), 500
+        raise HTTPException(status_code=500, detail="Failed to terminate app.")
 
-@apps_bp.route('/api/apps/<app_id>/lock', methods=['POST'])
-def lock_app(app_id: str):
+@apps_bp.post('/api/apps/{app_id}/lock')
+def lock_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """Sets the lock state for an app to true."""
-    manager = get_framework_shell_manager()
     running_apps = app_lifecycle.get_running_apps(manager)
     app_to_lock = next((app for app in running_apps if app.get("app_id") == app_id), None)
     if not app_to_lock:
-        return jsonify({"ok": False, "error": "App not running."}), 404
+        raise HTTPException(status_code=404, detail="App not running.")
     
     updated_app = app_lifecycle.set_lock_state(app_to_lock["shell_id"], True)
-    return jsonify({"ok": True, "data": updated_app})
+    return {"ok": True, "data": updated_app}
 
-@apps_bp.route('/api/apps/<app_id>/unlock', methods=['POST'])
-def unlock_app(app_id: str):
+@apps_bp.post('/api/apps/{app_id}/unlock')
+def unlock_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """Sets the lock state for an app to false."""
-    manager = get_framework_shell_manager()
     running_apps = app_lifecycle.get_running_apps(manager)
     app_to_unlock = next((app for app in running_apps if app.get("app_id") == app_id), None)
     if not app_to_unlock:
-        return jsonify({"ok": False, "error": "App not running."}), 404
+        raise HTTPException(status_code=404, detail="App not running.")
     
     updated_app = app_lifecycle.set_lock_state(app_to_unlock["shell_id"], False)
-    return jsonify({"ok": True, "data": updated_app})
+    return {"ok": True, "data": updated_app}
 
-@apps_bp.route('/api/apps/running', methods=['GET'])
-def get_running_apps():
+@apps_bp.get('/api/apps/running')
+def get_running_apps(manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """Returns a list of all currently running app shells with stats."""
-    manager = get_framework_shell_manager()
     running_apps = app_lifecycle.get_running_apps(manager)
     # We need to augment this with data from the main app manifests (like name and icon)
-    all_apps = {app['id']: app for app in current_app.config.get('LOADED_APPS', [])}
+    all_apps = {app['id']: app for app in loaded_apps}
     
     augmented_apps = []
     for app in running_apps:
@@ -89,50 +77,54 @@ def get_running_apps():
             app['icon_emoji'] = manifest_data.get('icon_emoji')
         augmented_apps.append(app)
         
-    return jsonify({"ok": True, "data": augmented_apps})
+    return {"ok": True, "data": augmented_apps}
 
-@apps_bp.route('/api/apps')
+@apps_bp.get('/api/apps')
 def get_apps():
     """
     This endpoint is now responsible for providing the list of available applications.
-    The actual loading and blueprint registration still happens at startup in app/main.py,
-    and the result is stored in `current_app.config`.
+    The actual loading and blueprint registration still happens at startup in app/main.py.
     """
-    loaded_apps = current_app.config.get('LOADED_APPS', [])
-    return jsonify({"ok": True, "data": loaded_apps})
+    return {"ok": True, "data": loaded_apps}
 
-@apps_bp.route('/app/<app_id>')
-def app_shell(app_id):
+@apps_bp.get("/app/{app_id}", response_class=HTMLResponse)
+async def app_shell(app_id: str, request: Request):
     """Renders the appropriate shell for an app."""
-    loaded_apps = current_app.config.get('LOADED_APPS', [])
     manifest = next((app for app in loaded_apps if app.get('id') == app_id), None)
     if not manifest:
-        return abort(404)
+        raise HTTPException(status_code=404, detail="App not found")
 
     entrypoints = manifest.get('entrypoints', {})
     if entrypoints.get('nicegui_shell'):
         app_info = ensure_app_running(app_id)
         port = app_info.get('port') if isinstance(app_info, dict) else None
         if not port:
-            return abort(502)
+            raise HTTPException(status_code=502, detail="App worker not running")
 
         time.sleep(2.0)
-        host_only = request.host.split(':')[0]
-        scheme = request.scheme
+        host_only = request.url.hostname
+        scheme = request.url.scheme
         redirect_url = f"{scheme}://{host_only}:{port}/"
-        return redirect(redirect_url)
+        return RedirectResponse(url=redirect_url)
 
-    return render_template('app_shell.html', app_id=app_id)
+    template_path = os.path.join(os.path.dirname(__file__), "..", "..", "templates", "app_shell.html")
+    with open(template_path, "r") as f:
+        template_content = f.read()
+    
+    # Basic templating, since Jinja2 is not used here
+    template_content = template_content.replace("{{ app_id|tojson }}", json.dumps(app_id))
+    template_content = template_content.replace("{{ url_for('static', filename='js/ws_port.js') }}", "/static/js/ws_port.js")
 
-@apps_bp.route('/apps/<path:app_dir>/<path:filename>')
-def serve_app_file(app_dir, filename):
+
+    return HTMLResponse(content=template_content)
+
+@apps_bp.get("/apps/{app_dir}/{filename:path}")
+def serve_app_file(app_dir: str, filename: str):
     """Serves static assets for a specific app."""
-    # Note: app.root_path is used to construct the absolute path to the 'app' directory.
-    full_path = os.path.join(current_app.root_path, 'apps', app_dir, filename)
+    full_path = os.path.join(project_root, 'app', 'apps', app_dir, filename)
     if not os.path.isfile(full_path):
-        from flask import abort
-        return abort(404)
+        raise HTTPException(status_code=404, detail="File not found")
     # Ensure JS modules are served with a JS MIME type so dynamic import() works reliably
     if filename.endswith(('.js', '.mjs')):
-        return send_from_directory(os.path.join(current_app.root_path, 'apps', app_dir), filename, mimetype='application/javascript')
-    return send_from_directory(os.path.join(current_app.root_path, 'apps', app_dir), filename)
+        return FileResponse(full_path, media_type="application/javascript")
+    return FileResponse(full_path)

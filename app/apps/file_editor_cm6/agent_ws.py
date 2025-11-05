@@ -55,130 +55,122 @@ def _build_history_payload(messages):
     return base_instructions, transcript
 
 
-def register_agent_websocket(sock):
+async def agent_websocket(websocket: WebSocket):
     """
-    Register agent WebSocket endpoint.
+    WebSocket endpoint for bidirectional agent communication.
     
-    Args:
-        sock: Flask-Sock instance
+    ONE shared shell per agent type - multiple UI sessions multiplex via conversationId.
+    
+    Query parameters:
+        agent: Agent type - 'codex' or 'gemini' (default: 'codex')
+        cwd: Working directory (optional, defaults to home)
+        file: Current file path for context enrichment (optional)
+    
+    Message Flow:
+        Frontend → WebSocket → Bridge → Shared Agent Process
+        Shared Agent Process → Bridge → WebSocket → Frontend
+    
+    Frontend sends normalized messages with conversationId:
+        {"id":"42","action":"chat","text":"Explain","conversationId":"abc-123"}
+    
+    Frontend receives normalized events:
+        {"id":"42","event":"token","text":"partial..."}
+        {"id":"42","event":"conversation_started","conversationId":"abc-123"}
     """
+    await websocket.accept()
+    bridge = get_bridge()
+    global _shared_shells
+    request_session_map = {}
+    request_map_lock = asyncio.Lock()
     
-    @sock.route('/ws/agent')
-    def agent_websocket(ws):
-        """
-        WebSocket endpoint for bidirectional agent communication.
+    # Parse query parameters
+    agent_type = websocket.query_params.get('agent', 'codex')
+    cwd = websocket.query_params.get('cwd', None)
+    file_path = websocket.query_params.get('file', None)
+    requested_session_id = websocket.query_params.get('session', None)
         
-        ONE shared shell per agent type - multiple UI sessions multiplex via conversationId.
-        
-        Query parameters:
-            agent: Agent type - 'codex' or 'gemini' (default: 'codex')
-            cwd: Working directory (optional, defaults to home)
-            file: Current file path for context enrichment (optional)
-        
-        Message Flow:
-            Frontend → WebSocket → Bridge → Shared Agent Process
-            Shared Agent Process → Bridge → WebSocket → Frontend
-        
-        Frontend sends normalized messages with conversationId:
-            {"id":"42","action":"chat","text":"Explain","conversationId":"abc-123"}
-        
-        Frontend receives normalized events:
-            {"id":"42","event":"token","text":"partial..."}
-            {"id":"42","event":"conversation_started","conversationId":"abc-123"}
-        """
-        bridge = get_bridge()
-        global _shared_shells
-        request_session_map = {}
-        request_map_lock = threading.Lock()
-        
-        # Parse query parameters
-        agent_type = request.args.get('agent', 'codex')
-        cwd = request.args.get('cwd', None)
-        file_path = request.args.get('file', None)
-        requested_session_id = request.args.get('session', None)
-        
-        # Validate agent type
-        if agent_type not in ['codex', 'gemini']:
+    # Validate agent type
+    if agent_type not in ['codex', 'gemini']:
+        try:
+            await websocket.send_text(json.dumps({
+                'event': 'error',
+                'error': f'Invalid agent type: {agent_type}. Must be "codex" or "gemini".'
+            }))
+            await websocket.close()
+        except:
+            pass
+        return
+    
+    # Get or create THE SINGLE shared shell for this agent type
+    # First, try to find existing shell by label (survives worker restarts)
+    label = f"agent-{agent_type}-shared-c"  # Consistent label for shared shell
+    session_id = requested_session_id
+    shell_id = None
+    
+    # Try to find existing shell by label (survives worker restarts)
+    existing_shell = bridge.manager.find_shell_by_label(label, status='running')
+    if existing_shell:
+        shell_id = existing_shell.id
+        if not session_id:
+            cached = _shared_shells.get(agent_type)
+            session_id = cached[0] if cached else f'shared-{agent_type}'
+        bridge.attach_session(session_id, shell_id)
+        _shared_shells[agent_type] = (session_id, shell_id)
+        print(f'[Agent WS] Found existing {agent_type} shell: {shell_id}')
+        # FIX 1: Populate CodexAdapter._conversations from disk on connection
+        if requested_session_id:
+            from .agent_bridge import CodexAdapter
+            saved = get_session(requested_session_id)
+            if saved and saved.get('conversationId'):
+                CodexAdapter.store_conversation_id(requested_session_id, saved['conversationId'])
+                print(f"[Agent WS] Restored conversation ID {saved['conversationId'][:8]}... for session {requested_session_id}")
+    else:
+        # Fallback: use in-memory registry if still valid
+        cached = _shared_shells.get(agent_type)
+        if cached:
+            cached_session, cached_shell = cached
+            record = bridge.manager.get_shell(cached_shell)
+            if record and record.status == 'running':
+                shell_id = cached_shell
+                session_id = session_id or cached_session
+                bridge.attach_session(session_id, shell_id)
+                # FIX 1: Restore conversation ID mapping for cached shell
+                if requested_session_id:
+                    from .agent_bridge import CodexAdapter
+                    saved = get_session(requested_session_id)
+                    if saved and saved.get('conversationId'):
+                        CodexAdapter.store_conversation_id(requested_session_id, saved['conversationId'])
+                        print(f"[Agent WS] Restored conversation ID {saved['conversationId'][:8]}... for session {requested_session_id}")
+            else:
+                _shared_shells.pop(agent_type, None)
+                _initialized_shells.discard(cached_shell)
+    
+    original_shell_id = shell_id
+    
+    # Spawn shared shell if needed
+    if not shell_id:
+        try:
+            session_id = session_id or f'shared-{agent_type}-{uuid.uuid4().hex[:8]}'
+            shell_info = await anyio.to_thread.run_sync(bridge.spawn_agent, agent_type, cwd or os.path.expanduser('~'), session_id)
+            shell_id = shell_info['id']
+            bridge.attach_session(session_id, shell_id)
+            _shared_shells[agent_type] = (session_id, shell_id)
+        except Exception as e:
             try:
-                ws.send(json.dumps({
+                await websocket.send_text(json.dumps({
                     'event': 'error',
-                    'error': f'Invalid agent type: {agent_type}. Must be "codex" or "gemini".'
+                    'error': f'Failed to spawn agent: {str(e)}'
                 }))
-                ws.close()
+                await websocket.close()
             except:
                 pass
             return
-        
-        # Get or create THE SINGLE shared shell for this agent type
-        # First, try to find existing shell by label (survives worker restarts)
-        label = f"agent-{agent_type}-shared-c"  # Consistent label for shared shell
-        session_id = requested_session_id
-        shell_id = None
-        
-        # Try to find existing shell by label (survives worker restarts)
-        existing_shell = bridge.manager.find_shell_by_label(label, status='running')
-        if existing_shell:
-            shell_id = existing_shell.id
-            if not session_id:
-                cached = _shared_shells.get(agent_type)
-                session_id = cached[0] if cached else f'shared-{agent_type}'
-            bridge.attach_session(session_id, shell_id)
-            _shared_shells[agent_type] = (session_id, shell_id)
-            print(f'[Agent WS] Found existing {agent_type} shell: {shell_id}')
-            # FIX 1: Populate CodexAdapter._conversations from disk on connection
-            if requested_session_id:
-                from .agent_bridge import CodexAdapter
-                saved = get_session(requested_session_id)
-                if saved and saved.get('conversationId'):
-                    CodexAdapter.store_conversation_id(requested_session_id, saved['conversationId'])
-                    print(f"[Agent WS] Restored conversation ID {saved['conversationId'][:8]}... for session {requested_session_id}")
-        else:
-            # Fallback: use in-memory registry if still valid
-            cached = _shared_shells.get(agent_type)
-            if cached:
-                cached_session, cached_shell = cached
-                record = bridge.manager.get_shell(cached_shell)
-                if record and record.status == 'running':
-                    shell_id = cached_shell
-                    session_id = session_id or cached_session
-                    bridge.attach_session(session_id, shell_id)
-                    # FIX 1: Restore conversation ID mapping for cached shell
-                    if requested_session_id:
-                        from .agent_bridge import CodexAdapter
-                        saved = get_session(requested_session_id)
-                        if saved and saved.get('conversationId'):
-                            CodexAdapter.store_conversation_id(requested_session_id, saved['conversationId'])
-                            print(f"[Agent WS] Restored conversation ID {saved['conversationId'][:8]}... for session {requested_session_id}")
-                else:
-                    _shared_shells.pop(agent_type, None)
-                    _initialized_shells.discard(cached_shell)
-        
-        original_shell_id = shell_id
-        
-        # Spawn shared shell if needed
-        if not shell_id:
-            try:
-                session_id = session_id or f'shared-{agent_type}-{uuid.uuid4().hex[:8]}'
-                shell_info = bridge.spawn_agent(agent_type, cwd or os.path.expanduser('~'), session_id)
-                shell_id = shell_info['id']
-                bridge.attach_session(session_id, shell_id)
-                _shared_shells[agent_type] = (session_id, shell_id)
-            except Exception as e:
-                try:
-                    ws.send(json.dumps({
-                        'event': 'error',
-                        'error': f'Failed to spawn agent: {str(e)}'
-                    }))
-                    ws.close()
-                except:
-                    pass
-                return
         
         bridge.update_session_shell(session_id, shell_id)
 
         # Send shell metadata to frontend
         try:
-            ws.send(json.dumps({
+            await websocket.send_text(json.dumps({
                 'event': 'connected',
                 'agent': agent_type,
                 'shell_id': shell_id,
@@ -186,7 +178,7 @@ def register_agent_websocket(sock):
                 'cwd': cwd
             }))
             if original_shell_id and original_shell_id != shell_id:
-                ws.send(json.dumps({
+                await websocket.send_text(json.dumps({
                     'event': 'shell_replaced',
                     'agent': agent_type,
                     'old_shell_id': original_shell_id,
@@ -198,14 +190,14 @@ def register_agent_websocket(sock):
         
         # Subscribe to agent output
         try:
-            output_queue = bridge.subscribe_output(session_id)
+            output_queue = await anyio.to_thread.run_sync(bridge.subscribe_output, session_id)
         except Exception as e:
             try:
-                ws.send(json.dumps({
+                await websocket.send_text(json.dumps({
                     'event': 'error',
                     'error': f'Failed to subscribe to agent output: {str(e)}'
                 }))
-                ws.close()
+                await websocket.close()
             except:
                 pass
             return
@@ -228,24 +220,23 @@ def register_agent_websocket(sock):
                 }
                 shell_id = bridge._sessions.get(session_id)
                 if shell_id:
-                    bridge.manager.write_to_pty(shell_id, json.dumps(init_msg) + '\n')
+                    await anyio.to_thread.run_sync(bridge.manager.write_to_pty, shell_id, json.dumps(init_msg) + '\n')
                     _initialized_shells.add(shell_id)
             except Exception as e:
                 print(f'Failed to initialize Codex MCP: {e}')
         
-        stop_event = threading.Event()
         line_buffer = ""
         
-        def forward_agent_to_ws():
+        async def forward_agent_to_ws():
             """
             Forward agent output to WebSocket.
             Reads chunks from PTY, buffers lines, parses JSON, normalizes, and sends to WS.
             """
             nonlocal line_buffer
             
-            while not stop_event.is_set():
+            while True:
                 try:
-                    chunk = output_queue.get(timeout=0.5)
+                    chunk = await anyio.to_thread.run_sync(output_queue.get, timeout=0.5)
                 except queue.Empty:
                     continue
                 
@@ -266,7 +257,7 @@ def register_agent_websocket(sock):
                         request_id = normalized.get('id')
                         session_key = None
                         if request_id is not None:
-                            with request_map_lock:
+                            async with request_map_lock:
                                 session_key = request_session_map.get(str(request_id))
                         if session_key:
                             normalized.setdefault('session', session_key)
@@ -358,29 +349,22 @@ def register_agent_websocket(sock):
                         
                         # Clean up request map AFTER persistence
                         if normalized.get('event') in ('final', 'error') and request_id is not None:
-                            with request_map_lock:
+                            async with request_map_lock:
                                 request_session_map.pop(str(request_id), None)
                         
                         try:
-                            ws.send(json.dumps(normalized))
+                            await websocket.send_text(json.dumps(normalized))
                         except Exception:
-                            stop_event.set()
                             break
         
-        # Start agent → WebSocket forwarding thread
-        forward_thread = threading.Thread(target=forward_agent_to_ws, daemon=True)
-        forward_thread.start()
+        forward_task = asyncio.create_task(forward_agent_to_ws())
         
         # Register shell for edit tracking
         edit_tracker.register_shell_watcher(shell_id, 'agent')
         
         try:
             # Forward WebSocket → Agent
-            while not stop_event.is_set():
-                data = ws.receive()
-                if data is None:
-                    break
-                
+            async for data in websocket.iter_text():
                 try:
                     # Parse frontend message
                     message = json.loads(data)
@@ -391,7 +375,7 @@ def register_agent_websocket(sock):
                     chat_session_id = message.get('session') or requested_session_id or session_id
                     if not chat_session_id:
                         try:
-                            ws.send(json.dumps({
+                            await websocket.send_text(json.dumps({
                                 'event': 'error',
                                 'error': 'Missing session identifier for agent message'
                             }))
@@ -489,7 +473,7 @@ def register_agent_websocket(sock):
 
                     req_id = message.get('id')
                     if req_id is not None:
-                        with request_map_lock:
+                        async with request_map_lock:
                             request_session_map[str(req_id)] = chat_session_id
 
                     # Persist user message to session (BEFORE sending to agent)
@@ -507,12 +491,12 @@ def register_agent_websocket(sock):
                         print(f"[Agent WS] Failed to persist user message: {e}")
 
                     # Write to agent with protocol translation
-                    bridge.write_message(session_id, msg_agent_type, message, context)
+                    await anyio.to_thread.run_sync(bridge.write_message, session_id, msg_agent_type, message, context)
                     
                 except json.JSONDecodeError:
                     # Invalid JSON from frontend
                     try:
-                        ws.send(json.dumps({
+                        await websocket.send_text(json.dumps({
                             'event': 'error',
                             'error': 'Invalid JSON from client'
                         }))
@@ -521,7 +505,7 @@ def register_agent_websocket(sock):
                 except Exception as e:
                     # Error writing to agent
                     try:
-                        ws.send(json.dumps({
+                        await websocket.send_text(json.dumps({
                             'event': 'error',
                             'error': f'Failed to send to agent: {str(e)}'
                         }))
@@ -530,18 +514,13 @@ def register_agent_websocket(sock):
         
         finally:
             # Clean up
-            stop_event.set()
+            forward_task.cancel()
             
             # Unregister shell from edit tracking
             edit_tracker.unregister_shell_watcher(shell_id)
             
             try:
-                forward_thread.join(timeout=1.0)
-            except Exception:
-                pass
-            
-            try:
-                bridge.unsubscribe_output(session_id, output_queue)
+                await anyio.to_thread.run_sync(bridge.unsubscribe_output, session_id, output_queue)
             except Exception:
                 pass
             

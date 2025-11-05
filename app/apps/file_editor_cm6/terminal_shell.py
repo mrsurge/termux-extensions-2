@@ -1,7 +1,7 @@
 # app/apps/file_editor_cm6/terminal_shell.py
 
 import os
-from app.libs.framework_shells import _manager
+from app.libs.framework_shells import get_manager as _manager
 
 def create_editor_shell(cwd=None, shell_cmd=None):
     """

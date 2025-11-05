@@ -3,7 +3,7 @@ import socket
 import time
 from pathlib import Path
 from flask import current_app
-from app.libs.framework_shells import _manager as get_framework_shell_manager
+from app.libs.framework_shells import get_manager as get_framework_shell_manager
 from app.libs import app_lifecycle
 
 def find_free_port():
