@@ -7,6 +7,7 @@ performing best-effort cleanup of framework shells when the host exits.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import signal
 import subprocess
@@ -27,18 +28,30 @@ def _ensure_run_id() -> str:
     return run_id
 
 
-def _cleanup_framework_shells() -> None:
+async def _cleanup_framework_shells():
+    """Cleanup all framework shells on shutdown."""
+    from app.libs.framework_shells import get_manager
     try:
-        from app.libs.framework_shells import FrameworkShellManager
-
-        manager = FrameworkShellManager()
-        for record in list(manager.list_shells()):
+        mgr = await get_manager()
+        shells = await mgr.list_shells()
+        for shell in shells:
             try:
-                manager.remove_shell(record.id, force=True)
-            except Exception as exc:  # pragma: no cover - best effort
-                print(f"[supervisor] Failed to remove shell {record.id}: {exc}", file=sys.stderr)
-    except Exception as exc:  # pragma: no cover - best effort
-        print(f"[supervisor] Framework shell cleanup failed: {exc}", file=sys.stderr)
+                await mgr.terminate_shell(shell.id, force=True)
+            except Exception as e:
+                print(f"Failed to terminate shell {shell.id}: {e}")
+    except Exception as e:
+        print(f"Failed to cleanup framework shells: {e}")
+
+def _safe_cleanup_wrapper():
+    """Safe wrapper that works in both sync and async contexts."""
+    try:
+        # Check if we're already in an async context
+        loop = asyncio.get_running_loop()
+        # We have a running loop - schedule as task
+        asyncio.create_task(_cleanup_framework_shells())
+    except RuntimeError:
+        # No running loop - safe to create new one
+        asyncio.run(_cleanup_framework_shells())
 
 
 def _kill_process_group(pid: int, sig: signal.Signals) -> None:
@@ -98,7 +111,7 @@ def run(argv: List[str]) -> int:
             print("[supervisor] Forcing shutdown")
             _kill_process_group(proc.pid, signal.SIGKILL)
 
-    _cleanup_framework_shells()
+    _safe_cleanup_wrapper()
 
     try:
         if RUN_ID_FILE.exists() and RUN_ID_FILE.read_text(encoding="utf-8").strip() == run_id:

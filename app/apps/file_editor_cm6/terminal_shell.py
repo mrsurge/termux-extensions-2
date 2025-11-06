@@ -3,7 +3,7 @@
 import os
 from app.libs.framework_shells import get_manager as _manager
 
-def create_editor_shell(cwd=None, shell_cmd=None):
+async def create_editor_shell(cwd=None, shell_cmd=None):
     """
     Create a new PTY-backed shell session for the code editor terminal drawer.
     
@@ -14,7 +14,7 @@ def create_editor_shell(cwd=None, shell_cmd=None):
     Returns:
         dict: Shell session info including ID
     """
-    mgr = _manager()
+    mgr = await _manager()
     
     if shell_cmd is None:
         shell_cmd = ['bash', '-l', '-i']
@@ -23,16 +23,16 @@ def create_editor_shell(cwd=None, shell_cmd=None):
         cwd = os.path.expanduser('~')
     
     # Create PTY-backed shell using spawn_shell_pty
-    rec = mgr.spawn_shell_pty(
+    rec = await mgr.spawn_shell_pty(
         shell_cmd,
         label='code-editor-terminal',
         cwd=cwd
     )
     
-    return mgr.describe(rec)
+    return await mgr.describe(rec)
 
 
-def destroy_editor_shell(shell_id):
+async def destroy_editor_shell(shell_id):
     """
     Terminate and remove a shell session, cleaning up PTY and logs.
     Called when user clicks the X button to permanently close the terminal.
@@ -43,16 +43,16 @@ def destroy_editor_shell(shell_id):
     Returns:
         bool: True if successfully removed
     """
-    mgr = _manager()
+    mgr = await _manager()
     try:
         # Force termination and remove metadata/logs
-        mgr.remove_shell(shell_id, force=True)
+        await mgr.remove_shell(shell_id, force=True)
         return True
     except Exception:
         return False
 
 
-def resize_editor_shell(shell_id, cols, rows):
+async def resize_editor_shell(shell_id, cols, rows):
     """
     Resize the terminal PTY.
     
@@ -61,15 +61,15 @@ def resize_editor_shell(shell_id, cols, rows):
         cols: Terminal columns
         rows: Terminal rows
     """
-    mgr = _manager()
+    mgr = await _manager()
     try:
-        mgr.resize_pty(shell_id, cols, rows)
+        await mgr.resize_pty(shell_id, cols, rows)
         return True
     except Exception:
         return False
 
 
-def get_shell_info(shell_id):
+async def get_shell_info(shell_id):
     """
     Get shell session information.
     
@@ -79,8 +79,8 @@ def get_shell_info(shell_id):
     Returns:
         dict: Shell metadata or None if not found
     """
-    mgr = _manager()
-    rec = mgr.get_shell(shell_id)
+    mgr = await _manager()
+    rec = await mgr.get_shell(shell_id)
     if not rec:
         return None
-    return mgr.describe(rec)
+    return await mgr.describe(rec)

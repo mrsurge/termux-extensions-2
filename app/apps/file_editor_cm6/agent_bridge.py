@@ -12,7 +12,7 @@ import json
 import os
 from typing import Dict, List, Optional, Any
 from pathlib import Path
-from app.libs.framework_shells import get_manager as _manager
+from app.libs.framework_shells import FrameworkShellManager, get_manager as _manager
 
 
 class CodexAdapter:
@@ -422,7 +422,6 @@ class AgentBridge:
     """
     
     def __init__(self):
-        self.manager = _manager()
         self._sessions: Dict[str, str] = {}  # session_id -> shell_id
         self._session_state: Dict[str, Dict[str, Any]] = {}
         self._adapters = {
@@ -430,7 +429,17 @@ class AgentBridge:
             'gemini': GeminiAdapter
         }
     
-    def spawn_agent(self, agent_type: str, cwd: str, session_id: str) -> dict:
+    async def _get_manager(self):
+        """Get manager instance (lazy async initialization)."""
+        if not hasattr(self, '_manager_instance'):
+            self._manager_instance = await _manager()
+        return self._manager_instance
+
+    async def get_manager(self) -> FrameworkShellManager:
+        """Public async accessor for the framework shell manager."""
+        return await self._get_manager()
+    
+    async def spawn_agent(self, agent_type: str, cwd: str, session_id: str) -> dict:
         """
         Spawn a new agent process via framework shells.
         
@@ -458,21 +467,22 @@ class AgentBridge:
         # Use 'shared-c' suffix for shared shells (discoverable across restarts)
         label_suffix = 'shared-c' if 'shared' in session_id else session_id[:8]
         
-        shell_record = self.manager.spawn_shell_pty(
+        manager = await self._get_manager()
+        shell_record = await manager.spawn_shell_pty(
             command,
             label=f"agent-{agent_type}-{label_suffix}",
             cwd=cwd
         )
         
         # Convert to dict for return
-        shell_dict = self.manager.describe(shell_record)
+        shell_dict = await manager.describe(shell_record)
         
         # Store session mapping
         self._sessions[session_id] = shell_dict['id']
         
         return shell_dict
     
-    def get_or_create_agent(self, session_id: str, agent_type: str, cwd: str) -> dict:
+    async def get_or_create_agent(self, session_id: str, agent_type: str, cwd: str) -> dict:
         """
         Get existing agent shell or spawn new one.
         
@@ -489,16 +499,17 @@ class AgentBridge:
         if shell_id:
             # Check if still alive
             try:
-                shell = self.manager.describe(shell_id)
+                manager = await self._get_manager()
+                shell = await manager.describe(shell_id)
                 if shell and shell.get('alive'):
                     return shell
             except Exception:
                 pass
         
         # Spawn new agent
-        return self.spawn_agent(agent_type, cwd, session_id)
+        return await self.spawn_agent(agent_type, cwd, session_id)
     
-    def write_message(self, session_id: str, agent_type: str, message: dict, context: Optional[dict] = None):
+    async def write_message(self, session_id: str, agent_type: str, message: dict, context: Optional[dict] = None):
         """
         Write normalized message to agent, translating to agent-specific format.
         
@@ -561,7 +572,8 @@ class AgentBridge:
         
         # Write line-delimited JSON to PTY
         line = json.dumps(agent_msg) + '\n'
-        self.manager.write_to_pty(shell_id, line)
+        manager = await self._get_manager()
+        await manager.write_to_pty(shell_id, line)
     
     def parse_agent_output(self, agent_type: str, line: str) -> Optional[dict]:
         """
@@ -581,18 +593,20 @@ class AgentBridge:
         except json.JSONDecodeError:
             return None
     
-    def subscribe_output(self, session_id: str):
+    async def subscribe_output(self, session_id: str):
         """Subscribe to agent output queue."""
         shell_id = self._sessions.get(session_id)
         if not shell_id:
             raise ValueError(f"No agent for session {session_id}")
-        return self.manager.subscribe_output(shell_id)
+        manager = await self._get_manager()
+        return await manager.subscribe_output(shell_id)
     
-    def unsubscribe_output(self, session_id: str, queue):
+    async def unsubscribe_output(self, session_id: str, queue):
         """Unsubscribe from agent output queue."""
         shell_id = self._sessions.get(session_id)
         if shell_id:
-            self.manager.unsubscribe_output(shell_id, queue)
+            manager = await self._get_manager()
+            await manager.unsubscribe_output(shell_id, queue)
 
     def set_session_state(self, session_id: str, state: Dict[str, Any]):
         self._session_state[session_id] = state
@@ -613,24 +627,26 @@ class AgentBridge:
         if session_id and shell_id:
             self._sessions[session_id] = shell_id
     
-    def terminate_agent(self, session_id: str):
+    async def terminate_agent(self, session_id: str):
         """Stop agent process gracefully."""
         shell_id = self._sessions.get(session_id)
         if shell_id:
             try:
-                self.manager.stop_shell(shell_id)
+                manager = await self._get_manager()
+                await manager.stop_shell(shell_id)
             except Exception:
                 pass
             del self._sessions[session_id]
     
-    def get_agent_stats(self, session_id: str) -> Optional[dict]:
+    async def get_agent_stats(self, session_id: str) -> Optional[dict]:
         """Get resource stats for agent process."""
         shell_id = self._sessions.get(session_id)
         if not shell_id:
             return None
         
         try:
-            shell = self.manager.describe(shell_id)
+            manager = await self._get_manager()
+            shell = await manager.describe(shell_id)
             return {
                 'alive': shell.get('alive', False),
                 'cpu_percent': shell.get('cpu_percent'),
@@ -641,12 +657,13 @@ class AgentBridge:
         except Exception:
             return None
     
-    def list_agents(self) -> List[dict]:
+    async def list_agents(self) -> List[dict]:
         """List all active agent sessions."""
         agents = []
+        manager = await self._get_manager()
         for session_id, shell_id in self._sessions.items():
             try:
-                shell = self.manager.describe(shell_id)
+                shell = await manager.describe(shell_id)
                 agents.append({
                     'session_id': session_id,
                     'shell_id': shell_id,

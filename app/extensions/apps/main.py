@@ -1,5 +1,6 @@
 import os
 import json
+import aiofiles
 
 # Get project root reliably - app module's parent
 import app
@@ -24,26 +25,26 @@ apps_bp = APIRouter()
 
 
 @apps_bp.post('/api/apps/{app_id}/start')
-def start_app(app_id: str):
+async def start_app(app_id: str):
     try:
-        app_info = ensure_app_running(app_id)
+        app_info = await ensure_app_running(app_id)
         return {"ok": True, "data": app_info}
     except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @apps_bp.post('/api/apps/{app_id}/quit')
-def quit_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
+async def quit_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """
     A new, specific endpoint for quitting an app.
     """
-    running_apps = app_lifecycle.get_running_apps(manager)
+    running_apps = await app_lifecycle.get_running_apps(manager)
     app_to_quit = next((app for app in running_apps if app.get("app_id") == app_id), None)
 
     if not app_to_quit:
         raise HTTPException(status_code=404, detail="App is not running or already terminated.")
 
     shell_id = app_to_quit["shell_id"]
-    terminated = app_lifecycle.terminate_app(manager, shell_id)
+    terminated = await app_lifecycle.terminate_app(manager, shell_id)
 
     if terminated:
         return {"ok": True, "data": {"message": f"App {app_id} terminated."}}
@@ -51,31 +52,31 @@ def quit_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework
         raise HTTPException(status_code=500, detail="Failed to terminate app.")
 
 @apps_bp.post('/api/apps/{app_id}/lock')
-def lock_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
+async def lock_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """Sets the lock state for an app to true."""
-    running_apps = app_lifecycle.get_running_apps(manager)
+    running_apps = await app_lifecycle.get_running_apps(manager)
     app_to_lock = next((app for app in running_apps if app.get("app_id") == app_id), None)
     if not app_to_lock:
         raise HTTPException(status_code=404, detail="App not running.")
     
-    updated_app = app_lifecycle.set_lock_state(app_to_lock["shell_id"], True)
+    updated_app = await app_lifecycle.set_lock_state(app_to_lock["shell_id"], True)
     return {"ok": True, "data": updated_app}
 
 @apps_bp.post('/api/apps/{app_id}/unlock')
-def unlock_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
+async def unlock_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """Sets the lock state for an app to false."""
-    running_apps = app_lifecycle.get_running_apps(manager)
+    running_apps = await app_lifecycle.get_running_apps(manager)
     app_to_unlock = next((app for app in running_apps if app.get("app_id") == app_id), None)
     if not app_to_unlock:
         raise HTTPException(status_code=404, detail="App not running.")
     
-    updated_app = app_lifecycle.set_lock_state(app_to_unlock["shell_id"], False)
+    updated_app = await app_lifecycle.set_lock_state(app_to_unlock["shell_id"], False)
     return {"ok": True, "data": updated_app}
 
 @apps_bp.get('/api/apps/running')
-def get_running_apps(manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
+async def get_running_apps(manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """Returns a list of all currently running app shells with stats."""
-    running_apps = app_lifecycle.get_running_apps(manager)
+    running_apps = await app_lifecycle.get_running_apps(manager)
     # We need to augment this with data from the main app manifests (like name and icon)
     all_apps = {app['id']: app for app in get_loaded_apps()}
     
@@ -106,20 +107,20 @@ async def app_shell(app_id: str, request: Request):
 
     entrypoints = manifest.get('entrypoints', {})
     if entrypoints.get('nicegui_shell'):
-        app_info = ensure_app_running(app_id)
+        app_info = await ensure_app_running(app_id)
         port = app_info.get('port') if isinstance(app_info, dict) else None
         if not port:
             raise HTTPException(status_code=502, detail="App worker not running")
 
-        time.sleep(2.0)
+        await asyncio.sleep(2.0)
         host_only = request.url.hostname
         scheme = request.url.scheme
         redirect_url = f"{scheme}://{host_only}:{port}/"
         return RedirectResponse(url=redirect_url)
 
     template_path = os.path.join(os.path.dirname(__file__), "..", "..", "templates", "app_shell.html")
-    with open(template_path, "r") as f:
-        template_content = f.read()
+    async with aiofiles.open(template_path, "r") as f:
+        template_content = await f.read()
     
     # Basic templating, since Jinja2 is not used here
     template_content = template_content.replace("{{ app_id|tojson }}", json.dumps(app_id))
@@ -151,8 +152,8 @@ def serve_app_file(app_dir: str, filename: str):
 async def shell_logs_viewer(shell_id: str):
     """Render log viewer for a framework shell."""
     template_path = os.path.join(project_root, 'app', 'templates', 'shell_log_viewer.html')
-    with open(template_path, "r") as f:
-        content = f.read()
+    async with aiofiles.open(template_path, "r") as f:
+        content = await f.read()
     content = content.replace("{{ shell_id }}", shell_id)
     return HTMLResponse(content=content)
 
@@ -165,7 +166,7 @@ async def shell_logs_ws(websocket: WebSocket, shell_id: str):
     stdout_path = logs_dir / f"{shell_id}.stdout.log"
     stderr_path = logs_dir / f"{shell_id}.stderr.log"
     
-    if not stdout_path.exists() and not stderr_path.exists():
+    if not await asyncio.to_thread(stdout_path.exists) and not await asyncio.to_thread(stderr_path.exists):
         await websocket.send_json({
             "type": "error",
             "message": f"No log files found for {shell_id}"
@@ -175,11 +176,18 @@ async def shell_logs_ws(websocket: WebSocket, shell_id: str):
     
     try:
         # Send initial 200 lines from both logs
-        stdout_lines = stdout_path.read_text().splitlines() if stdout_path.exists() else []
-        stderr_lines = stderr_path.read_text().splitlines() if stderr_path.exists() else []
+        stdout_lines = []
+        if await asyncio.to_thread(stdout_path.exists):
+            async with aiofiles.open(stdout_path, 'r') as f:
+                stdout_lines = (await f.read()).splitlines()
         
-        stdout_initial = '\n'.join(stdout_lines[-200:]) if len(stdout_lines) > 200 else '\n'.join(stdout_lines)
-        stderr_initial = '\n'.join(stderr_lines[-200:]) if len(stderr_lines) > 200 else '\n'.join(stderr_lines)
+        stderr_lines = []
+        if await asyncio.to_thread(stderr_path.exists):
+            async with aiofiles.open(stderr_path, 'r') as f:
+                stderr_lines = (await f.read()).splitlines()
+        
+        stdout_initial = '\n'.join(stdout_lines[-200:])
+        stderr_initial = '\n'.join(stderr_lines[-200:])
         
         await websocket.send_json({
             "type": "initial",
@@ -188,19 +196,19 @@ async def shell_logs_ws(websocket: WebSocket, shell_id: str):
         })
         
         # Track file sizes for tailing
-        stdout_size = stdout_path.stat().st_size if stdout_path.exists() else 0
-        stderr_size = stderr_path.stat().st_size if stderr_path.exists() else 0
+        stdout_size = (await asyncio.to_thread(stdout_path.stat)).st_size if await asyncio.to_thread(stdout_path.exists) else 0
+        stderr_size = (await asyncio.to_thread(stderr_path.stat)).st_size if await asyncio.to_thread(stderr_path.exists) else 0
         
         while True:
             await asyncio.sleep(1)  # Poll every second
             
             # Check stdout
-            if stdout_path.exists():
-                current_stdout = stdout_path.stat().st_size
+            if await asyncio.to_thread(stdout_path.exists):
+                current_stdout = (await asyncio.to_thread(stdout_path.stat)).st_size
                 if current_stdout > stdout_size:
-                    with open(stdout_path, 'r') as f:
-                        f.seek(stdout_size)
-                        new_content = f.read()
+                    async with aiofiles.open(stdout_path, 'r') as f:
+                        await f.seek(stdout_size)
+                        new_content = await f.read()
                         await websocket.send_json({
                             "type": "update",
                             "stream": "stdout",
@@ -211,12 +219,12 @@ async def shell_logs_ws(websocket: WebSocket, shell_id: str):
                     stdout_size = 0
             
             # Check stderr
-            if stderr_path.exists():
-                current_stderr = stderr_path.stat().st_size
+            if await asyncio.to_thread(stderr_path.exists):
+                current_stderr = (await asyncio.to_thread(stderr_path.stat)).st_size
                 if current_stderr > stderr_size:
-                    with open(stderr_path, 'r') as f:
-                        f.seek(stderr_size)
-                        new_content = f.read()
+                    async with aiofiles.open(stderr_path, 'r') as f:
+                        await f.seek(stderr_size)
+                        new_content = await f.read()
                         await websocket.send_json({
                             "type": "update",
                             "stream": "stderr",

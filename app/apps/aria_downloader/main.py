@@ -201,8 +201,8 @@ def _clear_shell_state() -> None:
         return
 
 
-def _framework_manager() -> FrameworkShellManager:
-    return get_framework_shell_manager()
+async def _framework_manager() -> FrameworkShellManager:
+    return await get_framework_shell_manager()
 
 
 def _wrap_shell_response(record: Optional[Dict[str, Any]], config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -380,42 +380,45 @@ def _sanitize_env(env: Dict[str, Any]) -> Tuple[Optional[Dict[str, str]], Option
 
 
 @aria_downloader_bp.get('/shells')
-def list_framework_shells():
-    mgr = _framework_manager()
-    shells = [mgr.describe(record) for record in mgr.list_shells()]
+async def list_framework_shells():
+    mgr = await _framework_manager()
+    records = await mgr.list_shells()
+    shells = []
+    for record in records:
+        shells.append(await mgr.describe(record))
     return {'ok': True, 'data': {'shells': shells}}
 
 
 @aria_downloader_bp.get('/shell')
-def get_tracked_shell(logs: bool = Query(False), tail: int = Query(DEFAULT_LOG_TAIL_LINES)):
+async def get_tracked_shell(logs: bool = Query(False), tail: int = Query(DEFAULT_LOG_TAIL_LINES)):
     state = _load_shell_state()
     if not state or 'id' not in state:
         return {'ok': True, 'data': {'shell': None}}
 
     include_logs = logs
     shell_id = str(state.get('id'))
-    mgr = _framework_manager()
-    record = mgr.get_shell(shell_id)
+    mgr = await _framework_manager()
+    record = await mgr.get_shell(shell_id)
     if not record:
         _clear_shell_state()
         return {'ok': True, 'data': {'shell': None}}
     tail_lines = tail
-    described = mgr.describe(record, include_logs=include_logs, tail_lines=tail_lines if include_logs else 0)
+    described = await mgr.describe(record, include_logs=include_logs, tail_lines=tail_lines if include_logs else 0)
     return {'ok': True, 'data': _wrap_shell_response(described, state)}
 
 
 @aria_downloader_bp.post('/shell/spawn')
-def spawn_shell(payload: dict = Body(...)):
+async def spawn_shell(payload: dict = Body(...)):
     force = bool(payload.get('force'))
     current_state = _load_shell_state()
     if current_state and not force:
         raise HTTPException(status_code=409, detail='An aria2 framework shell is already tracked. Stop or remove it before spawning a new one.')
-    mgr = _framework_manager()
+    mgr = await _framework_manager()
     if current_state and force:
         shell_id = current_state.get('id')
         if shell_id:
             try:
-                mgr.remove_shell(shell_id, force=True)
+                await mgr.remove_shell(shell_id, force=True)
             except Exception:
                 pass
         _clear_shell_state()
@@ -452,7 +455,7 @@ def spawn_shell(payload: dict = Body(...)):
     autostart = bool(payload.get('autostart', False))
 
     try:
-        record = mgr.spawn_shell(command, cwd=cwd, env=env or {}, label=label, autostart=autostart)
+        record = await mgr.spawn_shell(command, cwd=cwd, env=env or {}, label=label, autostart=autostart)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
@@ -460,7 +463,7 @@ def spawn_shell(payload: dict = Body(...)):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'Failed to spawn shell: {exc}')
 
-    described = mgr.describe(record)
+    described = await mgr.describe(record)
     shell_config = {
         'id': record.id,
         'label': label,
@@ -477,7 +480,7 @@ def spawn_shell(payload: dict = Body(...)):
 
 
 @aria_downloader_bp.post('/shell/action')
-def shell_action(payload: dict = Body(...)):
+async def shell_action(payload: dict = Body(...)):
     action = (payload.get('action') or '').strip().lower()
     if not action:
         raise HTTPException(status_code=400, detail='"action" is required')
@@ -486,11 +489,11 @@ def shell_action(payload: dict = Body(...)):
         shell_id = payload.get('id')
         if not isinstance(shell_id, str) or not shell_id:
             raise HTTPException(status_code=400, detail='"id" is required when adopting a shell')
-        mgr = _framework_manager()
-        record = mgr.get_shell(shell_id)
+        mgr = await _framework_manager()
+        record = await mgr.get_shell(shell_id)
         if not record:
             raise HTTPException(status_code=404, detail='Shell not found')
-        described = mgr.describe(record)
+        described = await mgr.describe(record)
         config = {
             'id': shell_id,
             'label': described.get('label') or DEFAULT_ARIA2_LABEL,
@@ -507,9 +510,9 @@ def shell_action(payload: dict = Body(...)):
         if not state or 'id' not in state:
             _clear_shell_state()
             return {'ok': True, 'data': {'shell': None}}
-        mgr = _framework_manager()
+        mgr = await _framework_manager()
         try:
-            mgr.remove_shell(state['id'], force=bool(payload.get('force')))
+            await mgr.remove_shell(state['id'], force=bool(payload.get('force')))
         except KeyError:
             pass
         except Exception as exc:
@@ -521,14 +524,14 @@ def shell_action(payload: dict = Body(...)):
         raise HTTPException(status_code=404, detail='No aria2 framework shell is currently tracked.')
 
     shell_id = str(state['id'])
-    mgr = _framework_manager()
+    mgr = await _framework_manager()
     try:
         if action in {'stop', 'terminate'}:
-            record = mgr.terminate_shell(shell_id, force=False)
+            record = await mgr.terminate_shell(shell_id, force=False)
         elif action in {'kill', 'force'}:
-            record = mgr.terminate_shell(shell_id, force=True)
+            record = await mgr.terminate_shell(shell_id, force=True)
         elif action == 'restart':
-            record = mgr.restart_shell(shell_id)
+            record = await mgr.restart_shell(shell_id)
         else:
             raise HTTPException(status_code=400, detail=f'Unsupported action "{action}"')
     except KeyError:
@@ -544,5 +547,5 @@ def shell_action(payload: dict = Body(...)):
         state['updated_at'] = time.time()
         _save_shell_state(state)
 
-    described = mgr.describe(record)
+    described = await mgr.describe(record)
     return {'ok': True, 'data': _wrap_shell_response(described, state)}

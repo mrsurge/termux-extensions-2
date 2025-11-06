@@ -1,0 +1,24 @@
+# IPC Fallback Plan
+
+## Goal
+Provide an optional developer-side IPC channel for iframe-embedded apps that cannot rely on the standard proxied WebSocket transport, while keeping the frontend thin and backend-driven.
+
+## Transport
+- Stand up a lightweight auxiliary service (HTTP/JSON or ZeroMQ) on a dedicated port/Unix socket.
+- Keep the schema minimal: e.g. `{action, target, payload}` for push commands, plus a simple “state fetch” endpoint if needed.
+
+## Usage Pattern
+1. Default path stays on the existing proxy/WebSocket stack.
+2. When an integration can’t stabilize over the proxy, the developer wires the iframe backend to the auxiliary IPC (either listening for commands or polling).
+3. The parent framework publishes commands or state deltas over this channel; the iframe applies them locally and acknowledges success.
+
+## Guidelines
+- Keep payloads JSON and small; no binary streaming.
+- Require an auth token shared with the main app.
+- Document the command schema so embedded apps can opt in quickly.
+- Treat the IPC as a developer fallback; no automatic runtime switchover.
+
+## Next Steps
+- Define the minimal command set (`load_resource`, `set_state`, `push_delta`, etc.).
+- Prototype a tiny asyncio-powered HTTP service exposing `POST /ipc/command`.
+- Update integration docs so embedded apps know how to subscribe.

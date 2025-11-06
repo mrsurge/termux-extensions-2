@@ -353,3 +353,227 @@ NEXT STEPS:
   - Test all extensions load correctly
 
 --------------------------------------------------------------------------------
+[2025-11-06 12:45:00 UTC]
+REPORT: Terminal PTY Investigation (No code changes)
+
+SUMMARY:
+  - Confirmed WebSocket bootstrap still performs synchronous shell manager calls, blocking the ASGI loop and causing proxy timeouts.
+  - Documented mismatches between incident reports/docs and current FastAPI implementation (REST usage, migration status, file locations).
+
+KEY FINDINGS:
+  1. `/ws/terminal/auto` invokes `mgr.list_shells()`, `mgr.terminate_shell(...)`, and `create_editor_shell(...)` directly on the event loop (`app/apps/file_editor_cm6/terminal_backend.py:192-233`), so shell creation hangs until subprocess work completes.
+  2. `FrameworkShellManager.spawn_shell_pty` remains entirely synchronous (lock acquisition, `subprocess.Popen`, metadata writes, optional `ps` sampling) and blocks during the handshake (`app/libs/framework_shells.py:598-808`).
+  3. `/terminal/shell-id` still performs orphan cleanup and synchronous manager calls despite the “lightweight GET” recommendation in `TERMINAL_ARCHITECTURE_ISSUE.md`.
+  4. Frontend terminal code continues to rely on REST endpoints for teardown/history/resize, contradicting the “WebSocket-only” architecture recorded in the incident log (`app/apps/file_editor_cm6/static/js/terminal.js:98-155`).
+  5. Migration docs (`ASGI_MIGRATION_SUPPLEMENTARY.md`, `docs/core/framework_shells.md`, Code CM6 docs) reference Flask blueprints and outdated file paths even though the live code is FastAPI-based and relocated to `app/libs/framework_shells.py`.
+
+NEXT ACTIONS (recommended):
+  - Offload the blocking shell manager/history-store work inside `/ws/terminal/auto` with `anyio.to_thread.run_sync` or refactor the manager for asyncio-native subprocess handling.
+  - Align terminal docs and incident notes with the current implementation (clarify ongoing REST usage and FastAPI module locations).
+  - Update migration docs that still flag `agent_routes.py` as unmigrated and note the new FastAPI router in `app/libs/framework_shells.py`.
+
+[2025-11-07 16:30:00 UTC]
+INVESTIGATION: Terminal PTY Creation Failure & Documentation Inconsistencies
+
+--------------------------------------------------------------------------------
+SUMMARY OF FINDINGS
+--------------------------------------------------------------------------------
+
+This investigation analyzed the root cause of the terminal PTY creation failure and checked for inconsistencies between the project's documentation and its current state after the ASGI migration.
+
+### 1. Inconsistencies between Documentation and Current State
+
+The repository contains significant inconsistencies, primarily because the documentation has not been updated since the major ASGI migration was completed.
+
+*   **`ASGI_*` Documents**: The files `ASGI_MIGRATION_PLAN.md` and `ASGI_MIGRATION_SUPPLEMENTARY.md` are now obsolete. They describe a plan to migrate from Flask to FastAPI, a task that is now largely complete. The inconsistencies are that the code no longer uses Flask `Blueprints` (it uses FastAPI `APIRouters`), and Flask dependencies have been removed.
+*   **`docs/core/framework_shells.md`**: This document is outdated. Its examples and architectural descriptions in sections 9.5 and 9.6 refer to a `flask-sock` and `threading` based WebSocket implementation, which is the direct cause of the blocking issues described in `TERMINAL_ARCHITECTURE_ISSUE.md`. The current implementation uses FastAPI's native WebSockets and `asyncio`.
+*   **Other Core Documents**: `docs/core/repo_overview.md`, `docs/core/apps_loading_mechanism.md`, and `docs/core/websockets.md` are all similarly outdated, referencing the old Flask/WSGI architecture.
+*   **`AGENTS.log`**: This log file is consistent with the recent changes. It correctly documents the step-by-step bug fixes that occurred after the initial ASGI migration, including the architectural change in the terminal from a REST-based to a WebSocket-based lifecycle management system.
+
+### 2. Reason for PTY Creation Failure in `file_editor_cm6`
+
+The `file_editor_cm6` app fails to create a PTY shell for xterm.js because its backend API endpoints make **synchronous, blocking calls** to the `FrameworkShellManager`, which freezes the ASGI server's single event loop.
+
+Here is the precise failure chain:
+
+1.  The frontend connects to the `/ws/terminal/auto` WebSocket endpoint in `app/apps/file_editor_cm6/terminal_backend.py`.
+2.  The `terminal_ws` function determines that no shell exists and calls `create_editor_shell(cwd=cwd)`.
+3.  The `create_editor_shell` function (in `app/apps/file_editor_cm6/terminal_shell.py`) then calls `mgr.spawn_shell_pty(...)`.
+4.  **This is the critical failure point.** The `spawn_shell_pty` method inside `app/libs/framework_shells.py` is a synchronous function that uses `subprocess.Popen` and performs blocking file I/O to set up the shell.
+5.  As documented in `TERMINAL_ARCHITECTURE_ISSUE.md`, calling a blocking function like this from within an `async` WebSocket handler, even with `anyio.to_thread.run_sync`, causes a deadlock or freezes the event loop because the `FrameworkShellManager` is a stateful, non-thread-safe singleton.
+
+In short, the `terminal_backend.py` was correctly migrated to use FastAPI's async/await syntax, but the underlying service it depends on, `FrameworkShellManager`, was not, creating a fundamental conflict with the ASGI concurrency model.
+[2025-11-06 15:54:00 UTC]
+INVESTIGATION: Terminal PTY Not Creating - Root Cause Analysis
+
+--------------------------------------------------------------------------------
+BUG: Terminal PTY Creation Blocked by Synchronous Manager Calls in Async Endpoints
+--------------------------------------------------------------------------------
+
+CURRENT STATUS: BLOCKING - Terminal feature non-functional
+
+SYMPTOMS OBSERVED:
+  - Frontend calls GET /terminal/shell-id → timeout (30s proxy timeout)
+  - No framework shell with label 'code-editor-terminal' is spawned
+  - WebSocket /ws/terminal/auto connects but PTY creation never happens
+  - Worker endpoints hang when called through reverse proxy
+
+ROOT CAUSE IDENTIFIED:
+
+The terminal_backend.py file has async endpoint declarations but makes DIRECT SYNCHRONOUS CALLS to FrameworkShellManager methods without wrapping them in anyio.to_thread.run_sync().
+
+CRITICAL CODE PATH (app/apps/file_editor_cm6/terminal_backend.py):
+
+Line 42-66:
+```python
+@terminal_router.get('/terminal/shell-id')
+async def get_terminal_shell_id():  # ← ASYNC endpoint
+    mgr = get_manager()
+    
+    # BLOCKING CALLS - NO ASYNC WRAPPER:
+    shells = mgr.list_shells()              # ← Line 47: BLOCKS event loop
+    mgr.terminate_shell(orphan.id)          # ← Line 51: BLOCKS event loop  
+    rec = mgr.get_shell(shell_id)           # ← Line 57: BLOCKS event loop
+```
+
+VERIFICATION:
+All FrameworkShellManager methods are SYNCHRONOUS:
+  - list_shells: SYNC
+  - get_shell: SYNC  
+  - terminate_shell: SYNC
+  - spawn_shell_pty: SYNC
+
+These methods perform blocking operations:
+  - Synchronous subprocess calls (subprocess.run, subprocess.Popen)
+  - Synchronous file I/O (reading logs, state files)
+  - Synchronous IPC (checking process status via os.kill)
+
+FAILURE SEQUENCE:
+
+1. User clicks "Toggle Terminal" in UI
+2. Frontend: GET /api/app/file_editor_cm6/terminal/shell-id
+3. terminal_backend.py line 47: mgr.list_shells() executes
+4. Event loop FREEZES during subprocess iteration
+5. 30 seconds pass (proxy timeout)
+6. Proxy returns 500 Internal Server Error
+7. Frontend never reaches WebSocket connection phase
+8. create_editor_shell() at line 225 never executes
+9. NO PTY IS CREATED
+
+WHY PTY CREATION CODE NEVER RUNS:
+
+The WebSocket endpoint at line 180-282 DOES have the correct shell creation code:
+```python
+@terminal_router.websocket('/ws/terminal/{shell_id}')
+async def terminal_ws(...):
+    # Line 225: This would create the PTY
+    shell_rec = create_editor_shell(cwd=cwd)
+```
+
+BUT the frontend cannot reach this code path because:
+  - REST endpoint GET /terminal/shell-id times out first
+  - Frontend error handling prevents WebSocket connection attempt
+  - PTY creation code is never invoked
+
+INCONSISTENCIES IDENTIFIED:
+
+1. AGENTS.log INCORRECT:
+   - Claims terminal persistence was fixed (commit 67300c6)
+   - States "Terminal now works with zero REST calls"
+   - REALITY: REST endpoints still have blocking I/O, terminal DOES NOT WORK
+
+2. ASGI Migration Status INCORRECT:
+   - COMPLETE_ASGI_MIGRATION.md shows Phase 1 incomplete
+   - REALITY: Fixes were partially applied but GET endpoint was missed
+   - ASGI_MIGRATION_REFACTOR.md fixes NOT fully implemented
+
+3. TERMINAL_ARCHITECTURE_ISSUE.md is CORRECT:
+   - Accurately describes blocking I/O freezing event loop
+   - Correctly identifies synchronous manager calls as root cause
+   - Document status should remain BLOCKING
+
+REQUIRED FIX:
+
+Wrap ALL FrameworkShellManager calls in anyio.to_thread.run_sync:
+
+```python
+@terminal_router.get('/terminal/shell-id')
+async def get_terminal_shell_id():
+    history_store = get_history_store()
+    mgr = get_manager()
+    
+    try:
+        shell_id = history_store.get_terminal_shell_id()
+        
+        # WRAP BLOCKING CALLS:
+        shells = await anyio.to_thread.run_sync(mgr.list_shells)
+        orphans = [s for s in shells if s.label == 'code-editor-terminal' and s.id != shell_id]
+        for orphan in orphans:
+            try:
+                await anyio.to_thread.run_sync(mgr.terminate_shell, orphan.id)
+            except Exception as e:
+                print(f"Failed to cleanup orphan shell {orphan.id}: {e}")
+        
+        if shell_id:
+            rec = await anyio.to_thread.run_sync(mgr.get_shell, shell_id)
+            if not rec or rec.status != 'running':
+                history_store.set_terminal_shell_id(None)
+                shell_id = None
+        
+        return {"ok": True, "data": {"shell_id": shell_id}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+ALTERNATIVE FIX (as suggested in TERMINAL_ARCHITECTURE_ISSUE.md):
+
+Strip all validation/cleanup logic from GET endpoint:
+```python
+@terminal_router.get('/terminal/shell-id')
+async def get_terminal_shell_id():
+    """Just return the stored shell ID - no validation, no cleanup."""
+    history_store = get_history_store()
+    shell_id = history_store.get_terminal_shell_id()
+    return {"ok": True, "data": {"shell_id": shell_id}}
+```
+
+Move orphan cleanup to:
+  - WebSocket connection handler (already has shell creation logic)
+  - App worker startup hook
+  - Or remove entirely
+
+FILES REQUIRING CHANGES:
+  - app/apps/file_editor_cm6/terminal_backend.py
+    * Line 47: Wrap mgr.list_shells()
+    * Line 51: Wrap mgr.terminate_shell()
+    * Line 57: Wrap mgr.get_shell()
+
+DOCUMENTATION INCONSISTENCIES:
+
+All core documentation remains outdated with Flask/WSGI references:
+  - docs/core/framework_shells.md - Shows Flask Blueprint examples
+  - docs/core/websockets.md - References flask-sock
+  - docs/core/repo_overview.md - References wsgi.py and Flask app
+  - docs/apps/code_cm6/*.md - References flask-sock routes
+
+These should be updated to reflect current FastAPI/Starlette implementation.
+
+VERIFICATION STEPS (after fix):
+  - [ ] GET /terminal/shell-id returns within <100ms
+  - [ ] No proxy timeouts on terminal endpoints
+  - [ ] WebSocket connection succeeds
+  - [ ] create_editor_shell() executes
+  - [ ] Framework shell with label 'code-editor-terminal' appears in /api/framework_shells
+  - [ ] ps aux | grep bash shows PTY process
+  - [ ] Terminal input/output works in xterm.js
+
+STATUS: READY FOR FIX IMPLEMENTATION
+
+NEXT STEPS:
+1. Apply anyio.to_thread.run_sync wrappers to terminal_backend.py
+2. Test terminal creation flow
+3. Update AGENTS.log with fix verification
+4. Update documentation to remove Flask references
+
+--------------------------------------------------------------------------------
+

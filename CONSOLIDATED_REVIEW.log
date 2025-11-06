@@ -1,0 +1,1774 @@
+================================================================================
+CONSOLIDATED_REVIEW.LOG - Cross-Reference Analysis
+================================================================================
+
+[2025-11-06 15:57:00 UTC]
+INVESTIGATION: Terminal PTY Failure - Comprehensive Cross-Reference Analysis
+
+--------------------------------------------------------------------------------
+BUG: Terminal PTY Creation Blocked - Architectural Threading Issue
+--------------------------------------------------------------------------------
+
+CURRENT STATUS: BLOCKING - Terminal feature non-functional after ASGI migration
+
+INVESTIGATION SCOPE:
+  - Cross-referenced TERMINAL_ARCHITECTURE_ISSUE.md with current codebase
+  - Analyzed AGENTS.log entries from 2025-11-05 through 2025-11-07
+  - Reviewed ASGI migration documentation vs. actual implementation
+  - Examined docs/core/* and docs/apps/code_cm6/* for consistency
+  - Verified FrameworkShellManager implementation in app/libs/framework_shells.py
+  - Traced terminal_backend.py execution paths (REST + WebSocket)
+
+SYMPTOMS OBSERVED:
+  - Frontend calls GET /terminal/shell-id → timeout (30s proxy timeout)
+  - No framework shell with label 'code-editor-terminal' is spawned
+  - WebSocket /ws/terminal/auto connects but PTY creation never happens
+  - Worker endpoints hang when called through reverse proxy
+  - Browser console shows 500 errors on terminal REST endpoints
+
+MULTI-LAYER ROOT CAUSE ANALYSIS:
+
+The terminal failure has THREE distinct layers of blocking I/O issues:
+
+LAYER 1: REST Endpoint Blocking (Lines 42-66)
+```python
+@terminal_router.get('/terminal/shell-id')
+async def get_terminal_shell_id():  # ← ASYNC endpoint declaration
+    mgr = get_manager()  # Returns FrameworkShellManager singleton
+    
+    # DIRECT SYNCHRONOUS CALLS - NO ASYNC WRAPPER:
+    shells = mgr.list_shells()              # Line 47: subprocess iteration
+    mgr.terminate_shell(orphan.id)          # Line 51: process signaling
+    rec = mgr.get_shell(shell_id)           # Line 57: file I/O
+```
+
+LAYER 2: WebSocket Handler Blocking (Lines 180-233)
+```python
+@terminal_router.websocket('/ws/terminal/{shell_id}')
+async def terminal_ws(...):
+    await websocket.accept()
+    
+    if shell_id == 'auto':
+        # ALL BLOCKING - INSIDE WEBSOCKET HANDLER:
+        shells = mgr.list_shells()          # Line 200: subprocess iteration
+        mgr.terminate_shell(s.id)           # Line 206: process signaling
+        rec = mgr.get_shell(saved_shell_id) # Line 212: file I/O
+        shell_rec = create_editor_shell()   # Line 225: spawn_shell_pty
+```
+
+LAYER 3: FrameworkShellManager Non-Thread-Safe Singleton
+```python
+# app/libs/framework_shells.py
+class FrameworkShellManager:
+    def __init__(...):
+        self._lock = threading.RLock()  # Thread lock, not asyncio.Lock
+        # Shared mutable state across all callers
+        
+    def list_shells(self):  # SYNCHRONOUS method
+        with self._lock:    # Threading lock
+            # Calls subprocess.run, os.waitpid, psutil.Process
+            # Performs blocking file I/O on metadata
+            
+    def spawn_shell_pty(self):  # SYNCHRONOUS method
+        with self._lock:
+            # pty.openpty() - blocking
+            # subprocess.Popen() - blocking
+            # File writes to logs - blocking
+```
+
+WHY anyio.to_thread.run_sync DOESN'T FIX IT:
+
+From [2025-11-07 16:30:00 UTC] investigation:
+> "calling a blocking function like this from within an async WebSocket handler, 
+> even with anyio.to_thread.run_sync, causes a deadlock or freezes the event loop 
+> because the FrameworkShellManager is a stateful, non-thread-safe singleton."
+
+The singleton pattern creates race conditions:
+  1. Multiple async tasks call anyio.to_thread.run_sync(mgr.list_shells)
+  2. Each runs in different thread from thread pool
+  3. All threads access same FrameworkShellManager instance
+  4. threading.RLock prevents simultaneous access
+  5. Threads block waiting for lock
+  6. Event loop has no async tasks to run (all blocked in threads)
+  7. Deadlock or severe performance degradation
+
+FAILURE SEQUENCE TRACED:
+
+PATH A: REST Endpoint Failure
+1. User clicks "Toggle Terminal" in UI
+2. Frontend: GET /api/app/file_editor_cm6/terminal/shell-id
+3. Proxy forwards to worker: GET http://127.0.0.1:<dynamic_port>/terminal/shell-id
+4. terminal_backend.py line 47: mgr.list_shells() executes
+5. BLOCKS on subprocess iteration in FrameworkShellManager._iter_records()
+6. No async yield point - event loop frozen
+7. Proxy timeout after 30 seconds
+8. Returns 500 Internal Server Error to frontend
+9. Frontend error handler prevents progression to WebSocket
+10. Terminal creation aborted
+
+PATH B: WebSocket Failure (if REST bypassed)
+1. Frontend connects: ws://localhost:8080/ws/app/file_editor_cm6/terminal/auto
+2. Proxy forwards to: ws://127.0.0.1:<dynamic_port>/ws/terminal/auto
+3. terminal_backend.py line 180: await websocket.accept()
+4. Line 200: mgr.list_shells() executes (orphan cleanup)
+5. BLOCKS on subprocess iteration
+6. WebSocket handshake never completes
+7. Frontend times out waiting for shell_id message
+8. PTY creation code at line 225 never reached
+
+VERIFICATION OF BLOCKING BEHAVIOR:
+
+Confirmed all FrameworkShellManager methods are SYNCHRONOUS:
+  - list_shells: SYNC (subprocess calls, file I/O)
+  - get_shell: SYNC (file I/O for metadata)
+  - terminate_shell: SYNC (os.killpg, os.waitpid)
+  - spawn_shell_pty: SYNC (pty.openpty, subprocess.Popen)
+  - subscribe_output: SYNC (threading operations)
+  - write_to_pty: SYNC (os.write)
+
+These perform blocking operations:
+  - subprocess.run() / subprocess.Popen() - process creation
+  - os.waitpid() - process status checks
+  - os.kill() / os.killpg() - signal sending
+  - Path.open() / Path.write_text() - file I/O
+  - pty.openpty() - PTY allocation
+  - psutil.Process() operations - resource monitoring
+
+CROSS-REFERENCE WITH HISTORICAL LOG ENTRIES:
+
+[2025-11-06 03:29:44 UTC] - Commit 67300c6 Entry Analysis:
+  - CLAIM: "Terminal now works with zero REST calls"
+  - ARCHITECTURE CHANGE: Moved shell lifecycle to WebSocket
+  - VERIFICATION: This change WAS implemented (confirmed in terminal_backend.py)
+  - ISSUE: The WebSocket handler itself has blocking calls
+  - CONCLUSION: Fix was real but incomplete - moved problem, didn't solve it
+
+[2025-11-06 12:45:00 UTC] - Investigation Report Analysis:
+  - CORRECTLY identifies blocking calls in /ws/terminal/auto
+  - CORRECTLY points to lines 192-233 in terminal_backend.py
+  - CORRECTLY notes FrameworkShellManager.spawn_shell_pty is synchronous
+  - CORRECTLY identifies this blocks the ASGI event loop
+  - CONCLUSION: Accurate diagnosis
+
+[2025-11-07 16:30:00 UTC] - Investigation Report Analysis:
+  - CORRECTLY identifies thread-safety issue with singleton
+  - CORRECTLY notes anyio.to_thread.run_sync won't work
+  - CORRECTLY describes "deadlock or freezes the event loop"
+  - CORRECTLY points to threading.RLock as problematic
+  - CONCLUSION: Most accurate and complete diagnosis
+
+MY INITIAL ANALYSIS WAS WRONG:
+
+ERROR 1: Misunderstood the 67300c6 fix
+  - I claimed AGENTS.log entry was incorrect
+  - REALITY: The architectural change WAS made, just insufficient
+  - The move to WebSocket-only was real, not fabricated
+
+ERROR 2: Suggested insufficient fix
+  - I proposed wrapping calls in anyio.to_thread.run_sync
+  - REALITY: This was already attempted and failed (per logs)
+  - Singleton thread-safety prevents this approach
+
+ERROR 3: Missed WebSocket blocking
+  - I focused only on REST endpoint line 47
+  - REALITY: Lines 200, 206, 212, 225 in WebSocket also block
+  - Problem exists in BOTH code paths
+
+ERROR 4: Didn't account for singleton architecture
+  - I treated this as simple sync-in-async issue
+  - REALITY: Singleton with threading.RLock creates deadlocks
+  - Root cause is architectural, not just missing await
+
+WHAT I GOT RIGHT:
+
+CORRECT 1: Blocking I/O is the root cause
+  - Synchronous subprocess/file operations in async context
+  - This freezes the ASGI event loop
+
+CORRECT 2: Identified specific problem lines
+  - Lines 47, 51, 57 in REST endpoint
+  - Lines 200, 206, 212, 225 in WebSocket handler
+
+CORRECT 3: TERMINAL_ARCHITECTURE_ISSUE.md is accurate
+  - Document correctly describes the problem
+  - Status should remain BLOCKING
+  - Proposed solutions (Options A/B/C) are appropriate
+
+CORRECT 4: Documentation is outdated
+  - docs/core/framework_shells.md has Flask examples
+  - docs/core/websockets.md references flask-sock
+  - ASGI migration docs don't reflect current state
+
+DOCUMENTATION INCONSISTENCIES IDENTIFIED:
+
+OUTDATED WSGI/FLASK REFERENCES:
+  - docs/core/framework_shells.md
+    * Shows Flask Blueprint examples (should be FastAPI APIRouter)
+    * Section 9.5-9.6 use flask-sock (should be Starlette WebSocket)
+    
+  - docs/core/websockets.md
+    * States "framework uses flask-sock"
+    * All examples use Flask decorators
+    * Should reference Starlette WebSocket
+    
+  - docs/core/repo_overview.md
+    * References wsgi.py and Flask application
+    * Should reference ASGI and FastAPI
+    
+  - docs/apps/code_cm6/CODE_CM6_COMPLETE.md
+  - docs/apps/code_cm6/CODE_CM6_DOCUMENTATION.md
+  - docs/apps/code_cm6/CHANGELOG_2025_10_28.md
+    * All reference "flask-sock route" and "flask-sock WebSocket"
+    * Should reference "FastAPI WebSocket" or "Starlette WebSocket"
+
+OBSOLETE MIGRATION DOCUMENTS:
+  - ASGI_MIGRATION_PLAN.md
+    * Describes migration plan that is now complete
+    * Should be archived or marked as historical
+    
+  - ASGI_MIGRATION_SUPPLEMENTARY.md
+    * Lists files that have already been migrated
+    * Should be archived or updated to reflect completion
+    
+  - ASGI_MIGRATION_REFACTOR.md
+    * Documents anyio.to_thread.run_sync keyword argument fixes
+    * Most fixes already applied but document not updated
+
+ACTUAL SOLUTION REQUIRED:
+
+Per TERMINAL_ARCHITECTURE_ISSUE.md, three options exist:
+
+OPTION A: Make FrameworkShellManager Async-Native (Recommended)
+  - Rewrite all methods to use asyncio.subprocess instead of subprocess
+  - Replace threading.RLock with asyncio.Lock
+  - Use aiofiles for all file I/O operations
+  - Replace os.kill/os.waitpid with async equivalents
+  - Major refactor affecting entire framework
+  - BENEFIT: Proper ASGI integration, no thread pool overhead
+  - DRAWBACK: Large code change, affects all apps using framework shells
+
+OPTION B: Separate Process for Shell Manager
+  - Run FrameworkShellManager in dedicated process
+  - Communicate via IPC (ZMQ, pipes, or HTTP)
+  - ASGI workers send async requests to manager process
+  - Manager handles all blocking I/O in isolation
+  - BENEFIT: No code changes to FrameworkShellManager internals
+  - DRAWBACK: IPC overhead, more complex deployment
+
+OPTION C: Dedicated Thread Pool with Enhanced Locking
+  - Keep FrameworkShellManager synchronous
+  - Run in dedicated thread pool executor
+  - Replace threading.RLock with more sophisticated locking
+  - BENEFIT: Minimal code changes
+  - DRAWBACK: Thread pool overhead, may still have edge cases
+  - NOTE: Logs indicate this approach already failed
+
+RECOMMENDED APPROACH: Option A (Async-Native Refactor)
+
+Because:
+  1. Option C was already attempted and failed (per investigation logs)
+  2. ASGI architecture fundamentally incompatible with blocking I/O
+  3. Long-term maintainability - no sync/async bridge complexity
+  4. Better performance - no thread pool context switching
+  5. Sets pattern for other framework components
+
+FILES REQUIRING CHANGES (Option A):
+
+PRIMARY:
+  - app/libs/framework_shells.py
+    * Class FrameworkShellManager - full async conversion
+    * All methods: spawn_shell, spawn_shell_pty, terminate_shell, etc.
+    * Replace threading.RLock with asyncio.Lock
+    * Replace subprocess.Popen with asyncio.create_subprocess_exec
+    * Replace Path.open() with aiofiles.open()
+    
+  - app/apps/file_editor_cm6/terminal_backend.py
+    * Lines 47, 51, 57: Already async, just remove anyio wrapper when manager fixed
+    * Lines 200, 206, 212, 225: Same - direct await on async manager methods
+    
+  - app/apps/file_editor_cm6/terminal_shell.py
+    * create_editor_shell(): Change to async def
+    * destroy_editor_shell(): Change to async def
+    * resize_editor_shell(): Change to async def
+
+SECONDARY (all apps using framework shells):
+  - app/extensions/apps/main.py (app lifecycle management)
+  - app/apps/*/main.py (any app spawning shells)
+  - app/libs/app_lifecycle.py (if exists)
+
+VERIFICATION STEPS (after fix):
+
+REST ENDPOINT:
+  - [ ] GET /terminal/shell-id returns within <100ms
+  - [ ] No proxy timeouts on REST endpoints
+  - [ ] Endpoint can handle concurrent requests
+
+WEBSOCKET:
+  - [ ] WebSocket /ws/terminal/auto connects successfully
+  - [ ] Connection completes within <500ms
+  - [ ] shell_id message received by frontend
+  - [ ] Multiple concurrent WebSocket connections work
+
+PTY CREATION:
+  - [ ] create_editor_shell() executes without blocking
+  - [ ] Framework shell with label 'code-editor-terminal' appears in /api/framework_shells
+  - [ ] ps aux | grep bash shows PTY process running
+  - [ ] Shell persists across page reloads
+
+TERMINAL FUNCTIONALITY:
+  - [ ] Terminal input/output works in xterm.js
+  - [ ] Terminal resize events work
+  - [ ] Scrollback history loads on reconnect
+  - [ ] Orphan cleanup happens automatically
+
+CONCURRENCY:
+  - [ ] Multiple users can open terminals simultaneously
+  - [ ] Rapid terminal open/close cycles don't cause deadlocks
+  - [ ] Framework shutdown cleanly terminates all shells
+
+MIGRATION STATUS CLARIFICATION:
+
+COMPLETE:
+  ✅ Flask → FastAPI migration for app endpoints
+  ✅ Blueprint → APIRouter conversion
+  ✅ Flask request/jsonify → FastAPI Request/dict returns
+  ✅ Terminal architecture moved to WebSocket-based lifecycle
+
+INCOMPLETE:
+  ❌ FrameworkShellManager async conversion
+  ❌ Framework shells still use synchronous subprocess/file I/O
+  ❌ Documentation updates to reflect ASGI architecture
+  ❌ ASGI migration docs not marked as complete
+
+BLOCKING ISSUE:
+  🚫 Terminal PTY creation (this issue)
+  🚫 Any feature requiring framework shells in async context
+  🚫 Potential issues in other apps (settings, extensions) using shells
+
+NEXT STEPS:
+
+IMMEDIATE (Required for terminal fix):
+  1. Refactor FrameworkShellManager to async-native (Option A)
+  2. Update all callers to await async manager methods
+  3. Test terminal creation flow end-to-end
+  4. Verify no regressions in other apps using framework shells
+
+SHORT-TERM (Clean up):
+  5. Update all docs/core/*.md to remove Flask/WSGI references
+  6. Update docs/apps/code_cm6/*.md to reference FastAPI/Starlette
+  7. Archive or mark ASGI_MIGRATION_*.md as complete/historical
+  8. Update AGENTS.log with final verification results
+
+LONG-TERM (Technical debt):
+  9. Audit other framework components for sync-in-async issues
+  10. Establish coding standards for ASGI-compatible components
+  11. Create async-native patterns documentation
+  12. Add integration tests for concurrent framework shell operations
+
+STATUS: READY FOR IMPLEMENTATION - Option A Async Refactor Required
+
+PRIORITY: HIGH - Terminal is core feature for code editor app
+
+ESTIMATED EFFORT:
+  - FrameworkShellManager refactor: 6-8 hours
+  - Caller updates and testing: 4-6 hours
+  - Documentation updates: 2-3 hours
+  - Total: 12-17 hours
+
+RISK ASSESSMENT:
+  - HIGH: Refactor affects all apps using framework shells
+  - MEDIUM: Potential for subtle async/await bugs
+  - LOW: Well-documented pattern (asyncio.subprocess is standard library)
+  - MITIGATION: Comprehensive testing before deployment
+
+--------------------------------------------------------------------------------
+
+[2025-11-06 16:11:00 UTC]
+IMPLEMENTATION PLAN: Option A - Async-Native FrameworkShellManager Refactor
+
+--------------------------------------------------------------------------------
+ADMINISTRATOR-REQUESTED ACTION PLAN
+--------------------------------------------------------------------------------
+
+This plan was requested by the system administrator. No further commentary or approval is needed. Execute as specified.
+
+OBJECTIVE:
+Convert FrameworkShellManager from synchronous/threading-based to async-native implementation compatible with ASGI event loop architecture.
+
+SCOPE:
+  - Complete rewrite of app/libs/framework_shells.py
+  - Update all callers in file_editor_cm6 app
+  - Update all callers in apps extension
+  - Update all other framework components using shell manager
+
+PREREQUISITES:
+  - Install aiofiles: pip install aiofiles
+  - Install psutil (already installed, confirm async compatibility)
+  - Backup current framework_shells.py
+  - Backup current terminal_backend.py
+
+EXECUTION ORDER:
+All steps must be executed in strict sequential order. Do not skip steps.
+
+--------------------------------------------------------------------------------
+PHASE 1: CORE ASYNC CONVERSION - FrameworkShellManager Class
+--------------------------------------------------------------------------------
+
+STEP 1.1: Update Imports
+FILE: app/libs/framework_shells.py
+LOCATION: Lines 1-40
+
+REMOVE:
+  - import threading
+  - import queue
+
+ADD:
+  - import asyncio
+  - import aiofiles
+  - from asyncio import Lock as AsyncLock
+  - from asyncio import Queue as AsyncQueue
+
+KEEP:
+  - All other imports (subprocess, os, signal, etc.)
+
+STEP 1.2: Convert Class Initialization
+FILE: app/libs/framework_shells.py
+LOCATION: FrameworkShellManager.__init__() (around line 85)
+
+CHANGE:
+```python
+# OLD:
+self._lock = threading.RLock()
+self._pty: Dict[str, PTYState] = {}
+
+# NEW:
+self._lock = AsyncLock()
+self._pty: Dict[str, PTYState] = {}
+```
+
+STEP 1.3: Convert PTYState Dataclass
+FILE: app/libs/framework_shells.py
+LOCATION: PTYState definition (around line 75)
+
+CHANGE:
+```python
+# OLD:
+@dataclass
+class PTYState:
+    master_fd: int
+    subscribers: List["queue.Queue[str]"] = field(default_factory=list)
+    stop: threading.Event = field(default_factory=threading.Event)
+    reader: Optional[threading.Thread] = None
+
+# NEW:
+@dataclass
+class PTYState:
+    master_fd: int
+    subscribers: List["AsyncQueue[str]"] = field(default_factory=list)
+    stop: asyncio.Event = field(default_factory=asyncio.Event)
+    reader: Optional[asyncio.Task] = None
+```
+
+STEP 1.4: Convert _adopt_orphaned_shells Method
+FILE: app/libs/framework_shells.py
+LOCATION: FrameworkShellManager._adopt_orphaned_shells() (around line 107)
+
+CHANGE:
+```python
+# OLD:
+def _adopt_orphaned_shells(self) -> None:
+    with self._lock:
+        for record in self._iter_records():
+            # ... logic
+
+# NEW:
+async def _adopt_orphaned_shells(self) -> None:
+    async with self._lock:
+        async for record in self._aiter_records():
+            # ... logic (same)
+            if mutated:
+                await self._save_record(record)
+```
+
+STEP 1.5: Convert _iter_records to Async Generator
+FILE: app/libs/framework_shells.py
+LOCATION: FrameworkShellManager._iter_records() (around line 143)
+
+CHANGE:
+```python
+# OLD:
+def _iter_records(self) -> Iterable[ShellRecord]:
+    for meta in sorted(self.metadata_dir.glob("*/meta.json")):
+        record = self._load_record(meta.parent.name)
+        if record:
+            yield record
+
+# NEW:
+async def _aiter_records(self) -> AsyncIterator[ShellRecord]:
+    meta_paths = sorted(self.metadata_dir.glob("*/meta.json"))
+    for meta in meta_paths:
+        record = await self._load_record(meta.parent.name)
+        if record:
+            yield record
+```
+
+STEP 1.6: Convert _load_record to Async
+FILE: app/libs/framework_shells.py
+LOCATION: FrameworkShellManager._load_record() (around line 150)
+
+CHANGE:
+```python
+# OLD:
+def _load_record(self, shell_id: str) -> Optional[ShellRecord]:
+    meta_path = self.metadata_dir / shell_id / "meta.json"
+    if not meta_path.exists():
+        return None
+    try:
+        with meta_path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return None
+    # ... rest of parsing
+
+# NEW:
+async def _load_record(self, shell_id: str) -> Optional[ShellRecord]:
+    meta_path = self.metadata_dir / shell_id / "meta.json"
+    if not meta_path.exists():
+        return None
+    try:
+        async with aiofiles.open(meta_path, "r", encoding="utf-8") as fh:
+            content = await fh.read()
+            data = json.loads(content)
+    except Exception:
+        return None
+    # ... rest of parsing (same)
+```
+
+STEP 1.7: Convert _save_record to Async
+FILE: app/libs/framework_shells.py
+LOCATION: FrameworkShellManager._save_record() (around line 182)
+
+CHANGE:
+```python
+# OLD:
+def _save_record(self, record: ShellRecord) -> None:
+    record_dir = self.metadata_dir / record.id
+    record_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = record_dir / "meta.json.tmp"
+    meta_path = record_dir / "meta.json"
+    data = {...}
+    with tmp_path.open("w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+    tmp_path.replace(meta_path)
+
+# NEW:
+async def _save_record(self, record: ShellRecord) -> None:
+    record_dir = self.metadata_dir / record.id
+    await asyncio.to_thread(record_dir.mkdir, parents=True, exist_ok=True)
+    tmp_path = record_dir / "meta.json.tmp"
+    meta_path = record_dir / "meta.json"
+    data = {...}
+    async with aiofiles.open(tmp_path, "w", encoding="utf-8") as fh:
+        await fh.write(json.dumps(data, indent=2))
+    await asyncio.to_thread(tmp_path.replace, meta_path)
+```
+
+STEP 1.8: Convert _launch to Async
+FILE: app/libs/framework_shells.py
+LOCATION: FrameworkShellManager._launch() (around line 369)
+
+CHANGE:
+```python
+# OLD:
+def _launch(self, record: ShellRecord) -> ShellRecord:
+    record.uses_pty = False
+    env = self._prepare_env(record)
+    stdout_path = Path(record.stdout_log)
+    stderr_path = Path(record.stderr_log)
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    with stdout_path.open("ab") as stdout_fh, stderr_path.open("ab") as stderr_fh:
+        proc = subprocess.Popen(...)
+    record.pid = proc.pid
+    record.status = "running"
+    record.exit_code = None
+    record.updated_at = time.time()
+    self._save_record(record)
+    return record
+
+# NEW:
+async def _launch(self, record: ShellRecord) -> ShellRecord:
+    record.uses_pty = False
+    env = self._prepare_env(record)
+    stdout_path = Path(record.stdout_log)
+    stderr_path = Path(record.stderr_log)
+    await asyncio.to_thread(stdout_path.parent.mkdir, parents=True, exist_ok=True)
+    await asyncio.to_thread(stderr_path.parent.mkdir, parents=True, exist_ok=True)
+    
+    # Open files in binary append mode
+    stdout_fh = await asyncio.to_thread(open, stdout_path, "ab")
+    stderr_fh = await asyncio.to_thread(open, stderr_path, "ab")
+    
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *record.command,
+            cwd=record.cwd,
+            env=env,
+            stdout=stdout_fh,
+            stderr=stderr_fh,
+            start_new_session=True,
+        )
+        record.pid = proc.pid
+        record.status = "running"
+        record.exit_code = None
+        record.updated_at = time.time()
+        await self._save_record(record)
+        return record
+    finally:
+        await asyncio.to_thread(stdout_fh.close)
+        await asyncio.to_thread(stderr_fh.close)
+```
+
+STEP 1.9: Convert _launch_pty to Async with AsyncIO Reader
+FILE: app/libs/framework_shells.py
+LOCATION: FrameworkShellManager._launch_pty() (around line 390)
+
+CHANGE:
+```python
+# OLD:
+def _launch_pty(self, record: ShellRecord) -> ShellRecord:
+    record.uses_pty = True
+    master_fd, slave_fd = pty.openpty()
+    # ... setup
+    proc = subprocess.Popen(...)
+    # ... metadata updates
+    state = PTYState(master_fd=master_fd)
+    
+    def _reader() -> None:
+        # Threading-based reader loop
+        pass
+    
+    reader_thread = threading.Thread(target=_reader, daemon=True)
+    state.reader = reader_thread
+    self._pty[record.id] = state
+    reader_thread.start()
+    return record
+
+# NEW:
+async def _launch_pty(self, record: ShellRecord) -> ShellRecord:
+    record.uses_pty = True
+    master_fd, slave_fd = await asyncio.to_thread(pty.openpty)
+    envp = self._prepare_env(record)
+    envp.setdefault("TERM", "xterm-256color")
+    envp.setdefault("TE_TTY", "pty")
+    
+    stdout_path = Path(record.stdout_log)
+    stderr_path = Path(record.stderr_log)
+    await asyncio.to_thread(stdout_path.parent.mkdir, parents=True, exist_ok=True)
+    await asyncio.to_thread(stdout_path.touch, exist_ok=True)
+    await asyncio.to_thread(stderr_path.touch, exist_ok=True)
+    
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *record.command,
+            cwd=record.cwd,
+            env=envp,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            start_new_session=True,
+        )
+    finally:
+        await asyncio.to_thread(os.close, slave_fd)
+    
+    record.pid = proc.pid
+    record.status = "running"
+    record.exit_code = None
+    record.updated_at = time.time()
+    await self._save_record(record)
+    
+    state = PTYState(master_fd=master_fd)
+    
+    async def _async_reader() -> None:
+        log_path = Path(record.stdout_log)
+        async with aiofiles.open(log_path, "ab") as log_fh:
+            while not state.stop.is_set():
+                try:
+                    # Use asyncio event loop to read from FD
+                    ready = await asyncio.wait_for(
+                        asyncio.get_event_loop().run_in_executor(
+                            None, 
+                            lambda: select.select([master_fd], [], [], 0.5)
+                        ),
+                        timeout=0.6
+                    )
+                    rlist, _, _ = ready
+                    if not rlist:
+                        continue
+                    data = await asyncio.to_thread(os.read, master_fd, 4096)
+                    if not data:
+                        await asyncio.sleep(0.05)
+                        continue
+                except (OSError, asyncio.TimeoutError):
+                    break
+                
+                try:
+                    await log_fh.write(data)
+                    await log_fh.flush()
+                except Exception:
+                    pass
+                
+                text = data.decode("utf-8", errors="replace")
+                subscribers = list(state.subscribers)
+                for q in subscribers:
+                    try:
+                        await q.put(text)
+                    except Exception:
+                        pass
+        
+        try:
+            await asyncio.to_thread(os.close, master_fd)
+        except Exception:
+            pass
+    
+    reader_task = asyncio.create_task(_async_reader())
+    state.reader = reader_task
+    self._pty[record.id] = state
+    return record
+```
+
+STEP 1.10: Convert terminate_shell to Async
+FILE: app/libs/framework_shells.py
+LOCATION: FrameworkShellManager.terminate_shell() (around line 677)
+
+CHANGE:
+```python
+# OLD:
+def terminate_shell(self, shell_id: str, *, force: bool = False, timeout: float = 5.0) -> ShellRecord:
+    with self._lock:
+        record = self._load_record(shell_id)
+        # ... logic with os.killpg, time.sleep
+        self._save_record(record)
+        return record
+
+# NEW:
+async def terminate_shell(self, shell_id: str, *, force: bool = False, timeout: float = 5.0) -> ShellRecord:
+    async with self._lock:
+        record = await self._load_record(shell_id)
+        if not record:
+            raise KeyError("Shell not found")
+        if not record.pid or not await self._is_pid_alive(record.pid):
+            exit_code = record.exit_code or await self._collect_exit_code(record.pid)
+            await self._mark_exited(record, exit_code)
+            await self._stop_pty(shell_id)
+            return record
+        
+        sig = signal.SIGKILL  # Force immediate kill (per current implementation)
+        
+        try:
+            await asyncio.to_thread(os.killpg, record.pid, sig)
+        except ProcessLookupError:
+            exit_code = record.exit_code or await self._collect_exit_code(record.pid)
+            await self._mark_exited(record, exit_code)
+            await self._stop_pty(shell_id)
+            return record
+        
+        exit_code = await self._collect_exit_code(record.pid)
+        await self._mark_exited(record, exit_code)
+        await self._stop_pty(shell_id)
+        return record
+```
+
+STEP 1.11: Convert Helper Methods to Async
+FILE: app/libs/framework_shells.py
+LOCATION: Various helper methods
+
+Convert these methods to async:
+  - _is_pid_alive() - wrap os.kill in asyncio.to_thread
+  - _collect_exit_code() - wrap os.waitpid in asyncio.to_thread
+  - _mark_exited() - make async, await _save_record()
+  - _stop_pty() - make async, handle asyncio.Task cancellation
+  - _read_log_tail() - use aiofiles for file reading
+  - _process_stats() - wrap subprocess.run and psutil calls in asyncio.to_thread
+
+Example for _is_pid_alive:
+```python
+# OLD:
+def _is_pid_alive(self, pid: Optional[int]) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        return True
+    except OSError as exc:
+        if getattr(exc, "errno", None) == errno.EPERM:
+            return True
+        return False
+    return True
+
+# NEW:
+async def _is_pid_alive(self, pid: Optional[int]) -> bool:
+    if not pid:
+        return False
+    try:
+        await asyncio.to_thread(os.kill, pid, 0)
+    except PermissionError:
+        return True
+    except OSError as exc:
+        if getattr(exc, "errno", None) == errno.EPERM:
+            return True
+        return False
+    return True
+```
+
+STEP 1.12: Convert Public API Methods to Async
+FILE: app/libs/framework_shells.py
+LOCATION: Public methods (around line 540+)
+
+Convert ALL public methods to async:
+
+list_shells():
+```python
+# OLD:
+def list_shells(self) -> List[ShellRecord]:
+    with self._lock:
+        self.sweep()
+        return sorted(self._iter_records(), key=lambda rec: rec.created_at)
+
+# NEW:
+async def list_shells(self) -> List[ShellRecord]:
+    async with self._lock:
+        await self.sweep()
+        records = []
+        async for record in self._aiter_records():
+            records.append(record)
+        return sorted(records, key=lambda rec: rec.created_at)
+```
+
+get_shell():
+```python
+# OLD:
+def get_shell(self, shell_id: str) -> Optional[ShellRecord]:
+    with self._lock:
+        self.sweep()
+        return self._load_record(shell_id)
+
+# NEW:
+async def get_shell(self, shell_id: str) -> Optional[ShellRecord]:
+    async with self._lock:
+        await self.sweep()
+        return await self._load_record(shell_id)
+```
+
+find_shell_by_label():
+```python
+# OLD:
+def find_shell_by_label(self, label: str, status: Optional[str] = "running") -> Optional[ShellRecord]:
+    if not label:
+        return None
+    with self._lock:
+        self.sweep()
+        for record in self._iter_records():
+            # ... logic
+        return None
+
+# NEW:
+async def find_shell_by_label(self, label: str, status: Optional[str] = "running") -> Optional[ShellRecord]:
+    if not label:
+        return None
+    async with self._lock:
+        await self.sweep()
+        async for record in self._aiter_records():
+            if record.label != label:
+                continue
+            if status and record.status != status:
+                continue
+            if status == "running" and not await self._is_pid_alive(record.pid):
+                continue
+            return record
+        return None
+```
+
+spawn_shell():
+```python
+# OLD:
+def spawn_shell(self, command: Iterable[str], *, cwd: Optional[str] = None, ...) -> ShellRecord:
+    with self._lock:
+        # ... logic
+        return self._launch(record)
+
+# NEW:
+async def spawn_shell(self, command: Iterable[str], *, cwd: Optional[str] = None, ...) -> ShellRecord:
+    async with self._lock:
+        from app.libs import app_lifecycle
+        await self.sweep()
+        if label:
+            existing = await self.find_shell_by_label(label, status="running")
+            if existing:
+                return existing
+        # ... limit checking logic (same)
+        record = self._create_record(command, cwd=cwd, env=env, label=label, autostart=autostart)
+        return await self._launch(record)
+```
+
+spawn_shell_pty():
+```python
+# Same pattern as spawn_shell, but call self._launch_pty(record)
+async def spawn_shell_pty(...) -> ShellRecord:
+    async with self._lock:
+        # ... logic
+        return await self._launch_pty(record)
+```
+
+write_to_pty():
+```python
+# OLD:
+def write_to_pty(self, shell_id: str, data: bytes | str) -> None:
+    with self._lock:
+        state = self._pty.get(shell_id)
+        if not state:
+            raise KeyError("No PTY for this shell")
+        payload = data.encode("utf-8") if isinstance(data, str) else data
+        try:
+            os.write(state.master_fd, payload)
+        except OSError:
+            raise
+
+# NEW:
+async def write_to_pty(self, shell_id: str, data: bytes | str) -> None:
+    async with self._lock:
+        state = self._pty.get(shell_id)
+        if not state:
+            raise KeyError("No PTY for this shell")
+        payload = data.encode("utf-8") if isinstance(data, str) else data
+        try:
+            await asyncio.to_thread(os.write, state.master_fd, payload)
+        except OSError:
+            raise
+```
+
+subscribe_output():
+```python
+# OLD:
+def subscribe_output(self, shell_id: str) -> "queue.Queue[str]":
+    with self._lock:
+        state = self._pty.get(shell_id)
+        if not state:
+            raise KeyError("No PTY for this shell")
+        q: "queue.Queue[str]" = queue.Queue()
+        state.subscribers.append(q)
+        return q
+
+# NEW:
+async def subscribe_output(self, shell_id: str) -> "AsyncQueue[str]":
+    async with self._lock:
+        state = self._pty.get(shell_id)
+        if not state:
+            raise KeyError("No PTY for this shell")
+        q: "AsyncQueue[str]" = AsyncQueue()
+        state.subscribers.append(q)
+        return q
+```
+
+unsubscribe_output():
+```python
+# OLD:
+def unsubscribe_output(self, shell_id: str, q: "queue.Queue[str]") -> None:
+    with self._lock:
+        state = self._pty.get(shell_id)
+        if not state:
+            return
+        try:
+            state.subscribers.remove(q)
+        except ValueError:
+            pass
+
+# NEW:
+async def unsubscribe_output(self, shell_id: str, q: "AsyncQueue[str]") -> None:
+    async with self._lock:
+        state = self._pty.get(shell_id)
+        if not state:
+            return
+        try:
+            state.subscribers.remove(q)
+        except ValueError:
+            pass
+```
+
+resize_pty():
+```python
+# OLD:
+def resize_pty(self, shell_id: str, cols: int, rows: int) -> None:
+    with self._lock:
+        state = self._pty.get(shell_id)
+        if not state:
+            raise KeyError("No PTY for this shell")
+        winsz = struct.pack("HHHH", max(1, rows), max(1, cols), 0, 0)
+        try:
+            fcntl.ioctl(state.master_fd, termios.TIOCSWINSZ, winsz)
+        except Exception:
+            pass
+
+# NEW:
+async def resize_pty(self, shell_id: str, cols: int, rows: int) -> None:
+    async with self._lock:
+        state = self._pty.get(shell_id)
+        if not state:
+            raise KeyError("No PTY for this shell")
+        winsz = struct.pack("HHHH", max(1, rows), max(1, cols), 0, 0)
+        try:
+            await asyncio.to_thread(fcntl.ioctl, state.master_fd, termios.TIOCSWINSZ, winsz)
+        except Exception:
+            pass
+```
+
+restart_shell():
+```python
+# OLD:
+def restart_shell(self, shell_id: str) -> ShellRecord:
+    with self._lock:
+        record = self._load_record(shell_id)
+        # ... logic
+        return self._launch(record) or self._launch_pty(record)
+
+# NEW:
+async def restart_shell(self, shell_id: str) -> ShellRecord:
+    async with self._lock:
+        record = await self._load_record(shell_id)
+        if not record:
+            raise KeyError("Shell not found")
+        await self.terminate_shell(shell_id, force=True)
+        now = time.time()
+        record.created_at = now
+        record.updated_at = now
+        record.exit_code = None
+        record.status = "pending"
+        await self._save_record(record)
+        if record.uses_pty:
+            return await self._launch_pty(record)
+        return await self._launch(record)
+```
+
+remove_shell():
+```python
+# OLD:
+def remove_shell(self, shell_id: str, *, force: bool = False) -> None:
+    with self._lock:
+        # ... logic
+        self.terminate_shell(shell_id, force=force)
+        # ... file operations
+
+# NEW:
+async def remove_shell(self, shell_id: str, *, force: bool = False) -> None:
+    async with self._lock:
+        record = await self._load_record(shell_id)
+        if not record:
+            raise KeyError("Shell not found")
+        if record.pid and await self._is_pid_alive(record.pid):
+            await self.terminate_shell(shell_id, force=force)
+        await self._stop_pty(shell_id)
+        await asyncio.to_thread(shutil.rmtree, self.metadata_dir / shell_id, ignore_errors=True)
+        for log_path in (record.stdout_log, record.stderr_log):
+            try:
+                await asyncio.to_thread(Path(log_path).unlink)
+            except FileNotFoundError:
+                pass
+```
+
+sweep():
+```python
+# OLD:
+def sweep(self) -> None:
+    for record in list(self._iter_records()):
+        if record.pid and not self._is_pid_alive(record.pid):
+            exit_code = record.exit_code or self._collect_exit_code(record.pid)
+            self._mark_exited(record, exit_code)
+
+# NEW:
+async def sweep(self) -> None:
+    records = []
+    async for record in self._aiter_records():
+        records.append(record)
+    for record in records:
+        if record.pid and not await self._is_pid_alive(record.pid):
+            exit_code = record.exit_code or await self._collect_exit_code(record.pid)
+            await self._mark_exited(record, exit_code)
+```
+
+describe():
+```python
+# OLD:
+def describe(self, record: ShellRecord, *, include_logs: bool = False, tail_lines: int = 0) -> Dict[str, Any]:
+    payload = record.to_payload()
+    payload["stats"] = self._process_stats(record)
+    if include_logs:
+        payload["logs"] = {
+            "stdout_tail": self._read_log_tail(Path(record.stdout_log), tail_lines),
+            "stderr_tail": self._read_log_tail(Path(record.stderr_log), tail_lines),
+        }
+    return payload
+
+# NEW:
+async def describe(self, record: ShellRecord, *, include_logs: bool = False, tail_lines: int = 0) -> Dict[str, Any]:
+    payload = record.to_payload()
+    payload["stats"] = await self._process_stats(record)
+    if include_logs:
+        payload["logs"] = {
+            "stdout_tail": await self._read_log_tail(Path(record.stdout_log), tail_lines),
+            "stderr_tail": await self._read_log_tail(Path(record.stderr_log), tail_lines),
+        }
+    return payload
+```
+
+aggregate_resource_stats():
+```python
+# Make async, await all helper calls
+async def aggregate_resource_stats(self) -> Dict[str, Any]:
+    async with self._lock:
+        # ... logic, await _is_pid_alive, await _aiter_records
+```
+
+list_active_pids():
+```python
+# Make async
+async def list_active_pids(self) -> List[int]:
+    async with self._lock:
+        pids: List[int] = []
+        async for record in self._aiter_records():
+            if record.pid and await self._is_pid_alive(record.pid):
+                pids.append(record.pid)
+        return pids
+```
+
+STEP 1.13: Update FastAPI Blueprint Routes
+FILE: app/libs/framework_shells.py
+LOCATION: Route handlers (around line 870+)
+
+All route handlers are already async def. Add await to manager calls:
+
+```python
+@framework_shells_bp.get("/api/framework_shells")
+async def list_framework_shells(mgr: FrameworkShellManager = Depends(get_manager)) -> Any:
+    records = [await mgr.describe(record) for record in await mgr.list_shells()]
+    return {"ok": True, "data": records}
+
+@framework_shells_bp.post("/api/framework_shells")
+async def create_framework_shell(mgr: FrameworkShellManager = Depends(get_manager), ...) -> Any:
+    # ... validation logic (same)
+    try:
+        record = await mgr.spawn_shell(command, cwd=cwd, env=env, label=label, autostart=autostart)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to spawn shell: {exc}")
+    return {"ok": True, "data": await mgr.describe(record)}
+
+@framework_shells_bp.get("/api/framework_shells/{shell_id}")
+async def get_framework_shell(shell_id: str, mgr: FrameworkShellManager = Depends(get_manager), ...) -> Any:
+    record = await mgr.get_shell(shell_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Shell not found")
+    return {"ok": True, "data": await mgr.describe(record, include_logs=logs, tail_lines=tail)}
+
+@framework_shells_bp.delete("/api/framework_shells/{shell_id}")
+async def delete_framework_shell(shell_id: str, mgr: FrameworkShellManager = Depends(get_manager), ...) -> Any:
+    # ... auth check (same)
+    try:
+        await mgr.remove_shell(shell_id, force=force)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Shell not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to remove shell: {exc}")
+    return {"ok": True, "data": {"id": shell_id}}
+
+@framework_shells_bp.post("/api/framework_shells/{shell_id}/action")
+async def framework_shell_action(shell_id: str, mgr: FrameworkShellManager = Depends(get_manager), ...) -> Any:
+    # ... auth check (same)
+    action = (payload.get("action") or "").lower()
+    try:
+        if action in {"stop", "terminate"}:
+            record = await mgr.terminate_shell(shell_id, force=False)
+        elif action in {"kill", "force"}:
+            record = await mgr.terminate_shell(shell_id, force=True)
+            try:
+                await mgr.remove_shell(shell_id, force=True)
+            except Exception:
+                pass
+        elif action == "restart":
+            record = await mgr.restart_shell(shell_id)
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported action '{action}'")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Shell not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Shell action failed: {exc}")
+    return {"ok": True, "data": await mgr.describe(record)}
+```
+
+--------------------------------------------------------------------------------
+PHASE 2: UPDATE FILE_EDITOR_CM6 TERMINAL BACKEND
+--------------------------------------------------------------------------------
+
+STEP 2.1: Update terminal_shell.py Helper Functions
+FILE: app/apps/file_editor_cm6/terminal_shell.py
+LOCATION: All functions
+
+Convert all functions to async:
+
+```python
+# OLD:
+def create_editor_shell(cwd=None, shell_cmd=None):
+    mgr = _manager()
+    # ... logic
+    rec = mgr.spawn_shell_pty(...)
+    return mgr.describe(rec)
+
+# NEW:
+async def create_editor_shell(cwd=None, shell_cmd=None):
+    mgr = _manager()
+    if shell_cmd is None:
+        shell_cmd = ['bash', '-l', '-i']
+    if cwd is None:
+        cwd = os.path.expanduser('~')
+    rec = await mgr.spawn_shell_pty(
+        shell_cmd,
+        label='code-editor-terminal',
+        cwd=cwd
+    )
+    return await mgr.describe(rec)
+
+# OLD:
+def destroy_editor_shell(shell_id):
+    mgr = _manager()
+    try:
+        mgr.remove_shell(shell_id, force=True)
+        return True
+    except Exception:
+        return False
+
+# NEW:
+async def destroy_editor_shell(shell_id):
+    mgr = _manager()
+    try:
+        await mgr.remove_shell(shell_id, force=True)
+        return True
+    except Exception:
+        return False
+
+# OLD:
+def resize_editor_shell(shell_id, cols, rows):
+    mgr = _manager()
+    try:
+        mgr.resize_pty(shell_id, cols, rows)
+        return True
+    except Exception:
+        return False
+
+# NEW:
+async def resize_editor_shell(shell_id, cols, rows):
+    mgr = _manager()
+    try:
+        await mgr.resize_pty(shell_id, cols, rows)
+        return True
+    except Exception:
+        return False
+
+# OLD:
+def get_shell_info(shell_id):
+    mgr = _manager()
+    rec = mgr.get_shell(shell_id)
+    if not rec:
+        return None
+    return mgr.describe(rec)
+
+# NEW:
+async def get_shell_info(shell_id):
+    mgr = _manager()
+    rec = await mgr.get_shell(shell_id)
+    if not rec:
+        return None
+    return await mgr.describe(rec)
+```
+
+STEP 2.2: Update terminal_backend.py GET Endpoint
+FILE: app/apps/file_editor_cm6/terminal_backend.py
+LOCATION: Lines 42-66
+
+REMOVE all anyio.to_thread.run_sync wrappers, add direct await:
+
+```python
+# NEW:
+@terminal_router.get('/terminal/shell-id')
+async def get_terminal_shell_id():
+    """Get the stored terminal shell ID, validating it still exists and cleaning up orphans."""
+    history_store = get_history_store()
+    mgr = get_manager()
+    
+    try:
+        shell_id = history_store.get_terminal_shell_id()
+        
+        # Clean up orphaned terminal shells (except the saved one)
+        shells = await mgr.list_shells()
+        orphans = [s for s in shells if s.label == 'code-editor-terminal' and s.id != shell_id]
+        for orphan in orphans:
+            try:
+                await mgr.terminate_shell(orphan.id)
+            except Exception as e:
+                print(f"Failed to cleanup orphan shell {orphan.id}: {e}")
+        
+        # If we have a stored shell ID, verify it still exists
+        if shell_id:
+            rec = await mgr.get_shell(shell_id)
+            if not rec or rec.status != 'running':
+                # Shell was deleted or died - clear the stale ID
+                history_store.set_terminal_shell_id(None)
+                shell_id = None
+        
+        # Return null if no valid shell ID
+        return {"ok": True, "data": {"shell_id": shell_id}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+STEP 2.3: Update terminal_backend.py POST /terminal/create
+FILE: app/apps/file_editor_cm6/terminal_backend.py
+LOCATION: Lines 82-100
+
+```python
+# OLD:
+@terminal_router.post('/terminal/create')
+async def terminal_create(data: dict = Body(...)):
+    cwd = data.get('cwd')
+    shell_cmd = data.get('shell')
+    try:
+        shell_info = await anyio.to_thread.run_sync(
+            functools.partial(create_editor_shell, cwd=cwd, shell_cmd=shell_cmd)
+        )
+        return {"ok": True, "data": shell_info}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# NEW:
+@terminal_router.post('/terminal/create')
+async def terminal_create(data: dict = Body(...)):
+    cwd = data.get('cwd')
+    shell_cmd = data.get('shell')
+    try:
+        shell_info = await create_editor_shell(cwd=cwd, shell_cmd=shell_cmd)
+        return {"ok": True, "data": shell_info}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+STEP 2.4: Update terminal_backend.py DELETE Endpoint
+FILE: app/apps/file_editor_cm6/terminal_backend.py
+LOCATION: Lines 103-120
+
+```python
+# OLD:
+@terminal_router.delete('/terminal/{shell_id}')
+async def terminal_destroy(shell_id: str):
+    try:
+        success = await anyio.to_thread.run_sync(destroy_editor_shell, shell_id)
+        if success:
+            return {"ok": True, "data": {"id": shell_id}}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to destroy shell")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# NEW:
+@terminal_router.delete('/terminal/{shell_id}')
+async def terminal_destroy(shell_id: str):
+    try:
+        success = await destroy_editor_shell(shell_id)
+        if success:
+            return {"ok": True, "data": {"id": shell_id}}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to destroy shell")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+STEP 2.5: Update terminal_backend.py POST /terminal/resize
+FILE: app/apps/file_editor_cm6/terminal_backend.py
+LOCATION: Lines 123-148
+
+```python
+# OLD:
+@terminal_router.post('/terminal/{shell_id}/resize')
+async def terminal_resize(shell_id: str, data: dict = Body(...)):
+    cols = int(data.get('cols', 80))
+    rows = int(data.get('rows', 24))
+    try:
+        success = await anyio.to_thread.run_sync(resize_editor_shell, shell_id, cols, rows)
+        if success:
+            return {"ok": True, "data": {"id": shell_id, "cols": cols, "rows": rows}}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to resize terminal")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# NEW:
+@terminal_router.post('/terminal/{shell_id}/resize')
+async def terminal_resize(shell_id: str, data: dict = Body(...)):
+    cols = int(data.get('cols', 80))
+    rows = int(data.get('rows', 24))
+    try:
+        success = await resize_editor_shell(shell_id, cols, rows)
+        if success:
+            return {"ok": True, "data": {"id": shell_id, "cols": cols, "rows": rows}}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to resize terminal")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+STEP 2.6: Update terminal_backend.py GET /terminal/{shell_id}
+FILE: app/apps/file_editor_cm6/terminal_backend.py
+LOCATION: Lines 151-177
+
+```python
+# Already correct - just needs manager calls awaited
+@terminal_router.get('/terminal/{shell_id}')
+async def terminal_info(shell_id: str, logs: bool = Query(False), tail: int = Query(200), mgr: FrameworkShellManager = Depends(get_manager)):
+    try:
+        rec = await mgr.get_shell(shell_id)
+        if not rec:
+            raise HTTPException(status_code=404, detail="Shell not found")
+        
+        info = await mgr.describe(rec, include_logs=logs, tail_lines=tail)
+        return {"ok": True, "data": info}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+STEP 2.7: Update terminal_backend.py WebSocket Handler
+FILE: app/apps/file_editor_cm6/terminal_backend.py
+LOCATION: Lines 180-282
+
+CRITICAL CHANGES:
+  - Remove ALL anyio.to_thread.run_sync wrappers
+  - Add direct await to manager calls
+  - Update queue.get to AsyncQueue.get with await
+  - Change output_queue type from queue.Queue to AsyncQueue
+
+```python
+@terminal_router.websocket('/ws/terminal/{shell_id}')
+async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellManager = Depends(get_manager)):
+    """WebSocket endpoint for bidirectional PTY streaming."""
+    await websocket.accept()
+    
+    # Handle auto shell management
+    if shell_id == 'auto':
+        print(f"[Terminal WS] Auto shell management requested")
+        history_store = get_history_store()
+        saved_shell_id = history_store.get_terminal_shell_id()
+        print(f"[Terminal WS] Saved shell ID from history: {saved_shell_id}")
+        
+        # Clean up orphaned shells first - DIRECT AWAIT
+        shells = await mgr.list_shells()
+        orphans = [s for s in shells if s.label == 'code-editor-terminal' and s.id != saved_shell_id]
+        print(f"[Terminal WS] Found {len(orphans)} orphaned terminal shells")
+        for s in orphans:
+            try:
+                print(f"[Terminal WS] Cleaning up orphaned shell: {s.id}")
+                await mgr.terminate_shell(s.id)
+            except Exception as e:
+                print(f"[Terminal WS] Failed to cleanup orphan {s.id}: {e}")
+        
+        # Validate saved shell - DIRECT AWAIT
+        if saved_shell_id:
+            rec = await mgr.get_shell(saved_shell_id)
+            if rec and rec.status == 'running':
+                print(f"[Terminal WS] Reconnecting to existing shell: {saved_shell_id}")
+                shell_id = saved_shell_id
+            else:
+                print(f"[Terminal WS] Saved shell no longer running (status={rec.status if rec else 'not found'})")
+                saved_shell_id = None
+        else:
+            print(f"[Terminal WS] No saved shell ID found")
+        
+        # Create new shell if needed - DIRECT AWAIT
+        if not saved_shell_id:
+            cwd = str(Path.home())
+            print(f"[Terminal WS] Creating new terminal shell (cwd={cwd})")
+            shell_rec = await create_editor_shell(cwd=cwd)
+            shell_id = shell_rec['id']
+            print(f"[Terminal WS] New shell created: {shell_id}")
+            history_store.set_terminal_shell_id(shell_id)
+            print(f"[Terminal WS] Saved shell ID to history store")
+        
+        # Send shell ID to client
+        print(f"[Terminal WS] Sending shell_id to client: {shell_id}")
+        await websocket.send_json({"type": "shell_id", "shell_id": shell_id})
+    
+    # Subscribe to output - DIRECT AWAIT, AsyncQueue returned
+    try:
+        output_queue = await mgr.subscribe_output(shell_id)
+    except Exception as e:
+        await websocket.send_json({"type": "error", "message": str(e)})
+        await websocket.close()
+        return
+    
+    stop_event = asyncio.Event()
+    
+    async def forward_pty_to_ws():
+        """Forward PTY output to WebSocket client"""
+        while not stop_event.is_set():
+            try:
+                # AsyncQueue.get is already async - DIRECT AWAIT
+                chunk = await asyncio.wait_for(output_queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
+            
+            try:
+                await websocket.send_text(chunk)
+            except Exception:
+                stop_event.set()
+                break
+    
+    forward_task = asyncio.create_task(forward_pty_to_ws())
+    
+    edit_tracker.register_shell_watcher(shell_id, 'terminal')
+    
+    try:
+        async for msg in websocket.iter_text():
+            try:
+                # DIRECT AWAIT
+                await mgr.write_to_pty(shell_id, msg)
+            except Exception:
+                pass
+    finally:
+        stop_event.set()
+        edit_tracker.unregister_shell_watcher(shell_id)
+        forward_task.cancel()
+        try:
+            await forward_task
+        except asyncio.CancelledError:
+            pass
+        
+        try:
+            # DIRECT AWAIT
+            await mgr.unsubscribe_output(shell_id, output_queue)
+        except Exception:
+            pass
+```
+
+STEP 2.8: Remove Unused Imports
+FILE: app/apps/file_editor_cm6/terminal_backend.py
+LOCATION: Top of file
+
+REMOVE:
+  - import anyio
+  - import functools (if only used for anyio wrappers)
+  - import queue (if imported)
+
+KEEP:
+  - All other imports
+
+--------------------------------------------------------------------------------
+PHASE 3: UPDATE OTHER APPS AND EXTENSIONS
+--------------------------------------------------------------------------------
+
+STEP 3.1: Update app/extensions/apps/main.py
+FILE: app/extensions/apps/main.py
+LOCATION: All locations using FrameworkShellManager
+
+Find all calls to manager methods and add await:
+  - ensure_app_running() may call mgr.spawn_shell() - make async
+  - App lifecycle functions may call mgr.terminate_shell() - make async
+  - Any mgr.list_shells() calls - add await
+  - Any mgr.get_shell() calls - add await
+
+Pattern:
+```python
+# OLD:
+def ensure_app_running(app_id: str) -> dict:
+    mgr = get_manager()
+    shell = mgr.find_shell_by_label(f"app-worker:{app_id}", status="running")
+    if not shell:
+        shell = mgr.spawn_shell([...], label=f"app-worker:{app_id}")
+    return {...}
+
+# NEW:
+async def ensure_app_running(app_id: str) -> dict:
+    mgr = get_manager()
+    shell = await mgr.find_shell_by_label(f"app-worker:{app_id}", status="running")
+    if not shell:
+        shell = await mgr.spawn_shell([...], label=f"app-worker:{app_id}")
+    return {...}
+```
+
+Then update all callers of ensure_app_running to await it.
+
+STEP 3.2: Update app/libs/app_lifecycle.py (if exists)
+FILE: app/libs/app_lifecycle.py
+LOCATION: All manager method calls
+
+Apply same pattern - make functions async, await manager calls.
+
+STEP 3.3: Update Supervisor Shutdown
+FILE: app/supervisor.py (or wherever shutdown cleanup happens)
+LOCATION: Framework shell cleanup on shutdown
+
+```python
+# OLD:
+def cleanup_framework_shells():
+    mgr = get_manager()
+    for shell in mgr.list_shells():
+        mgr.terminate_shell(shell.id, force=True)
+
+# NEW:
+async def cleanup_framework_shells():
+    mgr = get_manager()
+    for shell in await mgr.list_shells():
+        await mgr.terminate_shell(shell.id, force=True)
+
+# And call it:
+# OLD:
+cleanup_framework_shells()
+
+# NEW:
+asyncio.run(cleanup_framework_shells())
+# OR if already in async context:
+await cleanup_framework_shells()
+```
+
+STEP 3.4: Search for All Other Manager Usage
+COMMAND: grep -r "get_manager()" app/ --include="*.py"
+
+For each file found:
+  1. Open the file
+  2. Find all mgr.method() calls
+  3. Make the containing function async
+  4. Add await to manager calls
+  5. Update all callers to await the function
+
+--------------------------------------------------------------------------------
+PHASE 4: UPDATE TYPE HINTS AND IMPORTS
+--------------------------------------------------------------------------------
+
+STEP 4.1: Update Type Hints
+FILE: app/libs/framework_shells.py
+LOCATION: Throughout file
+
+Change return types from sync to async:
+```python
+# OLD:
+def list_shells(self) -> List[ShellRecord]:
+
+# NEW:
+async def list_shells(self) -> List[ShellRecord]:
+```
+
+STEP 4.2: Update AsyncIterator Import
+FILE: app/libs/framework_shells.py
+LOCATION: Top imports
+
+ADD:
+```python
+from typing import AsyncIterator
+```
+
+STEP 4.3: Update Queue Type Hints
+FILE: app/libs/framework_shells.py
+LOCATION: subscribe_output, unsubscribe_output
+
+```python
+# OLD:
+def subscribe_output(self, shell_id: str) -> "queue.Queue[str]":
+def unsubscribe_output(self, shell_id: str, q: "queue.Queue[str]") -> None:
+
+# NEW:
+async def subscribe_output(self, shell_id: str) -> "AsyncQueue[str]":
+async def unsubscribe_output(self, shell_id: str, q: "AsyncQueue[str]") -> None:
+```
+
+--------------------------------------------------------------------------------
+PHASE 5: DEPENDENCIES AND REQUIREMENTS
+--------------------------------------------------------------------------------
+
+STEP 5.1: Update requirements.txt
+FILE: requirements.txt
+
+ADD:
+```
+aiofiles>=23.0.0
+```
+
+VERIFY:
+```
+asyncio  # Built-in, no install needed
+```
+
+STEP 5.2: Install Dependencies
+COMMAND:
+```bash
+pip install aiofiles
+```
+
+--------------------------------------------------------------------------------
+PHASE 6: VERIFICATION CHECKLIST
+--------------------------------------------------------------------------------
+
+After all code changes complete, verify:
+
+IMPORT VERIFICATION:
+  [ ] python -c "from app.libs.framework_shells import FrameworkShellManager" succeeds
+  [ ] python -c "from app.apps.file_editor_cm6.terminal_backend import terminal_router" succeeds
+  [ ] python -c "from app.apps.file_editor_cm6.terminal_shell import create_editor_shell" succeeds
+  [ ] No import errors in worker startup logs
+
+SYNTAX VERIFICATION:
+  [ ] python -m py_compile app/libs/framework_shells.py succeeds
+  [ ] python -m py_compile app/apps/file_editor_cm6/terminal_backend.py succeeds
+  [ ] python -m py_compile app/apps/file_editor_cm6/terminal_shell.py succeeds
+
+RUNTIME VERIFICATION:
+  [ ] Framework starts without errors
+  [ ] Worker processes spawn successfully
+  [ ] No "RuntimeWarning: coroutine was never awaited" messages
+  [ ] No blocking I/O warnings in logs
+
+--------------------------------------------------------------------------------
+EXECUTION SUMMARY
+--------------------------------------------------------------------------------
+
+TOTAL PHASES: 6
+TOTAL STEPS: 40+
+
+ESTIMATED EXECUTION TIME:
+  - Phase 1 (Core async conversion): 4-5 hours
+  - Phase 2 (Terminal backend update): 1-2 hours
+  - Phase 3 (Other apps/extensions): 2-3 hours
+  - Phase 4 (Type hints): 30 minutes
+  - Phase 5 (Dependencies): 15 minutes
+  - Phase 6 (Verification): 30 minutes
+  - TOTAL: 8-11 hours
+
+CRITICAL SUCCESS FACTORS:
+  1. Execute steps in exact order
+  2. Do not skip any await keywords
+  3. Change ALL threading primitives to asyncio equivalents
+  4. Update ALL callers when making a function async
+  5. Use AsyncQueue, not queue.Queue
+  6. Use asyncio.Lock, not threading.RLock
+  7. Use asyncio.Event, not threading.Event
+  8. Use asyncio.create_task, not threading.Thread
+
+ROLLBACK PLAN:
+If any step fails critically:
+  1. Restore backup of framework_shells.py
+  2. Restore backup of terminal_backend.py
+  3. Restart framework
+  4. Document failure point in AGENTS.log
+  5. Review error messages before retrying
+
+--------------------------------------------------------------------------------
+

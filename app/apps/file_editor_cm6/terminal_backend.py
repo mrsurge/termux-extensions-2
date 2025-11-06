@@ -5,13 +5,10 @@ Terminal drawer backend for the code editor.
 Provides REST endpoints and WebSocket PTY streaming for embedded terminal.
 """
 
-import json
-import threading
-import functools
+import asyncio
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query, Depends
-import asyncio
-import anyio
+
 from app.libs.framework_shells import FrameworkShellManager, get_manager
 from app.apps.file_editor_cm6 import edit_tracker
 from app.apps.file_editor_cm6.terminal_shell import (
@@ -35,26 +32,26 @@ def get_history_store():
     return _history_store_singleton
 
 @terminal_router.get('/terminal/shell-id')
-def get_terminal_shell_id():
+async def get_terminal_shell_id():
     """Get the stored terminal shell ID, validating it still exists and cleaning up orphans."""
     history_store = get_history_store()
-    mgr = get_manager()
+    mgr = await get_manager()
     
     try:
         shell_id = history_store.get_terminal_shell_id()
         
         # First, clean up orphaned terminal shells (except the saved one)
-        shells = mgr.list_shells()
+        shells = await mgr.list_shells()
         orphans = [s for s in shells if s.label == 'code-editor-terminal' and s.id != shell_id]
         for orphan in orphans:
             try:
-                mgr.terminate_shell(orphan.id)
+                await mgr.terminate_shell(orphan.id)
             except Exception as e:
                 print(f"Failed to cleanup orphan shell {orphan.id}: {e}")
         
         # If we have a stored shell ID, verify it still exists
         if shell_id:
-            rec = mgr.get_shell(shell_id)
+            rec = await mgr.get_shell(shell_id)
             if not rec or rec.status != 'running':
                 # Shell was deleted or died - clear the stale ID
                 history_store.set_terminal_shell_id(None)
@@ -94,9 +91,7 @@ async def terminal_create(data: dict = Body(...)):
     shell_cmd = data.get('shell')
     
     try:
-        shell_info = await anyio.to_thread.run_sync(
-            functools.partial(create_editor_shell, cwd=cwd, shell_cmd=shell_cmd)
-        )
+        shell_info = await create_editor_shell(cwd=cwd, shell_cmd=shell_cmd)
         return {"ok": True, "data": shell_info}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -115,7 +110,7 @@ async def terminal_destroy(shell_id: str):
         Success confirmation
     """
     try:
-        success = await anyio.to_thread.run_sync(destroy_editor_shell, shell_id)
+        success = await destroy_editor_shell(shell_id)
         if success:
             return {"ok": True, "data": {"id": shell_id}}
         else:
@@ -143,7 +138,7 @@ async def terminal_resize(shell_id: str, data: dict = Body(...)):
     rows = int(data.get('rows', 24))
     
     try:
-        success = await anyio.to_thread.run_sync(resize_editor_shell, shell_id, cols, rows)
+        success = await resize_editor_shell(shell_id, cols, rows)
         if success:
             return {"ok": True, "data": {"id": shell_id, "cols": cols, "rows": rows}}
         else:
@@ -153,7 +148,7 @@ async def terminal_resize(shell_id: str, data: dict = Body(...)):
 
 
 @terminal_router.get('/terminal/{shell_id}')
-def terminal_info(shell_id: str, logs: bool = Query(False), tail: int = Query(200), mgr: FrameworkShellManager = Depends(get_manager)):
+async def terminal_info(shell_id: str, logs: bool = Query(False), tail: int = Query(200), mgr: FrameworkShellManager = Depends(get_manager)):
     """
     Get terminal shell session information.
     
@@ -168,11 +163,11 @@ def terminal_info(shell_id: str, logs: bool = Query(False), tail: int = Query(20
         Shell metadata with optional log tails
     """
     try:
-        rec = mgr.get_shell(shell_id)
+        rec = await mgr.get_shell(shell_id)
         if not rec:
             raise HTTPException(status_code=404, detail="Shell not found")
         
-        info = mgr.describe(rec, include_logs=logs, tail_lines=tail)
+        info = await mgr.describe(rec, include_logs=logs, tail_lines=tail)
         return {"ok": True, "data": info}
     except HTTPException:
         raise  # Re-raise HTTPException as-is
@@ -195,20 +190,20 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
         saved_shell_id = history_store.get_terminal_shell_id()
         print(f"[Terminal WS] Saved shell ID from history: {saved_shell_id}")
         
-        # Clean up orphaned shells first
-        shells = mgr.list_shells()
+        # Clean up orphaned shells first - DIRECT AWAIT
+        shells = await mgr.list_shells()
         orphans = [s for s in shells if s.label == 'code-editor-terminal' and s.id != saved_shell_id]
         print(f"[Terminal WS] Found {len(orphans)} orphaned terminal shells")
         for s in orphans:
             try:
                 print(f"[Terminal WS] Cleaning up orphaned shell: {s.id}")
-                mgr.terminate_shell(s.id)
+                await mgr.terminate_shell(s.id)
             except Exception as e:
                 print(f"[Terminal WS] Failed to cleanup orphan {s.id}: {e}")
         
-        # Validate saved shell
+        # Validate saved shell - DIRECT AWAIT
         if saved_shell_id:
-            rec = mgr.get_shell(saved_shell_id)
+            rec = await mgr.get_shell(saved_shell_id)
             if rec and rec.status == 'running':
                 print(f"[Terminal WS] Reconnecting to existing shell: {saved_shell_id}")
                 shell_id = saved_shell_id
@@ -218,22 +213,23 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
         else:
             print(f"[Terminal WS] No saved shell ID found")
         
-        # Create new shell if needed
+        # Create new shell if needed - DIRECT AWAIT
         if not saved_shell_id:
-            cwd = str(Path.home())  # Default CWD
+            cwd = str(Path.home())
             print(f"[Terminal WS] Creating new terminal shell (cwd={cwd})")
-            shell_rec = create_editor_shell(cwd=cwd)  # Don't pass mgr, it gets its own
+            shell_rec = await create_editor_shell(cwd=cwd)
             shell_id = shell_rec['id']
             print(f"[Terminal WS] New shell created: {shell_id}")
             history_store.set_terminal_shell_id(shell_id)
             print(f"[Terminal WS] Saved shell ID to history store")
         
-        # Send shell ID to client so it knows what it connected to
+        # Send shell ID to client
         print(f"[Terminal WS] Sending shell_id to client: {shell_id}")
         await websocket.send_json({"type": "shell_id", "shell_id": shell_id})
     
+    # Subscribe to output - DIRECT AWAIT, AsyncQueue returned
     try:
-        output_queue = mgr.subscribe_output(shell_id)
+        output_queue = await mgr.subscribe_output(shell_id)
     except Exception as e:
         await websocket.send_json({"type": "error", "message": str(e)})
         await websocket.close()
@@ -243,11 +239,11 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
     
     async def forward_pty_to_ws():
         """Forward PTY output to WebSocket client"""
-        import queue as _queue
         while not stop_event.is_set():
             try:
-                chunk = await anyio.to_thread.run_sync(functools.partial(output_queue.get, timeout=0.5))
-            except _queue.Empty:
+                # AsyncQueue.get is already async - DIRECT AWAIT
+                chunk = await asyncio.wait_for(output_queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
                 continue
             
             try:
@@ -263,7 +259,8 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
     try:
         async for msg in websocket.iter_text():
             try:
-                await anyio.to_thread.run_sync(mgr.write_to_pty, shell_id, msg)
+                # DIRECT AWAIT
+                await mgr.write_to_pty(shell_id, msg)
             except Exception:
                 pass
     finally:
@@ -276,6 +273,7 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
             pass
         
         try:
-            await anyio.to_thread.run_sync(mgr.unsubscribe_output, shell_id, output_queue)
+            # DIRECT AWAIT
+            await mgr.unsubscribe_output(shell_id, output_queue)
         except Exception:
             pass

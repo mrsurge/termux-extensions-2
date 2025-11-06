@@ -1,0 +1,712 @@
+
+[2025-11-06 17:06:00 UTC]
+SUPPLEMENTARY: Fix Plan for Remaining Issues (CORRECTED)
+
+--------------------------------------------------------------------------------
+FIX PLAN: Corrections Required for Async Refactor
+--------------------------------------------------------------------------------
+
+ISSUE 1: Event-loop lock binding
+LOCATION: app/libs/framework_shells.py lines 128, 872
+LOCATION: app/libs/app_lifecycle.py line 9
+
+FIX:
+Use private method for lazy lock initialization, not property pattern.
+
+app/libs/framework_shells.py:
+```python
+# REMOVE line 128:
+# self._lock = AsyncLock()
+
+# ADD private method:
+def _get_lock(self):
+    """Get or create the instance lock (lazy initialization)."""
+    if not hasattr(self, '_lock_instance'):
+        self._lock_instance = asyncio.Lock()
+    return self._lock_instance
+
+# UPDATE all usages from:
+# async with self._lock:
+# TO:
+# async with self._get_lock():
+```
+
+For module-level manager lock:
+```python
+# REMOVE line 872:
+# _manager_lock = AsyncLock()
+
+# MODIFY get_manager() function:
+async def get_manager() -> FrameworkShellManager:
+    global _manager_instance
+    if _manager_instance is None:
+        # Ensure we're in async context
+        loop = asyncio.get_running_loop()  # Raises RuntimeError if no loop
+        
+        # Create lock on-demand
+        if not hasattr(get_manager, '_lock'):
+            get_manager._lock = asyncio.Lock()
+        
+        async with get_manager._lock:
+            if _manager_instance is None:
+                base_dir_setting = os.getenv("TE_FRAMEWORK_SHELL_DIR")
+                base_dir = Path(base_dir_setting) if base_dir_setting else None
+                # ... rest of initialization
+                _manager_instance = FrameworkShellManager(...)
+    return _manager_instance
+```
+
+app/libs/app_lifecycle.py:
+```python
+# REMOVE line 9:
+# _lock = asyncio.Lock()
+
+# ADD module-level helper:
+_lock = None
+
+def _get_lock():
+    """Get or create module-level lock (lazy initialization)."""
+    global _lock
+    if _lock is None:
+        _lock = asyncio.Lock()
+    return _lock
+
+# REPLACE all occurrences of:
+# async with _lock:
+# WITH:
+# async with _get_lock():
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Awaiting non-coroutines
+LOCATION: app/libs/framework_shells.py lines 603-612
+
+FIX:
+Convert _active_shell_count to async method.
+
+```python
+# CHANGE:
+def _active_shell_count(self, app_shell: bool = False) -> int:
+    return sum(1 for r in self._iter_records() if r.status == "running" and (r.label or "").startswith("app-worker:") == app_shell)
+
+# TO:
+async def _active_shell_count(self, app_shell: bool = False) -> int:
+    count = 0
+    async for r in self._aiter_records():
+        if r.status == "running" and (r.label or "").startswith("app-worker:") == app_shell:
+            count += 1
+    return count
+```
+
+THEN update all callers to await:
+```python
+# Line 603-612 and similar locations:
+# CHANGE:
+if limit and self._active_shell_count(app_shell=is_app_worker) >= limit:
+
+# TO:
+if limit and await self._active_shell_count(app_shell=is_app_worker) >= limit:
+```
+
+Search for all _active_shell_count calls:
+```bash
+grep -n "_active_shell_count" app/libs/framework_shells.py
+```
+
+Add await to each call found.
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: Async file access misuse
+LOCATION: app/extensions/apps/main.py lines 169-179, 198-215
+
+FIX:
+Use async context manager for aiofiles.
+
+```python
+# CHANGE:
+content = await aiofiles.open(log_path, 'r').read()
+
+# TO:
+async with aiofiles.open(log_path, 'r') as f:
+    content = await f.read()
+```
+
+Apply this pattern to ALL aiofiles.open() calls in the file.
+
+Lines to fix:
+- Line 169-179: Shell stdout log reading
+- Line 198-215: Shell stderr log reading
+
+Pattern:
+```python
+# WRONG:
+log_content = await aiofiles.open(path, 'r').read()
+
+# CORRECT:
+async with aiofiles.open(path, 'r') as f:
+    log_content = await f.read()
+```
+
+Search for all aiofiles usage:
+```bash
+grep -n "aiofiles.open" app/extensions/apps/main.py
+```
+
+Fix each occurrence found.
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: Supervisor cleanup disabled
+LOCATION: app/supervisor.py
+
+FIX:
+Re-implement _cleanup_framework_shells with proper event loop handling.
+
+```python
+# ADD async cleanup function:
+async def _cleanup_framework_shells():
+    """Cleanup all framework shells on shutdown."""
+    from app.libs.framework_shells import get_manager
+    try:
+        mgr = await get_manager()
+        shells = await mgr.list_shells()
+        for shell in shells:
+            try:
+                await mgr.terminate_shell(shell.id, force=True)
+            except Exception as e:
+                print(f"Failed to terminate shell {shell.id}: {e}")
+    except Exception as e:
+        print(f"Failed to cleanup framework shells: {e}")
+
+# ADD safe wrapper for sync/async context:
+def _safe_cleanup_wrapper():
+    """Safe wrapper that works in both sync and async contexts."""
+    try:
+        # Check if we're already in an async context
+        loop = asyncio.get_running_loop()
+        # We have a running loop - schedule as task
+        asyncio.create_task(_cleanup_framework_shells())
+    except RuntimeError:
+        # No running loop - safe to create new one
+        asyncio.run(_cleanup_framework_shells())
+
+# THEN in shutdown handler:
+# CHANGE:
+# _cleanup_framework_shells()  # commented out
+
+# TO:
+_safe_cleanup_wrapper()
+```
+
+Alternative if shutdown is already async:
+```python
+# If supervisor shutdown is already an async function:
+await _cleanup_framework_shells()
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: Sync/async mismatch in main app
+LOCATION: app/main.py
+
+FIX:
+Update all callers to await async functions.
+
+Step 1 - Find ensure_app_running calls:
+```bash
+grep -n "ensure_app_running" app/main.py
+```
+
+Step 2 - For each call, make the containing function async and await:
+```python
+# CHANGE:
+def some_route_handler():
+    app_info = ensure_app_running(app_id)
+    # ...
+
+# TO:
+async def some_route_handler():
+    app_info = await ensure_app_running(app_id)
+    # ...
+```
+
+Step 3 - Find get_running_apps calls:
+```bash
+grep -n "get_running_apps" app/main.py
+```
+
+Step 4 - For each call, add await:
+```python
+# CHANGE:
+apps = get_running_apps()
+
+# TO:
+apps = await get_running_apps()
+```
+
+Step 5 - If caller cannot be async (rare edge case), create sync wrapper:
+```python
+def ensure_app_running_sync(app_id: str) -> dict:
+    """Synchronous wrapper for async ensure_app_running.
+    
+    WARNING: Only use this if the caller absolutely cannot be made async.
+    This creates a new event loop and should be avoided in async contexts.
+    """
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+        raise RuntimeError("Cannot call sync wrapper from async context")
+    except RuntimeError as e:
+        if "no running event loop" in str(e).lower():
+            # Safe - no loop exists
+            return asyncio.run(ensure_app_running(app_id))
+        else:
+            # Already in async context
+            raise
+```
+
+--------------------------------------------------------------------------------
+
+EXECUTION ORDER:
+
+Execute fixes in this exact sequence:
+
+1. Fix Issue 1 (lock binding) - app/libs/framework_shells.py, app/libs/app_lifecycle.py
+2. Fix Issue 2 (await non-coroutine) - app/libs/framework_shells.py _active_shell_count
+3. Fix Issue 3 (aiofiles misuse) - app/extensions/apps/main.py
+4. Fix Issue 4 (supervisor cleanup) - app/supervisor.py
+5. Fix Issue 5 (main.py sync/async) - app/main.py
+
+--------------------------------------------------------------------------------
+
+FILES REQUIRING CHANGES:
+
+PRIMARY:
+  - app/libs/framework_shells.py (Issues 1, 2)
+  - app/libs/app_lifecycle.py (Issue 1)
+  - app/extensions/apps/main.py (Issue 3)
+  - app/supervisor.py (Issue 4)
+  - app/main.py (Issue 5)
+
+VERIFICATION AFTER EACH FIX:
+  - Import the modified module
+  - Check for syntax errors
+  - Verify no new import errors introduced
+
+CRITICAL NOTES:
+  - Lock initialization must happen lazily to avoid event loop binding errors
+  - Always check for running event loop before calling asyncio.run()
+  - Use _get_lock() method pattern, NOT @property decorator
+  - get_manager() must verify event loop exists with asyncio.get_running_loop()
+
+--------------------------------------------------------------------------------
+
+[2025-11-06 18:28:00 UTC]
+FOLLOW-UP: Additional Async Integration Failures
+
+OBSERVED REGRESSIONS (post-agent run):
+  1. Synchronous bridge modules still call get_manager()
+     • app/apps/file_editor_cm6/agent_bridge.py:425 (`self.manager = _manager()`) assigns the coroutine returned by async get_manager to self.manager. Any later call to `self.manager.spawn_shell(...)` now fails.
+     • app/apps/file_editor_cm6/agent_bridge_mcp.py:416 uses the same pattern, so Codex MCP sessions break.
+     • app/apps/terminal/backend.py defines `mgr()` returning `_manager()`. Every route now calls async methods (`list_shells`, `describe`, `spawn_shell_pty`) without awaiting them, so the entire terminal-backend API raises TypeError/RuntimeError on first use.
+
+  2. agent_routes.py still wraps async methods in to_thread
+     • get_agent_shell_status() calls `await anyio.to_thread.run_sync(mgr.list_shells)` even though `mgr.list_shells` is now async. Passing a coroutine into run_sync raises immediately, so the status endpoint is broken.
+
+REQUIRED FIXES:
+  - Convert every `get_manager as _manager` usage to await the coroutine before storing it (e.g., `self.manager = await _manager()` inside an async initializer or lazily via async helper).
+  - Update all consumers to await manager methods (`await self.manager.spawn_shell(...)`, `await self.manager.describe(...)`, etc.). For synchronous modules such as `app/apps/terminal/backend.py`, refactor endpoints to async (or provide async wrappers) so they can await the manager.
+  - Replace `anyio.to_thread.run_sync(mgr.list_shells)` and similar with direct awaits.
+
+CONCLUSION:
+The async manager integration is incomplete—large portions of the app still treat the manager synchronously, so core services (agent bridge, terminal backend, shell status) fail instantly. Must address these call sites before the refactor can be considered stable.
+
+[2025-11-06 17:29:00 UTC]
+EXECUTION PLAN: Step-by-Step Fix Implementation
+
+--------------------------------------------------------------------------------
+PLAN: Complete Async Refactor Fixes
+--------------------------------------------------------------------------------
+
+This plan addresses all 5 core issues plus 2 additional integration issues.
+Execute in exact order. Do not skip steps.
+
+================================================================================
+ISSUE 1: Event-loop lock binding
+================================================================================
+
+FILE: app/libs/framework_shells.py
+
+STEP 1.1: Locate and remove line 128
+FIND: self._lock = AsyncLock()
+ACTION: Delete this line
+
+STEP 1.2: Add _get_lock method to FrameworkShellManager class
+LOCATION: After __init__ method
+ADD:
+```python
+def _get_lock(self):
+    """Get or create the instance lock (lazy initialization)."""
+    if not hasattr(self, '_lock_instance'):
+        self._lock_instance = asyncio.Lock()
+    return self._lock_instance
+```
+
+STEP 1.3: Replace all self._lock usages
+FIND ALL: async with self._lock:
+REPLACE WITH: async with self._get_lock():
+SEARCH COMMAND: grep -n "async with self._lock:" app/libs/framework_shells.py
+ACTION: Replace each occurrence
+
+STEP 1.4: Locate and remove line 872
+FIND: _manager_lock = AsyncLock()
+ACTION: Delete this line
+
+STEP 1.5: Modify get_manager function
+FIND: async def get_manager() -> FrameworkShellManager:
+REPLACE ENTIRE FUNCTION WITH:
+```python
+async def get_manager() -> FrameworkShellManager:
+    global _manager_instance
+    if _manager_instance is None:
+        # Ensure we're in async context
+        loop = asyncio.get_running_loop()  # Raises RuntimeError if no loop
+        
+        # Create lock on-demand
+        if not hasattr(get_manager, '_lock'):
+            get_manager._lock = asyncio.Lock()
+        
+        async with get_manager._lock:
+            if _manager_instance is None:
+                base_dir_setting = os.getenv("TE_FRAMEWORK_SHELL_DIR")
+                base_dir = Path(base_dir_setting) if base_dir_setting else None
+                try:
+                    from app.main import get_setting
+                    max_app_shells = get_setting("TE_MAX_APP_SHELLS")
+                    max_service_shells = get_setting("TE_MAX_SERVICE_SHELLS")
+                except Exception:
+                    max_app_shells = None
+                    max_service_shells = None
+                
+                if max_app_shells is None:
+                    max_app_shells_setting = os.getenv("TE_MAX_APP_SHELLS")
+                    max_app_shells = int(max_app_shells_setting) if max_app_shells_setting else 5
+                else:
+                    max_app_shells = int(max_app_shells)
+                    
+                if max_service_shells is None:
+                    max_service_shells_setting = os.getenv("TE_MAX_SERVICE_SHELLS")
+                    max_service_shells = int(max_service_shells_setting) if max_service_shells_setting else 5
+                else:
+                    max_service_shells = int(max_service_shells)
+                    
+                token = os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
+                run_id = os.getenv("TE_RUN_ID")
+                _manager_instance = FrameworkShellManager(
+                    base_dir=base_dir,
+                    max_app_shells=max_app_shells,
+                    max_service_shells=max_service_shells,
+                    auth_token=token,
+                    run_id=run_id,
+                )
+    return _manager_instance
+```
+
+--------------------------------------------------------------------------------
+
+FILE: app/libs/app_lifecycle.py
+
+STEP 1.6: Locate and modify line 9
+FIND: _lock = asyncio.Lock()
+REPLACE WITH: _lock = None
+
+STEP 1.7: Add _get_lock helper function
+LOCATION: After _lock = None line
+ADD:
+```python
+def _get_lock():
+    """Get or create module-level lock (lazy initialization)."""
+    global _lock
+    if _lock is None:
+        _lock = asyncio.Lock()
+    return _lock
+```
+
+STEP 1.8: Replace all _lock usages in app_lifecycle.py
+FIND ALL: async with _lock:
+REPLACE WITH: async with _get_lock():
+SEARCH COMMAND: grep -n "async with _lock:" app/libs/app_lifecycle.py
+ACTION: Replace each occurrence
+
+================================================================================
+ISSUE 2: Awaiting non-coroutines
+================================================================================
+
+FILE: app/libs/framework_shells.py
+
+STEP 2.1: Find _active_shell_count method
+SEARCH COMMAND: grep -n "def _active_shell_count" app/libs/framework_shells.py
+FIND: def _active_shell_count(self, app_shell: bool = False) -> int:
+
+STEP 2.2: Replace _active_shell_count method
+REPLACE ENTIRE METHOD WITH:
+```python
+async def _active_shell_count(self, app_shell: bool = False) -> int:
+    count = 0
+    async for r in self._aiter_records():
+        if r.status == "running" and (r.label or "").startswith("app-worker:") == app_shell:
+            count += 1
+    return count
+```
+
+STEP 2.3: Find all callers of _active_shell_count
+SEARCH COMMAND: grep -n "_active_shell_count" app/libs/framework_shells.py
+EXPECTED LOCATIONS: Lines around 603-612, possibly others
+
+STEP 2.4: Add await to each call
+FIND PATTERN: self._active_shell_count(
+REPLACE WITH: await self._active_shell_count(
+ACTION: For each occurrence found in step 2.3, add await keyword
+
+================================================================================
+ISSUE 3: Async file access misuse
+================================================================================
+
+FILE: app/extensions/apps/main.py
+
+STEP 3.1: Find all aiofiles.open calls
+SEARCH COMMAND: grep -n "aiofiles.open" app/extensions/apps/main.py
+EXPECTED LOCATIONS: Lines 169-179, 198-215
+
+STEP 3.2: Fix each aiofiles.open occurrence
+FOR EACH OCCURRENCE:
+FIND PATTERN: content = await aiofiles.open(log_path, 'r').read()
+REPLACE WITH:
+```python
+async with aiofiles.open(log_path, 'r') as f:
+    content = await f.read()
+```
+
+STEP 3.3: Verify all occurrences fixed
+SEARCH COMMAND: grep -n "aiofiles.open.*\.read()" app/extensions/apps/main.py
+EXPECTED RESULT: No matches (all should be fixed)
+
+================================================================================
+ISSUE 4: Supervisor cleanup disabled
+================================================================================
+
+FILE: app/supervisor.py
+
+STEP 4.1: Find commented cleanup function
+SEARCH COMMAND: grep -n "_cleanup_framework_shells" app/supervisor.py
+
+STEP 4.2: Add async cleanup function
+LOCATION: Before or after existing cleanup code
+ADD:
+```python
+async def _cleanup_framework_shells():
+    """Cleanup all framework shells on shutdown."""
+    from app.libs.framework_shells import get_manager
+    try:
+        mgr = await get_manager()
+        shells = await mgr.list_shells()
+        for shell in shells:
+            try:
+                await mgr.terminate_shell(shell.id, force=True)
+            except Exception as e:
+                print(f"Failed to terminate shell {shell.id}: {e}")
+    except Exception as e:
+        print(f"Failed to cleanup framework shells: {e}")
+```
+
+STEP 4.3: Add safe wrapper function
+ADD:
+```python
+def _safe_cleanup_wrapper():
+    """Safe wrapper that works in both sync and async contexts."""
+    try:
+        loop = asyncio.get_running_loop()
+        asyncio.create_task(_cleanup_framework_shells())
+    except RuntimeError:
+        asyncio.run(_cleanup_framework_shells())
+```
+
+STEP 4.4: Find shutdown handler
+SEARCH COMMAND: grep -n "shutdown\|cleanup" app/supervisor.py
+
+STEP 4.5: Add cleanup call in shutdown handler
+FIND: Location where cleanup should be called (where old cleanup was commented)
+ADD: _safe_cleanup_wrapper()
+
+================================================================================
+ISSUE 5: Sync/async mismatch in main app
+================================================================================
+
+FILE: app/main.py
+
+STEP 5.1: Find ensure_app_running calls
+SEARCH COMMAND: grep -n "ensure_app_running" app/main.py
+
+STEP 5.2: For each ensure_app_running call
+ACTION: Make containing function async and add await
+FIND PATTERN: def route_handler(...):
+                  ...
+                  result = ensure_app_running(app_id)
+REPLACE WITH: async def route_handler(...):
+                  ...
+                  result = await ensure_app_running(app_id)
+
+STEP 5.3: Find get_running_apps calls
+SEARCH COMMAND: grep -n "get_running_apps" app/main.py
+
+STEP 5.4: For each get_running_apps call
+ADD: await keyword before call
+FIND PATTERN: apps = get_running_apps()
+REPLACE WITH: apps = await get_running_apps()
+
+================================================================================
+ISSUE 6: Agent bridge synchronous manager usage
+================================================================================
+
+FILE: app/apps/file_editor_cm6/agent_bridge.py
+
+STEP 6.1: Find manager assignment
+SEARCH COMMAND: grep -n "self.manager = _manager()" app/apps/file_editor_cm6/agent_bridge.py
+EXPECTED LOCATION: Line 425
+
+STEP 6.2: Convert to async initialization
+FIND: self.manager = _manager()
+CONTEXT: This is in __init__ or similar
+ACTION: This requires refactoring initialization to be async
+
+OPTION A - Lazy async initialization:
+ADD method to class:
+```python
+async def _get_manager(self):
+    """Get manager instance (lazy async initialization)."""
+    if not hasattr(self, '_manager_instance'):
+        self._manager_instance = await get_manager()
+    return self._manager_instance
+```
+
+STEP 6.3: Replace all self.manager usages
+FIND ALL: self.manager.spawn_shell
+REPLACE WITH: (await self._get_manager()).spawn_shell
+ACTION: Add await before each manager method call
+
+STEP 6.4: Update all methods using manager to async
+FIND: def method_using_manager(self):
+      ...
+      self.manager.spawn_shell(...)
+REPLACE WITH: async def method_using_manager(self):
+                  ...
+                  await (await self._get_manager()).spawn_shell(...)
+
+--------------------------------------------------------------------------------
+
+FILE: app/apps/file_editor_cm6/agent_bridge_mcp.py
+
+STEP 6.5: Apply same fix as agent_bridge.py
+SEARCH COMMAND: grep -n "self.manager = _manager()" app/apps/file_editor_cm6/agent_bridge_mcp.py
+EXPECTED LOCATION: Line 416
+ACTION: Apply steps 6.2-6.4 to this file
+
+--------------------------------------------------------------------------------
+
+FILE: app/apps/terminal/backend.py
+
+STEP 6.6: Find mgr() function
+SEARCH COMMAND: grep -n "def mgr():" app/apps/terminal/backend.py
+
+STEP 6.7: Make mgr() async
+FIND: def mgr():
+      return _manager()
+REPLACE WITH: async def mgr():
+                  return await get_manager()
+
+STEP 6.8: Update all route handlers
+FIND: All functions calling mgr()
+ACTION: Make them async and await mgr() call
+PATTERN: def route_handler():
+             manager = mgr()
+             shells = manager.list_shells()
+REPLACE: async def route_handler():
+             manager = await mgr()
+             shells = await manager.list_shells()
+
+================================================================================
+ISSUE 7: Agent routes anyio wrappers
+================================================================================
+
+FILE: app/apps/file_editor_cm6/agent_routes.py
+
+STEP 7.1: Find anyio.to_thread.run_sync(mgr.list_shells)
+SEARCH COMMAND: grep -n "anyio.to_thread.run_sync(mgr" app/apps/file_editor_cm6/agent_routes.py
+
+STEP 7.2: Remove anyio wrappers for async methods
+FOR EACH OCCURRENCE:
+FIND PATTERN: await anyio.to_thread.run_sync(mgr.list_shells)
+REPLACE WITH: await mgr.list_shells()
+
+FIND PATTERN: await anyio.to_thread.run_sync(mgr.describe, rec)
+REPLACE WITH: await mgr.describe(rec)
+
+FIND PATTERN: await anyio.to_thread.run_sync(mgr.spawn_shell_pty, ...)
+REPLACE WITH: await mgr.spawn_shell_pty(...)
+
+STEP 7.3: Search for all anyio wrappers of manager methods
+SEARCH COMMAND: grep -n "anyio.to_thread.run_sync.*mgr\." app/apps/file_editor_cm6/agent_routes.py
+ACTION: Remove anyio.to_thread.run_sync wrapper for each, keep direct await
+
+================================================================================
+VERIFICATION STEPS
+================================================================================
+
+After completing each issue:
+
+VERIFY SYNTAX:
+python3 -m py_compile <modified_file>
+
+VERIFY IMPORTS:
+python3 -c "from <module> import <class>"
+
+AFTER ALL FIXES:
+python3 -c "from app.libs.framework_shells import get_manager"
+python3 -c "from app.apps.file_editor_cm6.terminal_backend import terminal_router"
+python3 -c "from app.apps.file_editor_cm6.agent_bridge import AgentBridge"
+
+================================================================================
+EXECUTION CHECKLIST
+================================================================================
+
+[ ] Issue 1: Lock binding - framework_shells.py (Steps 1.1-1.5)
+[ ] Issue 1: Lock binding - app_lifecycle.py (Steps 1.6-1.8)
+[ ] Issue 2: Await non-coroutines (Steps 2.1-2.4)
+[ ] Issue 3: Aiofiles misuse (Steps 3.1-3.3)
+[ ] Issue 4: Supervisor cleanup (Steps 4.1-4.5)
+[ ] Issue 5: Main app sync/async (Steps 5.1-5.4)
+[ ] Issue 6: Agent bridge - agent_bridge.py (Steps 6.1-6.4)
+[ ] Issue 6: Agent bridge - agent_bridge_mcp.py (Step 6.5)
+[ ] Issue 6: Terminal backend (Steps 6.6-6.8)
+[ ] Issue 7: Agent routes anyio wrappers (Steps 7.1-7.3)
+
+================================================================================
+FILES TO MODIFY (COMPLETE LIST)
+================================================================================
+
+1. app/libs/framework_shells.py
+2. app/libs/app_lifecycle.py
+3. app/extensions/apps/main.py
+4. app/supervisor.py
+5. app/main.py
+6. app/apps/file_editor_cm6/agent_bridge.py
+7. app/apps/file_editor_cm6/agent_bridge_mcp.py
+8. app/apps/terminal/backend.py
+9. app/apps/file_editor_cm6/agent_routes.py
+
+Total: 9 files
+
+--------------------------------------------------------------------------------
+

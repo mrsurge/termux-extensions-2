@@ -54,7 +54,7 @@ async def agent_create(data: dict = Body(...)):
         session_id = str(uuid.uuid4())
     
     try:
-        shell = await anyio.to_thread.run_sync(bridge.spawn_agent, agent_type, cwd, session_id)
+        shell = await bridge.spawn_agent(agent_type, cwd, session_id)
         return {
             "ok": True,
             "data": {
@@ -94,7 +94,7 @@ async def agent_list():
     bridge = get_bridge()
     
     try:
-        agents = await anyio.to_thread.run_sync(bridge.list_agents)
+        agents = await bridge.list_agents()
         return {"ok": True, "data": agents}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -206,7 +206,7 @@ async def get_agent_shell_status(mgr: FrameworkShellManager = Depends(get_manage
     """
     try:
         # Find active Codex MCP shells
-        shells = await anyio.to_thread.run_sync(mgr.list_shells)
+        shells = await mgr.list_shells()
         codex_shell = None
         
         for shell in shells:
@@ -253,7 +253,7 @@ async def agent_info(session_id: str):
     bridge = get_bridge()
     
     try:
-        stats = await anyio.to_thread.run_sync(bridge.get_agent_stats, session_id)
+        stats = await bridge.get_agent_stats(session_id)
         if stats is None:
             raise HTTPException(status_code=404, detail="Agent not found")
         
@@ -285,7 +285,7 @@ async def agent_terminate(session_id: str):
     bridge = get_bridge()
     
     try:
-        await anyio.to_thread.run_sync(bridge.terminate_agent, session_id)
+        await bridge.terminate_agent(session_id)
         return {
             "ok": True,
             "data": {"session_id": session_id}
@@ -308,12 +308,13 @@ async def agent_send_raw(data: dict = Body(...)):
     
     try:
         # Get shell ID for this session
-        shell_id = await anyio.to_thread.run_sync(bridge._sessions.get, session_id)
+        shell_id = bridge._sessions.get(session_id)
         if not shell_id:
             raise HTTPException(status_code=404, detail="Session not found")
         
         # Write raw message to PTY
-        await anyio.to_thread.run_sync(bridge.manager.write_to_pty, shell_id, message + '\n')
+        mgr = await bridge._get_manager()
+        await mgr.write_to_pty(shell_id, message + '\n')
         
         return {"ok": True, "data": {"session_id": session_id}}
     except Exception as e:

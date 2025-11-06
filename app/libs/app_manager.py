@@ -3,7 +3,9 @@ import sys
 import json
 import socket
 import subprocess
+import asyncio
 import time
+import contextlib
 from pathlib import Path
 from app.libs.framework_shells import get_manager as get_framework_shell_manager
 from app.libs import app_lifecycle
@@ -15,7 +17,7 @@ _LOADED_APPS = []
 # Persistent storage file for app workers (only valid while framework is running)
 _RUNNING_APPS_FILE = Path.home() / '.cache' / 'te_framework' / 'running_apps.json'
 
-def _load_running_apps():
+async def _load_running_apps():
     """
     Load app workers from disk ONLY if they're still alive.
     This handles the case where framework is still running but user navigated away.
@@ -33,10 +35,10 @@ def _load_running_apps():
             saved_apps = json.load(f)
         
         # Validate each saved app - only restore if shell is STILL alive
-        manager = get_framework_shell_manager()
+        manager = await get_framework_shell_manager()
         restored = 0
         for app_id, app_info in saved_apps.items():
-            shell = manager.get_shell(app_info.get('shell_id'))
+            shell = await manager.get_shell(app_info.get('shell_id'))
             if shell and shell.status == 'running':
                 _RUNNING_APPS[app_id] = app_info
                 restored += 1
@@ -70,7 +72,26 @@ def find_free_port():
         s.bind(('', 0))
         return s.getsockname()[1]
 
-def ensure_app_running(app_id):
+async def _wait_for_port(port: int, *, host: str = "127.0.0.1", timeout: float = 10.0, interval: float = 0.2) -> bool:
+    """
+    Wait for a TCP port to become reachable.
+    Returns True if the connection succeeds within the timeout, otherwise False.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            reader, writer = await asyncio.open_connection(host, port)
+        except (OSError, ConnectionError):
+            await asyncio.sleep(interval)
+            continue
+        else:
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+            return True
+    return False
+
+async def ensure_app_running(app_id):
     """
     Ensures an app's backend is running. If not, it spawns it.
     Returns the app's info (port, shell_id) or raises an exception.
@@ -84,8 +105,8 @@ def ensure_app_running(app_id):
         # App is already running, verify the shell is alive
         app_info = _RUNNING_APPS[app_id]
         print(f"[AppManager] Found in _RUNNING_APPS: shell_id={app_info.get('shell_id')}, port={app_info.get('port')}")
-        manager = get_framework_shell_manager()
-        shell = manager.get_shell(app_info.get('shell_id'))
+        manager = await get_framework_shell_manager()
+        shell = await manager.get_shell(app_info.get('shell_id'))
         if shell:
             print(f"[AppManager] Shell found with status: {shell.status}")
         else:
@@ -136,11 +157,11 @@ def ensure_app_running(app_id):
             str(port),
         ]
 
-        manager = get_framework_shell_manager()
-        shell = manager.spawn_shell(command, label=f"asgi-app:{app_id}", cwd=project_root, env=env)
+        manager = await get_framework_shell_manager()
+        shell = await manager.spawn_shell(command, label=f"asgi-app:{app_id}", cwd=project_root, env=env)
 
-        time.sleep(1.5)
-        updated_shell = manager.get_shell(shell.id)
+        await asyncio.sleep(1.5)
+        updated_shell = await manager.get_shell(shell.id)
 
         if not updated_shell or updated_shell.status != 'running':
             error_log_path = Path(shell.stderr_log)
@@ -149,16 +170,25 @@ def ensure_app_running(app_id):
                 error_output = error_log_path.read_text().strip()
 
             try:
-                manager.remove_shell(shell.id)
+                await manager.remove_shell(shell.id)
             except Exception:
                 pass
 
             raise RuntimeError(f"App worker failed to start: {error_output}")
 
+        listen_host = os.environ.get("TE_NICEGUI_HOST", "0.0.0.0") or "0.0.0.0"
+        wait_host = "127.0.0.1" if listen_host in ("0.0.0.0", "::") else listen_host
+        if not await _wait_for_port(port, host=wait_host):
+            try:
+                await manager.remove_shell(shell.id, force=True)
+            except Exception:
+                pass
+            raise RuntimeError(f"App worker started but port {port} did not become reachable")
+
         app_info = {"port": port, "shell_id": shell.id, "nicegui_shell": True}
         _RUNNING_APPS[app_id] = app_info
         _save_running_apps()  # Persist to disk
-        app_lifecycle.register_app(app_id, shell.id, port)
+        await app_lifecycle.register_app(app_id, shell.id, port)
         return app_info
 
     if not backend_module:
@@ -176,12 +206,12 @@ def ensure_app_running(app_id):
         "--backend-module", backend_module_path
     ]
 
-    manager = get_framework_shell_manager()
-    shell = manager.spawn_shell(command, label=f"app-worker:{app_id}", cwd=project_root, env=env)
+    manager = await get_framework_shell_manager()
+    shell = await manager.spawn_shell(command, label=f"app-worker:{app_id}", cwd=project_root, env=env)
 
     # Wait a moment and check if the shell is still alive
-    time.sleep(1.5)
-    updated_shell = manager.get_shell(shell.id)
+    await asyncio.sleep(1.5)
+    updated_shell = await manager.get_shell(shell.id)
     
     if not updated_shell or updated_shell.status != 'running':
         error_log_path = Path(shell.stderr_log)
@@ -190,21 +220,28 @@ def ensure_app_running(app_id):
             error_output = error_log_path.read_text().strip()
         
         try:
-            manager.remove_shell(shell.id)
+            await manager.remove_shell(shell.id)
         except Exception:
             pass
 
         raise RuntimeError(f"App worker failed to start: {error_output}")
+
+    if not await _wait_for_port(port, host="127.0.0.1"):
+        try:
+            await manager.remove_shell(shell.id, force=True)
+        except Exception:
+            pass
+        raise RuntimeError(f"App worker started but port {port} did not become reachable")
 
     app_info = {"port": port, "shell_id": shell.id}
     _RUNNING_APPS[app_id] = app_info
     print(f"[AppManager] Registered new worker: app_id={app_id}, shell_id={shell.id}, port={port}")
     print(f"[AppManager] _RUNNING_APPS now contains: {list(_RUNNING_APPS.keys())}")
     _save_running_apps()  # Persist to disk
-    app_lifecycle.register_app(app_id, shell.id, port)
+    await app_lifecycle.register_app(app_id, shell.id, port)
     return app_info
 
-def get_running_apps():
+async def get_running_apps():
     """
     Returns the dict of currently running apps.
     Fast lookup - no shell validation, just returns the cached dict.
@@ -216,4 +253,4 @@ def get_loaded_apps():
     return _LOADED_APPS
 
 # Load running apps from disk when module is imported
-_load_running_apps()
+asyncio.run(_load_running_apps())

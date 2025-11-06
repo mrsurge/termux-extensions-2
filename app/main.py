@@ -57,12 +57,12 @@ async def lifespan(app_instance):
     # Shutdown - forcibly kill all framework shells
     print("--- Shutting down: Cleaning up framework shells ---")
     try:
-        manager = get_manager()
-        shells = list(manager.list_shells())
+        manager = await get_manager()
+        shells = await manager.list_shells()
         for shell in shells:
             try:
                 print(f"Terminating shell {shell.id} (PID {shell.pid})...")
-                manager.terminate_shell(shell.id, force=True, timeout=2.0)
+                await manager.terminate_shell(shell.id, force=True, timeout=2.0)
             except Exception as e:
                 print(f"Warning: Failed to terminate shell {shell.id}: {e}")
         print(f"Cleaned up {len(shells)} framework shells.")
@@ -732,10 +732,11 @@ async def delete_state(keys: List[str] = Query(...)):
         raise HTTPException(status_code=500, detail=f"Failed to persist state: {exc}")
     return {"ok": True, "data": {"removed": removed}}
 
-def _terminate_framework_shells(manager: FrameworkShellManager) -> None:
-    for record in list(manager.list_shells()):
+async def _terminate_framework_shells(manager: FrameworkShellManager) -> None:
+    records = await manager.list_shells()
+    for record in list(records):
         try:
-            manager.remove_shell(record.id, force=True)
+            await manager.remove_shell(record.id, force=True)
         except Exception as exc:
             print(f"Failed to remove shell {record.id}: {exc}")
 
@@ -809,7 +810,7 @@ import anyio
 async def proxy_app_request(app_id: str, subpath: str, request: Request):
     # Fast lookup - don't spawn workers on every request
     # Apps must be started via POST /api/apps/{app_id}/start first
-    running_apps = get_running_apps()
+    running_apps = await get_running_apps()
     
     if app_id not in running_apps:
         return JSONResponse({
@@ -825,14 +826,24 @@ async def proxy_app_request(app_id: str, subpath: str, request: Request):
     body = await request.body()
     
     async with httpx.AsyncClient() as client:
-        resp = await client.request(
-            method=request.method,
-            url=url,
-            params=request.query_params,
-            headers=headers,
-            content=body,
-            timeout=30.0,
-        )
+        try:
+            resp = await client.request(
+                method=request.method,
+                url=url,
+                params=request.query_params,
+                headers=headers,
+                content=body,
+                timeout=30.0,
+            )
+        except httpx.RequestError as exc:
+            print(f"[AppProxy] Failed to reach app '{app_id}' at {url}: {exc}")
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": f"App '{app_id}' worker is not reachable yet. Please retry shortly."
+                },
+                status_code=502,
+            )
     
     # Strip hop-by-hop headers
     excluded = {'content-encoding', 'content-length', 'transfer-encoding', 'connection'}
@@ -853,7 +864,7 @@ async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
     await websocket.accept()
     
     # Fast lookup - apps must be started via launcher first
-    running_apps = get_running_apps()
+    running_apps = await get_running_apps()
     
     if app_id not in running_apps:
         await websocket.send_json({

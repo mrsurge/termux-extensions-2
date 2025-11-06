@@ -12,12 +12,10 @@ Architecture:
 - Sessions are multiplexed via conversationId in messages
 """
 
+import asyncio
 import json
 import os
-import queue
-import threading
 import uuid
-import functools
 from fastapi import WebSocket
 from .agent_bridge import get_bridge, enrich_context
 from .agent_session_store import get_session, clear_conversation_id
@@ -80,6 +78,7 @@ async def agent_websocket(websocket: WebSocket):
     """
     await websocket.accept()
     bridge = get_bridge()
+    manager = await bridge.get_manager()
     global _shared_shells
     request_session_map = {}
     request_map_lock = asyncio.Lock()
@@ -109,7 +108,7 @@ async def agent_websocket(websocket: WebSocket):
     shell_id = None
     
     # Try to find existing shell by label (survives worker restarts)
-    existing_shell = bridge.manager.find_shell_by_label(label, status='running')
+    existing_shell = await manager.find_shell_by_label(label, status='running')
     if existing_shell:
         shell_id = existing_shell.id
         if not session_id:
@@ -130,7 +129,7 @@ async def agent_websocket(websocket: WebSocket):
         cached = _shared_shells.get(agent_type)
         if cached:
             cached_session, cached_shell = cached
-            record = bridge.manager.get_shell(cached_shell)
+            record = await manager.get_shell(cached_shell)
             if record and record.status == 'running':
                 shell_id = cached_shell
                 session_id = session_id or cached_session
@@ -152,7 +151,7 @@ async def agent_websocket(websocket: WebSocket):
     if not shell_id:
         try:
             session_id = session_id or f'shared-{agent_type}-{uuid.uuid4().hex[:8]}'
-            shell_info = await anyio.to_thread.run_sync(bridge.spawn_agent, agent_type, cwd or os.path.expanduser('~'), session_id)
+            shell_info = await bridge.spawn_agent(agent_type, cwd or os.path.expanduser('~'), session_id)
             shell_id = shell_info['id']
             bridge.attach_session(session_id, shell_id)
             _shared_shells[agent_type] = (session_id, shell_id)
@@ -188,175 +187,174 @@ async def agent_websocket(websocket: WebSocket):
                 }))
         except:
             pass
-        
-        # Subscribe to agent output
+
+    # Subscribe to agent output
+    try:
+        output_queue = await bridge.subscribe_output(session_id)
+    except Exception as e:
         try:
-            output_queue = await anyio.to_thread.run_sync(bridge.subscribe_output, session_id)
-        except Exception as e:
-            try:
-                await websocket.send_text(json.dumps({
-                    'event': 'error',
-                    'error': f'Failed to subscribe to agent output: {str(e)}'
-                }))
-                await websocket.close()
-            except:
-                pass
-            return
-        
-        # Initialize MCP for Codex once per shell lifetime
-        if agent_type == 'codex' and shell_id and shell_id not in _initialized_shells:
-            try:
-                init_msg = {
-                    'jsonrpc': '2.0',
-                    'id': 'init-mcp',
-                    'method': 'initialize',
-                    'params': {
-                        'protocolVersion': '2024-11-05',
-                        'capabilities': {},
-                        'clientInfo': {
-                            'name': 'code_cm6',
-                            'version': '1.0.0'
-                        }
+            await websocket.send_text(json.dumps({
+                'event': 'error',
+                'error': f'Failed to subscribe to agent output: {str(e)}'
+            }))
+            await websocket.close()
+        except:
+            pass
+        return
+    
+    # Initialize MCP for Codex once per shell lifetime
+    if agent_type == 'codex' and shell_id and shell_id not in _initialized_shells:
+        try:
+            init_msg = {
+                'jsonrpc': '2.0',
+                'id': 'init-mcp',
+                'method': 'initialize',
+                'params': {
+                    'protocolVersion': '2024-11-05',
+                    'capabilities': {},
+                    'clientInfo': {
+                        'name': 'code_cm6',
+                        'version': '1.0.0'
                     }
                 }
-                shell_id = bridge._sessions.get(session_id)
-                if shell_id:
-                    await anyio.to_thread.run_sync(bridge.manager.write_to_pty, shell_id, json.dumps(init_msg) + '\n')
-                    _initialized_shells.add(shell_id)
-            except Exception as e:
-                print(f'Failed to initialize Codex MCP: {e}')
+            }
+            shell_id = bridge._sessions.get(session_id)
+            if shell_id:
+                await manager.write_to_pty(shell_id, json.dumps(init_msg) + '\n')
+                _initialized_shells.add(shell_id)
+        except Exception as e:
+            print(f'Failed to initialize Codex MCP: {e}')
+    
+    line_buffer = ""
+    
+    async def forward_agent_to_ws():
+        """
+        Forward agent output to WebSocket.
+        Reads chunks from PTY, buffers lines, parses JSON, normalizes, and sends to WS.
+        """
+        nonlocal line_buffer
         
-        line_buffer = ""
-        
-        async def forward_agent_to_ws():
-            """
-            Forward agent output to WebSocket.
-            Reads chunks from PTY, buffers lines, parses JSON, normalizes, and sends to WS.
-            """
-            nonlocal line_buffer
+        while True:
+            try:
+                chunk = await asyncio.wait_for(output_queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
             
-            while True:
-                try:
-                    chunk = await anyio.to_thread.run_sync(functools.partial(output_queue.get, timeout=0.5))
-                except queue.Empty:
+            # Buffer chunks and extract complete lines
+            line_buffer += chunk
+            
+            while '\n' in line_buffer:
+                line, line_buffer = line_buffer.split('\n', 1)
+                line = line.strip()
+                
+                if not line:
                     continue
                 
-                # Buffer chunks and extract complete lines
-                line_buffer += chunk
+                # Parse and normalize agent output
+                normalized = bridge.parse_agent_output(agent_type, line)
                 
-                while '\n' in line_buffer:
-                    line, line_buffer = line_buffer.split('\n', 1)
-                    line = line.strip()
-                    
-                    if not line:
-                        continue
-                    
-                    # Parse and normalize agent output
-                    normalized = bridge.parse_agent_output(agent_type, line)
-                    
-                    if normalized:
-                        request_id = normalized.get('id')
-                        session_key = None
-                        if request_id is not None:
-                            async with request_map_lock:
-                                session_key = request_session_map.get(str(request_id))
-                        if session_key:
-                            normalized.setdefault('session', session_key)
+                if normalized:
+                    request_id = normalized.get('id')
+                    session_key = None
+                    if request_id is not None:
+                        async with request_map_lock:
+                            session_key = request_session_map.get(str(request_id))
+                    if session_key:
+                        normalized.setdefault('session', session_key)
 
-                        # Store conversation ID for Codex MCP
-                        if normalized.get('event') == 'conversation_started' and normalized.get('conversationId'):
-                            target_session = session_key or session_id
-                            from .agent_bridge import CodexAdapter
-                            from .agent_session_store import update_session_metadata
-                            CodexAdapter.store_conversation_id(target_session, normalized['conversationId'])
-                            bridge.note_conversation(target_session, normalized['conversationId'])
-                            if session_key:
-                                # Persist conversation ID immediately
-                                update_session_metadata(session_key, conversationId=normalized['conversationId'], shell_id=shell_id)
-                            # DON'T remove from request_session_map yet - we need it for 'final' event!
-
-                        # Persist agent messages to session
+                    # Store conversation ID for Codex MCP
+                    if normalized.get('event') == 'conversation_started' and normalized.get('conversationId'):
+                        target_session = session_key or session_id
+                        from .agent_bridge import CodexAdapter
+                        from .agent_session_store import update_session_metadata
+                        CodexAdapter.store_conversation_id(target_session, normalized['conversationId'])
+                        bridge.note_conversation(target_session, normalized['conversationId'])
                         if session_key:
-                            event_type = normalized.get('event')
-                            from .agent_session_store import append_message
-                            import time
-                            
-                            try:
-                                # Handle different message types
-                                if event_type == 'token':
-                                    # Streaming assistant response - for now, skip persistence of tokens
-                                    # We'll persist the final message on 'final' event
-                                    pass
-                                
-                                elif event_type == 'final':
-                                    # Complete assistant response
-                                    final_text = normalized.get('text', '')
-                                    append_message(session_key, {
-                                        'id': f"msg-{request_id}",
-                                        'type': 'assistant',
-                                        'text': final_text,
-                                        'timestamp': time.time()
-                                    })
-                                
-                                elif event_type == 'system':
-                                    # System messages (planning, etc.)
-                                    append_message(session_key, {
-                                        'id': str(uuid.uuid4()),
-                                        'type': 'system',
-                                        'text': normalized.get('text', ''),
-                                        'timestamp': time.time()
-                                    })
-                                
-                                elif event_type == 'error':
-                                    # Error messages
-                                    append_message(session_key, {
-                                        'id': str(uuid.uuid4()),
-                                        'type': 'error',
-                                        'error': normalized.get('error', ''),
-                                        'timestamp': time.time()
-                                    })
-                                
-                                elif event_type == 'planning':
-                                    # Planning messages
-                                    append_message(session_key, {
-                                        'id': str(uuid.uuid4()),
-                                        'type': 'planning',
-                                        'summary': normalized.get('summary', ''),
-                                        'timestamp': time.time()
-                                    })
-                                
-                                elif event_type == 'tool_call':
-                                    # Tool usage
-                                    append_message(session_key, {
-                                        'id': str(uuid.uuid4()),
-                                        'type': 'tool_call',
-                                        'tool': normalized.get('tool', ''),
-                                        'args': normalized.get('args', {}),
-                                        'timestamp': time.time()
-                                    })
-                                
-                                elif event_type == 'diff':
-                                    # Diff messages
-                                    append_message(session_key, {
-                                        'id': str(uuid.uuid4()),
-                                        'type': 'diff',
-                                        'path': normalized.get('path', ''),
-                                        'patch': normalized.get('patch', ''),
-                                        'timestamp': time.time()
-                                    })
-                                
-                            except Exception as e:
-                                print(f"[Agent WS] Failed to persist agent message: {e}")
-                        
-                        # Clean up request map AFTER persistence
-                        if normalized.get('event') in ('final', 'error') and request_id is not None:
-                            async with request_map_lock:
-                                request_session_map.pop(str(request_id), None)
+                            # Persist conversation ID immediately
+                            update_session_metadata(session_key, conversationId=normalized['conversationId'], shell_id=shell_id)
+                        # DON'T remove from request_session_map yet - we need it for 'final' event!
+
+                    # Persist agent messages to session
+                    if session_key:
+                        event_type = normalized.get('event')
+                        from .agent_session_store import append_message
+                        import time
                         
                         try:
-                            await websocket.send_text(json.dumps(normalized))
-                        except Exception:
-                            break
+                            # Handle different message types
+                            if event_type == 'token':
+                                # Streaming assistant response - skip persistence of tokens; final persists output
+                                pass
+                            
+                            elif event_type == 'final':
+                                # Complete assistant response
+                                final_text = normalized.get('text', '')
+                                append_message(session_key, {
+                                    'id': f"msg-{request_id}",
+                                    'type': 'assistant',
+                                    'text': final_text,
+                                    'timestamp': time.time()
+                                })
+                            
+                            elif event_type == 'system':
+                                # System messages (planning, etc.)
+                                append_message(session_key, {
+                                    'id': str(uuid.uuid4()),
+                                    'type': 'system',
+                                    'text': normalized.get('text', ''),
+                                    'timestamp': time.time()
+                                })
+                            
+                            elif event_type == 'error':
+                                # Error messages
+                                append_message(session_key, {
+                                    'id': str(uuid.uuid4()),
+                                    'type': 'error',
+                                    'error': normalized.get('error', ''),
+                                    'timestamp': time.time()
+                                })
+                            
+                            elif event_type == 'planning':
+                                # Planning messages
+                                append_message(session_key, {
+                                    'id': str(uuid.uuid4()),
+                                    'type': 'planning',
+                                    'summary': normalized.get('summary', ''),
+                                    'timestamp': time.time()
+                                })
+                            
+                            elif event_type == 'tool_call':
+                                # Tool usage
+                                append_message(session_key, {
+                                    'id': str(uuid.uuid4()),
+                                    'type': 'tool_call',
+                                    'tool': normalized.get('tool', ''),
+                                    'args': normalized.get('args', {}),
+                                    'timestamp': time.time()
+                                })
+                            
+                            elif event_type == 'diff':
+                                # Diff messages
+                                append_message(session_key, {
+                                    'id': str(uuid.uuid4()),
+                                    'type': 'diff',
+                                    'path': normalized.get('path', ''),
+                                    'patch': normalized.get('patch', ''),
+                                    'timestamp': time.time()
+                                })
+                            
+                        except Exception as e:
+                            print(f"[Agent WS] Failed to persist agent message: {e}")
+                    
+                    # Clean up request map AFTER persistence
+                    if normalized.get('event') in ('final', 'error') and request_id is not None:
+                        async with request_map_lock:
+                            request_session_map.pop(str(request_id), None)
+                    
+                    try:
+                        await websocket.send_text(json.dumps(normalized))
+                    except Exception:
+                        break
         
         forward_task = asyncio.create_task(forward_agent_to_ws())
         
@@ -492,7 +490,7 @@ async def agent_websocket(websocket: WebSocket):
                         print(f"[Agent WS] Failed to persist user message: {e}")
 
                     # Write to agent with protocol translation
-                    await anyio.to_thread.run_sync(bridge.write_message, session_id, msg_agent_type, message, context)
+                    await bridge.write_message(session_id, msg_agent_type, message, context)
                     
                 except json.JSONDecodeError:
                     # Invalid JSON from frontend
@@ -521,7 +519,7 @@ async def agent_websocket(websocket: WebSocket):
             edit_tracker.unregister_shell_watcher(shell_id)
             
             try:
-                await anyio.to_thread.run_sync(bridge.unsubscribe_output, session_id, output_queue)
+                await bridge.unsubscribe_output(session_id, output_queue)
             except Exception:
                 pass
             

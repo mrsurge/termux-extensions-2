@@ -9,26 +9,28 @@ services such as aria2 RPC, container helpers, or LLM runtimes.
 
 from __future__ import annotations
 
+import asyncio
 import errno
 import fcntl
 import json
 import os
 import pty
-import queue
 import select
 import shlex
 import shutil
 import signal
 import struct
 import subprocess
-import threading
 import termios
 import time
 import uuid
+from asyncio import Lock as AsyncLock
+from asyncio import Queue as AsyncQueue
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, AsyncIterator, Dict, Iterable, List, Optional
 
+import aiofiles
 from fastapi import APIRouter, Depends, Request, HTTPException, Header, Body, Query
 
 framework_shells_bp = APIRouter()
@@ -97,9 +99,9 @@ class ShellRecord:
 @dataclass
 class PTYState:
     master_fd: int
-    subscribers: List["queue.Queue[str]"] = field(default_factory=list)
-    stop: threading.Event = field(default_factory=threading.Event)
-    reader: Optional[threading.Thread] = None
+    subscribers: List["AsyncQueue[str]"] = field(default_factory=list)
+    stop: asyncio.Event = field(default_factory=asyncio.Event)
+    reader: Optional[asyncio.Task] = None
 
 
 class FrameworkShellManager:
@@ -126,19 +128,24 @@ class FrameworkShellManager:
         self.run_id = run_id or os.getenv("TE_RUN_ID")
         self.launcher_pid = os.getpid()
         self.started_at = time.time()
-        self._lock = threading.RLock()
         self._pty: Dict[str, PTYState] = {}
-        self._adopt_orphaned_shells()
+        # self._adopt_orphaned_shells()
+
+    def _get_lock(self):
+        """Get or create the instance lock (lazy initialization)."""
+        if not hasattr(self, '_lock_instance'):
+            self._lock_instance = asyncio.Lock()
+        return self._lock_instance
 
     # ------------------------------------------------------------------
     # Adoption and helpers
 
-    def _adopt_orphaned_shells(self) -> None:
-        with self._lock:
-            for record in self._iter_records():
-                if record.pid and not self._is_pid_alive(record.pid):
-                    exit_code = record.exit_code or self._collect_exit_code(record.pid)
-                    self._mark_exited(record, exit_code)
+    async def _adopt_orphaned_shells(self) -> None:
+        async with self._get_lock():
+            async for record in self._aiter_records():
+                if record.pid and not await self._is_pid_alive(record.pid):
+                    exit_code = record.exit_code or await self._collect_exit_code(record.pid)
+                    await self._mark_exited(record, exit_code)
                     continue
                 if not self.run_id:
                     continue
@@ -151,18 +158,18 @@ class FrameworkShellManager:
                     mutated = True
                 if mutated:
                     record.adopted = True
-                    self._save_record(record)
+                    await self._save_record(record)
 
-    def list_active_pids(self) -> List[int]:
-        with self._lock:
+    async def list_active_pids(self) -> List[int]:
+        async with self._get_lock():
             pids: List[int] = []
-            for record in self._iter_records():
-                if record.pid and self._is_pid_alive(record.pid):
+            async for record in self._aiter_records():
+                if record.pid and await self._is_pid_alive(record.pid):
                     pids.append(record.pid)
             return pids
 
-    def aggregate_resource_stats(self) -> Dict[str, Any]:
-        with self._lock:
+    async def aggregate_resource_stats(self) -> Dict[str, Any]:
+        async with self._get_lock():
             now = time.time()
             stats: Dict[str, Any] = {
                 "run_id": self.run_id,
@@ -179,11 +186,11 @@ class FrameworkShellManager:
             }
             running_records: List[ShellRecord] = []
             adopted_count = 0
-            for record in self._iter_records():
+            async for record in self._aiter_records():
                 stats["num_shells"] += 1
                 if getattr(record, "adopted", False):
                     adopted_count += 1
-                if record.pid and self._is_pid_alive(record.pid):
+                if record.pid and await self._is_pid_alive(record.pid):
                     stats["num_running"] += 1
                     stats["pids"].append(record.pid)
                     running_records.append(record)
@@ -193,7 +200,7 @@ class FrameworkShellManager:
                 rss_total = 0
                 for rec in running_records:
                     try:
-                        proc = psutil.Process(rec.pid)  # type: ignore[arg-type]
+                        proc = await asyncio.to_thread(psutil.Process, rec.pid)  # type: ignore[arg-type]
                         with proc.oneshot():
                             cpu_total += proc.cpu_percent(interval=0.0)
                             rss_total += proc.memory_info().rss
@@ -204,7 +211,8 @@ class FrameworkShellManager:
             else:
                 for rec in running_records:
                     try:
-                        ps_output = subprocess.run(
+                        ps_output = await asyncio.to_thread(
+                            subprocess.run,
                             [
                                 "ps",
                                 "-p",
@@ -229,19 +237,21 @@ class FrameworkShellManager:
     # ------------------------------------------------------------------
     # Record persistence helpers
 
-    def _iter_records(self) -> Iterable[ShellRecord]:
-        for meta in sorted(self.metadata_dir.glob("*/meta.json")):
-            record = self._load_record(meta.parent.name)
+    async def _aiter_records(self) -> AsyncIterator[ShellRecord]:
+        meta_paths = sorted(self.metadata_dir.glob("*/meta.json"))
+        for meta in meta_paths:
+            record = await self._load_record(meta.parent.name)
             if record:
                 yield record
 
-    def _load_record(self, shell_id: str) -> Optional[ShellRecord]:
+    async def _load_record(self, shell_id: str) -> Optional[ShellRecord]:
         meta_path = self.metadata_dir / shell_id / "meta.json"
         if not meta_path.exists():
             return None
         try:
-            with meta_path.open("r", encoding="utf-8") as fh:
-                data = json.load(fh)
+            async with aiofiles.open(meta_path, "r", encoding="utf-8") as fh:
+                content = await fh.read()
+                data = json.loads(content)
         except Exception:
             return None
         try:
@@ -258,11 +268,11 @@ class FrameworkShellManager:
                 autostart=bool(data.get("autostart", False)),
                 stdout_log=data.get(
                     "stdout_log",
-                    str(self.logs_dir / f"{data.get('id', shell_id)}.stdout.log"),
+                    str(self.logs_dir / f'{data.get("id", shell_id)}.stdout.log'),
                 ),
                 stderr_log=data.get(
                     "stderr_log",
-                    str(self.logs_dir / f"{data.get('id', shell_id)}.stderr.log"),
+                    str(self.logs_dir / f'{data.get("id", shell_id)}.stderr.log'),
                 ),
                 exit_code=data.get("exit_code"),
                 run_id=data.get("run_id"),
@@ -273,9 +283,9 @@ class FrameworkShellManager:
         except Exception:
             return None
 
-    def _save_record(self, record: ShellRecord) -> None:
+    async def _save_record(self, record: ShellRecord) -> None:
         record_dir = self.metadata_dir / record.id
-        record_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(record_dir.mkdir, parents=True, exist_ok=True)
         tmp_path = record_dir / "meta.json.tmp"
         meta_path = record_dir / "meta.json"
         data = {
@@ -297,9 +307,9 @@ class FrameworkShellManager:
             "adopted": record.adopted,
             "uses_pty": record.uses_pty,
         }
-        with tmp_path.open("w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-        tmp_path.replace(meta_path)
+        async with aiofiles.open(tmp_path, "w", encoding="utf-8") as fh:
+            await fh.write(json.dumps(data, indent=2))
+        await asyncio.to_thread(tmp_path.replace, meta_path)
 
     # ------------------------------------------------------------------
     # Core helpers
@@ -374,104 +384,123 @@ class FrameworkShellManager:
             uses_pty=uses_pty,
         )
 
-    def _launch(self, record: ShellRecord) -> ShellRecord:
+    async def _launch(self, record: ShellRecord) -> ShellRecord:
         record.uses_pty = False
         env = self._prepare_env(record)
         stdout_path = Path(record.stdout_log)
         stderr_path = Path(record.stderr_log)
-        stdout_path.parent.mkdir(parents=True, exist_ok=True)
-        stderr_path.parent.mkdir(parents=True, exist_ok=True)
-        with stdout_path.open("ab") as stdout_fh, stderr_path.open("ab") as stderr_fh:
-            proc = subprocess.Popen(
-                record.command,
+        await asyncio.to_thread(stdout_path.parent.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(stderr_path.parent.mkdir, parents=True, exist_ok=True)
+        
+        # Open files in binary append mode
+        stdout_fh = await asyncio.to_thread(open, stdout_path, "ab")
+        stderr_fh = await asyncio.to_thread(open, stderr_path, "ab")
+        
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *record.command,
                 cwd=record.cwd,
                 env=env,
                 stdout=stdout_fh,
                 stderr=stderr_fh,
                 start_new_session=True,
             )
-        record.pid = proc.pid
-        record.status = "running"
-        record.exit_code = None
-        record.updated_at = time.time()
-        self._save_record(record)
-        return record
+            record.pid = proc.pid
+            record.status = "running"
+            record.exit_code = None
+            record.updated_at = time.time()
+            await self._save_record(record)
+            return record
+        finally:
+            await asyncio.to_thread(stdout_fh.close)
+            await asyncio.to_thread(stderr_fh.close)
 
-    def _launch_pty(self, record: ShellRecord) -> ShellRecord:
+    async def _launch_pty(self, record: ShellRecord) -> ShellRecord:
         record.uses_pty = True
-        master_fd, slave_fd = pty.openpty()
+        master_fd, slave_fd = await asyncio.to_thread(pty.openpty)
         envp = self._prepare_env(record)
         envp.setdefault("TERM", "xterm-256color")
         envp.setdefault("TE_TTY", "pty")
-        for path_str in (record.stdout_log, record.stderr_log):
-            Path(path_str).parent.mkdir(parents=True, exist_ok=True)
-            Path(path_str).touch(exist_ok=True)
+        
+        stdout_path = Path(record.stdout_log)
+        stderr_path = Path(record.stderr_log)
+        await asyncio.to_thread(stdout_path.parent.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(stdout_path.touch, exist_ok=True)
+        await asyncio.to_thread(stderr_path.touch, exist_ok=True)
+        
         try:
-            proc = subprocess.Popen(
-                record.command,
+            proc = await asyncio.create_subprocess_exec(
+                *record.command,
                 cwd=record.cwd,
                 env=envp,
                 stdin=slave_fd,
                 stdout=slave_fd,
                 stderr=slave_fd,
                 start_new_session=True,
-                close_fds=True,
             )
         finally:
-            try:
-                os.close(slave_fd)
-            except Exception:
-                pass
+            await asyncio.to_thread(os.close, slave_fd)
+        
         record.pid = proc.pid
         record.status = "running"
         record.exit_code = None
         record.updated_at = time.time()
-        self._save_record(record)
-
+        await self._save_record(record)
+        
         state = PTYState(master_fd=master_fd)
-
-        def _reader() -> None:
+        
+        async def _async_reader() -> None:
             log_path = Path(record.stdout_log)
-            with log_path.open("ab") as log_fh:
+            async with aiofiles.open(log_path, "ab") as log_fh:
                 while not state.stop.is_set():
                     try:
-                        rlist, _, _ = select.select([master_fd], [], [], 0.5)
+                        # Use asyncio event loop to read from FD
+                        ready = await asyncio.wait_for(
+                            asyncio.get_event_loop().run_in_executor(
+                                None, 
+                                lambda: select.select([master_fd], [], [], 0.5)
+                            ),
+                            timeout=0.6
+                        )
+                        rlist, _, _ = ready
                         if not rlist:
                             continue
-                        data = os.read(master_fd, 4096)
+                        data = await asyncio.to_thread(os.read, master_fd, 4096)
                         if not data:
-                            time.sleep(0.05)
+                            await asyncio.sleep(0.05)
                             continue
-                    except OSError:
+                    except (OSError, asyncio.TimeoutError):
                         break
+                    
                     try:
-                        log_fh.write(data)
-                        log_fh.flush()
+                        await log_fh.write(data)
+                        await log_fh.flush()
                     except Exception:
                         pass
+                    
                     text = data.decode("utf-8", errors="replace")
                     subscribers = list(state.subscribers)
                     for q in subscribers:
                         try:
-                            q.put_nowait(text)
+                            await q.put(text)
                         except Exception:
                             pass
+            
             try:
-                os.close(master_fd)
+                await asyncio.to_thread(os.close, master_fd)
             except Exception:
                 pass
-
-        reader_thread = threading.Thread(target=_reader, daemon=True)
-        state.reader = reader_thread
+        
+        reader_task = asyncio.create_task(_async_reader())
+        state.reader = reader_task
         self._pty[record.id] = state
-        reader_thread.start()
         return record
 
-    def _is_pid_alive(self, pid: Optional[int]) -> bool:
+    async def _is_pid_alive(self, pid: Optional[int]) -> bool:
         if not pid:
             return False
         try:
-            os.kill(pid, 0)
+            await asyncio.to_thread(os.kill, pid, 0)
         except PermissionError:
             return True
         except OSError as exc:  # includes ProcessLookupError
@@ -480,11 +509,11 @@ class FrameworkShellManager:
             return False
         return True
 
-    def _collect_exit_code(self, pid: Optional[int]) -> Optional[int]:
+    async def _collect_exit_code(self, pid: Optional[int]) -> Optional[int]:
         if not pid:
             return None
         try:
-            waited_pid, status = os.waitpid(pid, os.WNOHANG)
+            waited_pid, status = await asyncio.to_thread(os.waitpid, pid, os.WNOHANG)
             if waited_pid == 0:
                 return None
             if os.WIFEXITED(status):
@@ -497,61 +526,74 @@ class FrameworkShellManager:
             return None
         return None
 
-    def _mark_exited(self, record: ShellRecord, exit_code: Optional[int]) -> None:
+    async def _mark_exited(self, record: ShellRecord, exit_code: Optional[int]) -> None:
         record.pid = None
         record.status = "exited"
         record.exit_code = exit_code
         record.updated_at = time.time()
-        self._save_record(record)
+        await self._save_record(record)
 
-    def _active_shell_count(self, app_shell: bool = False) -> int:
-        return sum(1 for r in self._iter_records() if r.status == "running" and (r.label or "").startswith("app-worker:") == app_shell)
+    async def _active_shell_count(self, app_shell: bool = False) -> int:
+        count = 0
+        async for r in self._aiter_records():
+            if r.status == "running" and (r.label or "").startswith("app-worker:") == app_shell:
+                count += 1
+        return count
 
-    def _stop_pty(self, shell_id: str) -> None:
+    async def _stop_pty(self, shell_id: str) -> None:
         state = self._pty.pop(shell_id, None)
         if not state:
             return
         state.stop.set()
+        if state.reader:
+            state.reader.cancel()
+            try:
+                await state.reader
+            except asyncio.CancelledError:
+                pass
         try:
-            if state.reader:
-                state.reader.join(timeout=1.0)
-        except Exception:
-            pass
-        try:
-            os.close(state.master_fd)
+            await asyncio.to_thread(os.close, state.master_fd)
         except Exception:
             pass
 
     # ------------------------------------------------------------------
     # Public manager API
 
-    def list_shells(self) -> List[ShellRecord]:
-        with self._lock:
-            self.sweep()
-            return sorted(self._iter_records(), key=lambda rec: rec.created_at)
+    async def list_shells(self) -> List[ShellRecord]:
+        async with self._get_lock():
+            await self.sweep()
+            records = []
+            async for record in self._aiter_records():
+                records.append(record)
+            return sorted(records, key=lambda rec: rec.created_at)
 
-    def get_shell(self, shell_id: str) -> Optional[ShellRecord]:
-        with self._lock:
-            self.sweep()
-            return self._load_record(shell_id)
+    async def get_shell(self, shell_id: str) -> Optional[ShellRecord]:
+        async with self._get_lock():
+            await self.sweep()
+            return await self._load_record(shell_id)
 
-    def find_shell_by_label(self, label: str, status: Optional[str] = "running") -> Optional[ShellRecord]:
+    async def _find_shell_by_label_unlocked(self, label: str, status: Optional[str]) -> Optional[ShellRecord]:
+        if not label:
+            return None
+        async for record in self._aiter_records():
+            if record.label != label:
+                continue
+            if status and record.status != status:
+                continue
+            if status == "running" and not await self._is_pid_alive(record.pid):
+                continue
+            return record
+        return None
+
+    async def find_shell_by_label(self, label: str, status: Optional[str] = "running") -> Optional[ShellRecord]:
         """Find the first shell matching the given label and optional status."""
         if not label:
             return None
-        with self._lock:
-            self.sweep()
-            for record in self._iter_records():
-                if record.label != label:
-                    continue
-                if status and record.status != status:
-                    continue
-                if status == "running" and not self._is_pid_alive(record.pid):
-                    continue
-                return record
-            return None
+        async with self._get_lock():
+            await self.sweep()
+            return await self._find_shell_by_label_unlocked(label, status)
 
-    def spawn_shell(
+    async def spawn_shell(
         self,
         command: Iterable[str],
         *,
@@ -560,26 +602,26 @@ class FrameworkShellManager:
         label: Optional[str] = None,
         autostart: bool = False,
     ) -> ShellRecord:
-        with self._lock:
+        async with self._get_lock():
             from app.libs import app_lifecycle
-            self.sweep()
+            await self.sweep()
             if label:
-                existing = self.find_shell_by_label(label, status="running")
+                existing = await self._find_shell_by_label_unlocked(label, status="running")
                 if existing:
                     return existing
             is_app_worker = (label or "").startswith("app-worker:")
             limit = self.max_app_shells if is_app_worker else self.max_service_shells
-            if limit and self._active_shell_count(app_shell=is_app_worker) >= limit:
+            if limit and await self._active_shell_count(app_shell=is_app_worker) >= limit:
                 if is_app_worker:
                     # Attempt to clean up the oldest unlocked app
-                    running_apps = app_lifecycle.get_running_apps(self)
+                    running_apps = await app_lifecycle.get_running_apps(self)
                     unlocked_apps = [app for app in running_apps if not app.get("locked")]
                     if unlocked_apps:
                         oldest_app = unlocked_apps[0]
                         print(f"[FrameworkShells] Max app shells reached. Terminating oldest unlocked app: {oldest_app.get('app_id')}")
-                        app_lifecycle.terminate_app(self, oldest_app["shell_id"])
-                        time.sleep(0.5)
-                        if self._active_shell_count(app_shell=True) >= self.max_app_shells:
+                        await app_lifecycle.terminate_app(self, oldest_app["shell_id"])
+                        await asyncio.sleep(0.5)
+                        if await self._active_shell_count(app_shell=True) >= self.max_app_shells:
                             raise RuntimeError("Maximum app shell count reached and could not free a slot.")
                     else:
                         raise RuntimeError("Maximum app shell count reached and all running apps are locked.")
@@ -593,9 +635,9 @@ class FrameworkShellManager:
                 label=label,
                 autostart=autostart,
             )
-            return self._launch(record)
+            return await self._launch(record)
 
-    def spawn_shell_pty(
+    async def spawn_shell_pty(
         self,
         command: Iterable[str],
         *,
@@ -604,25 +646,25 @@ class FrameworkShellManager:
         label: Optional[str] = None,
         autostart: bool = True,
     ) -> ShellRecord:
-        with self._lock:
+        async with self._get_lock():
             from app.libs import app_lifecycle
-            self.sweep()
+            await self.sweep()
             if label:
-                existing = self.find_shell_by_label(label, status="running")
+                existing = await self._find_shell_by_label_unlocked(label, status="running")
                 if existing:
                     return existing
             is_app_worker = (label or "").startswith("app-worker:")
             limit = self.max_app_shells if is_app_worker else self.max_service_shells
-            if limit and self._active_shell_count(app_shell=is_app_worker) >= limit:
+            if limit and await self._active_shell_count(app_shell=is_app_worker) >= limit:
                 if is_app_worker:
-                    running_apps = app_lifecycle.get_running_apps(self)
+                    running_apps = await app_lifecycle.get_running_apps(self)
                     unlocked_apps = [app for app in running_apps if not app.get("locked")]
                     if unlocked_apps:
                         oldest_app = unlocked_apps[0]
                         print(f"[FrameworkShells] Max app shells reached. Terminating oldest unlocked app: {oldest_app.get('app_id')}")
-                        app_lifecycle.terminate_app(self, oldest_app["shell_id"])
-                        time.sleep(0.5)
-                        if self._active_shell_count(app_shell=True) >= self.max_app_shells:
+                        await app_lifecycle.terminate_app(self, oldest_app["shell_id"])
+                        await asyncio.sleep(0.5)
+                        if await self._active_shell_count(app_shell=True) >= self.max_app_shells:
                             raise RuntimeError("Maximum app shell count reached and could not free a slot.")
                     else:
                         raise RuntimeError("Maximum app shell count reached and all running apps are locked.")
@@ -637,30 +679,30 @@ class FrameworkShellManager:
                 autostart=autostart,
                 uses_pty=True,
             )
-            return self._launch_pty(record)
+            return await self._launch_pty(record)
 
-    def write_to_pty(self, shell_id: str, data: bytes | str) -> None:
-        with self._lock:
+    async def write_to_pty(self, shell_id: str, data: bytes | str) -> None:
+        async with self._get_lock():
             state = self._pty.get(shell_id)
             if not state:
                 raise KeyError("No PTY for this shell")
             payload = data.encode("utf-8") if isinstance(data, str) else data
             try:
-                os.write(state.master_fd, payload)
+                await asyncio.to_thread(os.write, state.master_fd, payload)
             except OSError:
                 raise
 
-    def subscribe_output(self, shell_id: str) -> "queue.Queue[str]":
-        with self._lock:
+    async def subscribe_output(self, shell_id: str) -> "AsyncQueue[str]":
+        async with self._get_lock():
             state = self._pty.get(shell_id)
             if not state:
                 raise KeyError("No PTY for this shell")
-            q: "queue.Queue[str]" = queue.Queue()
+            q: "AsyncQueue[str]" = AsyncQueue()
             state.subscribers.append(q)
             return q
 
-    def unsubscribe_output(self, shell_id: str, q: "queue.Queue[str]") -> None:
-        with self._lock:
+    async def unsubscribe_output(self, shell_id: str, q: "AsyncQueue[str]") -> None:
+        async with self._get_lock():
             state = self._pty.get(shell_id)
             if not state:
                 return
@@ -669,97 +711,96 @@ class FrameworkShellManager:
             except ValueError:
                 pass
 
-    def resize_pty(self, shell_id: str, cols: int, rows: int) -> None:
-        with self._lock:
+    async def resize_pty(self, shell_id: str, cols: int, rows: int) -> None:
+        async with self._get_lock():
             state = self._pty.get(shell_id)
             if not state:
                 raise KeyError("No PTY for this shell")
             winsz = struct.pack("HHHH", max(1, rows), max(1, cols), 0, 0)
             try:
-                fcntl.ioctl(state.master_fd, termios.TIOCSWINSZ, winsz)
+                await asyncio.to_thread(fcntl.ioctl, state.master_fd, termios.TIOCSWINSZ, winsz)
             except Exception:
                 pass
 
-    def terminate_shell(self, shell_id: str, *, force: bool = False, timeout: float = 5.0) -> ShellRecord:
-        with self._lock:
-            record = self._load_record(shell_id)
+    async def terminate_shell(self, shell_id: str, *, force: bool = False, timeout: float = 5.0) -> ShellRecord:
+        async with self._get_lock():
+            record = await self._load_record(shell_id)
             if not record:
                 raise KeyError("Shell not found")
-            if not record.pid or not self._is_pid_alive(record.pid):
-                exit_code = record.exit_code or self._collect_exit_code(record.pid)
-                self._mark_exited(record, exit_code)
-                self._stop_pty(shell_id)
+            if not record.pid or not await self._is_pid_alive(record.pid):
+                exit_code = record.exit_code or await self._collect_exit_code(record.pid)
+                await self._mark_exited(record, exit_code)
+                await self._stop_pty(shell_id)
                 return record
             
-            # TEMPORARY: Use SIGKILL always - graceful shutdown broken
-            # TODO: Restore SIGTERM -> SIGKILL escalation after debugging
-            # sig = signal.SIGKILL if force else signal.SIGTERM
-            sig = signal.SIGKILL  # Force immediate kill
+            sig = signal.SIGKILL if force else signal.SIGTERM
             
             try:
-                os.killpg(record.pid, sig)
+                await asyncio.to_thread(os.killpg, record.pid, sig)
             except ProcessLookupError:
-                exit_code = record.exit_code or self._collect_exit_code(record.pid)
-                self._mark_exited(record, exit_code)
-                self._stop_pty(shell_id)
+                exit_code = record.exit_code or await self._collect_exit_code(record.pid)
+                await self._mark_exited(record, exit_code)
+                await self._stop_pty(shell_id)
                 return record
             
-            # COMMENTED OUT: Graceful shutdown timeout (not working)
-            # if not force:
-            #     deadline = time.time() + max(0.0, timeout)
-            #     while time.time() < deadline:
-            #         if not self._is_pid_alive(record.pid):
-            #             break
-            #         time.sleep(0.1)
-            #     if self._is_pid_alive(record.pid):
-            #         try:
-            #             os.killpg(record.pid, signal.SIGKILL)
-            #         except (ProcessLookupError, OSError):
-            #             pass
+            if not force:
+                deadline = time.time() + max(0.0, timeout)
+                while time.time() < deadline:
+                    if not await self._is_pid_alive(record.pid):
+                        break
+                    await asyncio.sleep(0.1)
+                if await self._is_pid_alive(record.pid):
+                    try:
+                        await asyncio.to_thread(os.killpg, record.pid, signal.SIGKILL)
+                    except (ProcessLookupError, OSError):
+                        pass
             
-            exit_code = self._collect_exit_code(record.pid)
-            self._mark_exited(record, exit_code)
-            self._stop_pty(shell_id)
+            exit_code = await self._collect_exit_code(record.pid)
+            await self._mark_exited(record, exit_code)
+            await self._stop_pty(shell_id)
             return record
 
-    def restart_shell(self, shell_id: str) -> ShellRecord:
-        with self._lock:
-            record = self._load_record(shell_id)
+    async def restart_shell(self, shell_id: str) -> ShellRecord:
+        async with self._get_lock():
+            record = await self._load_record(shell_id)
             if not record:
                 raise KeyError("Shell not found")
-            self.terminate_shell(shell_id, force=True)
+            await self.terminate_shell(shell_id, force=True)
             now = time.time()
             record.created_at = now
             record.updated_at = now
             record.exit_code = None
             record.status = "pending"
-            self._save_record(record)
+            await self._save_record(record)
             if record.uses_pty:
-                return self._launch_pty(record)
-            return self._launch(record)
+                return await self._launch_pty(record)
+            return await self._launch(record)
 
-    def remove_shell(self, shell_id: str, *, force: bool = False) -> None:
-        with self._lock:
-            record = self._load_record(shell_id)
+    async def remove_shell(self, shell_id: str, *, force: bool = False) -> None:
+        async with self._get_lock():
+            record = await self._load_record(shell_id)
             if not record:
                 raise KeyError("Shell not found")
-            if record.pid and self._is_pid_alive(record.pid):
-                self.terminate_shell(shell_id, force=force)
-            self._stop_pty(shell_id)
-            shutil.rmtree(self.metadata_dir / shell_id, ignore_errors=True)
+            if record.pid and await self._is_pid_alive(record.pid):
+                await self.terminate_shell(shell_id, force=force)
+            await self._stop_pty(shell_id)
+            await asyncio.to_thread(shutil.rmtree, self.metadata_dir / shell_id, ignore_errors=True)
             for log_path in (record.stdout_log, record.stderr_log):
                 try:
-                    Path(log_path).unlink()
+                    await asyncio.to_thread(Path(log_path).unlink)
                 except FileNotFoundError:
                     pass
 
-    def sweep(self) -> None:
-        for record in list(self._iter_records()):
-            if record.pid and not self._is_pid_alive(record.pid):
-                exit_code = record.exit_code or self._collect_exit_code(record.pid)
-                self._mark_exited(record, exit_code)
+    async def sweep(self) -> None:
+        records = []
+        async for record in self._aiter_records():
+            records.append(record)
+        for record in records:
+            if record.pid and not await self._is_pid_alive(record.pid):
+                exit_code = record.exit_code or await self._collect_exit_code(record.pid)
+                await self._mark_exited(record, exit_code)
 
-    def describe(
+    async def describe(
         self,
         record: ShellRecord,
         *,
@@ -767,27 +808,27 @@ class FrameworkShellManager:
         tail_lines: int = 0,
     ) -> Dict[str, Any]:
         payload = record.to_payload()
-        payload["stats"] = self._process_stats(record)
+        payload["stats"] = await self._process_stats(record)
         if include_logs:
             payload["logs"] = {
-                "stdout_tail": self._read_log_tail(Path(record.stdout_log), tail_lines),
-                "stderr_tail": self._read_log_tail(Path(record.stderr_log), tail_lines),
+                "stdout_tail": await self._read_log_tail(Path(record.stdout_log), tail_lines),
+                "stderr_tail": await self._read_log_tail(Path(record.stderr_log), tail_lines),
             }
         return payload
 
-    def _process_stats(self, record: ShellRecord) -> Dict[str, Any]:
+    async def _process_stats(self, record: ShellRecord) -> Dict[str, Any]:
         stats: Dict[str, Any] = {
             "alive": False,
             "uptime": None,
         }
         if record.pid:
-            alive = self._is_pid_alive(record.pid)
+            alive = await self._is_pid_alive(record.pid)
             stats["alive"] = alive
             if alive:
                 stats["uptime"] = max(0.0, time.time() - record.created_at)
                 if psutil:
                     try:
-                        proc = psutil.Process(record.pid)  # type: ignore[arg-type]
+                        proc = await asyncio.to_thread(psutil.Process, record.pid)  # type: ignore[arg-type]
                         with proc.oneshot():
                             stats["cpu_percent"] = proc.cpu_percent(interval=0.0)
                             stats["memory_rss"] = proc.memory_info().rss
@@ -796,7 +837,8 @@ class FrameworkShellManager:
                         pass
                 else:
                     try:
-                        ps_output = subprocess.run(
+                        ps_output = await asyncio.to_thread(
+                            subprocess.run,
                             [
                                 "ps",
                                 "-p",
@@ -820,16 +862,17 @@ class FrameworkShellManager:
                         pass
         return stats
 
-    def _read_log_tail(self, path: Path, lines: int) -> List[str]:
+    async def _read_log_tail(self, path: Path, lines: int) -> List[str]:
         if lines <= 0 or not path.exists():
             return []
-        size = path.stat().st_size
-        to_read = min(size, LOG_TAIL_BYTES)
-        with path.open("rb") as fh:
-            fh.seek(-to_read, os.SEEK_END)
-            data = fh.read().decode("utf-8", errors="replace")
+        size = await asyncio.to_thread(path.stat)
+        to_read = min(size.st_size, LOG_TAIL_BYTES)
+        async with aiofiles.open(path, "rb") as fh:
+            await fh.seek(-to_read, os.SEEK_END)
+            data = await fh.read()
+            decoded_data = data.decode("utf-8", errors="replace")
         # Use splitlines(keepends=True) to preserve line terminators
-        return data.splitlines(keepends=True)[-lines:]
+        return decoded_data.splitlines(keepends=True)[-lines:]
 
 
 # ----------------------------------------------------------------------
@@ -837,19 +880,21 @@ class FrameworkShellManager:
 
 # FastAPI blueprint
 
-
-
-
-
 from app.libs.shell_groups import terminate_group
 
 _manager_instance: Optional[FrameworkShellManager] = None
-_manager_lock = threading.Lock()
 
-def get_manager() -> FrameworkShellManager:
+async def get_manager() -> FrameworkShellManager:
     global _manager_instance
     if _manager_instance is None:
-        with _manager_lock:
+        # Ensure we're in async context
+        loop = asyncio.get_running_loop()  # Raises RuntimeError if no loop
+        
+        # Create lock on-demand
+        if not hasattr(get_manager, '_lock'):
+            get_manager._lock = asyncio.Lock()
+        
+        async with get_manager._lock:
             if _manager_instance is None:
                 base_dir_setting = os.getenv("TE_FRAMEWORK_SHELL_DIR")
                 base_dir = Path(base_dir_setting) if base_dir_setting else None
@@ -876,18 +921,24 @@ def get_manager() -> FrameworkShellManager:
                     max_service_shells = int(max_service_shells)
                 token = os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
                 run_id = os.getenv("TE_RUN_ID")
-                _manager_instance = FrameworkShellManager(
+                
+                # Create the instance
+                instance = FrameworkShellManager(
                     base_dir=base_dir,
                     max_app_shells=max_app_shells,
                     max_service_shells=max_service_shells,
                     auth_token=token,
                     run_id=run_id,
                 )
+                # Call the async adoption method
+                await instance._adopt_orphaned_shells()
+                _manager_instance = instance
+
     return _manager_instance
 
 @framework_shells_bp.get("/api/framework_shells")
-def list_framework_shells(mgr: FrameworkShellManager = Depends(get_manager)) -> Any:
-    records = [mgr.describe(record) for record in mgr.list_shells()]
+async def list_framework_shells(mgr: FrameworkShellManager = Depends(get_manager)) -> Any:
+    records = [await mgr.describe(record) for record in await mgr.list_shells()]
     return {"ok": True, "data": records}
 
 
@@ -907,30 +958,30 @@ async def create_framework_shell(mgr: FrameworkShellManager = Depends(get_manage
     autostart = bool(payload.get("autostart", False))
     cwd = payload.get("cwd")
     try:
-        record = mgr.spawn_shell(command, cwd=cwd, env=env, label=label, autostart=autostart)
+        record = await mgr.spawn_shell(command, cwd=cwd, env=env, label=label, autostart=autostart)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to spawn shell: {exc}")
-    return {"ok": True, "data": mgr.describe(record)}
+    return {"ok": True, "data": await mgr.describe(record)}
 
 
 @framework_shells_bp.get("/api/framework_shells/{shell_id}")
-def get_framework_shell(shell_id: str, mgr: FrameworkShellManager = Depends(get_manager), tail: int = Query(LOG_TAIL_LINES), logs: bool = Query(False)) -> Any:
-    record = mgr.get_shell(shell_id)
+async def get_framework_shell(shell_id: str, mgr: FrameworkShellManager = Depends(get_manager), tail: int = Query(LOG_TAIL_LINES), logs: bool = Query(False)) -> Any:
+    record = await mgr.get_shell(shell_id)
     if not record:
         raise HTTPException(status_code=404, detail="Shell not found")
-    return {"ok": True, "data": mgr.describe(record, include_logs=logs, tail_lines=tail)}
+    return {"ok": True, "data": await mgr.describe(record, include_logs=logs, tail_lines=tail)}
 
 
 @framework_shells_bp.delete("/api/framework_shells/{shell_id}")
-def delete_framework_shell(shell_id: str, mgr: FrameworkShellManager = Depends(get_manager), x_framework_key: Optional[str] = Header(None), force: bool = Query(False)) -> Any:
+async def delete_framework_shell(shell_id: str, mgr: FrameworkShellManager = Depends(get_manager), x_framework_key: Optional[str] = Header(None), force: bool = Query(False)) -> Any:
     if mgr.auth_token and x_framework_key != mgr.auth_token:
         raise HTTPException(status_code=403, detail="Forbidden: invalid framework shell token")
     try:
-        mgr.remove_shell(shell_id, force=force)
+        await mgr.remove_shell(shell_id, force=force)
     except KeyError:
         raise HTTPException(status_code=404, detail="Shell not found")
     except Exception as exc:
@@ -945,22 +996,22 @@ async def framework_shell_action(shell_id: str, mgr: FrameworkShellManager = Dep
     action = (payload.get("action") or "").lower()
     try:
         if action in {"stop", "terminate"}:
-            record = mgr.terminate_shell(shell_id, force=False)
+            record = await mgr.terminate_shell(shell_id, force=False)
         elif action in {"kill", "force"}:
-            record = mgr.terminate_shell(shell_id, force=True)
+            record = await mgr.terminate_shell(shell_id, force=True)
             try:
-                mgr.remove_shell(shell_id, force=True)
+                await mgr.remove_shell(shell_id, force=True)
             except Exception:
                 pass
         elif action == "restart":
-            record = mgr.restart_shell(shell_id)
+            record = await mgr.restart_shell(shell_id)
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported action '{action}'")
     except KeyError:
         raise HTTPException(status_code=404, detail="Shell not found")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Shell action failed: {exc}")
-    return {"ok": True, "data": mgr.describe(record)}
+    return {"ok": True, "data": await mgr.describe(record)}
 
 
 @framework_shells_bp.post("/api/framework_shells/terminate_group")
@@ -971,7 +1022,7 @@ async def terminate_shell_group(mgr: FrameworkShellManager = Depends(get_manager
     if not isinstance(group, str) or not group:
         raise HTTPException(status_code=400, detail="group must be a non-empty string")
     try:
-        count = terminate_group(mgr, group)
+        count = await terminate_group(mgr, group)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to terminate group: {exc}")
     return {"ok": True, "data": {"terminated_count": count}}

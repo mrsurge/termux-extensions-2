@@ -4,7 +4,6 @@ import os
 import shlex
 import asyncio
 import shutil
-import anyio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Body, Query, WebSocket
@@ -14,8 +13,8 @@ from app.libs.framework_shells import get_manager as _manager
 
 terminal_bp = APIRouter()
 
-def mgr():
-    return _manager()
+async def mgr():
+    return await _manager()
 
 
 def _default_shell_command() -> list[str]:
@@ -26,15 +25,15 @@ def _default_shell_command() -> list[str]:
 
 
 @terminal_bp.get("/shells")
-def list_shells() -> Any:
+async def list_shells() -> Any:
     """List framework shells created by this app (label == 'terminal-app')."""
-    m = mgr()
-    records = [m.describe(r) for r in m.list_shells() if r.label == "terminal-app"]
+    m = await mgr()
+    records = [await m.describe(r) for r in await m.list_shells() if r.label == "terminal-app"]
     return {"ok": True, "data": records}
 
 
 @terminal_bp.post("/shells")
-def create_shell(payload: dict = Body(...)) -> Any:
+async def create_shell(payload: dict = Body(...)) -> Any:
     """Spawn a new PTY-backed interactive shell as a framework shell.
 
     Body (JSON): { shell?: string[], cwd?: string }
@@ -46,36 +45,36 @@ def create_shell(payload: dict = Body(...)) -> Any:
         shell_cmd = _default_shell_command()
     cwd = str(payload.get("cwd") or "~")
 
-    m = mgr()
+    m = await mgr()
     try:
-        record = m.spawn_shell_pty(shell_cmd, cwd=cwd, env={}, label="terminal-app", autostart=True)
+        record = await m.spawn_shell_pty(shell_cmd, cwd=cwd, env={}, label="terminal-app", autostart=True)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to spawn shell: {exc}")
 
-    data = m.describe(record)
+    data = await m.describe(record)
     return {"ok": True, "data": data}
 
 
 @terminal_bp.get("/shells/{shell_id}")
-def get_shell(shell_id: str, tail: int = Query(0), logs: bool = Query(False)) -> Any:
-    m = mgr()
-    rec = m.get_shell(shell_id)
+async def get_shell(shell_id: str, tail: int = Query(0), logs: bool = Query(False)) -> Any:
+    m = await mgr()
+    rec = await m.get_shell(shell_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Shell not found")
     
     include_logs = logs
-    data = m.describe(rec, include_logs=include_logs, tail_lines=tail)
+    data = await m.describe(rec, include_logs=include_logs, tail_lines=tail)
     return {"ok": True, "data": data}
 
 
 @terminal_bp.post("/shells/{shell_id}/input")
-def send_input(shell_id: str, payload: dict = Body(...)) -> Any:
+async def send_input(shell_id: str, payload: dict = Body(...)) -> Any:
     """Send input (string) to the PTY of a shell.
 
     Body: { data: string, newline?: boolean }
     """
-    m = mgr()
-    rec = m.get_shell(shell_id)
+    m = await mgr()
+    rec = await m.get_shell(shell_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Shell not found")
 
@@ -88,48 +87,49 @@ def send_input(shell_id: str, payload: dict = Body(...)) -> Any:
     if add_newline:
         text += "\n"
     try:
-        m.write_to_pty(shell_id, text)
+        await m.write_to_pty(shell_id, text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to write to PTY: {e}")
     return {"ok": True, "data": {"id": shell_id}}
 
 
 @terminal_bp.post("/shells/{shell_id}/resize")
-def resize_shell(shell_id: str, payload: dict = Body(...)) -> Any:
+async def resize_shell(shell_id: str, payload: dict = Body(...)) -> Any:
     cols = int(payload.get("cols") or 80)
     rows = int(payload.get("rows") or 24)
     try:
-        mgr().resize_pty(shell_id, cols, rows)
+        m = await mgr()
+        await m.resize_pty(shell_id, cols, rows)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Resize failed: {e}")
     return {"ok": True, "data": {"id": shell_id, "cols": cols, "rows": rows}}
 
 
 @terminal_bp.post("/shells/{shell_id}/action")
-def shell_action(shell_id: str, payload: dict = Body(...)) -> Any:
+async def shell_action(shell_id: str, payload: dict = Body(...)) -> Any:
     action = str(payload.get("action") or "").lower()
-    m = mgr()
+    m = await mgr()
     try:
         if action in {"stop", "terminate"}:
-            record = m.terminate_shell(shell_id, force=False)
+            record = await m.terminate_shell(shell_id, force=False)
         elif action in {"kill", "force"}:
-            record = m.terminate_shell(shell_id, force=True)
+            record = await m.terminate_shell(shell_id, force=True)
         elif action == "restart":
-            record = m.restart_shell(shell_id)
+            record = await m.restart_shell(shell_id)
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported action '{action}'")
     except KeyError:
         raise HTTPException(status_code=404, detail="Shell not found")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Shell action failed: {exc}")
-    return {"ok": True, "data": m.describe(record)}
+    return {"ok": True, "data": await m.describe(record)}
 
 
 @terminal_bp.delete("/shells/{shell_id}")
-def delete_shell(shell_id: str) -> Any:
-    m = mgr()
+async def delete_shell(shell_id: str) -> Any:
+    m = await mgr()
     try:
-        m.remove_shell(shell_id, force=True)
+        await m.remove_shell(shell_id, force=True)
     except KeyError:
         raise HTTPException(status_code=404, detail="Shell not found")
     except Exception as exc:
@@ -143,9 +143,9 @@ def delete_shell(shell_id: str) -> Any:
 @terminal_bp.websocket("/ws/terminal/{shell_id}")
 async def terminal_ws(websocket: WebSocket, shell_id: str):
     await websocket.accept()
-    m = _manager()
+    m = await _manager()
     try:
-        q = await anyio.to_thread.run_sync(m.subscribe_output, shell_id)
+        q = await m.subscribe_output(shell_id)
     except Exception:
         await websocket.close()
         return
@@ -153,11 +153,10 @@ async def terminal_ws(websocket: WebSocket, shell_id: str):
     stop = asyncio.Event()
 
     async def sender():
-        import queue as _q
         while not stop.is_set():
             try:
-                chunk = await anyio.to_thread.run_sync(q.get, timeout=0.5)
-            except _q.Empty:
+                chunk = await asyncio.wait_for(q.get(), timeout=0.5)
+            except asyncio.TimeoutError:
                 continue
             try:
                 await websocket.send_text(chunk)
@@ -172,7 +171,7 @@ async def terminal_ws(websocket: WebSocket, shell_id: str):
             if msg is None:
                 break
             try:
-                await anyio.to_thread.run_sync(m.write_to_pty, shell_id, msg)
+                await m.write_to_pty(shell_id, msg)
             except Exception:
                 pass
     finally:
@@ -182,4 +181,4 @@ async def terminal_ws(websocket: WebSocket, shell_id: str):
             await sender_task
         except asyncio.CancelledError:
             pass
-        await anyio.to_thread.run_sync(m.unsubscribe_output, shell_id, q)
+        await m.unsubscribe_output(shell_id, q)

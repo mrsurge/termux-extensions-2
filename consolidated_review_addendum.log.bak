@@ -1,0 +1,266 @@
+[2025-11-06 18:05:00 UTC]
+REVIEW: Async Refactor Validation Addendum
+
+KEY REGRESSIONS DETECTED:
+  1. Event-loop lock binding
+     • app/libs/framework_shells.py now instantiates AsyncLock() at import time (line 128) and stores it in _lock.
+     • app/libs/framework_shells.py also creates _manager_lock = AsyncLock() (line 872) at import time.
+     • app/libs/app_lifecycle.py does the same with _lock = asyncio.Lock() (line 9).
+     Result: when the FastAPI/Uvicorn loop runs, using those locks raises RuntimeError("<Lock> is bound to a different event loop"), breaking manager and lifecycle APIs immediately.
+
+  2. Awaiting non-coroutines
+     • app/libs/framework_shells.py:603-612 – spawn_shell awaits self._active_shell_count(...), but _active_shell_count still returns an int. "int" objects are not awaitable, so shell startup fails before any process is spawned.
+
+  3. Async file access misuse
+     • app/extensions/apps/main.py:169-179 (and again around 198-215) calls `(await aiofiles.open(...).read())`, but aiofiles.open returns a coroutine context manager. Calling .read() before entering an async-with raises AttributeError (‘coroutine’ object has no attribute ‘read’). Shell log viewer crashes immediately.
+
+  4. Supervisor cleanup disabled instead of ported
+     • app/supervisor.py now comments out _cleanup_framework_shells() without providing an async equivalent, leaving orphan shells on shutdown.
+
+OTHER NOTES:
+  • app/main.py still imports ensure_app_running synchronously and calls get_running_apps() without awaiting. ensure_app_running/app_lifecycle are now async, so those callers either need awaiting or a synchronous adapter.
+  • The new async FrameworkShellManager still calls self._active_shell_count (sync) from async context; either convert _active_shell_count to async or rebuild without awaiting it.
+
+CONCLUSION:
+The current async refactor does not run successfully. Core services fail at startup due to lock binding errors and unawaitables, and shell log viewing is broken. Supervisor cleanup regressed. Further fixes required before merging.
+
+[2025-11-06 17:01:00 UTC]
+SUPPLEMENTARY: Fix Plan for Remaining Issues
+
+--------------------------------------------------------------------------------
+FIX PLAN: Corrections Required for Async Refactor
+--------------------------------------------------------------------------------
+
+ISSUE 1: Event-loop lock binding
+LOCATION: app/libs/framework_shells.py lines 128, 872
+LOCATION: app/libs/app_lifecycle.py line 9
+
+FIX:
+Move AsyncLock instantiation from module-level and __init__ to lazy property pattern.
+
+app/libs/framework_shells.py:
+```python
+# REMOVE line 128:
+# self._lock = AsyncLock()
+
+# ADD:
+@property
+def _lock(self):
+    if not hasattr(self, '_lock_instance'):
+        self._lock_instance = asyncio.Lock()
+    return self._lock_instance
+
+# REMOVE line 872:
+# _manager_lock = AsyncLock()
+
+# MODIFY get_manager() function:
+async def get_manager() -> FrameworkShellManager:
+    global _manager_instance
+    if _manager_instance is None:
+        if not hasattr(get_manager, '_lock'):
+            get_manager._lock = asyncio.Lock()
+        async with get_manager._lock:
+            if _manager_instance is None:
+                # ... create instance
+    return _manager_instance
+```
+
+app/libs/app_lifecycle.py:
+```python
+# REMOVE line 9:
+# _lock = asyncio.Lock()
+
+# ADD at module level:
+_lock = None
+
+def _get_lock():
+    global _lock
+    if _lock is None:
+        _lock = asyncio.Lock()
+    return _lock
+
+# REPLACE all `async with _lock:` with:
+# async with _get_lock():
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Awaiting non-coroutines
+LOCATION: app/libs/framework_shells.py lines 603-612
+
+FIX:
+Convert _active_shell_count to async method.
+
+```python
+# CHANGE:
+def _active_shell_count(self, app_shell: bool = False) -> int:
+    return sum(1 for r in self._iter_records() if r.status == "running" and (r.label or "").startswith("app-worker:") == app_shell)
+
+# TO:
+async def _active_shell_count(self, app_shell: bool = False) -> int:
+    count = 0
+    async for r in self._aiter_records():
+        if r.status == "running" and (r.label or "").startswith("app-worker:") == app_shell:
+            count += 1
+    return count
+```
+
+THEN update all callers to await:
+```python
+# Line 603-612 and similar locations:
+# CHANGE:
+if limit and self._active_shell_count(app_shell=is_app_worker) >= limit:
+
+# TO:
+if limit and await self._active_shell_count(app_shell=is_app_worker) >= limit:
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: Async file access misuse
+LOCATION: app/extensions/apps/main.py lines 169-179, 198-215
+
+FIX:
+Use async context manager for aiofiles.
+
+```python
+# CHANGE:
+content = await aiofiles.open(log_path, 'r').read()
+
+# TO:
+async with aiofiles.open(log_path, 'r') as f:
+    content = await f.read()
+```
+
+Apply this pattern to ALL aiofiles.open() calls in the file.
+
+Lines to fix:
+- Line 169-179: Shell stdout log reading
+- Line 198-215: Shell stderr log reading
+
+Pattern:
+```python
+# WRONG:
+log_content = await aiofiles.open(path, 'r').read()
+
+# CORRECT:
+async with aiofiles.open(path, 'r') as f:
+    log_content = await f.read()
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: Supervisor cleanup disabled
+LOCATION: app/supervisor.py
+
+FIX:
+Re-implement _cleanup_framework_shells as async function.
+
+```python
+# ADD async cleanup function:
+async def _cleanup_framework_shells():
+    """Cleanup all framework shells on shutdown."""
+    from app.libs.framework_shells import get_manager
+    try:
+        mgr = await get_manager()
+        shells = await mgr.list_shells()
+        for shell in shells:
+            try:
+                await mgr.terminate_shell(shell.id, force=True)
+            except Exception as e:
+                print(f"Failed to terminate shell {shell.id}: {e}")
+    except Exception as e:
+        print(f"Failed to cleanup framework shells: {e}")
+
+# THEN in shutdown handler:
+# CHANGE:
+# _cleanup_framework_shells()  # commented out
+
+# TO:
+import asyncio
+asyncio.run(_cleanup_framework_shells())
+```
+
+If supervisor is already running in async context:
+```python
+await _cleanup_framework_shells()
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: Sync/async mismatch in main app
+LOCATION: app/main.py
+
+FIX:
+Update all callers to await async functions.
+
+Step 1 - Find ensure_app_running calls:
+```bash
+grep -n "ensure_app_running" app/main.py
+```
+
+Step 2 - For each call, make the containing function async and await:
+```python
+# CHANGE:
+def some_route_handler():
+    app_info = ensure_app_running(app_id)
+    # ...
+
+# TO:
+async def some_route_handler():
+    app_info = await ensure_app_running(app_id)
+    # ...
+```
+
+Step 3 - Find get_running_apps calls:
+```bash
+grep -n "get_running_apps" app/main.py
+```
+
+Step 4 - For each call, add await:
+```python
+# CHANGE:
+apps = get_running_apps()
+
+# TO:
+apps = await get_running_apps()
+```
+
+Step 5 - If caller cannot be async, create sync wrapper:
+```python
+def ensure_app_running_sync(app_id: str) -> dict:
+    """Synchronous wrapper for async ensure_app_running."""
+    import asyncio
+    return asyncio.run(ensure_app_running(app_id))
+```
+
+--------------------------------------------------------------------------------
+
+EXECUTION ORDER:
+
+Execute fixes in this exact sequence:
+
+1. Fix Issue 1 (lock binding) - app/libs/framework_shells.py, app/libs/app_lifecycle.py
+2. Fix Issue 2 (await non-coroutine) - app/libs/framework_shells.py _active_shell_count
+3. Fix Issue 3 (aiofiles misuse) - app/extensions/apps/main.py
+4. Fix Issue 4 (supervisor cleanup) - app/supervisor.py
+5. Fix Issue 5 (main.py sync/async) - app/main.py
+
+--------------------------------------------------------------------------------
+
+FILES REQUIRING CHANGES:
+
+PRIMARY:
+  - app/libs/framework_shells.py (Issues 1, 2)
+  - app/libs/app_lifecycle.py (Issue 1)
+  - app/extensions/apps/main.py (Issue 3)
+  - app/supervisor.py (Issue 4)
+  - app/main.py (Issue 5)
+
+VERIFICATION AFTER EACH FIX:
+  - Import the modified module
+  - Check for syntax errors
+  - Verify no new import errors introduced
+
+--------------------------------------------------------------------------------
+
