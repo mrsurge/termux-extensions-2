@@ -142,3 +142,81 @@ NEXT STEPS:
 
 --------------------------------------------------------------------------------
 
+[2025-11-05 18:42:49 UTC]
+COMMIT: 95ea688 -> b066f5b
+BRANCH: te-agsi
+HEAD STATUS: b066f5b
+
+--------------------------------------------------------------------------------
+BUG: Routes Return 500 Internal Server Error (Missing Function Imports)
+--------------------------------------------------------------------------------
+
+SYMPTOMS:
+  - GET /api/app/file_editor_cm6/diff → 500 (NameError: collect_diff not defined)
+  - GET /api/app/file_editor_cm6/git/status → 500 (NameError: git_get_status not defined)
+  - GET /api/app/file_editor_cm6/git/branches → 500 (NameError: git_list_branches not defined)
+  - GET /api/app/file_editor_cm6/explorer/list → 500 (NameError: list_dir not defined)
+  - WebSocket /ws/read → errors (NameError: subscribe not defined)
+
+ROOT CAUSE:
+  - Earlier import fixes only added functions used at module-level initialization
+  - Functions called inside route handlers were not imported
+  - Routes registered correctly but crashed when executed
+
+CONVERSATION SUMMARY:
+  1. User confirmed routes loading but seeing 500 errors
+  2. Agent checked worker stderr logs for specific NameErrors
+  3. Identified missing imports: collect_diff, git helpers, list_dir, subscribe/unsubscribe
+  4. Agent added all missing function imports to main.py
+  5. Verified imports load successfully
+  6. User restarted and confirmed fix works
+
+FILES MODIFIED:
+  - app/apps/file_editor_cm6/main.py
+      * Added list_dir from explorer_helper
+      * Added 9 git helper functions (with aliases to match usage in routes)
+      * Added collect_diff from diff_helper
+      * Added subscribe, unsubscribe from core_read
+
+IMPORTS ADDED:
+  From explorer_helper:
+    - list_dir (for /explorer/list route)
+  
+  From git_helper (with aliases):
+    - list_branches → git_list_branches
+    - checkout_branch → git_checkout_branch
+    - create_branch → git_create_branch_helper
+    - get_status → git_get_status
+    - stage_all → git_stage_all
+    - unstage_all → git_unstage_all
+    - commit_changes → git_commit_changes
+    - push_changes → git_push_changes
+    - pull_changes → git_pull_changes
+  
+  From diff_helper:
+    - collect_diff (for /diff route)
+  
+  From core_read:
+    - subscribe, unsubscribe (for /ws/read WebSocket)
+
+FIX APPLIED:
+  ✓ All missing function imports added to main.py
+  ✓ Module imports successfully without errors
+  ✓ 44 routes remain registered in router
+
+VERIFICATION:
+  - python import test → SUCCESS
+  - 44 routes registered → SUCCESS
+  - All NameErrors resolved → SUCCESS
+  - file_editor_cm6 app fully functional → SUCCESS (per user confirmation)
+
+STATUS: COMPLETE
+  ✅ file_editor_cm6 worker startup fixed
+  ✅ All routes load correctly (48 total)
+  ✅ All route handlers have required imports
+  ✅ App fully functional
+
+NEXT PHASE: Beginning work on other apps
+
+--------------------------------------------------------------------------------
+

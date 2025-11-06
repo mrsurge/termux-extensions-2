@@ -312,9 +312,8 @@ async def create_agent_session(data: dict = Body(...)):
     from .agent_session_store import create_session
     import uuid
     
-    name = data.get('name')
-    if not name:
-        raise HTTPException(status_code=400, detail="Missing required field: name")
+    # Make name optional with a default for backwards compatibility
+    name = data.get('name') or f"Session {uuid.uuid4().hex[:6]}"
     
     agent = data.get('agent', 'codex')
     if agent not in ['codex', 'gemini']:

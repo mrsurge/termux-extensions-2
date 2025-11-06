@@ -2,37 +2,31 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Optional
 from urllib.parse import urlencode
 
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, HTTPException, Body, Query
+from fastapi.responses import JSONResponse
 
 from app.libs.archiver_service import browse_archive
 from app.libs.jobs import manager as job_manager
 from app.utils.paths import _resolve_user_path
 
-archive_manager_bp = Blueprint("archive_manager_app", __name__)
+archive_manager_bp = APIRouter()
 
 
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------'''
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _json_ok(data: Any, status: int = 200):
-    return jsonify({"ok": True, "data": data}), status
-
-
-def _json_err(message: str, status: int = 400):
-    return jsonify({"ok": False, "error": str(message)}), status
 
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
-@archive_manager_bp.route("/ping")
+@archive_manager_bp.get("/ping")
 def ping():
-    return _json_ok({"message": "archive-manager ready"})
+    return {"ok": True, "data": {"message": "archive-manager ready"}}
 
 
 def _looks_like_archive(path: Path) -> bool:
@@ -72,46 +66,51 @@ def _list_directory_entries(path: Path, show_hidden: bool) -> list[dict[str, Any
     entries.sort(key=lambda item: (item["type"] != "directory", item["name"].lower()))
     return entries
 
-@archive_manager_bp.route("/browse", methods=["GET"])
-def browse():
-    raw_path = request.args.get("path", "~")
-    internal = (request.args.get("internal", "") or "").strip('/')
-    show_hidden = request.args.get("hidden", "false").lower() in {"1", "true", "yes", "on"}
-    forced_archive = request.args.get("archive", "false").lower() in {"1", "true", "yes", "on"}
+@archive_manager_bp.get("/browse")
+def browse(
+    path: str = Query("~"),
+    internal: str = Query(""),
+    hidden: bool = Query(False),
+    archive: bool = Query(False),
+):
+    raw_path = path
+    internal = (internal or "").strip('/')
+    show_hidden = hidden
+    forced_archive = archive
 
     try:
         target_path = _resolve_user_path(raw_path, must_exist=True)
     except PermissionError as exc:
-        return _json_err(str(exc), 403)
+        raise HTTPException(status_code=403, detail=str(exc))
     except FileNotFoundError as exc:
-        return _json_err(str(exc), 404)
+        raise HTTPException(status_code=404, detail=str(exc))
 
     if target_path.is_dir() and not forced_archive:
         try:
             entries = _list_directory_entries(target_path, show_hidden)
         except PermissionError as exc:
-            return _json_err(str(exc), 403)
+            raise HTTPException(status_code=403, detail=str(exc))
         except FileNotFoundError as exc:
-            return _json_err(str(exc), 404)
+            raise HTTPException(status_code=404, detail=str(exc))
         payload = {
             "mode": "filesystem",
             "path": str(target_path),
             "entries": entries,
             "show_hidden": show_hidden,
         }
-        return _json_ok(payload)
+        return {"ok": True, "data": payload}
 
     # Archive mode
     if not target_path.is_file() and not forced_archive:
-        return _json_err("Target is neither a directory nor a readable archive.", 400)
+        raise HTTPException(status_code=400, detail="Target is neither a directory nor a readable archive.")
 
     if not _looks_like_archive(target_path) and not forced_archive:
-        return _json_err("Unsupported archive type.", 400)
+        raise HTTPException(status_code=400, detail="Unsupported archive type.")
 
     try:
         entries = browse_archive(target_path, internal, show_hidden)
     except Exception as exc:
-        return _json_err(f"Failed to browse archive: {exc}", 500)
+        raise HTTPException(status_code=500, detail=f"Failed to browse archive: {exc}")
 
     payload = {
         "mode": "archive",
@@ -120,12 +119,11 @@ def browse():
         "entries": entries,
         "show_hidden": show_hidden,
     }
-    return _json_ok(payload)
+    return {"ok": True, "data": payload}
 
 
-@archive_manager_bp.route("/archives/launch", methods=["POST"])
-def launch_archive():
-    payload = request.get_json(silent=True) or {}
+@archive_manager_bp.post("/archives/launch")
+def launch_archive(payload: dict = Body(...)):
     raw_archive_path = payload.get("archive_path")
     internal = (payload.get("internal") or "").strip('/')
     filesystem_path_raw = payload.get("filesystem_path")
@@ -133,14 +131,14 @@ def launch_archive():
     show_hidden = bool(payload.get("show_hidden"))
 
     if not isinstance(raw_archive_path, str) or not raw_archive_path.strip():
-        return _json_err("archive_path is required", 400)
+        raise HTTPException(status_code=400, detail="archive_path is required")
 
     try:
         archive_path = _resolve_user_path(raw_archive_path, must_exist=True)
     except FileNotFoundError as exc:
-        return _json_err(str(exc), 404)
+        raise HTTPException(status_code=404, detail=str(exc))
     except PermissionError as exc:
-        return _json_err(str(exc), 403)
+        raise HTTPException(status_code=403, detail=str(exc))
 
     params = {"archive": str(archive_path)}
     if internal:
@@ -151,15 +149,15 @@ def launch_archive():
             fs_path = _resolve_user_path(filesystem_path_raw, must_exist=True)
             params["path"] = str(fs_path)
         except FileNotFoundError as exc:
-            return _json_err(str(exc), 404)
+            raise HTTPException(status_code=404, detail=str(exc))
         except PermissionError as exc:
-            return _json_err(str(exc), 403)
+            raise HTTPException(status_code=403, detail=str(exc))
     if destination_raw:
         try:
             dest_path = _resolve_user_path(destination_raw, must_exist=False)
             params["destination"] = str(dest_path)
         except PermissionError as exc:
-            return _json_err(str(exc), 403)
+            raise HTTPException(status_code=403, detail=str(exc))
     if show_hidden:
         params["hidden"] = '1'
 
@@ -167,21 +165,20 @@ def launch_archive():
     if params:
         app_url = f"{app_url}?{urlencode(params)}"
 
-    return _json_ok({
+    return {"ok": True, "data": {
         "archive_path": str(archive_path),
         "app_url": app_url,
-    })
+    }}
 
-@archive_manager_bp.route("/archives/extract", methods=["POST"])
-def extract_archive():
-    payload = request.get_json(silent=True) or {}
+@archive_manager_bp.post("/archives/extract")
+def extract_archive(payload: dict = Body(...)):
     raw_archive_path = payload.get("archive_path")
     items = payload.get("items") or []
     destination_raw = payload.get("destination")
     options = payload.get("options") or {}
 
     if not isinstance(raw_archive_path, str) or not raw_archive_path.strip():
-        return _json_err("archive_path is required", 400)
+        raise HTTPException(status_code=400, detail="archive_path is required")
 
     try:
         job = job_manager.create_job(
@@ -194,9 +191,9 @@ def extract_archive():
             },
         )
     except Exception as exc:
-        return _json_err(f"Failed to create extraction job: {exc}", 500)
+        raise HTTPException(status_code=500, detail=f"Failed to create extraction job: {exc}")
 
-    return _json_ok(job.to_public_dict())
+    return {"ok": True, "data": job.to_public_dict()}
 
 
 

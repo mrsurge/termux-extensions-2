@@ -17,6 +17,7 @@ import os
 import queue
 import threading
 import uuid
+import functools
 from fastapi import WebSocket
 from .agent_bridge import get_bridge, enrich_context
 from .agent_session_store import get_session, clear_conversation_id
@@ -236,7 +237,7 @@ async def agent_websocket(websocket: WebSocket):
             
             while True:
                 try:
-                    chunk = await anyio.to_thread.run_sync(output_queue.get, timeout=0.5)
+                    chunk = await anyio.to_thread.run_sync(functools.partial(output_queue.get, timeout=0.5))
                 except queue.Empty:
                     continue
                 

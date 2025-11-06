@@ -38,6 +38,10 @@ file_editor_cm6_bp = APIRouter()
 # # Register agent routes and WebSocket handler
 from .agent_routes import bp as agent_routes_bp
 file_editor_cm6_bp.include_router(agent_routes_bp)
+
+# Register terminal routes
+from .terminal_backend import terminal_router
+file_editor_cm6_bp.include_router(terminal_router)
 file_editor_cm6_bp.add_api_websocket_route("/ws/agent", agent_websocket)
 
 # Initialize history store (project root managed by explorer_helper)
@@ -215,7 +219,10 @@ async def write_file_route(data: dict = Body(...)):
         init_watcher(project_root)
 
         # Perform atomic write with optional conflict check
-        file_meta = await anyio.to_thread.run_sync(write_full, project_root, str(rel_path), content, base_sha256=base_sha256)
+        # Note: anyio.to_thread.run_sync doesn't support keyword args directly
+        file_meta = await anyio.to_thread.run_sync(
+            lambda: write_full(project_root, str(rel_path), content, base_sha256=base_sha256)
+        )
 
         # Send save acknowledgement to prevent self-echo
         push_save_ack(str(rel_path), op_id, client_id, file_meta)

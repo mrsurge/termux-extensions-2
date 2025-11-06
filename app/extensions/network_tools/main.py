@@ -1,8 +1,8 @@
-# Extension Backend: Network Tools (minimal blueprint)
+# Extension Backend: Network Tools (minimal router)
 
-from flask import Blueprint
+from fastapi import APIRouter
 
-network_tools_bp = Blueprint('network_tools', __name__)
+network_tools_bp = APIRouter()
 
 # No routes required; the extension uses core /api/run_command.
 

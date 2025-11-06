@@ -54,8 +54,20 @@ async def lifespan(app_instance):
     
     yield
     
-    # Shutdown (if needed)
-    pass
+    # Shutdown - forcibly kill all framework shells
+    print("--- Shutting down: Cleaning up framework shells ---")
+    try:
+        manager = get_manager()
+        shells = list(manager.list_shells())
+        for shell in shells:
+            try:
+                print(f"Terminating shell {shell.id} (PID {shell.pid})...")
+                manager.terminate_shell(shell.id, force=True, timeout=2.0)
+            except Exception as e:
+                print(f"Warning: Failed to terminate shell {shell.id}: {e}")
+        print(f"Cleaned up {len(shells)} framework shells.")
+    except Exception as e:
+        print(f"Warning: Error during shell cleanup: {e}")
 
 app = FastAPI(lifespan=lifespan)
 

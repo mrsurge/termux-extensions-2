@@ -3,10 +3,14 @@
 import json
 import os
 import subprocess
-from flask import Blueprint, jsonify, request, current_app
+from fastapi import APIRouter, HTTPException, Body
 
-# Create a Blueprint
-sessions_bp = Blueprint('sessions_and_shortcuts', __name__)
+# Create a APIRouter
+sessions_bp = APIRouter()
+
+# Determine the project root path to find the scripts directory
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_app_root_path = os.path.join(_project_root, 'app')
 
 def run_script(script_name, app_root_path, args=None):
     """Helper function to run a shell script and return its output."""
@@ -23,11 +27,11 @@ def run_script(script_name, app_root_path, args=None):
 
 # --- API Endpoints for this extension ---
 
-@sessions_bp.route('/sessions', methods=['GET'])
+@sessions_bp.get('/sessions')
 def get_sessions():
-    output, error = run_script('list_sessions.sh', current_app.root_path)
+    output, error = run_script('list_sessions.sh', _app_root_path)
     if error:
-        return jsonify({"ok": False, "error": error}), 500
+        raise HTTPException(status_code=500, detail=error)
 
     def _parse_stat_fields(stat_content: str):
         """Return tuple (state, ppid, pgrp, session, tty_nr, tpgid) from a /proc/<pid>/stat line."""
@@ -179,48 +183,46 @@ def get_sessions():
             sid = s.get('sid')
             state = _detect_state(sid)
             s.update(state)
-        return jsonify({"ok": True, "data": sessions})
+        return {"ok": True, "data": sessions}
     except json.JSONDecodeError:
-        return jsonify({"ok": False, "error": 'Failed to decode JSON from script.'}), 500
+        raise HTTPException(status_code=500, detail='Failed to decode JSON from script.')
 
-@sessions_bp.route('/shortcuts', methods=['GET'])
+@sessions_bp.get('/shortcuts')
 def get_shortcuts():
-    output, error = run_script('list_shortcuts.sh', current_app.root_path)
+    output, error = run_script('list_shortcuts.sh', _app_root_path)
     if error:
-        return jsonify({"ok": False, "error": error}), 500
+        raise HTTPException(status_code=500, detail=error)
     try:
-        return jsonify({"ok": True, "data": json.loads(output)})
+        return {"ok": True, "data": json.loads(output)}
     except json.JSONDecodeError:
-        return jsonify({"ok": False, "error": 'Failed to decode JSON from script.'}), 500
+        raise HTTPException(status_code=500, detail='Failed to decode JSON from script.')
 
-@sessions_bp.route('/sessions/<string:sid>/command', methods=['POST'])
-def run_command(sid):
-    data = request.get_json()
+@sessions_bp.post('/sessions/{sid}/command')
+def run_command(sid: str, data: dict = Body(...)):
     if not data or 'command' not in data:
-        return jsonify({"ok": False, "error": 'Missing \'command\' in request body'}), 400
-    _, error = run_script('run_in_session.sh', current_app.root_path, [sid, data['command']])
+        raise HTTPException(status_code=400, detail='Missing \'command\' in request body')
+    _, error = run_script('run_in_session.sh', _app_root_path, [sid, data['command']])
     if error:
-        return jsonify({"ok": False, "error": error}), 500
-    return jsonify({"ok": True})
+        raise HTTPException(status_code=500, detail=error)
+    return {"ok": True}
 
-@sessions_bp.route('/sessions/<string:sid>/shortcut', methods=['POST'])
-def run_shortcut(sid):
-    data = request.get_json()
+@sessions_bp.post('/sessions/{sid}/shortcut')
+def run_shortcut(sid: str, data: dict = Body(...)):
     if not data or 'path' not in data:
-        return jsonify({"ok": False, "error": 'Missing \'path\' in request body'}), 400
-    _, error = run_script('run_in_session.sh', current_app.root_path, [sid, data['path']])
+        raise HTTPException(status_code=400, detail='Missing \'path\' in request body')
+    _, error = run_script('run_in_session.sh', _app_root_path, [sid, data['path']])
     if error:
-        return jsonify({"ok": False, "error": error}), 500
-    return jsonify({"ok": True})
+        raise HTTPException(status_code=500, detail=error)
+    return {"ok": True}
 
-@sessions_bp.route('/sessions/<string:sid>', methods=['DELETE'])
-def kill_session(sid):
+@sessions_bp.delete('/sessions/{sid}')
+def kill_session(sid: str):
     try:
         os.kill(int(sid), 9)
-        return jsonify({"ok": True})
+        return {"ok": True}
     except (ValueError, TypeError):
-        return jsonify({"ok": False, "error": 'Invalid session ID'}), 400
+        raise HTTPException(status_code=400, detail='Invalid session ID')
     except ProcessLookupError:
-        return jsonify({"ok": True, "data": {"message": 'Session already terminated.'}}), 200
+        return {"ok": True, "data": {"message": 'Session already terminated.'}}
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))

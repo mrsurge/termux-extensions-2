@@ -7,10 +7,12 @@ Provides REST endpoints and WebSocket PTY streaming for embedded terminal.
 
 import json
 import threading
-from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
+import functools
+from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query, Depends
 import asyncio
 import anyio
 from app.libs.framework_shells import FrameworkShellManager, get_manager
+from app.apps.file_editor_cm6 import edit_tracker
 
 terminal_router = APIRouter()
 
@@ -30,7 +32,9 @@ async def terminal_create(data: dict = Body(...)):
     shell_cmd = data.get('shell')
     
     try:
-        shell_info = await anyio.to_thread.run_sync(create_editor_shell, cwd=cwd, shell_cmd=shell_cmd)
+        shell_info = await anyio.to_thread.run_sync(
+            functools.partial(create_editor_shell, cwd=cwd, shell_cmd=shell_cmd)
+        )
         return {"ok": True, "data": shell_info}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -56,9 +60,9 @@ async def terminal_destroy(shell_id: str):
             raise HTTPException(status_code=500, detail="Failed to destroy shell")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-    
-    @terminal_router.post('/terminal/{shell_id}/resize')
+
+
+@terminal_router.post('/terminal/{shell_id}/resize')
 async def terminal_resize(shell_id: str, data: dict = Body(...)):
     """
     Resize the terminal PTY.
@@ -110,9 +114,9 @@ def terminal_info(shell_id: str, logs: bool = Query(False), tail: int = Query(20
         return {"ok": True, "data": info}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-    
-    @terminal_router.websocket('/ws/terminal/{shell_id}')
+
+
+@terminal_router.websocket('/ws/terminal/{shell_id}')
 async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellManager = Depends(get_manager)):
     """
     WebSocket endpoint for bidirectional PTY streaming.
@@ -132,7 +136,7 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
         import queue as _queue
         while not stop_event.is_set():
             try:
-                chunk = await anyio.to_thread.run_sync(output_queue.get, timeout=0.5)
+                chunk = await anyio.to_thread.run_sync(functools.partial(output_queue.get, timeout=0.5))
             except _queue.Empty:
                 continue
             

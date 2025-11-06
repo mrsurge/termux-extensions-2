@@ -1,4 +1,5 @@
 import anyio
+import functools
 from __future__ import annotations
 
 import grp
@@ -17,6 +18,8 @@ from fastapi.responses import JSONResponse
 from app.libs.jobs import JobCancelled, register_job_handler
 
 file_explorer_bp = APIRouter()
+
+HOME_DIR = Path.home()
 
 
 def _scandir_entries(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
@@ -254,7 +257,7 @@ async def make_directory(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail='Base path is not a directory')
     target = os.path.abspath(os.path.join(base, name))
     try:
-        await anyio.to_thread.run_sync(os.makedirs, target, exist_ok=False)
+        await anyio.to_thread.run_sync(functools.partial(os.makedirs, target, exist_ok=False))
     except FileExistsError:
         raise HTTPException(status_code=400, detail='A file or folder with that name already exists')
     except PermissionError:

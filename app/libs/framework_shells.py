@@ -690,7 +690,12 @@ class FrameworkShellManager:
                 self._mark_exited(record, exit_code)
                 self._stop_pty(shell_id)
                 return record
-            sig = signal.SIGKILL if force else signal.SIGTERM
+            
+            # TEMPORARY: Use SIGKILL always - graceful shutdown broken
+            # TODO: Restore SIGTERM -> SIGKILL escalation after debugging
+            # sig = signal.SIGKILL if force else signal.SIGTERM
+            sig = signal.SIGKILL  # Force immediate kill
+            
             try:
                 os.killpg(record.pid, sig)
             except ProcessLookupError:
@@ -698,17 +703,20 @@ class FrameworkShellManager:
                 self._mark_exited(record, exit_code)
                 self._stop_pty(shell_id)
                 return record
-            if not force:
-                deadline = time.time() + max(0.0, timeout)
-                while time.time() < deadline:
-                    if not self._is_pid_alive(record.pid):
-                        break
-                    time.sleep(0.1)
-                if self._is_pid_alive(record.pid):
-                    try:
-                        os.kill(record.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+            
+            # COMMENTED OUT: Graceful shutdown timeout (not working)
+            # if not force:
+            #     deadline = time.time() + max(0.0, timeout)
+            #     while time.time() < deadline:
+            #         if not self._is_pid_alive(record.pid):
+            #             break
+            #         time.sleep(0.1)
+            #     if self._is_pid_alive(record.pid):
+            #         try:
+            #             os.killpg(record.pid, signal.SIGKILL)
+            #         except (ProcessLookupError, OSError):
+            #             pass
+            
             exit_code = self._collect_exit_code(record.pid)
             self._mark_exited(record, exit_code)
             self._stop_pty(shell_id)
