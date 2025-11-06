@@ -74,92 +74,13 @@ export function createTerminalDrawer(options = {}) {
   }
 
   /**
-   * Get or create a terminal shell session
+   * Get or create terminal shell - backend handles everything.
+   * Just connect to the WebSocket and let the server manage persistence.
    */
   async function getOrCreateShell() {
-    // Try to restore previous shell from app's history store
-    try {
-      const stateRes = await fetch('/api/app/file_editor_cm6/terminal/shell-id');
-      const stateResult = await stateRes.json();
-      
-      if (stateResult.ok && stateResult.data.shell_id) {
-        const savedShellId = stateResult.data.shell_id;
-        
-        // Check if saved shell still exists
-        const shellRes = await fetch(`/api/app/file_editor_cm6/terminal/${savedShellId}`);
-        const shellResult = await shellRes.json();
-        
-        if (shellResult.ok && shellResult.data.status === 'running') {
-          console.log('Reconnecting to existing shell:', savedShellId);
-          return savedShellId;
-        } else {
-          console.log('Saved shell no longer running, cleaning up state');
-          // Clear invalid shell ID from state
-          await fetch('/api/app/file_editor_cm6/terminal/shell-id', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ shell_id: null }),
-          });
-        }
-      }
-    } catch (err) {
-      console.log('No saved shell found:', err);
-    }
-    
-    // Clean up any orphaned code-editor-terminal shells
-    await cleanupOrphanedShells();
-    
-    // Create new shell
-    const cwd = getCurrentProjectPath();
-    const res = await fetch('/api/app/file_editor_cm6/terminal/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cwd }),
-    });
-
-    const result = await res.json();
-    if (!result.ok) {
-      throw new Error(result.error || 'Failed to create terminal shell');
-    }
-
-    const newShellId = result.data.id;
-    
-    // Save to app's history store
-    await fetch('/api/app/file_editor_cm6/terminal/shell-id', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ shell_id: newShellId }),
-    });
-    
-    console.log('Created new shell:', newShellId);
-    
-    return newShellId;
-  }
-
-  /**
-   * Clean up orphaned terminal shells
-   */
-  async function cleanupOrphanedShells() {
-    try {
-      const res = await fetch('/api/framework_shells');
-      const result = await res.json();
-      
-      if (result.ok) {
-        const orphanedShells = result.data.filter(shell => 
-          shell.label === 'code-editor-terminal'
-        );
-        
-        console.log(`Found ${orphanedShells.length} orphaned terminal shells, cleaning up...`);
-        
-        for (const shell of orphanedShells) {
-          await fetch(`/api/app/file_editor_cm6/terminal/${shell.id}`, {
-            method: 'DELETE',
-          }).catch(err => console.error('Failed to cleanup shell:', shell.id, err));
-        }
-      }
-    } catch (err) {
-      console.error('Failed to cleanup orphaned shells:', err);
-    }
+    // Don't set shellId yet - wait for WebSocket to tell us the real ID
+    // Return null so caller knows to use 'auto' for WebSocket URL
+    return null;
   }
 
   /**
@@ -193,24 +114,6 @@ export function createTerminalDrawer(options = {}) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${location.host}/ws/app/file_editor_cm6/terminal/${id}`;
 
-    // Preload persisted log tail so history survives refresh/reopen
-    if (term) {
-      try {
-        const res = await fetch(`/api/app/file_editor_cm6/terminal/${id}?logs=true&tail=2000`);
-        const result = await res.json();
-        
-        if (result.ok && result.data.logs && Array.isArray(result.data.logs.stdout_tail)) {
-          const priming = result.data.logs.stdout_tail.join('');
-          if (priming) {
-            term.write(priming);
-            console.log('Preloaded terminal history:', result.data.logs.stdout_tail.length, 'lines');
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to preload terminal history:', err);
-      }
-    }
-
     const socket = new ReconnectingWebSocket(url, {
       maxRetries: 15,
       reconnectInterval: 500,
@@ -222,7 +125,42 @@ export function createTerminalDrawer(options = {}) {
       console.log('Terminal WebSocket connected');
     };
 
-    socket.onmessage = (event) => {
+    socket.onmessage = async (event) => {
+      // Handle JSON messages from server
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'shell_id') {
+          // Server sent us the real shell ID
+          shellId = msg.shell_id;
+          console.log('Received shell ID from server:', shellId);
+          
+          // Now fetch logs with the real shell ID
+          if (term) {
+            try {
+              const res = await fetch(`/api/app/file_editor_cm6/terminal/${shellId}?logs=true&tail=2000`);
+              const result = await res.json();
+              
+              if (result.ok && result.data.logs && Array.isArray(result.data.logs.stdout_tail)) {
+                const priming = result.data.logs.stdout_tail.join('');
+                if (priming) {
+                  term.write(priming);
+                  console.log('Preloaded terminal history:', result.data.logs.stdout_tail.length, 'lines');
+                }
+              }
+            } catch (err) {
+              console.warn('Failed to preload terminal history:', err);
+            }
+          }
+          return;
+        } else if (msg.type === 'error') {
+          console.error('Terminal error:', msg.message);
+          return;
+        }
+      } catch (e) {
+        // Not JSON, treat as terminal output
+      }
+      
+      // Regular terminal output
       if (term) {
         term.write(event.data);
       }
@@ -320,15 +258,15 @@ export function createTerminalDrawer(options = {}) {
       await initTerminal();
     }
 
-    // Create shell if doesn't exist
+    // Create shell if doesn't exist (getOrCreateShell returns null now)
     if (!shellId) {
-      shellId = await getOrCreateShell();
-      console.log('Shell created:', shellId);
+      await getOrCreateShell();  // This just prepares, doesn't return ID
+      console.log('Shell will be managed by backend via WebSocket');
     }
 
-    // Connect WebSocket if not connected (preload history first)
+    // Connect WebSocket - use 'auto' to let backend manage shell ID
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      ws = await connectWebSocket(shellId);
+      ws = await connectWebSocket('auto');  // Backend will send us the real ID
     }
 
     // Fit terminal to drawer size and manually send initial resize

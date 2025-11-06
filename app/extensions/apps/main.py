@@ -132,7 +132,15 @@ def serve_app_file(app_dir: str, filename: str):
     full_path = os.path.join(project_root, 'app', 'apps', app_dir, filename)
     if not os.path.isfile(full_path):
         raise HTTPException(status_code=404, detail="File not found")
-    # Ensure JS modules are served with a JS MIME type so dynamic import() works reliably
-    if filename.endswith(('.js', '.mjs')):
-        return FileResponse(full_path, media_type="application/javascript")
+    
+    # Set no-cache headers for JS/CSS to ensure fresh code loads
+    if filename.endswith(('.js', '.mjs', '.css')):
+        headers = {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        }
+        media_type = "application/javascript" if filename.endswith(('.js', '.mjs')) else "text/css"
+        return FileResponse(full_path, media_type=media_type, headers=headers)
+    
     return FileResponse(full_path)

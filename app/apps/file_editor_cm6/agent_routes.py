@@ -99,6 +99,135 @@ async def agent_list():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
+# Specific routes MUST come before wildcard routes to avoid path conflicts
+    
+@bp.get('/agent/sessions')
+async def list_agent_sessions():
+    """
+    List all agent sessions with summary metadata.
+
+    Example:
+        GET /api/app/file_editor_cm6/agent/sessions
+        
+        Response:
+        {
+          "ok": true,
+          "data": [
+            {
+              "id": "session-123",
+              "name": "Project Debug",
+              "agent": "codex",
+              "conversationId": "abc...",
+              "messageCount": 15,
+              "createdAt": 1730000000,
+              "cwd": "/home/user/project",
+              "auto": false,
+              "fullAccess": false
+            }
+          ]
+        }
+    """
+    from .agent_session_store import list_sessions
+    try:
+        sessions = await anyio.to_thread.run_sync(list_sessions)
+        return {"ok": True, "data": sessions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@bp.post('/agent/sessions', status_code=201)
+async def create_agent_session(data: dict = Body(...)):
+    """
+    Create a new agent session.
+    
+    Example:
+        POST /api/app/file_editor_cm6/agent/sessions
+        {"name":"Debug Session","agent":"codex","cwd":"/home/user/project"}
+        
+        Response:
+        {
+          "ok": true,
+          "data": {
+            "id": "session-123",
+            "name": "Debug Session",
+            "agent": "codex",
+            "messages": [],
+            "createdAt": 1730000000
+          }
+        }
+    
+    """
+    from .agent_session_store import create_session
+    import uuid
+    
+    # Make name optional with a default for backwards compatibility
+    name = data.get('name') or f"Session {uuid.uuid4().hex[:6]}"
+    
+    agent = data.get('agent', 'codex')
+    if agent not in ['codex', 'gemini']:
+        raise HTTPException(status_code=400, detail=f"Invalid agent type: {agent}")
+    
+    session_id = f"session-{uuid.uuid4().hex[:12]}"
+    cwd = data.get('cwd')
+    auto = data.get('auto', False)
+    fullAccess = data.get('fullAccess', False)
+    
+    try:
+        session = await anyio.to_thread.run_sync(
+            lambda: create_session(
+                session_id=session_id,
+                name=name,
+                agent=agent,
+                cwd=cwd,
+                auto=auto,
+                fullAccess=fullAccess
+            )
+        )
+        return {"ok": True, "data": session}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@bp.get('/agent/shell/status')
+async def get_agent_shell_status(mgr: FrameworkShellManager = Depends(get_manager)):
+    """
+    Check if there's an active Codex MCP server shell.
+
+    Example:
+        GET /api/app/file_editor_cm6/agent/shell/status
+        
+        Response:
+        {
+          "ok": true,
+          "data": {
+            "shell_id": "fs_1762043953_7cd3f985",
+            "status": "running",
+            "alive": true
+          }
+        }
+    """
+    try:
+        # Find active Codex MCP shells
+        shells = await anyio.to_thread.run_sync(mgr.list_shells)
+        codex_shell = None
+        
+        for shell in shells:
+            # Check if this is a Codex MCP server shell (note: space not hyphen)
+            # shell.command is a List[str], so join and check
+            command_str = ' '.join(shell.command) if isinstance(shell.command, list) else str(shell.command)
+            if 'codex mcp-server' in command_str:
+                # Check if shell is running (status == 'running' and has PID)
+                if shell.status == 'running' and shell.pid:
+                    codex_shell = {
+                        'shell_id': shell.id,
+                        'status': shell.status,
+                        'alive': True,
+                        'pid': shell.pid
+                    }
+                    break
+        
+        return {"ok": True, "data": codex_shell}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
     
 @bp.get('/agent/{session_id}')
 async def agent_info(session_id: str):
@@ -223,39 +352,6 @@ async def preferences_set(data: dict = Body(...)):
     
     # --- Session Management Endpoints ---
     
-@bp.get('/agent/sessions')
-async def list_agent_sessions():
-    """
-    List all agent sessions with summary metadata.
-
-    Example:
-        GET /api/app/file_editor_cm6/agent/sessions
-        
-        Response:
-        {
-          "ok": true,
-          "data": [
-            {
-              "id": "session-123",
-              "name": "Project Debug",
-              "agent": "codex",
-              "conversationId": "abc...",
-              "messageCount": 15,
-              "createdAt": 1730000000,
-              "cwd": "/home/user/project",
-              "auto": false,
-              "fullAccess": false
-            }
-          ]
-        }
-    """
-    from .agent_session_store import list_sessions
-    try:
-        sessions = await anyio.to_thread.run_sync(list_sessions)
-        return {"ok": True, "data": sessions}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
 @bp.get('/agent/session/{session_id}')
 async def get_agent_session(session_id: str):
     """
@@ -283,57 +379,6 @@ async def get_agent_session(session_id: str):
         session = await anyio.to_thread.run_sync(get_session, session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        return {"ok": True, "data": session}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@bp.post('/agent/sessions', status_code=201)
-async def create_agent_session(data: dict = Body(...)):
-    """
-    Create a new agent session.
-    
-    Example:
-        POST /api/app/file_editor_cm6/agent/sessions
-        {"name":"Debug Session","agent":"codex","cwd":"/home/user/project"}
-        
-        Response:
-        {
-          "ok": true,
-          "data": {
-            "id": "session-123",
-            "name": "Debug Session",
-            "agent": "codex",
-            "messages": [],
-            "createdAt": 1730000000
-          }
-        }
-    
-    """
-    from .agent_session_store import create_session
-    import uuid
-    
-    # Make name optional with a default for backwards compatibility
-    name = data.get('name') or f"Session {uuid.uuid4().hex[:6]}"
-    
-    agent = data.get('agent', 'codex')
-    if agent not in ['codex', 'gemini']:
-        raise HTTPException(status_code=400, detail=f"Invalid agent type: {agent}")
-    
-    session_id = f"session-{uuid.uuid4().hex[:12]}"
-    cwd = data.get('cwd')
-    auto = data.get('auto', False)
-    fullAccess = data.get('fullAccess', False)
-    
-    try:
-        session = await anyio.to_thread.run_sync(
-            create_session,
-            session_id=session_id,
-            name=name,
-            agent=agent,
-            cwd=cwd,
-            auto=auto,
-            fullAccess=fullAccess
-        )
         return {"ok": True, "data": session}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -413,47 +458,5 @@ async def send_to_agent_session(session_id: str, data: dict = Body(...)):
                 "queued": True
             }
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@bp.get('/agent/shell/status')
-async def get_agent_shell_status(mgr: FrameworkShellManager = Depends(get_manager)):
-    """
-    Check if there's an active Codex MCP server shell.
-
-    Example:
-        GET /api/app/file_editor_cm6/agent/shell/status
-        
-        Response:
-        {
-          "ok": true,
-          "data": {
-            "shell_id": "fs_1762043953_7cd3f985",
-            "status": "running",
-            "alive": true
-          }
-        }
-    """
-    try:
-        # Find active Codex MCP shells
-        shells = await anyio.to_thread.run_sync(mgr.list_shells)
-        codex_shell = None
-        
-        for shell in shells:
-            # Check if this is a Codex MCP server shell (note: space not hyphen)
-            # shell.command is a List[str], so join and check
-            command_str = ' '.join(shell.command) if isinstance(shell.command, list) else str(shell.command)
-            if 'codex mcp-server' in command_str:
-                # Check if shell is running (status == 'running' and has PID)
-                if shell.status == 'running' and shell.pid:
-                    codex_shell = {
-                        'shell_id': shell.id,
-                        'status': shell.status,
-                        'alive': True,
-                        'pid': shell.pid
-                    }
-                    break
-        
-        return {"ok": True, "data": codex_shell}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -569,26 +569,6 @@ def clear_all_file_history():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@file_editor_cm6_bp.get('/terminal/shell-id')
-def get_terminal_shell_id():
-    """Get the stored terminal shell ID."""
-    try:
-        shell_id = _history_store.get_terminal_shell_id()
-        return {"ok": True, "data": {"shell_id": shell_id}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@file_editor_cm6_bp.post('/terminal/shell-id')
-async def set_terminal_shell_id(data: dict = Body(...)):
-    """Store the terminal shell ID."""
-    shell_id = data.get('shell_id')
-    
-    try:
-        _history_store.set_terminal_shell_id(shell_id)
-        return {"ok": True, "data": {"shell_id": shell_id}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @file_editor_cm6_bp.get('/edit_tracker/status')
 def get_edit_tracker_status():
     """Get current edit tracker status."""

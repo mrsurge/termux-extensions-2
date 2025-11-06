@@ -9,7 +9,8 @@ from fastapi import APIRouter, HTTPException, Body
 sessions_bp = APIRouter()
 
 # Determine the project root path to find the scripts directory
-_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Go up 4 levels: main.py -> sessions_and_shortcuts -> extensions -> app -> project_root
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 _app_root_path = os.path.join(_project_root, 'app')
 
 def run_script(script_name, app_root_path, args=None):
