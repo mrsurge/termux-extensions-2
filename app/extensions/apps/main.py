@@ -5,7 +5,9 @@ import json
 import app
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(app.__file__)))
 import time
-from fastapi import APIRouter, Depends, Request, HTTPException
+import asyncio
+from pathlib import Path
+from fastapi import APIRouter, Depends, Request, HTTPException, WebSocket
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from app.libs.app_manager import ensure_app_running
 from app.libs import app_lifecycle
@@ -144,3 +146,87 @@ def serve_app_file(app_dir: str, filename: str):
         return FileResponse(full_path, media_type=media_type, headers=headers)
     
     return FileResponse(full_path)
+
+@apps_bp.get("/shell-logs/{shell_id}", response_class=HTMLResponse)
+async def shell_logs_viewer(shell_id: str):
+    """Render log viewer for a framework shell."""
+    template_path = os.path.join(project_root, 'app', 'templates', 'shell_log_viewer.html')
+    with open(template_path, "r") as f:
+        content = f.read()
+    content = content.replace("{{ shell_id }}", shell_id)
+    return HTMLResponse(content=content)
+
+@apps_bp.websocket("/ws/shell-logs/{shell_id}")
+async def shell_logs_ws(websocket: WebSocket, shell_id: str):
+    """WebSocket endpoint for tailing framework shell logs (both stdout and stderr)."""
+    await websocket.accept()
+    
+    logs_dir = Path.home() / ".cache/te_framework/logs"
+    stdout_path = logs_dir / f"{shell_id}.stdout.log"
+    stderr_path = logs_dir / f"{shell_id}.stderr.log"
+    
+    if not stdout_path.exists() and not stderr_path.exists():
+        await websocket.send_json({
+            "type": "error",
+            "message": f"No log files found for {shell_id}"
+        })
+        await websocket.close()
+        return
+    
+    try:
+        # Send initial 200 lines from both logs
+        stdout_lines = stdout_path.read_text().splitlines() if stdout_path.exists() else []
+        stderr_lines = stderr_path.read_text().splitlines() if stderr_path.exists() else []
+        
+        stdout_initial = '\n'.join(stdout_lines[-200:]) if len(stdout_lines) > 200 else '\n'.join(stdout_lines)
+        stderr_initial = '\n'.join(stderr_lines[-200:]) if len(stderr_lines) > 200 else '\n'.join(stderr_lines)
+        
+        await websocket.send_json({
+            "type": "initial",
+            "stdout": stdout_initial,
+            "stderr": stderr_initial
+        })
+        
+        # Track file sizes for tailing
+        stdout_size = stdout_path.stat().st_size if stdout_path.exists() else 0
+        stderr_size = stderr_path.stat().st_size if stderr_path.exists() else 0
+        
+        while True:
+            await asyncio.sleep(1)  # Poll every second
+            
+            # Check stdout
+            if stdout_path.exists():
+                current_stdout = stdout_path.stat().st_size
+                if current_stdout > stdout_size:
+                    with open(stdout_path, 'r') as f:
+                        f.seek(stdout_size)
+                        new_content = f.read()
+                        await websocket.send_json({
+                            "type": "update",
+                            "stream": "stdout",
+                            "data": new_content
+                        })
+                    stdout_size = current_stdout
+                elif current_stdout < stdout_size:
+                    stdout_size = 0
+            
+            # Check stderr
+            if stderr_path.exists():
+                current_stderr = stderr_path.stat().st_size
+                if current_stderr > stderr_size:
+                    with open(stderr_path, 'r') as f:
+                        f.seek(stderr_size)
+                        new_content = f.read()
+                        await websocket.send_json({
+                            "type": "update",
+                            "stream": "stderr",
+                            "data": new_content
+                        })
+                    stderr_size = current_stderr
+                elif current_stderr < stderr_size:
+                    stderr_size = 0
+                    
+    except Exception as e:
+        print(f"Log tail error: {e}")
+    finally:
+        await websocket.close()

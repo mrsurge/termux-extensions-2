@@ -220,3 +220,136 @@ NEXT PHASE: Beginning work on other apps
 
 --------------------------------------------------------------------------------
 
+
+[2025-11-06 03:29:44 UTC]
+COMMIT: b066f5b -> 67300c6
+BRANCH: te-agsi
+HEAD STATUS: 67300c6
+
+--------------------------------------------------------------------------------
+BUG: Terminal Persistence Fails (Mixed JS/Python State Logic + REST Overhead)
+--------------------------------------------------------------------------------
+
+SYMPTOMS:
+  - Terminal creates new shell every time user leaves and returns to app
+  - Terminal history lost on page reload
+  - Multiple orphaned terminal shells pile up
+  - Excessive REST endpoint calls (shell-id GET/POST, create, resize)
+  - 500 errors on /terminal/auto/resize endpoint
+  - JavaScript managing shell lifecycle instead of backend
+
+ROOT CAUSE:
+  1. Frontend had complex shell validation/cleanup logic in JavaScript
+  2. Backend HistoryStore was being created fresh on each request (no singleton)
+  3. Terminal ID stored in file but Python couldn't read it (new instance every time)
+  4. Frontend calling REST endpoints with 'auto' before real shell ID arrived
+  5. Architecture had unnecessary REST layer between frontend and WebSocket
+
+CONVERSATION SUMMARY:
+  1. User reported terminal not persisting across page reloads
+  2. Agent discovered frontend doing shell validation/cleanup (should be backend)
+  3. Added backend singleton for HistoryStore to persist state across requests
+  4. User questioned why REST endpoints exist at all for terminal
+  5. Agent realized correct architecture: WebSocket should handle everything
+  6. Removed all frontend shell management logic
+  7. Moved shell validation, orphan cleanup, and persistence to WebSocket handler
+  8. Frontend now just connects to /ws/terminal/auto
+  9. Backend sends real shell_id via WebSocket JSON message
+  10. User caught resize errors - frontend using 'auto' before ID received
+  11. Agent fixed timing: shellId stays null until WebSocket sends real ID
+  12. User caught bug: create_editor_shell() signature doesn't accept mgr parameter
+  13. Fixed function call signature
+  14. Terminal now works with zero REST calls!
+
+FILES MODIFIED:
+  - app/apps/file_editor_cm6/terminal_backend.py
+      * Added _history_store_singleton module-level variable
+      * Added get_history_store() singleton factory function
+      * Updated GET /terminal/shell-id to use singleton (endpoint kept for log fetching)
+      * Updated POST /terminal/shell-id to use singleton
+      * Enhanced WebSocket handler to accept shell_id='auto'
+      * Added auto shell management in WebSocket:
+        - Loads saved shell ID from history store
+        - Cleans up orphaned terminal shells (except saved one)
+        - Validates saved shell still exists and is running
+        - Creates new shell if none exists or saved is dead
+        - Saves new shell ID to history store
+        - Sends shell_id to client via JSON message
+      * Added detailed logging at each step for debugging
+      * Fixed create_editor_shell() call to use cwd= keyword arg only
+  
+  - app/apps/file_editor_cm6/static/js/terminal.js
+      * Removed all shell management logic from getOrCreateShell()
+      * Changed to return null (no longer manages shell ID)
+      * Updated open() to always connect to /ws/terminal/auto
+      * Updated WebSocket onmessage handler to parse JSON messages:
+        - Handles {"type": "shell_id", "shell_id": "..."} 
+        - Updates shellId variable when received
+        - Fetches log history after ID received
+        - Handles {"type": "error", "message": "..."}
+        - Treats non-JSON as terminal output
+      * Removed orphan cleanup logic (cleanupOrphanedShells function)
+      * shellId stays null until WebSocket provides real ID
+      * Resize calls have if(shellId) guard - only fire after ID received
+  
+  - app/extensions/apps/main.py
+      * Added Cache-Control headers to JS/CSS file serving
+      * Forces browser to fetch fresh code on every load
+      * Prevents stale JavaScript cache issues
+
+ARCHITECTURE BEFORE:
+```
+Frontend → GET /terminal/shell-id → Returns saved ID or null
+Frontend → Validates shell exists via GET /terminal/{id}
+Frontend → Cleans up orphans via DELETE /terminal/{id}
+Frontend → POST /terminal/create → Creates new shell
+Frontend → POST /terminal/shell-id → Saves new ID
+Frontend → WS /ws/terminal/{id} → Connects to PTY
+Frontend → POST /terminal/{id}/resize → On every resize
+```
+
+ARCHITECTURE AFTER:
+```
+Frontend → WS /ws/terminal/auto → Backend handles everything
+Backend  → Validates/cleans/creates/persists shell
+Backend  → {"type": "shell_id", "shell_id": "fs_..."} → Frontend
+Frontend → Uses real ID for subsequent calls (logs, resize)
+```
+
+FIX APPLIED:
+  ✓ Terminal persistence moved entirely to backend
+  ✓ HistoryStore made singleton to persist across requests
+  ✓ WebSocket handler manages shell lifecycle
+  ✓ Frontend simplified to just connect and receive ID
+  ✓ Zero REST calls for shell management
+  ✓ Terminal persists across page reloads
+  ✓ Orphan cleanup happens automatically on reconnect
+  ✓ Shell history restored via log tail fetch
+
+VERIFICATION:
+  - Terminal opens → Backend creates shell → SUCCESS
+  - User leaves app → Shell stays alive → SUCCESS
+  - User returns → Backend reconnects to same shell → SUCCESS
+  - Terminal history shows previous session → SUCCESS
+  - Only 1 shell exists (orphans cleaned) → SUCCESS
+  - WebSocket logs show:
+      [Terminal WS] Auto shell management requested
+      [Terminal WS] Saved shell ID from history: fs_1762398196_de03c5c9
+      [Terminal WS] Found 0 orphaned terminal shells
+      [Terminal WS] Reconnecting to existing shell: fs_1762398196_de03c5c9
+      [Terminal WS] Sending shell_id to client: fs_1762398196_de03c5c9
+
+REMAINING ISSUES:
+  ✗ Sessions extension endpoint error (missing script file)
+      - INFO: GET /api/ext/sessions_and_shortcuts/sessions → 500
+      - chmod: cannot access 'app/scripts/list_sessions.sh'
+  ✗ Settings app missing routes:
+      - INFO: GET /api/framework/runtime/metrics → 404 Not Found
+      - INFO: POST /api/framework/runtime/shutdown → 404 Not Found
+
+NEXT STEPS:
+  - Fix sessions extension script path
+  - Add missing runtime API routes
+  - Test all extensions load correctly
+
+--------------------------------------------------------------------------------

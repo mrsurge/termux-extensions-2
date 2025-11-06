@@ -212,6 +212,7 @@ function renderFrameworkShells() {
         card.innerHTML = `
             <div class="session-header">
                 <div class="session-title">Framework Shell • ${escapeHTML(containerLabel)}</div>
+                <button class="framework-log" data-shell="${shell.id}">Log</button>
                 <button class="framework-kill" data-shell="${shell.id}">Kill</button>
             </div>
             <div class="session-cwd">ID: ${shell.id}</div>
@@ -400,6 +401,14 @@ function attachEventListeners() {
                     setTimeout(() => input.focus(), 0);
                 }
                 openModal('rename-modal', sid);
+            }
+            return;
+        }
+
+        if (target.classList.contains('framework-log')) {
+            const shellId = target.dataset.shell;
+            if (shellId) {
+                window.open(`/shell-logs/${shellId}`, '_blank');
             }
             return;
         }

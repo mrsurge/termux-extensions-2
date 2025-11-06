@@ -24,7 +24,7 @@ from fastapi import FastAPI, Request, Query, Body, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 import requests
 from app.libs.app_lifecycle import start_background_tasks
-from app.libs.app_manager import ensure_app_running
+from app.libs.app_manager import ensure_app_running, get_running_apps
 from app.libs.bookmarks import bookmarks_bp
 
 # Create FastAPI app instance with lifespan
@@ -807,12 +807,17 @@ import anyio
 
 @app.api_route('/api/app/{app_id}/{subpath:path}', methods=['GET','POST','PUT','DELETE','PATCH','OPTIONS'])
 async def proxy_app_request(app_id: str, subpath: str, request: Request):
-    # Call ensure_app_running (sync, wrap in anyio)
-    app_info = await anyio.to_thread.run_sync(ensure_app_running, app_id)
-    if not app_info or not app_info.get('port'):
-        return JSONResponse({"ok": False, "error": "App has no backend or is not running."}, status_code=404)
+    # Fast lookup - don't spawn workers on every request
+    # Apps must be started via POST /api/apps/{app_id}/start first
+    running_apps = get_running_apps()
     
-    port = app_info['port']
+    if app_id not in running_apps:
+        return JSONResponse({
+            "ok": False, 
+            "error": f"App '{app_id}' is not running. Start it from the launcher first."
+        }, status_code=503)  # Service Unavailable
+    
+    port = running_apps[app_id]['port']
     url = f"http://127.0.0.1:{port}/{subpath}"
     
     # Forward headers minus 'host'
@@ -847,13 +852,18 @@ import asyncio
 async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
     await websocket.accept()
     
-    # Call ensure_app_running (sync)
-    app_info = await anyio.to_thread.run_sync(ensure_app_running, app_id)
-    if not app_info or not app_info.get('port'):
+    # Fast lookup - apps must be started via launcher first
+    running_apps = get_running_apps()
+    
+    if app_id not in running_apps:
+        await websocket.send_json({
+            "type": "error",
+            "message": f"App '{app_id}' is not running. Start it from the launcher first."
+        })
         await websocket.close()
         return
     
-    port = app_info['port']
+    port = running_apps[app_id]['port']
     query = websocket.scope['query_string'].decode('utf-8')
     worker_url = f"ws://127.0.0.1:{port}/ws/{route}"
     if query:
