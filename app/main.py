@@ -83,6 +83,7 @@ from app.libs.framework_shells import FrameworkShellManager, get_manager, framew
 
 app.include_router(framework_shells_bp)
 from app.libs.jobs import jobs_bp
+from app.apps.file_editor_cm6.agent_bridge import get_bridge
 app.include_router(jobs_bp, prefix="/api")
 
 
@@ -731,6 +732,60 @@ async def delete_state(keys: List[str] = Query(...)):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to persist state: {exc}")
     return {"ok": True, "data": {"removed": removed}}
+
+
+@app.post("/api/framework/runtime/shutdown")
+async def shutdown_framework(request: Request):
+    expected_token = os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
+    provided_token = request.headers.get("x-framework-key")
+    if expected_token and provided_token != expected_token:
+        return JSONResponse(
+            {"ok": False, "error": "Forbidden: invalid framework token"},
+            status_code=403,
+        )
+
+    supervisor_pid = os.environ.get("TE_SUPERVISOR_PID")
+    if not supervisor_pid:
+        return JSONResponse(
+            {"ok": False, "error": "Supervisor PID unavailable; shutdown not supported"},
+            status_code=503,
+        )
+
+    try:
+        os.kill(int(supervisor_pid), signal.SIGTERM)
+    except Exception as exc:
+        return JSONResponse(
+            {"ok": False, "error": f"Failed to signal supervisor: {exc}"},
+            status_code=500,
+        )
+
+    return JSONResponse(
+        {"ok": True, "data": {"message": "Shutdown signal sent to supervisor"}},
+        status_code=202,
+    )
+
+
+@app.post("/api/internal/agents/spawn")
+async def internal_spawn_agent(payload: dict = Body(...)):
+    agent = payload.get("agent", "codex")
+    session_id = payload.get("session_id")
+    cwd = payload.get("cwd")
+
+    if agent != "codex":
+        raise HTTPException(status_code=400, detail=f"Unsupported agent type '{agent}'")
+
+    bridge = get_bridge()
+    result = await bridge.find_or_spawn_agent("codex", cwd or os.path.expanduser("~"))
+    resolved_session = session_id or result.get("session_id") or result.get("id")
+    shell_id = result.get("id")
+    shell = await bridge.get_or_create_agent(resolved_session, "codex", cwd or os.path.expanduser("~"))
+    data = {
+        "agent": agent,
+        "session_id": resolved_session,
+        "shell_id": shell_id,
+        "shell": shell,
+    }
+    return {"ok": True, "data": data}
 
 async def _terminate_framework_shells(manager: FrameworkShellManager) -> None:
     records = await manager.list_shells()

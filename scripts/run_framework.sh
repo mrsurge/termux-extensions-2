@@ -130,4 +130,34 @@ if supervisor_running; then
   echo "[run_framework] Existing supervisor detected but bind switch failed; starting fresh." >&2
 fi
 
+IPC_PID_FILE="$HOME/.cache/te_framework/ipc.pid"
+IPC_HOST="${TE_IPC_HOST:-127.0.0.1}"
+IPC_PORT="${TE_IPC_PORT:-9123}"
+
+start_ipc_server() {
+  local existing_pid=""
+  if [ -f "$IPC_PID_FILE" ]; then
+    existing_pid="$(cat "$IPC_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
+      export TE_IPC_PID="$existing_pid"
+      echo "[run_framework] Reusing existing IPC server (pid $existing_pid)"
+      return 0
+    fi
+    rm -f "$IPC_PID_FILE"
+  fi
+
+  local python_bin="${PYTHON_BIN:-python}"
+  echo "[run_framework] Starting IPC server on $IPC_HOST:$IPC_PORT"
+  TE_FRAMEWORK_URL="${TE_FRAMEWORK_URL:-http://127.0.0.1:8088}" \
+  IPC_LOG_PREFIX=1 \
+  "$python_bin" -m app.ipc.server --host "$IPC_HOST" --port "$IPC_PORT" &
+  TE_IPC_PID=$!
+  export TE_IPC_PID
+  mkdir -p "$(dirname "$IPC_PID_FILE")"
+  echo "$TE_IPC_PID" > "$IPC_PID_FILE"
+  echo "[run_framework] IPC server pid $TE_IPC_PID"
+}
+
+start_ipc_server
+
 exec python -m app.supervisor "${EXTRA_ARGS[@]}"

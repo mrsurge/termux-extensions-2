@@ -5,6 +5,9 @@ const SHELL_DELETE_ENDPOINT = (id) => `/api/framework_shells/${id}`;
 const SHUTDOWN_ENDPOINT = '/api/framework/runtime/shutdown';
 const SETTINGS_ENDPOINT = '/api/settings';
 const EXTENSIONS_ENDPOINT = '/api/extensions';
+const IPC_PORT_DEFAULT = parseInt(window.__TE_IPC_PORT__ || '9123', 10);
+const IPC_HOST = window.__TE_IPC_HOST__ || window.location.hostname || '127.0.0.1';
+const IPC_BASE_URL = `${window.location.protocol}//${IPC_HOST}:${IPC_PORT_DEFAULT}`;
 
 function formatDuration(seconds) {
   if (!Number.isFinite(seconds)) return '--';
@@ -55,6 +58,9 @@ export default function init(root, _api, host) {
   const maxAppShellsInput = root.querySelector('#max-app-shells');
   const appTtlInput = root.querySelector('#app-ttl');
   const saveLifecycleBtn = root.querySelector('[data-action="save-lifecycle-settings"]');
+  const ipcLogOutput = root.querySelector('[data-role="ipc-log-output"]');
+
+  let ipcEventSource = null;
 
   let frameworkToken = '';
   const savedState = typeof host.loadState === 'function' ? host.loadState({}) : null;
@@ -289,6 +295,65 @@ export default function init(root, _api, host) {
     renderExtensionOrderList(extensions || []);
   }
 
+  function appendIpcLog(message, type = 'info') {
+    if (!ipcLogOutput) return;
+    const timestamp = new Date().toISOString();
+    const prefix = type ? `[${type}]` : '';
+    const line = `[${timestamp}] ${prefix} ${message}`.trim();
+    const nextContent = ipcLogOutput.textContent ? `${ipcLogOutput.textContent}\n${line}` : line;
+    const lines = nextContent.split('\n');
+    ipcLogOutput.textContent = lines.slice(-200).join('\n');
+    ipcLogOutput.scrollTop = ipcLogOutput.scrollHeight;
+  }
+
+  function startIpcStream() {
+    if (!ipcLogOutput || typeof EventSource === 'undefined') {
+      return;
+    }
+    const url = `${IPC_BASE_URL}/stream`;
+    try {
+      ipcEventSource = new EventSource(url);
+      ipcEventSource.onopen = () => appendIpcLog(`Connected to IPC stream at ${url}`, 'status');
+      ipcEventSource.onerror = () => appendIpcLog('IPC stream error/disconnected', 'error');
+      ipcEventSource.onmessage = (event) => {
+        if (!event.data) return;
+        try {
+          const payload = JSON.parse(event.data);
+          appendIpcLog(JSON.stringify(payload), payload.event || 'event');
+        } catch (err) {
+          appendIpcLog(event.data, 'event');
+        }
+      };
+    } catch (err) {
+      appendIpcLog(`Failed to open IPC stream: ${err?.message || err}`, 'error');
+    }
+  }
+
+  async function triggerIpcShutdown() {
+    if (!window.confirm('Force shutdown via IPC service?')) {
+      return;
+    }
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (frameworkToken) {
+        headers['X-Framework-Key'] = frameworkToken;
+      }
+      const response = await fetch(`${IPC_BASE_URL}/actions/shutdown`, {
+        method: 'POST',
+        headers,
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.ok === false) {
+        throw new Error(body.error || `HTTP ${response.status}`);
+      }
+      appendIpcLog('Shutdown forwarded to supervisor via IPC', 'shutdown');
+      if (host?.toast) host.toast('IPC shutdown forwarded', 3000);
+    } catch (err) {
+      appendIpcLog(`IPC shutdown failed: ${err?.message || err}`, 'error');
+      if (host?.toast) host.toast('IPC shutdown failed', 3000);
+    }
+  }
+
   async function performShellAction(shellId, action) {
     await request(SHELL_ACTION_ENDPOINT(shellId), { method: 'POST', body: { action } }, true);
     if (host?.toast) host.toast(`Shell ${shellId} ${action} requested`, 2500);
@@ -329,6 +394,9 @@ export default function init(root, _api, host) {
   });
   root.querySelector('[data-action="shutdown"]')?.addEventListener('click', () => {
     shutdownSupervisor().catch(() => {});
+  });
+  root.querySelector('[data-action="ipc-shutdown"]')?.addEventListener('click', () => {
+    triggerIpcShutdown().catch(() => {});
   });
   reloadExtensionsBtn?.addEventListener('click', () => {
     loadExtensions().catch(() => {});
@@ -390,4 +458,5 @@ export default function init(root, _api, host) {
   }
 
   loadAndRenderAll();
+  startIpcStream();
 }

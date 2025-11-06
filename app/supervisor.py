@@ -12,6 +12,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -63,6 +64,19 @@ def _kill_process_group(pid: int, sig: signal.Signals) -> None:
         print(f"[supervisor] Failed to signal group {pid}: {exc}", file=sys.stderr)
 
 
+def _stop_ipc_server(sig: signal.Signals = signal.SIGTERM) -> None:
+    ipc_pid = os.environ.get("TE_IPC_PID")
+    if not ipc_pid:
+        return
+    try:
+        os.kill(int(ipc_pid), sig)
+        print(f"[supervisor] Sent {sig.name} to IPC server pid {ipc_pid}")
+    except ProcessLookupError:
+        pass
+    except Exception as exc:
+        print(f"[supervisor] Failed to stop IPC server {ipc_pid}: {exc}", file=sys.stderr)
+
+
 def run(argv: List[str]) -> int:
     run_id = _ensure_run_id()
     os.environ.setdefault("TE_SUPERVISOR_PID", str(os.getpid()))
@@ -83,6 +97,18 @@ def run(argv: List[str]) -> int:
 
     shutting_down = False
 
+    def _schedule_force_kill():
+        def _worker():
+            time.sleep(10.0)
+            if proc.poll() is not None:
+                return
+            print("[supervisor] Graceful shutdown timed out; forcing framework cleanup")
+            _safe_cleanup_wrapper()
+            _kill_process_group(proc.pid, signal.SIGKILL)
+            _stop_ipc_server(signal.SIGKILL)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _handle_signal(signum, _frame):
         nonlocal shutting_down
         if shutting_down:
@@ -90,6 +116,10 @@ def run(argv: List[str]) -> int:
         shutting_down = True
         print(f"[supervisor] Received signal {signum}; shutting down run {run_id}")
         _kill_process_group(proc.pid, signal.SIGTERM)
+        if signum == signal.SIGINT:
+            _schedule_force_kill()
+        else:
+            _stop_ipc_server(signal.SIGTERM)
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
@@ -112,6 +142,7 @@ def run(argv: List[str]) -> int:
             _kill_process_group(proc.pid, signal.SIGKILL)
 
     _safe_cleanup_wrapper()
+    _stop_ipc_server(signal.SIGTERM)
 
     try:
         if RUN_ID_FILE.exists() and RUN_ID_FILE.read_text(encoding="utf-8").strip() == run_id:
