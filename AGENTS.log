@@ -240,7 +240,7 @@ SYMPTOMS:
 
 ROOT CAUSE:
   1. Frontend had complex shell validation/cleanup logic in JavaScript
-  2. Backend HistoryStore was being created fresh on each request (no singleton)
+  2. Backend  HistoryStore was being created fresh on each request (no singleton)
   3. Terminal ID stored in file but Python couldn't read it (new instance every time)
   4. Frontend calling REST endpoints with 'auto' before real shell ID arrived
   5. Architecture had unnecessary REST layer between frontend and WebSocket

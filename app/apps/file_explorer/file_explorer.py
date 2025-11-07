@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 import anyio
 import functools
-from __future__ import annotations
 
 import grp
 import json

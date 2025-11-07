@@ -7,6 +7,7 @@ import asyncio
 import time
 import contextlib
 from pathlib import Path
+from typing import Optional
 from app.libs.framework_shells import get_manager as get_framework_shell_manager
 from app.libs import app_lifecycle
 
@@ -17,44 +18,91 @@ _LOADED_APPS = []
 # Persistent storage file for app workers (only valid while framework is running)
 _RUNNING_APPS_FILE = Path.home() / '.cache' / 'te_framework' / 'running_apps.json'
 
+
+def _parse_port(value) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _register_running_app(app_id: str, shell_id: str, port: int, *, nicegui: bool = False) -> None:
+    """Track a running app worker and register it with the lifecycle service."""
+    _RUNNING_APPS[app_id] = {"port": port, "shell_id": shell_id}
+    if nicegui:
+        _RUNNING_APPS[app_id]["nicegui_shell"] = True
+    await app_lifecycle.register_app(app_id, shell_id, port)
+
+
+async def _adopt_running_shells(manager) -> int:
+    """Discover running app-worker shells without saved entries."""
+    adopted = 0
+    shells = await manager.list_shells()
+    for record in shells:
+        label = record.label or ""
+        if not label.startswith("app-worker:"):
+            continue
+        app_id = label.split(":", 1)[1]
+        if not app_id or app_id in _RUNNING_APPS:
+            continue
+        if record.status != "running" or not record.pid:
+            continue
+        port = _parse_port(record.env_overrides.get("TE_APP_WORKER_PORT"))
+        if port is None:
+            print(f"[AppManager] Cannot adopt {record.id}: missing TE_APP_WORKER_PORT")
+            continue
+        await _register_running_app(app_id, record.id, port)
+        adopted += 1
+        print(f"[AppManager] Adopted running worker: app_id={app_id}, shell_id={record.id}, port={port}")
+    return adopted
+
+
 async def _load_running_apps():
     """
-    Load app workers from disk ONLY if they're still alive.
-    This handles the case where framework is still running but user navigated away.
-    NOT for framework restarts - workers die when framework dies.
+    Restore app workers that survived a browser refresh or framework restart.
     """
     global _RUNNING_APPS
     _RUNNING_APPS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    
-    if not _RUNNING_APPS_FILE.exists():
-        print("[AppManager] No saved running apps found (first run or fresh start)")
-        return
-    
-    try:
-        with open(_RUNNING_APPS_FILE, 'r') as f:
-            saved_apps = json.load(f)
-        
-        # Validate each saved app - only restore if shell is STILL alive
-        manager = await get_framework_shell_manager()
-        restored = 0
+    manager = await get_framework_shell_manager()
+
+    restored = 0
+    if _RUNNING_APPS_FILE.exists():
+        try:
+            with open(_RUNNING_APPS_FILE, 'r') as f:
+                saved_apps = json.load(f)
+        except Exception as e:
+            print(f"[AppManager] Failed to load running apps: {e}")
+            saved_apps = {}
+
         for app_id, app_info in saved_apps.items():
             shell = await manager.get_shell(app_info.get('shell_id'))
             if shell and shell.status == 'running':
-                _RUNNING_APPS[app_id] = app_info
+                port = _parse_port(app_info.get('port'))
+                if port is None:
+                    print(f"[AppManager] Saved worker missing valid port; skipping app_id={app_id}")
+                    continue
+                await _register_running_app(
+                    app_id,
+                    app_info.get('shell_id'),
+                    port,
+                    nicegui=app_info.get("nicegui_shell", False),
+                )
                 restored += 1
-                print(f"[AppManager] Restored worker: app_id={app_id}, shell_id={app_info.get('shell_id')}, port={app_info.get('port')}")
+                print(f"[AppManager] Restored worker: app_id={app_id}, shell_id={app_info.get('shell_id')}, port={port}")
             else:
                 print(f"[AppManager] Discarded stale worker: app_id={app_id} (shell not running)")
-        
-        if restored > 0:
-            print(f"[AppManager] Restored {restored}/{len(saved_apps)} workers from previous navigation")
-        else:
-            print(f"[AppManager] All saved workers dead (framework was restarted), starting fresh")
-            # Clear the stale file
-            _RUNNING_APPS_FILE.unlink()
-    except Exception as e:
-        print(f"[AppManager] Failed to load running apps: {e}")
-        _RUNNING_APPS = {}
+
+        if restored == 0 and saved_apps:
+            print("[AppManager] All saved workers dead; clearing saved state")
+            with contextlib.suppress(Exception):
+                _RUNNING_APPS_FILE.unlink()
+
+    adopted = await _adopt_running_shells(manager)
+
+    if restored or adopted:
+        _save_running_apps()
+    else:
+        print("[AppManager] No running app workers detected during startup")
 
 async def initialize_running_apps():
     """Async initializer to load running apps within an event loop."""
@@ -153,11 +201,13 @@ async def ensure_app_running(app_id):
     # Go up 3 levels: app/libs/app_manager.py -> app/libs -> app -> project_root
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     env = {
-        "PYTHONPATH": f"{os.environ.get('PYTHONPATH', '')}:{project_root}"
+        "PYTHONPATH": f"{os.environ.get('PYTHONPATH', '')}:{project_root}",
+        "TE_APP_ID": app_id,
     }
 
     if nicegui_module and nicegui_shell:
         port = find_free_port()
+        env["TE_APP_WORKER_PORT"] = str(port)
         shell_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'apps', 'nicegui_shell', 'worker.py')
         module_name = f"app.apps.{app_manifest['_dir']}.{Path(nicegui_module).stem}"
         command = [
@@ -212,6 +262,7 @@ async def ensure_app_running(app_id):
         return {"message": "No backend to start"}
 
     port = find_free_port()
+    env["TE_APP_WORKER_PORT"] = str(port)
     backend_module_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'apps', app_manifest['_dir'], backend_module)
     command = [
         "python",

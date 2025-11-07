@@ -134,7 +134,6 @@ class FrameworkShellManager:
         self.launcher_pid = os.getpid()
         self.started_at = time.time()
         self._pty: Dict[str, PTYState] = {}
-        # self._adopt_orphaned_shells()
 
     def _get_lock(self):
         """Get or create the instance lock (lazy initialization)."""
@@ -146,11 +145,21 @@ class FrameworkShellManager:
     # Adoption and helpers
 
     async def _adopt_orphaned_shells(self) -> None:
+        """Reclaim shells from previous runs and purge stale metadata."""
+        stale_records: List[ShellRecord] = []
+        updated = 0
         async with self._get_lock():
             async for record in self._aiter_records():
-                if record.pid and not await self._is_pid_alive(record.pid):
+                alive = bool(record.pid) and await self._is_pid_alive(record.pid)
+                if record.pid and not alive:
                     exit_code = record.exit_code or await self._collect_exit_code(record.pid)
                     await self._mark_exited(record, exit_code)
+                    record.pid = None
+                    record.status = "exited"
+                    stale_records.append(record)
+                    continue
+                if not alive:
+                    stale_records.append(record)
                     continue
                 if not self.run_id:
                     continue
@@ -164,6 +173,13 @@ class FrameworkShellManager:
                 if mutated:
                     record.adopted = True
                     await self._save_record(record)
+                    updated += 1
+            for record in stale_records:
+                await self._stop_pty(record.id)
+                await self._purge_record_files(record)
+                print(f"[FrameworkShells] Cleaned orphaned shell {record.id} (stale metadata removed)")
+        if updated:
+            print(f"[FrameworkShells] Adopted {updated} running shell(s) from previous run")
 
     async def list_active_pids(self) -> List[int]:
         async with self._get_lock():
@@ -807,12 +823,20 @@ class FrameworkShellManager:
             if record.pid and await self._is_pid_alive(record.pid):
                 await self.terminate_shell(shell_id, force=force)
             await self._stop_pty(shell_id)
-            await asyncio.to_thread(shutil.rmtree, self.metadata_dir / shell_id, ignore_errors=True)
-            for log_path in (record.stdout_log, record.stderr_log):
-                try:
-                    await asyncio.to_thread(Path(log_path).unlink)
-                except FileNotFoundError:
-                    pass
+            await self._purge_record_files(record)
+
+    async def _purge_record_files(self, record: ShellRecord) -> None:
+        """Delete metadata and log files for a shell record."""
+        await asyncio.to_thread(shutil.rmtree, self.metadata_dir / record.id, ignore_errors=True)
+        for log_path in (record.stdout_log, record.stderr_log):
+            if not log_path:
+                continue
+            try:
+                await asyncio.to_thread(Path(log_path).unlink)
+            except FileNotFoundError:
+                pass
+            except IsADirectoryError:
+                await asyncio.to_thread(shutil.rmtree, Path(log_path), ignore_errors=True)
 
     async def sweep(self) -> None:
         records = []
