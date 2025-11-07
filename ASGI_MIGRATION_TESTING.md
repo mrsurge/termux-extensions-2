@@ -5,7 +5,7 @@ This document contains all testing and validation steps to be performed **after*
 ## Pre-migration baseline
 
 ### Capture Flask baseline
-1. Start current Flask app: `python app/main.py` or `gunicorn -w 2 -k gthread --threads 8 -b 0.0.0.0:8080 wsgi:application`
+1. Start current Flask app: `python app/main.py` or `gunicorn -w 2 -k gthread --threads 8 -b 0.0.0.0:8088 wsgi:application`
 2. Dump all Flask routes:
    ```bash
    python -c "from app.main import app; import json; routes = [{'path': r.rule, 'methods': list(r.methods)} for r in app.url_map.iter_rules()]; print(json.dumps(routes, indent=2))" > tests/flask_routes_baseline.json
@@ -20,7 +20,7 @@ This document contains all testing and validation steps to be performed **after*
 ## Post-migration validation
 
 ### Route parity check
-1. Start ASGI app: `uvicorn app.main:app --host 0.0.0.0 --port 8080`
+1. Start ASGI app: `uvicorn app.main:app --host 0.0.0.0 --port 8088`
 2. Dump all FastAPI routes:
    ```bash
    python -c "from app.main import app; import json; routes = [{'path': r.path, 'methods': list(r.methods)} for r in app.routes]; print(json.dumps(routes, indent=2))" > tests/fastapi_routes.json
@@ -36,31 +36,31 @@ Start ASGI app and test key endpoints:
 
 ```bash
 # Core framework
-curl http://localhost:8080/api/extensions
-curl http://localhost:8080/api/apps
-curl http://localhost:8080/api/framework/runtime/metrics
-curl http://localhost:8080/api/framework_shells
+curl http://localhost:8088/api/extensions
+curl http://localhost:8088/api/apps
+curl http://localhost:8088/api/framework/runtime/metrics
+curl http://localhost:8088/api/framework_shells
 
 # Bookmarks
-curl http://localhost:8080/api/bookmarks
-curl -X POST http://localhost:8080/api/bookmarks -H "Content-Type: application/json" -d '{"name":"test","path":"/tmp"}'
+curl http://localhost:8088/api/bookmarks
+curl -X POST http://localhost:8088/api/bookmarks -H "Content-Type: application/json" -d '{"name":"test","path":"/tmp"}'
 
 # Browse
-curl "http://localhost:8080/api/browse?path=~"
+curl "http://localhost:8088/api/browse?path=~"
 
 # Settings/State
-curl http://localhost:8080/api/settings
-curl http://localhost:8080/api/state
+curl http://localhost:8088/api/settings
+curl http://localhost:8088/api/state
 
 # file_editor_cm6 REST
-curl "http://localhost:8080/api/app/file_editor_cm6/read?path=/path/to/file"
-curl -X POST http://localhost:8080/api/app/file_editor_cm6/write -H "Content-Type: application/json" -d '{"path":"/tmp/test.txt","content":"hello"}'
-curl "http://localhost:8080/api/app/file_editor_cm6/diff?path=somefile.py"
-curl http://localhost:8080/api/app/file_editor_cm6/state
-curl http://localhost:8080/api/app/file_editor_cm6/preferences
+curl "http://localhost:8088/api/app/file_editor_cm6/read?path=/path/to/file"
+curl -X POST http://localhost:8088/api/app/file_editor_cm6/write -H "Content-Type: application/json" -d '{"path":"/tmp/test.txt","content":"hello"}'
+curl "http://localhost:8088/api/app/file_editor_cm6/diff?path=somefile.py"
+curl http://localhost:8088/api/app/file_editor_cm6/state
+curl http://localhost:8088/api/app/file_editor_cm6/preferences
 
 # App proxy (if external worker apps exist)
-curl http://localhost:8080/api/app/<app_id>/some_endpoint
+curl http://localhost:8088/api/app/<app_id>/some_endpoint
 ```
 
 ### WebSocket smoke tests
@@ -68,21 +68,21 @@ curl http://localhost:8080/api/app/<app_id>/some_endpoint
 #### Test /ws/read (file watcher)
 ```bash
 # Using wscat (npm install -g wscat)
-wscat -c "ws://localhost:8080/ws/read?path=/path/to/file"
+wscat -c "ws://localhost:8088/ws/read?path=/path/to/file"
 
 # Expected: connection opens, receives file_changed events when file modified
 ```
 
 #### Test /ws/edit_tracker
 ```bash
-wscat -c "ws://localhost:8080/ws/edit_tracker"
+wscat -c "ws://localhost:8088/ws/edit_tracker"
 
 # Expected: connection opens, receives edit events when agent modifies files
 ```
 
 #### Test /ws/agent
 ```bash
-wscat -c "ws://localhost:8080/ws/agent"
+wscat -c "ws://localhost:8088/ws/agent"
 
 # Send: {"text": "hello", "session": "test-session"}
 # Expected: receives agent response events (token, planning, final, etc.)
@@ -91,11 +91,11 @@ wscat -c "ws://localhost:8080/ws/agent"
 #### Test /ws/terminal/<id>
 ```bash
 # First create a terminal via REST
-curl -X POST http://localhost:8080/api/app/file_editor_cm6/terminal/create -H "Content-Type: application/json" -d '{"cwd":"~"}'
+curl -X POST http://localhost:8088/api/app/file_editor_cm6/terminal/create -H "Content-Type: application/json" -d '{"cwd":"~"}'
 # Response: {"ok": true, "data": {"shell_id": "...", "pid": ...}}
 
 # Connect to terminal WebSocket
-wscat -c "ws://localhost:8080/ws/terminal/<shell_id>"
+wscat -c "ws://localhost:8088/ws/terminal/<shell_id>"
 
 # Send: ls -la\n
 # Expected: receives PTY output
@@ -103,7 +103,7 @@ wscat -c "ws://localhost:8080/ws/terminal/<shell_id>"
 
 #### Test /ws/app/<app_id>/<route> proxy (if external workers)
 ```bash
-wscat -c "ws://localhost:8080/ws/app/<app_id>/<route>"
+wscat -c "ws://localhost:8088/ws/app/<app_id>/<route>"
 
 # Expected: connection proxied to worker, bidirectional messages work
 ```
@@ -111,7 +111,7 @@ wscat -c "ws://localhost:8080/ws/app/<app_id>/<route>"
 ### Browser-based integration tests
 
 1. **Launch file_editor_cm6**:
-   - Navigate to `http://localhost:8080/app/file_editor_cm6`
+   - Navigate to `http://localhost:8088/app/file_editor_cm6`
    - Verify app shell loads
 
 2. **Test file operations**:
@@ -157,9 +157,9 @@ def validate_endpoint(url, expected_keys):
     print(f"✓ {url}")
 
 # Run for each endpoint
-validate_endpoint('http://localhost:8080/api/extensions', ['html', 'card_html'])
-validate_endpoint('http://localhost:8080/api/apps', [])  # list of apps
-validate_endpoint('http://localhost:8080/api/framework/runtime/metrics', ['run_id', 'uptime_seconds'])
+validate_endpoint('http://localhost:8088/api/extensions', ['html', 'card_html'])
+validate_endpoint('http://localhost:8088/api/apps', [])  # list of apps
+validate_endpoint('http://localhost:8088/api/framework/runtime/metrics', ['run_id', 'uptime_seconds'])
 # ... etc
 ```
 
@@ -169,10 +169,10 @@ Compare response times (optional):
 
 ```bash
 # Flask baseline
-ab -n 100 -c 10 http://localhost:8080/api/extensions
+ab -n 100 -c 10 http://localhost:8088/api/extensions
 
 # FastAPI after migration
-ab -n 100 -c 10 http://localhost:8080/api/extensions
+ab -n 100 -c 10 http://localhost:8088/api/extensions
 
 # WebSocket latency (manual timing with wscat)
 ```
@@ -183,13 +183,13 @@ Test error conditions:
 
 ```bash
 # 404 routes
-curl http://localhost:8080/nonexistent
+curl http://localhost:8088/nonexistent
 
 # 400 bad requests
-curl -X POST http://localhost:8080/api/bookmarks -H "Content-Type: application/json" -d '{}'
+curl -X POST http://localhost:8088/api/bookmarks -H "Content-Type: application/json" -d '{}'
 
 # 403 forbidden (if applicable)
-curl "http://localhost:8080/api/browse?path=/root"
+curl "http://localhost:8088/api/browse?path=/root"
 
 # 500 internal errors (trigger via malformed data if possible)
 ```
@@ -198,14 +198,14 @@ curl "http://localhost:8080/api/browse?path=/root"
 
 ```bash
 # Service worker
-curl http://localhost:8080/sw.js
+curl http://localhost:8088/sw.js
 
 # App static files (.js/.mjs with correct MIME)
-curl -I http://localhost:8080/apps/file_editor_cm6/main.js
+curl -I http://localhost:8088/apps/file_editor_cm6/main.js
 # Verify: Content-Type: application/javascript
 
 # Vendor assets (should not be modified)
-curl -I http://localhost:8080/static/vendor/codemirror/codemirror.js
+curl -I http://localhost:8088/static/vendor/codemirror/codemirror.js
 ```
 
 ## Success criteria
@@ -217,7 +217,7 @@ curl -I http://localhost:8080/static/vendor/codemirror/codemirror.js
 - [ ] App proxy forwards requests correctly (if external workers exist)
 - [ ] Static assets serve with correct MIME types
 - [ ] No Python import errors on startup
-- [ ] ASGI app starts cleanly: `uvicorn app.main:app --host 0.0.0.0 --port 8080`
+- [ ] ASGI app starts cleanly: `uvicorn app.main:app --host 0.0.0.0 --port 8088`
 
 ## Regression testing checklist
 

@@ -324,7 +324,7 @@ You may use ONLY these read-only git commands to verify your changes:
 
 ## How to run after migration
 - Install deps: `pip install fastapi starlette uvicorn httpx websockets` (+ existing requirements)
-- Run ASGI app: `uvicorn app.main:app --host 0.0.0.0 --port 8080`
+- Run ASGI app: `uvicorn app.main:app --host 0.0.0.0 --port 8088`
 - Entry point is app/main.py (migrated Flask → FastAPI in-place)
 
 ---

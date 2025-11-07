@@ -107,7 +107,7 @@ PATH A: REST Endpoint Failure
 10. Terminal creation aborted
 
 PATH B: WebSocket Failure (if REST bypassed)
-1. Frontend connects: ws://localhost:8080/ws/app/file_editor_cm6/terminal/auto
+1. Frontend connects: ws://localhost:8088/ws/app/file_editor_cm6/terminal/auto
 2. Proxy forwards to: ws://127.0.0.1:<dynamic_port>/ws/terminal/auto
 3. terminal_backend.py line 180: await websocket.accept()
 4. Line 200: mgr.list_shells() executes (orphan cleanup)
@@ -1771,4 +1771,3 @@ If any step fails critically:
   5. Review error messages before retrying
 
 --------------------------------------------------------------------------------
-

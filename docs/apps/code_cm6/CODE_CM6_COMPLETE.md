@@ -52,7 +52,7 @@ The `file_editor_cm6` app is a full-featured CodeMirror 6 editor bundled with Te
 ### App Worker Pattern
 
 ```
-WebSocket Proxy (Main App - Port 8080)
+WebSocket Proxy (Main App - Port 8088)
   ↓
 file_editor_cm6 Worker (Dynamic Port)
   ├─ core_read.py (file watcher)
@@ -73,7 +73,7 @@ The editor uses a unified WebSocket proxy architecture:
 ```
 Client Browser
   ↓
-ws://localhost:8080/ws/app/file_editor_cm6/{endpoint}
+ws://localhost:8088/ws/app/file_editor_cm6/{endpoint}
   ↓
 Main App (proxy)
   ↓ (discovers port via X-App-Worker-Port header)

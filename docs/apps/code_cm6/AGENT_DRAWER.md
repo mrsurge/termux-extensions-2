@@ -1382,7 +1382,7 @@ function connectSharedShell() {
   }
   
   sharedShell.connectPromise = new Promise((resolve, reject) => {
-    const ws = new WebSocket('ws://localhost:8080/ws/app/file_editor_cm6/agent');
+    const ws = new WebSocket('ws://localhost:8088/ws/app/file_editor_cm6/agent');
     
     ws.onopen = () => {
       sharedShell.ws = ws;

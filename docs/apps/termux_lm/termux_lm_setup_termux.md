@@ -38,7 +38,7 @@ After the script completes, open a new Termux session (so `.bashrc` is reloaded)
 start-te
 ```
 
-This runs `python -m app.supervisor`, loads extensions/apps, and exposes the framework at `http://localhost:8080`. Access it locally via a browser (e.g. `http://127.0.0.1:8080`) or over LAN if you bind externally.
+This runs `python -m app.supervisor`, loads extensions/apps, and exposes the framework at `http://localhost:8088`. Access it locally via a browser (e.g. `http://127.0.0.1:8088`) or over LAN if you bind externally.
 
 ## 4. Post-install checklist
 

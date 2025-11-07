@@ -21,7 +21,7 @@ framework now that framework shells are available.
 ## 3. Using Framework Shells for aria2
 1. **Spawn the daemon** (example request):
    ```bash
-   curl -X POST http://localhost:8080/api/framework_shells \
+   curl -X POST http://localhost:8088/api/framework_shells \
      -H 'Content-Type: application/json' \
      -d '{
        "command": ["aria2c", "--enable-rpc", "--rpc-listen-all=false", "--rpc-allow-origin-all"],
@@ -35,21 +35,21 @@ framework now that framework shells are available.
 
 2. **Monitor status**:
    ```bash
-   curl http://localhost:8080/api/framework_shells
-   curl 'http://localhost:8080/api/framework_shells/<id>?logs=true&tail=200'
+   curl http://localhost:8088/api/framework_shells
+   curl 'http://localhost:8088/api/framework_shells/<id>?logs=true&tail=200'
    ```
 
 3. **Stop / restart**:
    ```bash
-   curl -X POST http://localhost:8080/api/framework_shells/<id>/action \
+   curl -X POST http://localhost:8088/api/framework_shells/<id>/action \
      -H 'Content-Type: application/json' -d '{"action":"stop"}'
-   curl -X POST http://localhost:8080/api/framework_shells/<id>/action \
+   curl -X POST http://localhost:8088/api/framework_shells/<id>/action \
      -H 'Content-Type: application/json' -d '{"action":"restart"}'
    ```
 
 4. **Remove metadata/logs** when the daemon is no longer needed:
    ```bash
-   curl -X DELETE http://localhost:8080/api/framework_shells/<id>
+   curl -X DELETE http://localhost:8088/api/framework_shells/<id>
    ```
 
 The aria2 app can call these endpoints directly from its backend (via `requests`

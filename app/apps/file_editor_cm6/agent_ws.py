@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import uuid
+from typing import Optional
 from fastapi import WebSocket
 from .agent_bridge import get_bridge, enrich_context
 from .agent_session_store import get_session, clear_conversation_id
@@ -101,11 +102,34 @@ async def agent_websocket(websocket: WebSocket):
             pass
         return
     
+    async def _send_connected_event(current_shell_id: str, current_session_id: str, replaced_from: Optional[str] = None):
+        """Emit the connected event expected by the frontend handshake."""
+        payload = {
+            'event': 'connected',
+            'agent': agent_type,
+            'shell_id': current_shell_id,
+            'session_id': current_session_id,
+            'cwd': cwd,
+        }
+        try:
+            await websocket.send_text(json.dumps(payload))
+            if replaced_from and replaced_from != current_shell_id:
+                await websocket.send_text(json.dumps({
+                    'event': 'shell_replaced',
+                    'agent': agent_type,
+                    'old_shell_id': replaced_from,
+                    'shell_id': current_shell_id,
+                    'session_id': current_session_id,
+                }))
+        except Exception:
+            pass
+
     # Get or create THE SINGLE shared shell for this agent type
     # First, try to find existing shell by label (survives worker restarts)
     label = f"agent-{agent_type}-shared-c"  # Consistent label for shared shell
     session_id = requested_session_id
     shell_id = None
+    connected_sent = False
     
     # Try to find existing shell by label (survives worker restarts)
     existing_shell = await manager.find_shell_by_label(label, status='running')
@@ -117,6 +141,8 @@ async def agent_websocket(websocket: WebSocket):
         bridge.attach_session(session_id, shell_id)
         _shared_shells[agent_type] = (session_id, shell_id)
         print(f'[Agent WS] Found existing {agent_type} shell: {shell_id}')
+        await _send_connected_event(shell_id, session_id)
+        connected_sent = True
         # FIX 1: Populate CodexAdapter._conversations from disk on connection
         if requested_session_id:
             from .agent_bridge import CodexAdapter
@@ -134,6 +160,8 @@ async def agent_websocket(websocket: WebSocket):
                 shell_id = cached_shell
                 session_id = session_id or cached_session
                 bridge.attach_session(session_id, shell_id)
+                await _send_connected_event(shell_id, session_id)
+                connected_sent = True
                 # FIX 1: Restore conversation ID mapping for cached shell
                 if requested_session_id:
                     from .agent_bridge import CodexAdapter
@@ -169,24 +197,12 @@ async def agent_websocket(websocket: WebSocket):
         bridge.update_session_shell(session_id, shell_id)
 
         # Send shell metadata to frontend
-        try:
-            await websocket.send_text(json.dumps({
-                'event': 'connected',
-                'agent': agent_type,
-                'shell_id': shell_id,
-                'session_id': session_id,  # Shared session ID for send_raw endpoint
-                'cwd': cwd
-            }))
-            if original_shell_id and original_shell_id != shell_id:
-                await websocket.send_text(json.dumps({
-                    'event': 'shell_replaced',
-                    'agent': agent_type,
-                    'old_shell_id': original_shell_id,
-                    'shell_id': shell_id,
-                    'session_id': session_id
-                }))
-        except:
-            pass
+        await _send_connected_event(shell_id, session_id, replaced_from=original_shell_id)
+        connected_sent = True
+
+    # If we reused a shell but never emitted the handshake (shouldn't happen, defensive)
+    if shell_id and not connected_sent:
+        await _send_connected_event(shell_id, session_id, replaced_from=original_shell_id)
 
     # Subscribe to agent output
     try:
@@ -364,6 +380,7 @@ async def agent_websocket(websocket: WebSocket):
         try:
             # Forward WebSocket → Agent
             async for data in websocket.iter_text():
+                print(f"[Agent WS] Received client payload: {data[:120]}")
                 try:
                     # Parse frontend message
                     message = json.loads(data)

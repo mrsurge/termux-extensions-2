@@ -11,7 +11,7 @@
  * - Manual close() stops reconnection attempts
  * 
  * Usage:
- *   const ws = new ReconnectingWebSocket('ws://localhost:8080/ws/endpoint', {
+ *   const ws = new ReconnectingWebSocket('ws://localhost:8088/ws/endpoint', {
  *     maxRetries: 10,
  *     reconnectInterval: 1000,
  *     maxReconnectInterval: 30000,

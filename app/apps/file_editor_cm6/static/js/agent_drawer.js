@@ -490,11 +490,11 @@ export function initAgentDrawer() {
       try {
         const projectRoot = await getProjectRoot();
 
-        // Build WebSocket URL - must go through main framework proxy at port 8080
+        // Build WebSocket URL - must go through main framework proxy at port 8088
         // Main framework proxies /ws/app/file_editor_cm6/agent -> worker's /ws/agent
         const wsUrl = new URL('/ws/app/file_editor_cm6/agent', window.location.origin);
         wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
-        wsUrl.port = '8080';  // Main framework port, not worker port
+        wsUrl.port = '8088';  // Main framework port, not worker port
         wsUrl.searchParams.set('agent', sharedShell.agent);
         if (projectRoot) wsUrl.searchParams.set('cwd', projectRoot);
         if (sharedShell.session_id) wsUrl.searchParams.set('session', sharedShell.session_id);

@@ -44,7 +44,7 @@ The editor uses a unified WebSocket proxy architecture:
 ```
 Client Browser
   ↓
-ws://localhost:8080/ws/app/file_editor_cm6/read
+ws://localhost:8088/ws/app/file_editor_cm6/read
   ↓
 Main App (proxy)
   ↓ (discovers port via X-App-Worker-Port header)

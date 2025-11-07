@@ -114,7 +114,7 @@ Else:
 ```
 Client → ws://host/ws/app/file_editor_cm6/read
   ↓
-Main app (port 8080)
+Main app (port 8088)
   ↓
 Discover worker port from registry
   ↓

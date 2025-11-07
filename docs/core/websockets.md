@@ -38,7 +38,7 @@ The framework uses **flask-sock** for WebSocket support, providing bidirectional
 
 **Why proxy worker WebSockets?**
 - Apps run in isolated worker processes (port 50000+)
-- Main app runs on port 8080
+- Main app runs on port 8088
 - Browser connects to main app, which forwards to worker
 - Enables process isolation and independent lifecycle management
 
@@ -88,10 +88,10 @@ app.config["SOCK"] = sock
 **Examples:**
 ```
 # Main app - direct
-ws://localhost:8080/ws/terminal/shell_123
+ws://localhost:8088/ws/terminal/shell_123
 
 # Worker app - proxied
-ws://localhost:8080/ws/app/file_editor_cm6/agent
+ws://localhost:8088/ws/app/file_editor_cm6/agent
   → proxied to →
 ws://localhost:50001/ws/agent
 ```
@@ -104,7 +104,7 @@ ws://localhost:50001/ws/agent
 
 ```
 Browser
-  ↓ ws://localhost:8080/ws/terminal/shell_123
+  ↓ ws://localhost:8088/ws/terminal/shell_123
 Main Flask App
   ↓
 Handle WebSocket directly
@@ -124,7 +124,7 @@ Handle WebSocket directly
 
 ```
 Browser
-  ↓ ws://localhost:8080/ws/app/code_cm6/agent
+  ↓ ws://localhost:8088/ws/app/code_cm6/agent
 Main Flask App (proxy)
   ↓ ws://localhost:50001/ws/agent
 Worker Process
@@ -227,7 +227,7 @@ def register_websockets(sock):
         """
         Worker WebSocket handler.
         
-        Client connects to: ws://localhost:8080/ws/app/my_app/my_feature
+        Client connects to: ws://localhost:8088/ws/app/my_app/my_feature
         Main app proxies to: ws://localhost:50001/ws/my_feature
         """
         try:
@@ -285,7 +285,7 @@ def proxy_app_websocket(client_ws, app_id, subpath):
 
 ```
 1. Browser connects to main app:
-   ws://localhost:8080/ws/app/code_cm6/agent
+   ws://localhost:8088/ws/app/code_cm6/agent
 
 2. Main app extracts:
    - app_id: "code_cm6"
@@ -652,7 +652,7 @@ def query_websocket(ws):
 
 **Client:**
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/ws/query');
+const ws = new WebSocket('ws://localhost:8088/ws/query');
 
 ws.onopen = () => {
     ws.send(JSON.stringify({
@@ -691,7 +691,7 @@ def stream_websocket(ws):
 
 **Client:**
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/ws/stream');
+const ws = new WebSocket('ws://localhost:8088/ws/stream');
 
 ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
@@ -973,7 +973,7 @@ def websocket_handler(ws):
 
 **Client-side:**
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/ws/feature');
+const ws = new WebSocket('ws://localhost:8088/ws/feature');
 
 ws.onopen = () => {
     console.log('WebSocket connected');
@@ -1029,7 +1029,7 @@ def websocket_handler(ws):
 npm install -g wscat
 
 # Connect to WebSocket
-wscat -c ws://localhost:8080/ws/feature
+wscat -c ws://localhost:8088/ws/feature
 
 # Send messages
 > {"type":"request","data":"hello"}
@@ -1047,7 +1047,7 @@ curl --no-buffer \
      --header "Upgrade: websocket" \
      --header "Sec-WebSocket-Version: 13" \
      --header "Sec-WebSocket-Key: $(openssl rand -base64 16)" \
-     http://localhost:8080/ws/feature
+     http://localhost:8088/ws/feature
 ```
 
 ### Monitor Active Connections
@@ -1097,7 +1097,7 @@ def debug_websockets():
 
 **Client connects to:**
 ```
-ws://localhost:8080/ws/app/file_editor_cm6/agent
+ws://localhost:8088/ws/app/file_editor_cm6/agent
 ```
 
 **Main app proxies to:**

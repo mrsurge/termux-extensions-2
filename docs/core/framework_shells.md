@@ -94,7 +94,7 @@ All responses honour the `{ "ok": true|false, ... }` envelope.
 
 1. **Spawn aria2 daemon**
    ```bash
-   curl -X POST http://localhost:8080/api/framework_shells \
+   curl -X POST http://localhost:8088/api/framework_shells \
      -H 'Content-Type: application/json' \
      -d '{"command":["aria2c","--enable-rpc"],"label":"aria2"}'
    ```
@@ -102,20 +102,20 @@ All responses honour the `{ "ok": true|false, ... }` envelope.
 
 2. **List shells**
    ```bash
-   curl http://localhost:8080/api/framework_shells
+   curl http://localhost:8088/api/framework_shells
    ```
 
 3. **Inspect logs**
    ```bash
-   curl 'http://localhost:8080/api/framework_shells/<id>?logs=true&tail=200'
+   curl 'http://localhost:8088/api/framework_shells/<id>?logs=true&tail=200'
    ```
 
 4. **Stop / Remove**
    ```bash
-   curl -X POST http://localhost:8080/api/framework_shells/<id>/action \
+   curl -X POST http://localhost:8088/api/framework_shells/<id>/action \
      -H 'Content-Type: application/json' \
      -d '{"action":"stop"}'
-   curl -X DELETE http://localhost:8080/api/framework_shells/<id>
+   curl -X DELETE http://localhost:8088/api/framework_shells/<id>
    ```
 
 ## 7. User-Configurable Shell Timeouts
@@ -525,12 +525,12 @@ def cleanup():
 
 **View shell list:**
 ```bash
-curl http://localhost:8080/api/framework_shells | jq
+curl http://localhost:8088/api/framework_shells | jq
 ```
 
 **View shell logs:**
 ```bash
-curl 'http://localhost:8080/api/framework_shells/<shell-id>?logs=true&tail=100' | jq
+curl 'http://localhost:8088/api/framework_shells/<shell-id>?logs=true&tail=100' | jq
 ```
 
 **Manual log file inspection:**
@@ -549,7 +549,7 @@ cat ~/.cache/te_framework/meta/<shell-id>/meta.json | jq
 
 **Force kill stuck shell:**
 ```bash
-curl -X POST http://localhost:8080/api/framework_shells/<shell-id>/action \
+curl -X POST http://localhost:8088/api/framework_shells/<shell-id>/action \
   -H 'Content-Type: application/json' \
   -d '{"action":"kill"}'
 ```

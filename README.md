@@ -60,7 +60,7 @@ After the bootstrap completes, open a new shell (so `.bashrc` reloads) and launc
 start-te
 ```
 
-Then browse to `http://localhost:8080` from the device (or another host on your LAN if you bind externally).
+Then browse to `http://localhost:8088` from the device (or another host on your LAN if you bind externally).
 
 ### Manual setup
 
@@ -83,7 +83,7 @@ If you prefer a manual install, follow these steps instead:
    ```
 
 4. **Access the UI**
-   Navigate to `http://localhost:8080` in a browser.
+   Navigate to `http://localhost:8088` in a browser.
 
 ### Production run (serve to other devices)
 
@@ -93,11 +93,11 @@ To allow other devices on your network to access the UI, run with Gunicorn and b
 # Install requirements (if not already)
 pip install -r requirements.txt
 
-# Run Gunicorn, binding to 0.0.0.0:8080
-TE_SESSION_TYPE="framework" gunicorn -w 2 -k gthread --threads 8 -b 0.0.0.0:8080 wsgi:application
+# Run Gunicorn, binding to 0.0.0.0:8088
+TE_SESSION_TYPE="framework" gunicorn -w 2 -k gthread --threads 8 -b 0.0.0.0:8088 wsgi:application
 ```
 
-Then open from another device on the same network: `http://<your-device-ip>:8080`
+Then open from another device on the same network: `http://<your-device-ip>:8088`
 
 ## Testing
 
@@ -111,7 +111,7 @@ The framework now exposes runtime metadata via `TE_RUN_ID` and a metrics endpoin
 
 2. In a separate shell, confirm the server is reporting metrics:
    ```bash
-   curl http://localhost:8080/api/framework/runtime/metrics | jq
+   curl http://localhost:8088/api/framework/runtime/metrics | jq
    ```
    The response includes the active `run_id`, supervisor/app PIDs, aggregate CPU usage, RSS totals for all framework-managed shells, and the list of interactive sessions stamped with the current run.
 
@@ -120,7 +120,7 @@ The framework now exposes runtime metadata via `TE_RUN_ID` and a metrics endpoin
 If you are iterating on backend changes, restart the supervisor script to issue a fresh `TE_RUN_ID` for the next test cycle. Press `Ctrl+C` in the supervisor window to trigger an orderly shutdown (framework shells and dtach sessions tagged with the run ID are cleaned up automatically).
 
 Notes:
-- The built-in Flask server is now non-debug by default and binds to `0.0.0.0` on port 8080, but Gunicorn is recommended for multi-client stability.
+- The built-in Flask server is now non-debug by default and binds to `0.0.0.0` on port 8088, but Gunicorn is recommended for multi-client stability.
 - Adjust workers/threads based on your device resources. On low-memory phones/tablets, `-w 1 --threads 4` might be better.
 
 
@@ -128,7 +128,7 @@ Notes:
 
 On mobile (Android Chrome/Edge, recent Firefox):
 
-- Open `http://localhost:8080` in the browser on the same device.
+- Open `http://localhost:8088` in the browser on the same device.
 - Use the browser menu and select "Install app" or "Add to Home screen".
 - Launch from the home screen icon for a full-screen experience.
 
