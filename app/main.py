@@ -765,28 +765,6 @@ async def shutdown_framework(request: Request):
     )
 
 
-@app.post("/api/internal/agents/spawn")
-async def internal_spawn_agent(payload: dict = Body(...)):
-    agent = payload.get("agent", "codex")
-    session_id = payload.get("session_id")
-    cwd = payload.get("cwd")
-
-    if agent != "codex":
-        raise HTTPException(status_code=400, detail=f"Unsupported agent type '{agent}'")
-
-    bridge = get_bridge()
-    result = await bridge.find_or_spawn_agent("codex", cwd or os.path.expanduser("~"))
-    resolved_session = session_id or result.get("session_id") or result.get("id")
-    shell_id = result.get("id")
-    shell = await bridge.get_or_create_agent(resolved_session, "codex", cwd or os.path.expanduser("~"))
-    data = {
-        "agent": agent,
-        "session_id": resolved_session,
-        "shell_id": shell_id,
-        "shell": shell,
-    }
-    return {"ok": True, "data": data}
-
 async def _terminate_framework_shells(manager: FrameworkShellManager) -> None:
     records = await manager.list_shells()
     for record in list(records):

@@ -10,5 +10,8 @@
     "frontend_template": "template.html",
     "frontend_script": "main.js"
   },
-  "fullscreen": true
+  "fullscreen": true,
+  "ipc_modules": [
+    "app.apps.file_editor_cm6.ipc_bridge"
+  ]
 }

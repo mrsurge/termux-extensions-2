@@ -435,6 +435,36 @@ class AgentBridge:
             self._manager_instance = await _manager()
         return self._manager_instance
 
+    async def find_or_spawn_agent(self, agent_type: str, cwd: str) -> dict:
+        """
+        Find an existing shared agent shell or spawn a new one.
+        Ensures a single shared Codex shell backs all sessions.
+        """
+        if agent_type not in self._adapters:
+            raise ValueError(f"Unknown agent type: {agent_type}")
+
+        label = f"agent-{agent_type}-shared-c"
+        session_id = f"shared-{agent_type}"
+        manager = await self._get_manager()
+        existing = await manager.find_shell_by_label(label, status="running")
+        if existing:
+            self._sessions[session_id] = existing.id
+            described = await manager.describe(existing)
+            return {
+                "id": existing.id,
+                "session_id": session_id,
+                "alive": described.get("alive", False),
+                "label": described.get("label"),
+            }
+
+        shell_dict = await self.spawn_agent(agent_type, cwd, session_id)
+        return {
+            "id": shell_dict["id"],
+            "session_id": session_id,
+            "alive": shell_dict.get("alive", False),
+            "label": shell_dict.get("label"),
+        }
+
     async def get_manager(self) -> FrameworkShellManager:
         """Public async accessor for the framework shell manager."""
         return await self._get_manager()
