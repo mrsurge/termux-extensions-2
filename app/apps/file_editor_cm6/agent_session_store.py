@@ -11,6 +11,37 @@ _SESSIONS_DIR = Path.home() / '.codex' / 'agent_sessions'
 _SESSIONS_FILE = _SESSIONS_DIR / 'sessions.json'
 
 
+def _normalize_conversation_id(value: Any) -> Optional[str]:
+    """
+    Coerce persisted conversation IDs into clean strings.
+    Accepts None or null-like strings and normalizes to None.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        lowered = cleaned.lower()
+        if lowered in {'null', 'none', 'undefined'}:
+            return None
+        return cleaned
+    # Ignore unexpected types; treat as no conversation.
+    return None
+
+
+def _normalize_session_entry(session_id: str, session: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Ensure critical fields (like conversationId) stay in canonical form.
+    Mutates and returns the session dict for convenience.
+    """
+    if not isinstance(session, dict):
+        return {}
+    session.setdefault('id', session_id)
+    session['conversationId'] = _normalize_conversation_id(session.get('conversationId'))
+    return session
+
+
 def load_session_map() -> Dict[str, Any]:
     """Load all sessions from dedicated sessions file."""
     if not _SESSIONS_FILE.exists():
@@ -21,6 +52,9 @@ def load_session_map() -> Dict[str, Any]:
             return {}
         data = json.loads(content)
         if isinstance(data, dict):
+            for sid, payload in list(data.items()):
+                if isinstance(payload, dict):
+                    data[sid] = _normalize_session_entry(sid, payload)
             return data
     except Exception:
         pass
@@ -41,7 +75,7 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
         sessions = load_session_map()
         entry = sessions.get(session_id)
         if entry and isinstance(entry, dict):
-            return entry
+            return _normalize_session_entry(session_id, entry)
         return None
 
 
@@ -91,7 +125,7 @@ def create_session(
             'fullAccess': fullAccess,
             'version': 1
         }
-        sessions[session_id] = session
+        sessions[session_id] = _normalize_session_entry(session_id, session)
         save_session_map(sessions)
         return session
 
@@ -112,7 +146,7 @@ def append_message(session_id: str, message: Dict[str, Any]) -> Dict[str, Any]:
         
         session['messages'].append(message)
         session['version'] = session.get('version', 1) + 1
-        sessions[session_id] = session
+        sessions[session_id] = _normalize_session_entry(session_id, session)
         save_session_map(sessions)
         return session
 
@@ -135,7 +169,7 @@ def update_message(session_id: str, message_id: str, **updates: Any) -> Dict[str
                 break
         
         session['version'] = session.get('version', 1) + 1
-        sessions[session_id] = session
+        sessions[session_id] = _normalize_session_entry(session_id, session)
         save_session_map(sessions)
         return session
 
@@ -145,9 +179,11 @@ def update_session_metadata(session_id: str, **kwargs: Any) -> Dict[str, Any]:
     with _session_lock:
         sessions = load_session_map()
         session = sessions.get(session_id, {}) if isinstance(sessions.get(session_id), dict) else {}
+        if 'conversationId' in kwargs:
+            kwargs['conversationId'] = _normalize_conversation_id(kwargs['conversationId'])
         session.update(kwargs)
         session['version'] = session.get('version', 1) + 1
-        sessions[session_id] = session
+        sessions[session_id] = _normalize_session_entry(session_id, session)
         save_session_map(sessions)
         return session
 
@@ -171,7 +207,7 @@ def clear_conversation_id(session_id: str) -> None:
         if isinstance(entry, dict):
             entry['conversationId'] = None
             entry['version'] = entry.get('version', 1) + 1
-            sessions[session_id] = entry
+            sessions[session_id] = _normalize_session_entry(session_id, entry)
             save_session_map(sessions)
 
 

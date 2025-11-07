@@ -24,11 +24,11 @@ from fastapi import FastAPI, Request, Query, Body, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 import requests
 from app.libs.app_lifecycle import start_background_tasks
-from app.libs.app_manager import ensure_app_running, get_running_apps
+from app.libs.app_manager import ensure_app_running, get_running_apps, initialize_running_apps
 from app.libs.bookmarks import bookmarks_bp
 
 # Create FastAPI app instance with lifespan
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 @asynccontextmanager
 async def lifespan(app_instance):
@@ -48,24 +48,37 @@ async def lifespan(app_instance):
     from app.libs import app_manager
     app_manager._LOADED_APPS = loaded_apps
     print(f"Loaded {len(loaded_apps)} apps.")
+    print("--- Restoring Running Apps ---")
+    await initialize_running_apps()
     print("--- Starting Framework Shell Log Monitor ---")
     global _log_monitor_thread
     _log_monitor_thread = _start_framework_shell_log_monitor()
-    
+    print("--- Starting Lifecycle Background Tasks ---")
+    start_background_tasks()
+
     yield
-    
+
+    print("--- Shutting down: Terminating running apps ---")
+    manager = None
+    try:
+        manager = await get_manager()
+        from app.libs import app_lifecycle
+        await app_lifecycle.shutdown_lifecycle(manager)
+    except Exception as e:
+        print(f"Warning: Failed to shutdown lifecycle apps cleanly: {e}")
+
     # Shutdown - forcibly kill all framework shells
     print("--- Shutting down: Cleaning up framework shells ---")
     try:
-        manager = await get_manager()
+        manager = manager or await get_manager()
         shells = await manager.list_shells()
         for shell in shells:
             try:
-                print(f"Terminating shell {shell.id} (PID {shell.pid})...")
-                await manager.terminate_shell(shell.id, force=True, timeout=2.0)
+                print(f"Removing shell {shell.id} (PID {shell.pid})...")
+                await manager.remove_shell(shell.id, force=True)
             except Exception as e:
-                print(f"Warning: Failed to terminate shell {shell.id}: {e}")
-        print(f"Cleaned up {len(shells)} framework shells.")
+                print(f"Warning: Failed to remove shell {shell.id}: {e}")
+        print(f"Removed {len(shells)} framework shells.")
     except Exception as e:
         print(f"Warning: Error during shell cleanup: {e}")
 
@@ -858,43 +871,53 @@ async def proxy_app_request(app_id: str, subpath: str, request: Request):
     headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
     body = await request.body()
     
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.request(
-                method=request.method,
-                url=url,
-                params=request.query_params,
-                headers=headers,
-                content=body,
-                timeout=30.0,
-            )
-        except httpx.RequestError as exc:
-            print(f"[AppProxy] Failed to reach app '{app_id}' at {url}: {exc}")
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "error": f"App '{app_id}' worker is not reachable yet. Please retry shortly."
-                },
-                status_code=502,
-            )
+    client = httpx.AsyncClient(timeout=30.0)
+    try:
+        upstream_request = client.build_request(
+            method=request.method,
+            url=url,
+            params=request.query_params,
+            headers=headers,
+            content=body,
+        )
+        resp = await client.send(upstream_request, stream=True)
+    except httpx.RequestError as exc:
+        await client.aclose()
+        print(f"[AppProxy] Failed to reach app '{app_id}' at {url}: {exc}")
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": f"App '{app_id}' worker is not reachable yet. Please retry shortly."
+            },
+            status_code=502,
+        )
     
     # Strip hop-by-hop headers
     excluded = {'content-encoding', 'content-length', 'transfer-encoding', 'connection'}
     resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
-    
+
+    async def _iter_body():
+        try:
+            async for chunk in resp.aiter_bytes():
+                yield chunk
+        finally:
+            await resp.aclose()
+            await client.aclose()
+
     return StreamingResponse(
-        resp.iter_bytes(chunk_size=10240),
+        _iter_body(),
         status_code=resp.status_code,
         headers=resp_headers,
     )
 
-from starlette.websockets import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 import websockets
 import asyncio
 
 @app.websocket('/ws/app/{app_id}/{route:path}')
 async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
     await websocket.accept()
+    print(f"[AppProxy][WebSocket] Client connected app={app_id} route={route}")
     
     # Fast lookup - apps must be started via launcher first
     running_apps = await get_running_apps()
@@ -915,27 +938,42 @@ async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
     
     try:
         async with websockets.connect(worker_url) as worker_ws:
+            print(f"[AppProxy][WebSocket] Connected to worker {worker_url}")
+
             async def forward_client_to_worker():
                 try:
                     async for msg in websocket.iter_text():
                         await worker_ws.send(msg)
                 except WebSocketDisconnect:
-                    pass
-            
+                    print(f"[AppProxy][WebSocket] Client disconnected app={app_id}")
+                except Exception as exc:
+                    print(f"[AppProxy][WebSocket] Error forwarding client->worker for {app_id}: {exc}")
+
             async def forward_worker_to_client():
                 try:
                     async for msg in worker_ws:
                         await websocket.send_text(msg)
-                except:
-                    pass
-            
-            await asyncio.gather(
-                forward_client_to_worker(),
-                forward_worker_to_client(),
-                return_exceptions=True,
-            )
-    except Exception:
-        await websocket.close()
+                except websockets.ConnectionClosedOK:
+                    print(f"[AppProxy][WebSocket] Worker closed connection app={app_id}")
+                except Exception as exc:
+                    print(f"[AppProxy][WebSocket] Error forwarding worker->client for {app_id}: {exc}")
+
+            tasks = [
+                asyncio.create_task(forward_client_to_worker(), name=f"ws-client-to-worker-{app_id}"),
+                asyncio.create_task(forward_worker_to_client(), name=f"ws-worker-to-client-{app_id}"),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            print(f"[AppProxy][WebSocket] Bridge closed for app={app_id}")
+    except Exception as exc:
+        print(f"[AppProxy][WebSocket] Failed to proxy app={app_id}: {exc}")
+    finally:
+        if websocket.application_state != WebSocketState.DISCONNECTED:
+            with suppress(Exception):
+                await websocket.close()
 
 
 

@@ -7,7 +7,6 @@ performing best-effort cleanup of framework shells when the host exits.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import signal
 import subprocess
@@ -15,10 +14,13 @@ import sys
 import threading
 import time
 import uuid
+import shutil
 from pathlib import Path
 from typing import List
 
 RUN_ID_FILE = Path(os.path.expanduser("~/.cache/te_framework/run_id"))
+LOGS_DIR = Path(os.path.expanduser("~/.cache/te_framework/logs"))
+PRESERVE_FLAG = Path(os.path.expanduser("~/.cache/te_framework/preserve_logs.flag"))
 
 
 def _ensure_run_id() -> str:
@@ -27,32 +29,6 @@ def _ensure_run_id() -> str:
         run_id = f"run_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
         os.environ["TE_RUN_ID"] = run_id
     return run_id
-
-
-async def _cleanup_framework_shells():
-    """Cleanup all framework shells on shutdown."""
-    from app.libs.framework_shells import get_manager
-    try:
-        mgr = await get_manager()
-        shells = await mgr.list_shells()
-        for shell in shells:
-            try:
-                await mgr.terminate_shell(shell.id, force=True)
-            except Exception as e:
-                print(f"Failed to terminate shell {shell.id}: {e}")
-    except Exception as e:
-        print(f"Failed to cleanup framework shells: {e}")
-
-def _safe_cleanup_wrapper():
-    """Safe wrapper that works in both sync and async contexts."""
-    try:
-        # Check if we're already in an async context
-        loop = asyncio.get_running_loop()
-        # We have a running loop - schedule as task
-        asyncio.create_task(_cleanup_framework_shells())
-    except RuntimeError:
-        # No running loop - safe to create new one
-        asyncio.run(_cleanup_framework_shells())
 
 
 def _kill_process_group(pid: int, sig: signal.Signals) -> None:
@@ -77,6 +53,32 @@ def _stop_ipc_server(sig: signal.Signals = signal.SIGTERM) -> None:
         print(f"[supervisor] Failed to stop IPC server {ipc_pid}: {exc}", file=sys.stderr)
 
 
+def _mark_logs_for_preservation() -> None:
+    try:
+        PRESERVE_FLAG.parent.mkdir(parents=True, exist_ok=True)
+        PRESERVE_FLAG.write_text(str(int(time.time())), encoding="utf-8")
+    except Exception as exc:  # pragma: no cover - best effort
+        print(f"[supervisor] Failed to mark logs for preservation: {exc}", file=sys.stderr)
+
+
+def _cleanup_shell_logs() -> None:
+    if not LOGS_DIR.exists():
+        return
+    try:
+        for entry in LOGS_DIR.iterdir():
+            if entry.is_file() or entry.is_symlink():
+                entry.unlink(missing_ok=True)
+            else:
+                shutil.rmtree(entry, ignore_errors=True)
+        if not LOGS_DIR.exists():
+            LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        if PRESERVE_FLAG.exists():
+            PRESERVE_FLAG.unlink(missing_ok=True)
+        print("[supervisor] Cleaned framework shell logs")
+    except Exception as exc:  # pragma: no cover - best effort
+        print(f"[supervisor] Failed to clean framework shell logs: {exc}", file=sys.stderr)
+
+
 def run(argv: List[str]) -> int:
     run_id = _ensure_run_id()
     os.environ.setdefault("TE_SUPERVISOR_PID", str(os.getpid()))
@@ -96,14 +98,17 @@ def run(argv: List[str]) -> int:
         return 1
 
     shutting_down = False
+    forced_shutdown = False
 
     def _schedule_force_kill():
         def _worker():
+            nonlocal forced_shutdown
             time.sleep(10.0)
             if proc.poll() is not None:
                 return
-            print("[supervisor] Graceful shutdown timed out; forcing framework cleanup")
-            _safe_cleanup_wrapper()
+            print("[supervisor] Graceful shutdown timed out; forcing framework shutdown")
+            _mark_logs_for_preservation()
+            forced_shutdown = True
             _kill_process_group(proc.pid, signal.SIGKILL)
             _stop_ipc_server(signal.SIGKILL)
 
@@ -139,9 +144,15 @@ def run(argv: List[str]) -> int:
         time.sleep(1.0)
         if proc.poll() is None:
             print("[supervisor] Forcing shutdown")
+            _mark_logs_for_preservation()
+            forced_shutdown = True
             _kill_process_group(proc.pid, signal.SIGKILL)
 
-    _safe_cleanup_wrapper()
+    if forced_shutdown:
+        print("[supervisor] Preserving framework shell logs due to forced shutdown")
+    else:
+        _cleanup_shell_logs()
+
     _stop_ipc_server(signal.SIGTERM)
 
     try:

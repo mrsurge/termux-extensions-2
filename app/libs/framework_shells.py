@@ -48,6 +48,9 @@ DEFAULT_MAX_SHELLS = 5
 LOG_TAIL_BYTES = 4096
 LOG_TAIL_LINES = 200
 
+def _drawer_debug(stage: str, message: str) -> None:
+    print(f"[AgentDrawer][{stage}] {message}")
+
 
 @dataclass
 class ShellRecord:
@@ -99,6 +102,8 @@ class ShellRecord:
 @dataclass
 class PTYState:
     master_fd: int
+    label: Optional[str] = None
+    shell_id: Optional[str] = None
     subscribers: List["AsyncQueue[str]"] = field(default_factory=list)
     stop: asyncio.Event = field(default_factory=asyncio.Event)
     reader: Optional[asyncio.Task] = None
@@ -447,7 +452,11 @@ class FrameworkShellManager:
         record.updated_at = time.time()
         await self._save_record(record)
         
-        state = PTYState(master_fd=master_fd)
+        state = PTYState(
+            master_fd=master_fd,
+            label=record.label,
+            shell_id=record.id,
+        )
         
         async def _async_reader() -> None:
             log_path = Path(record.stdout_log)
@@ -479,6 +488,12 @@ class FrameworkShellManager:
                         pass
                     
                     text = data.decode("utf-8", errors="replace")
+                    preview = text.strip().replace("\n", "\\n")
+                    if preview:
+                        _drawer_debug(
+                            "PTY recv",
+                            f"shell={record.id} label={record.label} chunk={preview[:200]}"
+                        )
                     subscribers = list(state.subscribers)
                     for q in subscribers:
                         try:
@@ -687,10 +702,18 @@ class FrameworkShellManager:
             if not state:
                 raise KeyError("No PTY for this shell")
             payload = data.encode("utf-8") if isinstance(data, str) else data
+            preview = payload[:200].decode("utf-8", errors="replace")
+            _drawer_debug(
+                "PTY write",
+                f"shell={shell_id} label={state.label} bytes={len(payload)} data={preview}"
+            )
             try:
                 await asyncio.to_thread(os.write, state.master_fd, payload)
-            except OSError:
+            except OSError as exc:
+                _drawer_debug("PTY write", f"error shell={shell_id}: {exc}")
                 raise
+            else:
+                _drawer_debug("PTY write", f"complete shell={shell_id}")
 
     async def subscribe_output(self, shell_id: str) -> "AsyncQueue[str]":
         async with self._get_lock():

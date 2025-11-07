@@ -56,6 +56,11 @@ async def _load_running_apps():
         print(f"[AppManager] Failed to load running apps: {e}")
         _RUNNING_APPS = {}
 
+async def initialize_running_apps():
+    """Async initializer to load running apps within an event loop."""
+    await _load_running_apps()
+
+
 def _save_running_apps():
     """Save app workers to disk."""
     _RUNNING_APPS_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -77,7 +82,9 @@ async def _wait_for_port(port: int, *, host: str = "127.0.0.1", timeout: float =
     Wait for a TCP port to become reachable.
     Returns True if the connection succeeds within the timeout, otherwise False.
     """
+    print(f"[AppManager] Waiting for port {port} on {host} (timeout {timeout}s)")
     deadline = time.time() + timeout
+    start = time.time()
     while time.time() < deadline:
         try:
             reader, writer = await asyncio.open_connection(host, port)
@@ -88,7 +95,10 @@ async def _wait_for_port(port: int, *, host: str = "127.0.0.1", timeout: float =
             writer.close()
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
+            elapsed = time.time() - start
+            print(f"[AppManager] Port {port} became reachable after {elapsed:.2f}s")
             return True
+    print(f"[AppManager] Port {port} did not become reachable within {timeout}s")
     return False
 
 async def ensure_app_running(app_id):
@@ -114,10 +124,16 @@ async def ensure_app_running(app_id):
         
         if shell and shell.status == 'running':
             print(f"[AppManager] Worker still running, returning existing app_info")
+            # Ensure lifecycle tracking knows about this worker
+            await app_lifecycle.register_app(app_id, app_info.get('shell_id'), app_info.get('port'))
             return app_info
         # Shell is not running, remove it from the list and restart
         print(f"[AppManager] Shell dead or missing, removing from cache and restarting")
         _RUNNING_APPS.pop(app_id, None)
+        try:
+            await app_lifecycle.unregister_app(app_info.get('shell_id'))
+        except Exception:
+            pass
 
     # Find the app's manifest
     app_manifest = None
@@ -252,5 +268,5 @@ def get_loaded_apps():
     """Returns the list of loaded app manifests."""
     return _LOADED_APPS
 
-# Load running apps from disk when module is imported
-asyncio.run(_load_running_apps())
+# Running apps are now initialized explicitly during FastAPI startup to avoid
+# creating nested event loops at import time.

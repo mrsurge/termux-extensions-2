@@ -63,6 +63,33 @@ generate_run_id_if_needed() {
 
 generate_run_id_if_needed
 
+cleanup_framework_shell_logs() {
+  local base_dir="$HOME/.cache/te_framework"
+  local logs_dir="$base_dir/logs"
+  local preserve_flag="$base_dir/preserve_logs.flag"
+
+  if [ -f "$preserve_flag" ]; then
+    if [ -d "$logs_dir" ]; then
+      local ts archive_dir
+      ts="$(date +%s)"
+      archive_dir="$base_dir/logs_preserved_$ts"
+      mv "$logs_dir" "$archive_dir"
+      echo "[run_framework] Preserved forced-shutdown logs at $archive_dir"
+      mkdir -p "$logs_dir"
+    else
+      echo "[run_framework] Preserve flag present but no logs directory to archive"
+    fi
+    rm -f "$preserve_flag"
+    return
+  fi
+
+  if [ ! -d "$logs_dir" ]; then
+    return
+  fi
+  echo "[run_framework] Cleaning previous framework shell logs in $logs_dir"
+  find "$logs_dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+}
+
 resolve_path() {
   local src="$1"
   if command -v readlink >/dev/null 2>&1; then
@@ -87,6 +114,8 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 
 cd "$REPO_ROOT"
+
+cleanup_framework_shell_logs
 
 # Clean up stale python cache files
 find . -type d -name "__pycache__" -exec rm -rf {} +

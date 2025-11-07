@@ -26,10 +26,13 @@ apps_bp = APIRouter()
 
 @apps_bp.post('/api/apps/{app_id}/start')
 async def start_app(app_id: str):
+    print(f"[AppsExtension] start_app requested for {app_id}")
     try:
         app_info = await ensure_app_running(app_id)
+        print(f"[AppsExtension] start_app succeeded for {app_id}: shell={app_info.get('shell_id')} port={app_info.get('port')}")
         return {"ok": True, "data": app_info}
     except (ValueError, RuntimeError) as e:
+        print(f"[AppsExtension] start_app failed for {app_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @apps_bp.post('/api/apps/{app_id}/quit')
@@ -37,14 +40,17 @@ async def quit_app(app_id: str, manager: FrameworkShellManager = Depends(get_fra
     """
     A new, specific endpoint for quitting an app.
     """
+    print(f"[AppsExtension] quit_app requested for {app_id}")
     running_apps = await app_lifecycle.get_running_apps(manager)
     app_to_quit = next((app for app in running_apps if app.get("app_id") == app_id), None)
 
     if not app_to_quit:
+        print(f"[AppsExtension] quit_app: app {app_id} not running")
         raise HTTPException(status_code=404, detail="App is not running or already terminated.")
 
     shell_id = app_to_quit["shell_id"]
     terminated = await app_lifecycle.terminate_app(manager, shell_id)
+    print(f"[AppsExtension] quit_app terminate_app(shell_id={shell_id}) -> {terminated}")
 
     if terminated:
         return {"ok": True, "data": {"message": f"App {app_id} terminated."}}
@@ -54,6 +60,7 @@ async def quit_app(app_id: str, manager: FrameworkShellManager = Depends(get_fra
 @apps_bp.post('/api/apps/{app_id}/lock')
 async def lock_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """Sets the lock state for an app to true."""
+    print(f"[AppsExtension] lock_app requested for {app_id}")
     running_apps = await app_lifecycle.get_running_apps(manager)
     app_to_lock = next((app for app in running_apps if app.get("app_id") == app_id), None)
     if not app_to_lock:
@@ -65,6 +72,7 @@ async def lock_app(app_id: str, manager: FrameworkShellManager = Depends(get_fra
 @apps_bp.post('/api/apps/{app_id}/unlock')
 async def unlock_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """Sets the lock state for an app to false."""
+    print(f"[AppsExtension] unlock_app requested for {app_id}")
     running_apps = await app_lifecycle.get_running_apps(manager)
     app_to_unlock = next((app for app in running_apps if app.get("app_id") == app_id), None)
     if not app_to_unlock:
@@ -77,6 +85,7 @@ async def unlock_app(app_id: str, manager: FrameworkShellManager = Depends(get_f
 async def get_running_apps(manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """Returns a list of all currently running app shells with stats."""
     running_apps = await app_lifecycle.get_running_apps(manager)
+    print(f"[AppsExtension] get_running_apps returning {len(running_apps)} entries")
     # We need to augment this with data from the main app manifests (like name and icon)
     all_apps = {app['id']: app for app in get_loaded_apps()}
     
@@ -107,6 +116,7 @@ async def app_shell(app_id: str, request: Request):
 
     entrypoints = manifest.get('entrypoints', {})
     if entrypoints.get('nicegui_shell'):
+        print(f"[AppsExtension] app_shell launching nicegui app {app_id}")
         app_info = await ensure_app_running(app_id)
         port = app_info.get('port') if isinstance(app_info, dict) else None
         if not port:
@@ -161,6 +171,7 @@ async def shell_logs_viewer(shell_id: str):
 async def shell_logs_ws(websocket: WebSocket, shell_id: str):
     """WebSocket endpoint for tailing framework shell logs (both stdout and stderr)."""
     await websocket.accept()
+    print(f"[AppsExtension] shell_logs_ws subscribed shell_id={shell_id}")
     
     logs_dir = Path.home() / ".cache/te_framework/logs"
     stdout_path = logs_dir / f"{shell_id}.stdout.log"
@@ -172,6 +183,7 @@ async def shell_logs_ws(websocket: WebSocket, shell_id: str):
             "message": f"No log files found for {shell_id}"
         })
         await websocket.close()
+        print(f"[AppsExtension] shell_logs_ws no logs for {shell_id}, closing")
         return
     
     try:
@@ -194,6 +206,7 @@ async def shell_logs_ws(websocket: WebSocket, shell_id: str):
             "stdout": stdout_initial,
             "stderr": stderr_initial
         })
+        print(f"[AppsExtension] shell_logs_ws sent initial payload for {shell_id}")
         
         # Track file sizes for tailing
         stdout_size = (await asyncio.to_thread(stdout_path.stat)).st_size if await asyncio.to_thread(stdout_path.exists) else 0

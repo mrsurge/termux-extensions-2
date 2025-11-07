@@ -14,6 +14,24 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 from app.libs.framework_shells import FrameworkShellManager, get_manager as _manager
 
+def _debug_log(stage: str, message: str) -> None:
+    print(f"[AgentDrawer][{stage}] {message}")
+
+
+def _normalize_conversation_id(value: Any) -> Optional[str]:
+    """Normalize conversation IDs coming from various layers."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return None
+        lowered = trimmed.lower()
+        if lowered in {'null', 'none', 'undefined'}:
+            return None
+        return trimmed
+    return None
+
 
 class CodexAdapter:
     """
@@ -551,12 +569,25 @@ class AgentBridge:
         """
         shell_id = self._sessions.get(session_id)
         if not shell_id:
+            _debug_log("Bridge:error", f"No shell mapping for session={session_id}")
             raise ValueError(f"No agent for session {session_id}")
         
         # Get adapter
         adapter = self._adapters[agent_type]
 
         chat_session_id = message.get('session')
+        _debug_log(
+            "Bridge:route",
+            f"shared_session={session_id} chat_session={chat_session_id} "
+            f"shell={shell_id} agent={agent_type} msg_id={message.get('id')}"
+        )
+
+        if 'conversationId' in message:
+            normalized_conv = _normalize_conversation_id(message.get('conversationId'))
+            if normalized_conv is None:
+                message.pop('conversationId', None)
+            else:
+                message['conversationId'] = normalized_conv
 
         session_state = None
         if agent_type == 'codex':
@@ -586,9 +617,10 @@ class AgentBridge:
                     session_state['conversation_id'] = None
 
                 # Enforce stored conversation ID if we have one
-                stored_conv = session_state.get('conversation_id')
+                stored_conv = _normalize_conversation_id(session_state.get('conversation_id'))
                 if stored_conv:
                     message['conversationId'] = stored_conv
+                    session_state['conversation_id'] = stored_conv
                 elif 'conversationId' in message and message['conversationId']:
                     # If we don't have a stored conversation, ensure None is sent
                     message['conversationId'] = None
@@ -599,11 +631,27 @@ class AgentBridge:
 
         # Translate to agent format
         agent_msg = adapter.to_agent(message, context)
+        line = json.dumps(agent_msg) + '\n'
+
+        payload_preview = line.strip().replace('\n', '\\n')
+        params = agent_msg.get('params', {})
+        tool_name = params.get('name') if isinstance(params, dict) else None
+        encoded = line.encode("utf-8")
+        _debug_log(
+            "Bridge->PTY",
+            f"shell={shell_id} bytes={len(encoded)} tool={tool_name} "
+            f"conversation={message.get('conversationId')} preview={payload_preview[:160]}"
+        )
         
         # Write line-delimited JSON to PTY
-        line = json.dumps(agent_msg) + '\n'
         manager = await self._get_manager()
-        await manager.write_to_pty(shell_id, line)
+        try:
+            await manager.write_to_pty(shell_id, encoded)
+        except Exception as exc:
+            _debug_log("Bridge->PTY", f"write failed shell={shell_id}: {exc}")
+            raise
+        else:
+            _debug_log("Bridge->PTY", f"write complete shell={shell_id}")
     
     def parse_agent_output(self, agent_type: str, line: str) -> Optional[dict]:
         """
@@ -639,6 +687,8 @@ class AgentBridge:
             await manager.unsubscribe_output(shell_id, queue)
 
     def set_session_state(self, session_id: str, state: Dict[str, Any]):
+        if 'conversation_id' in state:
+            state['conversation_id'] = _normalize_conversation_id(state['conversation_id'])
         self._session_state[session_id] = state
 
     def clear_session_state(self, session_id: str):
@@ -646,7 +696,7 @@ class AgentBridge:
 
     def note_conversation(self, session_id: str, conversation_id: str):
         state = self._session_state.setdefault(session_id, {})
-        state['conversation_id'] = conversation_id
+        state['conversation_id'] = _normalize_conversation_id(conversation_id)
 
     def update_session_shell(self, session_id: str, shell_id: str):
         state = self._session_state.setdefault(session_id, {})

@@ -1,10 +1,12 @@
 import asyncio
+import contextlib
 import time
 from typing import Dict, List, Optional
 
 # A simple in-memory store for the state of running apps.
 _running_apps: Dict[str, Dict] = {}
 _lock: Optional[asyncio.Lock] = None
+_cleanup_task: Optional[asyncio.Task] = None
 
 def _get_lock():
     """Get or create module-level lock (lazy initialization)."""
@@ -23,9 +25,11 @@ async def _background_cleanup():
     """Periodically checks for and terminates old, unlocked apps."""
     from app.libs.framework_shells import get_manager as get_framework_shell_manager
     from app.main import get_setting
-    
+
+    tick = 0
     while True:
         await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
+        tick += 1
         manager = await get_framework_shell_manager()
         app_ttl_seconds = get_setting("APP_TTL_SECONDS", DEFAULT_APP_TTL_SECONDS)
         if app_ttl_seconds is not None:
@@ -33,6 +37,7 @@ async def _background_cleanup():
         else:
             app_ttl_seconds = DEFAULT_APP_TTL_SECONDS
         
+        print(f"[AppLifecycle] Cleanup tick {tick}: tracking {len(_running_apps)} app(s)")
         async with _get_lock():
             now = time.time()
             stale_apps = []
@@ -48,14 +53,32 @@ async def _background_cleanup():
                     await terminate_app(manager, shell_id)
 
 def start_background_tasks():
-    # Start the background task when the module is loaded.
-    asyncio.create_task(_background_cleanup())
+    """Kick off background lifecycle tasks inside the current event loop."""
+    global _cleanup_task
+    if _cleanup_task and not _cleanup_task.done():
+        return
+    _cleanup_task = asyncio.create_task(_background_cleanup())
+
+
+async def _stop_background_tasks():
+    """Cancel the background cleanup task if it is running."""
+    global _cleanup_task
+    if _cleanup_task is None:
+        print("[AppLifecycle] No background task to stop")
+        return
+    print("[AppLifecycle] Stopping background cleanup task")
+    _cleanup_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await _cleanup_task
+    _cleanup_task = None
+    print("[AppLifecycle] Background cleanup task stopped")
 
 # --- Public API for the Library ---
 async def register_app(app_id: str, shell_id: str, port: int):
     """
     Called by the app launcher when a new app worker shell is spawned.
     """
+    print(f"[AppLifecycle] Registering app_id={app_id} shell_id={shell_id} port={port}")
     async with _get_lock():
         _running_apps[shell_id] = {
             "app_id": app_id,
@@ -69,6 +92,7 @@ async def unregister_app(shell_id: str):
     """
     Removes an app from tracking when it is terminated.
     """
+    print(f"[AppLifecycle] Unregistering shell_id={shell_id}")
     async with _get_lock():
         _running_apps.pop(shell_id, None)
 
@@ -112,14 +136,33 @@ async def terminate_app(manager, shell_id: str) -> bool:
     The unified function to terminate an app. It finds the shell and uses the
     FrameworkShellManager to stop it.
     """
+    print(f"[AppLifecycle] Terminating shell_id={shell_id}")
     try:
         # We use force=True to ensure the entire process group is killed.
         await manager.terminate_shell(shell_id, force=True)
         await unregister_app(shell_id)
+        print(f"[AppLifecycle] Terminated shell_id={shell_id}")
         return True
     except (KeyError, Exception):
         # If termination fails, at least remove it from our tracking
         await unregister_app(shell_id)
+        print(f"[AppLifecycle] Failed to terminate shell_id={shell_id}, unregistered tracking entry")
         return False
+
+async def terminate_all_apps(manager) -> None:
+    """Terminate every tracked app shell."""
+    async with _get_lock():
+        shell_ids = list(_running_apps.keys())
+    print(f"[AppLifecycle] Terminating all apps ({len(shell_ids)})")
+    for shell_id in shell_ids:
+        await terminate_app(manager, shell_id)
+
+
+async def shutdown_lifecycle(manager) -> None:
+    """Gracefully stop lifecycle background tasks and running apps."""
+    print("[AppLifecycle] Shutting down lifecycle services...")
+    await terminate_all_apps(manager)
+    await _stop_background_tasks()
+    print("[AppLifecycle] Lifecycle shutdown complete.")
 
 # --- End of Public API ---

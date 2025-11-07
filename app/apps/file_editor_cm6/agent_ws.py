@@ -27,6 +27,26 @@ _shared_shells = {}
 _initialized_shells = set()
 
 
+def _debug_log(stage: str, message: str) -> None:
+    """Lightweight debug print with consistent prefix."""
+    print(f"[AgentDrawer][{stage}] {message}")
+
+
+def _normalize_conversation_id(value):
+    """Treat empty/null-like strings as no conversation."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return None
+        lowered = trimmed.lower()
+        if lowered in {'null', 'none', 'undefined'}:
+            return None
+        return trimmed
+    return None
+
+
 def _build_history_payload(messages):
     if not isinstance(messages, list) or not messages:
         return '', ''
@@ -380,15 +400,26 @@ async def agent_websocket(websocket: WebSocket):
         try:
             # Forward WebSocket → Agent
             async for data in websocket.iter_text():
-                print(f"[Agent WS] Received client payload: {data[:120]}")
                 try:
                     # Parse frontend message
                     message = json.loads(data)
+                    if 'conversationId' in message:
+                        normalized_conv = _normalize_conversation_id(message.get('conversationId'))
+                        if normalized_conv is None:
+                            message.pop('conversationId', None)
+                        else:
+                            message['conversationId'] = normalized_conv
                     
                     # Override target if specified in message
                     msg_agent_type = message.get('target', agent_type)
 
                     chat_session_id = message.get('session') or requested_session_id or session_id
+                    _debug_log(
+                        "WS<-Client",
+                        f"id={message.get('id')} target={msg_agent_type} "
+                        f"chat_session={chat_session_id} shared_session={session_id} "
+                        f"text={str(message.get('text', ''))[:120]!r}"
+                    )
                     if not chat_session_id:
                         try:
                             await websocket.send_text(json.dumps({
@@ -409,7 +440,7 @@ async def agent_websocket(websocket: WebSocket):
 
                     if saved_session:
                         history_instructions, history_transcript = _build_history_payload(saved_session.get('messages', []))
-                        stored_conversation = saved_session.get('conversationId')
+                        stored_conversation = _normalize_conversation_id(saved_session.get('conversationId'))
                         saved_shell = saved_session.get('shell_id')
 
                         # FIX 2: Simplified needs_restore logic
@@ -458,22 +489,26 @@ async def agent_websocket(websocket: WebSocket):
                         context.setdefault('sandbox', sandbox)
 
                     # FIX 3: Proper conversation ID routing
-                    print(f"[DEBUG] needs_restore={needs_restore}, has_transcript={bool(history_transcript)}, stored_conv={stored_conversation}, chat_session={chat_session_id}")
+                    _debug_log(
+                        "WS:conversation",
+                        f"needs_restore={needs_restore} has_history={bool(history_transcript)} "
+                        f"stored_conv={stored_conversation} chat_session={chat_session_id}"
+                    )
                     if needs_restore and history_transcript:
-                        print(f"[DEBUG] Restoring conversation with history ({len(history_transcript)} chars)")
+                        _debug_log("WS:conversation", f"Restoring history size={len(history_transcript)} chars")
                         message['text'] = f"{history_transcript}\n\nUser: {message.get('text', '')}"
                         message['conversationId'] = None
                     elif stored_conversation:
-                        print(f"[DEBUG] Using existing conversation ID: {stored_conversation[:8]}...")
+                        _debug_log("WS:conversation", f"Using stored conversation {stored_conversation[:8]}…")
                         message['conversationId'] = stored_conversation
                         from .agent_bridge import CodexAdapter
                         if not CodexAdapter._conversations.get(chat_session_id):
                             CodexAdapter.store_conversation_id(chat_session_id, stored_conversation)
                     else:
-                        print(f"[DEBUG] New conversation (no history)")
+                        _debug_log("WS:conversation", "New conversation (no history)")
                         message['conversationId'] = None
 
-                    print(f"[DEBUG] Final message conversationId: {message.get('conversationId')}")
+                    _debug_log("WS:conversation", f"Final conversationId={message.get('conversationId')}")
 
                     bridge.set_session_state(chat_session_id, {
                         'history_instructions': history_instructions,
@@ -507,6 +542,12 @@ async def agent_websocket(websocket: WebSocket):
                         print(f"[Agent WS] Failed to persist user message: {e}")
 
                     # Write to agent with protocol translation
+                    _debug_log(
+                        "WS->Bridge",
+                        f"shared_session={session_id} chat_session={chat_session_id} shell={shell_id} "
+                        f"req_id={req_id} conv={message.get('conversationId')} "
+                        f"context_keys={sorted(context.keys()) if context else []}"
+                    )
                     await bridge.write_message(session_id, msg_agent_type, message, context)
                     
                 except json.JSONDecodeError:

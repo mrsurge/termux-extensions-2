@@ -2,6 +2,7 @@
 import argparse
 import importlib.util
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -74,7 +75,24 @@ def main():
     
     print(f"DEBUG: Starting uvicorn on http://127.0.0.1:{args.port}", file=sys.stderr)
 
-    uvicorn.run(app, host='127.0.0.1', port=args.port)
+    config = uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=args.port,
+        timeout_graceful_shutdown=2.0,
+        log_config=None,
+    )
+    server = uvicorn.Server(config)
+
+    def _force_exit(signum, _frame):
+        print(f"[app-worker] Received signal {signum}; forcing shutdown", file=sys.stderr)
+        server.force_exit = True
+        server.should_exit = True
+
+    signal.signal(signal.SIGTERM, _force_exit)
+    signal.signal(signal.SIGINT, _force_exit)
+
+    server.run()
 
 if __name__ == "__main__":
     main()

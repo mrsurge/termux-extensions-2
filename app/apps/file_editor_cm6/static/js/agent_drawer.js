@@ -743,18 +743,25 @@ export function initAgentDrawer() {
       }
     }
     
+    const normalizedConversationId = (typeof session.conversationId === 'string')
+      ? session.conversationId.trim()
+      : null;
+    const hasConversation = normalizedConversationId && normalizedConversationId.toLowerCase() !== 'null' && normalizedConversationId.toLowerCase() !== 'undefined';
+
     const message = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       action: 'chat',
       text: text,
       target: session.agent || 'codex',
-      conversationId: session.conversationId || null,
       cwd: session.cwd,
       session: session.id
     };
+    if (hasConversation) {
+      message.conversationId = normalizedConversationId;
+    }
     
     // Add approval settings for first message (new conversation)
-    if (!session.conversationId && (session.auto || session.fullAccess)) {
+    if (!hasConversation && (session.auto || session.fullAccess)) {
       message.context = message.context || {};
       
       if (session.auto || session.fullAccess) {

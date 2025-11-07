@@ -1532,9 +1532,6 @@ async function main() {
         root.classList.add('layout-mobile');
         root.classList.remove('layout-desktop');
       }
-      
-      // Trigger resize for CodeMirror and terminal
-      window.dispatchEvent(new Event('resize'));
     }
   };
 
