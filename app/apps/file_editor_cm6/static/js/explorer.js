@@ -466,7 +466,7 @@ async function renderTreeRoot(treeEl) {
 async function addTreeChildren(parentEl, rel) {
   try {
     const u = new URL('/api/app/file_editor_cm6/explorer/list', location.href);
-    u.searchParams.set('dir', rel);
+    u.searchParams.set('rel', rel);
     const r = await fetch(u);
     const j = await r.json();
 

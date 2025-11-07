@@ -664,29 +664,32 @@ async function requestBrowse(absPath, includeHidden) {
   if (!response.ok || !data.ok) {
     throw new Error(data.error || `Failed to browse ${absPath}`);
   }
-  const items = Array.isArray(data.data) ? data.data : [];
-  return items.map((entry) => {
+  const payload = data.data || {};
+  const items = Array.isArray(payload.entries) ? payload.entries : [];
+  const resolvedPath = payload.path ? simplifyAbsolute(payload.path) : simplifyAbsolute(absPath);
+  const mapped = items.map((entry) => {
     if (!entry || typeof entry !== 'object') return entry;
     return {
       ...entry,
       path: simplifyAbsolute(entry.path || ''),
     };
   });
+  return { entries: mapped, resolvedPath };
 }
 
 async function navigate(targetPath) {
   const normalized = toAbsolute(targetPath, state.currentPath || prefs.lastPath || DEFAULT_START);
   const previousPath = state.currentPath;
   try {
-    state.currentPath = normalized;
     clearSelection();
     elements.list.innerHTML = '<div class="te-fp-loading">Loading...</div>';
-    const entries = await requestBrowse(normalized, prefs.showHidden);
+    const { entries, resolvedPath } = await requestBrowse(normalized, prefs.showHidden);
+    state.currentPath = resolvedPath;
     const sorted = sortEntries(entries);
     state.entries = sorted;
-    prefs.lastPath = normalized;
-    if (state.persistKey) setStoredStart(state.persistKey, normalized);
-    renderBreadcrumbs(normalized);
+    prefs.lastPath = resolvedPath;
+    if (state.persistKey) setStoredStart(state.persistKey, resolvedPath);
+    renderBreadcrumbs(resolvedPath);
     renderEntries(sorted);
     updateButtons();
   } catch (err) {
