@@ -12,6 +12,6 @@
   },
   "fullscreen": true,
   "ipc_modules": [
-    "app.apps.file_editor_cm6.ipc_bridge"
+    "app.apps.file_editor_cm6.ipc_stack"
   ]
 }

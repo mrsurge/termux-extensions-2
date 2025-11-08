@@ -14,13 +14,13 @@ import time
 import traceback
 import uuid
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 # Add project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from fastapi import FastAPI, Request, Query, Body, HTTPException
+from fastapi import FastAPI, Request, Query, Body, HTTPException, Header
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 import requests
 from app.libs.app_lifecycle import start_background_tasks
@@ -747,6 +747,100 @@ async def delete_state(keys: List[str] = Query(...)):
     return {"ok": True, "data": {"removed": removed}}
 
 
+@app.get("/api/framework/ipc")
+async def get_ipc_config():
+    return {"ok": True, "data": {"host": _ipc_host(), "port": _ipc_port()}}
+
+
+def _verify_internal_token(token: Optional[str]) -> None:
+    expected = os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
+    if expected and token != expected:
+        raise HTTPException(status_code=403, detail="Forbidden: invalid framework token")
+
+
+@app.get("/api/internal/shells/{shell_id}")
+async def get_internal_shell(
+    shell_id: str,
+    token: Optional[str] = Header(default=None, alias="X-Framework-Key"),
+):
+    _verify_internal_token(token)
+    manager = await get_manager()
+    shell = await manager.get_shell(shell_id)
+    if not shell:
+        raise HTTPException(status_code=404, detail="Shell not found")
+    return await manager.describe(shell)
+
+
+@app.get("/api/internal/shells/find")
+async def find_internal_shell(
+    label: str = Query(...),
+    status: Optional[str] = Query("running"),
+    token: Optional[str] = Header(default=None, alias="X-Framework-Key"),
+):
+    _verify_internal_token(token)
+    manager = await get_manager()
+    shell = await manager.find_shell_by_label(label, status=status)
+    if not shell:
+        return None
+    return await manager.describe(shell)
+
+
+@app.post("/api/internal/shells/spawn")
+async def spawn_internal_shell(
+    payload: Dict[str, Any] = Body(...),
+    token: Optional[str] = Header(default=None, alias="X-Framework-Key"),
+):
+    _verify_internal_token(token)
+    command = payload.get("command")
+    if not isinstance(command, list):
+        raise HTTPException(status_code=400, detail="command must be a list of strings")
+    manager = await get_manager()
+    record = await manager.spawn_shell_pty(
+        command,
+        cwd=payload.get("cwd"),
+        env=payload.get("env"),
+        label=payload.get("label"),
+        autostart=payload.get("autostart", True),
+    )
+    return await manager.describe(record)
+
+
+@app.post("/api/internal/shells/{shell_id}/write")
+async def write_internal_shell(
+    shell_id: str,
+    payload: Dict[str, Any] = Body(...),
+    token: Optional[str] = Header(default=None, alias="X-Framework-Key"),
+):
+    _verify_internal_token(token)
+    message = payload.get("message")
+    if message is None:
+        raise HTTPException(status_code=400, detail="message is required")
+    manager = await get_manager()
+    await manager.write_to_pty(shell_id, message)
+    return {"ok": True}
+
+
+@app.get("/api/internal/shells/{shell_id}/stream")
+async def stream_internal_shell(
+    shell_id: str,
+    token: Optional[str] = Header(default=None, alias="X-Framework-Key"),
+):
+    _verify_internal_token(token)
+    manager = await get_manager()
+    queue = await manager.subscribe_output(shell_id)
+
+    async def event_stream():
+        try:
+            while True:
+                chunk = await queue.get()
+                payload = json.dumps({"chunk": chunk})
+                yield f"data: {payload}\n\n"
+        finally:
+            await manager.unsubscribe_output(shell_id, queue)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @app.post("/api/framework/runtime/shutdown")
 async def shutdown_framework(request: Request):
     expected_token = os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
@@ -914,6 +1008,18 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 import websockets
 import asyncio
 
+
+def _ipc_host() -> str:
+    return os.getenv("TE_IPC_HOST", "127.0.0.1")
+
+
+def _ipc_port() -> int:
+    return int(os.getenv("TE_IPC_PORT", "9123"))
+
+
+def _format_host_for_ws(host: str) -> str:
+    return host if ":" not in host else f"[{host}]"
+
 @app.websocket('/ws/app/{app_id}/{route:path}')
 async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
     await websocket.accept()
@@ -975,6 +1081,55 @@ async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
             with suppress(Exception):
                 await websocket.close()
 
+
+@app.websocket('/ws/ipc/{target_path:path}')
+async def proxy_ipc_websocket(websocket: WebSocket, target_path: str):
+    await websocket.accept()
+    host = _ipc_host()
+    port = _ipc_port()
+    host_fmt = _format_host_for_ws(host)
+    query = websocket.scope.get("query_string", b"").decode("utf-8")
+    ipc_url = f"ws://{host_fmt}:{port}/{target_path}"
+    if query:
+        ipc_url += f"?{query}"
+    print(f"[IPCProxy][WebSocket] Bridging to {ipc_url}")
+
+    try:
+        async with websockets.connect(ipc_url) as ipc_ws:
+
+            async def forward_client_to_ipc():
+                try:
+                    async for msg in websocket.iter_text():
+                        await ipc_ws.send(msg)
+                except WebSocketDisconnect:
+                    print("[IPCProxy][WebSocket] Client disconnected")
+                except Exception as exc:
+                    print(f"[IPCProxy][WebSocket] Error client->ipc: {exc}")
+
+            async def forward_ipc_to_client():
+                try:
+                    async for msg in ipc_ws:
+                        await websocket.send_text(msg)
+                except websockets.ConnectionClosedOK:
+                    print("[IPCProxy][WebSocket] IPC closed connection")
+                except Exception as exc:
+                    print(f"[IPCProxy][WebSocket] Error ipc->client: {exc}")
+
+            tasks = [
+                asyncio.create_task(forward_client_to_ipc(), name="ws-client-to-ipc"),
+                asyncio.create_task(forward_ipc_to_client(), name="ws-ipc-to-client"),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+    except Exception as exc:
+        print(f"[IPCProxy][WebSocket] Failed to bridge: {exc}")
+    finally:
+        if websocket.application_state != WebSocketState.DISCONNECTED:
+            with suppress(Exception):
+                await websocket.close()
 
 
 if __name__ == '__main__':

@@ -1,8 +1,6 @@
 // app/apps/file_editor_cm6/static/js/agent_drawer.js
 // Agent drawer with shared shell architecture - ONE MCP server for all sessions
 
-import ReconnectingWebSocket from './reconnecting_websocket.js';
-
 function notify(message) {
   if (window.host && typeof window.host.toast === 'function') {
     window.host.toast(message);
@@ -58,11 +56,84 @@ export function initAgentDrawer() {
   let currentAssistantBubble = null;
   let currentPlanningSection = null;
   
+  // IPC configuration cache (used for Socket.IO test hook)
+  let ipcConfigPromise = null;
+
+  async function fetchIpcConfig() {
+    if (!ipcConfigPromise) {
+      ipcConfigPromise = fetch('/api/framework/ipc', { cache: 'no-store' })
+        .then(resp => resp.json())
+        .then(body => {
+          if (!body.ok || !body.data) {
+            throw new Error(body.error || 'IPC config unavailable');
+          }
+          return body.data;
+        })
+        .catch(err => {
+          ipcConfigPromise = null;
+          throw err;
+        });
+    }
+    return ipcConfigPromise;
+  }
+
+  let socketIoLoader = null;
+  function ensureSocketIoClient() {
+    if (window.io) {
+      return Promise.resolve(window.io);
+    }
+    if (!socketIoLoader) {
+      socketIoLoader = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
+        script.async = true;
+        script.onload = () => resolve(window.io);
+        script.onerror = () => {
+          socketIoLoader = null;
+          reject(new Error('Failed to load Socket.IO client'));
+        };
+        document.head.appendChild(script);
+      });
+    }
+    return socketIoLoader;
+  }
+
+  window.__cm6TestSocketIO = async function cm6TestSocketIO() {
+    try {
+      const io = await ensureSocketIoClient();
+      const config = await fetchIpcConfig();
+      const url = `http://${config.host}:${config.port}/agent`;
+      console.log('[Agent Drawer] Testing Socket.IO connection to', url);
+      const socket = io(url, {
+        transports: ['websocket'],
+        timeout: 5000,
+      });
+      socket.on('connect', () => {
+        console.log('[Agent Drawer] Socket.IO connected (test sid)', socket.id);
+      });
+      socket.on('agent_connected', (payload) => {
+        console.log('[Agent Drawer] Socket.IO agent_connected payload', payload);
+        socket.disconnect();
+      });
+      socket.io.on('error', (err) => {
+        console.error('[Agent Drawer] Socket.IO manager error', err);
+      });
+      socket.on('connect_error', (err) => {
+        console.error('[Agent Drawer] Socket.IO connect error', err);
+      });
+      socket.on('disconnect', (reason) => {
+        console.log('[Agent Drawer] Socket.IO disconnected (test)', reason);
+      });
+    } catch (err) {
+      console.error('[Agent Drawer] __cm6TestSocketIO failed', err);
+    }
+  };
+
   // SHARED SHELL STATE - ONE shell for all Codex sessions
   let sharedShell = {
     shell_id: null,
     session_id: null,  // Backend session ID for send_raw endpoint
-    ws: null,
+    socket: null,
     agent: 'codex',
     status: 'Disconnected'  // 'Disconnected' | 'Connecting' | 'Connected' | 'Error'
   };
@@ -474,119 +545,108 @@ export function initAgentDrawer() {
   }
 
   async function connectSharedShell() {
-    if (sharedShell.status === 'Connected' && sharedShell.shell_id && sharedShell.ws) {
+    if (sharedShell.socket && sharedShell.socket.connected && sharedShell.shell_id) {
       return sharedShell.connectPromise || Promise.resolve();
     }
 
     if (sharedShell.connectPromise) {
       return sharedShell.connectPromise;
     }
-    
-    sharedShell.status = 'Connecting';
-    updateShellStatus();
-    notify('Connecting to Codex MCP server...');
 
     sharedShell.connectPromise = (async () => {
-      try {
-        const projectRoot = await getProjectRoot();
+      const io = await ensureSocketIoClient();
+      const config = await fetchIpcConfig();
+      const projectRoot = await getProjectRoot();
+      const url = `http://${config.host}:${config.port}/agent`;
 
-        // Build WebSocket URL - must go through main framework proxy at port 8088
-        // Main framework proxies /ws/app/file_editor_cm6/agent -> worker's /ws/agent
-        const wsUrl = new URL('/ws/app/file_editor_cm6/agent', window.location.origin);
-        wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
-        wsUrl.port = '8088';  // Main framework port, not worker port
-        wsUrl.searchParams.set('agent', sharedShell.agent);
-        if (projectRoot) wsUrl.searchParams.set('cwd', projectRoot);
-        if (sharedShell.session_id) wsUrl.searchParams.set('session', sharedShell.session_id);
+      sharedShell.status = 'Connecting';
+      updateShellStatus();
+      notify('Connecting to Codex MCP server...');
 
-        await new Promise((resolve, reject) => {
-          const socket = new ReconnectingWebSocket(wsUrl.toString(), {
-            maxRetries: 10,
-            reconnectInterval: 2000,
-            maxReconnectInterval: 30000,
-            debug: true
-          });
-
-          let initialHandshakeComplete = false;
-
-          const cleanup = () => {
-            socket.onopen = null;
-            socket.onmessage = null;
-            socket.onerror = null;
-            socket.onclose = null;
-            socket.onreconnect = null;
-          };
-
-          socket.onopen = () => {
-            sharedShell.status = 'Connected';
-            sharedShell.ws = socket;
-            updateShellStatus();
-            notify('Codex MCP server connected');
-          };
-
-          socket.onmessage = (event) => {
-            const msg = JSON.parse(event.data);
-
-            if (msg.event === 'connected') {
-              if (msg.shell_id) {
-                sharedShell.shell_id = msg.shell_id;
-              }
-              if (msg.session_id) {
-                sharedShell.session_id = msg.session_id;
-              }
-
-              if (!initialHandshakeComplete) {
-                initialHandshakeComplete = true;
-                resolve();
-              }
-            }
-
-            // Route message to appropriate session
-            const targetSessionId = msg.session || activeSessionId;
-            if (targetSessionId) {
-              handleAgentMessage(targetSessionId, msg);
-            }
-          };
-
-          socket.onerror = (error) => {
-            if (!initialHandshakeComplete) {
-              cleanup();
-              sharedShell.status = 'Error';
-              sharedShell.ws = null;
-              updateShellStatus();
-              notify('Agent connection error');
-              reject(error);
-            } else {
-              sharedShell.status = 'Error';
-              updateShellStatus();
-              notify('Agent connection error');
-              console.error('Agent WS error:', error);
-            }
-            console.error('Agent WS error:', error);
-          };
-
-          socket.onclose = () => {
-            sharedShell.status = 'Disconnected';
-            sharedShell.ws = null;
-            updateShellStatus();
-            notify('Agent disconnected');
-            if (!initialHandshakeComplete) {
-              cleanup();
-              reject(new Error('Agent connection closed before handshake'));
-            }
-          };
-
-          socket.onreconnect = (attempt, delay) => {
-            console.log(`[Agent] Reconnecting in ${delay}ms...`);
-            notify(`Reconnecting to agent (attempt ${attempt})...`);
-            sharedShell.status = 'Reconnecting';
-            updateShellStatus();
-          };
+      return await new Promise((resolve, reject) => {
+        const socket = io(url, {
+          transports: ['websocket'],
+          query: {
+            agent: sharedShell.agent,
+            cwd: projectRoot || '',
+            session: sharedShell.session_id || ''
+          },
+          reconnectionAttempts: Infinity,
+          reconnectionDelay: 2000,
+          reconnectionDelayMax: 10000
         });
-      } finally {
+        sharedShell.socket = socket;
+
+        let handshakeComplete = false;
+
+        socket.on('connect', () => {
+          sharedShell.status = 'Connected';
+          updateShellStatus();
+        });
+
+        socket.on('agent_connected', (payload) => {
+          sharedShell.status = 'Connected';
+          sharedShell.shell_id = payload.shell_id;
+          sharedShell.session_id = payload.session_id;
+          updateShellStatus();
+          notify('Codex MCP server connected');
+          if (!handshakeComplete) {
+            handshakeComplete = true;
+            resolve();
+          }
+        });
+
+        socket.on('agent_event', (payload) => {
+          const targetSessionId = payload.session || activeSessionId;
+          if (targetSessionId) {
+            handleAgentMessage(targetSessionId, payload);
+          }
+        });
+
+        socket.on('agent_error', (err) => {
+          notify(`Agent error: ${err?.message || 'Unknown error'}`);
+          if (!handshakeComplete) {
+            handshakeComplete = true;
+            reject(new Error(err?.message || 'Agent error'));
+          }
+        });
+
+        socket.on('disconnect', (reason) => {
+          sharedShell.status = 'Disconnected';
+          sharedShell.socket = null;
+          updateShellStatus();
+          if (!handshakeComplete) {
+            handshakeComplete = true;
+            reject(new Error(`Disconnected: ${reason}`));
+          } else {
+            notify('Agent disconnected');
+          }
+        });
+
+        socket.on('connect_error', (err) => {
+          sharedShell.status = 'Error';
+          updateShellStatus();
+          notify('Agent connection error');
+          if (!handshakeComplete) {
+            handshakeComplete = true;
+            reject(err);
+          }
+        });
+
+        socket.io.on('reconnect_attempt', (attempt) => {
+          sharedShell.status = 'Reconnecting';
+          updateShellStatus();
+          notify(`Reconnecting to agent (attempt ${attempt})...`);
+        });
+      });
+    })()
+      .catch((err) => {
+        console.error('[Agent Drawer] Failed to connect Socket.IO agent', err);
+        throw err;
+      })
+      .finally(() => {
         sharedShell.connectPromise = null;
-      }
-    })();
+      });
 
     return sharedShell.connectPromise;
   }
@@ -597,10 +657,13 @@ export function initAgentDrawer() {
       return;
     }
     
-    // Close WebSocket
-    if (sharedShell.ws) {
-      sharedShell.ws.close();
-      sharedShell.ws = null;
+    if (sharedShell.socket) {
+      try {
+        sharedShell.socket.disconnect();
+      } catch (e) {
+        console.error('Failed to disconnect socket:', e);
+      }
+      sharedShell.socket = null;
     }
     
     // Terminate framework shell
@@ -781,8 +844,11 @@ export function initAgentDrawer() {
     bubble.textContent = text;
     transcript?.appendChild(bubble);
     
-    // Send via shared WebSocket
-    sharedShell.ws.send(JSON.stringify(message));
+    if (!sharedShell.socket) {
+      notify('Agent socket unavailable');
+      return;
+    }
+    sharedShell.socket.emit('agent_user_message', message);
     
     composer.value = '';
     transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });

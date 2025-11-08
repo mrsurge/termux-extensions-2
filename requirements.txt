@@ -5,6 +5,9 @@ httpx
 websockets
 sse-starlette
 simple-websocket
+flask-socketio
+gevent
+gevent-websocket
 libarchive-c>=5.1
 requests
 libarchive

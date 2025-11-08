@@ -209,8 +209,14 @@ Content:
                         'text': msg_data.get('delta', '')
                     }
                 elif event_type == 'agent_reasoning':
-                    # Full reasoning - SYSTEM MESSAGE (ignore, we use deltas)
-                    return None
+                    # Full reasoning block - persistable system message
+                    return {
+                        'id': str(request_id),
+                        'event': 'system',
+                        'agent': 'codex',
+                        'text': msg_data.get('text', ''),
+                        'complete': True
+                    }
                 elif event_type == 'agent_reasoning_section_break':
                     # Section break - SYSTEM MESSAGE
                     return {
@@ -225,7 +231,8 @@ Content:
                         'id': str(request_id),
                         'event': 'system',
                         'agent': 'codex',
-                        'text': '[Task started]'
+                        'text': '[Task started]',
+                        'complete': True
                     }
                 elif event_type == 'task_complete':
                     # Task finished - use last_agent_message from the event itself
@@ -280,10 +287,11 @@ Content:
             if method == 'notifications/message':
                 return {
                     'id': str(mcp_msg.get('id', '')),
-                    'event': 'message',
+                    'event': 'system',
                     'agent': 'codex',
+                    'text': params.get('message', ''),
                     'level': params.get('level', 'info'),
-                    'text': params.get('message', '')
+                    'complete': True
                 }
             
             # Generic notification - ignore unknown ones

@@ -9,22 +9,28 @@ broadcast status updates to connected listeners.
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import os
 import queue
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Set
 
 import requests
 from flask import Flask, Response, jsonify, request
+from flask_socketio import SocketIO
+from flask_socketio import Namespace, SocketIO, emit
 
 from .control import FrameworkError, spawn_agent
 
 LOGGER = logging.getLogger("te.ipc")
 FRAMEWORK_URL = os.environ.get("TE_FRAMEWORK_URL", "http://127.0.0.1:8088")
 FRAMEWORK_TOKEN = os.environ.get("TE_FRAMEWORK_SHELL_TOKEN")
+_REGISTERED_IPC_MODULES: Set[str] = set()
+_APPS_DIR = Path(__file__).resolve().parent.parent / "apps"
 
 _listeners_lock = threading.Lock()
 _listeners: Set[queue.Queue] = set()
@@ -70,6 +76,45 @@ def _setup_logging(level: str) -> None:
         level=getattr(logging, level.upper(), logging.INFO),
         format=("[ipc] %(message)s" if _log_prefix_enabled() else "%(message)s"),
     )
+
+
+def _load_ipc_modules(app: Flask, socketio: SocketIO) -> None:
+    """Discover and register app-level IPC stacks."""
+    if not _APPS_DIR.exists():
+        LOGGER.debug("IPC module scan skipped; %s missing", _APPS_DIR)
+        return
+
+    for app_dir in _APPS_DIR.iterdir():
+        if not app_dir.is_dir():
+            continue
+        manifest_path = app_dir / "manifest.json"
+        if not manifest_path.exists():
+            continue
+
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            LOGGER.error("Failed to parse manifest %s: %s", manifest_path, exc)
+            continue
+
+        modules = manifest.get("ipc_modules") or []
+        if not isinstance(modules, list):
+            continue
+
+        for module_path in modules:
+            if not isinstance(module_path, str):
+                continue
+            if module_path in _REGISTERED_IPC_MODULES:
+                continue
+            try:
+                module = importlib.import_module(module_path)
+                register = getattr(module, "register_ipc_routes", None)
+                if callable(register):
+                    register(app, socketio)
+                    _REGISTERED_IPC_MODULES.add(module_path)
+                    LOGGER.info("Loaded IPC module %s", module_path)
+            except Exception as exc:
+                LOGGER.error("Failed to load IPC module %s: %s", module_path, exc)
 
 
 def create_app() -> Flask:
@@ -177,6 +222,8 @@ def create_app() -> Flask:
 
 
 app = create_app()
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
+_load_ipc_modules(app, socketio)
 
 
 @dataclass
@@ -198,7 +245,7 @@ def main() -> None:
 
     _setup_logging(args.log_level)
     LOGGER.info("starting IPC service on %s:%s", args.host, args.port)
-    create_app().run(host=args.host, port=args.port, use_reloader=False, threaded=True)
+    socketio.run(app, host=args.host, port=args.port, use_reloader=False)
 
 
 if __name__ == "__main__":
