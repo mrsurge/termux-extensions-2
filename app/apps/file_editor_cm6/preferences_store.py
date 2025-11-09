@@ -11,6 +11,8 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "showSyntax": True,
     "showShading": False,
     "wordWrap": False,
+    "autoCloseBrackets": True,
+    "autocompletion": True,
     "theme": "cm6-dark",
     "autoSave": True,
     "showInlineDiffs": True,

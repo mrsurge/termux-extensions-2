@@ -1,15 +1,18 @@
-import {EditorState, Compartment, Transaction} from '@codemirror/state';
-import {EditorView, keymap, highlightActiveLine, drawSelection, lineNumbers, Decoration, ViewPlugin} from '@codemirror/view';
-import {defaultKeymap, history, historyKeymap} from '@codemirror/commands';
-import {indentOnInput, bracketMatching, foldGutter, foldKeymap, syntaxHighlighting, defaultHighlightStyle} from '@codemirror/language';
-import {searchKeymap, highlightSelectionMatches} from '@codemirror/search';
+import {EditorState, Compartment, Transaction, StateEffect, StateField, RangeSetBuilder} from '@codemirror/state';
+import {EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, drawSelection, lineNumbers, Decoration, ViewPlugin, WidgetType} from '@codemirror/view';
+import {defaultKeymap, history, historyKeymap, undo, redo} from '@codemirror/commands';
+import {indentOnInput, bracketMatching, foldGutter, foldKeymap, syntaxHighlighting, defaultHighlightStyle, StreamLanguage} from '@codemirror/language';
+import {searchKeymap, highlightSelectionMatches, search, openSearchPanel} from '@codemirror/search';
 import {autocompletion, closeBrackets} from '@codemirror/autocomplete';
 import {oneDark} from '@codemirror/theme-one-dark';
 
 import {javascript} from '@codemirror/lang-javascript';
+import {json} from '@codemirror/lang-json';
 import {python} from '@codemirror/lang-python';
 import {html} from '@codemirror/lang-html';
+import {css} from '@codemirror/lang-css';
 import {markdown} from '@codemirror/lang-markdown';
+import {xml} from '@codemirror/lang-xml';
 import {shell as shellMode} from '@codemirror/legacy-modes/mode/shell';
 
 import {MergeView, unifiedMergeView} from '@codemirror/merge';
@@ -162,3 +165,68 @@ export function createMergeView({el, a='', b=''}={}){
 }
 
 window.CM6 = { createEditor, createUnifiedDiff, createMergeView };
+
+// Export raw CodeMirror modules for direct manipulation (needed for native selection)
+export {
+  EditorState,
+  Compartment,
+  Transaction,
+  StateEffect,
+  StateField,
+  RangeSetBuilder,
+  EditorView,
+  keymap,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  drawSelection,
+  lineNumbers,
+  Decoration,
+  ViewPlugin,
+  WidgetType,
+  defaultKeymap,
+  history,
+  historyKeymap,
+  undo,
+  redo,
+  searchKeymap,
+  search,
+  openSearchPanel,
+  foldKeymap,
+  syntaxHighlighting,
+  defaultHighlightStyle,
+  StreamLanguage,
+  indentOnInput,
+  bracketMatching,
+  foldGutter,
+  autocompletion,
+  closeBrackets,
+  highlightSelectionMatches,
+  oneDark,
+  javascript,
+  json,
+  python,
+  html,
+  css,
+  markdown,
+  xml,
+  shellMode,
+  MergeView,
+  unifiedMergeView,
+  // Additional themes
+  githubDark,
+  githubLight,
+  vscodeDark,
+  vscodeLight,
+  xcodeDark,
+  xcodeLight,
+  solarizedDark,
+  solarizedLight,
+  nord,
+  dracula,
+  okaidia,
+  sublime,
+  androidstudio,
+  darcula,
+  basicDark,
+  basicLight,
+};

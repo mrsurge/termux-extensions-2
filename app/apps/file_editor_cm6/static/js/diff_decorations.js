@@ -7,7 +7,7 @@ import {
   RangeSetBuilder,
   Decoration,
   WidgetType,
-} from '/static/vendor/codemirror.1/codemirror.bundle.js';
+} from '/static/vendor/codemirror.3/cm6.bundle.js';
 
 /**
  * Diff decorations controller for the CM6 editor.

@@ -305,6 +305,7 @@
   .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
   .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 15; }
   .fe-dropdown.show { display: block; }
+  #menu-theme-dd { max-height: calc(80vh - 60px); overflow-y: auto; }
   #recent-files-dd { left: auto; right: 0; }
   #menu-branch-dd { left: auto; right: 0; }
   .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; cursor: pointer; font-size: 0.9rem; align-items: center; }
@@ -1290,16 +1291,23 @@
         <div class="fe-dd-item" id="mi-selectall"><span>Select All</span><span class="fe-kbd">Ctrl/Cmd+A</span></div>
       </div>
     </div>
+    <div class="fe-menu" id="menu-editor">
+      <button class="fe-menu-btn" id="menu-editor-btn">Editor ▾</button>
+      <div class="fe-dropdown" id="menu-editor-dd">
+        <div class="fe-dd-item" id="mi-toggle-lines" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Show Line Numbers</span></div>
+        <div class="fe-dd-item" id="mi-toggle-syntax" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Syntax Highlighting</span></div>
+        <div class="fe-dd-item" id="mi-toggle-closebrackets" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Close Brackets</span></div>
+        <div class="fe-dd-item" id="mi-toggle-autocomplete" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Autocompletion</span></div>
+      </div>
+    </div>
     <div class="fe-menu" id="menu-view">
       <button class="fe-menu-btn" id="menu-view-btn">View ▾</button>
       <div class="fe-dropdown" id="menu-view-dd">
-        <div class="fe-dd-item" id="mi-toggle-lines" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Show Line Numbers</span></div>
-        <div class="fe-dd-item" id="mi-toggle-shading" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Line Shading</span></div>
-        <div class="fe-dd-item" id="mi-toggle-syntax" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Syntax Highlighting</span></div>
         <div class="fe-dd-item" id="mi-toggle-wrap" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Word Wrap</span></div>
-        <div class="fe-dd-item" id="mi-toggle-autosave" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Save</span></div>
+        <div class="fe-dd-item" id="mi-toggle-shading" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Line Shading</span></div>
         <div class="fe-dd-item" id="mi-toggle-diffs" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Show Inline Diffs</span></div>
         <div class="fe-dd-item" id="mi-track-edits" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Track Agent Edits</span></div>
+        <div class="fe-dd-item" id="mi-toggle-autosave" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Save</span></div>
         <div class="fe-dd-item" id="mi-toggle-terminal"><span>Toggle Terminal</span><span class="fe-kbd">Ctrl/Cmd+`</span></div>
         <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
         <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
@@ -1311,6 +1319,22 @@
         <div class="fe-dd-item" data-theme="cm6-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Dark (Default)</span></div>
         <div class="fe-dd-item" data-theme="one-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>One Dark</span></div>
         <div class="fe-dd-item" data-theme="termux" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Termux</span></div>
+        <div class="fe-dd-item" data-theme="github-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>GitHub Dark</span></div>
+        <div class="fe-dd-item" data-theme="github-light" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>GitHub Light</span></div>
+        <div class="fe-dd-item" data-theme="vscode-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>VS Code Dark</span></div>
+        <div class="fe-dd-item" data-theme="vscode-light" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>VS Code Light</span></div>
+        <div class="fe-dd-item" data-theme="xcode-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Xcode Dark</span></div>
+        <div class="fe-dd-item" data-theme="xcode-light" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Xcode Light</span></div>
+        <div class="fe-dd-item" data-theme="solarized-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Solarized Dark</span></div>
+        <div class="fe-dd-item" data-theme="solarized-light" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Solarized Light</span></div>
+        <div class="fe-dd-item" data-theme="nord" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Nord</span></div>
+        <div class="fe-dd-item" data-theme="dracula" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Dracula</span></div>
+        <div class="fe-dd-item" data-theme="okaidia" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Okaidia</span></div>
+        <div class="fe-dd-item" data-theme="sublime" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Sublime</span></div>
+        <div class="fe-dd-item" data-theme="androidstudio" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Android Studio</span></div>
+        <div class="fe-dd-item" data-theme="darcula" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Darcula</span></div>
+        <div class="fe-dd-item" data-theme="basic-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Basic Dark</span></div>
+        <div class="fe-dd-item" data-theme="basic-light" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Basic Light</span></div>
       </div>
     </div>
     <div class="fe-menu" id="menu-branch" style="margin-left: auto;">

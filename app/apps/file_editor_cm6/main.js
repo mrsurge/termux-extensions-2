@@ -3,7 +3,7 @@
 // Code Viewer (CM6) — dual-surface editor with native Android selection mode.
 // Imports resolve to files produced by scripts/vendor_cm6.sh
 // comment for testing in-line git refreshes
-import * as CM from '/static/vendor/codemirror.1/codemirror.bundle.js';
+import * as CM from '/static/vendor/codemirror.3/cm6.bundle.js';
 import { initExplorerUI } from './static/js/explorer.js';
 import { createDiffController } from './static/js/diff_decorations.js';
 import { createTerminalDrawer } from './static/js/terminal.js';
@@ -25,10 +25,43 @@ const StreamLanguage  = CM.StreamLanguage;
 const defaultHighlightStyle = CM.defaultHighlightStyle || null;
 const { undo, redo, oneDark, search, openSearchPanel, termuxTheme } = CM;
 
+// Import all available themes from the new bundle
+const {
+  githubDark, githubLight,
+  vscodeDark, vscodeLight,
+  xcodeDark, xcodeLight,
+  solarizedDark, solarizedLight,
+  nord, dracula, okaidia, sublime,
+  androidstudio, darcula,
+  basicDark, basicLight
+} = CM;
+
 const THEMES = {
-  'cm6-dark': EditorView.theme({}, {dark: true}), // Keep a basic dark as default
+  'cm6-dark': EditorView.theme({}, {dark: true}),
   'one-dark': oneDark || null,
-  'termux': termuxTheme ? termuxTheme() : null
+  'termux': termuxTheme ? termuxTheme() : null,
+  // GitHub themes
+  'github-dark': githubDark || null,
+  'github-light': githubLight || null,
+  // VS Code themes
+  'vscode-dark': vscodeDark || null,
+  'vscode-light': vscodeLight || null,
+  // Xcode themes
+  'xcode-dark': xcodeDark || null,
+  'xcode-light': xcodeLight || null,
+  // Solarized themes
+  'solarized-dark': solarizedDark || null,
+  'solarized-light': solarizedLight || null,
+  // Popular themes
+  'nord': nord || null,
+  'dracula': dracula || null,
+  'okaidia': okaidia || null,
+  'sublime': sublime || null,
+  'androidstudio': androidstudio || null,
+  'darcula': darcula || null,
+  // Basic themes
+  'basic-dark': basicDark || null,
+  'basic-light': basicLight || null,
 };
 
 const zebraStripes = EditorView.theme({
@@ -51,8 +84,8 @@ const xmlLang    = CM.xml        || (() => []);
 
 // Shell (legacy) — wrap if present in the bundle
 const shellLang = () => {
-  const mode = CM.shell || CM.shellMode || CM.modeShell;
-  return (mode && StreamLanguage) ? StreamLanguage.define(mode) : null;
+  const mode = CM.shellMode;
+  return (mode && CM.StreamLanguage) ? CM.StreamLanguage.define(mode) : null;
 };
 
 // ---- host/api contract (injected by framework) ----
@@ -213,6 +246,8 @@ const menuFileBtn = requireEl('#menu-file-btn');
 const menuFileDD  = requireEl('#menu-file-dd');
 const menuEditBtn = requireEl('#menu-edit-btn');
 const menuEditDD  = requireEl('#menu-edit-dd');
+const menuEditorBtn = requireEl('#menu-editor-btn');
+const menuEditorDD  = requireEl('#menu-editor-dd');
 const menuViewBtn = requireEl('#menu-view-btn');
 const menuViewDD  = requireEl('#menu-view-dd');
 const menuThemeBtn= requireEl('#menu-theme-btn');
@@ -237,8 +272,10 @@ const miPaste     = requireEl('#mi-paste');
 const miSelectAll = requireEl('#mi-selectall');
 
 const miToggleLines   = requireEl('#mi-toggle-lines');
-const miToggleShading = requireEl('#mi-toggle-shading');
 const miToggleSyntax  = requireEl('#mi-toggle-syntax');
+const miToggleCloseBrackets = requireEl('#mi-toggle-closebrackets');
+const miToggleAutocomplete = requireEl('#mi-toggle-autocomplete');
+const miToggleShading = requireEl('#mi-toggle-shading');
 const miToggleWrap    = requireEl('#mi-toggle-wrap');
 const miToggleAutosave = requireEl('#mi-toggle-autosave');
 const miToggleDiffs  = requireEl('#mi-toggle-diffs');
@@ -515,6 +552,8 @@ let showLineNumbers = true;
 let showLineShading = false; // cosmetic; not implemented for CM6 here
 let showSyntaxHighlight = true;
 let wordWrap = false;
+let autoCloseBrackets = true;  // New: ON by default
+let enableAutocompletion = true;  // New: ON by default
 let autoSaveEnabled = true;
 let showInlineDiffs = true;
 let trackAgentEdits = false;
@@ -556,6 +595,12 @@ function makeExtensions() {
   if (showLineShading) {
     exts.push(zebraStripes);
   }
+  if (autoCloseBrackets && CM.closeBrackets) {
+    exts.push(CM.closeBrackets());
+  }
+  if (enableAutocompletion && CM.autocompletion) {
+    exts.push(CM.autocompletion());
+  }
 
   // Theme
   const theme = THEMES[currentTheme] || THEMES['cm6-dark'];
@@ -566,17 +611,19 @@ function makeExtensions() {
   }
 
   // Language
-  const lang = (currentModeLanguage || 'text');
-  switch (lang) {
-    case 'javascript': exts.push(javascript()); break;
-    case 'json': exts.push(jsonLang()); break;
-    case 'python': exts.push(python()); break;
-    case 'html': exts.push(htmlLang()); break;
-    case 'css': exts.push(cssLang()); break;
-    case 'markdown': exts.push(markdown()); break;
-    case 'xml': exts.push(xmlLang()); break;
-    case 'shell': { const s = shellLang(); if (s) exts.push(s); } break;
-    default: break;
+  if (showSyntaxHighlight) {
+    const lang = (currentModeLanguage || 'text');
+    switch (lang) {
+      case 'javascript': exts.push(javascript()); break;
+      case 'json': exts.push(jsonLang()); break;
+      case 'python': exts.push(python()); break;
+      case 'html': exts.push(htmlLang()); break;
+      case 'css': exts.push(cssLang()); break;
+      case 'markdown': exts.push(markdown()); break;
+      case 'xml': exts.push(xmlLang()); break;
+      case 'shell': { const s = shellLang(); if (s) exts.push(s); } break;
+      default: break;
+    }
   }
   return exts;
 }
@@ -628,6 +675,8 @@ function applyPreferencesFromStore(payload) {
   showLineShading = !!editorPrefs.showShading;
   showSyntaxHighlight = editorPrefs.showSyntax !== false;
   wordWrap = !!editorPrefs.wordWrap;
+  autoCloseBrackets = editorPrefs.autoCloseBrackets !== false;  // Default true
+  enableAutocompletion = editorPrefs.autocompletion !== false;  // Default true
   autoSaveEnabled = editorPrefs.autoSave !== false;
   showInlineDiffs = editorPrefs.showInlineDiffs !== false;
   trackAgentEdits = !!editorPrefs.trackAgentEdits;
@@ -640,8 +689,10 @@ function applyPreferencesFromStore(payload) {
 
 function applyMenuState() {
   setMenuChecked(miToggleLines, showLineNumbers);
-  setMenuChecked(miToggleShading, showLineShading);
   setMenuChecked(miToggleSyntax, showSyntaxHighlight);
+  setMenuChecked(miToggleCloseBrackets, autoCloseBrackets);
+  setMenuChecked(miToggleAutocomplete, enableAutocompletion);
+  setMenuChecked(miToggleShading, showLineShading);
   setMenuChecked(miToggleWrap, wordWrap);
   setMenuChecked(miToggleAutosave, autoSaveEnabled);
   setMenuChecked(miToggleDiffs, showInlineDiffs);
@@ -1164,6 +1215,7 @@ async function pickSaveTarget() {
 function closeAllMenus() {
   menuFileDD.classList.remove('show');
   menuEditDD.classList.remove('show');
+  menuEditorDD.classList.remove('show');
   menuViewDD.classList.remove('show');
   menuThemeDD.classList.remove('show');
   recentFilesDD.classList.remove('show');
@@ -1204,11 +1256,12 @@ function bindThemeMenu() {
   });
 }
 
-menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-menuEditBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuViewDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-menuThemeBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuThemeDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-recentFilesBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = recentFilesDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuEditBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuEditorBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditorDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuViewDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuThemeBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuThemeDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+recentFilesBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = recentFilesDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
 document.addEventListener('click', () => closeAllMenus());
 
 bindMenuToggle(miNew, () => {
@@ -1278,6 +1331,24 @@ bindMenuToggle(miToggleSyntax, () => {
   applyMenuState();
   createView(getText());
   persistEditorPreferences({ showSyntax: showSyntaxHighlight });
+});
+bindMenuToggle(miToggleCloseBrackets, () => {
+  autoCloseBrackets = !autoCloseBrackets;
+  applyMenuState();
+  createView(getText());
+  if (showInlineDiffs && currentPath && currentPathExists) {
+    diffController.refresh(true);
+  }
+  persistEditorPreferences({ autoCloseBrackets });
+});
+bindMenuToggle(miToggleAutocomplete, () => {
+  enableAutocompletion = !enableAutocompletion;
+  applyMenuState();
+  createView(getText());
+  if (showInlineDiffs && currentPath && currentPathExists) {
+    diffController.refresh(true);
+  }
+  persistEditorPreferences({ autocompletion: enableAutocompletion });
 });
 bindMenuToggle(miToggleWrap, () => {
   wordWrap = !wordWrap;
