@@ -1555,6 +1555,11 @@ function disableNativeSelection(scrubDoc = false) {
     console.log('[NativeSelection] Re-enabling autosave');
     autoSaveWasEnabled = false;
   }
+  
+  // Refresh inline diffs after DOM manipulation
+  if (showInlineDiffs && currentPath && currentPathExists && diffController) {
+    diffController.refresh(true);
+  }
 }
 
 function requestDisableIfIdle(reason = '') {
