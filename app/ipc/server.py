@@ -222,7 +222,25 @@ def create_app() -> Flask:
 
 
 app = create_app()
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
+
+
+def _init_socketio(app: Flask) -> SocketIO:
+    preferred_modes = ["gevent", "eventlet", "threading"]
+    last_error: Optional[Exception] = None
+    for mode in preferred_modes:
+        try:
+            LOGGER.info("initializing Socket.IO server (async_mode=%s)", mode)
+            return SocketIO(app, cors_allowed_origins="*", async_mode=mode)
+        except ValueError as exc:
+            LOGGER.warning("async_mode '%s' unavailable: %s", mode, exc)
+            last_error = exc
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.error("failed to init Socket.IO with mode %s: %s", mode, exc)
+            last_error = exc
+    raise RuntimeError(f"Unable to initialize Socket.IO: {last_error}")
+
+
+socketio = _init_socketio(app)
 _load_ipc_modules(app, socketio)
 
 
@@ -245,7 +263,17 @@ def main() -> None:
 
     _setup_logging(args.log_level)
     LOGGER.info("starting IPC service on %s:%s", args.host, args.port)
-    socketio.run(app, host=args.host, port=args.port, use_reloader=False)
+    run_kwargs = {
+        "host": args.host,
+        "port": args.port,
+        "use_reloader": False,
+    }
+    if getattr(socketio, "async_mode", None) == "threading":
+        LOGGER.warning(
+            "Socket.IO is running in 'threading' mode; enabling allow_unsafe_werkzeug."
+        )
+        run_kwargs["allow_unsafe_werkzeug"] = True
+    socketio.run(app, **run_kwargs)
 
 
 if __name__ == "__main__":

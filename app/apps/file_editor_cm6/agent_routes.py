@@ -127,7 +127,7 @@ async def list_agent_sessions():
           ]
         }
     """
-    from .agent_session_store import list_sessions
+    from .conversation_store import list_sessions
     try:
         sessions = await anyio.to_thread.run_sync(list_sessions)
         return {"ok": True, "data": sessions}
@@ -156,7 +156,7 @@ async def create_agent_session(data: dict = Body(...)):
         }
     
     """
-    from .agent_session_store import create_session
+    from .conversation_store import create_session
     import uuid
     
     # Make name optional with a default for backwards compatibility
@@ -166,7 +166,6 @@ async def create_agent_session(data: dict = Body(...)):
     if agent not in ['codex', 'gemini']:
         raise HTTPException(status_code=400, detail=f"Invalid agent type: {agent}")
     
-    session_id = f"session-{uuid.uuid4().hex[:12]}"
     cwd = data.get('cwd')
     auto = data.get('auto', False)
     fullAccess = data.get('fullAccess', False)
@@ -174,7 +173,6 @@ async def create_agent_session(data: dict = Body(...)):
     try:
         session = await anyio.to_thread.run_sync(
             lambda: create_session(
-                session_id=session_id,
                 name=name,
                 agent=agent,
                 cwd=cwd,
@@ -375,7 +373,7 @@ async def get_agent_session(session_id: str):
           }
         }
     """
-    from .agent_session_store import get_session
+    from .conversation_store import get_session
     try:
         session = await anyio.to_thread.run_sync(get_session, session_id)
         if not session:
@@ -398,11 +396,9 @@ async def delete_agent_session(session_id: str):
           "data": {"session_id": "session-123"}
         }
     """
-    from .agent_session_store import delete_session
+    from .conversation_store import delete_session
     try:
-        deleted = await anyio.to_thread.run_sync(delete_session, session_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Session not found")
+        await anyio.to_thread.run_sync(delete_session, session_id)
         return {"ok": True, "data": {"session_id": session_id}}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -426,7 +422,7 @@ async def send_to_agent_session(session_id: str, data: dict = Body(...)):
           }
         }
     """
-    from .agent_session_store import get_session, append_message
+    from .conversation_store import get_session, append_message
     import uuid
     
     text = data.get('text')

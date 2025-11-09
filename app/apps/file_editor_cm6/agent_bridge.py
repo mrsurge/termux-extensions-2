@@ -44,6 +44,18 @@ class CodexAdapter:
     
     # Track last complete message per request (for persistence)
     _last_messages = {}
+
+    @staticmethod
+    def store_message_chunk(request_id: str, text: str):
+        """Appends a chunk of a streaming message to a buffer."""
+        if request_id not in CodexAdapter._last_messages:
+            CodexAdapter._last_messages[request_id] = []
+        CodexAdapter._last_messages[request_id].append(text)
+
+    @staticmethod
+    def get_complete_message(request_id: str) -> str:
+        """Retrieves the complete message and clears the buffer."""
+        return "".join(CodexAdapter._last_messages.pop(request_id, []))
     
     @staticmethod
     def to_agent(normalized: dict, context: Optional[dict] = None) -> dict:
@@ -83,9 +95,6 @@ class CodexAdapter:
                 'cwd': ctx.get('cwd', os.path.expanduser('~'))
             }
             
-            # Add base-instructions for history restoration
-            if ctx.get('base_instructions'):
-                tool_params['base-instructions'] = ctx['base_instructions']
             
             # Add approval policy and sandbox settings if provided
             if ctx.get('approval_policy'):
@@ -189,11 +198,14 @@ Content:
                 # DIRECT USER RESPONSES - these get normal bubbles
                 if event_type == 'agent_message_delta':
                     # Streaming token - DIRECT RESPONSE
+                    request_id_str = str(request_id)
+                    delta = msg_data.get('delta', '')
+                    CodexAdapter.store_message_chunk(request_id_str, delta)
                     return {
-                        'id': str(request_id),
+                        'id': request_id_str,
                         'event': 'token',
                         'agent': 'codex',
-                        'text': msg_data.get('delta', '')
+                        'text': delta
                     }
                 elif event_type == 'agent_message':
                     # Full message - not sent to UI (we use deltas for streaming)

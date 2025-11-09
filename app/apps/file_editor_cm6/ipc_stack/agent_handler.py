@@ -20,7 +20,7 @@ from app.apps.file_editor_cm6.agent_session_store import (
     get_session,
     update_session_metadata,
 )
-from .conversation import build_transcript
+from app.apps.file_editor_cm6.conversation_utils import build_transcript
 from .protocol import CodexAdapter
 
 LOGGER = logging.getLogger("te.ipc.agent_drawer")
@@ -88,6 +88,7 @@ class AgentSocketSession:
         self.line_buffer = ""
         self.running = True
         self.output_thread: Optional[threading.Thread] = None
+        self._request_map: Dict[str, str] = {}
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                          #
@@ -195,31 +196,26 @@ class AgentSocketSession:
         if not session:
             raise ValueError(f"Session {chat_session_id} not found")
 
-        transcript_instructions, transcript_text = build_transcript(session.get("messages"))
+        # Conversation restoration logic
+        _base_instructions, transcript_text = build_transcript(session.get("messages"))
         stored_shell = session.get("shell_id")
         stored_conversation = session.get("conversationId")
-        with _state_lock:
-            memory_conversation = _conversations.get(chat_session_id)
-
-        needs_restore = bool(session.get("messages")) and (
-            (stored_shell and stored_shell != self.shell_id)
-            or not stored_conversation
-            or not memory_conversation
+        needs_restore = bool(transcript_text) and (
+            not stored_conversation or (stored_shell and stored_shell != self.shell_id)
         )
 
-        if needs_restore and transcript_text:
-            payload["text"] = f"{transcript_text}\n\nUser: {payload.get('text', '')}"
+        original_text = payload.get("text", "")
+        if needs_restore:
+            payload["text"] = f"{transcript_text}\n\nUser: {original_text}"
             payload["conversationId"] = None
+            CodexAdapter.clear_conversation(chat_session_id)
             self._log("conversation", f"injecting transcript ({len(transcript_text)} chars)")
         elif stored_conversation:
             payload["conversationId"] = stored_conversation
-            with _state_lock:
-                _conversations[chat_session_id] = stored_conversation
         else:
             payload["conversationId"] = None
 
-        update_session_metadata(chat_session_id, shell_id=self.shell_id)
-
+        # Set up context for the agent
         context: Dict[str, Any] = {"cwd": self.cwd}
         if payload.get("file"):
             context.update(
@@ -232,17 +228,25 @@ class AgentSocketSession:
             context.setdefault("approval_policy", "never")
             context.setdefault("sandbox", "workspace-write")
 
-        payload.setdefault("id", f"msg-{int(time.time() * 1000)}")
+        # Persist user message before sending to agent
+        request_id = f"msg-{uuid.uuid4().hex}"
+        payload["id"] = request_id
+        self._request_map[request_id] = chat_session_id
+        
         append_message(
             chat_session_id,
             {
-                "id": payload["id"],
+                "id": request_id,
                 "type": "user",
-                "text": payload.get("text", ""),
+                "text": original_text, # Persist original text, not the prepended one
                 "timestamp": time.time(),
             },
         )
+        
+        # Update shell_id in session metadata
+        update_session_metadata(chat_session_id, shell_id=self.shell_id)
 
+        # Convert to agent message and send
         agent_msg = CodexAdapter.to_agent(payload, context)
         self._write_to_shell(json.dumps(agent_msg) + "\n")
         self._log(
@@ -300,53 +304,87 @@ class AgentSocketSession:
                 agent_msg = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            
             normalized = CodexAdapter.from_agent(agent_msg)
             if not normalized:
                 continue
+
+            request_id = str(normalized.get("id", ""))
+            chat_session = self._request_map.get(request_id) or self.session_id
+            normalized["session"] = chat_session
+            
             event = normalized.get("event")
-            chat_session = normalized.get("session") or self.session_id
-            if event == "conversation_started":
+
+            if event == "token":
+                # Token is already stored by from_agent, just emit
+                pass
+            elif event == "conversation_started":
                 conversation_id = normalized.get("conversationId")
                 if conversation_id:
                     with _state_lock:
                         _conversations[chat_session] = conversation_id
-                    update_session_metadata(chat_session, conversationId=conversation_id)
+                    update_session_metadata(chat_session, conversationId=conversation_id, shell_id=self.shell_id)
                     self._log(
                         "conversation",
                         f"{chat_session} conversation_id={conversation_id[:8]}…",
                     )
             elif event == "system":
-                if normalized.get("complete") and normalized.get("text"):
-                    append_message(
-                        chat_session,
-                        {
-                            "id": normalized.get("id") or f"msg-{uuid.uuid4().hex}",
-                            "type": "system",
-                            "text": normalized.get("text", ""),
-                            "timestamp": time.time(),
-                        },
-                    )
-            elif event == "final":
                 append_message(
                     chat_session,
                     {
-                        "id": normalized.get("id") or f"msg-{uuid.uuid4().hex}",
-                        "type": "assistant",
+                        "id": f"msg-{uuid.uuid4().hex}",
+                        "type": "system",
                         "text": normalized.get("text", ""),
                         "timestamp": time.time(),
                     },
                 )
+            elif event == "tool_call":
+                append_message(
+                    chat_session,
+                    {
+                        "id": f"msg-{uuid.uuid4().hex}",
+                        "type": "tool_call",
+                        "tool": normalized.get("tool", ""),
+                        "args": normalized.get("args", {}),
+                        "timestamp": time.time(),
+                    },
+                )
+            elif event == "diff":
+                append_message(
+                    chat_session,
+                    {
+                        "id": f"msg-{uuid.uuid4().hex}",
+                        "type": "diff",
+                        "path": normalized.get("path", ""),
+                        "patch": normalized.get("patch", ""),
+                        "timestamp": time.time(),
+                    },
+                )
+            elif event == "final":
+                complete_text = CodexAdapter.get_complete_message(request_id)
+                append_message(
+                    chat_session,
+                    {
+                        "id": request_id,
+                        "type": "assistant",
+                        "text": complete_text,
+                        "timestamp": time.time(),
+                    },
+                )
+                self._request_map.pop(request_id, None)
             elif event == "error":
                 error_text = normalized.get("error") or normalized.get("text") or "Agent error"
                 append_message(
                     chat_session,
                     {
-                        "id": normalized.get("id") or f"msg-{uuid.uuid4().hex}",
+                        "id": request_id or f"msg-{uuid.uuid4().hex}",
                         "type": "error",
                         "text": error_text,
                         "timestamp": time.time(),
                     },
                 )
+                if request_id:
+                    self._request_map.pop(request_id, None)
 
             self._emit_event(normalized)
 

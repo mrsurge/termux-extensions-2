@@ -90,7 +90,10 @@ export function initAgentDrawer() {
         script.onload = () => resolve(window.io);
         script.onerror = () => {
           socketIoLoader = null;
-          reject(new Error('Failed to load Socket.IO client'));
+          const errorMsg = 'Socket.IO client download failed. Agent features will be unavailable. Please check your network connection and ad-blocker settings.';
+          console.error(`[Agent Drawer] ${errorMsg}`);
+          notify(errorMsg);
+          reject(new Error('Failed to load Socket.IO client from CDN.'));
         };
         document.head.appendChild(script);
       });
