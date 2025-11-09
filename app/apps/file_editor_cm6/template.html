@@ -330,6 +330,12 @@
   .fe-editor-container { position:relative; flex:1; min-height:0; }
   #cm6-host { position:absolute; inset:0; display:flex; }
   .cm-editor { flex:1; height:100%; }
+  .cm-empty-anchor { 
+    font-size: 0; 
+    line-height: inherit; 
+    user-select: text; 
+    -webkit-user-select: text;
+  }
   .cm-line.cm-diff-line { position: relative; padding-left: calc(var(--diff-marker-width) + 0.35rem); }
   .cm-line.cm-diff-line::before {
     content: attr(data-diff-marker);

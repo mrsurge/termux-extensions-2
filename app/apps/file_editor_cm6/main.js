@@ -14,7 +14,7 @@ import { initResizeManager, loadLayoutPreferences } from './static/js/resize_man
 
 // Core
 const EditorState = CM.EditorState;
-const { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, lineNumbers } = CM;
+const { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, lineNumbers, Decoration, ViewPlugin, Compartment } = CM;
 const defaultKeymap   = CM.defaultKeymap   || [];
 const history         = CM.history         || (() => []);
 const historyKeymap   = CM.historyKeymap   || [];
@@ -87,6 +87,63 @@ const shellLang = () => {
   const mode = CM.shellMode;
   return (mode && CM.StreamLanguage) ? CM.StreamLanguage.define(mode) : null;
 };
+
+// ---------- Empty Line Selection Anchors (for Android native selection) ----------
+// Creates invisible widgets in empty lines so Android selection can anchor properly
+// Uses WORD JOINER (\u2060) which won't create line breaks
+
+const emptyLineAnchorCompartment = new Compartment();
+
+function createEmptyLineAnchorWidget() {
+  class EmptyLineAnchor extends CM.WidgetType {
+    toDOM() {
+      const span = document.createElement('span');
+      span.className = 'cm-empty-anchor';
+      span.textContent = '\u2060'; // WORD JOINER - invisible, non-breaking
+      return span;
+    }
+    ignoreEvent() { return false; }
+  }
+
+  const emptyLinePlugin = ViewPlugin.fromClass(class {
+    constructor(view) {
+      this.decorations = this.buildDecorations(view);
+    }
+    
+    update(update) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = this.buildDecorations(update.view);
+      }
+    }
+    
+    buildDecorations(view) {
+      const builder = [];
+      for (let { from, to } of view.visibleRanges) {
+        for (let pos = from; pos <= to;) {
+          const line = view.state.doc.lineAt(pos);
+          if (line.length === 0) {
+            // Empty line - add anchor widget at the start
+            builder.push(
+              Decoration.widget({
+                widget: new EmptyLineAnchor(),
+                side: -1,
+              }).range(line.from)
+            );
+          }
+          pos = line.to + 1;
+        }
+      }
+      return Decoration.set(builder);
+    }
+  }, {
+    decorations: v => v.decorations,
+  });
+
+  return emptyLinePlugin;
+}
+
+// Initially disabled (will be enabled during native selection)
+const emptyLineAnchorExtension = emptyLineAnchorCompartment.of([]);
 
 // ---- host/api contract (injected by framework) ----
 /* global host, api */
@@ -581,6 +638,7 @@ function makeExtensions() {
     search(),
     keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
     highlightActiveLine(),
+    emptyLineAnchorExtension, // Add the compartment for empty line anchors
   ];
   if (showLineNumbers) exts.push(lineNumbers(), highlightActiveLineGutter());
   if (showSyntaxHighlight && defaultHighlightStyle) {
@@ -1532,30 +1590,21 @@ function enableNativeSelection() {
   // Lock layout FIRST, before any DOM mutations
   lockLayout();
   
-  // Disable autosave during native selection to prevent saving ZWSPs
+  // Disable autosave during native selection to prevent saving anchors
   autoSaveWasEnabled = autoSaveEnabled;
   if (autoSaveEnabled) {
     console.log('[NativeSelection] Temporarily disabling autosave');
   }
   
+  // Enable empty line anchor widgets
+  view.dispatch({
+    effects: emptyLineAnchorCompartment.reconfigure(createEmptyLineAnchorWidget())
+  });
+  
   // Make the live CodeMirror content temporarily editable
   cmContent.setAttribute('contenteditable', 'true');
   cmContent.style.webkitUserModify = 'read-write-plaintext-only';
   cmContent.style.userSelect = 'text';
-  
-  // ZWSP injection - COMMENTED OUT
-  /*
-  // Inject zero-width spaces into empty lines so Android selection can anchor
-  // Empty lines in CM6 are just <div class="cm-line"><br></div> which breaks selection
-  zwspNodes = [];
-  cmContent.querySelectorAll('.cm-line').forEach(line => {
-    if (line.childNodes.length === 1 && line.firstChild.nodeName === 'BR') {
-      const zwsp = document.createTextNode('\u200B');
-      line.insertBefore(zwsp, line.firstChild); // Keep CM's <br>
-      zwspNodes.push(zwsp);
-    }
-  });
-  */
   
   cmContent.focus();
   nativeSelectionActive = true;
@@ -1565,31 +1614,19 @@ function disableNativeSelection(scrubDoc = false) {
   if (!nativeSelectionActive || !view) return;
   const cmContent = cmHost.querySelector('.cm-content');
   if (cmContent) {
-    // ZWSP cleanup - COMMENTED OUT
-    /*
-    // Remove temporary zero-width spaces from DOM
-    zwspNodes.forEach(node => {
-      if (node.parentNode) node.parentNode.removeChild(node);
-    });
-    zwspNodes = [];
-    */
-    
     // Restore CodeMirror's control
     cmContent.removeAttribute('contenteditable');
     cmContent.style.webkitUserModify = '';
     cmContent.style.userSelect = '';
   }
   
+  // Disable empty line anchor widgets
+  view.dispatch({
+    effects: emptyLineAnchorCompartment.reconfigure([])
+  });
+  
   nativeSelectionActive = false;
   unlockLayout();
-  
-  // ZWSP document scrubbing - COMMENTED OUT
-  /*
-  // Scrub any ZWSPs that leaked into the document
-  if (scrubDoc) {
-    purgeZWSPFromDoc();
-  }
-  */
   
   // Re-enable autosave if it was on before
   if (autoSaveWasEnabled) {
@@ -1646,17 +1683,16 @@ cmHost.addEventListener('dblclick', () => {
   }
 });
 
-// Scrub ZWSPs from clipboard when copying during native selection - COMMENTED OUT
-/*
+// Scrub invisible characters from clipboard when copying during native selection
 cmHost.addEventListener('copy', (e) => {
   if (!nativeSelectionActive) return;
   const sel = document.getSelection();
   if (!sel) return;
-  const text = sel.toString().replace(/\u200B/g, '');
+  // Strip both ZERO WIDTH SPACE and WORD JOINER
+  const text = sel.toString().replace(/[\u200B\u2060]/g, '');
   e.clipboardData.setData('text/plain', text);
   e.preventDefault();
 });
-*/
 
 // Cancel on touch end/move
 ['touchend', 'touchcancel', 'touchmove'].forEach(evt => {
