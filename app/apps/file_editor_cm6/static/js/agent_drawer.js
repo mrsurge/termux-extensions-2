@@ -51,6 +51,7 @@ export function initAgentDrawer() {
   
   // STREAMING MESSAGE CACHE - only holds the current assistant message being built
   let streamingMessage = null;
+  let pendingTaskStartCount = 0;
   
   // DOM references for streaming bubbles
   let currentAssistantBubble = null;
@@ -721,9 +722,31 @@ export function initAgentDrawer() {
         break;
       }
         
-      case 'system':
-        appendSystemToken(msg.text);
+      case 'system': {
+        const text = msg.text || '';
+        const trimmed = text.trim();
+        const reasoning = Boolean(msg.reasoning);
+        const complete = Boolean(msg.complete);
+
+        if (reasoning) {
+          if (complete) {
+            finalizeSystemReasoning(text);
+          } else {
+            appendSystemToken(text);
+          }
+          break;
+        }
+
+        if (trimmed === '[Task started]') {
+          if (pendingTaskStartCount > 0) {
+            pendingTaskStartCount = Math.max(0, pendingTaskStartCount - 1);
+            break;
+          }
+        }
+
+        appendSystemToken(text);
         break;
+      }
         
       case 'planning':
         appendPlanningToken(msg.summary);
@@ -750,12 +773,14 @@ export function initAgentDrawer() {
         }
         finishAssistantMessage();
         streamingMessage = null; // Clear cache
+        pendingTaskStartCount = 0;
         notify('Agent completed');
         break;
         
       case 'error':
         addErrorMessage(msg.error);
         streamingMessage = null; // Clear cache on error
+        pendingTaskStartCount = 0;
         break;
         
       case 'connected':
@@ -852,6 +877,9 @@ export function initAgentDrawer() {
       return;
     }
     sharedShell.socket.emit('agent_user_message', message);
+    if ((session.agent || 'codex') === 'codex') {
+      insertTaskStartedIndicator();
+    }
     
     composer.value = '';
     transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
@@ -980,6 +1008,7 @@ export function initAgentDrawer() {
       transcript.innerHTML = '';
     }
     currentAssistantBubble = null;
+    pendingTaskStartCount = 0;
   }
 
   function appendAssistantToken(text) {
@@ -1029,9 +1058,27 @@ export function initAgentDrawer() {
     appendSystemToken(text);
   }
 
+  function finalizeSystemReasoning(text) {
+    if (!currentPlanningSection) {
+      appendSystemToken(text);
+      return;
+    }
+    const textSpan = currentPlanningSection.querySelector('.agent-transcript__planning-text');
+    if (textSpan) {
+      const existing = textSpan.textContent || '';
+      const prefix = existing.startsWith('[Task started]\n') ? '[Task started]\n' : '';
+      textSpan.textContent = prefix ? `${prefix}${text || ''}` : (text || '');
+    }
+  }
+
   function finishAssistantMessage() {
     currentAssistantBubble = null;
     currentPlanningSection = null;
+  }
+
+  function insertTaskStartedIndicator() {
+    appendSystemToken('[Task started]\n');
+    pendingTaskStartCount += 1;
   }
 
   function addSystemMessage(text) {

@@ -70,8 +70,6 @@ def save_session_map(session_map: Dict[str, Dict[str, Any]]) -> None:
             _write_raw_sessions(session_map)
         except OSError as exc:
             print(f"[ConversationStore] Error saving sessions: {exc}")
-        finally:
-            _invalidate_cache()
 
 
 def list_sessions() -> List[Dict[str, Any]]:
@@ -129,7 +127,7 @@ def append_message(session_id: str, message: Dict[str, Any]) -> None:
         sessions = _load_raw_sessions()
         session = sessions.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            return
         session.setdefault("messages", []).append(message)
         session["version"] = session.get("version", 1) + 1
         _write_raw_sessions(sessions)
@@ -141,14 +139,14 @@ def update_message(session_id: str, message_id: str, updates: Dict[str, Any]) ->
         sessions = _load_raw_sessions()
         session = sessions.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            return
         for msg in session.get("messages", []):
             if msg.get("id") == message_id:
                 msg.update(updates)
                 session["version"] = session.get("version", 1) + 1
                 _write_raw_sessions(sessions)
                 return
-        raise ValueError(f"Message {message_id} not found in session {session_id}")
+        return
 
 
 def update_session_metadata(session_id: str, **kwargs: Any) -> None:
@@ -157,7 +155,7 @@ def update_session_metadata(session_id: str, **kwargs: Any) -> None:
         sessions = _load_raw_sessions()
         session = sessions.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            return
         session.update(kwargs)
         session["version"] = session.get("version", 1) + 1
         _write_raw_sessions(sessions)

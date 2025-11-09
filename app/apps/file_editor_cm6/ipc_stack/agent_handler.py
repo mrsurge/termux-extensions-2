@@ -329,15 +329,19 @@ class AgentSocketSession:
                         f"{chat_session} conversation_id={conversation_id[:8]}…",
                     )
             elif event == "system":
-                append_message(
-                    chat_session,
-                    {
-                        "id": f"msg-{uuid.uuid4().hex}",
-                        "type": "system",
-                        "text": normalized.get("text", ""),
-                        "timestamp": time.time(),
-                    },
-                )
+                if normalized.get("reasoning") and not normalized.get("complete"):
+                    # streaming-only reasoning; emit to UI but skip persistence
+                    pass
+                else:
+                    append_message(
+                        chat_session,
+                        {
+                            "id": f"msg-{uuid.uuid4().hex}",
+                            "type": "system",
+                            "text": normalized.get("text", ""),
+                            "timestamp": time.time(),
+                        },
+                    )
             elif event == "tool_call":
                 append_message(
                     chat_session,

@@ -213,12 +213,14 @@ Content:
                 
                 # EVERYTHING ELSE - terminal/console style
                 elif event_type == 'agent_reasoning_delta':
-                    # Reasoning tokens - SYSTEM MESSAGE
+                    # Streaming reasoning tokens - display only, no persistence
                     return {
                         'id': str(request_id),
                         'event': 'system',
                         'agent': 'codex',
-                        'text': msg_data.get('delta', '')
+                        'text': msg_data.get('delta', ''),
+                        'reasoning': True,
+                        'complete': False
                     }
                 elif event_type == 'agent_reasoning':
                     # Full reasoning block - persistable system message
@@ -227,15 +229,18 @@ Content:
                         'event': 'system',
                         'agent': 'codex',
                         'text': msg_data.get('text', ''),
+                        'reasoning': True,
                         'complete': True
                     }
                 elif event_type == 'agent_reasoning_section_break':
-                    # Section break - SYSTEM MESSAGE
+                    # Section break during reasoning
                     return {
                         'id': str(request_id),
                         'event': 'system',
                         'agent': 'codex',
-                        'text': '\n'
+                        'text': '\n',
+                        'reasoning': True,
+                        'complete': False
                     }
                 elif event_type == 'task_started':
                     # Task starting - SYSTEM MESSAGE
@@ -244,7 +249,8 @@ Content:
                         'event': 'system',
                         'agent': 'codex',
                         'text': '[Task started]',
-                        'complete': True
+                        'complete': True,
+                        'taskStarted': True
                     }
                 elif event_type == 'task_complete':
                     # Task finished - use last_agent_message from the event itself

@@ -117,7 +117,10 @@ async def agent_websocket(websocket: WebSocket):
                     if conversation_id:
                         update_session_metadata(chat_session, conversationId=conversation_id, shell_id=shell_id)
                 elif event == "system":
-                    append_message(chat_session, {"id": f"msg-{uuid.uuid4().hex}", "type": "system", "text": normalized.get("text", ""), "timestamp": time.time()})
+                    if normalized.get("reasoning") and not normalized.get("complete"):
+                        pass
+                    else:
+                        append_message(chat_session, {"id": f"msg-{uuid.uuid4().hex}", "type": "system", "text": normalized.get("text", ""), "timestamp": time.time()})
                 elif event == "tool_call":
                     append_message(chat_session, {"id": f"msg-{uuid.uuid4().hex}", "type": "tool_call", "tool": normalized.get("tool", ""), "args": normalized.get("args", {}), "timestamp": time.time()})
                 elif event == "diff":
