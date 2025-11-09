@@ -330,13 +330,6 @@
   .fe-editor-container { position:relative; flex:1; min-height:0; }
   #cm6-host { position:absolute; inset:0; display:flex; }
   .cm-editor { flex:1; height:100%; }
-  #select-surface { position:absolute; inset:0; display:none; padding:12px; overflow:auto;
-                    background:var(--bg); color:var(--fg);
-                    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-                    white-space:pre; }
-  #select-surface.wrap { white-space:pre-wrap; word-break:break-word; }
-  #select-exit { position:absolute; right:12px; bottom:12px; display:none; }
-  #select-tip { position:absolute; left:12px; bottom:12px; font-size:.8rem; color:var(--muted); display:none; }
   .cm-line.cm-diff-line { position: relative; padding-left: calc(var(--diff-marker-width) + 0.35rem); }
   .cm-line.cm-diff-line::before {
     content: attr(data-diff-marker);
@@ -1346,9 +1339,6 @@
 
   <div class="fe-editor-container" id="editor-container">
     <div id="cm6-host"></div>
-    <div id="select-surface" contenteditable="true" spellcheck="false"></div>
-    <button id="select-exit" class="fe-btn">Exit select mode</button>
-    <div id="select-tip">Long-press to select. Tap “Exit select mode” to return.</div>
   </div>
 
   <!-- Resize handle for terminal (mobile only) -->

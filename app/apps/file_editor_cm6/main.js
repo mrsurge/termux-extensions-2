@@ -227,9 +227,6 @@ function initVirtualKeyboardAdjustments({ root, agentDrawer, composer, transcrip
 
 const container = requireEl('#editor-container');
 const cmHost = requireEl('#cm6-host');
-const selectSurface = requireEl('#select-surface');
-const selectExit = requireEl('#select-exit');
-const selectTip = requireEl('#select-tip');
 const root = requireEl('.fe-root');
 const agentDrawerEl = requireEl('#agent-drawer');
 const agentTranscript = requireEl('#agent-transcript');
@@ -697,7 +694,6 @@ function applyMenuState() {
   setMenuChecked(miToggleAutosave, autoSaveEnabled);
   setMenuChecked(miToggleDiffs, showInlineDiffs);
   setMenuChecked(miTrackEdits, trackAgentEdits);
-  selectSurface.classList.toggle('wrap', wordWrap);
 }
 
 function updateThemeMenuChecks() {
@@ -1312,7 +1308,11 @@ bindMenuToggle(miPaste, async () => {
   } catch {}
   document.execCommand('paste');
 });
-bindMenuToggle(miSelectAll, () => { if (selectSurface.style.display === 'block') { const r = document.createRange(); r.selectNodeContents(selectSurface); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } else { view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }); view.focus(); } });
+bindMenuToggle(miSelectAll, () => {
+  // Select all text in CodeMirror
+  view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+  view.focus();
+});
 
 bindMenuToggle(miToggleLines, () => {
   showLineNumbers = !showLineNumbers;
@@ -1467,82 +1467,68 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ---------- Dual-surface selection mode ----------
-let selectMode = false;
-let longPressTimer = null;
-let pointerDownAt = null;
+// ---------- Native Android selection via .cm-content ----------
+// This enables Android's native text selection handles by temporarily making
+// the CodeMirror content element editable on long-press, then restoring it
+// when the user starts editing. See: docs/apps/code_cm6/CM6_NATIVE_SELECTION.md
 
-function enterSelectMode(fromPoint=null) {
-  if (selectMode) return;
-  selectMode = true;
-  // Populate and show the selection surface
-  selectSurface.textContent = getText();
-  selectSurface.style.display = 'block';
-  selectExit.style.display = 'inline-flex';
-  selectTip.style.display = 'block';
-  cmHost.style.display = 'none';
-  cmHost.setAttribute('inert', 'true');
-  cmHost.setAttribute('aria-hidden', 'true');
-  // Focus and place caret near press
-  selectSurface.focus();
-  try {
-    if (fromPoint && document.caretRangeFromPoint) {
-      const r = document.caretRangeFromPoint(fromPoint.x, fromPoint.y);
-      if (r) {
-        const sel = getSelection();
-        sel.removeAllRanges();
-        sel.addRange(r);
-      }
-    }
-  } catch {}
+let longPressTimer = null;
+const LONG_PRESS_MS = 300;
+
+function enableNativeSelection() {
+  if (!view) return;
+  const cmContent = cmHost.querySelector('.cm-content');
+  if (!cmContent) return;
+  
+  // Make the live CodeMirror content temporarily editable
+  cmContent.setAttribute('contenteditable', 'true');
+  cmContent.style.webkitUserModify = 'read-write-plaintext-only';
+  cmContent.style.userSelect = 'text';
+  cmContent.focus();
 }
 
-function exitSelectMode(commitChanges=true) {
-  if (!selectMode) return;
-  selectMode = false;
-  if (commitChanges) {
-    const newText = selectSurface.textContent || '';
-    if (newText !== getText()) {
-      setText(newText);
-      markUnsaved(newText !== lastSavedContent);
-    }
-  }
-  selectSurface.style.display = 'none';
-  selectExit.style.display = 'none';
-  selectTip.style.display = 'none';
-  cmHost.style.display = 'flex';
-  cmHost.removeAttribute('inert');
-  cmHost.removeAttribute('aria-hidden');
-  view.focus();
+function disableNativeSelection() {
+  if (!view) return;
+  const cmContent = cmHost.querySelector('.cm-content');
+  if (!cmContent) return;
+  
+  // Restore CodeMirror's control
+  cmContent.removeAttribute('contenteditable');
+  cmContent.style.webkitUserModify = '';
+  cmContent.style.userSelect = '';
 }
 
 function scheduleLongPress(ev) {
   clearTimeout(longPressTimer);
-  const pt = { x: ev.clientX, y: ev.clientY };
-  pointerDownAt = { x: pt.x, y: pt.y, t: Date.now() };
-  longPressTimer = setTimeout(() => enterSelectMode(pt), 500);
+  longPressTimer = setTimeout(() => {
+    enableNativeSelection();
+  }, LONG_PRESS_MS);
 }
+
 function cancelLongPress() {
   clearTimeout(longPressTimer);
   longPressTimer = null;
-  pointerDownAt = null;
 }
 
-cmHost.addEventListener('pointerdown', (ev) => {
-  if (ev.pointerType === 'touch' || ev.pointerType === 'pen') scheduleLongPress(ev);
-});
-['pointerup','pointercancel','pointermove','wheel','scroll'].forEach(evt => {
-  cmHost.addEventListener(evt, cancelLongPress, { passive:true });
+// Enable native selection on long-press
+cmHost.addEventListener('touchstart', (ev) => {
+  scheduleLongPress(ev);
+}, { passive: true });
+
+// Cancel on touch end/move
+['touchend', 'touchcancel', 'touchmove'].forEach(evt => {
+  cmHost.addEventListener(evt, cancelLongPress, { passive: true });
 });
 
-selectExit.addEventListener('click', () => exitSelectMode(true));
-selectSurface.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape') { ev.preventDefault(); exitSelectMode(true); }
+// Disable native selection when user starts editing
+cmHost.addEventListener('pointerdown', (ev) => {
+  if (ev.pointerType === 'mouse' || ev.pointerType === 'pen') {
+    disableNativeSelection();
+  }
 });
-selectSurface.addEventListener('blur', () => {
-  // If user navigates away, keep selection mode but sync text to CM to avoid divergence
-  const newText = selectSurface.textContent || '';
-  if (newText !== getText()) { setText(newText); markUnsaved(newText !== lastSavedContent); }
+
+cmHost.addEventListener('beforeinput', () => {
+  disableNativeSelection();
 });
 
 // ---------- Confirm modal ----------
