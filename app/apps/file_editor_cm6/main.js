@@ -1473,6 +1473,7 @@ document.addEventListener('keydown', (e) => {
 // when the user starts editing. See: docs/apps/code_cm6/CM6_NATIVE_SELECTION.md
 
 let longPressTimer = null;
+let nativeSelectionActive = false;
 const LONG_PRESS_MS = 300;
 
 function enableNativeSelection() {
@@ -1485,10 +1486,11 @@ function enableNativeSelection() {
   cmContent.style.webkitUserModify = 'read-write-plaintext-only';
   cmContent.style.userSelect = 'text';
   cmContent.focus();
+  nativeSelectionActive = true;
 }
 
 function disableNativeSelection() {
-  if (!view) return;
+  if (!nativeSelectionActive || !view) return;
   const cmContent = cmHost.querySelector('.cm-content');
   if (!cmContent) return;
   
@@ -1496,6 +1498,7 @@ function disableNativeSelection() {
   cmContent.removeAttribute('contenteditable');
   cmContent.style.webkitUserModify = '';
   cmContent.style.userSelect = '';
+  nativeSelectionActive = false;
 }
 
 function scheduleLongPress(ev) {
