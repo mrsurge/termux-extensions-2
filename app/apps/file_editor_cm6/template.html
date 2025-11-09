@@ -340,6 +340,8 @@
     font-weight: 600;
     opacity: 0.85;
     color: rgba(148, 163, 184, 0.65);
+    user-select: none;
+    -webkit-user-select: none;
   }
   .cm-line.cm-diff-line-added { background: var(--diff-add-bg) !important; border-left: 3px solid var(--diff-add-border) !important; }
   .cm-line.cm-diff-line-added::before { color: var(--diff-add-marker); }
@@ -365,6 +367,8 @@
     text-align: center;
     font-weight: 600;
     color: var(--diff-del-marker);
+    user-select: none;
+    -webkit-user-select: none;
   }
   .cm-diff-removed-text { display: block; white-space: pre; }
   .cm-diff-line-removed.cm-diff-wrap { white-space: pre-wrap; word-break: break-word; }
