@@ -598,6 +598,14 @@ function makeExtensions() {
   if (enableAutocompletion && CM.autocompletion) {
     exts.push(CM.autocompletion());
   }
+  
+  // Disable CM6's native double-click word selection (conflicts with our native selection)
+  exts.push(EditorView.domEventHandlers({
+    dblclick: (event, view) => {
+      event.preventDefault();
+      return true; // Mark as handled
+    }
+  }));
 
   // Theme
   const theme = THEMES[currentTheme] || THEMES['cm6-dark'];
@@ -1478,7 +1486,7 @@ let nativeSelectionActive = false;
 let zwspNodes = []; // Track zero-width spaces we inject
 let cleanupDebounce = null;
 let autoSaveWasEnabled = false; // Track autosave state before selection
-const LONG_PRESS_MS = 300;
+const LONG_PRESS_MS = 450; // Increased from 300ms to avoid CM6 double-click conflict
 
 function purgeZWSPFromDoc() {
   if (!view) return;
@@ -1525,6 +1533,11 @@ function enableNativeSelection() {
   
   cmContent.focus();
   nativeSelectionActive = true;
+  
+  // Refresh inline diffs after DOM manipulation (keep them visible)
+  if (showInlineDiffs && currentPath && currentPathExists && diffController) {
+    diffController.refresh(true);
+  }
 }
 
 function disableNativeSelection(scrubDoc = false) {
