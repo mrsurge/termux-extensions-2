@@ -1605,6 +1605,16 @@ cmHost.addEventListener('dblclick', () => {
   }
 });
 
+// Scrub ZWSPs from clipboard when copying during native selection
+cmHost.addEventListener('copy', (e) => {
+  if (!nativeSelectionActive) return;
+  const sel = document.getSelection();
+  if (!sel) return;
+  const text = sel.toString().replace(/\u200B/g, '');
+  e.clipboardData.setData('text/plain', text);
+  e.preventDefault();
+});
+
 // Cancel on touch end/move
 ['touchend', 'touchcancel', 'touchmove'].forEach(evt => {
   cmHost.addEventListener(evt, cancelLongPress, { passive: true });
