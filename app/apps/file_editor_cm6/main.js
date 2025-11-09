@@ -1523,13 +1523,7 @@ cmHost.addEventListener('touchstart', (ev) => {
   cmHost.addEventListener(evt, cancelLongPress, { passive: true });
 });
 
-// Disable native selection when user starts editing
-cmHost.addEventListener('pointerdown', (ev) => {
-  if (ev.pointerType === 'mouse' || ev.pointerType === 'pen') {
-    disableNativeSelection();
-  }
-});
-
+// Disable native selection when user starts typing
 cmHost.addEventListener('beforeinput', () => {
   disableNativeSelection();
 });
