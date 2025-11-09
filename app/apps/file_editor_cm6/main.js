@@ -1160,12 +1160,13 @@ function scheduleAutosave() {
     clearTimeout(saveDebounceTimer);
   }
 
-  if (!autoSaveEnabled) {
-    return; // Autosave is disabled
+  // Don't autosave if disabled OR if native selection is active (ZWSPs present)
+  if (!autoSaveEnabled || nativeSelectionActive) {
+    return;
   }
 
   saveDebounceTimer = setTimeout(() => {
-    if (unsaved && currentPath && currentPathExists) {
+    if (unsaved && currentPath && currentPathExists && !nativeSelectionActive) {
       saveFile().catch(err => {
         console.error('Autosave failed:', err);
       });
@@ -1475,12 +1476,36 @@ document.addEventListener('keydown', (e) => {
 let longPressTimer = null;
 let nativeSelectionActive = false;
 let zwspNodes = []; // Track zero-width spaces we inject
+let cleanupDebounce = null;
+let autoSaveWasEnabled = false; // Track autosave state before selection
 const LONG_PRESS_MS = 300;
+
+function purgeZWSPFromDoc() {
+  if (!view) return;
+  const text = view.state.doc.toString();
+  if (text.indexOf('\u200B') === -1) return;
+
+  const changes = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 8203) {
+      changes.push({ from: i, to: i + 1 });
+    }
+  }
+  if (changes.length) {
+    view.dispatch({ changes });
+  }
+}
 
 function enableNativeSelection() {
   if (!view) return;
   const cmContent = cmHost.querySelector('.cm-content');
   if (!cmContent) return;
+  
+  // Disable autosave during native selection to prevent saving ZWSPs
+  autoSaveWasEnabled = autoSaveEnabled;
+  if (autoSaveEnabled) {
+    console.log('[NativeSelection] Temporarily disabling autosave');
+  }
   
   // Make the live CodeMirror content temporarily editable
   cmContent.setAttribute('contenteditable', 'true');
@@ -1502,22 +1527,58 @@ function enableNativeSelection() {
   nativeSelectionActive = true;
 }
 
-function disableNativeSelection() {
+function disableNativeSelection(scrubDoc = false) {
   if (!nativeSelectionActive || !view) return;
   const cmContent = cmHost.querySelector('.cm-content');
-  if (!cmContent) return;
+  if (cmContent) {
+    // Remove temporary zero-width spaces from DOM
+    zwspNodes.forEach(node => {
+      if (node.parentNode) node.parentNode.removeChild(node);
+    });
+    zwspNodes = [];
+    
+    // Restore CodeMirror's control
+    cmContent.removeAttribute('contenteditable');
+    cmContent.style.webkitUserModify = '';
+    cmContent.style.userSelect = '';
+  }
   
-  // Remove temporary zero-width spaces
-  zwspNodes.forEach(node => {
-    if (node.parentNode) node.parentNode.removeChild(node);
-  });
-  zwspNodes = [];
-  
-  // Restore CodeMirror's control
-  cmContent.removeAttribute('contenteditable');
-  cmContent.style.webkitUserModify = '';
-  cmContent.style.userSelect = '';
   nativeSelectionActive = false;
+  
+  // Scrub any ZWSPs that leaked into the document
+  if (scrubDoc) {
+    purgeZWSPFromDoc();
+  }
+  
+  // Re-enable autosave if it was on before
+  if (autoSaveWasEnabled) {
+    console.log('[NativeSelection] Re-enabling autosave');
+    autoSaveWasEnabled = false;
+  }
+}
+
+function requestDisableIfIdle(reason = '') {
+  if (!nativeSelectionActive) return;
+  clearTimeout(cleanupDebounce);
+  cleanupDebounce = setTimeout(() => {
+    if (!nativeSelectionActive) return;
+
+    const cmContent = cmHost.querySelector('.cm-content');
+    const sel = document.getSelection();
+    const inEditor = !!(sel && sel.anchorNode && cmContent && cmContent.contains(sel.anchorNode));
+
+    // Disable if selection left editor, collapsed, or editor lost focus
+    const shouldDisable =
+      !inEditor ||
+      !sel ||
+      sel.rangeCount === 0 ||
+      sel.isCollapsed ||
+      document.activeElement !== cmContent;
+
+    if (shouldDisable) {
+      disableNativeSelection(true);
+    }
+  }, 120); // Small debounce avoids churn during drag
 }
 
 function scheduleLongPress(ev) {
@@ -1544,7 +1605,28 @@ cmHost.addEventListener('touchstart', (ev) => {
 
 // Disable native selection when user starts typing
 cmHost.addEventListener('beforeinput', () => {
-  disableNativeSelection();
+  disableNativeSelection(true);
+});
+
+// Cleanup watchers: disable native selection when selection is done
+document.addEventListener('selectionchange', requestDisableIfIdle, true);
+
+document.addEventListener('pointerdown', (e) => {
+  if (nativeSelectionActive && !cmHost.contains(e.target)) {
+    disableNativeSelection(true);
+  }
+}, true);
+
+cmHost.addEventListener('blur', () => {
+  if (nativeSelectionActive) {
+    disableNativeSelection(true);
+  }
+}, true);
+
+document.addEventListener('visibilitychange', () => {
+  if (nativeSelectionActive && document.visibilityState !== 'visible') {
+    disableNativeSelection(true);
+  }
 });
 
 // ---------- Confirm modal ----------
