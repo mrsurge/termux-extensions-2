@@ -1474,6 +1474,7 @@ document.addEventListener('keydown', (e) => {
 
 let longPressTimer = null;
 let nativeSelectionActive = false;
+let zwspNodes = []; // Track zero-width spaces we inject
 const LONG_PRESS_MS = 300;
 
 function enableNativeSelection() {
@@ -1485,6 +1486,18 @@ function enableNativeSelection() {
   cmContent.setAttribute('contenteditable', 'true');
   cmContent.style.webkitUserModify = 'read-write-plaintext-only';
   cmContent.style.userSelect = 'text';
+  
+  // Inject zero-width spaces into empty lines so Android selection can anchor
+  // Empty lines in CM6 are just <div class="cm-line"><br></div> which breaks selection
+  zwspNodes = [];
+  cmContent.querySelectorAll('.cm-line').forEach(line => {
+    if (line.childNodes.length === 1 && line.firstChild.nodeName === 'BR') {
+      const zwsp = document.createTextNode('\u200B');
+      line.insertBefore(zwsp, line.firstChild); // Keep CM's <br>
+      zwspNodes.push(zwsp);
+    }
+  });
+  
   cmContent.focus();
   nativeSelectionActive = true;
 }
@@ -1493,6 +1506,12 @@ function disableNativeSelection() {
   if (!nativeSelectionActive || !view) return;
   const cmContent = cmHost.querySelector('.cm-content');
   if (!cmContent) return;
+  
+  // Remove temporary zero-width spaces
+  zwspNodes.forEach(node => {
+    if (node.parentNode) node.parentNode.removeChild(node);
+  });
+  zwspNodes = [];
   
   // Restore CodeMirror's control
   cmContent.removeAttribute('contenteditable');
