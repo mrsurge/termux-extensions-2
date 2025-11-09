@@ -89,6 +89,11 @@ export function createDiffController(options = {}) {
 
   let controllerView = null;
   let enabled = false;
+  let suspended = false;
+  let queuedDecorations = null;
+  let queuedSummary = null;
+  let queuedOpts = null;
+  let pendingRefresh = false;
   let currentContext = null; // { path, sha }
   let currentDecorations = Decoration.none;
   let pendingKey = null;
@@ -142,6 +147,10 @@ export function createDiffController(options = {}) {
   }
 
   function refresh(force = false) {
+    if (suspended) {
+      pendingRefresh = true;
+      return;
+    }
     if (!enabled || !controllerView || !currentContext) {
       return;
     }
@@ -199,6 +208,12 @@ export function createDiffController(options = {}) {
   }
 
   function applyDecorations(deco, summary, opts = {}) {
+    if (suspended) {
+      queuedDecorations = deco;
+      queuedSummary = summary;
+      queuedOpts = opts;
+      return;
+    }
     currentDecorations = deco || Decoration.none;
     if (controllerView) {
       const effects = [];
@@ -221,6 +236,22 @@ export function createDiffController(options = {}) {
   function clearDecorations() {
     applyDecorations(Decoration.none, null);
   }
+  
+  function setSuspended(flag) {
+    if (suspended === flag) return;
+    suspended = flag;
+    if (!suspended) {
+      // Flush one coalesced apply or a forced refresh; never both
+      if (queuedDecorations) {
+        const d = queuedDecorations, s = queuedSummary, o = queuedOpts;
+        queuedDecorations = queuedSummary = queuedOpts = null;
+        applyDecorations(d, s, o);
+      } else if (pendingRefresh) {
+        pendingRefresh = false;
+        refresh(true);
+      }
+    }
+  }
 
   function contextKey(ctx) {
     if (!ctx || !ctx.path) return null;
@@ -232,6 +263,7 @@ export function createDiffController(options = {}) {
     bindView,
     unbindView,
     setEnabled,
+    setSuspended,
     setContext,
     refresh,
     invalidateCacheForPath,

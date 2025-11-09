@@ -358,6 +358,9 @@
     font: inherit;
     white-space: pre;
     line-height: inherit;
+    user-select: none;
+    -webkit-user-select: none;
+    contain: layout paint;
   }
   .cm-diff-line-removed::before {
     content: attr(data-diff-marker);

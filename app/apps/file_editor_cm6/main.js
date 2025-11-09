@@ -1486,7 +1486,24 @@ let nativeSelectionActive = false;
 let zwspNodes = []; // Track zero-width spaces we inject
 let cleanupDebounce = null;
 let autoSaveWasEnabled = false; // Track autosave state before selection
+let layoutLocks = 0;
 const LONG_PRESS_MS = 450; // Increased from 300ms to avoid CM6 double-click conflict
+
+function lockLayout(reason = 'native-select') {
+  layoutLocks++;
+  // Freeze diff decorations (no DOM re-render) while selecting
+  if (diffController?.setSuspended) diffController.setSuspended(true);
+  cmHost?.classList?.add('cm-layout-locked');
+}
+
+function unlockLayout() {
+  if (layoutLocks > 0) layoutLocks--;
+  if (layoutLocks === 0) {
+    cmHost?.classList?.remove('cm-layout-locked');
+    // Unfreeze and flush any queued diff state in one go
+    if (diffController?.setSuspended) diffController.setSuspended(false);
+  }
+}
 
 function purgeZWSPFromDoc() {
   if (!view) return;
@@ -1508,6 +1525,8 @@ function enableNativeSelection() {
   if (!view) return;
   const cmContent = cmHost.querySelector('.cm-content');
   if (!cmContent) return;
+  
+  lockLayout();
   
   // Disable autosave during native selection to prevent saving ZWSPs
   autoSaveWasEnabled = autoSaveEnabled;
@@ -1533,11 +1552,6 @@ function enableNativeSelection() {
   
   cmContent.focus();
   nativeSelectionActive = true;
-  
-  // Refresh inline diffs after DOM manipulation (keep them visible)
-  if (showInlineDiffs && currentPath && currentPathExists && diffController) {
-    diffController.refresh(true);
-  }
 }
 
 function disableNativeSelection(scrubDoc = false) {
@@ -1557,6 +1571,7 @@ function disableNativeSelection(scrubDoc = false) {
   }
   
   nativeSelectionActive = false;
+  unlockLayout();
   
   // Scrub any ZWSPs that leaked into the document
   if (scrubDoc) {
@@ -1567,11 +1582,6 @@ function disableNativeSelection(scrubDoc = false) {
   if (autoSaveWasEnabled) {
     console.log('[NativeSelection] Re-enabling autosave');
     autoSaveWasEnabled = false;
-  }
-  
-  // Refresh inline diffs after DOM manipulation
-  if (showInlineDiffs && currentPath && currentPathExists && diffController) {
-    diffController.refresh(true);
   }
 }
 
