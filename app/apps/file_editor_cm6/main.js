@@ -1483,7 +1483,7 @@ document.addEventListener('keydown', (e) => {
 
 let longPressTimer = null;
 let nativeSelectionActive = false;
-let zwspNodes = []; // Track zero-width spaces we inject
+// let zwspNodes = []; // Track zero-width spaces we inject - COMMENTED OUT
 let cleanupDebounce = null;
 let autoSaveWasEnabled = false; // Track autosave state before selection
 let layoutLocks = 0;
@@ -1505,6 +1505,8 @@ function unlockLayout() {
   }
 }
 
+// ZWSP purge function - COMMENTED OUT
+/*
 function purgeZWSPFromDoc() {
   if (!view) return;
   const text = view.state.doc.toString();
@@ -1520,12 +1522,14 @@ function purgeZWSPFromDoc() {
     view.dispatch({ changes });
   }
 }
+*/
 
 function enableNativeSelection() {
   if (!view) return;
   const cmContent = cmHost.querySelector('.cm-content');
   if (!cmContent) return;
   
+  // Lock layout FIRST, before any DOM mutations
   lockLayout();
   
   // Disable autosave during native selection to prevent saving ZWSPs
@@ -1539,6 +1543,8 @@ function enableNativeSelection() {
   cmContent.style.webkitUserModify = 'read-write-plaintext-only';
   cmContent.style.userSelect = 'text';
   
+  // ZWSP injection - COMMENTED OUT
+  /*
   // Inject zero-width spaces into empty lines so Android selection can anchor
   // Empty lines in CM6 are just <div class="cm-line"><br></div> which breaks selection
   zwspNodes = [];
@@ -1549,6 +1555,7 @@ function enableNativeSelection() {
       zwspNodes.push(zwsp);
     }
   });
+  */
   
   cmContent.focus();
   nativeSelectionActive = true;
@@ -1558,11 +1565,14 @@ function disableNativeSelection(scrubDoc = false) {
   if (!nativeSelectionActive || !view) return;
   const cmContent = cmHost.querySelector('.cm-content');
   if (cmContent) {
+    // ZWSP cleanup - COMMENTED OUT
+    /*
     // Remove temporary zero-width spaces from DOM
     zwspNodes.forEach(node => {
       if (node.parentNode) node.parentNode.removeChild(node);
     });
     zwspNodes = [];
+    */
     
     // Restore CodeMirror's control
     cmContent.removeAttribute('contenteditable');
@@ -1573,10 +1583,13 @@ function disableNativeSelection(scrubDoc = false) {
   nativeSelectionActive = false;
   unlockLayout();
   
+  // ZWSP document scrubbing - COMMENTED OUT
+  /*
   // Scrub any ZWSPs that leaked into the document
   if (scrubDoc) {
     purgeZWSPFromDoc();
   }
+  */
   
   // Re-enable autosave if it was on before
   if (autoSaveWasEnabled) {
@@ -1633,7 +1646,8 @@ cmHost.addEventListener('dblclick', () => {
   }
 });
 
-// Scrub ZWSPs from clipboard when copying during native selection
+// Scrub ZWSPs from clipboard when copying during native selection - COMMENTED OUT
+/*
 cmHost.addEventListener('copy', (e) => {
   if (!nativeSelectionActive) return;
   const sel = document.getSelection();
@@ -1642,6 +1656,7 @@ cmHost.addEventListener('copy', (e) => {
   e.clipboardData.setData('text/plain', text);
   e.preventDefault();
 });
+*/
 
 // Cancel on touch end/move
 ['touchend', 'touchcancel', 'touchmove'].forEach(evt => {
