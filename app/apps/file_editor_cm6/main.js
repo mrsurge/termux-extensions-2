@@ -1598,6 +1598,13 @@ cmHost.addEventListener('touchstart', (ev) => {
   scheduleLongPress(ev);
 }, { passive: true });
 
+// Enable native selection on double-tap (selects word)
+cmHost.addEventListener('dblclick', () => {
+  if (!nativeSelectionActive) {
+    enableNativeSelection();
+  }
+});
+
 // Cancel on touch end/move
 ['touchend', 'touchcancel', 'touchmove'].forEach(evt => {
   cmHost.addEventListener(evt, cancelLongPress, { passive: true });
