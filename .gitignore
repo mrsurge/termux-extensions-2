@@ -4,3 +4,4 @@ conv.chat
 *.fe-dis*
 #GEMINI.md
 #.agent/
+node_modules/
