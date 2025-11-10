@@ -44,6 +44,29 @@ from .terminal_backend import terminal_router
 file_editor_cm6_bp.include_router(terminal_router)
 file_editor_cm6_bp.add_api_websocket_route("/ws/agent", agent_websocket)
 
+# Mount NiceGUI editor as sub-application (picked up by app_worker.py)
+# NiceGUI requires ui.run_with() for proper initialization when embedding
+from nicegui import ui
+
+# Configure and initialize NiceGUI with the FastAPI app
+# This will be called after the FastAPI app is created in app_worker.py
+def init_nicegui_with_app(fastapi_app):
+    """Initialize NiceGUI by attaching it to the existing FastAPI app"""
+    ui.run_with(
+        fastapi_app,
+        mount_path='/ui',
+        storage_secret='file-editor-cm6-secret',  # For session management
+        # Configure static path to go through the proxy
+        # NiceGUI will serve static files relative to mount_path
+    )
+    
+    # Now import the page definitions
+    from app.apps.file_editor_cm6.nicegui_editor import editor_app
+
+# Don't expose SUBAPPS - ui.run_with() handles the mounting
+# Just expose the init hook for app_worker.py to call
+NICEGUI_INIT_HOOK = init_nicegui_with_app
+
 # Initialize history store (project root managed by explorer_helper)
 _history_store = HistoryStore()
 _preferences_store = PreferencesStore()

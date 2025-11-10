@@ -1132,6 +1132,139 @@ async def proxy_ipc_websocket(websocket: WebSocket, target_path: str):
                 await websocket.close()
 
 
+# === NiceGUI Dynamic Shims ===
+# Forward NiceGUI static assets and Socket.IO from top-level paths to the correct worker
+# Detects app_id from Referer header (e.g., /api/app/<app_id>/ui/nc)
+
+import re
+
+_APP_IN_UI = re.compile(r"/api/app/([^/]+)/ui/")
+
+def _extract_app_id_from_referer(headers) -> str | None:
+    """Extract app_id from Referer header matching /api/app/<app_id>/ui/..."""
+    try:
+        ref = headers.get("referer")
+    except AttributeError:
+        raw = dict(headers)
+        ref = raw.get(b"referer") or raw.get("referer")
+        if isinstance(ref, bytes):
+            ref = ref.decode()
+    if not ref:
+        return None
+    m = _APP_IN_UI.search(ref)
+    return m.group(1) if m else None
+
+
+@app.api_route("/ui/_nicegui/{rest:path}", methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"])
+async def _nicegui_assets_dynamic(request: Request, rest: str):
+    """Forward NiceGUI HTTP assets to the correct worker based on Referer"""
+    app_id = _extract_app_id_from_referer(request.headers) or request.query_params.get("app_id")
+    
+    if not app_id:
+        return JSONResponse({"error": "missing app_id (referer or ?app_id=)"}, status_code=400)
+    
+    running_apps = await get_running_apps()
+    
+    if app_id not in running_apps:
+        return JSONResponse({"error": f"{app_id} not running"}, status_code=503)
+    
+    port = running_apps[app_id]["port"]
+    url = f"http://127.0.0.1:{port}/ui/_nicegui/{rest}"
+    
+    headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
+    body = await request.body()
+    
+    client = httpx.AsyncClient(timeout=30.0)
+    try:
+        upstream_request = client.build_request(
+            method=request.method,
+            url=url,
+            params=request.query_params,
+            headers=headers,
+            content=body,
+        )
+        resp = await client.send(upstream_request, stream=True)
+    except httpx.RequestError as exc:
+        await client.aclose()
+        return JSONResponse({"error": str(exc)}, status_code=502)
+    
+    async def iter_response():
+        try:
+            async for chunk in resp.aiter_raw():
+                yield chunk
+        finally:
+            await client.aclose()
+    
+    return StreamingResponse(
+        iter_response(),
+        status_code=resp.status_code,
+        headers=dict(resp.headers),
+        media_type=resp.headers.get("content-type")
+    )
+
+
+@app.websocket("/ui/_nicegui_ws/socket.io/{rest:path}")
+async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
+    """Forward NiceGUI Socket.IO to the correct worker based on Referer"""
+    await websocket.accept()
+    
+    app_id = _extract_app_id_from_referer(websocket.headers) or websocket.query_params.get("app_id")
+    
+    if not app_id:
+        await websocket.close(code=4400)  # Bad request
+        return
+    
+    running_apps = await get_running_apps()
+    
+    if app_id not in running_apps:
+        await websocket.send_json({"error": f"{app_id} not running"})
+        await websocket.close()
+        return
+    
+    port = running_apps[app_id]["port"]
+    query = websocket.scope['query_string'].decode('utf-8')
+    worker_url = f"ws://127.0.0.1:{port}/ui/_nicegui_ws/socket.io/{rest}"
+    if query:
+        worker_url += f"?{query}"
+    
+    try:
+        async with websockets.connect(worker_url) as worker_ws:
+            async def forward_client_to_worker():
+                try:
+                    async for msg in websocket.iter_text():
+                        await worker_ws.send(msg)
+                except WebSocketDisconnect:
+                    pass
+                except Exception as exc:
+                    print(f"[NiceGUI WS] Error client->worker: {exc}")
+
+            async def forward_worker_to_client():
+                try:
+                    async for msg in worker_ws:
+                        await websocket.send_text(msg)
+                except websockets.ConnectionClosedOK:
+                    pass
+                except Exception as exc:
+                    print(f"[NiceGUI WS] Error worker->client: {exc}")
+
+            tasks = [
+                asyncio.create_task(forward_client_to_worker()),
+                asyncio.create_task(forward_worker_to_client()),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+    except Exception as exc:
+        print(f"[NiceGUI WS] Failed to proxy: {exc}")
+    finally:
+        if websocket.application_state != WebSocketState.DISCONNECTED:
+            with suppress(Exception):
+                await websocket.close()
+
+
+
 if __name__ == '__main__':
     import uvicorn
     print("--- Starting ASGI Server ---")

@@ -283,7 +283,7 @@ function initVirtualKeyboardAdjustments({ root, agentDrawer, composer, transcrip
 }
 
 const container = requireEl('#editor-container');
-const editorFrame = requireEl('#editor-frame'); // Changed from cm6-host to editor-frame
+const cmHost = requireEl('#cm6-host');
 const root = requireEl('.fe-root');
 const agentDrawerEl = requireEl('#agent-drawer');
 const agentTranscript = requireEl('#agent-transcript');
@@ -348,7 +348,7 @@ initVirtualKeyboardAdjustments({
   agentDrawer: agentDrawerEl,
   composer: agentComposer,
   transcript: agentTranscript,
-  editorSurface: editorFrame,
+  editorSurface: cmHost,
 });
 
 async function fetchDiffPayload(path) {
@@ -692,12 +692,28 @@ function makeExtensions() {
 }
 
 function createView(docText='') {
-  // Disabled: CM6 editor replaced with NiceGUI iframe
-  console.log('[CM6] createView() disabled - using NiceGUI iframe instead');
+  if (view) {
+    diffController.unbindView(view);
+    view.destroy();
+  }
+  const state = EditorState.create({
+    doc: docText,
+    extensions: makeExtensions(),
+  });
+  view = new EditorView({ state, parent: cmHost });
+  view.dom.style.flex = '1';
+  view.dom.style.height = '100%';
+  view.focus();
+  diffController.bindView(view);
+  diffController.setEnabled(showInlineDiffs);
+  if (showInlineDiffs) {
+    diffController.refresh();
+  }
+  reobserve();
 }
 
-function getText() { return ''; } // Stub: content is in iframe
-function setText(t) { console.log('[CM6] setText() disabled'); }
+function getText() { return view ? view.state.doc.toString() : ''; }
+function setText(t) { createView(t); }
 
 function markUnsaved(flag) {
   unsaved = !!flag;
@@ -1535,13 +1551,13 @@ function lockLayout(reason = 'native-select') {
   layoutLocks++;
   // Freeze diff decorations (no DOM re-render) while selecting
   if (diffController?.setSuspended) diffController.setSuspended(true);
-  editorFrame?.classList?.add('cm-layout-locked');
+  cmHost?.classList?.add('cm-layout-locked');
 }
 
 function unlockLayout() {
   if (layoutLocks > 0) layoutLocks--;
   if (layoutLocks === 0) {
-    editorFrame?.classList?.remove('cm-layout-locked');
+    cmHost?.classList?.remove('cm-layout-locked');
     // Unfreeze and flush any queued diff state in one go
     if (diffController?.setSuspended) diffController.setSuspended(false);
   }
@@ -1568,7 +1584,7 @@ function purgeZWSPFromDoc() {
 
 function enableNativeSelection() {
   if (!view) return;
-  const cmContent = editorFrame.querySelector('.cm-content');
+  const cmContent = cmHost.querySelector('.cm-content');
   if (!cmContent) return;
   
   // Lock layout FIRST, before any DOM mutations
@@ -1596,7 +1612,7 @@ function enableNativeSelection() {
 
 function disableNativeSelection(scrubDoc = false) {
   if (!nativeSelectionActive || !view) return;
-  const cmContent = editorFrame.querySelector('.cm-content');
+  const cmContent = cmHost.querySelector('.cm-content');
   if (cmContent) {
     // Restore CodeMirror's control
     cmContent.removeAttribute('contenteditable');
@@ -1625,7 +1641,7 @@ function requestDisableIfIdle(reason = '') {
   cleanupDebounce = setTimeout(() => {
     if (!nativeSelectionActive) return;
 
-    const cmContent = editorFrame.querySelector('.cm-content');
+    const cmContent = cmHost.querySelector('.cm-content');
     const sel = document.getSelection();
     const inEditor = !!(sel && sel.anchorNode && cmContent && cmContent.contains(sel.anchorNode));
 
@@ -1656,19 +1672,19 @@ function cancelLongPress() {
 }
 
 // Enable native selection on long-press
-editorFrame.addEventListener('touchstart', (ev) => {
+cmHost.addEventListener('touchstart', (ev) => {
   scheduleLongPress(ev);
 }, { passive: true });
 
 // Enable native selection on double-tap (selects word)
-editorFrame.addEventListener('dblclick', () => {
+cmHost.addEventListener('dblclick', () => {
   if (!nativeSelectionActive) {
     enableNativeSelection();
   }
 });
 
 // Scrub invisible characters from clipboard when copying during native selection
-editorFrame.addEventListener('copy', (e) => {
+cmHost.addEventListener('copy', (e) => {
   if (!nativeSelectionActive) return;
   const sel = document.getSelection();
   if (!sel) return;
@@ -1680,11 +1696,11 @@ editorFrame.addEventListener('copy', (e) => {
 
 // Cancel on touch end/move
 ['touchend', 'touchcancel', 'touchmove'].forEach(evt => {
-  editorFrame.addEventListener(evt, cancelLongPress, { passive: true });
+  cmHost.addEventListener(evt, cancelLongPress, { passive: true });
 });
 
 // Disable native selection when user starts typing
-editorFrame.addEventListener('beforeinput', () => {
+cmHost.addEventListener('beforeinput', () => {
   disableNativeSelection(true);
 });
 
@@ -1692,12 +1708,12 @@ editorFrame.addEventListener('beforeinput', () => {
 document.addEventListener('selectionchange', requestDisableIfIdle, true);
 
 document.addEventListener('pointerdown', (e) => {
-  if (nativeSelectionActive && !editorFrame.contains(e.target)) {
+  if (nativeSelectionActive && !cmHost.contains(e.target)) {
     disableNativeSelection(true);
   }
 }, true);
 
-editorFrame.addEventListener('blur', () => {
+cmHost.addEventListener('blur', () => {
   if (nativeSelectionActive) {
     disableNativeSelection(true);
   }
@@ -1854,5 +1870,5 @@ host.onBeforeExit(() => {
 // Track changes: refresh unsaved flag
 // (We don't wire CM6 transactions directly since we're using bare ESM; use a lightweight observer)
 const observer = new MutationObserver(() => onAnyChange());
-observer.observe(editorFrame, { childList:true, subtree:true, characterData:true });
+observer.observe(cmHost, { childList:true, subtree:true, characterData:true });
 }
