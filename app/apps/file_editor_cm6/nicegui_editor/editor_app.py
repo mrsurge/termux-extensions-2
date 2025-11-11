@@ -1,6 +1,8 @@
 # /data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/nicegui_editor/editor_app.py
 # app/apps/file_editor_cm6/nicegui_editor/editor_app.py
 
+import json
+
 from nicegui import ui, app as nicegui_app
 
 # Global reference to the active editor instance
@@ -139,3 +141,28 @@ async def editor_page():
                 # Bind to reactive state
                 editor.bind_value(state, 'content')
 
+                view_cache = {
+                    'word_wrap': bool(state.get('word_wrap', False)),
+                    'line_shading': bool(state.get('line_shading', False)),
+                }
+
+                def _sync_view_settings() -> None:
+                    editor_instance = get_active_editor()
+                    if not editor_instance or not getattr(editor_instance, 'client', None):
+                        return
+
+                    target_wrap = bool(state.get('word_wrap', False))
+                    if target_wrap != view_cache['word_wrap']:
+                        view_cache['word_wrap'] = target_wrap
+                        editor_instance.set_line_wrapping(target_wrap)
+                        editor_instance.update()
+
+                    target_shade = bool(state.get('line_shading', False))
+                    if target_shade != view_cache['line_shading']:
+                        view_cache['line_shading'] = target_shade
+                        payload = json.dumps({'line_shading': target_shade})
+                        editor_instance.client.run_javascript(
+                            f"window.__feApplyViewSettings && window.__feApplyViewSettings({payload});"
+                        )
+
+                ui.timer(0.3, _sync_view_settings)

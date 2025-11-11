@@ -294,21 +294,6 @@ async def set_view_settings(data: dict = Body(...)):
     if 'line_shading' in data:
         state['line_shading'] = bool(data['line_shading'])
     
-    # Immediately apply to the live NiceGUI editor (single-user context)
-    try:
-        from .nicegui_editor import get_active_editor  # Local import to avoid circulars
-        editor = get_active_editor()
-        if editor and editor.client:
-            if 'word_wrap' in data:
-                editor.set_line_wrapping(bool(state.get('word_wrap')))
-            if 'line_shading' in data:
-                payload = {'line_shading': bool(state.get('line_shading'))}
-                js = "window.__feApplyViewSettings && window.__feApplyViewSettings(%s);" % json.dumps(payload)
-                editor.client.run_javascript(js)
-    except Exception:
-        # Non-fatal: state persisted; UI will pick up on reload
-        pass
-
     return {"ok": True}
 
 @file_editor_cm6_bp.post('/write')
