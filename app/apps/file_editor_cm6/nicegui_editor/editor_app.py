@@ -41,7 +41,7 @@ async def editor_page():
                 editor = ui.codemirror(
                     value=state.get('content', ''),
                     language=state.get('language', 'python'),
-                    theme='oneDark',
+                    theme=state.get('theme', 'oneDark'),
                     line_wrapping=state.get('word_wrap', False),
                 ).style('flex: 1; border: none;').classes('editor-content w-full h-full').props('flat borderless')
                 
@@ -49,6 +49,7 @@ async def editor_page():
                 _active_editor = editor
                 
                 shade_pref = 'true' if state.get('line_shading', False) else 'false'
+                print(f"[DEBUG] Initial line_shading from state: {state.get('line_shading', False)}, shade_pref: {shade_pref}")
 
                 ui.run_javascript(f"""
                 (async () => {{
@@ -119,12 +120,19 @@ async def editor_page():
                   }});
 
                   const applySettings = (opts={{}}) => {{
+                    console.log('[EditorSetup] applySettings called with:', opts);
                     try {{
                       if (Object.prototype.hasOwnProperty.call(opts, 'line_shading')) {{
                         const enabled = !!opts.line_shading;
+                        console.log('[EditorSetup] Applying line_shading:', enabled);
                         const extensions = enabled ? [baseTheme, stepSize.of(2), zebraPlugin] : [];
                         view.dispatch({{ effects: shadeCompartment.reconfigure(extensions) }});
                         el.querySelector('.cm-content')?.classList.toggle('cm-zebraActive', enabled);
+                        console.log('[EditorSetup] Line shading applied, checking decorations...');
+                        setTimeout(() => {{
+                          const hasStripes = el.querySelectorAll('.cm-zebraStripe').length;
+                          console.log('[EditorSetup] Zebra stripes found:', hasStripes);
+                        }}, 100);
                       }}
                     }} catch (err) {{
                       console.error('[EditorSetup] Failed to apply view settings', err);
@@ -144,12 +152,19 @@ async def editor_page():
                 view_cache = {
                     'word_wrap': bool(state.get('word_wrap', False)),
                     'line_shading': bool(state.get('line_shading', False)),
+                    'theme': str(state.get('theme', 'oneDark')),
+                    'language': str(state.get('language', 'python')),
                 }
 
                 def _sync_view_settings() -> None:
                     editor_instance = get_active_editor()
                     if not editor_instance or not getattr(editor_instance, 'client', None):
                         return
+                    
+                    # Debug: check what we're syncing
+                    current_shade = bool(state.get('line_shading', False))
+                    if current_shade != view_cache['line_shading']:
+                        print(f"[DEBUG TIMER] line_shading changed: {view_cache['line_shading']} → {current_shade}")
 
                     target_wrap = bool(state.get('word_wrap', False))
                     if target_wrap != view_cache['word_wrap']:
@@ -161,8 +176,21 @@ async def editor_page():
                     if target_shade != view_cache['line_shading']:
                         view_cache['line_shading'] = target_shade
                         payload = json.dumps({'line_shading': target_shade})
+                        print(f"[DEBUG] Syncing line_shading: {target_shade}, payload: {payload}")
                         editor_instance.client.run_javascript(
                             f"window.__feApplyViewSettings && window.__feApplyViewSettings({payload});"
                         )
+
+                    target_theme = str(state.get('theme', 'oneDark'))
+                    if target_theme != view_cache['theme']:
+                        view_cache['theme'] = target_theme
+                        editor_instance.set_theme(target_theme)
+                        editor_instance.update()
+
+                    target_language = str(state.get('language', 'python'))
+                    if target_language != view_cache['language']:
+                        view_cache['language'] = target_language
+                        editor_instance.set_language(target_language)
+                        editor_instance.update()
 
                 ui.timer(0.3, _sync_view_settings)

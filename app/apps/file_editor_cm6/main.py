@@ -98,7 +98,8 @@ def get_editor_state():
             'path': '',
             'language': 'python',
             'word_wrap': False,
-            'line_shading': False
+            'line_shading': False,
+            'theme': 'oneDark'
         }
     return nicegui_app.storage.general['editor_state']
 
@@ -293,6 +294,8 @@ async def set_view_settings(data: dict = Body(...)):
         state['word_wrap'] = bool(data['word_wrap'])
     if 'line_shading' in data:
         state['line_shading'] = bool(data['line_shading'])
+    if 'theme' in data:
+        state['theme'] = str(data['theme'])
     
     return {"ok": True}
 

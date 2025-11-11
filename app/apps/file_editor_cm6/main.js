@@ -742,7 +742,7 @@ function applyPreferencesFromStore(payload) {
   showInlineDiffs = editorPrefs.showInlineDiffs !== false;
   trackAgentEdits = !!editorPrefs.trackAgentEdits;
   const themeId = editorPrefs.theme;
-  currentTheme = themeId || 'cm6-dark'; // Theme handled in NiceGUI iframe
+  currentTheme = themeId || 'cm6-dark';
   if (editorState) {
     editorState.preferences = cachedPreferences;
   }
@@ -750,7 +750,8 @@ function applyPreferencesFromStore(payload) {
   // Sync view settings to NiceGUI editor state
   apiPost('editor/set_view_settings', {
     word_wrap: wordWrap,
-    line_shading: showLineShading
+    line_shading: showLineShading,
+    theme: mapThemeToNiceGUI(currentTheme)
   }).catch(e => console.warn('[Preferences] Failed to sync view settings:', e));
 }
 
@@ -767,8 +768,40 @@ function applyMenuState() {
 }
 
 function updateThemeMenuChecks() {
-  // Disabled - themes handled in NiceGUI iframe
-  console.log('[Theme] updateThemeMenuChecks disabled');
+  themeMenuItems.forEach(item => {
+    const isChecked = item.dataset.theme === currentTheme;
+    item.setAttribute('aria-checked', isChecked ? 'true' : 'false');
+    if (isChecked) {
+      item.setAttribute('data-checked', 'true');
+    } else {
+      item.removeAttribute('data-checked');
+    }
+  });
+}
+
+function mapThemeToNiceGUI(themeId) {
+  const themeMap = {
+    'cm6-dark': 'basicDark',
+    'one-dark': 'oneDark',
+    'termux': 'consoleDark',
+    'github-dark': 'githubDark',
+    'github-light': 'githubLight',
+    'vscode-dark': 'vscodeDark',
+    'vscode-light': 'vscodeLight',
+    'xcode-dark': 'vscodeDark',
+    'xcode-light': 'vscodeLight',
+    'solarized-dark': 'solarizedDark',
+    'solarized-light': 'solarizedLight',
+    'nord': 'nord',
+    'dracula': 'dracula',
+    'okaidia': 'okaidia',
+    'sublime': 'sublime',
+    'androidstudio': 'androidstudio',
+    'darcula': 'darcula',
+    'basic-dark': 'basicDark',
+    'basic-light': 'basicLight',
+  };
+  return themeMap[themeId] || 'oneDark';
 }
 
 async function fetchPreferencesFromServer() {
@@ -1297,8 +1330,25 @@ function bindMenuToggle(el, action) {
 }
 
 function bindThemeMenu() {
-  // Disabled - themes handled in NiceGUI iframe
-  console.log('[Theme] bindThemeMenu disabled');
+  themeMenuItems.forEach(item => {
+    item.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const newTheme = item.dataset.theme;
+      if (newTheme && newTheme !== currentTheme) {
+        currentTheme = newTheme;
+        updateThemeMenuChecks();
+        
+        // 1. Persist to disk
+        await persistEditorPreferences({ theme: currentTheme });
+        
+        // 2. Update shared state for live sync
+        const niceGUITheme = mapThemeToNiceGUI(currentTheme);
+        apiPost('editor/set_view_settings', { theme: niceGUITheme })
+          .catch(e => console.warn('[Theme] Failed to sync theme:', e));
+      }
+      menuThemeDD.classList.remove('show');
+    });
+  });
 }
 
 menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
