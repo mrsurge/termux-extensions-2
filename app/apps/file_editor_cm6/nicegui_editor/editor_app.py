@@ -20,16 +20,13 @@ async def editor_page():
         from app.apps.file_editor_cm6.main import get_editor_state
         state = get_editor_state()
         
-        # Remove default page padding/margins and set dark background
-        ui.query('body').style('margin: 0; padding: 0; overflow: hidden;')
-        
-        # Add zebra stripes CSS
+        # Hard CSS reset for full-bleed content (removes Quasar/NiceGUI default padding)
         ui.add_head_html('''
         <style>
-        /* Zebra stripes are installed via CM6 extension, this just controls visibility */
-        .cm-content:not(.cm-zebraActive) .cm-zebraStripe {
-            background-color: transparent !important;
-        }
+          html, body, #q-app, .q-page-container, .q-page, .nicegui-content {
+            margin:0 !important; padding:0 !important; height:100%;
+          }
+          body { overflow: hidden; }
         </style>
         ''')
         
@@ -49,12 +46,31 @@ async def editor_page():
                 # Store global reference
                 _active_editor = editor
                 
-                # Install zebra stripes extension
+                # Install CM6 zebra stripes (logical lines) with a safe mount wait
                 ui.run_javascript(f"""
                 (async () => {{
                   const root = getElement('{editor.id}');
-                  const view = root.querySelector('.cm-content')?.cmView?.view;
-                  if (!view) return console.error('[ZebraStripes] EditorView not found');
+                  const el = root?.$el || root;
+                  if (!el || !el.querySelector) return console.error('[ZebraStripes] host el not found');
+
+                  // wait for CM6 to mount
+                  function getView() {{
+                    return el.querySelector('.cm-editor')?.cmView?.view || null;
+                  }}
+                  async function waitForView(timeout=4000) {{
+                    const v = getView();
+                    if (v) return v;
+                    return new Promise(resolve => {{
+                      const obs = new MutationObserver(() => {{
+                        const vv = getView();
+                        if (vv) {{ obs.disconnect(); resolve(vv); }}
+                      }});
+                      obs.observe(el, {{childList:true, subtree:true}});
+                      setTimeout(() => {{ obs.disconnect(); resolve(getView()); }}, timeout);
+                    }});
+                  }}
+                  const view = await waitForView();
+                  if (!view) return console.error('[ZebraStripes] EditorView not found after wait');
                   
                   if (view.__ngZebraInstalled) return;
                   view.__ngZebraInstalled = true;
@@ -97,6 +113,9 @@ async def editor_page():
                   view.dispatch({{
                     effects: StateEffect.appendConfig.of([baseTheme, stepSize.of(2), zebraPlugin])
                   }});
+
+                  // optional: tag content node in case you want CSS hooks later
+                  el.querySelector('.cm-content')?.classList.add('cm-zebraActive');
                   
                   console.log('[ZebraStripes] Extension installed');
                 }})();

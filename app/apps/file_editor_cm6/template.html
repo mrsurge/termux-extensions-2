@@ -326,19 +326,29 @@
   #fe-project-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
   #fe-open-project { margin-left: auto; }
 
-  /* CM6-specific styles */
-  .fe-editor-container { 
-    position: relative; 
-    flex: 1; 
-    min-height: 0;
-    max-width: 98%;
-    max-height: 98%;
+  /* CM6-specific styles - eliminate all gaps around iframe */
+  .fe-root, .fe-grid, .fe-editor-row, .fe-editor-container {
+    gap: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
+
+  .fe-editor-container {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    border: 0 !important;
+    box-shadow: none !important;
+    outline: 0 !important;
+  }
+  
   #editor-frame {
+    position: absolute;
+    inset: 0;
     width: 100% !important;
-    height: 95% !important;
-    border: none !important;
+    height: 100% !important;
     display: block;
+    border: 0 !important;
   }
   #cm6-host { position:absolute; inset:0; display:flex; }
   .cm-editor { flex:1; height:100%; }
