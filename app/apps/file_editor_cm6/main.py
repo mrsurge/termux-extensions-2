@@ -82,6 +82,26 @@ NICEGUI_INIT_HOOK = init_nicegui_with_app
 _history_store = HistoryStore()
 _preferences_store = PreferencesStore()
 
+# Shared editor state using NiceGUI's app storage
+from nicegui import app as nicegui_app
+
+def get_editor_state():
+    """Get or initialize editor state in NiceGUI app storage"""
+    if not hasattr(nicegui_app, 'storage'):
+        nicegui_app.storage = type('obj', (object,), {
+            'general': {}
+        })()
+    
+    if 'editor_state' not in nicegui_app.storage.general:
+        nicegui_app.storage.general['editor_state'] = {
+            'content': '',
+            'path': '',
+            'language': 'python',
+            'word_wrap': False,
+            'line_shading': False
+        }
+    return nicegui_app.storage.general['editor_state']
+
 def _ensure_project_root_synced() -> Path:
     """Ensure the in-memory project root matches the persisted active project."""
     stored = _history_store.get_active_project()
@@ -227,6 +247,57 @@ def read_file(path: str = Query(...)):
         return {"ok": True, "data": {"path": expanded, "content": content, "sha256": meta.get("sha256")}}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@file_editor_cm6_bp.post('/editor/set_content')
+async def set_editor_content(data: dict = Body(...)):
+    """Update the shared editor state - called by main.js when opening files"""
+    state = get_editor_state()
+    state['content'] = data.get('content', '')
+    state['path'] = data.get('path', '')
+    state['language'] = data.get('language', 'python')
+    return {"ok": True}
+
+@file_editor_cm6_bp.get('/editor/get_content')
+def get_editor_content():
+    """Get current editor state"""
+    state = get_editor_state()
+    return {
+        "ok": True,
+        "content": state.get('content', ''),
+        "path": state.get('path', ''),
+        "language": state.get('language', 'python')
+    }
+
+@file_editor_cm6_bp.post('/editor/toggle_setting')
+async def toggle_editor_setting(data: dict = Body(...)):
+    """Toggle editor view settings (word wrap, line shading, etc)"""
+    state = get_editor_state()
+    setting = data.get('setting')
+    
+    if setting == 'word_wrap':
+        state['word_wrap'] = not state.get('word_wrap', False)
+        return {"ok": True, "value": state['word_wrap']}
+    elif setting == 'line_shading':
+        state['line_shading'] = not state.get('line_shading', False)
+        return {"ok": True, "value": state['line_shading']}
+    
+    return {"ok": False, "error": "Unknown setting"}
+
+@file_editor_cm6_bp.post('/editor/set_view_settings')
+async def set_view_settings(data: dict = Body(...)):
+    """Set multiple view settings at once (used when loading preferences)"""
+    state = get_editor_state()
+    
+    # Update state for persistence and initial page load
+    if 'word_wrap' in data:
+        state['word_wrap'] = bool(data['word_wrap'])
+    if 'line_shading' in data:
+        state['line_shading'] = bool(data['line_shading'])
+    
+    # For now, just update the state - settings will apply on next file open or page reload
+    # TODO: implement live update without page reload
+    
+    return {"ok": True}
 
 @file_editor_cm6_bp.post('/write')
 async def write_file_route(data: dict = Body(...)):

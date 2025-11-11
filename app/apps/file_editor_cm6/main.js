@@ -720,8 +720,13 @@ async function apiGet(path) {
   return data.content ? data : (data.data || data);
 }
 async function apiPost(path, body) {
-  const res = await api.post(path, body);
-  return res.data || res;
+  try {
+    const res = await api.post(path, body);
+    return res?.data || res || {};
+  } catch (error) {
+    console.error(`[apiPost] Error calling ${path}:`, error);
+    return {};
+  }
 }
 
 function applyPreferencesFromStore(payload) {
@@ -741,6 +746,12 @@ function applyPreferencesFromStore(payload) {
   if (editorState) {
     editorState.preferences = cachedPreferences;
   }
+  
+  // Sync view settings to NiceGUI editor state
+  apiPost('editor/set_view_settings', {
+    word_wrap: wordWrap,
+    line_shading: showLineShading
+  }).catch(e => console.warn('[Preferences] Failed to sync view settings:', e));
 }
 
 function applyMenuState() {
@@ -1037,6 +1048,13 @@ async function openFile(path) {
 
     // Initialize SHA256 if provided
     lastSha256 = payload.sha256 || null;
+
+    // Send content to NiceGUI editor backend (fire and forget)
+    apiPost('editor/set_content', {
+      content: payload.content || '',
+      path: resolved,
+      language: currentModeLanguage || 'text'
+    }).catch(e => console.warn('[Editor] Failed to sync content to NiceGUI:', e));
 
     setText(payload.content || '');
     lastSavedContent = getText();
@@ -1351,11 +1369,12 @@ bindMenuToggle(miToggleLines, () => {
   createView(getText());
   persistEditorPreferences({ showLineNumbers });
 });
-bindMenuToggle(miToggleShading, () => {
+bindMenuToggle(miToggleShading, async () => {
   showLineShading = !showLineShading;
-  applyMenuState();
-  createView(getText());
+  setMenuChecked(miToggleShading, showLineShading);
   persistEditorPreferences({ showShading: showLineShading });
+  // Sync to NiceGUI state - use set_view_settings to update immediately
+  apiPost('editor/set_view_settings', { line_shading: showLineShading }).catch(e => console.warn('[Menu] Failed to sync line shading:', e));
 });
 bindMenuToggle(miToggleSyntax, () => {
   showSyntaxHighlight = !showSyntaxHighlight;
@@ -1381,14 +1400,12 @@ bindMenuToggle(miToggleAutocomplete, () => {
   }
   persistEditorPreferences({ autocompletion: enableAutocompletion });
 });
-bindMenuToggle(miToggleWrap, () => {
+bindMenuToggle(miToggleWrap, async () => {
   wordWrap = !wordWrap;
-  applyMenuState();
-  createView(getText());
-  if (showInlineDiffs && currentPath && currentPathExists) {
-    diffController.refresh(true);
-  }
+  setMenuChecked(miToggleWrap, wordWrap);
   persistEditorPreferences({ wordWrap });
+  // Sync to NiceGUI state
+  apiPost('editor/set_view_settings', { word_wrap: wordWrap }).catch(e => console.warn('[Menu] Failed to sync word wrap:', e));
 });
 bindMenuToggle(miToggleAutosave, () => {
   autoSaveEnabled = !autoSaveEnabled;
@@ -1495,197 +1512,6 @@ document.addEventListener('keydown', (e) => {
   if (cmdOrCtrl && e.key === 'o') {
     e.preventDefault();
     pickFile().then(p => { if (p) openFile(p); });
-  }
-});
-
-// ---------- Native Android selection via .cm-content ----------
-// This enables Android's native text selection handles by temporarily making
-// the CodeMirror content element editable on long-press, then restoring it
-// when the user starts editing. See: docs/apps/code_cm6/CM6_NATIVE_SELECTION.md
-
-let longPressTimer = null;
-let nativeSelectionActive = false;
-// let zwspNodes = []; // Track zero-width spaces we inject - COMMENTED OUT
-let cleanupDebounce = null;
-let autoSaveWasEnabled = false; // Track autosave state before selection
-let layoutLocks = 0;
-const LONG_PRESS_MS = 450; // Increased from 300ms to avoid CM6 double-click conflict
-
-function lockLayout(reason = 'native-select') {
-  layoutLocks++;
-  // Freeze diff decorations (no DOM re-render) while selecting
-  if (diffController?.setSuspended) diffController.setSuspended(true);
-  editorFrame?.classList?.add('cm-layout-locked');
-}
-
-function unlockLayout() {
-  if (layoutLocks > 0) layoutLocks--;
-  if (layoutLocks === 0) {
-    editorFrame?.classList?.remove('cm-layout-locked');
-    // Unfreeze and flush any queued diff state in one go
-    if (diffController?.setSuspended) diffController.setSuspended(false);
-  }
-}
-
-// ZWSP purge function - COMMENTED OUT
-/*
-function purgeZWSPFromDoc() {
-  if (!view) return;
-  const text = view.state.doc.toString();
-  if (text.indexOf('\u200B') === -1) return;
-
-  const changes = [];
-  for (let i = 0; i < text.length; i++) {
-    if (text.charCodeAt(i) === 8203) {
-      changes.push({ from: i, to: i + 1 });
-    }
-  }
-  if (changes.length) {
-    view.dispatch({ changes });
-  }
-}
-*/
-
-function enableNativeSelection() {
-  if (!view) return;
-  const cmContent = editorFrame.querySelector('.cm-content');
-  if (!cmContent) return;
-  
-  // Lock layout FIRST, before any DOM mutations
-  lockLayout();
-  
-  // Disable autosave during native selection to prevent saving anchors
-  autoSaveWasEnabled = autoSaveEnabled;
-  if (autoSaveEnabled) {
-    console.log('[NativeSelection] Temporarily disabling autosave');
-  }
-  
-  // Enable empty line anchor widgets
-  view.dispatch({
-    effects: emptyLineAnchorCompartment.reconfigure(createEmptyLineAnchorWidget())
-  });
-  
-  // Make the live CodeMirror content temporarily editable
-  cmContent.setAttribute('contenteditable', 'true');
-  cmContent.style.webkitUserModify = 'read-write-plaintext-only';
-  cmContent.style.userSelect = 'text';
-  
-  cmContent.focus();
-  nativeSelectionActive = true;
-}
-
-function disableNativeSelection(scrubDoc = false) {
-  if (!nativeSelectionActive || !view) return;
-  const cmContent = editorFrame.querySelector('.cm-content');
-  if (cmContent) {
-    // Restore CodeMirror's control
-    cmContent.removeAttribute('contenteditable');
-    cmContent.style.webkitUserModify = '';
-    cmContent.style.userSelect = '';
-  }
-  
-  // Disable empty line anchor widgets
-  view.dispatch({
-    effects: emptyLineAnchorCompartment.reconfigure([])
-  });
-  
-  nativeSelectionActive = false;
-  unlockLayout();
-  
-  // Re-enable autosave if it was on before
-  if (autoSaveWasEnabled) {
-    console.log('[NativeSelection] Re-enabling autosave');
-    autoSaveWasEnabled = false;
-  }
-}
-
-function requestDisableIfIdle(reason = '') {
-  if (!nativeSelectionActive) return;
-  clearTimeout(cleanupDebounce);
-  cleanupDebounce = setTimeout(() => {
-    if (!nativeSelectionActive) return;
-
-    const cmContent = editorFrame.querySelector('.cm-content');
-    const sel = document.getSelection();
-    const inEditor = !!(sel && sel.anchorNode && cmContent && cmContent.contains(sel.anchorNode));
-
-    // Disable if selection left editor, collapsed, or editor lost focus
-    const shouldDisable =
-      !inEditor ||
-      !sel ||
-      sel.rangeCount === 0 ||
-      sel.isCollapsed ||
-      document.activeElement !== cmContent;
-
-    if (shouldDisable) {
-      disableNativeSelection(true);
-    }
-  }, 120); // Small debounce avoids churn during drag
-}
-
-function scheduleLongPress(ev) {
-  clearTimeout(longPressTimer);
-  longPressTimer = setTimeout(() => {
-    enableNativeSelection();
-  }, LONG_PRESS_MS);
-}
-
-function cancelLongPress() {
-  clearTimeout(longPressTimer);
-  longPressTimer = null;
-}
-
-// Enable native selection on long-press
-editorFrame.addEventListener('touchstart', (ev) => {
-  scheduleLongPress(ev);
-}, { passive: true });
-
-// Enable native selection on double-tap (selects word)
-editorFrame.addEventListener('dblclick', () => {
-  if (!nativeSelectionActive) {
-    enableNativeSelection();
-  }
-});
-
-// Scrub invisible characters from clipboard when copying during native selection
-editorFrame.addEventListener('copy', (e) => {
-  if (!nativeSelectionActive) return;
-  const sel = document.getSelection();
-  if (!sel) return;
-  // Strip both ZERO WIDTH SPACE and WORD JOINER
-  const text = sel.toString().replace(/[\u200B\u2060]/g, '');
-  e.clipboardData.setData('text/plain', text);
-  e.preventDefault();
-});
-
-// Cancel on touch end/move
-['touchend', 'touchcancel', 'touchmove'].forEach(evt => {
-  editorFrame.addEventListener(evt, cancelLongPress, { passive: true });
-});
-
-// Disable native selection when user starts typing
-editorFrame.addEventListener('beforeinput', () => {
-  disableNativeSelection(true);
-});
-
-// Cleanup watchers: disable native selection when selection is done
-document.addEventListener('selectionchange', requestDisableIfIdle, true);
-
-document.addEventListener('pointerdown', (e) => {
-  if (nativeSelectionActive && !editorFrame.contains(e.target)) {
-    disableNativeSelection(true);
-  }
-}, true);
-
-editorFrame.addEventListener('blur', () => {
-  if (nativeSelectionActive) {
-    disableNativeSelection(true);
-  }
-}, true);
-
-document.addEventListener('visibilitychange', () => {
-  if (nativeSelectionActive && document.visibilityState !== 'visible') {
-    disableNativeSelection(true);
   }
 });
 
