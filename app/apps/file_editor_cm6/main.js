@@ -1,9 +1,10 @@
+// /data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/main.js
 // app/apps/file_editor_cm6/main.js
+// Iframe-based NiceGUI Editor Integration
 
-// Code Viewer (CM6) — dual-surface editor with native Android selection mode.
-// Imports resolve to files produced by scripts/vendor_cm6.sh
-// comment for testing in-line git refreshes
-import * as CM from '/static/vendor/codemirror.3/cm6.bundle.js';
+// CM6 import removed - now using NiceGUI's ui.codemirror in iframe
+// import * as CM from '/static/vendor/codemirror.3/cm6.bundle.js';
+
 import { initExplorerUI } from './static/js/explorer.js';
 import { createDiffController } from './static/js/diff_decorations.js';
 import { createTerminalDrawer } from './static/js/terminal.js';
@@ -12,6 +13,9 @@ import { initAgentDrawer } from './static/js/agent_drawer.js';
 import ReconnectingWebSocket from './static/js/reconnecting_websocket.js';
 import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
 
+// === CM6 Code Disabled - Using NiceGUI iframe ===
+// All CM6 initialization, themes, languages, and editor setup moved to NiceGUI
+/*
 // Core
 const EditorState = CM.EditorState;
 const { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, lineNumbers, Decoration, ViewPlugin, Compartment } = CM;
@@ -144,6 +148,8 @@ function createEmptyLineAnchorWidget() {
 
 // Initially disabled (will be enabled during native selection)
 const emptyLineAnchorExtension = emptyLineAnchorCompartment.of([]);
+*/
+// === End of CM6 disabled code ===
 
 // ---- host/api contract (injected by framework) ----
 /* global host, api */
@@ -632,6 +638,8 @@ const AUTOSAVE_DELAY = 1200; // 1200ms debounce
 let lastSaveTime = 0;
 const SELF_ECHO_GRACE = 300; // 300ms grace period after save
 
+// Disabled - CM6 editor replaced with NiceGUI iframe
+/*
 function makeExtensions() {
   const exts = [
     history(),
@@ -690,6 +698,7 @@ function makeExtensions() {
   }
   return exts;
 }
+*/
 
 function createView(docText='') {
   // Disabled: CM6 editor replaced with NiceGUI iframe
@@ -728,7 +737,7 @@ function applyPreferencesFromStore(payload) {
   showInlineDiffs = editorPrefs.showInlineDiffs !== false;
   trackAgentEdits = !!editorPrefs.trackAgentEdits;
   const themeId = editorPrefs.theme;
-  currentTheme = (themeId && THEMES[themeId]) ? themeId : 'cm6-dark';
+  currentTheme = themeId || 'cm6-dark'; // Theme handled in NiceGUI iframe
   if (editorState) {
     editorState.preferences = cachedPreferences;
   }
@@ -747,16 +756,8 @@ function applyMenuState() {
 }
 
 function updateThemeMenuChecks() {
-  themeMenuItems.forEach((item) => {
-    const themeId = item.getAttribute('data-theme');
-    const available = !!THEMES[themeId];
-    if (!available) {
-      item.style.display = 'none';
-      setMenuChecked(item, false);
-      return;
-    }
-    setMenuChecked(item, themeId === currentTheme);
-  });
+  // Disabled - themes handled in NiceGUI iframe
+  console.log('[Theme] updateThemeMenuChecks disabled');
 }
 
 async function fetchPreferencesFromServer() {
@@ -1278,29 +1279,8 @@ function bindMenuToggle(el, action) {
 }
 
 function bindThemeMenu() {
-  themeMenuItems.forEach((item) => {
-    const themeId = item.getAttribute('data-theme');
-    const available = !!THEMES[themeId];
-    if (!available) {
-      item.style.display = 'none';
-      return;
-    }
-    const handle = () => {
-      currentTheme = themeId;
-      updateThemeMenuChecks();
-      createView(getText());
-      persistEditorPreferences({ theme: currentTheme });
-    };
-
-    item.addEventListener('click', () => { closeAllMenus(); handle(); });
-    item.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' || ev.key === ' ') {
-        ev.preventDefault();
-        closeAllMenus();
-        handle();
-      }
-    });
-  });
+  // Disabled - themes handled in NiceGUI iframe
+  console.log('[Theme] bindThemeMenu disabled');
 }
 
 menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});

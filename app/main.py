@@ -1,4 +1,5 @@
 #!/bin/env python
+# /data/data/com.termux/files/home/mrselect/app/main.py
 # main.py (project_root)
 import errno
 import importlib
@@ -1161,7 +1162,10 @@ async def _nicegui_assets_dynamic(request: Request, rest: str):
     app_id = _extract_app_id_from_referer(request.headers) or request.query_params.get("app_id")
     
     if not app_id:
-        return JSONResponse({"error": "missing app_id (referer or ?app_id=)"}, status_code=400)
+        # ESM module imports often lack Referer - default to file_editor_cm6 for now
+        # TODO: Make this more generic if multiple apps use NiceGUI
+        app_id = "file_editor_cm6"
+        print(f"[NiceGUI Assets] No Referer, defaulting to {app_id}", file=sys.stderr)
     
     running_apps = await get_running_apps()
     

@@ -1,5 +1,5 @@
 
-# app/apps/file_editor_cm6/main.py
+# /data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/main.py
 
 import os
 import json
@@ -52,12 +52,18 @@ from nicegui import ui
 # This will be called after the FastAPI app is created in app_worker.py
 def init_nicegui_with_app(fastapi_app):
     """Initialize NiceGUI by attaching it to the existing FastAPI app"""
+    mount = '/ui'
+    
+    # Critical: Set Socket.IO path BEFORE calling ui.run_with()
+    # This ensures the client connects to /ui/_nicegui_ws/socket.io
+    # which matches our main server's dynamic WS proxy route
+    import nicegui.nicegui as ng
+    ng.sio_app.engineio_path = f'{mount}/_nicegui_ws/socket.io'
+    
     ui.run_with(
         fastapi_app,
-        mount_path='/ui',
+        mount_path=mount,
         storage_secret='file-editor-cm6-secret',  # For session management
-        # Configure static path to go through the proxy
-        # NiceGUI will serve static files relative to mount_path
     )
     
     # Now import the page definitions

@@ -1,3 +1,4 @@
+# /data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/nicegui_editor/editor_app.py
 # app/apps/file_editor_cm6/nicegui_editor/editor_app.py
 
 from nicegui import ui
@@ -7,26 +8,23 @@ from nicegui import ui
 async def editor_page():
         """Main editor page"""
         
-        # Basic page structure
-        with ui.element('div').style('width: 100vw; height: 100vh; display: flex; flex-direction: column; background: #0b0f1a; color: #e5e7eb; margin: 0; padding: 0;'):
+        # Basic page structure - no borders, no scrolling
+        with ui.element('div').style('width: 100vw; height: 100vh; display: flex; flex-direction: column; background: #0b0f1a; color: #e5e7eb; margin: 0; padding: 0; overflow: hidden;'):
             
-            # Header bar
-            with ui.element('div').style('padding: 8px 16px; background: #1a1f2e; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 12px;'):
-                ui.label('NiceGUI Editor').style('font-size: 14px; font-weight: 600;')
-                ui.label('Ready').classes('editor-status').style('font-size: 12px; color: #9ca3af; margin-left: auto;')
+            # Header bar with toast test button
+            with ui.element('div').style('padding: 8px 16px; background: #1a1f2e; display: flex; align-items: center; gap: 12px;'):
+                ui.button('Test Toast', on_click=lambda: ui.notify('Toast works!', type='positive')).props('dense flat')
             
-            # Editor container
-            with ui.element('div').style('flex: 1; padding: 16px; overflow: auto;'):
-                editor = ui.textarea(
-                    label='',
-                    placeholder='Open a file to begin editing...',
-                ).style('width: 100%; height: 100%; font-family: monospace; font-size: 14px;').classes('editor-content')
-                
-                # Store editor reference for postMessage bridge
-                editor.props('outlined dense hide-bottom-space')
+            # Editor container - fills remaining space, no overflow
+            with ui.element('div').style('flex: 1; display: flex; flex-direction: column; overflow: hidden;'):
+                editor = ui.codemirror(
+                    value='',
+                    language='python',
+                    theme='oneDark',
+                ).style('flex: 1; height: 100%; width: 100%;').classes('editor-content')
             
-            # Status bar
-            with ui.element('div').style('padding: 4px 16px; background: #1a1f2e; border-top: 1px solid #333; display: flex; align-items: center; gap: 16px; font-size: 12px;'):
+            # Status bar - no border
+            with ui.element('div').style('padding: 4px 16px; background: #1a1f2e; display: flex; align-items: center; gap: 16px; font-size: 12px;'):
                 ui.label('No file open').classes('file-status').style('color: #9ca3af;')
                 ui.label('Lines: 0').classes('line-count').style('color: #9ca3af; margin-left: auto;')
         

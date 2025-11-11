@@ -1,3 +1,4 @@
+# /data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/nicegui_editor/__init__.py
 # app/apps/file_editor_cm6/nicegui_editor/__init__.py
 
 # Initialize NiceGUI with proper event loop configuration
