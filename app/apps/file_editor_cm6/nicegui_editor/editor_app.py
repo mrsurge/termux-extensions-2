@@ -46,14 +46,14 @@ async def editor_page():
                 # Store global reference
                 _active_editor = editor
                 
-                # Install CM6 zebra stripes (logical lines) with a safe mount wait
+                shade_pref = 'true' if state.get('line_shading', False) else 'false'
+
                 ui.run_javascript(f"""
                 (async () => {{
                   const root = getElement('{editor.id}');
                   const el = root?.$el || root;
-                  if (!el || !el.querySelector) return console.error('[ZebraStripes] host el not found');
+                  if (!el || !el.querySelector) return console.error('[EditorSetup] host el not found');
 
-                  // wait for CM6 to mount
                   function getView() {{
                     return el.querySelector('.cm-editor')?.cmView?.view || null;
                   }}
@@ -69,26 +69,25 @@ async def editor_page():
                       setTimeout(() => {{ obs.disconnect(); resolve(getView()); }}, timeout);
                     }});
                   }}
+
                   const view = await waitForView();
-                  if (!view) return console.error('[ZebraStripes] EditorView not found after wait');
-                  
-                  if (view.__ngZebraInstalled) return;
-                  view.__ngZebraInstalled = true;
-                  
+                  if (!view) return console.error('[EditorSetup] EditorView not found after wait');
+                  if (view.__ngShadeConfigured) return;
+                  view.__ngShadeConfigured = true;
+
                   const [viewMod, stateMod] = await Promise.all([
                     import('https://esm.sh/@codemirror/view@6'),
                     import('https://esm.sh/@codemirror/state@6'),
                   ]);
                   const {{EditorView, Decoration, ViewPlugin}} = viewMod;
-                  const {{Facet, RangeSetBuilder, StateEffect}} = stateMod;
-                  
+                  const {{Facet, RangeSetBuilder, StateEffect, Compartment}} = stateMod;
+                  const shadeCompartment = new Compartment();
+
                   const baseTheme = EditorView.baseTheme({{
                     "&light .cm-zebraStripe": {{ backgroundColor: "rgba(0,0,0,.035)" }},
                     "&dark  .cm-zebraStripe": {{ backgroundColor: "rgba(255,255,255,.06)" }},
                   }});
-                  
                   const stepSize = Facet.define({{ combine: v => v.length ? v[0] : 2 }});
-                  
                   const stripe = Decoration.line({{ attributes: {{ class: "cm-zebraStripe" }} }});
                   function stripeDeco(v) {{
                     const step = v.state.facet(stepSize);
@@ -102,27 +101,41 @@ async def editor_page():
                     }}
                     return b.finish();
                   }}
-                  
                   const zebraPlugin = ViewPlugin.fromClass(class {{
                     constructor(v) {{ this.decorations = stripeDeco(v); }}
                     update(u) {{
                       if (u.docChanged || u.viewportChanged) this.decorations = stripeDeco(u.view);
                     }}
                   }}, {{ decorations: v => v.decorations }});
-                  
+
+                  const initialShade = {shade_pref};
+
                   view.dispatch({{
-                    effects: StateEffect.appendConfig.of([baseTheme, stepSize.of(2), zebraPlugin])
+                    effects: StateEffect.appendConfig.of([
+                      shadeCompartment.of(initialShade ? [baseTheme, stepSize.of(2), zebraPlugin] : []),
+                    ])
                   }});
 
-                  // optional: tag content node in case you want CSS hooks later
-                  el.querySelector('.cm-content')?.classList.add('cm-zebraActive');
-                  
-                  console.log('[ZebraStripes] Extension installed');
+                  const applySettings = (opts={{}}) => {{
+                    try {{
+                      if (Object.prototype.hasOwnProperty.call(opts, 'line_shading')) {{
+                        const enabled = !!opts.line_shading;
+                        const extensions = enabled ? [baseTheme, stepSize.of(2), zebraPlugin] : [];
+                        view.dispatch({{ effects: shadeCompartment.reconfigure(extensions) }});
+                        el.querySelector('.cm-content')?.classList.toggle('cm-zebraActive', enabled);
+                      }}
+                    }} catch (err) {{
+                      console.error('[EditorSetup] Failed to apply view settings', err);
+                    }}
+                  }};
+
+                  window.__feApplyViewSettings = applySettings;
+                  applySettings({{ line_shading: initialShade }});
+
+                  console.log('[EditorSetup] Runtime shading ready');
                 }})();
                 """)
                 
                 # Bind to reactive state
                 editor.bind_value(state, 'content')
-
-
 
