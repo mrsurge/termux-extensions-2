@@ -1207,16 +1207,69 @@ async def _nicegui_assets_dynamic(request: Request, rest: str):
     )
 
 
+# Engine.IO polling (HTTP) for NiceGUI's Socket.IO endpoint
+# Some Socket.IO clients initiate with HTTP long-polling before WebSocket upgrade.
+# Proxy those HTTP requests to the correct worker (mirrors _nicegui_assets_dynamic).
+@app.api_route("/ui/_nicegui_ws/socket.io/{rest:path}", methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"])
+async def _nicegui_engineio_http(request: Request, rest: str):
+    app_id = _extract_app_id_from_referer(request.headers) or request.query_params.get("app_id")
+
+    if not app_id:
+        # Default to the editor app if Referer is missing (ESM/imports often lack referer)
+        app_id = "file_editor_cm6"
+        print(f"[NiceGUI Engine.IO HTTP] No Referer/app_id, defaulting to {app_id}", file=sys.stderr)
+
+    running_apps = await get_running_apps()
+    if app_id not in running_apps:
+        return JSONResponse({"error": f"{app_id} not running"}, status_code=503)
+
+    port = running_apps[app_id]["port"]
+    # Build worker URL without adding a trailing slash when rest is empty
+    rest_path = f"/{rest}" if rest else ""
+    url = f"http://127.0.0.1:{port}/ui/_nicegui_ws/socket.io{rest_path}"
+
+    headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
+    body = await request.body()
+
+    client = httpx.AsyncClient(timeout=30.0)
+    try:
+        upstream_request = client.build_request(
+            method=request.method,
+            url=url,
+            params=request.query_params,
+            headers=headers,
+            content=body,
+        )
+        resp = await client.send(upstream_request, stream=True)
+    except httpx.RequestError as exc:
+        await client.aclose()
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+    async def iter_response():
+        try:
+            async for chunk in resp.aiter_raw():
+                yield chunk
+        finally:
+            await client.aclose()
+
+    return StreamingResponse(
+        iter_response(),
+        status_code=resp.status_code,
+        headers=dict(resp.headers),
+        media_type=resp.headers.get("content-type"),
+    )
+
+
 @app.websocket("/ui/_nicegui_ws/socket.io/{rest:path}")
 async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
     """Forward NiceGUI Socket.IO to the correct worker based on Referer"""
     await websocket.accept()
     
     app_id = _extract_app_id_from_referer(websocket.headers) or websocket.query_params.get("app_id")
-    
+    # Option B: default to file_editor_cm6 when not provided (WS often lacks Referer)
     if not app_id:
-        await websocket.close(code=4400)  # Bad request
-        return
+        app_id = "file_editor_cm6"
+        print(f"[NiceGUI WS] No Referer/app_id; defaulting to {app_id}")
     
     running_apps = await get_running_apps()
     
@@ -1227,16 +1280,60 @@ async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
     
     port = running_apps[app_id]["port"]
     query = websocket.scope['query_string'].decode('utf-8')
-    worker_url = f"ws://127.0.0.1:{port}/ui/_nicegui_ws/socket.io/{rest}"
+    rest_path = f"/{rest}" if rest else ""
+    worker_url = f"ws://127.0.0.1:{port}/ui/_nicegui_ws/socket.io{rest_path}"
     if query:
         worker_url += f"?{query}"
+
+    # Preserve critical handshake context for Engine.IO/NiceGUI
+    client_headers = websocket.headers
+    origin_hdr = client_headers.get("origin")
+    cookie_hdr = client_headers.get("cookie")
+    ua_hdr = client_headers.get("user-agent")
+    xff_hdr = client_headers.get("x-forwarded-for")
+    xfp_hdr = client_headers.get("x-forwarded-proto")
+    xfh_hdr = client_headers.get("x-forwarded-host")
+    sec_ws_proto = client_headers.get("sec-websocket-protocol")
+    subprotocols = None
+    if sec_ws_proto:
+        # comma-separated list
+        subprotocols = [p.strip() for p in sec_ws_proto.split(',') if p.strip()]
+    extra_headers = []
+    if cookie_hdr:
+        extra_headers.append(("Cookie", cookie_hdr))
+    if ua_hdr:
+        extra_headers.append(("User-Agent", ua_hdr))
+    # Forward X-Forwarded-* if present (harmless for localhost)
+    if xff_hdr:
+        extra_headers.append(("X-Forwarded-For", xff_hdr))
+    if xfp_hdr:
+        extra_headers.append(("X-Forwarded-Proto", xfp_hdr))
+    if xfh_hdr:
+        extra_headers.append(("X-Forwarded-Host", xfh_hdr))
     
     try:
-        async with websockets.connect(worker_url) as worker_ws:
+        # Some environments use older websockets versions which don't support extra_headers/subprotocols
+        # Start with a minimal, widely-supported set of arguments.
+        async with websockets.connect(
+            worker_url,
+            origin=origin_hdr,
+        ) as worker_ws:
             async def forward_client_to_worker():
                 try:
-                    async for msg in websocket.iter_text():
-                        await worker_ws.send(msg)
+                    if hasattr(websocket, "receive"):
+                        # Starlette >=0.27: low-level receive available
+                        while True:
+                            packet = await websocket.receive()
+                            if packet.get("type") == "websocket.disconnect":
+                                break
+                            if packet.get("text") is not None:
+                                await worker_ws.send(packet["text"])
+                            elif packet.get("bytes") is not None:
+                                await worker_ws.send(packet["bytes"])
+                    else:
+                        # Fallback: text-only iteration
+                        async for msg in websocket.iter_text():
+                            await worker_ws.send(msg)
                 except WebSocketDisconnect:
                     pass
                 except Exception as exc:
@@ -1245,7 +1342,10 @@ async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
             async def forward_worker_to_client():
                 try:
                     async for msg in worker_ws:
-                        await websocket.send_text(msg)
+                        if isinstance(msg, (bytes, bytearray)):
+                            await websocket.send_bytes(msg)
+                        else:
+                            await websocket.send_text(msg)
                 except websockets.ConnectionClosedOK:
                     pass
                 except Exception as exc:

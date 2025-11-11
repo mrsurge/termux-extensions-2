@@ -58,7 +58,12 @@ def init_nicegui_with_app(fastapi_app):
     # This ensures the client connects to /ui/_nicegui_ws/socket.io
     # which matches our main server's dynamic WS proxy route
     import nicegui.nicegui as ng
-    ng.sio_app.engineio_path = f'{mount}/_nicegui_ws/socket.io'
+    # Engine.IO path must be a pure path (no query string)
+    # Routing to the correct worker is handled by the main server proxy.
+    # Use NiceGUI's default engine.io path; NiceGUI mounts its Socket.IO app
+    # internally at '/_nicegui_ws/', so externally this resolves to
+    # f"{mount}/_nicegui_ws/socket.io" which matches the client's URL.
+    ng.sio_app.engineio_path = '/socket.io'
     
     ui.run_with(
         fastapi_app,
