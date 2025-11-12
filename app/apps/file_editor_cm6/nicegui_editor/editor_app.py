@@ -19,9 +19,16 @@ async def editor_page():
         """Main editor page"""
         global _active_editor
         
-        # Get shared state from NiceGUI app storage
-        from app.apps.file_editor_cm6.main import get_editor_state
-        state = get_editor_state()
+        import sys
+        print(f"[EDITOR_APP] ==================== PAGE LOAD ====================", file=sys.stderr)
+        print(f"[EDITOR_APP] Old editor reference: {_active_editor}", file=sys.stderr)
+        
+        # Load preferences from disk (THE ONLY SOURCE OF TRUTH)
+        from app.apps.file_editor_cm6.main import _preferences_store
+        prefs = _preferences_store.get_preferences()
+        editor_prefs = prefs.get('editor', {})
+        
+        print(f"[EDITOR_APP] Loading editor with prefs: {editor_prefs}", file=sys.stderr)
         
         # Hard CSS reset for full-bleed content (removes Quasar/NiceGUI default padding)
         ui.add_head_html('''
@@ -38,19 +45,29 @@ async def editor_page():
             
             # Editor container
             with ui.element('div').style('flex: 1; display: flex; flex-direction: column; overflow: hidden;').classes('editor-wrapper w-full h-full'):
-                # Bind editor directly to NiceGUI app storage state
+                # Initialize editor with preferences from disk
+                theme_val = editor_prefs.get('theme', 'cm6-dark')
+                wrap_val = editor_prefs.get('wordWrap', False)
+                print(f"[EDITOR_APP] Creating editor: theme={theme_val}, wordWrap={wrap_val}", file=sys.stderr)
+                
                 editor = ui.codemirror(
-                    value=state.get('content', ''),
-                    language=state.get('language', 'python'),
-                    theme=state.get('theme', 'oneDark'),
-                    line_wrapping=state.get('word_wrap', False),
+                    value='',  # Blank until file opens
+                    language='python',  # Default, will be set when file opens
+                    theme=theme_val,
+                    line_wrapping=wrap_val,
                 ).style('flex: 1; border: none;').classes('editor-content w-full h-full').props('flat borderless')
                 
-                # Store global reference
+                # Store global reference (ALWAYS create fresh editor on page load)
                 _active_editor = editor
+                print(f"[EDITOR_APP] New editor reference: {_active_editor}", file=sys.stderr)
                 
-                shade_pref = 'true' if state.get('line_shading', False) else 'false'
-                print(f"[DEBUG] Initial line_shading from state: {state.get('line_shading', False)}, shade_pref: {shade_pref}", file=sys.stderr)
+                # Apply initial zebra stripes and diffs settings
+                show_shading = editor_prefs.get('showShading', False)
+                show_diffs = editor_prefs.get('showInlineDiffs', False)
+                print(f"[EDITOR_APP] Applying initial settings: showShading={show_shading}, showInlineDiffs={show_diffs}", file=sys.stderr)
+                editor.set_zebra_stripes(show_shading)
+                if show_diffs:
+                    editor.set_diff_decorations([])  # Will be populated when file loads
                 
                 # Add diff styling (complete CSS from old architecture)
                 ui.add_head_html('''
@@ -149,45 +166,3 @@ async def editor_page():
                 </style>
                 ''')
                 
-                # Bind to reactive state
-                editor.bind_value(state, 'content')
-
-                view_cache = {
-                    'word_wrap': bool(state.get('word_wrap', False)),
-                    'line_shading': bool(state.get('line_shading', False)),
-                    'diff_hunks': [],  # Store current diff hunks
-                    'show_inline_diffs': bool(state.get('show_inline_diffs', False)),
-                }
-
-                def _sync_view_settings() -> None:
-                    """Timer-based sync - ONLY for toggleable settings from menu.
-                    
-                    Content, theme, and language are set directly when files open,
-                    NOT polled here (prevents flash/thrash on file load).
-                    """
-                    editor_instance = get_active_editor()
-                    if not editor_instance or not getattr(editor_instance, 'client', None):
-                        return
-
-                    # ONLY sync toggleable settings (menu checkboxes)
-                    target_wrap = bool(state.get('word_wrap', False))
-                    if target_wrap != view_cache['word_wrap']:
-                        view_cache['word_wrap'] = target_wrap
-                        editor_instance.set_line_wrapping(target_wrap)
-                        editor_instance.update()
-
-                    target_shade = bool(state.get('line_shading', False))
-                    if target_shade != view_cache['line_shading']:
-                        view_cache['line_shading'] = target_shade
-                        editor_instance.set_zebra_stripes(target_shade)
-
-                    # Sync diff decorations
-                    show_diffs = bool(state.get('show_inline_diffs', False))
-                    target_hunks = state.get('diff_hunks', []) if show_diffs else []
-                    
-                    if show_diffs != view_cache['show_inline_diffs'] or target_hunks != view_cache['diff_hunks']:
-                        view_cache['show_inline_diffs'] = show_diffs
-                        view_cache['diff_hunks'] = target_hunks
-                        editor_instance.set_diff_decorations(target_hunks)
-
-                ui.timer(0.3, _sync_view_settings)

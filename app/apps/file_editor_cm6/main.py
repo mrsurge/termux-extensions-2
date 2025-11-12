@@ -99,27 +99,6 @@ NICEGUI_INIT_HOOK = init_nicegui_with_app
 _history_store = HistoryStore()
 _preferences_store = PreferencesStore()
 
-# Shared editor state using NiceGUI's app storage
-from nicegui import app as nicegui_app
-
-def get_editor_state():
-    """Get or initialize editor state in NiceGUI app storage"""
-    if not hasattr(nicegui_app, 'storage'):
-        nicegui_app.storage = type('obj', (object,), {
-            'general': {}
-        })()
-    
-    if 'editor_state' not in nicegui_app.storage.general:
-        nicegui_app.storage.general['editor_state'] = {
-            'content': '',
-            'path': '',
-            'language': 'python',
-            'word_wrap': False,
-            'line_shading': False,
-            'theme': 'oneDark'
-        }
-    return nicegui_app.storage.general['editor_state']
-
 def _ensure_project_root_synced() -> Path:
     """Ensure the in-memory project root matches the persisted active project."""
     stored = _history_store.get_active_project()
@@ -268,38 +247,74 @@ def read_file(path: str = Query(...)):
 
 @file_editor_cm6_bp.post('/editor/set_content')
 async def set_editor_content(data: dict = Body(...)):
-    """Update the shared editor state - called by main.js when opening files"""
-    state = get_editor_state()
-    state['content'] = data.get('content', '')
-    state['path'] = data.get('path', '')
-    state['language'] = data.get('language', 'python')
+    """Update editor content - called by main.js when opening files"""
+    from .nicegui_editor.editor_app import get_active_editor
     
-    # Auto-fetch diffs if enabled
-    if state.get('show_inline_diffs', False) and state.get('path'):
+    editor = get_active_editor()
+    if not editor:
+        return {"ok": False, "error": "Editor not ready"}
+    
+    content = data.get('content', '')
+    path = data.get('path', '')
+    language = data.get('language', 'python')
+    
+    # Set content and language directly
+    editor.set_value(content)
+    editor.set_language(language)
+    editor.update()
+    
+    # CRITICAL: Re-sync ALL settings from disk on every file load
+    # This ensures browser refresh (while worker still running) gets fresh settings
+    prefs = _preferences_store.get_preferences()
+    editor_prefs = prefs.get('editor', {})
+    
+    # Apply zebra stripes from disk
+    show_shading = editor_prefs.get('showShading', False)
+    editor.set_zebra_stripes(show_shading)
+    print(f"[FILE_LOAD] Applied zebra stripes: {show_shading}", file=sys.stderr)
+    
+    # Apply word wrap from disk
+    word_wrap = editor_prefs.get('wordWrap', False)
+    editor.options['lineWrapping'] = word_wrap
+    editor.update()
+    print(f"[FILE_LOAD] Applied word wrap: {word_wrap}", file=sys.stderr)
+    
+    # Apply theme from disk
+    theme = editor_prefs.get('theme', 'oneDark')
+    editor.set_theme(theme)
+    print(f"[FILE_LOAD] Applied theme: {theme}", file=sys.stderr)
+    
+    # Load diffs if enabled
+    if editor_prefs.get('showInlineDiffs', False) and path:
         try:
             project_path = _history_store.get_active_project() or str(get_project_root())
             if project_path:
                 project_root = Path(project_path).expanduser()
-                rel = _normalize_rel_path(project_root, state['path'])
+                rel = _normalize_rel_path(project_root, path)
                 diff_data = collect_diff(project_root, rel)
-                state['diff_hunks'] = diff_data.get('hunks', [])
-                print(f"[DIFF] Auto-loaded {len(state['diff_hunks'])} hunks for {state['path']}", file=sys.stderr)
+                hunks = diff_data.get('hunks', [])
+                editor.set_diff_decorations(hunks)
+                print(f"[DIFF] Auto-loaded {len(hunks)} hunks for {path}", file=sys.stderr)
         except Exception as e:
             print(f"[DIFF] Failed to auto-load diffs: {e}", file=sys.stderr)
-            state['diff_hunks'] = []
+            editor.set_diff_decorations([])
     else:
-        state['diff_hunks'] = []
+        editor.set_diff_decorations([])
     
     return {"ok": True}
 
 @file_editor_cm6_bp.post('/editor/refresh_diffs')
-async def refresh_diffs():
+async def refresh_diffs(data: dict = Body(...)):
     """Manually refresh diffs for the current file"""
-    state = get_editor_state()
-    path = state.get('path')
+    from .nicegui_editor.editor_app import get_active_editor
     
+    path = data.get('path')
     if not path:
-        return {"ok": False, "error": "No file loaded"}
+        return {"ok": False, "error": "No path provided"}
+    
+    editor = get_active_editor()
+    if not editor:
+        return {"ok": False, "error": "Editor not ready"}
     
     try:
         project_path = _history_store.get_active_project() or str(get_project_root())
@@ -309,57 +324,91 @@ async def refresh_diffs():
         project_root = Path(project_path).expanduser()
         rel = _normalize_rel_path(project_root, path)
         diff_data = collect_diff(project_root, rel)
-        state['diff_hunks'] = diff_data.get('hunks', [])
+        hunks = diff_data.get('hunks', [])
         
-        print(f"[DIFF] Manually refreshed {len(state['diff_hunks'])} hunks for {path}", file=sys.stderr)
-        return {"ok": True, "hunks_count": len(state['diff_hunks'])}
+        editor.set_diff_decorations(hunks)
+        
+        print(f"[DIFF] Manually refreshed {len(hunks)} hunks for {path}", file=sys.stderr)
+        return {"ok": True, "hunks_count": len(hunks)}
     except Exception as e:
         print(f"[DIFF] Refresh failed: {e}", file=sys.stderr)
         return {"ok": False, "error": str(e)}
 
 @file_editor_cm6_bp.get('/editor/get_content')
 def get_editor_content():
-    """Get current editor state"""
-    state = get_editor_state()
-    return {
-        "ok": True,
-        "content": state.get('content', ''),
-        "path": state.get('path', ''),
-        "language": state.get('language', 'python')
-    }
+    """Get current editor content (if needed by main.js)"""
+    from .nicegui_editor.editor_app import get_active_editor
+    
+    editor = get_active_editor()
+    if not editor:
+        return {"ok": False, "error": "Editor not ready"}
+    
+    # Editor content is managed by NiceGUI - this is rarely needed
+    return {"ok": True, "content": ""}
 
 @file_editor_cm6_bp.post('/editor/toggle_setting')
 async def toggle_editor_setting(data: dict = Body(...)):
     """Toggle editor view settings (word wrap, line shading, etc)"""
-    state = get_editor_state()
-    setting = data.get('setting')
-    
-    if setting == 'word_wrap':
-        state['word_wrap'] = not state.get('word_wrap', False)
-        return {"ok": True, "value": state['word_wrap']}
-    elif setting == 'line_shading':
-        state['line_shading'] = not state.get('line_shading', False)
-        return {"ok": True, "value": state['line_shading']}
-    elif setting == 'show_inline_diffs':
-        state['show_inline_diffs'] = not state.get('show_inline_diffs', False)
-        return {"ok": True, "value": state['show_inline_diffs']}
-    
-    return {"ok": False, "error": "Unknown setting"}
-
 @file_editor_cm6_bp.post('/editor/set_view_settings')
 async def set_view_settings(data: dict = Body(...)):
-    """Set multiple view settings at once (used when loading preferences)"""
-    state = get_editor_state()
+    """Update editor view settings - writes to preferences_store and applies to editor"""
+    from .nicegui_editor.editor_app import get_active_editor
     
-    # Update state for persistence and initial page load
+    editor = get_active_editor()
+    
+    # Map frontend keys to preferences_store keys
+    editor_updates = {}
+    
     if 'word_wrap' in data:
-        state['word_wrap'] = bool(data['word_wrap'])
+        word_wrap = bool(data['word_wrap'])
+        editor_updates['wordWrap'] = word_wrap
+        print(f"[WORDWRAP] Setting to {word_wrap}, will save to prefs", file=sys.stderr)
+        if editor:
+            editor.set_line_wrapping(word_wrap)
+            editor.update()
+            print(f"[WORDWRAP] Applied to editor", file=sys.stderr)
+    
     if 'line_shading' in data:
-        state['line_shading'] = bool(data['line_shading'])
+        line_shading = bool(data['line_shading'])
+        editor_updates['showShading'] = line_shading
+        if editor:
+            editor.set_zebra_stripes(line_shading)
+    
     if 'show_inline_diffs' in data:
-        state['show_inline_diffs'] = bool(data['show_inline_diffs'])
+        show_diffs = bool(data['show_inline_diffs'])
+        editor_updates['showInlineDiffs'] = show_diffs
+        
+        # Load/clear diffs based on toggle
+        if show_diffs and editor:
+            # Get current file path from main.js (should be sent)
+            current_path = data.get('current_path')
+            if current_path:
+                try:
+                    project_path = _history_store.get_active_project() or str(get_project_root())
+                    project_root = Path(project_path).expanduser()
+                    rel = _normalize_rel_path(project_root, current_path)
+                    diff_data = collect_diff(project_root, rel)
+                    hunks = diff_data.get('hunks', [])
+                    editor.set_diff_decorations(hunks)
+                    print(f"[DIFF] Loaded {len(hunks)} hunks on toggle", file=sys.stderr)
+                except Exception as e:
+                    print(f"[DIFF] Failed to load diffs on toggle: {e}", file=sys.stderr)
+        elif not show_diffs and editor:
+            editor.set_diff_decorations([])
+    
     if 'theme' in data:
-        state['theme'] = str(data['theme'])
+        theme_name = str(data['theme'])
+        editor_updates['theme'] = theme_name
+        # Apply theme to editor immediately
+        if editor:
+            editor.set_theme(theme_name)
+            print(f"[THEME] Applied theme: {theme_name}", file=sys.stderr)
+    
+    # Write to disk
+    if editor_updates:
+        print(f"[PREFS] Saving to disk: {editor_updates}", file=sys.stderr)
+        result = _preferences_store.update_preferences(editor=editor_updates)
+        print(f"[PREFS] Saved successfully, current state: {result.get('editor', {})}", file=sys.stderr)
     
     return {"ok": True}
 
@@ -790,6 +839,3 @@ async def edit_tracker_ws(websocket: WebSocket):
 @file_editor_cm6_bp.post('/editor/update_diffs')
 async def update_diffs(data: dict = Body(...)):
     """Update diff hunks in editor state - for testing inline diffs"""
-    state = get_editor_state()
-    state['diff_hunks'] = data.get('hunks', [])
-    return {"ok": True, "hunks_count": len(state['diff_hunks'])}

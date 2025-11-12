@@ -747,12 +747,8 @@ function applyPreferencesFromStore(payload) {
     editorState.preferences = cachedPreferences;
   }
   
-  // Sync view settings to NiceGUI editor state
-  apiPost('editor/set_view_settings', {
-    word_wrap: wordWrap,
-    line_shading: showLineShading,
-    theme: mapThemeToNiceGUI(currentTheme)
-  }).catch(e => console.warn('[Preferences] Failed to sync view settings:', e));
+  // NOTE: Do NOT sync to NiceGUI here! editor_app.py already loads correct settings
+  // from preferences_store on startup. Menu toggles sync directly when changed.
 }
 
 function applyMenuState() {
@@ -1470,7 +1466,10 @@ bindMenuToggle(miToggleDiffs, async () => {
   setMenuChecked(miToggleDiffs, showInlineDiffs);
   persistEditorPreferences({ showInlineDiffs });
   // Sync to NiceGUI state - will trigger diff decorations in iframe
-  apiPost('editor/set_view_settings', { show_inline_diffs: showInlineDiffs }).catch(e => console.warn('[Menu] Failed to sync inline diffs:', e));
+  apiPost('editor/set_view_settings', { 
+    show_inline_diffs: showInlineDiffs,
+    current_path: currentPath  // Send current file for diff loading
+  }).catch(e => console.warn('[Menu] Failed to sync inline diffs:', e));
 });
 bindMenuToggle(miTrackEdits, () => {
   trackAgentEdits = !trackAgentEdits;
