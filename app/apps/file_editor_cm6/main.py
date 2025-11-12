@@ -1,11 +1,18 @@
 
 # /data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/main.py
 
+import sys
+from pathlib import Path
+
+# CRITICAL: Setup vendor path BEFORE any imports that might use nicegui
+vendor_dir = Path(__file__).parent.parent.parent / 'static' / 'vendor'
+sys.path.insert(0, str(vendor_dir))
+
 import os
 import json
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 import asyncio
 import anyio
 from .agent_ws import agent_websocket
@@ -38,6 +45,16 @@ file_editor_cm6_bp = APIRouter()
 # # Register agent routes and WebSocket handler
 from .agent_routes import bp as agent_routes_bp
 file_editor_cm6_bp.include_router(agent_routes_bp)
+
+# Serve static files (JS, CSS, etc.)
+@file_editor_cm6_bp.get("/static/{file_path:path}")
+async def serve_static(file_path: str):
+    """Serve static files from the app's static directory"""
+    static_dir = Path(__file__).parent / "static"
+    file = static_dir / file_path
+    if not file.exists() or not file.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file)
 
 # Register terminal routes
 from .terminal_backend import terminal_router
@@ -722,3 +739,10 @@ async def edit_tracker_ws(websocket: WebSocket):
             edit_tracker.unsubscribe(token)
         except Exception:
             pass
+
+@file_editor_cm6_bp.post('/editor/update_diffs')
+async def update_diffs(data: dict = Body(...)):
+    """Update diff hunks in editor state - for testing inline diffs"""
+    state = get_editor_state()
+    state['diff_hunks'] = data.get('hunks', [])
+    return {"ok": True, "hunks_count": len(state['diff_hunks'])}

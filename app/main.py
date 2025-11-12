@@ -1,6 +1,13 @@
 #!/bin/env python
 # /data/data/com.termux/files/home/mrselect/app/main.py
 # main.py (project_root)
+import sys
+from pathlib import Path
+
+# Add the vendor directory to the Python path to load our modified NiceGUI
+vendor_dir = Path(__file__).parent / 'static' / 'vendor'
+sys.path.insert(0, str(vendor_dir))
+
 import errno
 import importlib
 import importlib.util

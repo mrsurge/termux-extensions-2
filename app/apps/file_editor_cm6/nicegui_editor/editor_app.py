@@ -2,6 +2,7 @@
 # app/apps/file_editor_cm6/nicegui_editor/editor_app.py
 
 import json
+import sys
 
 from nicegui import ui, app as nicegui_app
 
@@ -49,102 +50,29 @@ async def editor_page():
                 _active_editor = editor
                 
                 shade_pref = 'true' if state.get('line_shading', False) else 'false'
-                print(f"[DEBUG] Initial line_shading from state: {state.get('line_shading', False)}, shade_pref: {shade_pref}")
-
-                ui.run_javascript(f"""
-                (async () => {{
-                  const root = getElement('{editor.id}');
-                  const el = root?.$el || root;
-                  if (!el || !el.querySelector) return console.error('[EditorSetup] host el not found');
-
-                  function getView() {{
-                    return el.querySelector('.cm-editor')?.cmView?.view || null;
-                  }}
-                  async function waitForView(timeout=4000) {{
-                    const v = getView();
-                    if (v) return v;
-                    return new Promise(resolve => {{
-                      const obs = new MutationObserver(() => {{
-                        const vv = getView();
-                        if (vv) {{ obs.disconnect(); resolve(vv); }}
-                      }});
-                      obs.observe(el, {{childList:true, subtree:true}});
-                      setTimeout(() => {{ obs.disconnect(); resolve(getView()); }}, timeout);
-                    }});
-                  }}
-
-                  const view = await waitForView();
-                  if (!view) return console.error('[EditorSetup] EditorView not found after wait');
-                  if (view.__ngShadeConfigured) return;
-                  view.__ngShadeConfigured = true;
-
-                  const [viewMod, stateMod] = await Promise.all([
-                    import('https://esm.sh/@codemirror/view@6'),
-                    import('https://esm.sh/@codemirror/state@6'),
-                  ]);
-                  const {{EditorView, Decoration, ViewPlugin}} = viewMod;
-                  const {{Facet, RangeSetBuilder, StateEffect, Compartment}} = stateMod;
-                  const shadeCompartment = new Compartment();
-
-                  const baseTheme = EditorView.baseTheme({{
-                    "&light .cm-zebraStripe": {{ backgroundColor: "rgba(0,0,0,.035)" }},
-                    "&dark  .cm-zebraStripe": {{ backgroundColor: "rgba(255,255,255,.06)" }},
-                  }});
-                  const stepSize = Facet.define({{ combine: v => v.length ? v[0] : 2 }});
-                  const stripe = Decoration.line({{ attributes: {{ class: "cm-zebraStripe" }} }});
-                  function stripeDeco(v) {{
-                    const step = v.state.facet(stepSize);
-                    const b = new RangeSetBuilder();
-                    for (let {{from, to}} of v.visibleRanges) {{
-                      for (let pos = from; pos <= to;) {{
-                        const line = v.state.doc.lineAt(pos);
-                        if ((line.number % step) === 0) b.add(line.from, line.from, stripe);
-                        pos = line.to + 1;
-                      }}
-                    }}
-                    return b.finish();
-                  }}
-                  const zebraPlugin = ViewPlugin.fromClass(class {{
-                    constructor(v) {{ this.decorations = stripeDeco(v); }}
-                    update(u) {{
-                      if (u.docChanged || u.viewportChanged) this.decorations = stripeDeco(u.view);
-                    }}
-                  }}, {{ decorations: v => v.decorations }});
-
-                  const initialShade = {shade_pref};
-
-                  view.dispatch({{
-                    effects: StateEffect.appendConfig.of([
-                      shadeCompartment.of(initialShade ? [baseTheme, stepSize.of(2), zebraPlugin] : []),
-                    ])
-                  }});
-
-                  const applySettings = (opts={{}}) => {{
-                    console.log('[EditorSetup] applySettings called with:', opts);
-                    try {{
-                      if (Object.prototype.hasOwnProperty.call(opts, 'line_shading')) {{
-                        const enabled = !!opts.line_shading;
-                        console.log('[EditorSetup] Applying line_shading:', enabled);
-                        const extensions = enabled ? [baseTheme, stepSize.of(2), zebraPlugin] : [];
-                        view.dispatch({{ effects: shadeCompartment.reconfigure(extensions) }});
-                        el.querySelector('.cm-content')?.classList.toggle('cm-zebraActive', enabled);
-                        console.log('[EditorSetup] Line shading applied, checking decorations...');
-                        setTimeout(() => {{
-                          const hasStripes = el.querySelectorAll('.cm-zebraStripe').length;
-                          console.log('[EditorSetup] Zebra stripes found:', hasStripes);
-                        }}, 100);
-                      }}
-                    }} catch (err) {{
-                      console.error('[EditorSetup] Failed to apply view settings', err);
-                    }}
-                  }};
-
-                  window.__feApplyViewSettings = applySettings;
-                  applySettings({{ line_shading: initialShade }});
-
-                  console.log('[EditorSetup] Runtime shading ready');
-                }})();
-                """)
+                print(f"[DEBUG] Initial line_shading from state: {state.get('line_shading', False)}, shade_pref: {shade_pref}", file=sys.stderr)
+                
+                # Add diff styling
+                ui.add_head_html('''
+                <style>
+                .cm-diff-line-added {
+                    background-color: rgba(0, 255, 0, 0.15);
+                    border-left: 3px solid rgba(0, 255, 0, 0.6);
+                }
+                .cm-diff-removed {
+                    background-color: rgba(255, 0, 0, 0.15);
+                    border-left: 3px solid rgba(255, 0, 0, 0.6);
+                    padding: 2px 0;
+                    margin: 2px 0;
+                }
+                .cm-diff-removed-line {
+                    padding-left: 4px;
+                    white-space: pre;
+                    font-family: monospace;
+                    opacity: 0.7;
+                }
+                </style>
+                ''')
                 
                 # Bind to reactive state
                 editor.bind_value(state, 'content')
@@ -154,6 +82,7 @@ async def editor_page():
                     'line_shading': bool(state.get('line_shading', False)),
                     'theme': str(state.get('theme', 'oneDark')),
                     'language': str(state.get('language', 'python')),
+                    'diff_hunks': [],  # Store current diff hunks
                 }
 
                 def _sync_view_settings() -> None:
@@ -164,7 +93,7 @@ async def editor_page():
                     # Debug: check what we're syncing
                     current_shade = bool(state.get('line_shading', False))
                     if current_shade != view_cache['line_shading']:
-                        print(f"[DEBUG TIMER] line_shading changed: {view_cache['line_shading']} → {current_shade}")
+                        print(f"[DEBUG TIMER] line_shading changed: {view_cache['line_shading']} → {current_shade}", file=sys.stderr)
 
                     target_wrap = bool(state.get('word_wrap', False))
                     if target_wrap != view_cache['word_wrap']:
@@ -175,11 +104,9 @@ async def editor_page():
                     target_shade = bool(state.get('line_shading', False))
                     if target_shade != view_cache['line_shading']:
                         view_cache['line_shading'] = target_shade
-                        payload = json.dumps({'line_shading': target_shade})
-                        print(f"[DEBUG] Syncing line_shading: {target_shade}, payload: {payload}")
-                        editor_instance.client.run_javascript(
-                            f"window.__feApplyViewSettings && window.__feApplyViewSettings({payload});"
-                        )
+                        print(f"[DEBUG] Calling set_zebra_stripes: {target_shade}", file=sys.stderr)
+                        editor_instance.set_zebra_stripes(target_shade)
+
 
                     target_theme = str(state.get('theme', 'oneDark'))
                     if target_theme != view_cache['theme']:
@@ -192,5 +119,14 @@ async def editor_page():
                         view_cache['language'] = target_language
                         editor_instance.set_language(target_language)
                         editor_instance.update()
+
+                    # Sync diff decorations
+                    # Note: Diffs come from editor_state['diff_hunks'] which should be
+                    # populated by the host page or another mechanism
+                    target_hunks = state.get('diff_hunks', [])
+                    if target_hunks != view_cache['diff_hunks']:
+                        view_cache['diff_hunks'] = target_hunks
+                        print(f"[DEBUG] Applying {len(target_hunks)} diff hunks", file=sys.stderr)
+                        editor_instance.set_diff_decorations(target_hunks)
 
                 ui.timer(0.3, _sync_view_settings)

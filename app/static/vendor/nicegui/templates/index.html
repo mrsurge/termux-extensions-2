@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>{{ title }}</title>
+    <meta name="viewport" content="{{ viewport }}" />
+    <link href="{{ favicon_url }}" rel="shortcut icon" />
+    <style>
+      @layer theme, base, quasar, nicegui, components, utilities, overrides, quasar_importants;
+      @import url("{{ prefix | safe }}/_nicegui/{{version}}/static/fonts.css") layer(base);
+      {% if prod_js %}
+        @import url("{{ prefix | safe }}/_nicegui/{{version}}/static/quasar.unimportant.prod.css") layer(quasar);
+        @import url("{{ prefix | safe }}/_nicegui/{{version}}/static/quasar.important.prod.css") layer(quasar_importants);
+      {% else %}
+        @import url("{{ prefix | safe }}/_nicegui/{{version}}/static/quasar.unimportant.css") layer(quasar);
+        @import url("{{ prefix | safe }}/_nicegui/{{version}}/static/quasar.important.css") layer(quasar_importants);
+      {% endif %}
+      @import url("{{ prefix | safe }}/_nicegui/{{version}}/static/nicegui.css") layer(nicegui);
+      @layer quasar {
+        blockquote, dd, dl, figure, h1, h2, h3, h4, h5, h6, hr, p, pre {
+          margin: revert-layer; /* HACK: revert Quasar's margin styles */
+        }
+      }
+      @layer overrides {
+        .column.inline, .flex.inline, .row.inline {
+          display: inline-flex;  /* HACK: re-apply Quasar's inline styles to override Tailwind */
+        }
+        .nicegui-dialog-open,
+        .nicegui-select-popup-open {
+          scroll-behavior: auto !important; /* HACK: avoid smooth-scrolling when dialogs or select popups close */
+        }
+      }
+    </style>
+    <!-- prevent Prettier from removing this line -->
+    {{ head_html | safe }}
+    <script type="importmap">
+      {"imports": {{ imports | safe }}}
+    </script>
+    {% for url in js_imports_urls %}
+    <link rel="modulepreload" href="{{ url }}" />
+    {% endfor %}
+    <!-- prevent Prettier from removing this line -->
+    {% if tailwind %}
+    <style type="text/tailwindcss">
+      @custom-variant dark (&:where(body.body--dark, body.body--dark *));
+    </style>
+    {% endif %}
+  </head>
+  <body>
+    <script async src="{{ prefix | safe }}/_nicegui/{{version}}/static/es-module-shims.js"></script>
+    <script defer src="{{ prefix | safe }}/_nicegui/{{version}}/static/socket.io.min.js"></script>
+    {% if tailwind %}
+    <script defer src="{{ prefix | safe }}/_nicegui/{{version}}/static/tailwindcss.min.js"></script>
+    {% endif %}
+    <!-- prevent Prettier from removing this line -->
+    {% if prod_js %}
+    <script defer src="{{ prefix | safe }}/_nicegui/{{version}}/static/vue.global.prod.js"></script>
+    <script defer src="{{ prefix | safe }}/_nicegui/{{version}}/static/quasar.umd.prod.js"></script>
+    {% else %}
+    <script defer src="{{ prefix | safe }}/_nicegui/{{version}}/static/vue.global.js"></script>
+    <script defer src="{{ prefix | safe }}/_nicegui/{{version}}/static/quasar.umd.js"></script>
+    {% endif %}
+    <script defer src="{{ prefix | safe }}/_nicegui/{{version}}/static/nicegui.js"></script>
+
+    <script defer src="{{ prefix | safe }}/_nicegui/{{version}}/static/lang/{{ language }}.umd.prod.js"></script>
+    {{ body_html | safe }}
+
+    <div id="app"></div>
+    <div id="popup" aria-hidden="true">
+      <span>{{ translations.connection_lost }}</span>
+      <span>{{ translations.trying_to_reconnect }}</span>
+    </div>
+    <script type="module">
+      const app = createApp(parseElements(String.raw`{{ elements | safe }}`), {
+        version: "{{ version }}",
+        prefix: "{{ prefix | safe }}",
+        query: {{ socket_io_js_query_params | safe }},
+        extraHeaders: {{ socket_io_js_extra_headers | safe }},
+        transports: {{ socket_io_js_transports | safe }},
+      });
+      const dark = {{ dark }};
+      const language = "{{ language }}";
+      const vue_config = {{ vue_config | safe }};
+      {{ vue_config_script | safe }}
+
+      {{ js_imports | safe }}
+      {{ vue_scripts | safe }}
+
+      app.mount("#app");
+    </script>
+  </body>
+</html>
