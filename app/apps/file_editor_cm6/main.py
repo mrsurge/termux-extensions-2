@@ -275,7 +275,7 @@ async def set_editor_content(data: dict = Body(...)):
     
     # Apply word wrap from disk
     word_wrap = editor_prefs.get('wordWrap', False)
-    editor.options['lineWrapping'] = word_wrap
+    editor.set_line_wrapping(word_wrap)
     editor.update()
     print(f"[FILE_LOAD] Applied word wrap: {word_wrap}", file=sys.stderr)
     

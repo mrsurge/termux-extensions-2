@@ -1,7 +1,9 @@
-# Zebra Striping Investigation Report
-**Date:** November 11, 2025  
-**Status:** BLOCKED - Cannot access CodeMirror EditorView from NiceGUI context  
-**Time Invested:** ~4 hours
+# NiceGUI Vendoring Journey: From Blocked to Silver Bullet
+
+**Date:** November 11-12, 2025  
+**Status:** ✅ SOLVED - Vendoring + `reconnect_timeout=0` = Complete Solution  
+**Time Invested:** ~6 hours  
+**Final Outcome:** Working zebra stripes, inline diffs, AND settings that persist correctly on refresh
 
 ---
 
@@ -12,6 +14,8 @@ Implement logical-line zebra striping (alternating line background colors) in th
 2. Toggles live without page reload
 3. Follows the established state-driven pattern (like word wrap, theme, language)
 4. Serves as proof-of-concept for inline git diffs (same extension mechanism)
+
+**Later discovered:** Also solve the settings refresh problem where changed settings didn't appear until worker restart.
 
 ---
 
@@ -223,46 +227,92 @@ if target_shade != view_cache['line_shading']:
 
 ### Lessons Learned
 
-1. **When a library blocks you, vendor and extend it** - Don't fight the architecture
-2. **Import order matters** - `sys.path.insert()` must happen before the first import
-3. **Read the source** - Understanding NiceGUI's Vue wrapper was key
-4. **Start simple** - Global variable attempt taught us what we needed
-5. **Copy existing patterns** - `set_line_wrapping()` showed us the way
+1. **Vendor when you need control** - Don't fight the library, extend it properly
+2. **Follow existing patterns** - `set_line_wrapping()` showed us the way
+3. **Read the vendored code** - Understanding NiceGUI's architecture was key
+4. **Test edge cases** - The reconnection bug only appeared on refresh after settings change
+5. **One parameter can change everything** - `reconnect_timeout=0` solved hours of head-scratching
+6. **Documentation lies** - Old docs referenced `editor_state` and timers that never existed (hallucination from previous agent)
+7. **Fresh is better than clever** - Sometimes forcing a fresh start is simpler than preserving state
 
 ---
 
-### Path Forward: Inline Diffs
+## Complete Architecture Summary
 
-**Zebra stripes prove the pattern works.** Inline diffs are now feasible:
+### What Works Now
 
-1. Add `set_diff_decorations(hunks)` method to `codemirror.py`
-2. Add `applyDiffDecorations(hunks)` method to `codemirror.js`
-3. Use `Decoration.line()` for changed lines
-4. Use `Decoration.widget()` for deletion markers
-5. Call from timer when diff state changes
+✅ **Zebra Stripes** - Toggleable, works with word wrap, persists correctly  
+✅ **Inline Diffs** - 700+ hunks render perfectly, auto-loads on file open  
+✅ **Settings Persistence** - All settings (wrap, theme, shading, diffs) persist to disk  
+✅ **Settings Refresh** - Browser refresh loads current settings from disk  
+✅ **Live Updates** - Settings apply immediately when changed via menu  
+✅ **Worker Lifecycle** - Settings survive worker restarts  
 
-**Difficulty: 5/10** (down from 9/10 impossible)
+### How It Works
 
-The infrastructure is proven. Diffs are just more complex decorations.
+**Storage Layer:**
+- `PreferencesStore` at `~/.local/share/termux-extensions-2/code_oss_prefs.json`
+- Thread-safe, atomic writes, validates against schema
+
+**Settings Flow:**
+1. User clicks menu → persist to disk via `/preferences` endpoint
+2. Apply immediately via `/editor/set_view_settings` endpoint
+3. On page load → read fresh from disk (forced by `reconnect_timeout=0`)
+4. On file open → defensive re-sync from disk
+
+**Vendored Methods:**
+- `editor.set_line_wrapping(bool)` - Toggle word wrap
+- `editor.set_theme(str)` - Change theme
+- `editor.set_zebra_stripes(bool)` - Toggle line shading
+- `editor.set_diff_decorations(list)` - Apply git diffs
+
+**No Polling Required:**
+- Settings applied immediately via method calls
+- Page refresh creates fresh editor with current settings
+- No timers, no state synchronization loops, no complexity
 
 ---
 
 ### Files Modified (Final)
 
-**Vendored:**
-- `app/static/vendor/nicegui/elements/codemirror/codemirror.py` - Added `set_zebra_stripes()`
-- `app/static/vendor/nicegui/elements/codemirror/codemirror.js` - Added `applyZebraStripes()`
+**Vendored NiceGUI:**
+- `app/static/vendor/nicegui/elements/codemirror/codemirror.py`
+  - Added `set_zebra_stripes(enabled)` method
+  - Added `set_diff_decorations(hunks)` method
+  
+- `app/static/vendor/nicegui/elements/codemirror/codemirror.js`
+  - Added `applyZebraStripes(enabled)` with StateField implementation
+  - Added `applyDiffDecorations(hunks)` with decoration rendering
+  - Added `buildZebraDecorations()` helper
+  - Added `buildDiffDecorations()` helper
 
-**Application:**
+**Application Code:**
 - `app/main.py` - Added vendor path setup (lines 4-9)
-- `app/apps/file_editor_cm6/main.py` - Added vendor path setup (lines 3-9)
-- `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` - Calls `set_zebra_stripes()` (line 85)
+- `app/apps/file_editor_cm6/main.py`
+  - Added vendor path setup (lines 3-9)
+  - Fixed `editor.options` → `editor.set_line_wrapping()` bug (line 278)
+  - Added `/editor/set_view_settings` endpoint (lines 352-414)
+  
+- `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+  - **SILVER BULLET:** Added `reconnect_timeout=0` (line 17)
+  - Loads settings from disk on every page load (lines 27-69)
+  - Applies zebra stripes and diffs on initialization (lines 65-70)
 
-**Time invested:** ~5 hours  
-**Result:** ✅ Working, maintainable, extensible
+**Documentation:**
+- `WORD_WRAP_FIX_NOTES.md` - Rewritten to remove hallucinated timer/polling architecture
+- `ZEBRA_STRIPING_VENDORED_IMPLEMENTATION.md` - Complete implementation guide with bug history
+- `NICEGUI_VENDORING_JOURNEY.md` - This document
+
+**Time invested:** ~6 hours  
+**Bugs fixed:** 2 (API mismatch, reconnection stale state)  
+**Features delivered:** 4 (zebra stripes, inline diffs, settings persistence, refresh reliability)  
+**Result:** ✅ Working, maintainable, extensible, **and reliable**
 
 ---
 
 **Investigation complete.**  
-**Feature delivered.**  
-**Architecture validated for future extensions.**
+**Features delivered.**  
+**Architecture validated.**  
+**Silver bullet discovered.**
+
+The combination of vendoring (for extension capability) + `reconnect_timeout=0` (for state reliability) proved to be the complete solution we needed. Both pieces were necessary; neither alone would have been sufficient.

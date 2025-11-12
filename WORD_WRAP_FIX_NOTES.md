@@ -1,101 +1,219 @@
 # Live View Settings Implementation - Complete Pattern
 
+**Last Updated:** November 12, 2025
+
 ## Summary
 
-Live view settings (word wrap, theme, line shading) are applied in the NiceGUI-based CM6 editor by keeping a single source of truth for view settings and having the iframe-driven editor sync itself to that state.
+Live view settings (word wrap, theme, line shading, inline diffs) are applied in the NiceGUI-based CM6 editor using a simple, direct approach: settings are persisted to disk via `PreferencesStore`, and the editor loads them fresh on every page load.
 
-## Complete Live View Settings Pattern
+## Architecture Overview
 
-This pattern is used for **word wrap**, **theme**, and **line shading** settings.
+### Storage Layer: PreferencesStore
 
-### Shared state storage
+**File:** `app/apps/file_editor_cm6/preferences_store.py`  
+**Location:** `~/.local/share/termux-extensions-2/code_oss_prefs.json`
 
-- `get_editor_state()` in `app/apps/file_editor_cm6/main.py` holds editor metadata including:
-  - `word_wrap` (boolean)
-  - `theme` (string, NiceGUI theme name like 'oneDark', 'githubDark', etc.)
-  - `line_shading` (boolean) - **Note: trigger works but visual effect not yet implemented**
-- `/editor/set_view_settings` updates this shared state when settings change.
-- Preferences persist via the existing `PreferencesStore`; no new persistence mechanism was added.
+The preferences store is a thread-safe, disk-backed JSON store with atomic writes. It handles:
+- `editor` settings (word wrap, theme, zebra stripes, inline diffs, etc.)
+- `ui` settings (assistant collapsed, git indicators)
+- `project` settings (last opened file per project)
 
-### Host (menu bar) behavior - The Two-Step Pattern
+**Key Properties:**
+- Thread-safe with `threading.Lock()`
+- Atomic writes via temp file + rename pattern
+- Validates updates against default schema
+- Merges defaults with stored values on read
 
-When a user clicks a menu option (e.g., "Word Wrap", "GitHub Dark", etc.), the frontend (`main.js`) follows this pattern:
+### Settings Flow: Two-Step Pattern
 
-1. **Update local JS variable** (e.g., `wordWrap = !wordWrap`, `currentTheme = 'github-dark'`)
-2. **Persist to disk**: Call `persistEditorPreferences({wordWrap})` or `persistEditorPreferences({theme})` 
-   - This hits the `/preferences` endpoint and saves to `PreferencesStore`
-3. **Update shared state**: Call `apiPost('editor/set_view_settings', {word_wrap: wordWrap})` or `apiPost('editor/set_view_settings', {theme: mapThemeToNiceGUI(currentTheme)})`
-   - This updates the in-memory `editor_state` that the iframe polls
+When a user changes a setting via the menu bar:
 
-**Critical**: `/editor/set_view_settings` does NOT persist to disk—it only updates the shared state. Persistence is handled separately via `/preferences`.
+1. **Persist to disk** via `/preferences` endpoint:
+   ```javascript
+   persistEditorPreferences({ wordWrap: true })
+   // → POST /api/app/file_editor_cm6/preferences
+   // → Updates PreferencesStore on disk
+   ```
 
-### Theme name mapping
+2. **Apply immediately** via `/editor/set_view_settings` endpoint:
+   ```javascript
+   apiPost('editor/set_view_settings', { word_wrap: true })
+   // → POST /api/app/file_editor_cm6/editor/set_view_settings
+   // → Calls editor.set_line_wrapping(true) immediately
+   ```
 
-The frontend uses human-friendly theme IDs (e.g., `'github-dark'`, `'one-dark'`) which are mapped to NiceGUI theme names via `mapThemeToNiceGUI()`:
+**Why two calls?**
+- Disk persistence and live UI updates are decoupled
+- Allows settings to be saved even if editor isn't loaded
+- Immediate feedback without waiting for disk I/O
 
-```javascript
-'github-dark' → 'githubDark'
-'one-dark' → 'oneDark'
-'termux' → 'consoleDark'
-'vscode-dark' → 'vscodeDark'
-// ... etc
+### Page Load Behavior: Fresh State Every Time
+
+**NiceGUI Reconnection Disabled:**
+```python
+@ui.page('/nc', reconnect_timeout=0)  # Force fresh page load
+async def editor_page():
+    # Load preferences from disk
+    prefs = _preferences_store.get_preferences()
+    editor_prefs = prefs.get('editor', {})
+    
+    # Create editor with current settings
+    editor = ui.codemirror(
+        theme=editor_prefs.get('theme', 'cm6-dark'),
+        line_wrapping=editor_prefs.get('wordWrap', False),
+    )
+    
+    # Apply additional settings
+    editor.set_zebra_stripes(editor_prefs.get('showShading', False))
+    if editor_prefs.get('showInlineDiffs', False):
+        editor.set_diff_decorations([])
 ```
 
-This mapping exists in `main.js` and is called before sending to `/editor/set_view_settings`.
+**Critical Design Decision:**
+- `reconnect_timeout=0` disables NiceGUI's client reconnection feature
+- Every browser refresh creates a **new** Client instance
+- `editor_page()` function **always runs** on every page load
+- Settings are **always** read fresh from disk
 
-### NiceGUI iframe behavior
+**Why disable reconnection?**
+1. **Prevents stale state** - NiceGUI's reconnection preserves old client state, causing visual thrash when settings change
+2. **Matches user intent** - When user refreshes after changing settings, they expect to see the new settings
+3. **Simple mental model** - Refresh = fresh load, predictable behavior
+4. **Mobile-friendly** - Screen-off/app-switch often disconnects anyway; fresh load is clearer
+5. **Aligned with architecture** - Multi-process worker model already handles lifecycle cleanly
 
-The embedded editor page is defined in `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`.
+### Theme Name Mapping
 
-**On load**, it:
-- Reads `state = get_editor_state()`
-- Creates the CodeMirror instance with initial values from state:
-  ```python
-  ui.codemirror(
-      value=state.get('content', ''),
-      language=state.get('language', 'python'),
-      theme=state.get('theme', 'oneDark'),
-      line_wrapping=state.get('word_wrap', False),
-  )
-  ```
-- Binds the editor content to this state with `editor.bind_value(state, 'content')`
+The frontend uses human-friendly theme IDs that get mapped to NiceGUI theme names:
 
-### Live synchronization (the crucial part)
-
-The iframe keeps a `view_cache` dictionary tracking the last applied values:
-
-```python
-view_cache = {
-    'word_wrap': bool(state.get('word_wrap', False)),
-    'line_shading': bool(state.get('line_shading', False)),
-    'theme': str(state.get('theme', 'oneDark')),
+```javascript
+function mapThemeToNiceGUI(themeId) {
+  const themeMap = {
+    'github-dark': 'githubDark',
+    'one-dark': 'oneDark',
+    'termux': 'consoleDark',
+    'vscode-dark': 'vscodeDark',
+    // ... etc
+  };
+  return themeMap[themeId] || 'oneDark';
 }
 ```
 
-A `ui.timer(0.3, _sync_view_settings)` callback runs periodically (every 300ms) inside the NiceGUI event loop. In each tick it:
-
-1. **Reads current values** from `state` (the shared `editor_state`)
-2. **Compares to cached values**
-3. **If changed**, updates the editor:
-   - **Word wrap**: `editor.set_line_wrapping(target_wrap)` + `editor.update()`
-   - **Theme**: `editor.set_theme(target_theme)` + `editor.update()`
-   - **Line shading**: Runs custom JavaScript via `editor.client.run_javascript(...)` to apply CM6 extension
-
-Because this logic runs client-side (within the NiceGUI page context) and uses NiceGUI's official APIs, changes are pushed to the browser immediately without a page reload.
-
-### Why this works
-
-- **Single source of truth**: The shared `editor_state` dict holds the canonical values
-- **Separation of concerns**: 
-  - Menu bar → persists to disk + updates shared state
-  - `/editor/set_view_settings` → only updates shared state (NOT persistence)
-  - NiceGUI iframe → polls shared state and applies changes via official APIs
-- **Event loop isolation**: Avoids trying to mutate the editor directly from FastAPI route context
-- **No cross-frame messaging**: Communication happens via shared Python state, not postMessage
+This mapping happens in `main.js` before calling `/editor/set_view_settings`.
 
 ---
 
-## Additional notes about this app
+## File Opening: Re-sync from Disk
+
+When a file is opened via `/editor/set_content` (main.py lines 268-284):
+
+```python
+# CRITICAL: Re-sync ALL settings from disk on every file load
+# This ensures browser refresh (while worker still running) gets fresh settings
+prefs = _preferences_store.get_preferences()
+editor_prefs = prefs.get('editor', {})
+
+# Apply settings using vendored CodeMirror API methods
+editor.set_zebra_stripes(editor_prefs.get('showShading', False))
+editor.set_line_wrapping(editor_prefs.get('wordWrap', False))
+editor.set_theme(editor_prefs.get('theme', 'cm6-dark'))
+```
+
+**Why re-sync on file open?**
+- Defensive: ensures settings are correct even if page didn't fully reload
+- Covers edge cases where NiceGUI state might be stale
+- Minimal overhead (fast disk read + method calls)
+
+---
+
+## Vendored NiceGUI CodeMirror API
+
+**Location:** `app/static/vendor/nicegui/elements/codemirror/codemirror.py`
+
+**Custom Methods:**
+```python
+def set_line_wrapping(self, value: bool) -> None:
+    """Sets whether line wrapping is enabled."""
+    self._props['lineWrapping'] = value
+
+def set_theme(self, theme: SUPPORTED_THEMES) -> None:
+    """Sets the theme of the editor."""
+    self._props['theme'] = theme
+
+def set_zebra_stripes(self, enabled: bool) -> None:
+    """Toggles logical-line zebra striping."""
+    self.run_method('applyZebraStripes', enabled)
+
+def set_diff_decorations(self, hunks: list) -> None:
+    """Apply inline git diff decorations."""
+    self.run_method('applyDiffDecorations', hunks)
+```
+
+**CRITICAL:** Vendored CodeMirror uses `._props` internally, **NOT** `.options`.
+- ❌ `editor.options['lineWrapping'] = value` → AttributeError
+- ✅ `editor.set_line_wrapping(value)` → Works correctly
+
+---
+
+## Bug History & Lessons Learned
+
+### Bug #1: editor.options API Mismatch (Nov 12, 2025)
+
+**Symptom:** 500 error when opening files after browser refresh
+
+**Root Cause:**
+```python
+# BROKEN (old code):
+editor.options['lineWrapping'] = word_wrap  # ❌ .options doesn't exist
+
+# FIXED:
+editor.set_line_wrapping(word_wrap)  # ✅ Uses vendored API
+```
+
+**Why it failed:**
+- Vendored `CodeMirror` uses `._props` dict, not `.options`
+- Inconsistent API usage between endpoints
+- Crash prevented ALL settings from being applied
+
+**Fix:** Use `set_line_wrapping()`, `set_theme()`, `set_zebra_stripes()` consistently everywhere.
+
+### Bug #2: NiceGUI Client Reconnection (Nov 12, 2025)
+
+**Symptom:** Settings changed, persisted to disk, but old settings displayed after browser refresh
+
+**Root Cause:**
+- NiceGUI's default `reconnect_timeout` preserves client state across refreshes
+- Browser refresh → NiceGUI reconnects to existing client from worker start
+- `editor_page()` doesn't re-run on reconnect, old editor instance persists
+- Settings on disk were correct, but editor wasn't reloaded
+
+**Fix:** Set `reconnect_timeout=0` to force fresh page load every time
+
+---
+
+## Why This Works
+
+**Single source of truth:** PreferencesStore on disk holds canonical values
+
+**Separation of concerns:**
+- Menu bar → persists to disk + applies immediately
+- `/preferences` → handles long-term storage
+- `/editor/set_view_settings` → handles immediate UI updates  
+- Page load → reads fresh from disk, no caching
+
+**No polling/timers needed:** Settings are applied:
+1. Immediately when changed (via endpoint method calls)
+2. On page load (from disk)
+3. On file open (defensive re-sync)
+
+**Predictable lifecycle:** With `reconnect_timeout=0`:
+- Browser refresh = new Client = fresh state
+- No hidden state preservation
+- Settings always match disk
+
+---
+
+## Additional Notes About This App
 
 ### Single-user, same-device model
 

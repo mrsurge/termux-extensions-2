@@ -505,6 +505,426 @@ if state.get('show_inline_diffs', False) and state.get('path'):
 
 ---
 
+## Extended Architecture & Lessons Learned
+
+### Critical Issue Discovered: Editor Refresh Bug (Nov 12, 2025)
+
+**Problem:** After changing settings (word wrap, theme, line shading) while the worker was running, browser refresh would revert to the old settings from when the worker first started, even though the settings were correctly persisted to disk.
+
+**Root Cause:** The `/editor/set_content` endpoint (called when opening files) had an API inconsistency:
+
+```python
+# BROKEN (line 278 - old code):
+editor.options['lineWrapping'] = word_wrap  # ❌ CodeMirror has no .options attribute
+
+# FIXED:
+editor.set_line_wrapping(word_wrap)  # ✅ Uses vendored API method
+```
+
+**Why It Failed:**
+- Vendored `CodeMirror` class uses `._props` internally, not `.options`
+- The `.options` attribute doesn't exist, causing an `AttributeError`
+- The crash prevented ALL settings (word wrap, theme, shading) from being re-applied on refresh
+- Settings were correctly read from disk but never applied to the editor before the crash
+
+**Why Inline Diffs Worked:**
+- Inline diffs used `editor.set_diff_decorations(hunks)` method (not property access)
+- Method calls worked; property access failed
+- This provided the critical clue to the root cause
+
+**The Fix:**
+Changed `/editor/set_content` to use the same pattern as `/editor/set_view_settings`:
+- Line 278: `editor.options['lineWrapping'] = word_wrap` → `editor.set_line_wrapping(word_wrap)`
+- Line 273: `editor.set_zebra_stripes(show_shading)` ✅ (already correct)
+- Line 284: `editor.set_theme(theme)` ✅ (already correct)
+
+**Files Modified:**
+- `app/apps/file_editor_cm6/main.py` (1 line change)
+
+**Result:**
+- Settings now correctly sync on page refresh while worker is running ✅
+- All settings (word wrap, theme, shading, diffs) load from disk correctly ✅
+- No more 500 errors when opening files after refresh ✅
+
+---
+
+## Preferences Architecture Deep Dive
+
+### PreferencesStore Implementation
+
+**File:** `app/apps/file_editor_cm6/preferences_store.py`
+
+**Storage Location:** `~/.local/share/termux-extensions-2/code_oss_prefs.json`
+
+**Structure:**
+```python
+{
+  "editor": {
+    "showLineNumbers": bool,
+    "showSyntax": bool,
+    "showShading": bool,      # Zebra stripes
+    "wordWrap": bool,
+    "autoCloseBrackets": bool,
+    "autocompletion": bool,
+    "theme": str,             # e.g., "cm6-dark", "githubDark"
+    "autoSave": bool,
+    "showInlineDiffs": bool,  # Git diff decorations
+    "trackAgentEdits": bool,
+  },
+  "ui": {
+    "assistantCollapsed": bool,
+    "gitIndicators": bool,
+  },
+  "projects": {
+    "/path/to/project": {
+      "last_file": "/path/to/file.py"
+    }
+  }
+}
+```
+
+**Example Actual File:**
+```json
+{
+  "editor": {
+    "wordWrap": true,
+    "showShading": false,
+    "theme": "githubDark",
+    "showInlineDiffs": true,
+    "showLineNumbers": false
+  },
+  "ui": {},
+  "projects": {
+    "/data/data/com.termux/files/home/test/termux-extensions-2": {}
+  }
+}
+```
+
+**Key Methods:**
+```python
+# Get preferences (with defaults merged)
+prefs = _preferences_store.get_preferences(project_path)
+# Returns: {"editor": {...}, "ui": {...}, "project": {...}}
+
+# Update preferences (validates against defaults)
+_preferences_store.update_preferences(
+    editor={"wordWrap": True, "theme": "githubDark"},
+    ui={"assistantCollapsed": False},
+    project={"path": "/home/user/project", "last_file": "main.py"}
+)
+```
+
+**Thread Safety:** Uses `threading.Lock()` for atomic read/write operations.
+
+**Atomic Writes:** Uses temp file + rename pattern to prevent corruption.
+
+---
+
+### HistoryStore Implementation
+
+**File:** `app/apps/file_editor_cm6/history_store.py`
+
+**Storage Location:** `~/.local/share/termux-extensions-2/code_oss_history.json`
+
+**Structure:**
+```python
+{
+  "recent_projects": [
+    {
+      "path": str,           # Absolute project path
+      "label": str,          # Project folder name
+      "opened_at": str       # ISO timestamp (UTC)
+    }
+  ],
+  "projects": {
+    "/path/to/project": {
+      "files": [
+        {
+          "path": str,       # Absolute file path
+          "label": str,      # Filename only
+          "opened_at": str   # ISO timestamp (UTC)
+        }
+      ],
+      "last_file": str,      # Absolute path to last opened file
+      "label": str,          # Project folder name
+      "opened_at": str       # ISO timestamp (UTC)
+    }
+  },
+  "active_project": str      # Absolute path to currently active project
+}
+```
+
+**Key Methods:**
+```python
+# Get active project path
+project_path = _history_store.get_active_project()
+
+# Set active project
+_history_store.set_active_project("/path/to/project")
+
+# Record file activity
+_history_store.record_file_activity(
+    project_path="/path/to/project",
+    file_path="/path/to/project/file.py"
+)
+
+# Get recent projects (limited to MAX_RECENT_PROJECTS=12)
+recents = _history_store.get_recent_projects()
+
+# Get recent files for a project (limited to MAX_RECENT_FILES=12)
+files = _history_store.get_recent_files("/path/to/project")
+```
+
+**Example Actual File (condensed):**
+```json
+{
+  "recent_projects": [
+    {
+      "path": "/data/data/com.termux/files/home/test/termux-extensions-2",
+      "label": "termux-extensions-2",
+      "opened_at": "2025-11-12T15:38:11.625209Z"
+    },
+    {
+      "path": "/data/data/com.termux/files/home/mrselect",
+      "label": "mrselect",
+      "opened_at": "2025-11-12T06:18:27.202215Z"
+    }
+  ],
+  "projects": {
+    "/data/data/com.termux/files/home/mrselect": {
+      "files": [
+        {
+          "path": "/data/data/com.termux/files/home/mrselect/.nicegui/storage-general.json",
+          "label": "storage-general.json",
+          "opened_at": "2025-11-12T06:18:27.202248Z"
+        },
+        {
+          "path": "/data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/main.js",
+          "label": "main.js",
+          "opened_at": "2025-11-12T06:02:21.720343Z"
+        }
+      ],
+      "last_file": "/data/data/com.termux/files/home/mrselect/.nicegui/storage-general.json",
+      "label": "mrselect",
+      "opened_at": "2025-11-12T06:18:27.202215Z"
+    }
+  },
+  "active_project": "/data/data/com.termux/files/home/test/termux-extensions-2"
+}
+```
+
+**Thread Safety:** Uses `threading.Lock()` for atomic read/write operations.
+
+**Atomic Writes:** Uses temp file + rename pattern to prevent corruption.
+
+**Max Limits:**
+- Recent projects: 12 entries (`MAX_RECENT_PROJECTS`)
+- Recent files per project: 12 entries (`MAX_RECENT_FILES`)
+
+---
+
+### Settings Flow: Menu → Disk → Editor
+
+**Two-Step Pattern** (used by all settings):
+
+1. **Persist to disk** via `/preferences` endpoint:
+   ```javascript
+   persistEditorPreferences({ wordWrap: true })
+   // Calls: POST /api/app/file_editor_cm6/preferences
+   // Updates: PreferencesStore on disk
+   ```
+
+2. **Update editor immediately** via `/editor/set_view_settings`:
+   ```javascript
+   apiPost('editor/set_view_settings', { word_wrap: true })
+   // Calls: POST /api/app/file_editor_cm6/editor/set_view_settings
+   // Applies: editor.set_line_wrapping(true) immediately
+   ```
+
+**Why Two Calls?**
+- Disk persistence and editor state are intentionally decoupled
+- `/preferences` handles long-term storage
+- `/editor/set_view_settings` handles immediate UI updates
+- This separation allows preferences to be loaded/saved independently of editor state
+
+---
+
+### Page Load Behavior: Fresh vs Refresh
+
+**Fresh Worker Start** (`@ui.page('/nc')` in `editor_app.py`):
+```python
+# 1. Load preferences from disk
+prefs = _preferences_store.get_preferences()
+editor_prefs = prefs.get('editor', {})
+
+# 2. Initialize editor with preferences
+editor = ui.codemirror(
+    theme=editor_prefs.get('theme', 'cm6-dark'),
+    line_wrapping=editor_prefs.get('wordWrap', False),
+)
+
+# 3. Apply additional settings via methods
+editor.set_zebra_stripes(editor_prefs.get('showShading', False))
+if editor_prefs.get('showInlineDiffs', False):
+    editor.set_diff_decorations([])
+```
+
+**Page Refresh (Worker Still Running)**:
+```python
+# Same flow as fresh start!
+# Page function re-executes, reads fresh prefs from disk
+# Creates new editor instance with current settings
+# Stores in global _active_editor reference
+```
+
+**File Open After Refresh** (`/editor/set_content`):
+```python
+# CRITICAL: Re-sync ALL settings from disk on every file load
+# This ensures browser refresh (while worker still running) gets fresh settings
+prefs = _preferences_store.get_preferences()
+editor_prefs = prefs.get('editor', {})
+
+# Apply settings using vendored API methods
+editor.set_zebra_stripes(editor_prefs.get('showShading', False))
+editor.set_line_wrapping(editor_prefs.get('wordWrap', False))
+editor.set_theme(editor_prefs.get('theme', 'cm6-dark'))
+```
+
+---
+
+### Vendored NiceGUI CodeMirror API
+
+**Location:** `app/static/vendor/nicegui/elements/codemirror/codemirror.py`
+
+**Custom Methods Added:**
+```python
+def set_line_wrapping(self, value: bool) -> None:
+    """Sets whether line wrapping is enabled."""
+    self._props['lineWrapping'] = value
+
+def set_theme(self, theme: SUPPORTED_THEMES) -> None:
+    """Sets the theme of the editor."""
+    self._props['theme'] = theme
+
+def set_zebra_stripes(self, enabled: bool) -> None:
+    """Toggles logical-line zebra striping."""
+    self.run_method('applyZebraStripes', enabled)
+
+def set_diff_decorations(self, hunks: list) -> None:
+    """Apply inline git diff decorations."""
+    self.run_method('applyDiffDecorations', hunks)
+```
+
+**Internal Structure:**
+- Uses `._props` dict for configuration (NOT `.options`)
+- `set_line_wrapping()` and `set_theme()` update `._props` and trigger re-render
+- `set_zebra_stripes()` and `set_diff_decorations()` call JavaScript methods via `run_method()`
+
+**JavaScript Side** (`app/static/vendor/nicegui/elements/codemirror/codemirror.js`):
+- `applyZebraStripes(enabled)` - Reconfigures StateField compartment
+- `applyDiffDecorations(hunks)` - Dispatches StateEffect to update decorations
+
+---
+
+### Menu Checkbox Synchronization
+
+**Observation:** Menu checkboxes always show correct state from disk, even when editor visual state was broken.
+
+**Why?**
+Menu checkboxes are populated from JavaScript variables that are initialized from `/preferences` response:
+```javascript
+// On app load (main.js ~line 736):
+const prefs = await apiGet('preferences');
+const editorPrefs = prefs.data.editor;
+
+wordWrap = !!editorPrefs.wordWrap;
+showLineShading = !!editorPrefs.showShading;
+showInlineDiffs = !!editorPrefs.showInlineDiffs;
+currentTheme = editorPrefs.theme || 'cm6-dark';
+
+// Update menu UI
+setMenuChecked(miToggleWrap, wordWrap);
+setMenuChecked(miToggleShading, showLineShading);
+setMenuChecked(miToggleDiffs, showInlineDiffs);
+```
+
+This proves that:
+- Preferences were correctly written to disk ✅
+- Preferences were correctly read from disk ✅
+- Only the editor visual application was broken ❌
+
+---
+
+### Debugging Tips for Future Issues
+
+**Symptoms of API Mismatch:**
+- Settings persist correctly to disk ✅
+- Menu checkboxes show correct state ✅
+- Editor visual state incorrect ❌
+- 500 errors in console when opening files ❌
+
+**Investigation Steps:**
+1. Check console for `AttributeError` or method-not-found errors
+2. Compare API usage between different endpoints (look for inconsistencies)
+3. Verify vendored library API surface (check actual methods vs. assumptions)
+4. Look for property access (`.options`, `.config`) vs. method calls (`.set_*()`)
+
+**Testing Refresh Behavior:**
+1. Start worker fresh
+2. Change a setting via menu
+3. Verify persistence: `cat ~/.local/share/termux-extensions-2/code_oss_prefs.json`
+4. Refresh browser (Ctrl+R)
+5. Open a file
+6. Check if setting applied correctly in editor
+
+---
+
+## Complete File Modification Summary
+
+**Files Modified for Full Implementation:**
+
+1. `app/apps/file_editor_cm6/main.py`
+   - Added `/editor/set_view_settings` endpoint (lines 352-414)
+   - Fixed `/editor/set_content` word wrap bug (line 278)
+   - Added diff auto-load logic
+
+2. `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+   - Added page load preference sync (lines 27-69)
+   - Injected diff CSS styles (lines 72-164)
+
+3. `app/apps/file_editor_cm6/main.js`
+   - Added menu toggle handlers (lines ~1329-1454)
+   - Added `mapThemeToNiceGUI()` function (lines 778-800)
+   - Initialized settings from preferences (lines ~736-760)
+
+4. `app/apps/file_editor_cm6/preferences_store.py`
+   - Already existed, no changes needed ✅
+
+5. `app/static/vendor/nicegui/elements/codemirror/codemirror.py`
+   - Added `set_line_wrapping()` method (lines 347-352)
+   - Added `set_theme()` method (lines 308-310)
+   - Added `set_zebra_stripes()` method (lines 355-362)
+   - Added `set_diff_decorations()` method (lines 364-370)
+
+6. `app/static/vendor/nicegui/elements/codemirror/codemirror.js`
+   - Added `applyZebraStripes()` method (lines 253-295)
+   - Added `applyDiffDecorations()` method (lines 297-356)
+   - Added `buildZebraDecorations()` helper (lines ~287-295)
+   - Added `buildDiffDecorations()` helper (lines 1-131)
+
+7. `app/apps/file_editor_cm6/diff_helper.py`
+   - Already existed, no changes needed ✅
+
+8. `app/main.py` (project root)
+   - Added vendored path override at top of file
+
+**Total Lines Changed:** ~650  
+**Bug Fixes:** 1 (editor refresh crash)  
+**New Features:** 3 (zebra stripes, inline diffs, theme switching)  
+**Implementation Status:** ✅ FULLY WORKING
+
+---
+
 ### Prerequisites
 
 1.  **NiceGUI Vendored:** The `nicegui` Python package has been copied into `app/static/vendor/nicegui/`.

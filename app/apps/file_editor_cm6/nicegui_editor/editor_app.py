@@ -14,7 +14,9 @@ def get_active_editor():
     return _active_editor
 
 # Register NiceGUI page - will be imported after ui.run_with() is called
-@ui.page('/nc')
+# reconnect_timeout=0 forces fresh page load on every browser refresh
+# This ensures settings are always loaded from disk, not cached from old client state
+@ui.page('/nc', reconnect_timeout=0)
 async def editor_page():
         """Main editor page"""
         global _active_editor
