@@ -298,6 +298,9 @@ async def toggle_editor_setting(data: dict = Body(...)):
     elif setting == 'line_shading':
         state['line_shading'] = not state.get('line_shading', False)
         return {"ok": True, "value": state['line_shading']}
+    elif setting == 'show_inline_diffs':
+        state['show_inline_diffs'] = not state.get('show_inline_diffs', False)
+        return {"ok": True, "value": state['show_inline_diffs']}
     
     return {"ok": False, "error": "Unknown setting"}
 
@@ -311,6 +314,8 @@ async def set_view_settings(data: dict = Body(...)):
         state['word_wrap'] = bool(data['word_wrap'])
     if 'line_shading' in data:
         state['line_shading'] = bool(data['line_shading'])
+    if 'show_inline_diffs' in data:
+        state['show_inline_diffs'] = bool(data['show_inline_diffs'])
     if 'theme' in data:
         state['theme'] = str(data['theme'])
     

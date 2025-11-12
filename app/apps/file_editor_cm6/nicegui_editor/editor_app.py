@@ -52,24 +52,99 @@ async def editor_page():
                 shade_pref = 'true' if state.get('line_shading', False) else 'false'
                 print(f"[DEBUG] Initial line_shading from state: {state.get('line_shading', False)}, shade_pref: {shade_pref}", file=sys.stderr)
                 
-                # Add diff styling
+                # Add diff styling (complete CSS from old architecture)
                 ui.add_head_html('''
                 <style>
-                .cm-diff-line-added {
-                    background-color: rgba(0, 255, 0, 0.15);
-                    border-left: 3px solid rgba(0, 255, 0, 0.6);
+                :root {
+                  --diff-marker-width: 1.65rem;
+                  --diff-add-bg: rgba(52, 211, 153, 0.22);
+                  --diff-add-border: rgba(52, 211, 153, 0.75);
+                  --diff-add-marker: rgba(52, 211, 153, 0.9);
+                  --diff-context-border: rgba(148, 163, 184, 0.35);
+                  --diff-context-marker: rgba(148, 163, 184, 0.55);
+                  --diff-del-bg: rgba(248, 113, 113, 0.18);
+                  --diff-del-border: rgba(248, 113, 113, 0.7);
+                  --diff-del-fg: rgba(248, 113, 113, 0.95);
+                  --diff-del-marker: rgba(248, 113, 113, 0.85);
+                  --diff-del-gap: 0;
                 }
-                .cm-diff-removed {
-                    background-color: rgba(255, 0, 0, 0.15);
-                    border-left: 3px solid rgba(255, 0, 0, 0.6);
-                    padding: 2px 0;
-                    margin: 2px 0;
+                
+                .cm-line.cm-diff-line { 
+                  position: relative; 
+                  padding-left: calc(var(--diff-marker-width) + 0.35rem); 
                 }
-                .cm-diff-removed-line {
-                    padding-left: 4px;
-                    white-space: pre;
-                    font-family: monospace;
-                    opacity: 0.7;
+                
+                .cm-line.cm-diff-line::before {
+                  content: attr(data-diff-marker);
+                  position: absolute;
+                  left: 0;
+                  width: var(--diff-marker-width);
+                  text-align: center;
+                  font-weight: 600;
+                  opacity: 0.85;
+                  color: rgba(148, 163, 184, 0.65);
+                  user-select: none;
+                  -webkit-user-select: none;
+                }
+                
+                .cm-line.cm-diff-line-added { 
+                  background: var(--diff-add-bg) !important; 
+                  border-left: 3px solid var(--diff-add-border) !important; 
+                }
+                .cm-line.cm-diff-line-added::before { 
+                  color: var(--diff-add-marker); 
+                }
+                
+                .cm-line.cm-diff-line-context { 
+                  border-left: 3px solid var(--diff-context-border); 
+                }
+                .cm-line.cm-diff-line-context::before { 
+                  color: var(--diff-context-marker); 
+                }
+                
+                .cm-line.cm-diff-line-plain { 
+                  border-left: 3px solid transparent; 
+                }
+                
+                .cm-diff-line-removed {
+                  position: relative;
+                  margin: 0 0 var(--diff-del-gap, 0);
+                  padding: 0 10px 0 calc(var(--diff-marker-width) + 6px);
+                  border-left: 3px solid var(--diff-del-border);
+                  background: var(--diff-del-bg);
+                  color: var(--diff-del-fg);
+                  font: inherit;
+                  white-space: pre;
+                  line-height: inherit;
+                  user-select: none;
+                  -webkit-user-select: none;
+                  contain: layout paint;
+                }
+                
+                .cm-diff-line-removed::before {
+                  content: attr(data-diff-marker);
+                  position: absolute;
+                  left: 0;
+                  width: var(--diff-marker-width);
+                  text-align: center;
+                  font-weight: 600;
+                  color: var(--diff-del-marker);
+                  user-select: none;
+                  -webkit-user-select: none;
+                }
+                
+                .cm-diff-removed-text { 
+                  display: block; 
+                  white-space: pre; 
+                }
+                
+                .cm-diff-line-removed.cm-diff-wrap { 
+                  white-space: pre-wrap; 
+                  word-break: break-word; 
+                }
+                .cm-diff-line-removed.cm-diff-wrap .cm-diff-removed-text { 
+                  white-space: pre-wrap; 
+                  word-break: break-word; 
                 }
                 </style>
                 ''')
@@ -83,6 +158,7 @@ async def editor_page():
                     'theme': str(state.get('theme', 'oneDark')),
                     'language': str(state.get('language', 'python')),
                     'diff_hunks': [],  # Store current diff hunks
+                    'show_inline_diffs': bool(state.get('show_inline_diffs', False)),
                 }
 
                 def _sync_view_settings() -> None:
@@ -121,12 +197,14 @@ async def editor_page():
                         editor_instance.update()
 
                     # Sync diff decorations
-                    # Note: Diffs come from editor_state['diff_hunks'] which should be
-                    # populated by the host page or another mechanism
-                    target_hunks = state.get('diff_hunks', [])
-                    if target_hunks != view_cache['diff_hunks']:
+                    # Only apply diffs if the feature is enabled
+                    show_diffs = bool(state.get('show_inline_diffs', False))
+                    target_hunks = state.get('diff_hunks', []) if show_diffs else []
+                    
+                    if show_diffs != view_cache['show_inline_diffs'] or target_hunks != view_cache['diff_hunks']:
+                        view_cache['show_inline_diffs'] = show_diffs
                         view_cache['diff_hunks'] = target_hunks
-                        print(f"[DEBUG] Applying {len(target_hunks)} diff hunks", file=sys.stderr)
+                        print(f"[DEBUG] Applying {len(target_hunks)} diff hunks (enabled: {show_diffs})", file=sys.stderr)
                         editor_instance.set_diff_decorations(target_hunks)
 
                 ui.timer(0.3, _sync_view_settings)

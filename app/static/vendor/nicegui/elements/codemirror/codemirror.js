@@ -1,5 +1,137 @@
 import * as CM from "nicegui-codemirror";
 
+// Inline diff decorations helper (extracted from diff_decorations.js)
+function buildDiffDecorations(view, hunks, CM, getWordWrap) {
+  const { Decoration, RangeSetBuilder, WidgetType } = CM;
+  
+  if (!hunks || hunks.length === 0) {
+    return Decoration.none;
+  }
+
+  const lineAddedDeco = Decoration.line({
+    class: 'cm-diff-line cm-diff-line-added',
+    attributes: { 'data-diff-marker': '+' },
+  });
+
+  const lineContextDeco = Decoration.line({
+    class: 'cm-diff-line cm-diff-line-context',
+    attributes: { 'data-diff-marker': '│' },
+  });
+
+  const linePlainDeco = Decoration.line({
+    class: 'cm-diff-line cm-diff-line-plain',
+  });
+
+  class RemovedLineWidget extends WidgetType {
+    constructor(text, wordWrap) {
+      super();
+      this.text = text;
+      this.wordWrap = wordWrap;
+    }
+    toDOM() {
+      const lineEl = document.createElement('div');
+      lineEl.className = 'cm-diff-line cm-diff-line-removed';
+      if (this.wordWrap) {
+        lineEl.classList.add('cm-diff-wrap');
+      }
+      lineEl.setAttribute('data-diff-marker', '−');
+
+      const content = document.createElement('span');
+      content.className = 'cm-diff-removed-text';
+      content.textContent = this.text ?? '';
+
+      lineEl.append(content);
+      return lineEl;
+    }
+    ignoreEvent() { return true; }
+  }
+
+  const wordWrap = getWordWrap();
+  const builder = new RangeSetBuilder();
+  const doc = view.state.doc;
+  
+  const lineDecorations = new Map();
+  const deletionWidgets = [];
+  
+  for (const hunk of hunks) {
+    let newLine = Math.max(1, hunk.newStart || 1);
+    for (const line of hunk.lines || []) {
+      const kind = line.type;
+      if (kind === 'add' || kind === 'context') {
+        const deco = kind === 'add' ? lineAddedDeco : lineContextDeco;
+        lineDecorations.set(newLine, deco);
+        newLine += 1;
+      } else if (kind === 'del') {
+        deletionWidgets.push({
+          line: newLine > 0 ? newLine : 1,
+          text: line.text || '',
+        });
+      }
+    }
+  }
+  
+  deletionWidgets.sort((a, b) => a.line - b.line);
+  
+  let widgetIndex = 0;
+  for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
+    const lineInfo = safeLine(doc, lineNum);
+    if (!lineInfo) continue;
+    
+    while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line < lineNum) {
+      const widget = deletionWidgets[widgetIndex];
+      const anchorLine = safeLine(doc, widget.line);
+      const pos = anchorLine ? anchorLine.from : doc.length;
+      builder.add(pos, pos, Decoration.widget({
+        side: -1,
+        block: true,
+        widget: new RemovedLineWidget(widget.text, wordWrap),
+      }));
+      widgetIndex++;
+    }
+    
+    while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line === lineNum) {
+      const widget = deletionWidgets[widgetIndex];
+      builder.add(lineInfo.from, lineInfo.from, Decoration.widget({
+        side: -1,
+        block: true,
+        widget: new RemovedLineWidget(widget.text, wordWrap),
+      }));
+      widgetIndex++;
+    }
+    
+    builder.add(lineInfo.from, lineInfo.from, linePlainDeco);
+    
+    if (lineDecorations.has(lineNum)) {
+      builder.add(lineInfo.from, lineInfo.from, lineDecorations.get(lineNum));
+    }
+  }
+  
+  while (widgetIndex < deletionWidgets.length) {
+    const widget = deletionWidgets[widgetIndex];
+    const anchorLine = safeLine(doc, widget.line);
+    const pos = anchorLine ? anchorLine.from : doc.length;
+    builder.add(pos, pos, Decoration.widget({
+      side: -1,
+      block: true,
+      widget: new RemovedLineWidget(widget.text, wordWrap),
+    }));
+    widgetIndex++;
+  }
+
+  return builder.finish();
+}
+
+function safeLine(doc, lineNumber) {
+  if (!doc) return null;
+  const total = doc.lines;
+  if (total <= 0) return null;
+  if (lineNumber < 1) lineNumber = 1;
+  if (lineNumber > total) {
+    return doc.line(total);
+  }
+  return doc.line(lineNumber);
+}
+
 export default {
   template: `
     <div></div>
@@ -165,102 +297,55 @@ export default {
     async applyDiffDecorations(hunks) {
       // Initialize diff compartment on first call
       if (!this.diffCompartment) {
-        const { EditorView, Decoration, ViewPlugin, WidgetType } = CM;
-        const { StateEffect, Compartment, RangeSetBuilder } = CM;
+        const { StateEffect, StateField, Compartment } = CM;
         
         this.diffCompartment = new Compartment();
+        this.setDiffEffect = StateEffect.define();
+        this.clearDiffEffect = StateEffect.define();
         
-        // Widget for displaying deleted lines
-        class RemovedLineWidget extends WidgetType {
-          constructor(lines) {
-            super();
-            this.lines = lines;
-          }
-          toDOM() {
-            const wrap = document.createElement('div');
-            wrap.className = 'cm-diff-removed';
-            for (const line of this.lines) {
-              const lineEl = document.createElement('div');
-              lineEl.className = 'cm-diff-removed-line';
-              lineEl.textContent = line.text || '';
-              wrap.appendChild(lineEl);
+        // Capture effects for use in the field
+        const setDiffEffect = this.setDiffEffect;
+        const clearDiffEffect = this.clearDiffEffect;
+        
+        // Create a StateField to hold diff decorations
+        const diffField = StateField.define({
+          create() {
+            return CM.Decoration.none;
+          },
+          update(value, tr) {
+            // Map decorations through document changes
+            if (tr.docChanged && value !== CM.Decoration.none) {
+              value = value.map(tr.changes);
             }
-            return wrap;
-          }
-        }
+            // Apply effects
+            for (const effect of tr.effects) {
+              if (effect.is(setDiffEffect)) {
+                value = effect.value;
+              } else if (effect.is(clearDiffEffect)) {
+                value = CM.Decoration.none;
+              }
+            }
+            return value;
+          },
+          provide: field => CM.EditorView.decorations.from(field)
+        });
         
-        // Store for later use
-        this.RemovedLineWidget = RemovedLineWidget;
-        this.diffDecorationTypes = {
-          addedLine: Decoration.line({ attributes: { class: 'cm-diff-line-added' } }),
-        };
+        // Store the field for effects
+        this.diffField = diffField;
         
-        // Install empty compartment
+        // Install the compartment with the field
         this.editor.dispatch({
-          effects: StateEffect.appendConfig.of(this.diffCompartment.of([]))
+          effects: StateEffect.appendConfig.of(this.diffCompartment.of([diffField]))
         });
       }
       
-      // Build decorations from hunks
-      const decorations = [];
-      if (hunks && hunks.length > 0) {
-        for (const hunk of hunks) {
-          const newStart = hunk.newStart || 0;
-          
-          // Find added and deleted lines
-          const addedLines = [];
-          const deletedLines = [];
-          if (hunk.lines) {
-            for (const line of hunk.lines) {
-              if (line.type === 'add') addedLines.push(line);
-              else if (line.type === 'del') deletedLines.push(line);
-            }
-          }
-          
-          // Add line decorations for additions
-          for (let i = 0; i < addedLines.length; i++) {
-            const lineNum = newStart + i;
-            if (lineNum > 0 && lineNum <= this.editor.state.doc.lines) {
-              const line = this.editor.state.doc.line(lineNum);
-              decorations.push(this.diffDecorationTypes.addedLine.range(line.from));
-            }
-          }
-          
-          // Add widget for deletions (before the first added line or at newStart)
-          if (deletedLines.length > 0) {
-            const insertAt = newStart > 0 && newStart <= this.editor.state.doc.lines
-              ? this.editor.state.doc.line(newStart).from
-              : 0;
-            const widget = Decoration.widget({
-              widget: new this.RemovedLineWidget(deletedLines),
-              side: -1,
-              block: true
-            });
-            decorations.push(widget.range(insertAt));
-          }
-        }
-      }
+      // Build decorations using the proven helper function
+      const getWordWrap = () => this.lineWrapping || false;
+      const decoSet = buildDiffDecorations(this.editor, hunks, CM, getWordWrap);
       
-      // Build the decoration set
-      const { RangeSetBuilder } = CM;
-      decorations.sort((a, b) => a.from - b.from);
-      const builder = new RangeSetBuilder();
-      for (const deco of decorations) {
-        builder.add(deco.from, deco.from, deco.value);
-      }
-      const decoSet = builder.finish();
-      
-      // Create a ViewPlugin that provides these decorations
-      const { ViewPlugin } = CM;
-      const diffPlugin = ViewPlugin.fromClass(class {
-        constructor() {
-          this.decorations = decoSet;
-        }
-      }, { decorations: v => v.decorations });
-      
-      // Reconfigure compartment with the plugin
+      // Dispatch the decoration update via effect
       this.editor.dispatch({
-        effects: this.diffCompartment.reconfigure(decoSet.size > 0 ? [diffPlugin] : [])
+        effects: this.setDiffEffect.of(decoSet)
       });
     },
     setupExtensions() {

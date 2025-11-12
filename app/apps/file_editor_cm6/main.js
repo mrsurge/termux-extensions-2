@@ -1465,14 +1465,12 @@ bindMenuToggle(miToggleAutosave, () => {
   }
   persistEditorPreferences({ autoSave: autoSaveEnabled });
 });
-bindMenuToggle(miToggleDiffs, () => {
+bindMenuToggle(miToggleDiffs, async () => {
   showInlineDiffs = !showInlineDiffs;
-  applyMenuState();
-  diffController.setEnabled(showInlineDiffs);
-  if (showInlineDiffs) {
-    diffController.refresh(true);
-  }
+  setMenuChecked(miToggleDiffs, showInlineDiffs);
   persistEditorPreferences({ showInlineDiffs });
+  // Sync to NiceGUI state - will trigger diff decorations in iframe
+  apiPost('editor/set_view_settings', { show_inline_diffs: showInlineDiffs }).catch(e => console.warn('[Menu] Failed to sync inline diffs:', e));
 });
 bindMenuToggle(miTrackEdits, () => {
   trackAgentEdits = !trackAgentEdits;
