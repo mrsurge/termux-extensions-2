@@ -25,6 +25,7 @@ from flask_socketio import SocketIO
 from flask_socketio import Namespace, SocketIO, emit
 
 from .control import FrameworkError, spawn_agent
+from .process_manager import ProcessRegistry
 
 LOGGER = logging.getLogger("te.ipc")
 FRAMEWORK_URL = os.environ.get("TE_FRAMEWORK_URL", "http://127.0.0.1:8088")
@@ -119,6 +120,9 @@ def _load_ipc_modules(app: Flask, socketio: SocketIO) -> None:
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    
+    # Create global process registry
+    process_registry = ProcessRegistry()
 
     @app.after_request
     def _apply_cors(response):  # type: ignore[override]
@@ -127,6 +131,92 @@ def create_app() -> Flask:
     @app.route("/health", methods=["GET"])
     def health() -> Dict[str, str]:
         return {"status": "ok"}
+    
+    @app.route("/processes/register", methods=["POST", "OPTIONS"])
+    def register_process() -> Any:
+        """Register a process with IPC."""
+        if request.method == "OPTIONS":
+            return ("", 204)
+        
+        payload = request.get_json(silent=True) or {}
+        pid = payload.get("pid")
+        type = payload.get("type")
+        
+        if not pid or not type:
+            return jsonify({"ok": False, "error": "pid and type required"}), 400
+        
+        try:
+            record = process_registry.register(
+                pid=int(pid),
+                type=str(type),
+                label=payload.get("label"),
+                parent_pid=payload.get("parent_pid"),
+                metadata=payload.get("metadata", {}),
+            )
+            LOGGER.info("Registered process: pid=%d type=%s label=%s", pid, type, record.label)
+            return jsonify({"ok": True, "data": record.to_dict()})
+        except Exception as exc:
+            LOGGER.error("Failed to register process: %s", exc)
+            return jsonify({"ok": False, "error": str(exc)}), 500
+    
+    @app.route("/processes/unregister", methods=["POST", "OPTIONS"])
+    def unregister_process() -> Any:
+        """Unregister a process."""
+        if request.method == "OPTIONS":
+            return ("", 204)
+        
+        payload = request.get_json(silent=True) or {}
+        pid = payload.get("pid")
+        
+        if not pid:
+            return jsonify({"ok": False, "error": "pid required"}), 400
+        
+        removed = process_registry.unregister(int(pid))
+        if removed:
+            LOGGER.info("Unregistered process: pid=%d", pid)
+        return jsonify({"ok": True, "removed": removed})
+    
+    @app.route("/processes/list", methods=["GET"])
+    def list_processes() -> Any:
+        """List all tracked processes."""
+        processes = process_registry.list_all()
+        return jsonify({
+            "ok": True,
+            "data": {
+                "processes": [p.to_dict() for p in processes],
+                "count": len(processes),
+            }
+        })
+    
+    @app.route("/processes/ping", methods=["POST", "OPTIONS"])
+    def ping_process() -> Any:
+        """Update process health ping."""
+        if request.method == "OPTIONS":
+            return ("", 204)
+        
+        payload = request.get_json(silent=True) or {}
+        pid = payload.get("pid")
+        
+        if not pid:
+            return jsonify({"ok": False, "error": "pid required"}), 400
+        
+        success = process_registry.ping(int(pid))
+        return jsonify({"ok": True, "pinged": success})
+    
+    @app.route("/actions/shutdown-all", methods=["POST", "OPTIONS"])
+    def shutdown_all_processes() -> Any:
+        """Shutdown all registered processes (SIGTERM → wait → SIGKILL)."""
+        if request.method == "OPTIONS":
+            return ("", 204)
+        
+        payload = request.get_json(silent=True) or {}
+        timeout = payload.get("timeout", 5.0)
+        
+        LOGGER.info("=== IPC SHUTDOWN INITIATED ===")
+        stats = process_registry.shutdown_all(timeout=timeout, logger=LOGGER)
+        LOGGER.info(f"=== IPC SHUTDOWN COMPLETE: {stats} ===")
+        
+        return jsonify({"ok": True, "data": stats})
 
     @app.route("/messages", methods=["POST", "OPTIONS"])
     def dispatch_message() -> Any:
@@ -139,25 +229,19 @@ def create_app() -> Flask:
 
     @app.route("/actions/shutdown", methods=["POST", "OPTIONS"])
     def runtime_shutdown() -> Any:
+        """Shutdown the framework (now orchestrated by IPC)."""
         if request.method == "OPTIONS":
             return ("", 204)
-        headers = {}
-        if FRAMEWORK_TOKEN:
-            headers["X-Framework-Key"] = FRAMEWORK_TOKEN
-        target = f"{FRAMEWORK_URL.rstrip('/')}/api/framework/runtime/shutdown"
-        try:
-            resp = requests.post(target, headers=headers, timeout=5.0)
-            data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            if resp.status_code >= 400 or not data.get("ok", True):
-                LOGGER.warning("shutdown request failed: %s", data)
-                return jsonify({"ok": False, "error": data.get("error") or resp.text}), resp.status_code
-            LOGGER.info("forwarded shutdown request to framework")
-            event = {"event": "shutdown", "status": "forwarded"}
-            _broadcast(event)
-            return jsonify({"ok": True, "data": data.get("data")})
-        except requests.RequestException as exc:
-            LOGGER.error("shutdown request error: %s", exc)
-            return jsonify({"ok": False, "error": str(exc)}), 502
+        
+        payload = request.get_json(silent=True) or {}
+        timeout = payload.get("timeout", 5.0)
+        
+        # New behavior: IPC shuts down all registered processes
+        LOGGER.info("Shutdown request received - initiating IPC-orchestrated shutdown")
+        stats = process_registry.shutdown_all(timeout=timeout, logger=LOGGER)
+        
+        _broadcast({"event": "shutdown", "status": "complete", "stats": stats})
+        return jsonify({"ok": True, "data": stats})
 
     @app.route("/actions/agent-spawn", methods=["POST", "OPTIONS"])
     def spawn_agent_route() -> Any:

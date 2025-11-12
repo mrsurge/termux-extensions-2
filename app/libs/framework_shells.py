@@ -431,6 +431,22 @@ class FrameworkShellManager:
             record.exit_code = None
             record.updated_at = time.time()
             await self._save_record(record)
+            
+            # Register with IPC
+            from app.ipc.client import register_process
+            shell_type = "worker" if (record.label or "").startswith("app-worker:") else "shell"
+            register_process(
+                pid=record.pid,
+                type=shell_type,
+                label=record.label,
+                parent_pid=os.getpid(),
+                metadata={
+                    "shell_id": record.id,
+                    "command": " ".join(record.command),
+                    "cwd": record.cwd,
+                }
+            )
+            
             return record
         finally:
             await asyncio.to_thread(stdout_fh.close)
@@ -467,6 +483,22 @@ class FrameworkShellManager:
         record.exit_code = None
         record.updated_at = time.time()
         await self._save_record(record)
+        
+        # Register with IPC
+        from app.ipc.client import register_process
+        shell_type = "worker" if (record.label or "").startswith("app-worker:") else "shell"
+        register_process(
+            pid=record.pid,
+            type=shell_type,
+            label=record.label,
+            parent_pid=os.getpid(),
+            metadata={
+                "shell_id": record.id,
+                "command": " ".join(record.command),
+                "cwd": record.cwd,
+                "uses_pty": True,
+            }
+        )
         
         state = PTYState(
             master_fd=master_fd,
@@ -772,6 +804,10 @@ class FrameworkShellManager:
                 await self._stop_pty(shell_id)
                 return record
             
+            # Unregister from IPC before killing
+            from app.ipc.client import unregister_process
+            unregister_process(record.pid)
+            
             sig = signal.SIGKILL if force else signal.SIGTERM
             
             try:
@@ -820,6 +856,12 @@ class FrameworkShellManager:
             record = await self._load_record(shell_id)
             if not record:
                 raise KeyError("Shell not found")
+            
+            # Unregister from IPC (defensive - should already be unregistered by terminate_shell)
+            if record.pid:
+                from app.ipc.client import unregister_process
+                unregister_process(record.pid)
+            
             if record.pid and await self._is_pid_alive(record.pid):
                 await self.terminate_shell(shell_id, force=force)
             await self._stop_pty(shell_id)

@@ -217,12 +217,40 @@ def run_shortcut(sid: str, data: dict = Body(...)):
     return {"ok": True}
 
 @sessions_bp.delete('/sessions/{sid}')
-def kill_session(sid: str):
+async def kill_session(sid: str):
+    """Kill a session by PID.
+    
+    First attempts to find and terminate via framework shell manager
+    (which handles IPC unregistration). Falls back to direct kill if not found.
+    """
     try:
-        os.kill(int(sid), 9)
-        return {"ok": True}
+        pid = int(sid)
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail='Invalid session ID')
+    
+    # Try to find this PID in framework shells
+    try:
+        from app.libs.framework_shells import get_manager
+        manager = await get_manager()
+        shells = await manager.list_shells()
+        
+        # Find shell by PID
+        for shell in shells:
+            if shell.pid == pid:
+                # Use framework shell termination (handles IPC unregistration)
+                await manager.terminate_shell(shell.id, force=True)
+                return {"ok": True, "data": {"message": "Session terminated via framework shell manager"}}
+    except Exception:
+        pass  # Fall through to direct kill
+    
+    # Not a framework shell, kill directly
+    try:
+        # Unregister from IPC first (in case it was registered outside framework shells)
+        from app.ipc.client import unregister_process
+        unregister_process(pid)
+        
+        os.kill(pid, 9)
+        return {"ok": True}
     except ProcessLookupError:
         return {"ok": True, "data": {"message": 'Session already terminated.'}}
     except Exception as e:

@@ -120,11 +120,25 @@ def run(argv: List[str]) -> int:
             return
         shutting_down = True
         print(f"[supervisor] Received signal {signum}; shutting down run {run_id}")
-        _kill_process_group(proc.pid, signal.SIGTERM)
-        if signum == signal.SIGINT:
-            _schedule_force_kill()
-        else:
-            _stop_ipc_server(signal.SIGTERM)
+        
+        # New behavior: Ask IPC to shutdown all processes
+        print("[supervisor] Requesting IPC to shutdown all processes")
+        import requests
+        ipc_url = f"http://127.0.0.1:9123/actions/shutdown"
+        try:
+            resp = requests.post(ipc_url, json={"timeout": 8.0}, timeout=15.0)
+            if resp.status_code == 200:
+                print("[supervisor] IPC shutdown completed successfully")
+            else:
+                print(f"[supervisor] IPC shutdown returned {resp.status_code}")
+        except Exception as exc:
+            print(f"[supervisor] IPC shutdown request failed: {exc}")
+            # Fallback: kill process group directly
+            print("[supervisor] Falling back to direct process group kill")
+            _kill_process_group(proc.pid, signal.SIGTERM)
+            time.sleep(2.0)
+            if proc.poll() is None:
+                _kill_process_group(proc.pid, signal.SIGKILL)
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)

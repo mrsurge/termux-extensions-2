@@ -41,6 +41,25 @@ from contextlib import asynccontextmanager, suppress
 @asynccontextmanager
 async def lifespan(app_instance):
     """Startup/shutdown logic for FastAPI app."""
+    
+    # Register framework with IPC
+    from app.ipc.client import register_process
+    framework_pid = os.getpid()
+    registered = register_process(
+        pid=framework_pid,
+        type="framework",
+        label="main-framework",
+        parent_pid=os.getppid(),
+        metadata={
+            "run_id": os.environ.get("TE_RUN_ID"),
+            "port": 8088,
+        }
+    )
+    if registered:
+        print(f"[framework] Registered with IPC (PID {framework_pid})")
+    else:
+        print(f"[framework] Warning: Failed to register with IPC", file=sys.stderr)
+    
     # Startup
     print("--- Loading Settings ---")
     _apply_settings_to_config()
@@ -66,29 +85,14 @@ async def lifespan(app_instance):
 
     yield
 
-    print("--- Shutting down: Terminating running apps ---")
-    manager = None
-    try:
-        manager = await get_manager()
-        from app.libs import app_lifecycle
-        await app_lifecycle.shutdown_lifecycle(manager)
-    except Exception as e:
-        print(f"Warning: Failed to shutdown lifecycle apps cleanly: {e}")
-
-    # Shutdown - forcibly kill all framework shells
-    print("--- Shutting down: Cleaning up framework shells ---")
-    try:
-        manager = manager or await get_manager()
-        shells = await manager.list_shells()
-        for shell in shells:
-            try:
-                print(f"Removing shell {shell.id} (PID {shell.pid})...")
-                await manager.remove_shell(shell.id, force=True)
-            except Exception as e:
-                print(f"Warning: Failed to remove shell {shell.id}: {e}")
-        print(f"Removed {len(shells)} framework shells.")
-    except Exception as e:
-        print(f"Warning: Error during shell cleanup: {e}")
+    print("--- Shutting down: IPC will handle process termination ---")
+    # Note: IPC server will kill us via SIGTERM, no need for manual cleanup
+    # Workers and shells are already registered with IPC and will be killed
+    
+    # Unregister from IPC (will happen before we're killed)
+    from app.ipc.client import unregister_process
+    unregister_process(framework_pid)
+    print(f"[framework] Unregistered from IPC")
 
 app = FastAPI(lifespan=lifespan)
 
