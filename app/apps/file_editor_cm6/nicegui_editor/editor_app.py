@@ -155,22 +155,21 @@ async def editor_page():
                 view_cache = {
                     'word_wrap': bool(state.get('word_wrap', False)),
                     'line_shading': bool(state.get('line_shading', False)),
-                    'theme': str(state.get('theme', 'oneDark')),
-                    'language': str(state.get('language', 'python')),
                     'diff_hunks': [],  # Store current diff hunks
                     'show_inline_diffs': bool(state.get('show_inline_diffs', False)),
                 }
 
                 def _sync_view_settings() -> None:
+                    """Timer-based sync - ONLY for toggleable settings from menu.
+                    
+                    Content, theme, and language are set directly when files open,
+                    NOT polled here (prevents flash/thrash on file load).
+                    """
                     editor_instance = get_active_editor()
                     if not editor_instance or not getattr(editor_instance, 'client', None):
                         return
-                    
-                    # Debug: check what we're syncing
-                    current_shade = bool(state.get('line_shading', False))
-                    if current_shade != view_cache['line_shading']:
-                        print(f"[DEBUG TIMER] line_shading changed: {view_cache['line_shading']} → {current_shade}", file=sys.stderr)
 
+                    # ONLY sync toggleable settings (menu checkboxes)
                     target_wrap = bool(state.get('word_wrap', False))
                     if target_wrap != view_cache['word_wrap']:
                         view_cache['word_wrap'] = target_wrap
@@ -180,31 +179,15 @@ async def editor_page():
                     target_shade = bool(state.get('line_shading', False))
                     if target_shade != view_cache['line_shading']:
                         view_cache['line_shading'] = target_shade
-                        print(f"[DEBUG] Calling set_zebra_stripes: {target_shade}", file=sys.stderr)
                         editor_instance.set_zebra_stripes(target_shade)
 
-
-                    target_theme = str(state.get('theme', 'oneDark'))
-                    if target_theme != view_cache['theme']:
-                        view_cache['theme'] = target_theme
-                        editor_instance.set_theme(target_theme)
-                        editor_instance.update()
-
-                    target_language = str(state.get('language', 'python'))
-                    if target_language != view_cache['language']:
-                        view_cache['language'] = target_language
-                        editor_instance.set_language(target_language)
-                        editor_instance.update()
-
                     # Sync diff decorations
-                    # Only apply diffs if the feature is enabled
                     show_diffs = bool(state.get('show_inline_diffs', False))
                     target_hunks = state.get('diff_hunks', []) if show_diffs else []
                     
                     if show_diffs != view_cache['show_inline_diffs'] or target_hunks != view_cache['diff_hunks']:
                         view_cache['show_inline_diffs'] = show_diffs
                         view_cache['diff_hunks'] = target_hunks
-                        print(f"[DEBUG] Applying {len(target_hunks)} diff hunks (enabled: {show_diffs})", file=sys.stderr)
                         editor_instance.set_diff_decorations(target_hunks)
 
                 ui.timer(0.3, _sync_view_settings)

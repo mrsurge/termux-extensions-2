@@ -273,7 +273,49 @@ async def set_editor_content(data: dict = Body(...)):
     state['content'] = data.get('content', '')
     state['path'] = data.get('path', '')
     state['language'] = data.get('language', 'python')
+    
+    # Auto-fetch diffs if enabled
+    if state.get('show_inline_diffs', False) and state.get('path'):
+        try:
+            project_path = _history_store.get_active_project() or str(get_project_root())
+            if project_path:
+                project_root = Path(project_path).expanduser()
+                rel = _normalize_rel_path(project_root, state['path'])
+                diff_data = collect_diff(project_root, rel)
+                state['diff_hunks'] = diff_data.get('hunks', [])
+                print(f"[DIFF] Auto-loaded {len(state['diff_hunks'])} hunks for {state['path']}", file=sys.stderr)
+        except Exception as e:
+            print(f"[DIFF] Failed to auto-load diffs: {e}", file=sys.stderr)
+            state['diff_hunks'] = []
+    else:
+        state['diff_hunks'] = []
+    
     return {"ok": True}
+
+@file_editor_cm6_bp.post('/editor/refresh_diffs')
+async def refresh_diffs():
+    """Manually refresh diffs for the current file"""
+    state = get_editor_state()
+    path = state.get('path')
+    
+    if not path:
+        return {"ok": False, "error": "No file loaded"}
+    
+    try:
+        project_path = _history_store.get_active_project() or str(get_project_root())
+        if not project_path:
+            return {"ok": False, "error": "No project selected"}
+        
+        project_root = Path(project_path).expanduser()
+        rel = _normalize_rel_path(project_root, path)
+        diff_data = collect_diff(project_root, rel)
+        state['diff_hunks'] = diff_data.get('hunks', [])
+        
+        print(f"[DIFF] Manually refreshed {len(state['diff_hunks'])} hunks for {path}", file=sys.stderr)
+        return {"ok": True, "hunks_count": len(state['diff_hunks'])}
+    except Exception as e:
+        print(f"[DIFF] Refresh failed: {e}", file=sys.stderr)
+        return {"ok": False, "error": str(e)}
 
 @file_editor_cm6_bp.get('/editor/get_content')
 def get_editor_content():

@@ -50,13 +50,17 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const builder = new RangeSetBuilder();
   const doc = view.state.doc;
   
+  console.log('[buildDiffDecorations] Doc has', doc.lines, 'lines');
+  
   const lineDecorations = new Map();
   const deletionWidgets = [];
   
   for (const hunk of hunks) {
     let newLine = Math.max(1, hunk.newStart || 1);
+    console.log('[buildDiffDecorations] Processing hunk, newStart:', hunk.newStart, 'lines:', hunk.lines?.length);
     for (const line of hunk.lines || []) {
       const kind = line.type;
+      console.log('[buildDiffDecorations]   Line type:', kind, 'newLine:', newLine, 'text:', line.text?.substring(0, 30));
       if (kind === 'add' || kind === 'context') {
         const deco = kind === 'add' ? lineAddedDeco : lineContextDeco;
         lineDecorations.set(newLine, deco);
@@ -69,6 +73,9 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       }
     }
   }
+  
+  console.log('[buildDiffDecorations] Line decorations:', Array.from(lineDecorations.keys()));
+  console.log('[buildDiffDecorations] Deletion widgets:', deletionWidgets.map(w => `line ${w.line}: ${w.text.substring(0, 20)}`));
   
   deletionWidgets.sort((a, b) => a.line - b.line);
   
@@ -295,6 +302,9 @@ export default {
       });
     },
     async applyDiffDecorations(hunks) {
+      console.log('[applyDiffDecorations] Called with hunks:', JSON.stringify(hunks, null, 2));
+      console.log('[applyDiffDecorations] Doc has', this.editor?.state?.doc?.lines, 'lines');
+      
       // Initialize diff compartment on first call
       if (!this.diffCompartment) {
         const { StateEffect, StateField, Compartment } = CM;
@@ -341,7 +351,9 @@ export default {
       
       // Build decorations using the proven helper function
       const getWordWrap = () => this.lineWrapping || false;
+      console.log('[applyDiffDecorations] Building decorations, wordWrap:', getWordWrap());
       const decoSet = buildDiffDecorations(this.editor, hunks, CM, getWordWrap);
+      console.log('[applyDiffDecorations] Built', decoSet.size, 'decorations');
       
       // Dispatch the decoration update via effect
       this.editor.dispatch({
