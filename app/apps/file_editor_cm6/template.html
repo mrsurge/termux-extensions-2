@@ -33,6 +33,13 @@
     height: var(--framework-toolbar-height, 50px);
     flex-shrink: 0;
   }
+  
+  /* In grid layouts, spacer must be first */
+  .layout-desktop #fe-framework-spacer,
+  .layout-mobile #fe-framework-spacer {
+    grid-row: 1;
+    grid-column: 1 / -1;
+  }
 
   body.keyboard-locked {
     overflow: hidden;
@@ -55,21 +62,21 @@
   .fe-root.layout-desktop {
     display: grid;
     grid-template-columns: var(--explorer-width, 430px) 1fr var(--agent-width, 400px);
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: auto auto auto 1fr auto;
     height: 100%;
     overflow: hidden;
   }
 
-  /* Toolbar spans full width */
+  /* Topbar spans full width */
   .layout-desktop .fe-toolbar {
     grid-column: 1 / -1;
-    grid-row: 1;
+    grid-row: 2;
   }
 
   /* Menubar spans full width */
   .layout-desktop .fe-menubar {
     grid-column: 1 / -1;
-    grid-row: 2;
+    grid-row: 3;
   }
 
   /* Explorer becomes left sidebar - ALWAYS VISIBLE in desktop */
@@ -81,7 +88,7 @@
     bottom: auto;
     width: 100%;
     grid-column: 1;
-    grid-row: 3 / 5;
+    grid-row: 4 / 6;
     border-right: 1px solid var(--border);
     overflow-y: auto;
   }
@@ -100,7 +107,7 @@
   /* Editor in middle column */
   .layout-desktop .fe-editor-container {
     grid-column: 2;
-    grid-row: 3;
+    grid-row: 4;
     position: relative;
     overflow: hidden;
   }
@@ -114,7 +121,7 @@
     bottom: auto;
     width: 100%;
     grid-column: 3;
-    grid-row: 3 / 5;
+    grid-row: 4 / 6;
     border-left: 1px solid var(--border);
     transition: opacity 0.2s ease, visibility 0.2s ease;
     overflow-y: auto;
@@ -141,7 +148,7 @@
     left: auto;
     right: auto;
     grid-column: 2;
-    grid-row: 4;
+    grid-row: 5;
     height: var(--terminal-height, 340px);
     border-top: 2px solid var(--border);
     transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
@@ -158,7 +165,7 @@
 
   /* Adjust grid when terminal is closed in desktop */
   .layout-desktop:has(.terminal-drawer:not(.open)) {
-    grid-template-rows: auto auto 1fr 0px;
+    grid-template-rows: auto auto auto 1fr 0px;
   }
 
   /* Fix z-index for dropdowns in desktop mode */
@@ -173,24 +180,24 @@
   .fe-root.layout-mobile {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: auto auto auto 1fr auto;
     height: 100%;
     overflow: hidden;
   }
 
   .layout-mobile .fe-toolbar {
     grid-column: 1;
-    grid-row: 1;
+    grid-row: 2;
   }
 
   .layout-mobile .fe-menubar {
     grid-column: 1;
-    grid-row: 2;
+    grid-row: 3;
   }
 
   .layout-mobile .fe-editor-container {
     grid-column: 1;
-    grid-row: 3;
+    grid-row: 4;
     position: relative;
     overflow: hidden;
   }
@@ -203,7 +210,7 @@
     left: auto;
     right: auto;
     grid-column: 1;
-    grid-row: 4;
+    grid-row: 5;
     height: var(--terminal-height, 340px);
     border-top: 2px solid var(--border);
     transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
@@ -221,7 +228,7 @@
 
   /* Adjust grid when terminal is closed */
   .layout-mobile:has(.terminal-drawer:not(.open)) {
-    grid-template-rows: auto auto 1fr 0px;
+    grid-template-rows: auto auto auto 1fr 0px;
   }
 
   /* ========================================
