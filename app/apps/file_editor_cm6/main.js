@@ -568,6 +568,15 @@ function formatDisplayPath(path) {
   return abs;
 }
 
+function formatDisplayDirectory(path) {
+  const abs = toAbsolute(path || HOME_DIR);
+  const dir = parentDir(abs);
+  if (!dir || dir === abs) {
+    return formatDisplayPath(abs);
+  }
+  return formatDisplayPath(dir);
+}
+
 // ---------- Editor state ----------
 let view = null;
 let currentPath = '';
@@ -1019,7 +1028,7 @@ function updatePathDisplay() {
   const abs = toAbsolute(currentPath, null, HOME_DIR);
   fileNameEl.textContent = basename(abs);
   fileNameEl.title = basename(abs);
-  filePathEl.textContent = formatDisplayPath(abs);
+  filePathEl.textContent = formatDisplayDirectory(abs);
   filePathEl.title = abs;
 }
 

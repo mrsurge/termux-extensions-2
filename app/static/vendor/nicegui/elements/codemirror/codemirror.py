@@ -360,6 +360,10 @@ class CodeMirror(ValueElement, DisableableElement,
         # Use run_method to call the JS function we'll add to codemirror.js
         self.run_method('applyZebraStripes', enabled)
 
+    def set_font_scale(self, scale: float) -> None:
+        """Adjust base font scaling (1.0 = 100%)."""
+        self.run_method('setFontScale', scale)
+
     def set_diff_decorations(self, hunks: list) -> None:
         """Apply inline git diff decorations to the editor.
         

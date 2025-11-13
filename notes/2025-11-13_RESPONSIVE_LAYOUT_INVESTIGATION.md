@@ -1237,3 +1237,31 @@ With layout now stable and working:
 **Time to Resolution:** ~4 hours of investigation and attempts  
 **Final Status:** Layout is stable, no URL bar jank, ready for keyboard handling implementation
 
+
+---
+
+## Update: 2025-11-13 19:04 UTC
+
+**Context:** Editor refactor and reconnect_timeout investigation
+
+**Issue Discovered:**
+After the editor refactor (making editor self-sufficient with auto-load), the `reconnect_timeout=0` setting was causing preference thrash and discarding unsaved edits on WebSocket disconnect.
+
+**Root Cause:**
+- `reconnect_timeout=0` was forcing fresh page loads on every disconnect
+- Auto-load logic would re-run, loading saved content from disk
+- Unsaved edits were being overwritten
+- This was the "silver bullet" for settings refresh in the old architecture, but became redundant after refactor
+
+**Resolution:**
+- Changed `reconnect_timeout=0` to `reconnect_timeout=3.0` in `editor_app.py`
+- Now unsaved edits survive temporary disconnects (within 3 seconds)
+- Settings still work correctly (applied on initial page load)
+- Auto-load only runs on true page refresh, not on reconnect
+
+**Files Modified:**
+- `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` (line 77)
+
+**Related Documentation:**
+- See `2025-11-13_EDITOR_REFACTOR_PLAN.md` for full refactor details
+- See `2025-11-13_RECONNECT_TIMEOUT_EXPLAINED.md` for detailed explanation of reconnect behavior

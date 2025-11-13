@@ -251,6 +251,34 @@ export default {
         effects: this.lineWrappingConfig.reconfigure(wrap ? [CM.EditorView.lineWrapping] : []),
       });
     },
+    setFontScale(scale) {
+      if (!this.editor) return;
+      const { EditorView, StateEffect, Compartment } = CM;
+      const parsed = Number(scale);
+      const clamped = Math.min(2, Math.max(0.5, isNaN(parsed) ? 1 : parsed));
+
+      if (!this.fontSizeCompartment) {
+        this.fontSizeCompartment = new Compartment();
+        this.editor.dispatch({
+          effects: StateEffect.appendConfig.of(this.fontSizeCompartment.of([])),
+        });
+      }
+
+      const fontTheme = EditorView.theme({
+        ".cm-editor": {
+          fontSize: `${clamped * 100}%`,
+          lineHeight: "1.45",
+        },
+        ".cm-editor .cm-content, .cm-editor .cm-line": {
+          fontSize: "inherit",
+          lineHeight: "inherit",
+        },
+      });
+
+      this.editor.dispatch({
+        effects: this.fontSizeCompartment.reconfigure([fontTheme]),
+      });
+    },
     async applyZebraStripes(enabled) {
       // Initialize zebra compartment on first call
       if (!this.zebraCompartment) {

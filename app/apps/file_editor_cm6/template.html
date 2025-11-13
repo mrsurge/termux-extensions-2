@@ -291,12 +291,13 @@
     display: none;
   }
 
-  .fe-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
+  .fe-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
   .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .fe-file-name { font-size: 1rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fe-file-name { font-size: 0.88rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fe-file-name.fe-unsaved::after { content: ' *'; color: var(--primary, #3b82f6); }
-  .fe-file-path { font-size: 0.75rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fe-file-path { font-size: 0.65rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: none; }
   .fe-btn { padding: 6px 10px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; flex-shrink: 0; align-self: center; }
+  #recent-files-btn { font-size: 0.85rem; padding: 4px 8px; white-space: nowrap; }
   .fe-btn:hover { border-color: var(--primary, #3b82f6); }
   .fe-status { font-size: 0.75rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
   .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 13px; }
@@ -1292,7 +1293,7 @@
     </div>
 
     <div class="fe-menu" style="position: relative; margin-left: auto;">
-      <button id="recent-files-btn" class="fe-btn" style="margin: 0;" disabled>Recent Files ▾</button>
+      <button id="recent-files-btn" class="fe-btn" style="margin: 0;" disabled>Recents ▾</button>
       <div id="recent-files-dd" class="fe-dropdown"></div>
     </div>
     <span id="fe-status" class="fe-status" style="display: none;"></span>

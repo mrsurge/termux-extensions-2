@@ -3,7 +3,7 @@
   "id": "file_editor_cm6",
   "icon_emoji": "\ud83d\udcd1",
   "version": "0.1.0",
-  "description": "A full-page CodeMirror 6 editor with native Android selection mode (long-press).",
+  "description": "A full-page CodeMirror 6 editor running inside the NiceGUI shell.",
   "author": "mrSurge",
   "entrypoints": {
     "backend_blueprint": "main.py",

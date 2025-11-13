@@ -74,7 +74,7 @@ def disable_edit_tracking():
         print(f"[EDIT_TRACK] Disabled automatic jump on edits", file=sys.stderr)
 
 # --- NiceGUI Page ---
-@ui.page('/nc', reconnect_timeout=0)
+@ui.page('/nc', reconnect_timeout=3.0)
 async def editor_page():
     global _active_editor
     
@@ -137,6 +137,7 @@ async def editor_page():
             _active_editor = editor
             set_current_file(initial_path, initial_sha256)
             editor.set_zebra_stripes(editor_prefs.get('showShading', False))
+            editor.set_font_scale(0.85)
             
             # 6. Load Diffs if Enabled
             if editor_prefs.get('showInlineDiffs', False) and initial_path and project_path:

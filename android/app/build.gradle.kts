@@ -15,6 +15,24 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["sharedUserIdValue"] = "com.termux.extensions.base"
+    }
+
+    flavorDimensions += "renderEngine"
+
+    productFlavors {
+        create("webview") {
+            dimension = "renderEngine"
+            applicationIdSuffix = ".webview"
+            versionNameSuffix = "-webview"
+            manifestPlaceholders["sharedUserIdValue"] = "com.termux.extensions.webview"
+        }
+        create("gecko") {
+            dimension = "renderEngine"
+            applicationIdSuffix = ".gecko"
+            versionNameSuffix = "-gecko"
+            manifestPlaceholders["sharedUserIdValue"] = "com.termux.extensions.gecko"
+        }
     }
 
     buildTypes {
@@ -41,6 +59,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    add("geckoImplementation", "org.mozilla.geckoview:geckoview:131.0.20240923135042")
     
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
