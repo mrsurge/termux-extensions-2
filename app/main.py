@@ -85,14 +85,10 @@ async def lifespan(app_instance):
 
     yield
 
+    # Note: Don't unregister here - IPC server is busy in shutdown_all() and can't process the request
+    # IPC will clean the registry after killing all processes
     print("--- Shutting down: IPC will handle process termination ---")
-    # Note: IPC server will kill us via SIGTERM, no need for manual cleanup
-    # Workers and shells are already registered with IPC and will be killed
-    
-    # Unregister from IPC (will happen before we're killed)
-    from app.ipc.client import unregister_process
-    unregister_process(framework_pid)
-    print(f"[framework] Unregistered from IPC")
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -1384,4 +1380,8 @@ if __name__ == '__main__':
     import uvicorn
     print("--- Starting ASGI Server ---")
     # Lifespan handler will handle all initialization
-    uvicorn.run("app.main:app", host='0.0.0.0', port=8088)
+    uvicorn.run(
+        "app.main:app",
+        host='0.0.0.0',
+        port=8088,
+    )

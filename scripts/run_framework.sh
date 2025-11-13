@@ -66,28 +66,52 @@ generate_run_id_if_needed
 cleanup_framework_shell_logs() {
   local base_dir="$HOME/.cache/te_framework"
   local logs_dir="$base_dir/logs"
-  local preserve_flag="$base_dir/preserve_logs.flag"
+  local preserved_dir="$base_dir/preserved_logs"
 
-  if [ -f "$preserve_flag" ]; then
-    if [ -d "$logs_dir" ]; then
-      local ts archive_dir
-      ts="$(date +%s)"
-      archive_dir="$base_dir/logs_preserved_$ts"
-      mv "$logs_dir" "$archive_dir"
-      echo "[run_framework] Preserved forced-shutdown logs at $archive_dir"
-      mkdir -p "$logs_dir"
-    else
-      echo "[run_framework] Preserve flag present but no logs directory to archive"
+  # Archive any leftover logs from previous run (force-killed or otherwise)
+  if [ -d "$logs_dir" ] && [ -n "$(ls -A "$logs_dir" 2>/dev/null)" ]; then
+    local ts archive_dir
+    ts="$(date +%s)"
+    archive_dir="$preserved_dir/logs_$ts"
+    
+    mkdir -p "$preserved_dir"
+    mv "$logs_dir" "$archive_dir"
+    echo "[run_framework] Archived leftover shell logs to $archive_dir"
+    mkdir -p "$logs_dir"
+  fi
+  
+  # Clean up old preserved logs (older than 7 days)
+  if [ -d "$preserved_dir" ]; then
+    local now cutoff count
+    now="$(date +%s)"
+    cutoff=$((now - 604800))  # 7 days in seconds
+    count=0
+    
+    for log_archive in "$preserved_dir"/logs_*; do
+      if [ ! -d "$log_archive" ]; then
+        continue
+      fi
+      
+      # Extract timestamp from directory name (logs_1762550020 → 1762550020)
+      local dir_name ts
+      dir_name="$(basename "$log_archive")"
+      ts="${dir_name#logs_}"
+      
+      # Validate it's a numeric timestamp
+      if ! [[ "$ts" =~ ^[0-9]+$ ]]; then
+        continue
+      fi
+      
+      if [ "$ts" -lt "$cutoff" ]; then
+        rm -rf "$log_archive"
+        count=$((count + 1))
+      fi
+    done
+    
+    if [ "$count" -gt 0 ]; then
+      echo "[run_framework] Cleaned $count preserved log archives older than 7 days"
     fi
-    rm -f "$preserve_flag"
-    return
   fi
-
-  if [ ! -d "$logs_dir" ]; then
-    return
-  fi
-  echo "[run_framework] Cleaning previous framework shell logs in $logs_dir"
-  find "$logs_dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 }
 
 resolve_path() {

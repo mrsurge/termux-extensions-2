@@ -19,8 +19,6 @@ from pathlib import Path
 from typing import List
 
 RUN_ID_FILE = Path(os.path.expanduser("~/.cache/te_framework/run_id"))
-LOGS_DIR = Path(os.path.expanduser("~/.cache/te_framework/logs"))
-PRESERVE_FLAG = Path(os.path.expanduser("~/.cache/te_framework/preserve_logs.flag"))
 
 
 def _ensure_run_id() -> str:
@@ -53,32 +51,6 @@ def _stop_ipc_server(sig: signal.Signals = signal.SIGTERM) -> None:
         print(f"[supervisor] Failed to stop IPC server {ipc_pid}: {exc}", file=sys.stderr)
 
 
-def _mark_logs_for_preservation() -> None:
-    try:
-        PRESERVE_FLAG.parent.mkdir(parents=True, exist_ok=True)
-        PRESERVE_FLAG.write_text(str(int(time.time())), encoding="utf-8")
-    except Exception as exc:  # pragma: no cover - best effort
-        print(f"[supervisor] Failed to mark logs for preservation: {exc}", file=sys.stderr)
-
-
-def _cleanup_shell_logs() -> None:
-    if not LOGS_DIR.exists():
-        return
-    try:
-        for entry in LOGS_DIR.iterdir():
-            if entry.is_file() or entry.is_symlink():
-                entry.unlink(missing_ok=True)
-            else:
-                shutil.rmtree(entry, ignore_errors=True)
-        if not LOGS_DIR.exists():
-            LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        if PRESERVE_FLAG.exists():
-            PRESERVE_FLAG.unlink(missing_ok=True)
-        print("[supervisor] Cleaned framework shell logs")
-    except Exception as exc:  # pragma: no cover - best effort
-        print(f"[supervisor] Failed to clean framework shell logs: {exc}", file=sys.stderr)
-
-
 def run(argv: List[str]) -> int:
     run_id = _ensure_run_id()
     os.environ.setdefault("TE_SUPERVISOR_PID", str(os.getpid()))
@@ -98,21 +70,6 @@ def run(argv: List[str]) -> int:
         return 1
 
     shutting_down = False
-    forced_shutdown = False
-
-    def _schedule_force_kill():
-        def _worker():
-            nonlocal forced_shutdown
-            time.sleep(10.0)
-            if proc.poll() is not None:
-                return
-            print("[supervisor] Graceful shutdown timed out; forcing framework shutdown")
-            _mark_logs_for_preservation()
-            forced_shutdown = True
-            _kill_process_group(proc.pid, signal.SIGKILL)
-            _stop_ipc_server(signal.SIGKILL)
-
-        threading.Thread(target=_worker, daemon=True).start()
 
     def _handle_signal(signum, _frame):
         nonlocal shutting_down
@@ -121,14 +78,20 @@ def run(argv: List[str]) -> int:
         shutting_down = True
         print(f"[supervisor] Received signal {signum}; shutting down run {run_id}")
         
-        # New behavior: Ask IPC to shutdown all processes
+        # IPC handles shutdown - no timeout needed
         print("[supervisor] Requesting IPC to shutdown all processes")
         import requests
         ipc_url = f"http://127.0.0.1:9123/actions/shutdown"
         try:
-            resp = requests.post(ipc_url, json={"timeout": 8.0}, timeout=15.0)
+            resp = requests.post(ipc_url, timeout=30.0)  # Just wait for IPC to finish
             if resp.status_code == 200:
                 print("[supervisor] IPC shutdown completed successfully")
+                # Log force-kill info if any
+                data = resp.json()
+                if data.get("ok"):
+                    stats = data.get("data", {})
+                    if stats.get("force_killed_shells"):
+                        print(f"[supervisor] Force-killed shells (logs will be archived on next startup): {stats['force_killed_shells']}")
             else:
                 print(f"[supervisor] IPC shutdown returned {resp.status_code}")
         except Exception as exc:
@@ -158,15 +121,11 @@ def run(argv: List[str]) -> int:
         time.sleep(1.0)
         if proc.poll() is None:
             print("[supervisor] Forcing shutdown")
-            _mark_logs_for_preservation()
-            forced_shutdown = True
             _kill_process_group(proc.pid, signal.SIGKILL)
 
-    if forced_shutdown:
-        print("[supervisor] Preserving framework shell logs due to forced shutdown")
-    else:
-        _cleanup_shell_logs()
-
+    # Note: Shell log cleanup handled by startup cycle, not shutdown
+    # IPC leaves all logs in place; next startup will archive/clean them
+    
     _stop_ipc_server(signal.SIGTERM)
 
     try:

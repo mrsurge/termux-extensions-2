@@ -205,16 +205,13 @@ def create_app() -> Flask:
     
     @app.route("/actions/shutdown-all", methods=["POST", "OPTIONS"])
     def shutdown_all_processes() -> Any:
-        """Shutdown all registered processes (SIGTERM → wait → SIGKILL)."""
+        """Shutdown all registered processes (IPC-orchestrated)."""
         if request.method == "OPTIONS":
             return ("", 204)
         
-        payload = request.get_json(silent=True) or {}
-        timeout = payload.get("timeout", 5.0)
-        
         LOGGER.info("=== IPC SHUTDOWN INITIATED ===")
-        stats = process_registry.shutdown_all(timeout=timeout, logger=LOGGER)
-        LOGGER.info(f"=== IPC SHUTDOWN COMPLETE: {stats} ===")
+        stats = process_registry.shutdown_all(logger=LOGGER)
+        LOGGER.info("=== IPC SHUTDOWN COMPLETE ===")
         
         return jsonify({"ok": True, "data": stats})
 
@@ -229,19 +226,17 @@ def create_app() -> Flask:
 
     @app.route("/actions/shutdown", methods=["POST", "OPTIONS"])
     def runtime_shutdown() -> Any:
-        """Shutdown the framework (now orchestrated by IPC)."""
+        """Shutdown the framework (IPC-orchestrated)."""
         if request.method == "OPTIONS":
             return ("", 204)
         
-        payload = request.get_json(silent=True) or {}
-        timeout = payload.get("timeout", 5.0)
-        
-        # New behavior: IPC shuts down all registered processes
-        LOGGER.info("Shutdown request received - initiating IPC-orchestrated shutdown")
-        stats = process_registry.shutdown_all(timeout=timeout, logger=LOGGER)
+        # All shutdowns go through IPC now
+        LOGGER.info("Shutdown request - initiating IPC shutdown")
+        stats = process_registry.shutdown_all(logger=LOGGER)
         
         _broadcast({"event": "shutdown", "status": "complete", "stats": stats})
         return jsonify({"ok": True, "data": stats})
+
 
     @app.route("/actions/agent-spawn", methods=["POST", "OPTIONS"])
     def spawn_agent_route() -> Any:
