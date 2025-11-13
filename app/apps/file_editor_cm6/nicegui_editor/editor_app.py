@@ -6,12 +6,28 @@ import sys
 
 from nicegui import ui, app as nicegui_app
 
-# Global reference to the active editor instance
+# Global reference to the active editor instance and current file
 _active_editor = None
+_current_file_path = None
+_current_file_sha256 = None  # Track SHA256 of file when loaded/saved
 
 def get_active_editor():
     """Get the currently active editor instance"""
     return _active_editor
+
+def set_current_file(path: str, sha256: str = None):
+    """Set the currently open file path and its SHA256"""
+    global _current_file_path, _current_file_sha256
+    _current_file_path = path
+    _current_file_sha256 = sha256
+
+def get_current_file():
+    """Get the currently open file path"""
+    return _current_file_path
+
+def get_current_file_sha256():
+    """Get the SHA256 of the currently open file when it was loaded/saved"""
+    return _current_file_sha256
 
 # Register NiceGUI page - will be imported after ui.run_with() is called
 # reconnect_timeout=0 forces fresh page load on every browser refresh

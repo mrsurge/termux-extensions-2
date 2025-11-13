@@ -10,6 +10,8 @@ sys.path.insert(0, str(vendor_dir))
 
 import os
 import json
+import hashlib
+import time
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
 from fastapi.responses import JSONResponse, FileResponse
@@ -248,7 +250,7 @@ def read_file(path: str = Query(...)):
 @file_editor_cm6_bp.post('/editor/set_content')
 async def set_editor_content(data: dict = Body(...)):
     """Update editor content - called by main.js when opening files"""
-    from .nicegui_editor.editor_app import get_active_editor
+    from .nicegui_editor.editor_app import get_active_editor, set_current_file
     
     editor = get_active_editor()
     if not editor:
@@ -257,6 +259,12 @@ async def set_editor_content(data: dict = Body(...)):
     content = data.get('content', '')
     path = data.get('path', '')
     language = data.get('language', 'python')
+    
+    # Compute SHA256 of content being loaded
+    content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
+    
+    # Track the current file path and SHA256 in backend
+    set_current_file(path, content_sha256)
     
     # Set content and language directly
     editor.set_value(content)
@@ -301,7 +309,7 @@ async def set_editor_content(data: dict = Body(...)):
     else:
         editor.set_diff_decorations([])
     
-    return {"ok": True}
+    return {"ok": True, "sha256": content_sha256}
 
 @file_editor_cm6_bp.post('/editor/refresh_diffs')
 async def refresh_diffs(data: dict = Body(...)):
@@ -334,17 +342,123 @@ async def refresh_diffs(data: dict = Body(...)):
         print(f"[DIFF] Refresh failed: {e}", file=sys.stderr)
         return {"ok": False, "error": str(e)}
 
-@file_editor_cm6_bp.get('/editor/get_content')
-def get_editor_content():
-    """Get current editor content (if needed by main.js)"""
-    from .nicegui_editor.editor_app import get_active_editor
+@file_editor_cm6_bp.get('/editor/debug/state')
+def debug_editor_state():
+    """DEBUG ENDPOINT: Get current editor state for testing"""
+    from .nicegui_editor.editor_app import get_active_editor, get_current_file
+    
+    editor = get_active_editor()
+    current_file = get_current_file()
+    
+    if not editor:
+        return {
+            "ok": False, 
+            "error": "Editor not ready",
+            "current_file": current_file,
+            "editor_exists": False
+        }
+    
+    content = editor.value or ''
+    
+    return {
+        "ok": True,
+        "editor_exists": True,
+        "current_file": current_file,
+        "content_length": len(content),
+        "content": content,  # Full content for debugging
+        "content_hash": hashlib.sha256(content.encode('utf-8')).hexdigest(),
+    }
+
+@file_editor_cm6_bp.post('/editor/save')
+async def save_current_file(data: dict = Body(...)):
+    """Save the current file - handles everything backend-side"""
+    from .nicegui_editor.editor_app import get_active_editor, get_current_file, get_current_file_sha256, set_current_file
+    
+    print(f"[SAVE] Endpoint called with data: {data}", file=sys.stderr)
     
     editor = get_active_editor()
     if not editor:
+        print(f"[SAVE] ERROR: Editor not ready", file=sys.stderr)
         return {"ok": False, "error": "Editor not ready"}
     
-    # Editor content is managed by NiceGUI - this is rarely needed
-    return {"ok": True, "content": ""}
+    current_file = get_current_file()
+    print(f"[SAVE] Current file: {current_file}", file=sys.stderr)
+    
+    if not current_file:
+        print(f"[SAVE] ERROR: No file open", file=sys.stderr)
+        return {"ok": False, "error": "No file is currently open"}
+    
+    # Get content directly from editor
+    content = editor.value or ''
+    print(f"[SAVE] Content length: {len(content)}", file=sys.stderr)
+    
+    # Use backend-tracked SHA256 for conflict detection (more reliable than frontend)
+    base_sha256 = get_current_file_sha256()
+    print(f"[SAVE] Backend tracked SHA256: {base_sha256}", file=sys.stderr)
+    
+    client_id = data.get('client_id', 'unknown')
+    op_id = data.get('op_id', f"op_{int(time.time() * 1000)}")
+    
+    project_root = get_project_root()
+    
+    try:
+        # Normalize path
+        rel_path = _normalize_rel_path(project_root, current_file)
+        print(f"[SAVE] Normalized path: {rel_path}", file=sys.stderr)
+    except ValueError as exc:
+        print(f"[SAVE] ERROR: Path normalization failed: {exc}", file=sys.stderr)
+        return {"ok": False, "error": f"Invalid path: {str(exc)}"}
+    
+    try:
+        # Initialize watcher
+        init_watcher(project_root)
+        
+        print(f"[SAVE] Calling write_full...", file=sys.stderr)
+        
+        # Atomic write with optional conflict check
+        file_meta = await anyio.to_thread.run_sync(
+            lambda: write_full(project_root, str(rel_path), content, base_sha256=base_sha256)
+        )
+        
+        print(f"[SAVE] Write successful, new SHA256: {file_meta['sha256']}", file=sys.stderr)
+        
+        # Send save acknowledgement to prevent self-echo
+        push_save_ack(str(rel_path), op_id, client_id, file_meta)
+        
+        # Notify diff subscribers of change
+        emit_diff_changed(str(rel_path), file_meta["sha256"])
+        
+        # Refresh caches
+        mark_git_cache_dirty(project_root)
+        invalidate_diff_cache(project_root, str(rel_path))
+        
+        # Update backend state with new SHA256
+        set_current_file(current_file, file_meta["sha256"])
+        
+        print(f"[SAVE] Success! Returning response", file=sys.stderr)
+        
+        return {
+            "ok": True,
+            "data": {
+                "mtime": file_meta["mtime"],
+                "size": file_meta["size"],
+                "sha256": file_meta["sha256"]
+            }
+        }
+    except BaseMismatchError as e:
+        print(f"[SAVE] Conflict detected: {e}", file=sys.stderr)
+        return JSONResponse(status_code=409, content={
+            "ok": False,
+            "error": "BASE_MISMATCH",
+            "data": {
+                "current": e.current_meta
+            }
+        })
+    except Exception as e:
+        print(f"[SAVE] ERROR: {type(e).__name__}: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return {"ok": False, "error": str(e)}
 
 @file_editor_cm6_bp.post('/editor/toggle_setting')
 async def toggle_editor_setting(data: dict = Body(...)):

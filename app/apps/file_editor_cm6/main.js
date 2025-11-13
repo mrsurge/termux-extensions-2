@@ -705,7 +705,7 @@ function createView(docText='') {
   console.log('[CM6] createView() disabled - using NiceGUI iframe instead');
 }
 
-function getText() { return ''; } // Stub: content is in iframe
+function getText() { return ''; } // Stub: content is in iframe (legacy code still calls this)
 function setText(t) { console.log('[CM6] setText() disabled'); }
 
 function markUnsaved(flag) {
@@ -1083,6 +1083,11 @@ async function openFile(path) {
       content: payload.content || '',
       path: resolved,
       language: currentModeLanguage || 'text'
+    }).then(result => {
+      if (result && result.sha256) {
+        lastSha256 = result.sha256;
+        console.log('[Editor] SHA256 initialized:', result.sha256);
+      }
     }).catch(e => console.warn('[Editor] Failed to sync content to NiceGUI:', e));
 
     setText(payload.content || '');
@@ -1187,15 +1192,67 @@ async function saveFile() {
   if (!currentPath || !currentPathExists) return saveAsDialog();
   statusEl.textContent = 'Saving...';
 
-  const content = getText();
-  const result = await doSave(currentPath, content);
+  // Backend-only save - no content round-trip needed
+  const opId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  const payload = {
+    client_id: clientId,
+    op_id: opId
+  };
+  
+  if (lastSha256) {
+    payload.base_sha256 = lastSha256;
+  }
 
-  if (result.success) {
-    statusEl.textContent = 'Saved';
-    setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
-  } else {
-    host.toast(`Save failed: ${result.error}`);
-    statusEl.textContent = '';
+  try {
+    const result = await apiPost('editor/save', payload);
+    
+    console.log('[SAVE] Response:', result);
+    
+    if (result.ok) {
+      lastSha256 = result.data.sha256 || lastSha256;
+      markUnsaved(false);
+      statusEl.textContent = 'Saved';
+      setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
+    } else {
+      console.error('[SAVE] Failed:', result.error);
+      host.toast(`Save failed: ${result.error}`);
+      statusEl.textContent = '';
+    }
+  } catch (e) {
+    console.error('[SAVE] Exception:', e);
+    
+    // Handle 409 conflict
+    if (e.status === 409 || (e.response && e.response.error === 'BASE_MISMATCH')) {
+      if (window.confirm('File was modified externally. Retry save and overwrite?')) {
+        // Retry without base check (force overwrite)
+        const retryPayload = {
+          client_id: clientId,
+          op_id: `${opId}_retry`
+        };
+        try {
+          const retryResult = await apiPost('editor/save', retryPayload);
+          if (retryResult.ok) {
+            lastSha256 = retryResult.data.sha256 || lastSha256;
+            markUnsaved(false);
+            statusEl.textContent = 'Saved';
+            setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
+          } else {
+            host.toast(`Save failed: ${retryResult.error}`);
+            statusEl.textContent = '';
+          }
+        } catch (retryErr) {
+          host.toast(`Save failed: ${retryErr.message || 'Unknown error'}`);
+          statusEl.textContent = '';
+        }
+      } else {
+        statusEl.textContent = '';
+      }
+    } else {
+      const errMsg = e.message || e.error || JSON.stringify(e);
+      host.toast(`Save failed: ${errMsg}`);
+      statusEl.textContent = '';
+    }
   }
 }
 
@@ -1205,7 +1262,7 @@ async function saveAsDialog() {
   if (target.existed && !window.confirm('File exists. Overwrite?')) return;
   statusEl.textContent = 'Saving...';
 
-  const content = getText();
+  const content = await getText();
   const targetAbs = toAbsolute(target.path, null, HOME_DIR);
 
   // Reset SHA256 since this is a new file path

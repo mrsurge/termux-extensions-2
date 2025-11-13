@@ -698,3 +698,542 @@ const availableHeight = window.visualViewport.height - stickyHeaderHeight;
 
 ---
 
+# Layout Hardening Plan - file_editor_cm6
+
+**Date:** 2025-11-13  
+**Status:** Planning - Awaiting Approval  
+**Scope:** Remove hardcoded viewport heights, make headers sticky to framework toolbar  
+**Goal:** Create solid layout foundation that can support keyboard-aware responsive features
+
+---
+
+## Context
+
+The current layout works well for basic responsive behavior (desktop/mobile modes), but hardcoded viewport heights (`93vh`/`94vh`) prevent it from adapting to viewport changes. This plan hardens the layout to use proper flex/grid sizing and establishes sticky header behavior, creating the foundation needed for future keyboard-aware responsive layout features.
+
+**This plan does NOT include keyboard handling** - that's a separate feature to be added after layout is hardened.
+
+---
+
+## Design Philosophy (Constraints)
+
+1. **No Automatic Stacking** - Layout changes between desktop/mobile are deliberate and programmatic, controlled by JavaScript class switching (`.layout-desktop` / `.layout-mobile`)
+
+2. **Framework Toolbar Supremacy** - The framework toolbar is the top-level UI element that:
+   - Always stays visible at `z-index` top
+   - Never has elements scroll above or underneath it
+   - Acts as a hard boundary (macOS menu bar metaphor)
+   - App headers should stick to its bottom edge like they're part of it
+
+3. **User-Managed Vertical Space** - When screen real estate gets tight (keyboard + terminal + editor), the app provides the layout but the user decides what stays visible (close terminal, etc.)
+
+---
+
+## Current Problems
+
+### Framework Level (`app/templates/app_shell.html`)
+
+**Lines 23-30:**
+```css
+.app-shell { 
+  display: flex; 
+  flex-direction: column; 
+  height: 100vh;  /* ✓ Correct */
+  width: 100vw; 
+}
+
+.app-toolbar { 
+  position: sticky; 
+  top: 0; 
+  z-index: 5;  /* ✓ Already sticky */
+}
+
+#app-container { 
+  flex: 1; 
+  overflow: auto;  /* ⚠️ Creates scroll container */
+}
+```
+
+**Status:** Framework is correct - it owns the viewport and provides scroll container.
+
+---
+
+### App Level (`app/apps/file_editor_cm6/template.html`)
+
+#### **Problem 1: Hardcoded Viewport Heights**
+
+**Desktop (line 53):**
+```css
+.fe-root.layout-desktop {
+  height: 93vh;  /* ❌ Hardcoded */
+}
+```
+
+**Mobile (line 172):**
+```css
+.fe-root.layout-mobile {
+  height: 94vh;  /* ❌ Hardcoded */
+}
+```
+
+**Impact:**
+- Prevents layout from adapting to viewport changes
+- Creates extra scroll space due to mismatch with framework's `100vh`
+- Will break keyboard-aware features since viewport changes won't propagate
+
+---
+
+#### **Problem 2: Non-Sticky Headers**
+
+**Toolbar (line 294):**
+```css
+.fe-toolbar { 
+  display: flex; 
+  /* ... other properties ... */
+  /* ❌ No position: sticky */
+}
+```
+
+**Menubar (line 302):**
+```css
+.fe-menubar { 
+  display: flex; 
+  /* ... other properties ... */
+  /* ❌ No position: sticky */
+}
+```
+
+**Impact:**
+- Headers scroll away when explorer/agent panels scroll
+- Inconsistent UX with framework toolbar
+- Will cause issues with keyboard layout calculations (headers not in predictable positions)
+
+---
+
+#### **Problem 3: Iframe Height Hack**
+
+**Line 1380:**
+```html
+<iframe 
+  id="editor-frame" 
+  style="width: 100%; height: 65%; ..."
+                           /* ↑ ❌ Should be 100% */
+>
+```
+
+**Impact:**
+- Arbitrary 65% suggests layout isn't sizing container correctly
+- Leaves 35% gap that gets filled with scroll space
+- Should be `100%` if grid row sizing is working properly
+
+---
+
+## Proposed Solution
+
+### **Change 1: Use 100% Height Instead of Viewport Units**
+
+**File:** `app/apps/file_editor_cm6/template.html`
+
+**Desktop Layout (line 53):**
+```css
+.fe-root.layout-desktop {
+  display: grid;
+  grid-template-columns: var(--explorer-width, 430px) 1fr var(--agent-width, 400px);
+  grid-template-rows: auto auto 1fr auto;
+  height: 100%;  /* ← CHANGE from 93vh */
+  overflow: hidden;
+}
+```
+
+**Mobile Layout (line 172):**
+```css
+.fe-root.layout-mobile {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto 1fr auto;
+  height: 100%;  /* ← CHANGE from 94vh */
+  overflow: hidden;
+}
+```
+
+**Rationale:**
+- `.fe-root` is injected into `#app-container` which has `flex: 1`
+- Using `height: 100%` lets it fill the container naturally
+- Removes hardcoded assumptions about framework toolbar height
+- Enables viewport changes to propagate through flex chain
+
+---
+
+### **Change 2: Make Headers Sticky to Framework Toolbar**
+
+**File:** `app/apps/file_editor_cm6/template.html`
+
+**Toolbar (line 294):**
+```css
+.fe-toolbar { 
+  display: flex; 
+  flex-wrap: wrap; 
+  gap: 12px; 
+  align-items: flex-start; 
+  padding: 10px 12px; 
+  border-bottom: 1px solid var(--border, #333); 
+  background: var(--card, #0b0f1a);
+  /* ↓ ADD THESE */
+  position: sticky;
+  top: 0;
+  z-index: 4;  /* Below framework toolbar (z-index: 5) */
+}
+```
+
+**Menubar (line 302):**
+```css
+.fe-menubar { 
+  display: flex; 
+  gap: 12px; 
+  align-items: center; 
+  padding: 6px 8px; 
+  border-bottom: 1px solid var(--border, #333); 
+  background: var(--card, #0b0f1a); 
+  font-size: 13px;
+  /* ↓ ADD THESE */
+  position: sticky;
+  top: var(--fe-toolbar-height, 50px);  /* Stack below toolbar */
+  z-index: 3;  /* Below toolbar */
+}
+```
+
+**Note:** May need to add JavaScript to calculate actual toolbar height and set CSS variable `--fe-toolbar-height` if toolbar wraps on narrow screens.
+
+---
+
+### **Change 3: Fix Iframe to Fill Container**
+
+**File:** `app/apps/file_editor_cm6/template.html`  
+**Line:** 1380
+
+**Change inline style:**
+```html
+<iframe 
+  id="editor-frame" 
+  src="/api/app/file_editor_cm6/ui/nc"
+  frameborder="0"
+  scrolling="no"
+  allow="clipboard-read; clipboard-write"
+  style="width: 100%; height: 100%; border: none; display: block; overflow: hidden;">
+  <!--                   ↑ CHANGE from 65% to 100% -->
+</iframe>
+```
+
+**Rationale:**
+- `.fe-editor-container` is grid row 3 with `1fr` (takes remaining space after auto-sized headers)
+- Iframe should completely fill this grid cell
+- If 65% was working, it means the container was oversized - fixing heights will fix this
+
+---
+
+## Implementation Steps
+
+### **Step 1: Update Layout Heights**
+- Change `.fe-root.layout-desktop { height: 93vh; }` → `height: 100%;`
+- Change `.fe-root.layout-mobile { height: 94vh; }` → `height: 100%;`
+
+### **Step 2: Make Headers Sticky**
+- Add `position: sticky; top: 0; z-index: 4;` to `.fe-toolbar`
+- Add `position: sticky; top: var(--fe-toolbar-height, 50px); z-index: 3;` to `.fe-menubar`
+
+### **Step 3: Fix Iframe Height**
+- Change iframe inline style from `height: 65%` → `height: 100%`
+
+### **Step 4: (Optional) Add Toolbar Height Tracking**
+If toolbar height is dynamic (wraps on narrow screens):
+```javascript
+// Add to <script> section
+function updateToolbarHeight() {
+  const toolbar = document.querySelector('.fe-toolbar');
+  if (toolbar) {
+    document.documentElement.style.setProperty(
+      '--fe-toolbar-height', 
+      `${toolbar.offsetHeight}px`
+    );
+  }
+}
+
+// Run on load and resize
+updateToolbarHeight();
+window.addEventListener('resize', updateToolbarHeight);
+```
+
+---
+
+## Testing Checklist
+
+### **Desktop Mode**
+- [ ] Explorer scrolls, headers stay fixed at top
+- [ ] Agent drawer scrolls, headers stay fixed at top
+- [ ] Terminal drawer tiles correctly below editor
+- [ ] Iframe fills editor container completely (no gap at bottom)
+- [ ] No extra scroll space below terminal
+
+### **Mobile Mode**
+- [ ] Editor iframe scrolls, headers stay fixed at top
+- [ ] Terminal tiles below editor correctly
+- [ ] Explorer drawer overlays correctly (z-index above headers)
+- [ ] Agent drawer overlays correctly (z-index above headers)
+- [ ] No extra scroll space at bottom
+
+### **Header Behavior**
+- [ ] Toolbar sticks to top, never scrolls away
+- [ ] Menubar sticks below toolbar, never scrolls away
+- [ ] Headers don't overlap framework toolbar
+- [ ] Dropdowns (File, Edit, etc.) display correctly over sticky headers
+- [ ] Framework toolbar always visible above app headers
+
+### **Visual**
+- [ ] No white space gaps
+- [ ] No double scrollbars
+- [ ] Smooth scrolling in scrollable regions
+- [ ] Headers have solid background (no transparency issues)
+
+---
+
+## Risk Assessment
+
+### **Low Risk:**
+- Changing `93vh`/`94vh` to `100%` - straightforward substitution
+- Adding sticky positioning to headers - well-supported CSS
+
+### **Medium Risk:**
+- Iframe height change from 65% to 100% - might reveal why it was 65% in the first place
+- Menubar `top` offset - might need dynamic calculation if toolbar wraps
+
+### **Mitigation:**
+- Test in mobile first (simpler layout)
+- If iframe 100% doesn't work, investigate `.fe-editor-container` grid sizing
+- Add toolbar height tracking script if menubar overlaps toolbar on narrow screens
+
+---
+
+## Future Work (Out of Scope)
+
+After layout is hardened:
+
+1. **Keyboard-Aware Responsive Layout**
+   - Add `visualViewport` tracking
+   - Implement `--keyboard-offset` CSS variable
+   - Add `padding-bottom` adjustments to maintain usable viewport
+
+2. **Dynamic Grid Sizing**
+   - Add resize handles for explorer/agent panels
+   - Persist panel widths to localStorage
+
+3. **Header Unification** (if needed)
+   - Evaluate merging framework + app headers for mobile UX
+   - Design API for apps to inject header content into framework
+
+---
+
+## Dependencies
+
+**Files to modify:**
+- `app/apps/file_editor_cm6/template.html` (all changes)
+
+**No changes required to:**
+- `app/templates/app_shell.html` (framework is correct as-is)
+
+**No new dependencies or libraries needed.**
+
+---
+
+## Success Criteria
+
+✅ Layout uses `100%` heights, not viewport units  
+✅ Headers stick to framework toolbar correctly  
+✅ Iframe fills container at `100%`  
+✅ No extra scroll space  
+✅ All tests pass in desktop and mobile modes  
+✅ Layout is ready for keyboard viewport tracking to be added
+
+---
+
+**Status:** Awaiting approval to proceed with implementation.
+
+---
+
+## Implementation Addendum - 2025-11-13
+
+**Status:** ✅ **RESOLVED - Layout Working**  
+**Final Solution:** Root scroll lock prevents Chrome URL bar collapse
+
+---
+
+### What We Tried (In Order)
+
+#### Attempt 1: Remove Hardcoded vh Heights
+- Changed `height: 93vh/94vh` → `height: 100%`
+- **Result:** Didn't solve the header scrolling issue
+- **Why:** `#app-container { overflow: auto }` was still the scroll container, creating wrong stacking context for sticky elements
+
+#### Attempt 2: Rename Elements to Avoid Browser Heuristics
+- Changed `.app-toolbar` → `.app-topbar`
+- Changed `.fe-toolbar` → `.fe-topbar` 
+- Changed `.fe-menubar` → `.fe-menu-strip`
+- **Result:** No effect on behavior
+- **Why:** Browser heuristics aren't based on class names, issue was architectural
+
+#### Attempt 3: Make App Headers position: sticky
+- Added `position: sticky; top: 0` to `.fe-toolbar`
+- Added `position: sticky; top: var(--fe-toolbar-height)` to `.fe-menubar`
+- **Result:** Headers stuck within `#app-container` scroll context, not viewport
+- **Why:** Sticky positioning works relative to nearest scrolling ancestor
+
+#### Attempt 4: Framework Toolbar position: fixed + Spacer Div
+- Changed framework toolbar to `position: fixed`
+- Added mandatory spacer div consuming `--framework-toolbar-height`
+- Grid positioning: spacer at row 1, headers shifted down
+- JavaScript to track and update framework toolbar height
+- **Result:** 
+  - Desktop: Worked but with quirks
+  - Mobile: Spacer and headers overlapped, everything squished to top
+  - Other apps: Drawers broke with spacer implementation
+- **Why:** Complex height calculations, grid row conflicts, broke drawer z-index stacking
+
+#### Attempt 5: Remove Framework Scroll Container
+- Changed `#app-container { overflow: auto }` → `overflow: hidden`
+- Apps handle internal scrolling
+- **Result:** Still didn't fully solve sticky header issue
+- **Why:** Root cause was Chrome mobile URL bar collapse behavior
+
+---
+
+### The Root Cause Discovery
+
+Found article explaining Chrome mobile URL bar behavior:
+- Chrome hides/shows URL bar when it detects "page scroll"
+- Any scroll container at root level triggers this behavior
+- No meta tag or CSS property can disable it
+- Only solution: **Lock root scroll, use inner scroll container**
+
+**The "aha" moment:** This was the fundamental issue all along. Not sticky positioning, not viewport heights, but Chrome's URL bar auto-hide triggering viewport changes.
+
+---
+
+### The Final Solution
+
+**One simple change to framework (`app/templates/app_shell.html`):**
+
+```css
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;      /* ← ROOT SCROLL LOCK */
+    position: fixed;
+    width: 100%;
+}
+```
+
+**What this does:**
+1. Locks `html` and `body` from scrolling
+2. Browser sees no page-level scroll → doesn't hide URL bar
+3. `#app-container { overflow: auto }` becomes the scroll container
+4. Apps scroll internally, viewport stays stable
+5. Sticky elements work correctly relative to their containers
+
+**App changes made:**
+- Desktop: `height: 93vh` → `height: 100%`
+- Mobile: `height: 94vh` → `height: 100%`  
+- Iframe: `height: 65%` → `height: 100%`
+- Grid layouts: 4 rows (toolbar, menubar, editor, terminal)
+- Headers: Normal flow, no sticky positioning needed
+
+**What we DIDN'T need:**
+- Spacer divs
+- position: sticky on app headers
+- position: fixed on framework toolbar
+- JavaScript height tracking
+- CSS variable calculations
+- Grid row offset gymnastics
+
+---
+
+### Files Modified
+
+**Framework:**
+- `app/templates/app_shell.html`
+  - Added root scroll lock (`html, body { overflow: hidden; position: fixed; }`)
+  - Framework toolbar remains `position: sticky` (works now that root is locked)
+
+**App:**
+- `app/apps/file_editor_cm6/template.html`
+  - Changed layout heights from viewport units to percentage
+  - Fixed iframe height to 100%
+  - Grid layouts use correct 4-row structure
+  - Headers remain in normal document flow
+
+**Not modified:**
+- Other apps (archive_manager, aria_downloader, file_explorer, settings, terminal)
+- No mandatory spacers added to other apps
+
+---
+
+### Testing Results
+
+✅ **Desktop Mode:**
+- Explorer scrolls smoothly, no jank
+- Agent drawer scrolls correctly
+- Terminal tiles properly
+- Iframe fills container (no 35% gap)
+- No extra scroll space
+
+✅ **Mobile Mode:**
+- Editor scrolls without URL bar collapse
+- Terminal tiles correctly
+- Drawers overlay properly
+- No overlap issues
+- Headers stay in place
+
+✅ **Cross-Browser:**
+- Chrome mobile: URL bar stays visible ✓
+- Firefox: Works correctly ✓
+- PWA mode: Works correctly ✓
+
+---
+
+### Key Learnings
+
+1. **Browser behavior trumps CSS tricks:** Understanding the platform (Chrome URL bar auto-hide) was more important than CSS positioning hacks
+
+2. **Root scroll lock is the pattern:** For PWA-like experiences in mobile browsers, lock root scroll and use inner containers
+
+3. **Simplicity wins:** The final solution was simpler than any attempted fix - just prevent root scroll
+
+4. **Viewport units are problematic:** Using `vh` units with dynamic browser chrome causes issues. Use `100%` and let flex/grid handle sizing
+
+5. **Test the premise:** We spent time on sticky positioning when the real issue was the scroll container triggering browser UI changes
+
+---
+
+### Next Steps
+
+With layout now stable and working:
+
+1. **Add keyboard-aware responsive features** (original goal)
+   - Implement `visualViewport` API tracking
+   - Add `--keyboard-offset` CSS variable
+   - Handle virtual keyboard overlay gracefully
+
+2. **Apply pattern to other apps** if needed
+   - Currently only file_editor_cm6 modified
+   - Other apps can be updated to use `100%` heights if they have similar issues
+
+3. **Document the pattern** for future app development
+   - Root scroll lock is mandatory
+   - Use percentage heights, not viewport units
+   - Apps manage internal scrolling
+
+---
+
+**Resolution Date:** 2025-11-13  
+**Time to Resolution:** ~4 hours of investigation and attempts  
+**Final Status:** Layout is stable, no URL bar jank, ready for keyboard handling implementation
+

@@ -27,19 +27,6 @@
     --keyboard-gap: 16px;
   }
   .fe-root { display: flex; flex-direction: column; height: 100%; background:var(--bg); color:var(--fg); }
-  
-  /* Mandatory spacer for framework toolbar - consumes --framework-toolbar-height */
-  #fe-framework-spacer {
-    height: var(--framework-toolbar-height, 50px);
-    flex-shrink: 0;
-  }
-  
-  /* In grid layouts, spacer must be first */
-  .layout-desktop #fe-framework-spacer,
-  .layout-mobile #fe-framework-spacer {
-    grid-row: 1;
-    grid-column: 1 / -1;
-  }
 
   body.keyboard-locked {
     overflow: hidden;
@@ -62,21 +49,21 @@
   .fe-root.layout-desktop {
     display: grid;
     grid-template-columns: var(--explorer-width, 430px) 1fr var(--agent-width, 400px);
-    grid-template-rows: auto auto auto 1fr auto;
+    grid-template-rows: auto auto 1fr auto;
     height: 100%;
     overflow: hidden;
   }
 
-  /* Topbar spans full width */
+  /* Toolbar spans full width */
   .layout-desktop .fe-toolbar {
     grid-column: 1 / -1;
-    grid-row: 2;
+    grid-row: 1;
   }
 
   /* Menubar spans full width */
   .layout-desktop .fe-menubar {
     grid-column: 1 / -1;
-    grid-row: 3;
+    grid-row: 2;
   }
 
   /* Explorer becomes left sidebar - ALWAYS VISIBLE in desktop */
@@ -88,7 +75,7 @@
     bottom: auto;
     width: 100%;
     grid-column: 1;
-    grid-row: 4 / 6;
+    grid-row: 3 / 5;
     border-right: 1px solid var(--border);
     overflow-y: auto;
   }
@@ -107,7 +94,7 @@
   /* Editor in middle column */
   .layout-desktop .fe-editor-container {
     grid-column: 2;
-    grid-row: 4;
+    grid-row: 3;
     position: relative;
     overflow: hidden;
   }
@@ -121,7 +108,7 @@
     bottom: auto;
     width: 100%;
     grid-column: 3;
-    grid-row: 4 / 6;
+    grid-row: 3 / 5;
     border-left: 1px solid var(--border);
     transition: opacity 0.2s ease, visibility 0.2s ease;
     overflow-y: auto;
@@ -148,7 +135,7 @@
     left: auto;
     right: auto;
     grid-column: 2;
-    grid-row: 5;
+    grid-row: 4;
     height: var(--terminal-height, 340px);
     border-top: 2px solid var(--border);
     transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
@@ -165,7 +152,7 @@
 
   /* Adjust grid when terminal is closed in desktop */
   .layout-desktop:has(.terminal-drawer:not(.open)) {
-    grid-template-rows: auto auto auto 1fr 0px;
+    grid-template-rows: auto auto 1fr 0px;
   }
 
   /* Fix z-index for dropdowns in desktop mode */
@@ -180,24 +167,24 @@
   .fe-root.layout-mobile {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto 1fr auto;
+    grid-template-rows: auto auto 1fr auto;
     height: 100%;
     overflow: hidden;
   }
 
   .layout-mobile .fe-toolbar {
     grid-column: 1;
-    grid-row: 2;
+    grid-row: 1;
   }
 
   .layout-mobile .fe-menubar {
     grid-column: 1;
-    grid-row: 3;
+    grid-row: 2;
   }
 
   .layout-mobile .fe-editor-container {
     grid-column: 1;
-    grid-row: 4;
+    grid-row: 3;
     position: relative;
     overflow: hidden;
   }
@@ -210,7 +197,7 @@
     left: auto;
     right: auto;
     grid-column: 1;
-    grid-row: 5;
+    grid-row: 4;
     height: var(--terminal-height, 340px);
     border-top: 2px solid var(--border);
     transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
@@ -228,7 +215,7 @@
 
   /* Adjust grid when terminal is closed */
   .layout-mobile:has(.terminal-drawer:not(.open)) {
-    grid-template-rows: auto auto auto 1fr 0px;
+    grid-template-rows: auto auto 1fr 0px;
   }
 
   /* ========================================
@@ -304,7 +291,7 @@
     display: none;
   }
 
-  .fe-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); position: sticky; top: 0; z-index: 4; }
+  .fe-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
   .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .fe-file-name { font-size: 1rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fe-file-name.fe-unsaved::after { content: ' *'; color: var(--primary, #3b82f6); }
@@ -312,7 +299,7 @@
   .fe-btn { padding: 6px 10px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; flex-shrink: 0; align-self: center; }
   .fe-btn:hover { border-color: var(--primary, #3b82f6); }
   .fe-status { font-size: 0.75rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
-  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 13px; position: sticky; top: var(--fe-toolbar-height, 50px); z-index: 3; }
+  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 13px; }
   .fe-menu { position: relative; }
   .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; }
   .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
@@ -1272,9 +1259,6 @@
 </style>
 
 <div class="fe-root">
-  <!-- Mandatory spacer - consumes framework toolbar height -->
-  <div id="fe-framework-spacer"></div>
-  
   <aside id="fe-drawer" class="fe-drawer">
     <header class="fe-drawer-head">
       <span id="fe-project-label"></span>
@@ -1547,26 +1531,5 @@
     </div>
   </div>
 </div>
-
-<script>
-// Track app toolbar height for menubar positioning
-function updateAppToolbarHeight() {
-  const appToolbar = document.querySelector('.fe-toolbar');
-  if (appToolbar) {
-    document.documentElement.style.setProperty(
-      '--fe-toolbar-height', 
-      `${appToolbar.offsetHeight}px`
-    );
-  }
-}
-
-// Run on load and resize
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', updateAppToolbarHeight);
-} else {
-  updateAppToolbarHeight();
-}
-window.addEventListener('resize', updateAppToolbarHeight);
-</script>
 
 <script type="module" src="main.js"></script>
