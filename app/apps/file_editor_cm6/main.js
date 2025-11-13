@@ -397,6 +397,73 @@ const diffController = createDiffController({
 });
 window.__cm6Diff = diffController;
 
+// ---------- Session telemetry ----------
+async function fetchPersistedSessionState() {
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/session_state', { cache: 'no-store' });
+    const json = await resp.json();
+    if (!resp.ok || json?.ok === false) {
+      throw new Error(json?.error || resp.statusText || 'Session state fetch failed');
+    }
+    persistedSessionSnapshot = json?.data || {};
+    return persistedSessionSnapshot;
+  } catch (err) {
+    console.warn('Failed to load session telemetry:', err);
+    persistedSessionSnapshot = null;
+    return null;
+  }
+}
+
+function initSessionStateContext(serverState) {
+  const persisted = persistedSessionSnapshot || {};
+  sessionState.activeProject = serverState?.activeProject || persisted.activeProject || null;
+  sessionState.currentPath = persisted.currentPath || null;
+  sessionState.unsaved = !!persisted.unsaved;
+  sessionState.lastSha256 = persisted.lastSha256 || null;
+  sessionState.updatedAt = persisted.updated_at || null;
+  sessionStateInitialized = true;
+}
+
+function queueSessionStateUpdate(partial = null) {
+  if (!sessionStateInitialized) return;
+  if (partial && Object.keys(partial).length) {
+    sessionState = { ...sessionState, ...partial };
+  }
+  sessionState.updatedAt = new Date().toISOString();
+  if (sessionStateTimer) clearTimeout(sessionStateTimer);
+  sessionStateTimer = setTimeout(() => flushSessionState(), 600);
+}
+
+async function flushSessionState(force = false) {
+  if (!sessionStateInitialized) return;
+  if (sessionStateTimer) {
+    clearTimeout(sessionStateTimer);
+    sessionStateTimer = null;
+  } else if (!force) {
+    // Nothing pending; skip.
+    return;
+  }
+  try {
+    await apiPost('session_state', sessionState);
+  } catch (err) {
+    console.warn('Failed to persist session telemetry:', err);
+  }
+}
+
+function activeProjectPath() {
+  return cachedProjectRoot || (editorState && editorState.activeProject) || sessionState.activeProject || null;
+}
+
+function syncSessionPath(extra = {}) {
+  queueSessionStateUpdate({
+    activeProject: activeProjectPath(),
+    currentPath: currentPath || null,
+    lastSha256,
+    unsaved,
+    ...extra,
+  });
+}
+
 // ---------- Edit Tracker ----------
 function connectEditTracker() {
   // Backend-only - no WebSocket needed
@@ -600,6 +667,16 @@ let editorState = null;
 let cachedPreferences = null;
 let branchMenuHandle = null;
 let agentDrawerHandle = null;
+let sessionState = {
+  activeProject: null,
+  currentPath: null,
+  unsaved: false,
+  lastSha256: null,
+  updatedAt: null,
+};
+let sessionStateInitialized = false;
+let sessionStateTimer = null;
+let persistedSessionSnapshot = null;
 
 // WebSocket and autosave state
 let ws = null;
@@ -684,8 +761,13 @@ function getText() { return ''; } // Stub: content is in iframe (legacy code sti
 function setText(t) { console.log('[CM6] setText() disabled'); }
 
 function markUnsaved(flag) {
-  unsaved = !!flag;
+  const next = !!flag;
+  if (unsaved === next) {
+    return;
+  }
+  unsaved = next;
   fileNameEl.classList.toggle('fe-unsaved', unsaved);
+  syncSessionPath();
 }
 
 // ---------- API helpers ----------
@@ -1062,6 +1144,7 @@ async function openFile(path) {
       if (result && result.sha256) {
         lastSha256 = result.sha256;
         console.log('[Editor] SHA256 initialized:', result.sha256);
+        syncSessionPath();
       }
     }).catch(e => console.warn('[Editor] Failed to sync content to NiceGUI:', e));
 
@@ -1069,6 +1152,7 @@ async function openFile(path) {
     lastSavedContent = getText();
     markUnsaved(false);
     updatePathDisplay();
+    syncSessionPath();
     statusEl.textContent = '';
 
     // Open WebSocket for this file
@@ -1088,11 +1172,14 @@ async function openFile(path) {
         editorState = activity.state;
         cachedProjectRoot = editorState.activeProject || cachedProjectRoot;
         broadcastRecentsUpdate(editorState);
+        syncSessionPath();
       } else {
         // Fallback to a fresh pull if the payload lacked state
         const refreshed = await syncEditorState(true);
         if (refreshed) {
           broadcastRecentsUpdate(refreshed);
+          sessionState.activeProject = refreshed.activeProject || sessionState.activeProject;
+          syncSessionPath();
         }
       }
     } catch (err) {
@@ -1126,6 +1213,7 @@ async function doSave(targetPath, content) {
     lastSha256 = result.sha256 || lastSha256;
     lastSavedContent = content;
     markUnsaved(false);
+    syncSessionPath();
     return { success: true, result };
   } catch (e) {
     inflightOpId = null;
@@ -1396,7 +1484,7 @@ bindMenuToggle(miNew, () => {
   diffController.setContext(null);
   currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
   lastSha256 = null;
-  setText(''); lastSavedContent = ''; markUnsaved(false); updatePathDisplay();
+  setText(''); lastSavedContent = ''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
 });
 bindMenuToggle(miOpen, async () => { const p = await pickFile(); if (p) await openFile(p); });
 bindMenuToggle(miSave, () => saveFile());
@@ -1409,7 +1497,7 @@ bindMenuToggle(miClose, () => {
   diffController.setContext(null);
   currentPath=''; currentPathExists=false; lastPickerPath=HOME_DIR; currentModeLanguage=null;
   lastSha256 = null;
-  setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay();
+  setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
 });
 bindMenuToggle(miQuit, () => {
   closeWebSocket();
@@ -1418,7 +1506,7 @@ bindMenuToggle(miQuit, () => {
   }
   diffController.setContext(null);
   currentPath=''; currentPathExists=false; lastSha256 = null;
-  setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay();
+  setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
 });
 
 bindMenuToggle(miUndo, () => { if (view && undo) undo(view); });
@@ -1584,7 +1672,7 @@ document.addEventListener('keydown', (e) => {
     diffController.setContext(null);
     currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
     lastSha256 = null;
-    setText(''); lastSavedContent = ''; markUnsaved(false); updatePathDisplay();
+    setText(''); lastSavedContent = ''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
   }
 
   // Ctrl/Cmd+O: Open
@@ -1683,6 +1771,9 @@ async function main() {
   applyMenuState();
   updateThemeMenuChecks();
   bindThemeMenu();
+  await fetchPersistedSessionState();
+  initSessionStateContext(serverState);
+  queueSessionStateUpdate({ activeProject: serverState?.activeProject || null });
 
   const initialDoc = '';
   createView(initialDoc);
@@ -1733,6 +1824,7 @@ main();
 // Save state on exit
 host.onBeforeExit(() => {
   if (unsaved) { showConfirm(); host.toast('Unsaved changes — Save or Discard before leaving.'); return { cancel:true }; }
+  flushSessionState(true);
   return {};
 });
 

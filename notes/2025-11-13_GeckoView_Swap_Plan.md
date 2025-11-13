@@ -72,6 +72,7 @@
 
 - **Nov 13:** Gecko flavor boots successfully; runtime created via `GeckoRuntimeProvider`. Default text zoom set to 80% (`fontSizeFactor = 0.8`) with automatic font adjustment disabled to match the former WebView `textZoom = 80` behavior.
 - **Nov 13 (later):** Vendored CodeMirror now exposes `set_font_scale`, allowing runtime font-size tuning from NiceGUI (currently defaulted to 85% inside `editor_app.py`). Toolbar tweaks keep Recents + path on one row.
+- **Status:** Font scaling controls still behave inconsistently in Gecko; deprioritized until after session-state work.
 
 ### Wishlist / Next Steps
 

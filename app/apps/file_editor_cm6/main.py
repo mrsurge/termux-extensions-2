@@ -467,6 +467,18 @@ def get_project_state():
     state = _build_state_payload()
     return {"ok": True, "data": state}
 
+@file_editor_cm6_bp.get('/session_state')
+def get_session_state():
+    """Return last-known editor session telemetry."""
+    state = _history_store.get_session_state()
+    return {"ok": True, "data": state}
+
+@file_editor_cm6_bp.post('/session_state')
+def update_session_state(payload: dict = Body(...)):
+    """Persist lightweight session telemetry for crash/reconnect recovery."""
+    state = _history_store.update_session_state(payload or {})
+    return {"ok": True, "data": state}
+
 
 @file_editor_cm6_bp.get('/preferences')
 def get_preferences():

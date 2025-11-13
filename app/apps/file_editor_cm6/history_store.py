@@ -39,6 +39,7 @@ class HistoryStore:
             "recent_projects": [],
             "projects": {},
             "active_project": None,
+            "session_state": {},
         }
         self._load()
 
@@ -56,9 +57,10 @@ class HistoryStore:
                 self._data["recent_projects"] = data.get("recent_projects", [])
                 self._data["projects"] = data.get("projects", {})
                 self._data["active_project"] = data.get("active_project")
+                self._data["session_state"] = data.get("session_state", {})
         except Exception:
             # Corrupt or unreadable history; start fresh.
-            self._data = {"recent_projects": [], "projects": {}, "active_project": None}
+            self._data = {"recent_projects": [], "projects": {}, "active_project": None, "session_state": {}}
 
     def _save_locked(self) -> None:
         tmp_path = self._path.with_suffix(".tmp")
@@ -254,3 +256,19 @@ class HistoryStore:
         if not path:
             return ""
         return _project_label(path)
+
+    # ----- session state helpers ---------------------------------------------
+
+    def get_session_state(self) -> Dict[str, object]:
+        with self._lock:
+            state = self._data.get("session_state") or {}
+            return dict(state)
+
+    def update_session_state(self, partial: Optional[Dict[str, object]]) -> Dict[str, object]:
+        payload = partial or {}
+        with self._lock:
+            state: Dict[str, object] = self._data.setdefault("session_state", {})
+            state.update(payload)
+            state["updated_at"] = _utc_timestamp()
+            self._save_locked()
+            return dict(state)
