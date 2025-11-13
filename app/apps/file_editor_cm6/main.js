@@ -399,52 +399,18 @@ window.__cm6Diff = diffController;
 
 // ---------- Edit Tracker ----------
 function connectEditTracker() {
-  if (editTrackerWS) return; // Already connected
-  
-  const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${wsProto}//${window.location.host}/ws/app/file_editor_cm6/edit_tracker`;
-  
-  editTrackerWS = new ReconnectingWebSocket(wsUrl, {
-    maxRetries: 10,
-    reconnectInterval: 1000,
-    maxReconnectInterval: 30000,
-    reconnectDecay: 1.5,
-    debug: true
-  });
-  
-  editTrackerWS.onopen = () => {
-    console.log('[EditTracker] Connected');
-  };
-  
-  editTrackerWS.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      handleEditTrackerEvent(data);
-    } catch (e) {
-      console.error('[EditTracker] Parse error:', e);
-    }
-  };
-  
-  editTrackerWS.onerror = (err) => {
-    console.error('[EditTracker] WebSocket error:', err);
-  };
-  
-  editTrackerWS.onclose = () => {
-    console.log('[EditTracker] Disconnected');
-    updateEditTrackerStatus({ active: false, shells: [], last_edit: null });
-  };
-  
-  editTrackerWS.onreconnect = (attempt, delay) => {
-    console.log(`[EditTracker] Reconnecting (attempt ${attempt}) in ${delay}ms...`);
-  };
+  // Backend-only - no WebSocket needed
+  // Just call the backend to enable edit tracking
+  apiPost('editor/toggle_edit_tracking', { enabled: true })
+    .then(() => console.log('[EditTracker] Enabled'))
+    .catch(err => console.error('[EditTracker] Failed to enable:', err));
 }
 
 function disconnectEditTracker() {
-  if (editTrackerWS) {
-    editTrackerWS.close();
-    editTrackerWS = null;
-  }
-  updateEditTrackerStatus({ active: false, shells: [], last_edit: null });
+  // Backend-only - no WebSocket needed
+  apiPost('editor/toggle_edit_tracking', { enabled: false })
+    .then(() => console.log('[EditTracker] Disabled'))
+    .catch(err => console.error('[EditTracker] Failed to disable:', err));
 }
 
 function handleEditTrackerEvent(data) {

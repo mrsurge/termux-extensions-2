@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "com.termux.extensions.app-debug-20:/mipmap-xxxhdpi_ic_launcher.png.flat",
+        "source": "com.termux.extensions.app-main-22:/mipmap-xxxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.termux.extensions.app-debug-20:/layout_activity_main.xml.flat",
+        "source": "com.termux.extensions.app-main-22:/layout/activity_main.xml"
+    }
+]

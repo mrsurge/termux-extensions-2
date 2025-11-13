@@ -10,8 +10,6 @@ sys.path.insert(0, str(vendor_dir))
 
 import os
 import json
-import hashlib
-import time
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
 from fastapi.responses import JSONResponse, FileResponse
@@ -20,7 +18,7 @@ import anyio
 from .agent_ws import agent_websocket
 from .history_store import HistoryStore
 from .preferences_store import PreferencesStore
-from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir
+from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
 from .git_helper import (
     GitError,
     list_branches as git_list_branches,
@@ -63,6 +61,10 @@ from .terminal_backend import terminal_router
 file_editor_cm6_bp.include_router(terminal_router)
 file_editor_cm6_bp.add_api_websocket_route("/ws/agent", agent_websocket)
 
+# Include the self-contained editor routes
+from .nicegui_editor.editor_app import editor_router
+file_editor_cm6_bp.include_router(editor_router)
+
 # Mount NiceGUI editor as sub-application (picked up by app_worker.py)
 # NiceGUI requires ui.run_with() for proper initialization when embedding
 from nicegui import ui
@@ -97,9 +99,8 @@ def init_nicegui_with_app(fastapi_app):
 # Just expose the init hook for app_worker.py to call
 NICEGUI_INIT_HOOK = init_nicegui_with_app
 
-# Initialize history store (project root managed by explorer_helper)
-_history_store = HistoryStore()
-_preferences_store = PreferencesStore()
+# Import singleton store instances
+from .stores import _history_store, _preferences_store
 
 def _ensure_project_root_synced() -> Path:
     """Ensure the in-memory project root matches the persisted active project."""
@@ -205,25 +206,6 @@ def _expand_and_validate_path(path):
         return None, 'Access denied'
     return expanded, None
 
-
-def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
-    """Return a project-relative POSIX path or raise ValueError."""
-    if not raw_path:
-        raise ValueError("path required")
-
-    candidate = Path(raw_path)
-    if candidate.is_absolute():
-        resolved = candidate.resolve()
-    else:
-        resolved = (project_root / candidate).resolve()
-
-    project_root_resolved = project_root.resolve()
-    if not str(resolved).startswith(str(project_root_resolved)):
-        raise ValueError("Path outside project root")
-
-    rel = resolved.relative_to(project_root_resolved)
-    return rel.as_posix()
-
 @file_editor_cm6_bp.get('/')
 def status_root():
     return {"ok": True, "data": {"message": "File Editor CM6 app API ready"}}
@@ -246,297 +228,6 @@ def read_file(path: str = Query(...)):
         return {"ok": True, "data": {"path": expanded, "content": content, "sha256": meta.get("sha256")}}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@file_editor_cm6_bp.post('/editor/set_content')
-async def set_editor_content(data: dict = Body(...)):
-    """Update editor content - called by main.js when opening files"""
-    from .nicegui_editor.editor_app import get_active_editor, set_current_file
-    
-    editor = get_active_editor()
-    if not editor:
-        return {"ok": False, "error": "Editor not ready"}
-    
-    content = data.get('content', '')
-    path = data.get('path', '')
-    language = data.get('language', 'python')
-    
-    # Compute SHA256 of content being loaded
-    content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
-    
-    # Track the current file path and SHA256 in backend
-    set_current_file(path, content_sha256)
-    
-    # Set content and language directly
-    editor.set_value(content)
-    editor.set_language(language)
-    editor.update()
-    
-    # CRITICAL: Re-sync ALL settings from disk on every file load
-    # This ensures browser refresh (while worker still running) gets fresh settings
-    prefs = _preferences_store.get_preferences()
-    editor_prefs = prefs.get('editor', {})
-    
-    # Apply zebra stripes from disk
-    show_shading = editor_prefs.get('showShading', False)
-    editor.set_zebra_stripes(show_shading)
-    print(f"[FILE_LOAD] Applied zebra stripes: {show_shading}", file=sys.stderr)
-    
-    # Apply word wrap from disk
-    word_wrap = editor_prefs.get('wordWrap', False)
-    editor.set_line_wrapping(word_wrap)
-    editor.update()
-    print(f"[FILE_LOAD] Applied word wrap: {word_wrap}", file=sys.stderr)
-    
-    # Apply theme from disk
-    theme = editor_prefs.get('theme', 'oneDark')
-    editor.set_theme(theme)
-    print(f"[FILE_LOAD] Applied theme: {theme}", file=sys.stderr)
-    
-    # Load diffs if enabled
-    if editor_prefs.get('showInlineDiffs', False) and path:
-        try:
-            project_path = _history_store.get_active_project() or str(get_project_root())
-            if project_path:
-                project_root = Path(project_path).expanduser()
-                rel = _normalize_rel_path(project_root, path)
-                diff_data = collect_diff(project_root, rel)
-                hunks = diff_data.get('hunks', [])
-                editor.set_diff_decorations(hunks)
-                print(f"[DIFF] Auto-loaded {len(hunks)} hunks for {path}", file=sys.stderr)
-        except Exception as e:
-            print(f"[DIFF] Failed to auto-load diffs: {e}", file=sys.stderr)
-            editor.set_diff_decorations([])
-    else:
-        editor.set_diff_decorations([])
-    
-    return {"ok": True, "sha256": content_sha256}
-
-@file_editor_cm6_bp.post('/editor/refresh_diffs')
-async def refresh_diffs(data: dict = Body(...)):
-    """Manually refresh diffs for the current file"""
-    from .nicegui_editor.editor_app import get_active_editor
-    
-    path = data.get('path')
-    if not path:
-        return {"ok": False, "error": "No path provided"}
-    
-    editor = get_active_editor()
-    if not editor:
-        return {"ok": False, "error": "Editor not ready"}
-    
-    try:
-        project_path = _history_store.get_active_project() or str(get_project_root())
-        if not project_path:
-            return {"ok": False, "error": "No project selected"}
-        
-        project_root = Path(project_path).expanduser()
-        rel = _normalize_rel_path(project_root, path)
-        diff_data = collect_diff(project_root, rel)
-        hunks = diff_data.get('hunks', [])
-        
-        editor.set_diff_decorations(hunks)
-        
-        print(f"[DIFF] Manually refreshed {len(hunks)} hunks for {path}", file=sys.stderr)
-        return {"ok": True, "hunks_count": len(hunks)}
-    except Exception as e:
-        print(f"[DIFF] Refresh failed: {e}", file=sys.stderr)
-        return {"ok": False, "error": str(e)}
-
-@file_editor_cm6_bp.get('/editor/debug/state')
-def debug_editor_state():
-    """DEBUG ENDPOINT: Get current editor state for testing"""
-    from .nicegui_editor.editor_app import get_active_editor, get_current_file
-    
-    editor = get_active_editor()
-    current_file = get_current_file()
-    
-    if not editor:
-        return {
-            "ok": False, 
-            "error": "Editor not ready",
-            "current_file": current_file,
-            "editor_exists": False
-        }
-    
-    content = editor.value or ''
-    
-    return {
-        "ok": True,
-        "editor_exists": True,
-        "current_file": current_file,
-        "content_length": len(content),
-        "content": content,  # Full content for debugging
-        "content_hash": hashlib.sha256(content.encode('utf-8')).hexdigest(),
-    }
-
-@file_editor_cm6_bp.post('/editor/save')
-async def save_current_file(data: dict = Body(...)):
-    """Save the current file - handles everything backend-side"""
-    from .nicegui_editor.editor_app import get_active_editor, get_current_file, get_current_file_sha256, set_current_file
-    
-    print(f"[SAVE] Endpoint called with data: {data}", file=sys.stderr)
-    
-    editor = get_active_editor()
-    if not editor:
-        print(f"[SAVE] ERROR: Editor not ready", file=sys.stderr)
-        return {"ok": False, "error": "Editor not ready"}
-    
-    current_file = get_current_file()
-    print(f"[SAVE] Current file: {current_file}", file=sys.stderr)
-    
-    if not current_file:
-        print(f"[SAVE] ERROR: No file open", file=sys.stderr)
-        return {"ok": False, "error": "No file is currently open"}
-    
-    # Get content directly from editor
-    content = editor.value or ''
-    print(f"[SAVE] Content length: {len(content)}", file=sys.stderr)
-    
-    # Use backend-tracked SHA256 for conflict detection (more reliable than frontend)
-    base_sha256 = get_current_file_sha256()
-    print(f"[SAVE] Backend tracked SHA256: {base_sha256}", file=sys.stderr)
-    
-    client_id = data.get('client_id', 'unknown')
-    op_id = data.get('op_id', f"op_{int(time.time() * 1000)}")
-    
-    project_root = get_project_root()
-    
-    try:
-        # Normalize path
-        rel_path = _normalize_rel_path(project_root, current_file)
-        print(f"[SAVE] Normalized path: {rel_path}", file=sys.stderr)
-    except ValueError as exc:
-        print(f"[SAVE] ERROR: Path normalization failed: {exc}", file=sys.stderr)
-        return {"ok": False, "error": f"Invalid path: {str(exc)}"}
-    
-    try:
-        # Initialize watcher
-        init_watcher(project_root)
-        
-        print(f"[SAVE] Calling write_full...", file=sys.stderr)
-        
-        # Atomic write with optional conflict check
-        file_meta = await anyio.to_thread.run_sync(
-            lambda: write_full(project_root, str(rel_path), content, base_sha256=base_sha256)
-        )
-        
-        print(f"[SAVE] Write successful, new SHA256: {file_meta['sha256']}", file=sys.stderr)
-        
-        # Send save acknowledgement to prevent self-echo
-        push_save_ack(str(rel_path), op_id, client_id, file_meta)
-        
-        # Notify diff subscribers of change
-        emit_diff_changed(str(rel_path), file_meta["sha256"])
-        
-        # Refresh caches
-        mark_git_cache_dirty(project_root)
-        invalidate_diff_cache(project_root, str(rel_path))
-        
-        # Update backend state with new SHA256
-        set_current_file(current_file, file_meta["sha256"])
-        
-        # Recalculate and apply diffs if enabled
-        prefs = _preferences_store.get_preferences()
-        if prefs.get('editor', {}).get('showInlineDiffs', False):
-            print(f"[SAVE] Recalculating diffs for saved file", file=sys.stderr)
-            try:
-                diff_data = collect_diff(project_root, str(rel_path))
-                hunks = diff_data.get('hunks', [])
-                editor.set_diff_decorations(hunks)
-                print(f"[SAVE] Applied {len(hunks)} diff hunks", file=sys.stderr)
-            except Exception as e:
-                print(f"[SAVE] Failed to recalculate diffs: {e}", file=sys.stderr)
-        
-        print(f"[SAVE] Success! Returning response", file=sys.stderr)
-        
-        return {
-            "ok": True,
-            "data": {
-                "mtime": file_meta["mtime"],
-                "size": file_meta["size"],
-                "sha256": file_meta["sha256"]
-            }
-        }
-    except BaseMismatchError as e:
-        print(f"[SAVE] Conflict detected: {e}", file=sys.stderr)
-        return JSONResponse(status_code=409, content={
-            "ok": False,
-            "error": "BASE_MISMATCH",
-            "data": {
-                "current": e.current_meta
-            }
-        })
-    except Exception as e:
-        print(f"[SAVE] ERROR: {type(e).__name__}: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return {"ok": False, "error": str(e)}
-
-@file_editor_cm6_bp.post('/editor/toggle_setting')
-async def toggle_editor_setting(data: dict = Body(...)):
-    """Toggle editor view settings (word wrap, line shading, etc)"""
-@file_editor_cm6_bp.post('/editor/set_view_settings')
-async def set_view_settings(data: dict = Body(...)):
-    """Update editor view settings - writes to preferences_store and applies to editor"""
-    from .nicegui_editor.editor_app import get_active_editor
-    
-    editor = get_active_editor()
-    
-    # Map frontend keys to preferences_store keys
-    editor_updates = {}
-    
-    if 'word_wrap' in data:
-        word_wrap = bool(data['word_wrap'])
-        editor_updates['wordWrap'] = word_wrap
-        print(f"[WORDWRAP] Setting to {word_wrap}, will save to prefs", file=sys.stderr)
-        if editor:
-            editor.set_line_wrapping(word_wrap)
-            editor.update()
-            print(f"[WORDWRAP] Applied to editor", file=sys.stderr)
-    
-    if 'line_shading' in data:
-        line_shading = bool(data['line_shading'])
-        editor_updates['showShading'] = line_shading
-        if editor:
-            editor.set_zebra_stripes(line_shading)
-    
-    if 'show_inline_diffs' in data:
-        show_diffs = bool(data['show_inline_diffs'])
-        editor_updates['showInlineDiffs'] = show_diffs
-        
-        # Load/clear diffs based on toggle
-        if show_diffs and editor:
-            # Get current file path from main.js (should be sent)
-            current_path = data.get('current_path')
-            if current_path:
-                try:
-                    project_path = _history_store.get_active_project() or str(get_project_root())
-                    project_root = Path(project_path).expanduser()
-                    rel = _normalize_rel_path(project_root, current_path)
-                    diff_data = collect_diff(project_root, rel)
-                    hunks = diff_data.get('hunks', [])
-                    editor.set_diff_decorations(hunks)
-                    print(f"[DIFF] Loaded {len(hunks)} hunks on toggle", file=sys.stderr)
-                except Exception as e:
-                    print(f"[DIFF] Failed to load diffs on toggle: {e}", file=sys.stderr)
-        elif not show_diffs and editor:
-            editor.set_diff_decorations([])
-    
-    if 'theme' in data:
-        theme_name = str(data['theme'])
-        editor_updates['theme'] = theme_name
-        # Apply theme to editor immediately
-        if editor:
-            editor.set_theme(theme_name)
-            print(f"[THEME] Applied theme: {theme_name}", file=sys.stderr)
-    
-    # Write to disk
-    if editor_updates:
-        print(f"[PREFS] Saving to disk: {editor_updates}", file=sys.stderr)
-        result = _preferences_store.update_preferences(editor=editor_updates)
-        print(f"[PREFS] Saved successfully, current state: {result.get('editor', {})}", file=sys.stderr)
-    
-    return {"ok": True}
 
 @file_editor_cm6_bp.post('/write')
 async def write_file_route(data: dict = Body(...)):

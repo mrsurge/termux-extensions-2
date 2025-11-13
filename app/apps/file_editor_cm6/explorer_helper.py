@@ -264,3 +264,22 @@ def _is_git_repo(root: Path) -> bool:
     except Exception:
         return False
     return result.returncode == 0 and result.stdout.strip() == 'true'
+
+
+def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
+    """Return a project-relative POSIX path or raise ValueError."""
+    if not raw_path:
+        raise ValueError("path required")
+
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+    else:
+        resolved = (project_root / candidate).resolve()
+
+    project_root_resolved = project_root.resolve()
+    if not str(resolved).startswith(str(project_root_resolved)):
+        raise ValueError("Path outside project root")
+
+    rel = resolved.relative_to(project_root_resolved)
+    return rel.as_posix()

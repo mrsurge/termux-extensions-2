@@ -339,3 +339,60 @@ try {
 **Files Modified**:
 - app/apps/file_editor_cm6/main.py - Added diff recalculation in save endpoint
 
+
+
+### 2025-11-13 09:09 UTC
+- **Implemented backend file watching for live updates**
+- When file is opened via /editor/set_content:
+  - Initializes file watcher
+  - Subscribes to file changes with callback
+  - On external file change:
+    - Updates editor.set_value() with new content
+    - Updates tracked SHA256
+    - Recalculates and applies diffs if enabled
+- All handled backend-side, no JavaScript WebSocket needed
+
+**Files Modified**:
+- app/apps/file_editor_cm6/main.py - Added file watching subscription in set_content
+
+**Next steps**:
+- Test external file changes appear in editor automatically
+- May need to handle subscription cleanup when switching files
+
+
+
+### 2025-11-13 09:19 UTC
+- **Implemented automatic edit tracker (backend-only)**
+- Added /editor/jump_to_line endpoint to open files and jump to specific lines
+- Added /editor/toggle_edit_tracking endpoint to enable/disable auto-jump
+- Backend subscribes to edit_tracker events and automatically triggers jumps
+- Simplified JavaScript - removed WebSocket, just toggles backend feature
+- Renamed menu item to "Auto-Jump to Edits"
+
+**How it works**:
+1. User enables "Auto-Jump to Edits" in menu
+2. JavaScript calls /editor/toggle_edit_tracking
+3. Backend subscribes to edit_tracker events
+4. When file is edited (by agent/linter/etc), edit_tracker detects it
+5. Backend automatically calls /editor/jump_to_line
+6. Editor opens the file (if different) and jumps to the edited line
+7. Diffs are recalculated automatically
+
+**Files Modified**:
+- app/apps/file_editor_cm6/nicegui_editor/editor_app.py - Added enable/disable_edit_tracking
+- app/apps/file_editor_cm6/main.py - Added jump_to_line and toggle_edit_tracking endpoints
+- app/apps/file_editor_cm6/main.js - Simplified to just call backend toggle
+- app/apps/file_editor_cm6/template.html - Renamed menu item
+
+
+
+### 2025-11-13 09:35 UTC
+- **Removed shell requirement from edit_tracker**
+- Previously required active shells (_active_shells) to track edits
+- Now tracks ANY file edits as long as there are subscribers
+- Added debug logging to track event flow
+- Will work for any external file changes (agents, linters, manual edits, etc)
+
+**Files Modified**:
+- app/apps/file_editor_cm6/edit_tracker.py - Removed shell check, added debug logs
+

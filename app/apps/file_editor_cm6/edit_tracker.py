@@ -80,13 +80,15 @@ def on_file_modified(path: str) -> None:
     Args:
         path: Absolute path to modified file
     """
+    import sys
+    
     with _lock:
-        # Only track if we have active shells
-        if not _active_shells:
-            return
-        
         # Only track if we have a project root
         if not _project_root:
+            return
+        
+        # Only track if we have subscribers
+        if not _subscribers:
             return
     
     # Get diff to find modified lines
@@ -100,14 +102,18 @@ def on_file_modified(path: str) -> None:
             # File outside project root
             return
         
+        print(f"[EDIT_TRACKER] File modified: {rel_path}", file=sys.stderr)
+        
         # Collect diff
         diff_data = collect_diff(_project_root, str(rel_path))
         
         if not diff_data or not diff_data.get('summary', {}).get('tracked'):
+            print(f"[EDIT_TRACKER] No tracked changes in diff", file=sys.stderr)
             return
         
         hunks = diff_data.get('hunks', [])
         if not hunks:
+            print(f"[EDIT_TRACKER] No hunks found", file=sys.stderr)
             return
         
         # Find first modified line (addition or deletion)
@@ -124,6 +130,7 @@ def on_file_modified(path: str) -> None:
                 break
         
         if first_line is None:
+            print(f"[EDIT_TRACKER] No line number found", file=sys.stderr)
             return
         
         # Update last edit state
@@ -141,12 +148,15 @@ def on_file_modified(path: str) -> None:
             global _last_edit
             _last_edit = edit_data
         
-        # Emit to WebSocket subscribers
+        print(f"[EDIT_TRACKER] Emitting edit event: {path_obj}:{first_line}", file=sys.stderr)
+        
+        # Emit to subscribers
         _emit_edit(edit_data)
         
-    except Exception:
-        # Silently ignore errors in edit tracking
-        pass
+    except Exception as e:
+        print(f"[EDIT_TRACKER] Error: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
 
 
 def subscribe(callback: Callable[[dict], None]) -> str:
