@@ -435,6 +435,18 @@ async def save_current_file(data: dict = Body(...)):
         # Update backend state with new SHA256
         set_current_file(current_file, file_meta["sha256"])
         
+        # Recalculate and apply diffs if enabled
+        prefs = _preferences_store.get_preferences()
+        if prefs.get('editor', {}).get('showInlineDiffs', False):
+            print(f"[SAVE] Recalculating diffs for saved file", file=sys.stderr)
+            try:
+                diff_data = collect_diff(project_root, str(rel_path))
+                hunks = diff_data.get('hunks', [])
+                editor.set_diff_decorations(hunks)
+                print(f"[SAVE] Applied {len(hunks)} diff hunks", file=sys.stderr)
+            except Exception as e:
+                print(f"[SAVE] Failed to recalculate diffs: {e}", file=sys.stderr)
+        
         print(f"[SAVE] Success! Returning response", file=sys.stderr)
         
         return {

@@ -327,3 +327,15 @@ try {
 - app/apps/file_editor_cm6/main.py - Added debug prints
 - app/apps/file_editor_cm6/main.js - Added console logging and better error handling
 
+
+
+### 2025-11-13 09:04 UTC
+- **Added diff recalculation after save**
+- After successful save, if showInlineDiffs is enabled:
+  - Recalculate diffs using collect_diff()
+  - Apply to editor using editor.set_diff_decorations()
+- This refreshes the diff decorations to reflect the saved state
+
+**Files Modified**:
+- app/apps/file_editor_cm6/main.py - Added diff recalculation in save endpoint
+
