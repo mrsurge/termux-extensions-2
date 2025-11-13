@@ -27,6 +27,12 @@
     --keyboard-gap: 16px;
   }
   .fe-root { display: flex; flex-direction: column; height: 100%; background:var(--bg); color:var(--fg); }
+  
+  /* Mandatory spacer for framework toolbar - consumes --framework-toolbar-height */
+  #fe-framework-spacer {
+    height: var(--framework-toolbar-height, 50px);
+    flex-shrink: 0;
+  }
 
   body.keyboard-locked {
     overflow: hidden;
@@ -50,7 +56,7 @@
     display: grid;
     grid-template-columns: var(--explorer-width, 430px) 1fr var(--agent-width, 400px);
     grid-template-rows: auto auto 1fr auto;
-    height: 93vh;
+    height: 100%;
     overflow: hidden;
   }
 
@@ -168,7 +174,7 @@
     display: grid;
     grid-template-columns: 1fr;
     grid-template-rows: auto auto 1fr auto;
-    height: 94vh;
+    height: 100%;
     overflow: hidden;
   }
 
@@ -291,7 +297,7 @@
     display: none;
   }
 
-  .fe-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
+  .fe-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); position: sticky; top: 0; z-index: 4; }
   .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .fe-file-name { font-size: 1rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fe-file-name.fe-unsaved::after { content: ' *'; color: var(--primary, #3b82f6); }
@@ -299,7 +305,7 @@
   .fe-btn { padding: 6px 10px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; flex-shrink: 0; align-self: center; }
   .fe-btn:hover { border-color: var(--primary, #3b82f6); }
   .fe-status { font-size: 0.75rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
-  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 13px; }
+  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 13px; position: sticky; top: var(--fe-toolbar-height, 50px); z-index: 3; }
   .fe-menu { position: relative; }
   .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; }
   .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
@@ -1259,6 +1265,9 @@
 </style>
 
 <div class="fe-root">
+  <!-- Mandatory spacer - consumes framework toolbar height -->
+  <div id="fe-framework-spacer"></div>
+  
   <aside id="fe-drawer" class="fe-drawer">
     <header class="fe-drawer-head">
       <span id="fe-project-label"></span>
@@ -1382,7 +1391,7 @@
       frameborder="0"
       scrolling="no"
       allow="clipboard-read; clipboard-write"
-      style="width: 100%; height: 65%; border: none; display: block; overflow: hidden;">
+      style="width: 100%; height: 100%; border: none; display: block; overflow: hidden;">
     </iframe>
   </div>
 
@@ -1531,4 +1540,26 @@
     </div>
   </div>
 </div>
+
+<script>
+// Track app toolbar height for menubar positioning
+function updateAppToolbarHeight() {
+  const appToolbar = document.querySelector('.fe-toolbar');
+  if (appToolbar) {
+    document.documentElement.style.setProperty(
+      '--fe-toolbar-height', 
+      `${appToolbar.offsetHeight}px`
+    );
+  }
+}
+
+// Run on load and resize
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', updateAppToolbarHeight);
+} else {
+  updateAppToolbarHeight();
+}
+window.addEventListener('resize', updateAppToolbarHeight);
+</script>
+
 <script type="module" src="main.js"></script>

@@ -175,6 +175,26 @@
     <script type="module" src="/static/js/jobs_client.js"></script>
     <script type="module" src="/static/js/file_picker.js"></script>
     <script id="__app_id_json" type="application/json">{{ app_id|tojson }}</script>
+    
+    <script>
+    // Framework toolbar height tracking - expose as CSS variable for all apps
+    function updateFrameworkToolbarHeight() {
+        const toolbar = document.querySelector('.app-toolbar');
+        if (toolbar) {
+            const height = toolbar.offsetHeight;
+            document.documentElement.style.setProperty('--framework-toolbar-height', `${height}px`);
+        }
+    }
+    
+    // Run on load and resize
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', updateFrameworkToolbarHeight);
+    } else {
+        updateFrameworkToolbarHeight();
+    }
+    window.addEventListener('resize', updateFrameworkToolbarHeight);
+    </script>
+    
     <script type="module">
         const SETTINGS_ENDPOINT = '/api/settings';
 
