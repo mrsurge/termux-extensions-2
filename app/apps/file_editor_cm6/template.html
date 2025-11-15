@@ -1533,4 +1533,15 @@
   </div>
 </div>
 
+<div id="crash-modal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.8); z-index:9999; justify-content:center; align-items:center;">
+  <div style="background:#1e293b; border-radius:8px; padding:24px; max-width:480px; box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+    <h2 style="margin:0 0 16px; color:#f1f5f9; font-size:20px; font-weight:600;">Unsaved Changes Detected</h2>
+    <p id="crash-message" style="margin:0 0 24px; color:#cbd5e1; font-size:14px; line-height:1.6;"></p>
+    <div style="display:flex; gap:12px; justify-content:flex-end;">
+      <button id="crash-discard" style="padding:8px 16px; background:#475569; color:#f1f5f9; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:500;">Discard</button>
+      <button id="crash-restore" style="padding:8px 16px; background:#3b82f6; color:#ffffff; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600;">Restore</button>
+    </div>
+  </div>
+</div>
+
 <script type="module" src="main.js"></script>

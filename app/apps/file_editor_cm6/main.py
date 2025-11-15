@@ -148,6 +148,17 @@ def _status_to_payload(status) -> dict:
         "untracked": status.untracked,
     }
 
+def _get_runtime_metadata() -> dict:
+    """Collect runtime metadata for crash detection."""
+    import os
+    return {
+        "run_id": os.getenv("TE_RUN_ID", "unknown"),
+        "shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
+        "shell_run_id": os.getenv("TE_FRAMEWORK_SHELL_RUN_ID", "unknown"),
+        "launcher_pid": int(os.getenv("TE_LAUNCHER_PID", "0")),
+        "worker_pid": os.getpid(),
+    }
+
 def _build_state_payload() -> dict:
     project_path = _history_store.get_active_project()
     project_exists = bool(project_path and Path(project_path).is_dir())
@@ -185,6 +196,7 @@ def _build_state_payload() -> dict:
         })
 
     editor_prefs = _preferences_store.get_preferences(project_path)
+    runtime_meta = _get_runtime_metadata()
 
     return {
         "activeProject": project_path,
@@ -197,6 +209,7 @@ def _build_state_payload() -> dict:
         "lastFileMessage": last_file_message,
         "recents": recents,
         "preferences": editor_prefs,
+        "runtime": runtime_meta,
     }
 
 def _expand_and_validate_path(path):
@@ -213,6 +226,72 @@ def status_root():
 @file_editor_cm6_bp.get('/status')
 def status():
     return {"ok": True, "data": {"message": "File Editor CM6 app API ready"}}
+
+
+@file_editor_cm6_bp.get('/session_cache')
+def get_session_cache(
+    project: str = Query(...),
+    path: str = Query(...),
+):
+    """Retrieve cached session for a document."""
+    expanded_project, err = _expand_and_validate_path(project)
+    if err:
+        raise HTTPException(status_code=403, detail=err)
+    
+    expanded_path, err = _expand_and_validate_path(path)
+    if err:
+        raise HTTPException(status_code=403, detail=err)
+    
+    cached = _history_store.get_cached_document(expanded_project, expanded_path)
+    
+    if not cached:
+        return {"ok": True, "data": None}
+    
+    # Determine state: crashed vs mid-session
+    runtime_meta = _get_runtime_metadata()
+    current_run_id = runtime_meta["run_id"]
+    cached_run_id = cached.get("run_id", "unknown")
+    
+    state = "mid_session" if current_run_id == cached_run_id else "crashed"
+    
+    return {
+        "ok": True,
+        "data": {
+            "state": state,
+            "content": cached["content"],
+            "content_sha256": cached["content_sha256"],
+            "base_sha256": cached["base_sha256"],
+            "unsaved": cached["unsaved"],
+            "run_id": cached_run_id,
+            "updated_at": cached["updated_at"],
+            "current_run_id": current_run_id,
+        }
+    }
+
+
+@file_editor_cm6_bp.delete('/session_cache')
+def delete_session_cache(
+    project: str = Query(...),
+    path: str = Query(...),
+):
+    """Discard cached session for a document."""
+    expanded_project, err = _expand_and_validate_path(project)
+    if err:
+        raise HTTPException(status_code=403, detail=err)
+    
+    expanded_path, err = _expand_and_validate_path(path)
+    if err:
+        raise HTTPException(status_code=403, detail=err)
+    
+    existed = _history_store.clear_cached_document(expanded_project, expanded_path)
+    
+    return {
+        "ok": True,
+        "data": {
+            "cleared": existed
+        }
+    }
+
 
 @file_editor_cm6_bp.get('/read')
 def read_file(path: str = Query(...)):
@@ -254,10 +333,14 @@ async def write_file_route(data: dict = Body(...)):
         init_watcher(project_root)
 
         # Perform atomic write with optional conflict check
-        # Note: anyio.to_thread.run_sync doesn't support keyword args directly
         file_meta = await anyio.to_thread.run_sync(
             lambda: write_full(project_root, str(rel_path), content, base_sha256=base_sha256)
         )
+        
+        # NEW: Purge cache entry on successful save
+        project_path = _history_store.get_active_project()
+        if project_path:
+            _history_store.clear_cached_document(project_path, path)
 
         # Send save acknowledgement to prevent self-echo
         push_save_ack(str(rel_path), op_id, client_id, file_meta)

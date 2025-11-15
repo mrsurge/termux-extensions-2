@@ -2,6 +2,7 @@
 
 import json
 import sys
+import os
 import hashlib
 import time
 from pathlib import Path
@@ -28,6 +29,8 @@ _active_editor = None
 _current_file_path = None
 _current_file_sha256 = None
 _edit_tracker_subscription = None
+_cache_persist_timer = None
+_cache_persist_debounce_ms = 1000  # 1 second debounce
 
 # --- State Accessors ---
 def get_active_editor():
@@ -43,6 +46,75 @@ def get_current_file():
 
 def get_current_file_sha256():
     return _current_file_sha256
+
+# --- Helpers ---
+def _get_runtime_metadata() -> dict:
+    return {
+        "run_id": os.getenv("TE_RUN_ID", "unknown"),
+        "shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
+        "shell_run_id": os.getenv("TE_FRAMEWORK_SHELL_RUN_ID", "unknown"),
+        "launcher_pid": int(os.getenv("TE_LAUNCHER_PID", "0")),
+        "worker_pid": os.getpid(),
+    }
+
+# --- Cache Persistence ---
+def _get_cached_editor_content(editor) -> str:
+    return getattr(editor, '_cached_content', editor.value or '')
+
+
+def _persist_to_cache_debounced():
+    """Debounced cache persistence called on editor change."""
+    global _cache_persist_timer
+    
+    editor = get_active_editor()
+    current_file = get_current_file()
+    current_sha = get_current_file_sha256()
+    
+    if not editor or not current_file:
+        return
+    
+    project_path = _history_store.get_active_project()
+    if not project_path:
+        return
+    
+    current_content = _get_cached_editor_content(editor)
+    print(f"[SESSION_CACHE] snapshot path={current_file} len={len(current_content)} sha256={hashlib.sha256(current_content.encode('utf-8')).hexdigest() if current_content else '0'*64}", file=sys.stderr)
+    
+    # Collect runtime metadata
+    runtime_meta = {
+        "run_id": os.getenv("TE_RUN_ID", "unknown"),
+        "shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
+        "shell_run_id": os.getenv("TE_FRAMEWORK_SHELL_RUN_ID", "unknown"),
+        "launcher_pid": int(os.getenv("TE_LAUNCHER_PID", "0")),
+        "worker_pid": os.getpid(),
+    }
+    
+    _history_store.upsert_cached_document(
+        project_path=project_path,
+        file_path=current_file,
+        content=current_content,
+        base_sha256=current_sha or '',
+        run_id=runtime_meta["run_id"],
+        shell_id=runtime_meta["shell_id"],
+        shell_run_id=runtime_meta["shell_run_id"],
+        launcher_pid=runtime_meta["launcher_pid"],
+        worker_pid=runtime_meta["worker_pid"],
+    )
+    
+    print(f"[SESSION_CACHE] Persisted draft for {current_file}", file=sys.stderr)
+
+def _schedule_cache_persist():
+    """Schedule debounced cache persistence."""
+    global _cache_persist_timer
+    
+    if _cache_persist_timer:
+        _cache_persist_timer.cancel()
+    
+    _cache_persist_timer = ui.timer(
+        _cache_persist_debounce_ms / 1000,
+        _persist_to_cache_debounced,
+        once=True
+    )
 
 # --- Edit Tracking ---
 def enable_edit_tracking():
@@ -92,6 +164,7 @@ async def editor_page():
     initial_language = 'text'
     initial_path = None
     initial_sha256 = None
+    restored_state = None
 
     if last_file and Path(last_file).is_file():
         try:
@@ -114,6 +187,17 @@ async def editor_page():
         except Exception as e:
             print(f"[EDITOR_APP] Failed to auto-load last file '{last_file}': {e}", file=sys.stderr)
 
+    # 2b. Apply cached session content if available
+    if project_path and initial_path:
+        cached_entry = _history_store.get_cached_document(project_path, initial_path)
+        if cached_entry and isinstance(cached_entry.get('content'), str):
+            runtime_meta = _get_runtime_metadata()
+            cached_run = cached_entry.get('run_id', 'unknown')
+            restored_state = 'mid_session' if cached_run == runtime_meta.get('run_id') else 'crashed'
+            initial_content = cached_entry.get('content')
+            initial_sha256 = cached_entry.get('content_sha256') or hashlib.sha256(initial_content.encode('utf-8')).hexdigest()
+            print(f"[EDITOR_APP] Restored cached session ({restored_state}) for {initial_path}", file=sys.stderr)
+
     # 3. Set up UI
     ui.add_head_html('''
     <style>
@@ -126,18 +210,33 @@ async def editor_page():
         with ui.element('div').style('flex: 1; display: flex; flex-direction: column; overflow: hidden;').classes('editor-wrapper w-full h-full'):
             
             # 4. Create Editor with Auto-Loaded Content
+            def _on_editor_change(event):
+                # Use the authoritative backend value; event.value can lag during init.
+                value = editor.value or ''
+                print(f"[ON_CHANGE] len={len(value)} sha={hashlib.sha256(value.encode('utf-8')).hexdigest() if value else '0'*64}", file=sys.stderr)
+                editor._cached_content = value
+                _schedule_cache_persist()
             editor = ui.codemirror(
                 value=initial_content,
                 language=initial_language,
                 theme=editor_prefs.get('theme', 'cm6-dark'),
                 line_wrapping=editor_prefs.get('wordWrap', False),
+                on_change=_on_editor_change,
             ).style('flex: 1; border: none;').classes('editor-content w-full h-full').props('flat borderless')
-            
+            editor._cached_content = initial_content
+
             # 5. Set Global State and Apply Settings
             _active_editor = editor
             set_current_file(initial_path, initial_sha256)
             editor.set_zebra_stripes(editor_prefs.get('showShading', False))
             editor.set_font_scale(0.85)
+
+            if restored_state:
+                ui.notify(
+                    'Restored unsaved draft' if restored_state == 'mid_session' else 'Recovered changes from prior crash',
+                    color='orange',
+                    position='top',
+                )
             
             # 6. Load Diffs if Enabled
             if editor_prefs.get('showInlineDiffs', False) and initial_path and project_path:
@@ -158,6 +257,7 @@ async def editor_page():
                     if event.get('type') == 'replace_full':
                         new_content, new_sha256 = event.get('content', ''), event.get('sha256')
                         editor.set_value(new_content)
+                        editor._cached_content = new_content
                         set_current_file(initial_path, new_sha256)
                         if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
                             try:
@@ -195,16 +295,40 @@ async def editor_page():
 
 # --- Editor API Endpoints ---
 
+@editor_router.post('/discard_draft')
+async def discard_draft(data: dict = Body(...)):
+    """Discard cached session for current document."""
+    path = data.get('path')
+    project_path = _history_store.get_active_project()
+    
+    if not path or not project_path:
+        return {"ok": False, "error": "No active document"}
+    
+    cleared = _history_store.clear_cached_document(project_path, path)
+    
+    return {"ok": True, "data": {"cleared": cleared}}
+
 @editor_router.post('/set_content')
 async def set_editor_content(data: dict = Body(...)):
     editor = get_active_editor()
     if not editor: return {"ok": False, "error": "Editor not ready"}
     
-    content, path, language = data.get('content', ''), data.get('path', ''), data.get('language', 'python')
+    new_path = data.get('path', '')
+    old_path = get_current_file()
+    project_path = _history_store.get_active_project()
+    
+    print(f"[SET_CONTENT] path={new_path!r} old={old_path!r}", file=sys.stderr)
+
+    # NEW: Clear cache for old document if switching
+    if old_path and old_path != new_path and project_path:
+        _history_store.clear_cached_document(project_path, old_path)
+    
+    content, language = data.get('content', ''), data.get('language', 'python')
     content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
-    set_current_file(path, content_sha256)
+    set_current_file(new_path, content_sha256)
     
     editor.set_value(content)
+    editor._cached_content = content
     editor.set_language(language)
     editor.update()
     
@@ -214,17 +338,19 @@ async def set_editor_content(data: dict = Body(...)):
     def on_file_change(event):
         if event.get('type') == 'replace_full':
             new_content, new_sha256 = event.get('content', ''), event.get('sha256')
+            print(f"[SET_CONTENT][WATCHER] replace_full path={new_path!r} sha={new_sha256}", file=sys.stderr)
             editor.set_value(new_content)
-            set_current_file(path, new_sha256)
+            editor._cached_content = new_content
+            set_current_file(new_path, new_sha256)
             if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
                 try:
-                    rel_path = _normalize_rel_path(project_root, path)
+                    rel_path = _normalize_rel_path(project_root, new_path)
                     diff_data = collect_diff(project_root, rel_path)
                     editor.set_diff_decorations(diff_data.get('hunks', []))
                 except Exception as e:
                     print(f"[FILE_WATCH] Failed to recalculate diffs: {e}", file=sys.stderr)
 
-    subscribe(path, 'nicegui_backend_set_content', on_file_change)
+    subscribe(new_path, 'nicegui_backend_set_content', on_file_change)
     
     editor_prefs = _preferences_store.get_preferences().get('editor', {})
     editor.set_zebra_stripes(editor_prefs.get('showShading', False))
@@ -232,10 +358,10 @@ async def set_editor_content(data: dict = Body(...)):
     editor.set_theme(editor_prefs.get('theme', 'oneDark'))
     editor.update()
     
-    if editor_prefs.get('showInlineDiffs', False) and path:
+    if editor_prefs.get('showInlineDiffs', False) and new_path:
         try:
             project_path = _history_store.get_active_project() or str(get_project_root())
-            rel = _normalize_rel_path(Path(project_path).expanduser(), path)
+            rel = _normalize_rel_path(Path(project_path).expanduser(), new_path)
             diff_data = collect_diff(Path(project_path).expanduser(), rel)
             editor.set_diff_decorations(diff_data.get('hunks', []))
         except Exception: editor.set_diff_decorations([])
@@ -268,7 +394,7 @@ async def toggle_edit_tracking(data: dict = Body(...)):
     enabled = data.get('enabled', False)
     if enabled: enable_edit_tracking()
     else: disable_edit_tracking()
-    _preferences_store.update_preferences({'editor': {'trackAgentEdits': enabled}})
+    _preferences_store.update_preferences(editor={'trackAgentEdits': enabled})
     return {"ok": True, "enabled": enabled}
 
 @editor_router.post('/jump_to_line')
@@ -276,6 +402,7 @@ async def jump_to_line(data: dict = Body(...)):
     target_path, target_line = data.get('path'), data.get('line', 1)
     editor = get_active_editor()
     if not editor: return {"ok": False, "error": "Editor not ready"}
+    print(f"[JUMP_TO_LINE] target={target_path!r} line={target_line}", file=sys.stderr)
     
     current_file = get_current_file()
     if target_path and target_path != current_file:
@@ -286,12 +413,16 @@ async def jump_to_line(data: dict = Body(...)):
             editor.set_language(language)
             content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
             set_current_file(target_path, content_sha256)
+            editor._cached_content = content
+            print(f"[JUMP_TO_LINE] loaded file sha={content_sha256}", file=sys.stderr)
             
             project_root = get_project_root()
             init_watcher(project_root)
             def on_file_change(event):
                 if event.get('type') == 'replace_full':
+                    print(f"[JUMP_TO_LINE][WATCHER] replace_full path={target_path!r}", file=sys.stderr)
                     editor.set_value(event.get('content', ''))
+                    editor._cached_content = event.get('content', '')
                     set_current_file(target_path, event.get('sha256'))
             subscribe(target_path, 'nicegui_backend_jump', on_file_change)
         except Exception as e:

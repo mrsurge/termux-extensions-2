@@ -1794,28 +1794,44 @@ async function main() {
   const params = new URLSearchParams(window.location.search);
   const fileFromUrl = params.get('file');
   let bootOpened = false;
+  const restoredPath = serverState.lastFile;
+  const restoredSha = serverState.lastFileSha256 || null;
+  if (restoredPath && !currentPath) {
+    currentPath = restoredPath;
+    currentPathExists = !!serverState.lastFileExists;
+    lastPickerPath = parentDir(restoredPath);
+    lastSha256 = restoredSha;
+    setText(''); // NiceGUI iframe owns the real buffer
+  }
 
   if (fileFromUrl) {
     const abs = toAbsolute(fileFromUrl, null, HOME_DIR);
     lastPickerPath = parentDir(abs);
     bootOpened = true;
-    openFile(abs).catch((e) => {
+    await openFile(abs).catch((e) => {
       host.toast(`Failed to open file: ${e.message}`);
       currentPath = ''; currentPathExists = false; setText(''); markUnsaved(false); updatePathDisplay();
     });
   } else if (serverState.lastFile && serverState.lastFileExists) {
-    bootOpened = true;
-    setTimeout(() => {
-      openFile(serverState.lastFile).catch((e) => {
-        console.error('Failed to reopen last file:', e);
-        statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
-      });
-    }, 400);
+    if (currentPath && restoredPath && currentPath === restoredPath) {
+      console.log('[BOOT] Skipping host-side open; NiceGUI already loaded restored path');
+      bootOpened = true;
+    } else {
+      bootOpened = true;
+      // Use a timeout to ensure the iframe is ready
+      setTimeout(async () => {
+        await openFile(serverState.lastFile).catch((e) => {
+          console.error('Failed to reopen last file:', e);
+          statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
+        });
+      }, 400);
+    }
   } else if (serverState.lastFile && !serverState.lastFileExists) {
     statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
   } else if (!bootOpened) {
     statusEl.textContent = 'Select a file to begin.';
   }
+
 }
 
 // Run the main boot sequence

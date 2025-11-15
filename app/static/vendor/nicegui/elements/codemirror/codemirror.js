@@ -176,6 +176,10 @@ export default {
     };
   },
   methods: {
+    request_content() {
+      if (!this.editor) return "";
+      return this.editor.state.doc.toString();
+    },
     // Find the language's extension by its name. Case insensitive.
     findLanguage(name) {
       for (const language of this.languages)
@@ -398,10 +402,20 @@ export default {
       // with ChangeSet.compose.
       const changeSender = CM.ViewPlugin.fromClass(
         class {
+          constructor() {
+            this.debounceTimer = null;
+          }
           update(update) {
             if (!update.docChanged) return;
             if (!self.emitting) return;
-            self.$emit("update:value", update.changes);
+
+            if (this.debounceTimer) {
+              clearTimeout(this.debounceTimer);
+            }
+            this.debounceTimer = setTimeout(() => {
+              const newContent = update.state.doc.toString();
+              self.$emit("change", { value: newContent });
+            }, 500); // 500ms debounce
           }
         }
       );
