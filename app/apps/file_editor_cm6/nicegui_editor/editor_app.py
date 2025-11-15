@@ -188,6 +188,7 @@ async def editor_page():
             print(f"[EDITOR_APP] Failed to auto-load last file '{last_file}': {e}", file=sys.stderr)
 
     # 2b. Apply cached session content if available
+    cached_was_restored = False
     if project_path and initial_path:
         cached_entry = _history_store.get_cached_document(project_path, initial_path)
         if cached_entry and isinstance(cached_entry.get('content'), str):
@@ -196,6 +197,7 @@ async def editor_page():
             restored_state = 'mid_session' if cached_run == runtime_meta.get('run_id') else 'crashed'
             initial_content = cached_entry.get('content')
             initial_sha256 = cached_entry.get('content_sha256') or hashlib.sha256(initial_content.encode('utf-8')).hexdigest()
+            cached_was_restored = True
             print(f"[EDITOR_APP] Restored cached session ({restored_state}) for {initial_path}", file=sys.stderr)
 
     # 3. Set up UI
@@ -253,8 +255,19 @@ async def editor_page():
                 project_root = get_project_root()
                 init_watcher(project_root)
                 
+                first_snapshot_seen = False
+                
                 def on_file_change(event):
+                    nonlocal first_snapshot_seen
+                    
                     if event.get('type') == 'replace_full':
+                        # Skip the first snapshot if we restored from cache
+                        if not first_snapshot_seen and cached_was_restored:
+                            first_snapshot_seen = True
+                            print(f"[FILE_WATCH] Skipping initial snapshot, cache was restored", file=sys.stderr)
+                            return
+                        
+                        first_snapshot_seen = True
                         new_content, new_sha256 = event.get('content', ''), event.get('sha256')
                         editor.set_value(new_content)
                         editor._cached_content = new_content

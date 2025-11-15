@@ -1,53 +1,25 @@
-## Root Cause: File Watcher Overwrites Restored Cache
+**Fix Applied - Watcher Skip on Cache Restore**
 
-### The Issue:
+**Changes made to `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`:**
 
-When `subscribe()` is called in `core_read.py`, it **immediately sends a `replace_full` snapshot** with content from disk (line 310-327).
+1. **Line 191:** Added `cached_was_restored = False` flag
+2. **Line 200:** Set `cached_was_restored = True` when cache is restored
+3. **Lines 258-267:** Added logic to skip first watcher snapshot if cache was restored
 
-The watcher callback (editor_app.py line 256-268) receives this and calls:
-```python
-editor.set_value(new_content)  # ❌ Overwrites cached edits with disk content!
-```
+**What this fixes:**
 
-**Sequence:**
-1. Backend restores cached edits → `initial_content` = edits ✅
-2. Editor created with cached edits ✅
-3. Subscribe to watcher
-4. Watcher immediately fires `replace_full` with **disk content** (original)
-5. Callback calls `editor.set_value(disk_content)` ❌
-6. Cached edits are overwritten!
+The file watcher's `subscribe()` function immediately sends a snapshot of the file from disk when you first subscribe. This was overwriting the cached edits you just restored.
 
-### The Fix:
+Now:
+- ✅ When cache is restored, the first watcher snapshot is ignored
+- ✅ Your cached edits stay in the editor
+- ✅ Subsequent file changes (real disk modifications) still trigger updates as expected
+- ✅ Save function works (already fixed)
+- ✅ Cache captures edits correctly (already fixed)
 
-Add a flag to skip the initial snapshot overwrite when cache was restored:
-
-```python
-# After cache restore (around line 189):
-cached_was_restored = False
-if cached_entry and isinstance(cached_entry.get('content'), str):
-    # ... restore logic ...
-    cached_was_restored = True
-
-# In watcher callback (around line 256):
-first_snapshot_seen = False
-
-def on_file_change(event):
-    nonlocal first_snapshot_seen
-    
-    if event.get('type') == 'replace_full':
-        # Skip the first snapshot if we restored from cache
-        if not first_snapshot_seen and cached_was_restored:
-            first_snapshot_seen = True
-            print(f"[FILE_WATCH] Skipping initial snapshot, cache was restored", file=sys.stderr)
-            return
-        
-        first_snapshot_seen = True
-        new_content, new_sha256 = event.get('content', ''), event.get('sha256')
-        editor.set_value(new_content)
-        # ... rest of callback ...
-```
-
-This way:
-- If cache was restored, skip the first watcher snapshot
-- Subsequent disk changes (real file modifications) still trigger updates
-- Cache edits are preserved on page load
+**Test:**
+1. Type some edits (should see SHA change in logs)
+2. Wait 1 second for cache persist
+3. Reload page
+4. Should see log: `[FILE_WATCH] Skipping initial snapshot, cache was restored`
+5. Your edits should be visible in the editor
