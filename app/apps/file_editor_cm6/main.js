@@ -678,6 +678,7 @@ let sessionState = {
 let sessionStateInitialized = false;
 let sessionStateTimer = null;
 let persistedSessionSnapshot = null;
+let restoredSessionActive = false;
 
 // WebSocket and autosave state
 let ws = null;
@@ -690,6 +691,59 @@ let saveDebounceTimer = null;
 const AUTOSAVE_DELAY = 1200; // 1200ms debounce
 let lastSaveTime = 0;
 const SELF_ECHO_GRACE = 300; // 300ms grace period after save
+let bootAutoOpenTimer = null;
+let bootAutoOpenPath = null;
+
+function cancelBootAutoOpen(reason) {
+  if (!bootAutoOpenTimer) return;
+  clearTimeout(bootAutoOpenTimer);
+  bootAutoOpenTimer = null;
+  bootAutoOpenPath = null;
+  if (reason) {
+    console.log(`[BOOT] Cancelled deferred open: ${reason}`);
+  }
+}
+
+function handleCacheStateBridgeEvent(event) {
+  if (!event || !event.data || event.data.type !== 'cm6-cache-state') {
+    return;
+  }
+  if (editorFrame && editorFrame.contentWindow && event.source && event.source !== editorFrame.contentWindow) {
+    return;
+  }
+  const data = event.data;
+  const normalizedPath = data.path ? toAbsolute(data.path, null, HOME_DIR) : null;
+  if (normalizedPath) {
+    const pathChanged = normalizedPath !== currentPath;
+    currentPath = normalizedPath;
+    currentPathExists = true;
+    lastPickerPath = parentDir(normalizedPath);
+    if (pathChanged || !fileNameEl.textContent || fileNameEl.textContent === 'Untitled') {
+      updatePathDisplay();
+    }
+  }
+  if (typeof data.content_sha256 === 'string' && data.content_sha256.length === 64) {
+    lastSha256 = data.content_sha256;
+  }
+  if (data.reason === 'restore') {
+    restoredSessionActive = true;
+    if (bootAutoOpenPath && normalizedPath && bootAutoOpenPath === normalizedPath) {
+      cancelBootAutoOpen('NiceGUI restored cached session');
+    }
+  } else if (data.state === 'clean') {
+    restoredSessionActive = false;
+    bootAutoOpenPath = null;
+  }
+  applyCacheIndicator({
+    state: data.state,
+    unsaved: data.unsaved,
+    reason: data.reason,
+    restoredActive: restoredSessionActive,
+  });
+  window.__cm6CacheState = data;
+}
+
+window.addEventListener('message', handleCacheStateBridgeEvent);
 
 // Disabled - CM6 editor replaced with NiceGUI iframe
 /*
@@ -1120,31 +1174,20 @@ function updatePathDisplay() {
   filePathEl.title = abs;
 }
 
-async function fetchCacheState() {
-  const project = activeProjectPath();
-  if (!project || !currentPath) return null;
-  try {
-    const url = `/api/app/file_editor_cm6/editor/cache_state?project=${encodeURIComponent(project)}&path=${encodeURIComponent(currentPath)}`;
-    const resp = await fetch(url, { cache: 'no-store' });
-    const json = await resp.json();
-    if (!resp.ok || json?.ok === false) return null;
-    return json.data || null;
-  } catch (err) {
-    console.warn('Failed to fetch cache state:', err);
-    return null;
-  }
-}
-
-function applyCacheIndicator(state) {
-  if (!state) {
+function applyCacheIndicator(info) {
+  if (!info) {
     cacheStateBadge.textContent = '';
     cacheStateBadge.dataset.state = '';
     return;
   }
-  if (state.state === 'crashed') {
+  const { state, unsaved, reason, restoredActive } = info;
+  if (state === 'crashed') {
     cacheStateBadge.textContent = '!';
     cacheStateBadge.dataset.state = 'crashed';
-  } else if (state.state === 'mid_session' && state.unsaved) {
+  } else if (state === 'mid_session' && (reason === 'restore' || restoredActive)) {
+    cacheStateBadge.textContent = '*';
+    cacheStateBadge.dataset.state = 'restored';
+  } else if (state === 'mid_session' && unsaved) {
     cacheStateBadge.textContent = '*';
     cacheStateBadge.dataset.state = 'cached';
   } else {
@@ -1153,7 +1196,8 @@ function applyCacheIndicator(state) {
   }
 }
 
-async function openFile(path) {
+async function openFile(path, options = {}) {
+  const { allowOverwrite = true } = options;
   if (!path) throw new Error('Path is empty');
   statusEl.textContent = 'Opening...';
   cacheStateBadge.textContent = '';
@@ -1166,6 +1210,12 @@ async function openFile(path) {
   }
 
   try {
+    const resolvedTarget = toAbsolute(path, null, HOME_DIR);
+    if (!allowOverwrite && restoredSessionActive && currentPath && resolvedTarget === currentPath) {
+      console.log('[Editor] Skipping host-side open; restored session buffer already loaded');
+      statusEl.textContent = '';
+      return;
+    }
     const payload = await apiGet(`read?path=${encodeURIComponent(path)}`);
     const resolved = toAbsolute(payload.path || path, null, HOME_DIR);
     currentPath = resolved;
@@ -1187,7 +1237,6 @@ async function openFile(path) {
         console.log('[Editor] SHA256 initialized:', result.sha256);
         syncSessionPath();
       }
-      fetchCacheState().then(applyCacheIndicator);
     }).catch(e => console.warn('[Editor] Failed to sync content to NiceGUI:', e));
 
     setText(payload.content || '');
@@ -1857,18 +1906,20 @@ async function main() {
   } else if (serverState.lastFile && serverState.lastFileExists) {
     if (currentPath && restoredPath && currentPath === restoredPath) {
       console.log('[BOOT] Skipping host-side open; NiceGUI already loaded restored path');
-      fetchCacheState().then(applyCacheIndicator);
       bootOpened = true;
     } else {
-      bootOpened = true;
-      // Use a timeout to ensure the iframe is ready
-      setTimeout(async () => {
-        await openFile(serverState.lastFile).catch((e) => {
-          console.error('Failed to reopen last file:', e);
-          statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
-        });
-      }, 400);
-    }
+    bootOpened = true;
+    // Use a timeout to ensure the iframe is ready
+    bootAutoOpenPath = toAbsolute(serverState.lastFile, null, HOME_DIR);
+    bootAutoOpenTimer = setTimeout(async () => {
+      bootAutoOpenTimer = null;
+      bootAutoOpenPath = null;
+      await openFile(serverState.lastFile, { allowOverwrite: false }).catch((e) => {
+        console.error('Failed to reopen last file:', e);
+        statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
+      });
+    }, 400);
+  }
   } else if (serverState.lastFile && !serverState.lastFileExists) {
     statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
   } else if (!bootOpened) {

@@ -245,6 +245,15 @@ export default {
       this.editor.dispatch({ changes: { from: 0, to: this.editor.state.doc.length, insert: value } });
       this.emitting = true;
     },
+    emitCacheState(payload) {
+      try {
+        const envelope = Object.assign({ type: 'cm6-cache-state' }, payload || {});
+        const target = window.parent || window;
+        target.postMessage(envelope, '*');
+      } catch (err) {
+        console.warn('[CodeMirror] Failed to emit cache state event', err);
+      }
+    },
     setDisabled(disabled) {
       this.editor.dispatch({
         effects: this.editableConfig.reconfigure(this.editableStates[!disabled]),

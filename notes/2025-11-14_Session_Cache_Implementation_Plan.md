@@ -749,6 +749,32 @@ This section describes the **host page** (not the iframe) that embeds the NiceGU
 
 **Estimated Lines Changed:** ~60-90 lines (combined Python + JS) because we are adding the new bridge, not just toggling an existing handler.
 
+#### Step 5b: Cache-State Event Bridge (No Polling, Detail Level 11)
+
+_Updated: 2025-11-15 04:55:39 UTC_
+
+**Goal:** Replace the provisional `/editor/cache_state` polling idea with a deterministic push pipeline so the host chrome never guesses about iframe state. This step is now canon: no fallback fetches, no timers.
+
+**Implementation Detail:**
+1. **Vendored JS hook** (`codemirror.js`):
+   - Added `emitCacheState(payload)` which wraps `window.parent.postMessage({ type: 'cm6-cache-state', ...payload }, '*')`.
+   - Payload remains JSON-serializable; failures log a `[CodeMirror]` warning without throwing.
+2. **Python helper** (`editor_app.py`):
+   - `_build_cache_state_payload()` normalizes absolute + relative paths, surface labels, sha hashes, and runtime metadata.
+   - `_broadcast_cache_state()` calls `editor.run_method('emitCacheState', payload)` whenever the backend becomes authoritative (initial load, cache restore, debounced persist, watcher replace, successful save, manual discard).
+   - Saves now upsert the cache entry with the freshly written content so `unsaved=False` propagates immediately.
+3. **Host listener** (`main.js`):
+   - Registers `window.addEventListener('message', handleCacheStateBridgeEvent)` once the iframe element exists and `let currentPath` is initialized (avoids TDZ issues).
+   - Validates `event.source === editorFrame.contentWindow` before trusting the payload.
+   - Updates `currentPath`, `lastPickerPath`, and `lastSha256` straight from the message, then calls `updatePathDisplay()` and `applyCacheIndicator()`—no HTTP round trips, no log spam.
+   - Exposes the raw payload at `window.__cm6CacheState` for debugging/tooling overlays.
+   - Tracks a `restoredSessionActive` flag so the header badge can distinguish between yellow (`mid_session` while still in the same run) and red (`mid_session` restored after leaving the page) without asking the backend again. Crash recoveries continue to use the red exclamation.
+   - Cancels the boot-time `openFile` timeout (`bootAutoOpenTimer`) if NiceGUI reports `reason: 'restore'` for the same path; when the host does attempt an auto-open, it passes `{allowOverwrite:false}` so `openFile` short-circuits rather than clobbering the restored buffer.
+4. **Save instrumentation**:
+   - `/editor/save` now emits `[SAVE] Attempting…`, `[SAVE] Success…`, or `[SAVE] BASE_MISMATCH…` log lines with the exact absolute path, buffer length, and the base hash we compared. This makes 409s debuggable even after a background restore because the worker log shows which file disagreed.
+
+**Result:** The filename header, tooltip directory, and badge color update within the same animation frame that NiceGUI commits the change; there is zero reliance on `/editor/cache_state` after Step 5b lands.
+
 ---
 
 ### Step 6: Wire Crash & Save Modals Into Host Shell
@@ -988,6 +1014,28 @@ app/apps/file_editor_cm6/
 - Bug fixes and refinement
 
 **Total Estimated Time:** 12-18 hours for Phase 1
+
+---
+
+## Implementation Notes & Fixes
+
+### 2025-11-15 05:17 UTC: Cache Restore SHA Fix
+
+**Issue:** After restoring from cache, save would fail with 409 Conflict (BASE_MISMATCH).
+
+**Root Cause:** In `editor_app.py` line 277, when restoring cached session, the code was using `content_sha256` (SHA of unsaved edits) instead of `base_sha256` (SHA of file on disk when editing started).
+
+```python
+# Before (WRONG):
+initial_sha256 = cached_entry.get('content_sha256')  # Draft content SHA
+
+# After (CORRECT):
+initial_sha256 = cached_entry.get('base_sha256')  # Original file SHA
+```
+
+**Why this matters:** The save endpoint uses `get_current_file_sha256()` as the base SHA for conflict detection. It needs to compare against the original file state, not the cached draft state. Using `content_sha256` caused the save to think the base was the draft content, which didn't match the actual file on disk, triggering a false conflict.
+
+**Fix Location:** `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` line 277
 
 ---
 

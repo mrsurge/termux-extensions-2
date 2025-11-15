@@ -62,6 +62,74 @@ def _get_cached_editor_content(editor) -> str:
     return getattr(editor, '_cached_content', editor.value or '')
 
 
+def _build_cache_state_payload(
+    project_path: str | None,
+    file_path: str | None,
+    *,
+    state: str,
+    unsaved: bool,
+    cache_entry: dict | None = None,
+    reason: str = 'update',
+) -> dict:
+    resolved_path = str(file_path) if file_path else ''
+    project_path = str(project_path) if project_path else None
+    file_label = Path(resolved_path).name if resolved_path else 'Untitled'
+    directory = str(Path(resolved_path).parent) if resolved_path else ''
+    rel_path = None
+    if project_path and resolved_path:
+        try:
+            rel_path = _normalize_rel_path(Path(project_path).expanduser(), resolved_path)
+        except Exception:
+            rel_path = None
+
+    payload = {
+        "path": resolved_path or None,
+        "project_path": project_path,
+        "relative_path": rel_path,
+        "file_label": file_label,
+        "directory_label": rel_path or directory or None,
+        "absolute_directory": directory or None,
+        "state": state,
+        "unsaved": bool(unsaved),
+        "reason": reason,
+        "updated_at": (cache_entry or {}).get("updated_at"),
+        "timestamp": time.time(),
+        "content_sha256": (cache_entry or {}).get("content_sha256"),
+        "base_sha256": (cache_entry or {}).get("base_sha256"),
+        "run_id": (cache_entry or {}).get("run_id"),
+        "shell_id": (cache_entry or {}).get("shell_id"),
+        "shell_run_id": (cache_entry or {}).get("shell_run_id"),
+    }
+    # Drop None values to keep the payload compact
+    return {k: v for k, v in payload.items() if v is not None}
+
+
+def _broadcast_cache_state(
+    project_path: str | None,
+    file_path: str | None,
+    *,
+    state: str,
+    unsaved: bool,
+    cache_entry: dict | None = None,
+    reason: str = 'update',
+):
+    editor = get_active_editor()
+    if not editor or not file_path:
+        return
+    payload = _build_cache_state_payload(
+        project_path,
+        file_path,
+        state=state,
+        unsaved=unsaved,
+        cache_entry=cache_entry,
+        reason=reason,
+    )
+    try:
+        editor.run_method('emitCacheState', payload)
+    except Exception as exc:
+        print(f"[SESSION_CACHE] Failed to emit cache state: {exc}", file=sys.stderr)
+
+
 def _persist_to_cache_debounced():
     """Debounced cache persistence called on editor change."""
     global _cache_persist_timer
@@ -89,7 +157,7 @@ def _persist_to_cache_debounced():
         "worker_pid": os.getpid(),
     }
     
-    _history_store.upsert_cached_document(
+    cache_entry = _history_store.upsert_cached_document(
         project_path=project_path,
         file_path=current_file,
         content=current_content,
@@ -102,6 +170,15 @@ def _persist_to_cache_debounced():
     )
     
     print(f"[SESSION_CACHE] Persisted draft for {current_file}", file=sys.stderr)
+
+    _broadcast_cache_state(
+        project_path,
+        current_file,
+        state='mid_session',
+        unsaved=cache_entry.get('unsaved', False),
+        cache_entry=cache_entry,
+        reason='persist',
+    )
 
 def _schedule_cache_persist():
     """Schedule debounced cache persistence."""
@@ -189,6 +266,7 @@ async def editor_page():
 
     # 2b. Apply cached session content if available
     cached_was_restored = False
+    cached_entry = None
     if project_path and initial_path:
         cached_entry = _history_store.get_cached_document(project_path, initial_path)
         if cached_entry and isinstance(cached_entry.get('content'), str):
@@ -196,7 +274,7 @@ async def editor_page():
             cached_run = cached_entry.get('run_id', 'unknown')
             restored_state = 'mid_session' if cached_run == runtime_meta.get('run_id') else 'crashed'
             initial_content = cached_entry.get('content')
-            initial_sha256 = cached_entry.get('content_sha256') or hashlib.sha256(initial_content.encode('utf-8')).hexdigest()
+            initial_sha256 = cached_entry.get('base_sha256') or hashlib.sha256(initial_content.encode('utf-8')).hexdigest()
             cached_was_restored = True
             print(f"[EDITOR_APP] Restored cached session ({restored_state}) for {initial_path}", file=sys.stderr)
 
@@ -232,6 +310,25 @@ async def editor_page():
             set_current_file(initial_path, initial_sha256)
             editor.set_zebra_stripes(editor_prefs.get('showShading', False))
             editor.set_font_scale(0.85)
+
+            if initial_path:
+                if cached_was_restored:
+                    _broadcast_cache_state(
+                        project_path,
+                        initial_path,
+                        state=restored_state or 'mid_session',
+                        unsaved=cached_entry.get('unsaved', False),
+                        cache_entry=cached_entry,
+                        reason='restore',
+                    )
+                else:
+                    _broadcast_cache_state(
+                        project_path,
+                        initial_path,
+                        state='clean',
+                        unsaved=False,
+                        reason='init',
+                    )
 
             if restored_state:
                 ui.notify(
@@ -272,6 +369,13 @@ async def editor_page():
                         editor.set_value(new_content)
                         editor._cached_content = new_content
                         set_current_file(initial_path, new_sha256)
+                        _broadcast_cache_state(
+                            project_path,
+                            initial_path,
+                            state='clean',
+                            unsaved=False,
+                            reason='watcher_replace',
+                        )
                         if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
                             try:
                                 rel_path = _normalize_rel_path(project_root, initial_path)
@@ -318,6 +422,15 @@ async def discard_draft(data: dict = Body(...)):
         return {"ok": False, "error": "No active document"}
     
     cleared = _history_store.clear_cached_document(project_path, path)
+
+    if cleared and path == get_current_file():
+        _broadcast_cache_state(
+            project_path,
+            path,
+            state='clean',
+            unsaved=False,
+            reason='discard',
+        )
     
     return {"ok": True, "data": {"cleared": cleared}}
 
@@ -344,6 +457,14 @@ async def set_editor_content(data: dict = Body(...)):
     editor._cached_content = content
     editor.set_language(language)
     editor.update()
+
+    _broadcast_cache_state(
+        project_path,
+        new_path,
+        state='clean',
+        unsaved=False,
+        reason='set_content',
+    )
     
     project_root = get_project_root()
     init_watcher(project_root)
@@ -355,6 +476,13 @@ async def set_editor_content(data: dict = Body(...)):
             editor.set_value(new_content)
             editor._cached_content = new_content
             set_current_file(new_path, new_sha256)
+            _broadcast_cache_state(
+                project_path,
+                new_path,
+                state='clean',
+                unsaved=False,
+                reason='watcher_replace',
+            )
             if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
                 try:
                     rel_path = _normalize_rel_path(project_root, new_path)
@@ -427,6 +555,13 @@ async def jump_to_line(data: dict = Body(...)):
             content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
             set_current_file(target_path, content_sha256)
             editor._cached_content = content
+            _broadcast_cache_state(
+                _history_store.get_active_project(),
+                target_path,
+                state='clean',
+                unsaved=False,
+                reason='jump_to_line',
+            )
             print(f"[JUMP_TO_LINE] loaded file sha={content_sha256}", file=sys.stderr)
             
             project_root = get_project_root()
@@ -437,6 +572,13 @@ async def jump_to_line(data: dict = Body(...)):
                     editor.set_value(event.get('content', ''))
                     editor._cached_content = event.get('content', '')
                     set_current_file(target_path, event.get('sha256'))
+                    _broadcast_cache_state(
+                        _history_store.get_active_project(),
+                        target_path,
+                        state='clean',
+                        unsaved=False,
+                        reason='watcher_replace',
+                    )
             subscribe(target_path, 'nicegui_backend_jump', on_file_change)
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -487,6 +629,7 @@ async def save_current_file(data: dict = Body(...)):
     content, base_sha256 = editor.value or '', get_current_file_sha256()
     client_id, op_id = data.get('client_id', 'unknown'), data.get('op_id', f"op_{int(time.time() * 1000)}")
     project_root = get_project_root()
+    print(f"[SAVE] Attempting path={current_file!r} len={len(content)} base={base_sha256}", file=sys.stderr)
     
     try:
         rel_path = _normalize_rel_path(project_root, current_file)
@@ -498,15 +641,40 @@ async def save_current_file(data: dict = Body(...)):
         mark_git_cache_dirty(project_root)
         invalidate_diff_cache(project_root, str(rel_path))
         set_current_file(current_file, file_meta["sha256"])
+        project_path = _history_store.get_active_project()
+        if project_path and current_file:
+            runtime_meta = _get_runtime_metadata()
+            cache_entry = _history_store.upsert_cached_document(
+                project_path=project_path,
+                file_path=current_file,
+                content=content,
+                base_sha256=file_meta["sha256"],
+                run_id=runtime_meta["run_id"],
+                shell_id=runtime_meta["shell_id"],
+                shell_run_id=runtime_meta["shell_run_id"],
+                launcher_pid=runtime_meta["launcher_pid"],
+                worker_pid=runtime_meta["worker_pid"],
+            )
+            _broadcast_cache_state(
+                project_path,
+                current_file,
+                state='clean',
+                unsaved=cache_entry.get('unsaved', False),
+                cache_entry=cache_entry,
+                reason='save',
+            )
         
         if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
             diff_data = collect_diff(project_root, str(rel_path))
             editor.set_diff_decorations(diff_data.get('hunks', []))
             
+        print(f"[SAVE] Success path={current_file!r} sha={file_meta['sha256']}", file=sys.stderr)
         return {"ok": True, "data": file_meta}
     except BaseMismatchError as e:
+        print(f"[SAVE] BASE_MISMATCH path={current_file!r} expected={base_sha256} actual={e.current_meta.get('sha256') if getattr(e, 'current_meta', None) else 'unknown'}", file=sys.stderr)
         return Response(status_code=409, content=json.dumps({"ok": False, "error": "BASE_MISMATCH", "data": {"current": e.current_meta}}), media_type="application/json")
     except Exception as e:
+        print(f"[SAVE] ERROR path={current_file!r} error={e}", file=sys.stderr)
         return {"ok": False, "error": str(e)}
 
 @editor_router.post('/set_view_settings')
