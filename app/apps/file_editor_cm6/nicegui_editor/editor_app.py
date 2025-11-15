@@ -9,7 +9,7 @@ from pathlib import Path
 import anyio
 
 from nicegui import ui, app as nicegui_app
-from fastapi import APIRouter, Body, HTTPException, Response
+from fastapi import APIRouter, Body, HTTPException, Query, Response
 
 # --- Local Imports ---
 # Import stores as singletons from the new stores module
@@ -443,6 +443,32 @@ async def jump_to_line(data: dict = Body(...)):
             
     ui.run_javascript(f'const view = document.querySelector(".cm-editor")?.cmView.view; if(view) {{ const pos = view.state.doc.line({target_line}).from; view.dispatch({{ selection: {{ anchor: pos }}, scrollIntoView: true }}); }}')
     return {"ok": True, "file": target_path or current_file, "line": target_line}
+
+
+@editor_router.get('/cache_state')
+def get_cache_state(project: str | None = Query(None), path: str | None = Query(None)):
+    project_path = project or _history_store.get_active_project()
+    current_file = path or get_current_file()
+    if not project_path or not current_file:
+        return {"ok": True, "data": None}
+
+    cached = _history_store.get_cached_document(project_path, current_file)
+    if not cached:
+        return {"ok": True, "data": {"state": "clean"}}
+
+    runtime = _get_runtime_metadata()
+    state = "mid_session" if cached.get('run_id') == runtime.get('run_id') else "crashed"
+    return {
+        "ok": True,
+        "data": {
+            "state": state,
+            "unsaved": cached.get('unsaved', False),
+            "content_sha256": cached.get('content_sha256'),
+            "base_sha256": cached.get('base_sha256'),
+            "updated_at": cached.get('updated_at'),
+            "run_id": cached.get('run_id'),
+        }
+    }
 
 @editor_router.get('/debug/state')
 def debug_editor_state():

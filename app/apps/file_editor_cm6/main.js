@@ -156,6 +156,7 @@ const emptyLineAnchorExtension = emptyLineAnchorCompartment.of([]);
 export default async function initFileEditor(rootEl, api, host) {
 
 window.host = host;
+const cacheStateBadge = requireEl('#fe-file-draft-badge');
 window.api  = api;
 const HOME_DIR = '/data/data/com.termux/files/home';
 const HOME_PREFIX = `${HOME_DIR}/`;
@@ -762,6 +763,7 @@ function setText(t) { console.log('[CM6] setText() disabled'); }
 
 function markUnsaved(flag) {
   const next = !!flag;
+  cacheStateBadge.dataset.state = next ? (cacheStateBadge.dataset.state || '') : '';
   if (unsaved === next) {
     return;
   }
@@ -1102,6 +1104,8 @@ function scheduleExplorerRefresh() {
 function updatePathDisplay() {
   if (!currentPath) {
     fileNameEl.textContent = 'Untitled';
+  cacheStateBadge.textContent = '';
+  cacheStateBadge.dataset.state = '';
     fileNameEl.title = 'Untitled';
     filePathEl.textContent = 'No file open';
     filePathEl.title = '';
@@ -1109,14 +1113,51 @@ function updatePathDisplay() {
   }
   const abs = toAbsolute(currentPath, null, HOME_DIR);
   fileNameEl.textContent = basename(abs);
+  cacheStateBadge.textContent = '';
+  cacheStateBadge.dataset.state = '';
   fileNameEl.title = basename(abs);
   filePathEl.textContent = formatDisplayDirectory(abs);
   filePathEl.title = abs;
 }
 
+async function fetchCacheState() {
+  const project = activeProjectPath();
+  if (!project || !currentPath) return null;
+  try {
+    const url = `/api/app/file_editor_cm6/editor/cache_state?project=${encodeURIComponent(project)}&path=${encodeURIComponent(currentPath)}`;
+    const resp = await fetch(url, { cache: 'no-store' });
+    const json = await resp.json();
+    if (!resp.ok || json?.ok === false) return null;
+    return json.data || null;
+  } catch (err) {
+    console.warn('Failed to fetch cache state:', err);
+    return null;
+  }
+}
+
+function applyCacheIndicator(state) {
+  if (!state) {
+    cacheStateBadge.textContent = '';
+    cacheStateBadge.dataset.state = '';
+    return;
+  }
+  if (state.state === 'crashed') {
+    cacheStateBadge.textContent = '!';
+    cacheStateBadge.dataset.state = 'crashed';
+  } else if (state.state === 'mid_session' && state.unsaved) {
+    cacheStateBadge.textContent = '*';
+    cacheStateBadge.dataset.state = 'cached';
+  } else {
+    cacheStateBadge.textContent = '';
+    cacheStateBadge.dataset.state = '';
+  }
+}
+
 async function openFile(path) {
   if (!path) throw new Error('Path is empty');
   statusEl.textContent = 'Opening...';
+  cacheStateBadge.textContent = '';
+  cacheStateBadge.dataset.state = '';
   const projectState = await ensureProjectContext();
   if (!projectState || !projectState.activeProject || !projectState.activeProjectExists) {
     statusEl.textContent = '';
@@ -1146,6 +1187,7 @@ async function openFile(path) {
         console.log('[Editor] SHA256 initialized:', result.sha256);
         syncSessionPath();
       }
+      fetchCacheState().then(applyCacheIndicator);
     }).catch(e => console.warn('[Editor] Failed to sync content to NiceGUI:', e));
 
     setText(payload.content || '');
@@ -1815,6 +1857,7 @@ async function main() {
   } else if (serverState.lastFile && serverState.lastFileExists) {
     if (currentPath && restoredPath && currentPath === restoredPath) {
       console.log('[BOOT] Skipping host-side open; NiceGUI already loaded restored path');
+      fetchCacheState().then(applyCacheIndicator);
       bootOpened = true;
     } else {
       bootOpened = true;

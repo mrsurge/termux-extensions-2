@@ -1,25 +1,68 @@
-**Fix Applied - Watcher Skip on Cache Restore**
+## Status Update: Save Works, But Header Issues Remain
 
-**Changes made to `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`:**
+### ✅ Fixed: Save Function
+The 200 OK confirms save is working now. The backend must be getting the correct `_current_file_path`.
 
-1. **Line 191:** Added `cached_was_restored = False` flag
-2. **Line 200:** Set `cached_was_restored = True` when cache is restored
-3. **Lines 258-267:** Added logic to skip first watcher snapshot if cache was restored
+### ❌ Issue 1: Header Shows "Untitled"
 
-**What this fixes:**
+**Root cause:** The frontend `main.js` has `currentPath = ''` (empty) because:
 
-The file watcher's `subscribe()` function immediately sends a snapshot of the file from disk when you first subscribe. This was overwriting the cached edits you just restored.
+1. Backend loads file in NiceGUI iframe ✅
+2. Backend sets `_current_file_path` ✅
+3. **BUT** frontend `currentPath` is never updated ❌
+4. `updatePathDisplay()` checks `if (!currentPath)` → displays "Untitled"
 
-Now:
-- ✅ When cache is restored, the first watcher snapshot is ignored
-- ✅ Your cached edits stay in the editor
-- ✅ Subsequent file changes (real disk modifications) still trigger updates as expected
-- ✅ Save function works (already fixed)
-- ✅ Cache captures edits correctly (already fixed)
+**The barrier:** NiceGUI iframe backend cannot directly communicate with host frontend JavaScript.
 
-**Test:**
-1. Type some edits (should see SHA change in logs)
-2. Wait 1 second for cache persist
-3. Reload page
-4. Should see log: `[FILE_WATCH] Skipping initial snapshot, cache was restored`
-5. Your edits should be visible in the editor
+**Current flow that SHOULD work but doesn't:**
+- Line 1800 in main.js: `currentPath = restoredPath` (from `serverState.lastFile`)
+- This relies on `/api/app/file_editor_cm6/state` returning `lastFile`
+- But this only happens during boot, not after cache restore
+
+**The fix:** After backend restores cache, ensure `_history_store.touch_file()` is called so `/state` endpoint returns the correct file. OR the frontend needs to call `/state` again after page load.
+
+### ❌ Issue 2: Dynamic Asterisk (Unsaved Indicator)
+
+**You're right - this requires iframe → parent communication.**
+
+**Options:**
+
+1. **Polling (Simple, No Vendoring):**
+   - Frontend calls `/editor/cache_state` every 2-3 seconds
+   - Updates asterisk based on response
+   - No vendor changes needed
+   - Downside: 2-3 second delay
+
+2. **WebSocket from Backend (Better, Requires Vendor Changes):**
+   - Add method to vendored codemirror.py: `notify_parent_unsaved(bool)`
+   - Call it from `_on_editor_change` callback
+   - Have NiceGUI send WebSocket message to host
+   - Frontend listens and updates asterisk immediately
+   - Downside: More complex, requires understanding NiceGUI's WebSocket internals
+
+3. **postMessage from Iframe (Cleanest, Requires Vendor Changes):**
+   - In vendored codemirror.js, add:
+     ```javascript
+     window.parent.postMessage({
+       type: 'editor_state',
+       unsaved: true,
+       path: '...'
+     }, '*');
+     ```
+   - Frontend listens:
+     ```javascript
+     window.addEventListener('message', (e) => {
+       if (e.data.type === 'editor_state') {
+         updateAsterisk(e.data.unsaved);
+       }
+     });
+     ```
+   - Call from Python via `run_javascript()`
+   - This is probably the cleanest for real-time updates
+
+**Recommendation for now:** 
+- Fix the "Untitled" issue first (make sure frontend gets the path)
+- Use polling (option 1) for the asterisk as a quick win
+- Later, implement postMessage (option 3) for real-time updates if needed
+
+**The header path issue is separate from asterisk** - that should be fixable without vendor changes, just need frontend `currentPath` to sync with backend state.

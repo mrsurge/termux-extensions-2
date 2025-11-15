@@ -293,8 +293,12 @@
 
   .fe-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
   .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .fe-file-name { font-size: 0.88rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fe-file-name { font-size: 0.88rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 0.35rem; }
   .fe-file-name.fe-unsaved::after { content: ' *'; color: var(--primary, #3b82f6); }
+  .fe-file-draft-indicator { font-size: 0.75rem; font-weight: 600; min-width: 0.85rem; text-align: center; }
+  .fe-file-draft-indicator[data-state='cached'] { color: #facc15; }
+  .fe-file-draft-indicator[data-state='crashed'] { color: #f87171; }
+
   .fe-file-path { font-size: 0.65rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: none; }
   .fe-btn { padding: 6px 10px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; flex-shrink: 0; align-self: center; }
   #recent-files-btn { font-size: 0.85rem; padding: 4px 8px; white-space: nowrap; }
@@ -1288,7 +1292,7 @@
   <div class="fe-toolbar">
     <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer">☰</button>
     <div class="fe-title-block">
-      <div id="fe-file-name" class="fe-file-name" title="Current file">Untitled</div>
+      <div class="fe-file-name"><span id="fe-file-name" title="Current file">Untitled</span><span id="fe-file-draft-badge" class="fe-file-draft-indicator"></span></div>
       <div id="fe-file-path" class="fe-file-path" title="Current path">No file open</div>
     </div>
 
