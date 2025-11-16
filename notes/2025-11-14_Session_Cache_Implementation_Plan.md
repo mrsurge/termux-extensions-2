@@ -775,6 +775,22 @@ _Updated: 2025-11-15 04:55:39 UTC_
 
 **Result:** The filename header, tooltip directory, and badge color update within the same animation frame that NiceGUI commits the change; there is zero reliance on `/editor/cache_state` after Step 5b lands.
 
+#### Step 5c: Watcher-Driven Cache Invalidation
+
+_Updated: 2025-11-15 05:08:40 UTC_
+
+**Problem:** If an external actor edits the file on disk while a cached draft exists, the watcher currently reloads the new content but leaves the stale draft in place. That causes the next unsaved change to compare against the wrong base hash and risks reviving the deleted draft if the user reloads again.
+
+**Plan:**
+1. In every watcher `replace_full` handler (init path, `/set_content`, `/jump_to_line`, etc.), compare the incoming `sha` with the cached entry’s `content_sha256`. When they differ, immediately:
+   - Call `_history_store.clear_cached_document(project_path, path)` to drop the stale sidecar.
+   - Broadcast a `state: 'clean'` cache event with `reason: 'watcher_external'`.
+   - Clear inline diff decorations before recomputing them so stale widgets from the deleted draft never linger.
+   - Optionally toast “File updated on disk; buffer reloaded” so the user knows why drafts vanished.
+2. Document the behavior in the UI (“external edits wipe unsaved drafts”) so expectations are aligned.
+3. Future phases (multi-doc) can add a reconciliation modal, but Phase 1 keeps it simple: the external editor wins, and the cache is treated as invalid as soon as the watcher reports a different hash.
+4. Host shell listens for `reason: 'watcher_external'` events and calls `openFile(path, { forceRefresh: true })`, which replays the normal file-open flow (reloading content, diff decorations, and watchers) so the UI reflects the canonical document immediately.
+
 ---
 
 ### Step 6: Wire Crash & Save Modals Into Host Shell

@@ -130,6 +130,55 @@ def _broadcast_cache_state(
         print(f"[SESSION_CACHE] Failed to emit cache state: {exc}", file=sys.stderr)
 
 
+def _apply_watcher_replace(
+    *,
+    path: str,
+    content: str,
+    sha256: str | None,
+    project_path: str | None,
+    reason: str = 'watcher_replace',
+):
+    """Apply content delivered by the file watcher and invalidate stale cache entries.
+
+    Returns True when an external change forced the cached draft to be cleared.
+    """
+    editor = get_active_editor()
+    if not editor or not path:
+        return False
+
+    editor.set_value(content)
+    editor._cached_content = content
+    set_current_file(path, sha256)
+
+    cache_entry = None
+    external_change = False
+    if project_path:
+        cache_entry = _history_store.get_cached_document(project_path, path)
+        cached_sha = cache_entry.get('content_sha256') if cache_entry else None
+        if cache_entry and cached_sha and sha256 and cached_sha != sha256:
+            print(f"[SESSION_CACHE] External edit detected for {path}; clearing cached draft", file=sys.stderr)
+            _history_store.clear_cached_document(project_path, path)
+            cache_entry = None
+            external_change = True
+
+    _broadcast_cache_state(
+        project_path,
+        path,
+        state='clean',
+        unsaved=False,
+        cache_entry=cache_entry,
+        reason='watcher_external' if external_change else reason,
+    )
+
+    if external_change:
+        try:
+            editor.set_diff_decorations([])
+        except Exception as err:
+            print(f"[DIFF] Failed to clear decorations after external edit: {err}", file=sys.stderr)
+
+    return external_change
+
+
 def _persist_to_cache_debounced():
     """Debounced cache persistence called on editor change."""
     global _cache_persist_timer
@@ -366,15 +415,11 @@ async def editor_page():
                         
                         first_snapshot_seen = True
                         new_content, new_sha256 = event.get('content', ''), event.get('sha256')
-                        editor.set_value(new_content)
-                        editor._cached_content = new_content
-                        set_current_file(initial_path, new_sha256)
-                        _broadcast_cache_state(
-                            project_path,
-                            initial_path,
-                            state='clean',
-                            unsaved=False,
-                            reason='watcher_replace',
+                        _apply_watcher_replace(
+                            path=initial_path,
+                            content=new_content,
+                            sha256=new_sha256,
+                            project_path=project_path,
                         )
                         if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
                             try:
@@ -473,15 +518,11 @@ async def set_editor_content(data: dict = Body(...)):
         if event.get('type') == 'replace_full':
             new_content, new_sha256 = event.get('content', ''), event.get('sha256')
             print(f"[SET_CONTENT][WATCHER] replace_full path={new_path!r} sha={new_sha256}", file=sys.stderr)
-            editor.set_value(new_content)
-            editor._cached_content = new_content
-            set_current_file(new_path, new_sha256)
-            _broadcast_cache_state(
-                project_path,
-                new_path,
-                state='clean',
-                unsaved=False,
-                reason='watcher_replace',
+            _apply_watcher_replace(
+                path=new_path,
+                content=new_content,
+                sha256=new_sha256,
+                project_path=project_path,
             )
             if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
                 try:
@@ -546,6 +587,7 @@ async def jump_to_line(data: dict = Body(...)):
     print(f"[JUMP_TO_LINE] target={target_path!r} line={target_line}", file=sys.stderr)
     
     current_file = get_current_file()
+    project_path = _history_store.get_active_project()
     if target_path and target_path != current_file:
         try:
             content = Path(target_path).read_text(encoding='utf-8', errors='replace')
@@ -556,7 +598,7 @@ async def jump_to_line(data: dict = Body(...)):
             set_current_file(target_path, content_sha256)
             editor._cached_content = content
             _broadcast_cache_state(
-                _history_store.get_active_project(),
+                project_path,
                 target_path,
                 state='clean',
                 unsaved=False,
@@ -569,15 +611,11 @@ async def jump_to_line(data: dict = Body(...)):
             def on_file_change(event):
                 if event.get('type') == 'replace_full':
                     print(f"[JUMP_TO_LINE][WATCHER] replace_full path={target_path!r}", file=sys.stderr)
-                    editor.set_value(event.get('content', ''))
-                    editor._cached_content = event.get('content', '')
-                    set_current_file(target_path, event.get('sha256'))
-                    _broadcast_cache_state(
-                        _history_store.get_active_project(),
-                        target_path,
-                        state='clean',
-                        unsaved=False,
-                        reason='watcher_replace',
+                    _apply_watcher_replace(
+                        path=target_path,
+                        content=event.get('content', ''),
+                        sha256=event.get('sha256'),
+                        project_path=project_path,
                     )
             subscribe(target_path, 'nicegui_backend_jump', on_file_change)
         except Exception as e:

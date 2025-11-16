@@ -679,6 +679,7 @@ let sessionStateInitialized = false;
 let sessionStateTimer = null;
 let persistedSessionSnapshot = null;
 let restoredSessionActive = false;
+let externalRefreshInProgress = false;
 
 // WebSocket and autosave state
 let ws = null;
@@ -734,6 +735,9 @@ function handleCacheStateBridgeEvent(event) {
     restoredSessionActive = false;
     bootAutoOpenPath = null;
   }
+  if (data.reason === 'watcher_external' && normalizedPath) {
+    triggerExternalRefresh(normalizedPath);
+  }
   applyCacheIndicator({
     state: data.state,
     unsaved: data.unsaved,
@@ -744,6 +748,19 @@ function handleCacheStateBridgeEvent(event) {
 }
 
 window.addEventListener('message', handleCacheStateBridgeEvent);
+
+async function triggerExternalRefresh(path) {
+  if (externalRefreshInProgress) return;
+  externalRefreshInProgress = true;
+  try {
+    console.log('[WATCHER] External edit detected; reloading', path);
+    await openFile(path, { forceRefresh: true });
+  } catch (err) {
+    console.error('Failed to refresh after external edit:', err);
+  } finally {
+    externalRefreshInProgress = false;
+  }
+}
 
 // Disabled - CM6 editor replaced with NiceGUI iframe
 /*
@@ -1197,7 +1214,7 @@ function applyCacheIndicator(info) {
 }
 
 async function openFile(path, options = {}) {
-  const { allowOverwrite = true } = options;
+  const { allowOverwrite = true, forceRefresh = false } = options;
   if (!path) throw new Error('Path is empty');
   statusEl.textContent = 'Opening...';
   cacheStateBadge.textContent = '';
@@ -1211,7 +1228,7 @@ async function openFile(path, options = {}) {
 
   try {
     const resolvedTarget = toAbsolute(path, null, HOME_DIR);
-    if (!allowOverwrite && restoredSessionActive && currentPath && resolvedTarget === currentPath) {
+    if (!forceRefresh && !allowOverwrite && restoredSessionActive && currentPath && resolvedTarget === currentPath) {
       console.log('[Editor] Skipping host-side open; restored session buffer already loaded');
       statusEl.textContent = '';
       return;
