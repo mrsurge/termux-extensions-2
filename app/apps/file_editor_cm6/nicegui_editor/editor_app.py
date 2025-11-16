@@ -624,6 +624,26 @@ async def jump_to_line(data: dict = Body(...)):
     ui.run_javascript(f'const view = document.querySelector(".cm-editor")?.cmView.view; if(view) {{ const pos = view.state.doc.line({target_line}).from; view.dispatch({{ selection: {{ anchor: pos }}, scrollIntoView: true }}); }}')
     return {"ok": True, "file": target_path or current_file, "line": target_line}
 
+@editor_router.post('/search/open')
+async def editor_search_open(data: dict = Body(...)):
+    """Open the CodeMirror search panel when user presses Ctrl+F."""
+    editor = get_active_editor()
+    
+    if not editor:
+        raise HTTPException(
+            status_code=404, 
+            detail="Editor not initialized. Open a file first."
+        )
+    
+    try:
+        editor.open_search_panel()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to open search panel: {str(e)}"
+        )
+
 
 @editor_router.get('/cache_state')
 def get_cache_state(project: str | None = Query(None), path: str | None = Query(None)):

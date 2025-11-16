@@ -859,6 +859,19 @@ async function apiPost(path, body) {
   }
 }
 
+async function triggerEditorSearchPanel(reason = 'menu') {
+  const payload = {
+    path: currentPath || null,
+    project: cachedProjectRoot || null,
+    reason,
+  };
+  const result = await apiPost('editor/search/open', payload);
+  if (result?.ok === false) {
+    const message = result?.error || 'Search unavailable';
+    host.toast(message);
+  }
+}
+
 function applyPreferencesFromStore(payload) {
   cachedPreferences = payload || {};
   const editorPrefs = (cachedPreferences && cachedPreferences.editor) || {};
@@ -1727,7 +1740,7 @@ bindMenuToggle(miToggleTerminal, () => {
   terminal.toggle();
 });
 
-bindMenuToggle(miFind, () => { if (view && openSearchPanel) openSearchPanel(view); });
+bindMenuToggle(miFind, () => { triggerEditorSearchPanel('menu'); });
 bindMenuToggle(miGoto, () => { const input = window.prompt('Go to line'); const line = Number.parseInt(input || '', 10); if (!Number.isNaN(line)) { const ln = Math.max(1, line); const pos = view.state.doc.line(ln).from; view.dispatch({ selection:{anchor:pos}, scrollIntoView:true }); view.focus(); } });
 
 
@@ -1767,6 +1780,12 @@ document.addEventListener('keydown', (e) => {
   if (cmdOrCtrl && e.key === 's') {
     e.preventDefault();
     saveFile();
+  }
+
+  // Ctrl/Cmd+F: Search
+  if (cmdOrCtrl && e.key === 'f') {
+    e.preventDefault();
+    triggerEditorSearchPanel('shortcut');
   }
 
   // Ctrl/Cmd+N: New
