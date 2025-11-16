@@ -422,14 +422,39 @@ When adding a new feature:
 - [ ] **Determine if vendoring is required**
   - Does it need to extend the editor API?
   - Does it need CodeMirror internals?
+  - Is it a new CodeMirror package? → Requires bundle rebuild
+  
+- [ ] **Check if bundle rebuild needed**
+  - New CodeMirror package? → Yes, rebuild
+  - Just using existing CM primitives? → No, write directly in codemirror.js
+  
+- [ ] **If rebuilding bundle:**
+  - [ ] Work in correct directory (`app/static/vendor/nicegui/elements/codemirror`)
+  - [ ] Install new package via npm
+  - [ ] Add export to `src/index.mjs`
+  - [ ] Run `npm run build`
+  - [ ] Comment out terser if build fails
+  - [ ] Verify exports with `grep -r "functionName" dist/`
   
 - [ ] **Implement with explicit state**
   - Pass `path` and `project` to all endpoints
   - Don't rely on global variables syncing
   
+- [ ] **Add defensive checks**
+  - Check if imports are available before using
+  - Check if editor exists before calling methods
+  - Handle null/undefined gracefully
+  
+- [ ] **Test the complete chain**
+  - Frontend calls backend? → Check endpoint exists
+  - Backend calls Python method? → Check method exists
+  - Python calls Vue method? → Check codemirror.js has it
+  - Vue uses CM function? → Check bundle exports it
+  
 - [ ] **Test the iframe boundary**
   - Does it work after page reload?
   - Does it work if frontend state is lost?
+  - Does it work after WebSocket reconnect?
   
 - [ ] **Document state assumptions**
   - What state must be in sync?
@@ -471,6 +496,257 @@ When adding a new feature:
 - Added `applyDiffDecorations()` to vendored `codemirror.js`
 
 **Key Decision:** Diffs recalculated on file change and save; no real-time updates needed
+
+### Example 4: Search Panel (Complex Extension)
+
+**Goal:** Add Ctrl+F search functionality using CodeMirror's native search extension
+
+**Challenge:** The `@codemirror/search` package was not included in the vendored NiceGUI bundle
+
+**Approach:**
+1. **Add dependency to bundle:**
+   ```bash
+   cd app/static/vendor/nicegui/elements/codemirror
+   npm install @codemirror/search
+   ```
+
+2. **Export search in bundle:**
+   ```javascript
+   // src/index.mjs
+   export * from "@codemirror/search";
+   ```
+
+3. **Rebuild bundle (without minification if OOM issues):**
+   ```javascript
+   // rollup.config.mjs
+   plugins: [
+     nodeResolve(),
+     // terser(), // Comment out if build fails with OOM
+   ],
+   ```
+
+4. **Add Vue method to codemirror.js:**
+   ```javascript
+   openSearchPanelFromServer() {
+     if (!this.editor || typeof openSearchPanel !== 'function') return;
+     try {
+       openSearchPanel(this.editor);
+     } catch (err) {
+       console.warn('[CodeMirror] Failed to open search panel:', err);
+     }
+   }
+   ```
+
+5. **Add Python wrapper to codemirror.py:**
+   ```python
+   def open_search_panel(self) -> None:
+       """Open the CodeMirror search panel."""
+       self.run_method('openSearchPanelFromServer')
+   ```
+
+6. **Add backend endpoint to editor_app.py:**
+   ```python
+   @app.post('/editor/search/open')
+   async def editor_search_open(data: dict = Body(...)):
+       """Open the CodeMirror search panel."""
+       editor = _editor_instance
+       if not editor:
+           raise HTTPException(status_code=404, detail="Editor not initialized")
+       try:
+           editor.open_search_panel()
+           return {"ok": True}
+       except Exception as e:
+           raise HTTPException(status_code=500, detail=f"Failed: {str(e)}")
+   ```
+
+7. **Frontend already wired up in main.js:**
+   ```javascript
+   // Ctrl+F handler
+   async function triggerEditorSearchPanel() {
+     const result = await apiPost('editor/search/open', {
+       path: currentPath,
+       project: cachedProjectRoot
+     });
+     if (!result?.ok) {
+       host.toast(result?.error || 'Search unavailable');
+     }
+   }
+   ```
+
+**Lessons Learned:**
+
+1. **Missing Package = Silent Failure**
+   - The code checked `if (searchExtension)` so missing package didn't error
+   - It just silently did nothing - confusing to debug
+   - Always verify bundle exports match what you're trying to import
+
+2. **Bundle Rebuild Can Fail**
+   - On resource-constrained devices (Android/Termux), terser minification can fail
+   - Not always OOM - could be terser bugs with specific code
+   - Solution: Disable minification for development (unminified works fine)
+   - For production: Minify on more powerful machine or use lighter minifier
+
+3. **Complete Chain Required**
+   - Frontend → Backend endpoint → Python method → Vue method → CodeMirror
+   - Missing ANY link = feature doesn't work
+   - Test each layer independently:
+     - Does bundle have the code? `grep -r "openSearchPanel" dist/`
+     - Does Python method exist? Check codemirror.py
+     - Does endpoint exist? Check editor_app.py
+     - Does frontend call it? Check main.js
+
+4. **Defensive Coding Essential**
+   ```javascript
+   // Always check if imports are available
+   const searchExtension = typeof CM.search === 'function' ? CM.search : null;
+   
+   // Always check if editor exists
+   if (!this.editor || typeof openSearchPanel !== 'function') return;
+   
+   // Always handle extensions conditionally
+   if (searchExtension) extensions.push(searchExtension());
+   ```
+
+5. **Bundle Rebuild Process**
+   ```bash
+   # Always work in the nicegui codemirror directory
+   cd app/static/vendor/nicegui/elements/codemirror
+   
+   # Install new packages
+   npm install @codemirror/search
+   
+   # Add to exports
+   echo 'export * from "@codemirror/search";' >> src/index.mjs
+   
+   # Rebuild (comment out terser in rollup.config.mjs if it fails)
+   npm run build
+   
+   # Verify
+   grep -r "openSearchPanel" dist/
+   ```
+
+**Key Decision:** Complex CodeMirror extensions (search, autocomplete, linting) require bundle rebuilds. Simple decorations (zebra stripes, diffs) can be written directly in codemirror.js using CM primitives.
+
+---
+
+## Bundle Management
+
+### When to Rebuild the Bundle
+
+**Rebuild Required:**
+- Adding new CodeMirror packages (e.g., `@codemirror/search`, `@codemirror/lint`)
+- Updating CodeMirror core version
+- Adding language modes not in bundle
+- Fixing bugs in vendored NiceGUI code
+
+**Rebuild NOT Required:**
+- Simple decorations using CM primitives (like zebra stripes)
+- Backend-only changes
+- Frontend chrome changes (main.js)
+- Python endpoint changes
+
+### Bundle Rebuild Process
+
+**Location:** Always work in the vendored NiceGUI codemirror directory:
+```bash
+cd app/static/vendor/nicegui/elements/codemirror
+```
+
+**Steps:**
+
+1. **Install new package:**
+   ```bash
+   npm install @codemirror/package-name
+   ```
+
+2. **Add to bundle exports:**
+   ```bash
+   # Edit src/index.mjs, add:
+   export * from "@codemirror/package-name";
+   ```
+
+3. **Build:**
+   ```bash
+   npm run build
+   ```
+
+4. **Verify:**
+   ```bash
+   # Check that new exports are in dist/
+   grep -r "functionName" dist/
+   ```
+
+### Handling Build Failures
+
+**Symptom:** `npm run build` fails with "Unexpected early exit" during terser minification
+
+**Not always OOM:** Could be terser bugs, code structure issues, or actual resource limits
+
+**Solution:** Disable minification for development
+
+**File:** `rollup.config.mjs`
+```javascript
+plugins: [
+  nodeResolve(),
+  // terser(), // COMMENTED OUT - build fails with minification
+],
+```
+
+**Trade-offs:**
+- ✅ Unminified bundle works perfectly
+- ✅ Easier to debug (readable code)
+- ❌ Larger file size (~2-3x)
+- ❌ Slightly slower initial load
+
+**For production:** Minify on a more powerful machine, or accept the larger bundle size
+
+### Verifying Bundle Exports
+
+After rebuild, verify exports are available:
+
+**Check files:**
+```bash
+cd app/static/vendor/nicegui/elements/codemirror
+ls -lh dist/*.js | head
+# Should see recent timestamps
+```
+
+**Check content:**
+```bash
+# Search for your function
+grep -r "openSearchPanel" dist/
+
+# Should return matches in index.js or other dist files
+```
+
+**Check in browser console:**
+```javascript
+// After editor loads, check imports
+console.log(typeof CM.search);           // 'function' if available
+console.log(typeof CM.openSearchPanel);  // 'function' if available
+```
+
+### Common Bundle Issues
+
+**Issue 1: Old bundle cached**
+- **Symptom:** Changes not appearing after rebuild
+- **Solution:** Hard refresh browser (Ctrl+Shift+R), restart app worker
+
+**Issue 2: Wrong directory**
+- **Symptom:** `npm install` fails with "Cannot find module"
+- **Solution:** Make sure you're in `app/static/vendor/nicegui/elements/codemirror`, not `app/static/vendor/codemirror.3`
+
+**Issue 3: Import namespace wrong**
+- **Symptom:** `TypeError: CM.functionName is not a function`
+- **Solution:** Check correct namespace - might be `CM.search.functionName` not `CM.functionName`
+
+**Issue 4: Extensions not loading**
+- **Symptom:** Feature doesn't work, no errors in console
+- **Solution:** Check conditional guards in codemirror.js - they might be silently skipping:
+  ```javascript
+  if (searchExtension) extensions.push(searchExtension());
+  // If searchExtension is null, this silently does nothing
+  ```
 
 ---
 
@@ -515,7 +791,8 @@ Check browser DevTools → Network → WS to see NiceGUI messages:
 - **Session Cache Implementation:** `notes/2025-11-14_Session_Cache_Implementation_Plan.md`
 - **Vendoring Journey:** `notes/NICEGUI_VENDORING_JOURNEY.md`
 - **WebSocket Architecture:** `docs/core/websockets.md`
+- **Search Integration Logs:** `notes/2025-11-16_CONSOLIDATED_SEARCH_LOG.md`
 
 ---
 
-_Last Updated: 2025-11-15 19:06 UTC_
+_Last Updated: 2025-11-16 19:42 UTC - Added search panel implementation example and bundle management guidelines_
