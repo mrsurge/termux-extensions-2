@@ -95,3 +95,9 @@
 - **Directory creation safety:** enforce project root sandboxing and warn users before creating directories outside `~/`.
 - **Git operations:** provide clear warnings/toasts for destructive actions (reset hard, restore).
 - **Shared File Picker availability:** guard with fallback alert if `window.teFilePicker` is missing.
+
+### 4. Styling Considerations
+- Header buttons (`#fe-open-project`, `#fe-new-project`) share the same base class with distinct accent colors so users can differentiate “Open” vs “New”.
+- Footer buttons (`#fe-git-reset-hard`, `#fe-git-init`) use solid backgrounds/borders; `Reset Hard` styled in red/orange to signal destructiveness, `Init Repo` in neutral blue.
+- Provide disabled/grayed state for `Init Repo` when `gitStatusCache?.isRepo === true` (button stays visible but visually muted and `disabled`).
+- Ensure buttons remain full-width/flexible on mobile and align with existing `.fe-btn` sizing/spacing.
