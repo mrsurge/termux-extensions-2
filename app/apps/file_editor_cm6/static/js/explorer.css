@@ -177,15 +177,20 @@
 
 /* Nested tree indentation */
 .fe-tree .fe-tree {
-  padding-left: 20px;
   width: 100%;
 }
 
 .fe-tree li > ul {
   grid-column: 1 / -1;
-  margin: 0;
+  margin: 6px 0 0;
   padding: 0;
   list-style: none;
+}
+
+.fe-tree li > ul > li {
+  margin: 4px 2px 4px 20px;
+  width: auto;
+  box-sizing: border-box;
 }
 
 .fe-dd-item-missing {

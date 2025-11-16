@@ -144,4 +144,18 @@
 
 **Next Steps:**
 - Proceed to Checkpoint C implementation upon user confirmation.
----
+------
+### CHECKPOINT A - Nested Card Insets
+**Timestamp:** 2025-11-16T05:32:00+00:00
+**Implementer:** Codex (GPT-5.1)
+
+**Changes Made:**
+- Iterated on `.fe-tree li > ul > li` margins/width to keep nested cards inset within their parent card while avoiding horizontal scroll. Final tweak (per user) set to `margin: 4px 2px 4px 20px; width: auto; box-sizing: border-box;`.
+
+**Issues Encountered:**
+- Initial attempt applied padding to the `<ul>` rather than the child cards, which made the bleed worse.
+- Second attempt used `width: calc(...)`, causing child cards to overflow and introduce horizontal scrolling.
+- Final margin-only approach keeps nesting visually clean without forcing widths.
+
+**Next Steps:**
+- With visual artifacts resolved, proceed to Checkpoint B validation/polish as needed.
