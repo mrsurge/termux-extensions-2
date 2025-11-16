@@ -9,6 +9,8 @@ let gitSummaryEl = null;
 let gitButtons = null;
 let treeElement = null;
 let cardMenu = null;
+let selectModeDir = null;
+const selectedEntries = new Set();
 
 const GIT_STATUS_CLASS_MAP = {
   modified: 'fe-git-modified',
@@ -527,6 +529,13 @@ async function addTreeChildren(parentEl, rel) {
     }
 
     const entries = j?.data?.entries || [];
+    const parentIsInSelectMode = isInSelectMode(rel);
+
+    if (parentEl.parentElement?.classList.contains('fe-tree-root')) {
+        parentEl.parentElement.classList.toggle('fe-tree-select-mode', parentIsInSelectMode);
+    } else {
+        parentEl.classList.toggle('fe-tree-select-mode', parentIsInSelectMode);
+    }
 
     entries.forEach(e => {
       const li = document.createElement('li');
@@ -541,6 +550,23 @@ async function addTreeChildren(parentEl, rel) {
         if (statusClass) {
           li.classList.add(statusClass);
         }
+      }
+
+      if (parentIsInSelectMode) {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'fe-entry-checkbox';
+        checkbox.dataset.rel = e.rel;
+        checkbox.checked = selectedEntries.has(e.rel);
+        checkbox.addEventListener('change', (ev) => {
+          ev.stopPropagation();
+          if (ev.target.checked) {
+            selectedEntries.add(e.rel);
+          } else {
+            selectedEntries.delete(e.rel);
+          }
+        });
+        li.appendChild(checkbox);
       }
 
       const twisty = document.createElement('button');
@@ -563,6 +589,9 @@ async function addTreeChildren(parentEl, rel) {
         ev.stopPropagation();
         showCardMenu(e, menuBtn);
       });
+      if (parentIsInSelectMode) {
+        menuBtn.style.display = 'none';
+      }
 
       li.appendChild(twisty);
       li.appendChild(icon);
@@ -664,7 +693,7 @@ function findDirNode(container, rel) {
 }
 
 async function onTreeClick(ev) {
-  if (ev.target.classList.contains('fe-card-menu-btn')) {
+  if (ev.target.classList.contains('fe-card-menu-btn') || ev.target.classList.contains('fe-entry-checkbox')) {
     return;
   }
   if (!currentProjectPath) {
@@ -674,7 +703,7 @@ async function onTreeClick(ev) {
   const li = ev.target.closest('li.fe-tree-node');
   if (!li) return;
 
-  // Prevent root from being collapsed
+  // Prevent root from being collapsed by clicking on its twisty/icon area
   if (li.dataset.rel === '.' && li.dataset.kind === 'dir' && !ev.target.classList.contains('fe-tree-text')) {
     const isMenuBtn = ev.target.classList.contains('fe-card-menu-btn');
     if(!isMenuBtn) return;
@@ -706,7 +735,7 @@ async function onTreeClick(ev) {
       li.dataset.open = 'true';
       if (twisty) twisty.textContent = '▾';
       const ul = document.createElement('ul');
-ul.className = 'fe-tree';
+      ul.className = 'fe-tree';
       li.appendChild(ul);
       await addTreeChildren(ul, rel);
       if (rel && rel !== '.') {
@@ -717,6 +746,7 @@ ul.className = 'fe-tree';
     // File clicked - open it
     openFileRel(rel, currentProjectPath);
     // Close drawer after opening file
+    const root = document.querySelector('.fe-root');
     root?.classList.remove('drawer-open');
   }
 }
@@ -808,16 +838,37 @@ function buildMenuItems(entry) {
   const items = [];
   const isDir = entry.kind === 'dir';
 
-  if (isDir) {
-    items.push({ label: 'Add File', handler: addFile });
-    items.push({ label: 'Add Directory', handler: addDirectory });
+  if (isInSelectMode(entry.rel)) {
+    items.push({ label: 'Disable select mode', handler: disableSelectMode });
+    items.push({ divider: true });
+    items.push({ label: `Copy selected (${selectedEntries.size})`, handler: batchCopyTo });
+    items.push({ label: `Move selected (${selectedEntries.size})`, handler: batchMoveTo });
+    items.push({ label: `Stage selected (${selectedEntries.size})`, handler: batchStage });
+    items.push({ label: `Unstage selected (${selectedEntries.size})`, handler: batchUnstage });
+    items.push({ divider: true });
+    items.push({ label: `Delete selected (${selectedEntries.size})`, handler: batchDelete, destructive: true });
+  } else {
+    if (isDir) {
+      items.push({ label: 'Enable select mode', handler: enableSelectMode });
+      items.push({ divider: true });
+      items.push({ label: 'Add File', handler: addFile });
+      items.push({ label: 'Add Directory', handler: addDirectory });
+    }
+
+    items.push({ label: 'Rename', handler: renameEntry });
+    items.push({ label: 'Copy to…', handler: copyTo });
+    items.push({ label: 'Move to…', handler: moveTo });
+    
+    if (entry.gitStatus && (entry.gitStatus === 'modified' || entry.gitStatus === 'untracked' || entry.gitStatus === 'added')) {
+        items.push({ label: 'Stage', handler: stageEntry });
+    }
+    if (entry.gitStatus && (entry.gitStatus === 'staged' || entry.gitStatus === 'staged_modified')) {
+        items.push({ label: 'Unstage', handler: unstageEntry });
+    }
+
+    items.push({ divider: true });
+    items.push({ label: 'Delete', handler: deleteEntry, destructive: true });
   }
-
-  items.push({ label: 'Rename', handler: renameEntry });
-
-  items.push({ divider: true });
-
-  items.push({ label: 'Delete', handler: deleteEntry, destructive: true });
 
   return items;
 }
@@ -920,6 +971,270 @@ async function deleteEntry(entry) {
         await refreshGitStatus(false);
     } catch (err) {
         toast(err.message || 'Delete failed');
+    }
+}
+
+function enableSelectMode(entry) {
+  if (entry.kind !== 'dir') return;
+  selectModeDir = entry.rel;
+  selectedEntries.clear();
+  refreshTree(treeElement); // This will re-render with checkboxes
+}
+
+function disableSelectMode() {
+  selectModeDir = null;
+  selectedEntries.clear();
+  refreshTree(treeElement);
+}
+
+function isInSelectMode(parentRel) {
+  return selectModeDir === parentRel;
+}
+
+async function copyTo(entry) {
+    if (!window.teFilePicker) {
+      toast('File picker not available');
+      return;
+    }
+    
+    try {
+      const dest = await window.teFilePicker.openDirectory({
+        title: `Copy "${entry.name}" to…`,
+        startPath: currentProjectPath
+      });
+      
+      const resp = await fetch('/api/app/file_editor_cm6/explorer/copy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project: currentProjectPath,
+          rel: entry.rel,
+          dest_path: dest.path
+        })
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Copy failed');
+      
+      toast(`Copied to ${dest.path}`);
+      await refreshTree(treeElement);
+      await refreshGitStatus(false);
+    } catch (err) {
+      if (err.message !== 'cancelled') {
+        toast(err.message || 'Copy failed');
+      }
+    }
+}
+
+async function moveTo(entry) {
+    if (!window.teFilePicker) {
+      toast('File picker not available');
+      return;
+    }
+    
+    try {
+      const dest = await window.teFilePicker.openDirectory({
+        title: `Move "${entry.name}" to…`,
+        startPath: currentProjectPath
+      });
+      
+      const resp = await fetch('/api/app/file_editor_cm6/explorer/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project: currentProjectPath,
+          rel: entry.rel,
+          dest_path: dest.path
+        })
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Move failed');
+      
+      toast(`Moved to ${dest.path}`);
+      await refreshTree(treeElement);
+      await refreshGitStatus(false);
+    } catch (err) {
+      if (err.message !== 'cancelled') {
+        toast(err.message || 'Move failed');
+      }
+    }
+}
+
+// Batch operations
+async function batchCopyTo() {
+    const paths = Array.from(selectedEntries);
+    if (paths.length === 0) return;
+
+    if (!window.teFilePicker) {
+      toast('File picker not available');
+      return;
+    }
+
+    try {
+        const dest = await window.teFilePicker.openDirectory({
+            title: `Copy ${paths.length} items to…`,
+            startPath: currentProjectPath
+        });
+
+        const resp = await fetch('/api/app/file_editor_cm6/explorer/batch_copy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                project: currentProjectPath,
+                rels: paths,
+                dest_path: dest.path
+            })
+        });
+        const json = await resp.json();
+        if (!json.ok) throw new Error(json.error || 'Batch copy failed');
+
+        toast(`Copied ${paths.length} items to ${dest.path}`);
+        disableSelectMode();
+        await refreshTree(treeElement);
+        await refreshGitStatus(false);
+    } catch (err) {
+        if (err.message !== 'cancelled') {
+            toast(err.message || 'Batch copy failed');
+        }
+    }
+}
+async function batchMoveTo() {
+    const paths = Array.from(selectedEntries);
+    if (paths.length === 0) return;
+
+    if (!window.teFilePicker) {
+        toast('File picker not available');
+        return;
+    }
+
+    try {
+        const dest = await window.teFilePicker.openDirectory({
+            title: `Move ${paths.length} items to…`,
+            startPath: currentProjectPath
+        });
+
+        const resp = await fetch('/api/app/file_editor_cm6/explorer/batch_move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                project: currentProjectPath,
+                rels: paths,
+                dest_path: dest.path
+            })
+        });
+        const json = await resp.json();
+        if (!json.ok) throw new Error(json.error || 'Batch move failed');
+
+        toast(`Moved ${paths.length} items to ${dest.path}`);
+        disableSelectMode();
+        await refreshTree(treeElement);
+        await refreshGitStatus(false);
+    } catch (err) {
+        if (err.message !== 'cancelled') {
+            toast(err.message || 'Batch move failed');
+        }
+    }
+}
+async function batchDelete() { 
+    const paths = Array.from(selectedEntries);
+    if (!paths.length) return;
+
+    const confirmed = confirm(
+      `⚠️ WARNING: Delete ${paths.length} items?\\n\\n` +
+      `This action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const resp = await fetch('/api/app/file_editor_cm6/explorer/batch_delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rels: paths })
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Batch delete failed');
+
+      toast(`Deleted ${paths.length} items`);
+      disableSelectMode();
+      await refreshTree(treeElement);
+      await refreshGitStatus(false);
+    } catch (err) {
+      toast(err.message || 'Batch delete failed');
+    }
+}
+async function batchStage() {
+    const paths = Array.from(selectedEntries);
+    if (paths.length === 0) return;
+    try {
+      const resp = await fetch('/api/app/file_editor_cm6/git/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: paths })
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Batch stage failed');
+      
+      gitStatusCache = json.data;
+      renderGitSummary(json.data);
+      await refreshTree(treeElement);
+      toast(`Staged ${paths.length} items`);
+    } catch (err) {
+      toast(err.message || 'Batch stage failed');
+    }
+}
+async function batchUnstage() {
+    const paths = Array.from(selectedEntries);
+    if (paths.length === 0) return;
+    try {
+      const resp = await fetch('/api/app/file_editor_cm6/git/unstage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: paths })
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Batch unstage failed');
+      
+      gitStatusCache = json.data;
+      renderGitSummary(json.data);
+      await refreshTree(treeElement);
+      toast(`Unstaged ${paths.length} items`);
+    } catch (err) {
+      toast(err.message || 'Batch unstage failed');
+    }
+}
+async function stageEntry(entry) {
+    try {
+      const resp = await fetch('/api/app/file_editor_cm6/git/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: [entry.rel] })
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Stage failed');
+      
+      gitStatusCache = json.data;
+      renderGitSummary(json.data);
+      await refreshTree(treeElement);
+      toast(`Staged ${entry.name}`);
+    } catch (err) {
+      toast(err.message || 'Stage failed');
+    }
+}
+async function unstageEntry(entry) {
+    try {
+      const resp = await fetch('/api/app/file_editor_cm6/git/unstage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: [entry.rel] })
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Unstage failed');
+      
+      gitStatusCache = json.data;
+      renderGitSummary(json.data);
+      await refreshTree(treeElement);
+      toast(`Unstaged ${entry.name}`);
+    } catch (err) {
+      toast(err.message || 'Unstage failed');
     }
 }
 

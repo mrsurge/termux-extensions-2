@@ -417,3 +417,16 @@
        border: 1.5px solid #1e40af;  /* Dark blue thin border */
        color: #2563eb;               /* Blue-ish letter */
      }
+
+/* --- Select Mode --- */
+.fe-entry-checkbox {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  justify-self: center;
+}
+
+.fe-tree.fe-tree-select-mode > li {
+  grid-template-columns: 24px 20px 20px 1fr auto;
+}

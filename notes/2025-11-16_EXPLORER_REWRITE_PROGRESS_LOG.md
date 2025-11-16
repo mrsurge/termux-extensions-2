@@ -82,4 +82,66 @@
 
 **Next Steps:**
 - Awaiting user confirmation that the drawer is fixed before proceeding to Checkpoint B.
+------
+### CHECKPOINT A - VISUAL PASS FINALIZATION
+**Timestamp:** 2025-11-16T05:18:00+00:00
+**Implementer:** Codex (GPT-5.1)
+
+**Changes Made:**
+- `app/apps/file_editor_cm6/static/js/explorer.css`
+  - Added explorer-specific palette variables and reapplied solid backgrounds (drawer, header, body, git footer) with fallbacks.
+  - Converted tree items to 4-column “card” layout (twisty, icon, label, menu) while keeping the existing border/hover stylings.
+  - Restored nested `<ul>` rules so subdirectories span the full width.
+  - Added icon + card-menu button styles and desktop-only hover states, per Checkpoint A requirements.
+- `app/apps/file_editor_cm6/static/js/explorer.js`
+  - Added logic to position the card menu to the left of the trigger and clamp it within the viewport so it never cascades off-screen.
+
+**Issues Encountered:**
+- Prior attempt had replaced the entire CSS with divergent values, causing complete loss of card visuals and nested directory rendering; we reverted to a clean baseline before reapplying the plan.
+- Menu popovers initially anchored to the trigger’s left edge, so on mobile they overflowed to the right—now they flip horizontally when needed.
+
+**Testing Notes:**
+- Verified drawer covers the full viewport, remains opaque, and lists nested directories correctly.
+- Exercised card menus (Add file/dir, Rename, Delete) and confirmed popovers stay onscreen.
+- Minor visual artifacts remain (e.g., legacy borders vs. new icon grid); will tidy these during Checkpoint B if time allows.
+
+**Next Steps:**
+- Proceed to Checkpoint B (select mode, batch operations) once we capture the remaining visual polish items.
+---
+### CHECKPOINT B - COMPLETION LOG
+**Timestamp:** 2025-11-16T04:28:49+00:00
+**Implementer:** Gemini
+
+**Changes Made:**
+- `app/apps/file_editor_cm6/static/js/explorer.js`:
+  - Added state management for "Select Mode" (`selectModeDir`, `selectedEntries`).
+  - Implemented `enableSelectMode`, `disableSelectMode`, `isInSelectMode` to control the mode.
+  - Updated `buildMenuItems` to dynamically show/hide batch actions and select mode toggles.
+  - Updated `addTreeChildren` to render checkboxes for items when in select mode.
+  - Implemented frontend logic for `copyTo`, `moveTo`, `batchCopyTo`, `batchMoveTo` using the shared file picker.
+  - Implemented frontend logic for `stageEntry`, `unstageEntry`, `batchStage`, `batchUnstage` to call Git endpoints.
+- `app/apps/file_editor_cm6/explorer_helper.py`:
+  - Added `batch_delete`, `copy_entry`, `move_entry`, `batch_copy`, and `batch_move` functions to handle batch and single file system operations.
+- `app/apps/file_editor_cm6/git_helper.py`:
+  - Added `stage_paths` and `unstage_paths` to allow staging/unstaging of specific paths.
+- `app/apps/file_editor_cm6/main.py`:
+  - Added `/explorer/batch_delete`, `/explorer/copy`, `/explorer/move`, `/explorer/batch_copy`, and `/explorer/batch_move` endpoints.
+  - Added `/git/stage` and `/git/unstage` endpoints.
+- `app/apps/file_editor_cm6/static/js/explorer.css`:
+  - Added styles for select mode checkboxes and adjusted the grid layout for items in select mode.
+
+**New Additions:**
+- **Functions (JS):** `enableSelectMode`, `disableSelectMode`, `isInSelectMode`, `copyTo`, `moveTo`, `batchCopyTo`, `batchMoveTo`, `stageEntry`, `unstageEntry`, `batchStage`, `batchUnstage`.
+- **Functions (Python):** `batch_delete`, `copy_entry`, `move_entry`, `batch_copy`, `batch_move` in `explorer_helper.py`. `stage_paths`, `unstage_paths` in `git_helper.py`.
+- **Endpoints:** `/explorer/batch_delete`, `/explorer/copy`, `/explorer/move`, `/explorer/batch_copy`, `/explorer/batch_move`, `/git/stage`, `/git/unstage`.
+- **CSS Classes:** `.fe-entry-checkbox`, `.fe-tree-select-mode`.
+
+**Issues Encountered:**
+- `replace` operations failed multiple times due to using stale file content for the `old_string`. This was resolved by re-reading the file before each modification to ensure the context was up-to-date.
+
+**Testing Notes:**
+- Awaiting user testing for Checkpoint B features.
+
+**Next Steps:**
+- Proceed to Checkpoint C implementation upon user confirmation.
 ---

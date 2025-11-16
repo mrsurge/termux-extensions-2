@@ -30,6 +30,8 @@ from .git_helper import (
     commit_changes as git_commit_changes,
     push_changes as git_push_changes,
     pull_changes as git_pull_changes,
+    stage_paths,
+    unstage_paths,
 )
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
@@ -544,6 +546,32 @@ async def git_pull_route(data: dict = Body(...)):
     except GitError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+@file_editor_cm6_bp.post('/git/stage')
+async def git_stage_route(data: dict = Body(...)):
+    paths = data.get('paths', [])
+    if not paths:
+        raise HTTPException(status_code=400, detail="Paths required")
+    try:
+        project_root = _get_active_project_root()
+        status = stage_paths(project_root, paths)
+        mark_git_cache_dirty(project_root)
+        return {"ok": True, "data": _status_to_payload(status)}
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@file_editor_cm6_bp.post('/git/unstage')
+async def git_unstage_route(data: dict = Body(...)):
+    paths = data.get('paths', [])
+    if not paths:
+        raise HTTPException(status_code=400, detail="Paths required")
+    try:
+        project_root = _get_active_project_root()
+        status = unstage_paths(project_root, paths)
+        mark_git_cache_dirty(project_root)
+        return {"ok": True, "data": _status_to_payload(status)}
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
 @file_editor_cm6_bp.get('/state')
 def get_project_state():
     """Return consolidated editor state."""
@@ -716,6 +744,75 @@ async def explorer_delete(data: dict = Body(...)):
     try:
         from .explorer_helper import delete_entry
         result = delete_entry(rel)
+        mark_git_cache_dirty(get_project_root())
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@file_editor_cm6_bp.post('/explorer/batch_delete')
+async def explorer_batch_delete(data: dict = Body(...)):
+    rels = data.get('rels', [])
+    if not rels:
+        raise HTTPException(status_code=400, detail="Paths required")
+    try:
+        from .explorer_helper import batch_delete
+        result = batch_delete(rels)
+        mark_git_cache_dirty(get_project_root())
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@file_editor_cm6_bp.post('/explorer/copy')
+async def explorer_copy(data: dict = Body(...)):
+    rel = data.get('rel')
+    dest_path = data.get('dest_path')
+    if not rel or not dest_path:
+        raise HTTPException(status_code=400, detail="Path required")
+    try:
+        from .explorer_helper import copy_entry
+        result = copy_entry(rel, dest_path)
+        mark_git_cache_dirty(get_project_root())
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@file_editor_cm6_bp.post('/explorer/move')
+async def explorer_move(data: dict = Body(...)):
+    rel = data.get('rel')
+    dest_path = data.get('dest_path')
+    if not rel or not dest_path:
+        raise HTTPException(status_code=400, detail="Path required")
+    try:
+        from .explorer_helper import move_entry
+        result = move_entry(rel, dest_path)
+        mark_git_cache_dirty(get_project_root())
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@file_editor_cm6_bp.post('/explorer/batch_copy')
+async def explorer_batch_copy(data: dict = Body(...)):
+    rels = data.get('rels', [])
+    dest_path = data.get('dest_path')
+    if not rels or not dest_path:
+        raise HTTPException(status_code=400, detail="Paths and destination required")
+    try:
+        from .explorer_helper import batch_copy
+        result = batch_copy(rels, dest_path)
+        mark_git_cache_dirty(get_project_root())
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@file_editor_cm6_bp.post('/explorer/batch_move')
+async def explorer_batch_move(data: dict = Body(...)):
+    rels = data.get('rels', [])
+    dest_path = data.get('dest_path')
+    if not rels or not dest_path:
+        raise HTTPException(status_code=400, detail="Paths and destination required")
+    try:
+        from .explorer_helper import batch_move
+        result = batch_move(rels, dest_path)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}
     except Exception as e:

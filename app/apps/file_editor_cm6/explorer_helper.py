@@ -357,3 +357,78 @@ def delete_entry(rel: str) -> dict:
         target.unlink()
     
     return {'rel': rel, 'deleted': True}
+
+def batch_delete(rels: list[str]) -> dict:
+    """Delete multiple entries."""
+    results = []
+    for rel in rels:
+        try:
+            result = delete_entry(rel)
+            results.append({'rel': rel, 'ok': True, 'result': result})
+        except Exception as e:
+            results.append({'rel': rel, 'ok': False, 'error': str(e)})
+    return {'results': results}
+
+def copy_entry(rel: str, dest_dir_path: str) -> dict:
+    """Copy file/dir from rel to dest_dir_path."""
+    root = get_project_root()
+    source = (root / rel).resolve()
+    dest_dir = Path(dest_dir_path).resolve()
+    
+    if not str(source).startswith(str(root.resolve())):
+        raise ValueError("source outside project root")
+    if not source.exists():
+        raise ValueError("source does not exist")
+    
+    dest = dest_dir / source.name
+    if dest.exists():
+        raise ValueError(f"'{source.name}' already exists in destination")
+    
+    if source.is_dir():
+        shutil.copytree(source, dest)
+    else:
+        shutil.copy2(source, dest)
+    
+    return {'source_rel': rel, 'dest_path': str(dest)}
+
+def move_entry(rel: str, dest_dir_path: str) -> dict:
+    """Move file/dir from rel to dest_dir_path."""
+    root = get_project_root()
+    source = (root / rel).resolve()
+    dest_dir = Path(dest_dir_path).resolve()
+    
+    if not str(source).startswith(str(root.resolve())):
+        raise ValueError("source outside project root")
+    if not source.exists():
+        raise ValueError("source does not exist")
+    
+    dest = dest_dir / source.name
+    if dest.exists():
+        raise ValueError(f"'{source.name}' already exists in destination")
+    
+    shutil.move(str(source), str(dest))
+    
+    new_rel = str(dest.relative_to(root)) if str(dest).startswith(str(root)) else None
+    return {'old_rel': rel, 'new_path': str(dest), 'new_rel': new_rel}
+
+def batch_copy(rels: list[str], dest_dir_path: str) -> dict:
+    """Copy multiple entries to dest_dir_path."""
+    results = []
+    for rel in rels:
+        try:
+            result = copy_entry(rel, dest_dir_path)
+            results.append({'rel': rel, 'ok': True, 'result': result})
+        except Exception as e:
+            results.append({'rel': rel, 'ok': False, 'error': str(e)})
+    return {'results': results}
+
+def batch_move(rels: list[str], dest_dir_path: str) -> dict:
+    """Move multiple entries to dest_dir_path."""
+    results = []
+    for rel in rels:
+        try:
+            result = move_entry(rel, dest_dir_path)
+            results.append({'rel': rel, 'ok': True, 'result': result})
+        except Exception as e:
+            results.append({'rel': rel, 'ok': False, 'error': str(e)})
+    return {'results': results}

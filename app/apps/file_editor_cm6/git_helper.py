@@ -232,3 +232,32 @@ def pull_changes(project_root: Path, remote: Optional[str] = None, branch: Optio
         args.append(branch)
     _run_git(project_root, *args)
     return get_status(project_root)
+
+def stage_paths(project_root: Path, paths: List[str]) -> GitStatus:
+    """Stage specific files or directories."""
+    _ensure_repo(project_root)
+    if not paths:
+        return get_status(project_root)
+    
+    # Stage each path
+    for path in paths:
+        _run_git(project_root, "add", "--", path)
+    
+    return get_status(project_root)
+
+def unstage_paths(project_root: Path, paths: List[str]) -> GitStatus:
+    """Unstage specific files or directories."""
+    _ensure_repo(project_root)
+    if not paths:
+        return get_status(project_root)
+    
+    has_commits = _has_commits(project_root)
+    
+    for path in paths:
+        if has_commits:
+            _run_git(project_root, "reset", "HEAD", "--", path)
+        else:
+            # No commits yet: remove from index
+            _run_git(project_root, "rm", "--cached", "--", path)
+    
+    return get_status(project_root)
