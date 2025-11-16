@@ -159,3 +159,29 @@
 
 **Next Steps:**
 - With visual artifacts resolved, proceed to Checkpoint B validation/polish as needed.
+---
+### CHECKPOINT B - UI FIXES
+**Timestamp:** 2025-11-16T05:01:45+00:00
+**Implementer:** Gemini
+
+**Changes Made:**
+- `app/apps/file_editor_cm6/static/js/explorer.css`:
+  - Added `-webkit-tap-highlight-color: transparent;` and other related properties to interactive explorer elements (`.fe-tree li`, `.fe-card-menu-btn`, etc.) to disable the default blue tap highlight on mobile browsers.
+- `app/apps/file_editor_cm6/static/js/explorer.js`:
+  - Reworked the card menu's click handling logic to fix several UI bugs.
+  - Added a `currentMenuButton` state variable to track the currently open menu.
+  - Modified `showCardMenu` to allow the menu button to act as a toggle.
+  - Replaced the global capture-phase click listener with a bubble-phase listener that correctly closes the menu only when clicking outside of it, preventing interference with other UI elements.
+
+**Issues Encountered:**
+- None. The user's analysis and proposed solution were clear and correct.
+
+**Testing Notes:**
+- The blue flash on mobile taps should now be gone.
+- The card menu should now toggle correctly when its button is clicked.
+- Clicking outside the menu should close it without accidentally triggering other actions.
+- Ready for re-testing by the user.
+
+**Next Steps:**
+- Awaiting user confirmation that the UI issues are resolved before proceeding.
+---

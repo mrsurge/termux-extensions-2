@@ -9,6 +9,7 @@ let gitSummaryEl = null;
 let gitButtons = null;
 let treeElement = null;
 let cardMenu = null;
+let currentMenuButton = null;
 let selectModeDir = null;
 const selectedEntries = new Set();
 
@@ -166,12 +167,22 @@ export async function initExplorerUI() {
   document.body.appendChild(cardMenu);
 
   document.addEventListener('click', (ev) => {
-    const isMenuClick = ev.target.closest('.fe-card-menu');
-    const isMenuBtnClick = ev.target.classList.contains('fe-card-menu-btn');
-    if (!isMenuClick && !isMenuBtnClick) {
-      cardMenu.classList.remove('show');
+    // If clicking menu itself, do nothing
+    if (ev.target.closest('.fe-card-menu')) {
+      return;
     }
-  }, true);
+
+    // If clicking menu button, let that button's handler deal with it
+    if (ev.target.closest('.fe-card-menu-btn')) {
+      return;
+    }
+
+    // Any other click: close menu without affecting that click
+    if (cardMenu.classList.contains('show')) {
+      cardMenu.classList.remove('show');
+      currentMenuButton = null;
+    }
+  }, false); // Use bubble phase, not capture
 }
 
 function basename(path) {
@@ -783,6 +794,14 @@ function applyEntryStyling(labelEl, entry) {
 }
 
 function showCardMenu(entry, anchorEl) {
+  // Toggle behavior: if clicking same button, close menu
+  if (currentMenuButton === anchorEl && cardMenu.classList.contains('show')) {
+    cardMenu.classList.remove('show');
+    currentMenuButton = null;
+    return;
+  }
+
+  currentMenuButton = anchorEl;
   cardMenu.innerHTML = '';
   cardMenu.classList.add('show');
 
@@ -807,6 +826,7 @@ function showCardMenu(entry, anchorEl) {
     }
     div.addEventListener('click', () => {
       cardMenu.classList.remove('show');
+      currentMenuButton = null;
       item.handler(entry);
     });
     cardMenu.appendChild(div);

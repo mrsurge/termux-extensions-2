@@ -435,3 +435,13 @@
 .fe-tree.fe-tree-select-mode > li {
   grid-template-columns: 24px 20px 20px 1fr auto;
 }
+
+/* --- Mobile Tap Behavior --- */
+.fe-tree li,
+.fe-tree-twisty,
+.fe-card-menu-btn,
+.fe-card-menu .fe-dd-item {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
