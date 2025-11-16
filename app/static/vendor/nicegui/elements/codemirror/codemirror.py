@@ -379,6 +379,10 @@ class CodeMirror(ValueElement, DisableableElement,
         """
         self.run_method('applyDiffDecorations', hunks)
 
+    def open_search_panel(self) -> None:
+        """Open the CodeMirror search panel (find/replace)."""
+        self.run_method('openSearchPanelFromServer')
+
     def request_content(self) -> Awaitable[str]:
         """Request the current editor content from the frontend.
 

@@ -10,8 +10,6 @@ export default {
   },
   plugins: [
     nodeResolve(),
-    terser({
-      mangle: true,
-    }),
+    // terser(), // COMMENTED OUT - OOM on Android
   ],
 };

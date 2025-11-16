@@ -1,5 +1,10 @@
 import * as CM from "nicegui-codemirror";
 
+const searchExtension = typeof CM.search === 'function' ? CM.search : null;
+const searchKeymap = Array.isArray(CM.searchKeymap) ? CM.searchKeymap : null;
+const highlightSelectionMatches = typeof CM.highlightSelectionMatches === 'function' ? CM.highlightSelectionMatches : null;
+const openSearchPanel = typeof CM.openSearchPanel === 'function' ? CM.openSearchPanel : null;
+
 // Inline diff decorations helper (extracted from diff_decorations.js)
 function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const { Decoration, RangeSetBuilder, WidgetType } = CM;
@@ -176,6 +181,14 @@ export default {
     };
   },
   methods: {
+    openSearchPanelFromServer() {
+      if (!this.editor || typeof openSearchPanel !== 'function') return;
+      try {
+        openSearchPanel(this.editor);
+      } catch (err) {
+        console.warn('[CodeMirror] Failed to open search panel:', err);
+      }
+    },
     request_content() {
       if (!this.editor) return "";
       return this.editor.state.doc.toString();
@@ -448,6 +461,11 @@ export default {
       ];
 
       if (this.highlightWhitespace) extensions.push([CM.highlightWhitespace()]);
+      if (searchExtension) extensions.push(searchExtension());
+      if (highlightSelectionMatches) extensions.push(highlightSelectionMatches());
+      if (searchKeymap && searchKeymap.length) {
+        extensions.push(CM.keymap.of(searchKeymap));
+      }
 
       return extensions;
     },
