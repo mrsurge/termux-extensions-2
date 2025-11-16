@@ -32,6 +32,10 @@ from .git_helper import (
     pull_changes as git_pull_changes,
     stage_paths,
     unstage_paths,
+    get_commits_for_path,
+    restore_path,
+    get_commits,
+    reset_hard,
 )
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
@@ -568,6 +572,69 @@ async def git_unstage_route(data: dict = Body(...)):
         project_root = _get_active_project_root()
         status = unstage_paths(project_root, paths)
         mark_git_cache_dirty(project_root)
+        return {"ok": True, "data": _status_to_payload(status)}
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@file_editor_cm6_bp.get('/git/commits_for_path')
+async def git_commits_for_path(path: str = Query(...), limit: int = Query(20)):
+    try:
+        project_root = _get_active_project_root()
+        commits = get_commits_for_path(project_root, path, limit)
+        return {"ok": True, "data": [
+            {
+                "hash": c.hash,
+                "short_hash": c.short_hash,
+                "summary": c.summary,
+                "author": c.author,
+                "date": c.date
+            }
+            for c in commits
+        ]}
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@file_editor_cm6_bp.post('/git/restore')
+async def git_restore_route(data: dict = Body(...)):
+    path = data.get('path')
+    commit = data.get('commit', 'HEAD')
+    if not path:
+        raise HTTPException(status_code=400, detail="Path required")
+    try:
+        project_root = _get_active_project_root()
+        restore_path(project_root, path, commit)
+        mark_git_cache_dirty(project_root)
+        invalidate_diff_cache(project_root, path)
+        return {"ok": True, "data": {"path": path, "commit": commit}}
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@file_editor_cm6_bp.get('/git/commits')
+async def git_commits():
+    try:
+        project_root = _get_active_project_root()
+        commits = get_commits(project_root, limit=50)
+        return {"ok": True, "data": [
+            {
+                "hash": c.hash,
+                "short_hash": c.short_hash,
+                "summary": c.summary,
+                "author": c.author,
+                "date": c.date
+            }
+            for c in commits
+        ]}
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@file_editor_cm6_bp.post('/git/reset_hard')
+async def git_reset_hard_route(data: dict = Body(...)):
+    commit = data.get('commit', 'HEAD')
+    try:
+        project_root = _get_active_project_root()
+        status = reset_hard(project_root, commit)
+        mark_git_cache_dirty(project_root)
+        invalidate_diff_cache(project_root)
         return {"ok": True, "data": _status_to_payload(status)}
     except GitError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

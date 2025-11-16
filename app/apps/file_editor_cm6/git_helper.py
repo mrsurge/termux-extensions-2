@@ -33,6 +33,14 @@ class GitStatus:
     unstaged: List[str]
     untracked: List[str]
 
+@dataclass
+class GitCommit:
+    hash: str
+    short_hash: str
+    summary: str
+    author: str
+    date: str
+
 
 def _run_git(project_root: Path, *args: str) -> str:
     try:
@@ -260,4 +268,69 @@ def unstage_paths(project_root: Path, paths: List[str]) -> GitStatus:
             # No commits yet: remove from index
             _run_git(project_root, "rm", "--cached", "--", path)
     
+    return get_status(project_root)
+
+def get_commits_for_path(project_root: Path, path: str, limit: int = 20) -> List[GitCommit]:
+    """Get commit history for a specific path."""
+    _ensure_repo(project_root)
+    
+    output = _run_git(
+        project_root,
+        "log",
+        f"--max-count={limit}",
+        "--format=%H|%h|%s|%an|%ai",
+        "--",
+        path
+    )
+    
+    commits = []
+    for line in output.splitlines():
+        if not line:
+            continue
+        parts = line.split('|', 4)
+        if len(parts) == 5:
+            commits.append(GitCommit(
+                hash=parts[0],
+                short_hash=parts[1],
+                summary=parts[2],
+                author=parts[3],
+                date=parts[4]
+            ))
+    return commits
+
+def restore_path(project_root: Path, path: str, commit: str = "HEAD") -> None:
+    """Restore a path to a specific commit."""
+    _ensure_repo(project_root)
+    _run_git(project_root, "restore", f"--source={commit}", "--", path)
+
+def get_commits(project_root: Path, limit: int = 50) -> List[GitCommit]:
+    """Get recent commits for the repository."""
+    _ensure_repo(project_root)
+    
+    output = _run_git(
+        project_root,
+        "log",
+        f"--max-count={limit}",
+        "--format=%H|%h|%s|%an|%ai"
+    )
+    
+    commits = []
+    for line in output.splitlines():
+        if not line:
+            continue
+        parts = line.split('|', 4)
+        if len(parts) == 5:
+            commits.append(GitCommit(
+                hash=parts[0],
+                short_hash=parts[1],
+                summary=parts[2],
+                author=parts[3],
+                date=parts[4]
+            ))
+    return commits
+
+def reset_hard(project_root: Path, commit: str = "HEAD") -> GitStatus:
+    """Perform a hard reset to the specified commit."""
+    _ensure_repo(project_root)
+    _run_git(project_root, "reset", "--hard", commit)
     return get_status(project_root)

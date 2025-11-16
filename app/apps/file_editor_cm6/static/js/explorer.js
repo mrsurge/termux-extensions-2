@@ -89,6 +89,7 @@ export async function initExplorerUI() {
     commit: document.getElementById('fe-git-commit'),
     push: document.getElementById('fe-git-push'),
     pull: document.getElementById('fe-git-pull'),
+    reset: document.getElementById('fe-git-reset'),
   };
   setGitControlsEnabled(false);
 
@@ -129,6 +130,46 @@ export async function initExplorerUI() {
     });
     gitButtons.push?.addEventListener('click', () => handleGitAction('/git/push', {}));
     gitButtons.pull?.addEventListener('click', () => handleGitAction('/git/pull', {}));
+    gitButtons.reset?.addEventListener('click', async () => {
+        try {
+          const resp = await fetch('/api/app/file_editor_cm6/git/commits');
+          const json = await resp.json();
+          if (!json.ok) throw new Error(json.error || 'Failed to fetch commits');
+          
+          const commits = json.data;
+          if (!commits.length) {
+            toast('No commits found');
+            return;
+          }
+          
+          const commitList = commits.slice(0, 5).map(c => `${c.short_hash}: ${c.summary}`).join('\n');
+          const confirmed = confirm(
+            `⚠️ DANGER: Hard reset will discard ALL uncommitted changes!\n\n` +
+            `Recent commits:\n${commitList}\n\n` +
+            `Reset to HEAD?`
+          );
+          if (!confirmed) return;
+          
+          const resetResp = await fetch('/api/app/file_editor_cm6/git/reset_hard', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ commit: 'HEAD' })
+          });
+          const resetJson = await resetResp.json();
+          if (!resetJson.ok) throw new Error(resetJson.error || 'Reset failed');
+          
+          gitStatusCache = resetJson.data;
+          renderGitSummary(resetJson.data);
+          toast('Repository reset to HEAD');
+          await refreshTree(treeElement);
+          
+          if (typeof window.__cm6ReloadCurrentFile === 'function') {
+            await window.__cm6ReloadCurrentFile();
+          }
+        } catch (err) {
+          toast(err.message || 'Reset failed');
+        }
+      });
   }
 
   // Toggle drawer function matching old IDE
@@ -885,6 +926,9 @@ function buildMenuItems(entry) {
     if (entry.gitStatus && (entry.gitStatus === 'staged' || entry.gitStatus === 'staged_modified')) {
         items.push({ label: 'Unstage', handler: unstageEntry });
     }
+    if (!isDir && entry.gitStatus && entry.gitStatus !== 'clean') {
+        items.push({ label: 'Restore…', handler: restoreEntry });
+    }
 
     items.push({ divider: true });
     items.push({ label: 'Delete', handler: deleteEntry, destructive: true });
@@ -1257,6 +1301,50 @@ async function unstageEntry(entry) {
       toast(err.message || 'Unstage failed');
     }
 }
+
+async function restoreEntry(entry) {
+    try {
+      // Fetch commits for this path
+      const resp = await fetch(`/api/app/file_editor_cm6/git/commits_for_path?path=${encodeURIComponent(entry.rel)}`);
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Failed to fetch commits');
+      
+      const commits = json.data;
+      if (!commits.length) {
+        toast('No commits found for this file');
+        return;
+      }
+      
+      // Show simple modal (for now use confirm, later build proper modal)
+      const commitList = commits.slice(0, 5).map(c => `${c.short_hash}: ${c.summary}`).join('\\n');
+      const confirmed = confirm(
+        `⚠️ WARNING: This will discard changes to ${entry.name}\\n\\n` +
+        `Recent commits:\\n${commitList}\\n\\n` +
+        `Restore from HEAD?`
+      );
+      if (!confirmed) return;
+      
+      // Restore from HEAD
+      const restoreResp = await fetch('/api/app/file_editor_cm6/git/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: entry.rel, commit: 'HEAD' })
+      });
+      const restoreJson = await restoreResp.json();
+      if (!restoreJson.ok) throw new Error(restoreJson.error || 'Restore failed');
+      
+      toast(`Restored ${entry.name} from HEAD`);
+      await refreshTree(treeElement);
+      await refreshGitStatus(false);
+      
+      // Reload current file if it was restored
+      if (typeof window.__cm6ReloadCurrentFile === 'function') {
+        await window.__cm6ReloadCurrentFile();
+      }
+    } catch (err) {
+      toast(err.message || 'Restore failed');
+    }
+  }
 
 // These functions will be provided by main.js
 function openFile(absPath) {
