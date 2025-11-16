@@ -36,6 +36,8 @@ from .git_helper import (
     restore_path,
     get_commits,
     reset_hard,
+    is_git_repository,
+    init_repository,
 )
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
@@ -440,6 +442,25 @@ async def project_open(data: dict = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@file_editor_cm6_bp.post('/project/create')
+async def project_create(data: dict = Body(...)):
+    """Create a new project directory."""
+    parent_path = data.get('parent_path')
+    name = data.get('name')
+
+    try:
+        from .explorer_helper import create_project
+        result = create_project(parent_path, name)
+        
+        # Set the new project as active
+        new_project_path = result['path']
+        _history_store.touch_project(new_project_path)
+        _history_store.set_active_project(new_project_path)
+        
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @file_editor_cm6_bp.get('/project/current')
 def project_current():
     """Get the current project root."""
@@ -635,6 +656,25 @@ async def git_reset_hard_route(data: dict = Body(...)):
         status = reset_hard(project_root, commit)
         mark_git_cache_dirty(project_root)
         invalidate_diff_cache(project_root)
+        return {"ok": True, "data": _status_to_payload(status)}
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@file_editor_cm6_bp.get('/git/is_repo')
+async def git_is_repo():
+    try:
+        project_root = _get_active_project_root()
+        is_repo = is_git_repository(project_root)
+        return {"ok": True, "data": {"is_repo": is_repo}}
+    except Exception as exc:
+        return {"ok": True, "data": {"is_repo": False}}
+
+@file_editor_cm6_bp.post('/git/init')
+async def git_init_route():
+    try:
+        project_root = _get_active_project_root()
+        status = init_repository(project_root)
+        mark_git_cache_dirty(project_root)
         return {"ok": True, "data": _status_to_payload(status)}
     except GitError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

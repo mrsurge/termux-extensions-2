@@ -6,6 +6,7 @@ Provides REST endpoints and WebSocket PTY streaming for embedded terminal.
 """
 
 import asyncio
+import json
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query, Depends
 
@@ -215,7 +216,9 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
         
         # Create new shell if needed - DIRECT AWAIT
         if not saved_shell_id:
-            cwd = str(Path.home())
+            # Use active project path if available, fallback to home
+            project_path = history_store.get_active_project()
+            cwd = project_path if project_path and Path(project_path).is_dir() else str(Path.home())
             print(f"[Terminal WS] Creating new terminal shell (cwd={cwd})")
             shell_rec = await create_editor_shell(cwd=cwd)
             shell_id = shell_rec['id']
@@ -258,8 +261,31 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
     
     try:
         async for msg in websocket.iter_text():
+            # Check if this is a command message
             try:
-                # DIRECT AWAIT
+                data = json.loads(msg)
+                if isinstance(data, dict) and data.get('action') == 'destroy':
+                    print(f"[Terminal WS] Received destroy command for shell {shell_id}")
+                    
+                    # Terminate the shell
+                    try:
+                        await mgr.terminate_shell(shell_id, force=True)
+                    except Exception as e:
+                        print(f"[Terminal WS] Error terminating shell: {e}")
+                    
+                    # Clear from history store (ATOMIC with terminate)
+                    history_store.set_terminal_shell_id(None)
+                    print(f"[Terminal WS] Shell {shell_id} destroyed and cache cleared")
+                    
+                    # Send confirmation and close
+                    await websocket.send_json({"type": "destroyed", "shell_id": shell_id})
+                    break  # Exit loop, triggers cleanup in finally block
+            except (json.JSONDecodeError, TypeError):
+                # Not JSON, treat as regular terminal input
+                pass
+            
+            # Regular terminal input
+            try:
                 await mgr.write_to_pty(shell_id, msg)
             except Exception:
                 pass

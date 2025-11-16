@@ -432,3 +432,24 @@ def batch_move(rels: list[str], dest_dir_path: str) -> dict:
         except Exception as e:
             results.append({'rel': rel, 'ok': False, 'error': str(e)})
     return {'results': results}
+
+def create_project(parent_path_str: str, name: str) -> dict:
+    """Create a new project directory."""
+    if not name or not name.strip():
+        raise ValueError("Project name cannot be empty")
+
+    parent_path = Path(parent_path_str).expanduser().resolve()
+
+    if not parent_path.is_dir():
+        raise ValueError("Parent path is not a valid directory.")
+
+    new_project_path = parent_path / name
+    if new_project_path.exists():
+        raise ValueError(f"Directory '{name}' already exists in the selected location.")
+
+    new_project_path.mkdir(parents=True, exist_ok=False)
+    
+    # Optional: Add boilerplate files here if needed
+    # (new_project_path / "README.md").write_text("# My New Project")
+
+    return {'path': str(new_project_path)}

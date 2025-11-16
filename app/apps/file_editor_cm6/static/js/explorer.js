@@ -90,6 +90,7 @@ export async function initExplorerUI() {
     push: document.getElementById('fe-git-push'),
     pull: document.getElementById('fe-git-pull'),
     reset: document.getElementById('fe-git-reset'),
+    init: document.getElementById('fe-git-init'),
   };
   setGitControlsEnabled(false);
 
@@ -110,6 +111,9 @@ export async function initExplorerUI() {
   });
 
   btnOpenProject?.addEventListener('click', openProjectPrompt);
+
+  const btnNewProject = document.getElementById('fe-new-project');
+  btnNewProject?.addEventListener('click', openNewProjectPrompt);
 
   if (gitButtons) {
     gitButtons.stage?.addEventListener('click', () => handleGitAction('/git/stage_all', {}));
@@ -169,7 +173,23 @@ export async function initExplorerUI() {
         } catch (err) {
           toast(err.message || 'Reset failed');
         }
-      });
+    });
+    gitButtons.init?.addEventListener('click', async () => {
+        const confirmed = confirm('Initialize Git repository in this project?');
+        if (!confirmed) return;
+        
+        try {
+          const resp = await fetch('/api/app/file_editor_cm6/git/init', { method: 'POST' });
+          const json = await resp.json();
+          if (!json.ok) throw new Error(json.error || 'Init failed');
+          
+          toast('Git repository initialized');
+          await refreshGitStatus(false);
+          await refreshTree(treeElement);
+        } catch (err) {
+          toast(err.message || 'Git init failed');
+        }
+    });
   }
 
   // Toggle drawer function matching old IDE
@@ -262,11 +282,22 @@ async function refreshCurrentProject(forceRefresh = false) {
   return state;
 }
 
-function setGitControlsEnabled(enabled) {
+function setGitControlsEnabled(enabled, showInit = false) {
   if (!gitButtons) return;
-  Object.values(gitButtons).forEach((btn) => {
-    if (btn) btn.disabled = !enabled;
-  });
+  
+  for (const [key, btn] of Object.entries(gitButtons)) {
+      if (!btn) continue;
+      if (key === 'init') {
+          btn.style.display = showInit ? 'inline-block' : 'none';
+      } else {
+          btn.disabled = !enabled;
+          btn.style.display = showInit ? 'none' : 'inline-block';
+      }
+  }
+  // Ensure reset is always hidden when other controls are, unless init is being shown
+  if (gitButtons.reset) {
+    gitButtons.reset.style.display = (enabled && !showInit) ? 'inline-block' : 'none';
+  }
 }
 
 function renderGitSummary(status, message) {
@@ -291,6 +322,14 @@ function renderGitSummary(status, message) {
 async function refreshGitStatus(showToast = true) {
   if (!currentProjectPath) return;
   try {
+    const isRepoData = await gitRequest('/git/is_repo');
+    if (!isRepoData.is_repo) {
+        gitStatusCache = null;
+        renderGitSummary(null, 'Not a git repository.');
+        setGitControlsEnabled(false, true);
+        return;
+    }
+
     const data = await gitRequest('/git/status');
     gitStatusCache = data;
     renderGitSummary(data);
@@ -388,6 +427,55 @@ async function openProjectPrompt() {
     }
     // If the error is 'cancelled', we do nothing.
   }
+}
+
+async function openNewProjectPrompt() {
+    if (!confirm("This will create a new directory for your project. Continue?")) {
+        return;
+    }
+
+    if (!window.teFilePicker) {
+        toast('File picker not available.');
+        return;
+    }
+
+    try {
+        // Use saveFile mode which includes a filename input
+        const result = await window.teFilePicker.saveFile({
+            title: 'Create New Project',
+            filename: 'my-project',  // Default suggestion
+            selectLabel: 'Create Project'
+        });
+
+        // result.directory is the parent path
+        // result.path is the full path (parent + filename)
+        // result.existed tells us if it already exists
+
+        if (result.existed) {
+            if (!confirm(`Directory "${result.path}" already exists. Use it anyway?`)) {
+                return;
+            }
+        }
+
+        const r = await fetch('/api/app/file_editor_cm6/project/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                parent_path: result.directory,  // Parent directory
+                name: result.name               // Folder name from the input
+            })
+        });
+        const j = await r.json();
+        if (j?.ok) {
+            location.reload();
+        } else {
+            alert(`Failed to create project: ${j?.error || 'Unknown error'}`);
+        }
+    } catch (e) {
+        if (e && e.message !== 'cancelled') {
+            alert(`An error occurred: ${e.message}`);
+        }
+    }
 }
 
 async function renderRecentMenu(state) {

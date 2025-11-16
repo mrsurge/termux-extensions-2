@@ -89,22 +89,21 @@ export function createTerminalDrawer(options = {}) {
   async function destroyShell() {
     if (!shellId) return;
 
-    try {
-      await fetch(`/api/app/file_editor_cm6/terminal/${shellId}`, {
-        method: 'DELETE',
-      });
-      
-      // Clear from app's history store
-      await fetch('/api/app/file_editor_cm6/terminal/shell-id', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shell_id: null }),
-      });
-    } catch (err) {
-      console.error('Failed to destroy terminal shell:', err);
-    }
+    const currentShellId = shellId;
+    shellId = null;  // Clear immediately to prevent reconnection
 
-    shellId = null;
+    // Send destroy command through WebSocket
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ action: 'destroy' }));
+        console.log('Sent destroy command for shell:', currentShellId);
+        
+        // Wait briefly for backend to process
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (err) {
+        console.error('Failed to send destroy command:', err);
+      }
+    }
   }
 
   /**
@@ -304,25 +303,28 @@ export function createTerminalDrawer(options = {}) {
    * Permanently destroy the terminal
    */
   async function destroy() {
-    // Close drawer
+    console.log('Terminal destroy() called');
+    
+    // Send destroy command to backend FIRST (before UI cleanup)
+    await destroyShell();
+    
+    // Close drawer UI
     close();
-
+    
+    // Close WebSocket (backend already terminated shell)
+    if (ws) {
+      ws.close();
+      ws = null;
+    }
+    
     // Dispose xterm instance
     if (term) {
       term.dispose();
       term = null;
     }
-
-    // Close WebSocket
-    if (ws) {
-      ws.close();
-      ws = null;
-    }
-
-    // Destroy shell on backend
-    await destroyShell();
-
+    
     container.innerHTML = '';
+    console.log('Terminal destroy() complete');
   }
 
   /**
@@ -423,7 +425,9 @@ export function createTerminalDrawer(options = {}) {
   }
 
   if (closeBtn) {
-    closeBtn.addEventListener('click', destroy);
+    closeBtn.addEventListener('click', async () => {
+      await destroy();  // ✅ Properly await async function
+    });
   }
 
   if (collapseBtn) {

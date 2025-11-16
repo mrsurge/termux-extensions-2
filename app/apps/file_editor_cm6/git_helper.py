@@ -334,3 +334,19 @@ def reset_hard(project_root: Path, commit: str = "HEAD") -> GitStatus:
     _ensure_repo(project_root)
     _run_git(project_root, "reset", "--hard", commit)
     return get_status(project_root)
+
+def init_repository(project_root: Path) -> GitStatus:
+    """Initialize a new git repository."""
+    try:
+        _run_git(project_root, "init")
+        # Set initial config
+        _run_git(project_root, "config", "user.name", "User")
+        _run_git(project_root, "config", "user.email", "user@example.com")
+        return get_status(project_root)
+    except Exception as exc:
+        raise GitError(f"Failed to initialize repository: {str(exc)}")
+
+def is_git_repository(project_root: Path) -> bool:
+    """Check if directory is a git repository."""
+    out = _run_git_optional(project_root, "rev-parse", "--is-inside-work-tree")
+    return out is not None and out.strip() == "true"

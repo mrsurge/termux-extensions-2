@@ -185,3 +185,96 @@
 **Next Steps:**
 - Awaiting user confirmation that the UI issues are resolved before proceeding.
 ---
+### CHECKPOINT C - COMPLETION LOG
+**Timestamp:** 2025-11-16T05:34:28+00:00
+**Implementer:** Gemini
+
+**Changes Made:**
+- `app/apps/file_editor_cm6/template.html`:
+  - Added a `#fe-new-project` button to the drawer header.
+  - Added a `#fe-git-init` button to the git actions footer.
+- `app/apps/file_editor_cm6/static/js/explorer.js`:
+  - Implemented `openNewProjectPrompt` to handle the new project creation flow.
+  - Added event listeners for the 'New Project' and 'Init Repo' buttons.
+  - Implemented `restoreEntry` to handle the Git restore flow.
+  - Updated `refreshGitStatus` and `setGitControlsEnabled` to manage the visibility of the 'Init Repo' button.
+- `app/apps/file_editor_cm6/explorer_helper.py`:
+  - Added `create_project` function to handle new project directory creation.
+- `app/apps/file_editor_cm6/git_helper.py`:
+  - Added `GitCommit` dataclass.
+  - Added `get_commits_for_path`, `restore_path`, `get_commits`, `reset_hard`, and `init_repository` functions.
+- `app/apps/file_editor_cm6/main.py`:
+  - Added `/project/create` endpoint for new project creation.
+  - Added `/git/commits_for_path`, `/git/restore`, `/git/commits`, `/git/reset_hard`, `/git/is_repo`, and `/git/init` endpoints.
+
+**New Additions:**
+- **Features:**
+  - New Project creation flow.
+  - Git Restore per file.
+  - Global Git Hard Reset.
+  - Global Git Init for non-repo projects.
+- **Functions (JS):** `openNewProjectPrompt`, `restoreEntry`.
+- **Functions (Python):** `create_project` in `explorer_helper.py`. `get_commits_for_path`, `restore_path`, `get_commits`, `reset_hard`, `init_repository` in `git_helper.py`.
+- **Endpoints:** `/project/create`, `/git/commits_for_path`, `/git/restore`, `/git/commits`, `/git/reset_hard`, `/git/is_repo`, `/git/init`.
+
+**Testing Notes:**
+- All features from Checkpoint C and the new project plan should be ready for testing.
+
+**Next Steps:**
+- Awaiting user confirmation to finalize the implementation phase.
+---
+### HOTFIX - Remove Home Directory Restriction
+**Timestamp:** 2025-11-16T06:01:55.581Z
+**Implementer:** Claude (Anthropic)
+
+**Changes Made:**
+- `app/apps/file_editor_cm6/explorer_helper.py`:
+  - Removed overly restrictive home directory check from `create_project()` function (lines 442-446).
+  - Users can now create projects anywhere within Termux's accessible file system, not just within `/data/data/com.termux/files/home`.
+
+**Issues Encountered:**
+- Gemini's Checkpoint C implementation added an unnecessary security restriction that only allowed project creation within the user's home directory.
+- This prevented users from creating projects in other valid locations like shared storage (`/storage/emulated/0`) or custom Termux-accessible paths.
+- User encountered 400 Bad Request error when attempting to create a project outside home directory.
+
+**Testing Notes:**
+- User confirmed the endpoint works correctly after removing the restriction.
+- File system permissions remain as the security boundary - invalid locations will fail naturally with appropriate OS errors.
+
+**Next Steps:**
+- Monitor for any issues with project creation in various locations.
+---
+### CHECKPOINT C - GIT INIT FIX
+**Timestamp:** 2025-11-16T05:46:08+00:00
+**Implementer:** Gemini
+
+**Changes Made:**
+- `app/apps/file_editor_cm6/git_helper.py`:
+  - Added the missing `is_git_repository` function. This function was being imported and called by `main.py` but was not defined, causing the `/git/is_repo` endpoint to always fail and return `false`.
+
+**Issues Encountered:**
+- A previous implementation was incomplete, failing to define a function that was being imported and used. This has now been corrected as per user feedback.
+
+**Testing Notes:**
+- The "Initialize Git" button should now correctly appear only for projects that are not already Git repositories.
+
+**Next Steps:**
+- Awaiting user confirmation that the "Git Init" feature works as expected.
+---
+### CHECKPOINT C - NEW PROJECT FIX
+**Timestamp:** 2025-11-16T05:48:40+00:00
+**Implementer:** Gemini
+
+**Changes Made:**
+- `app/apps/file_editor_cm6/static/js/explorer.js`:
+  - Replaced the `openNewProjectPrompt` function with the improved version provided by the user. The new implementation uses the `saveFile` mode of the file picker for a better user experience, providing an integrated way to specify the new project's name and location.
+
+**Issues Encountered:**
+- The previous implementation used a separate `prompt()` after the file picker, which was a suboptimal user experience. The new implementation corrects this by using the appropriate file picker mode.
+
+**Testing Notes:**
+- The "New Project..." button should now open a single modal that allows selecting a parent directory and entering the new project name in one step.
+
+**Next Steps:**
+- Awaiting user confirmation that the "New Project" flow is correct.
+---
