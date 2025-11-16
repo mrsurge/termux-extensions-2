@@ -8,6 +8,7 @@ let gitStatusCache = null;
 let gitSummaryEl = null;
 let gitButtons = null;
 let treeElement = null;
+let cardMenu = null;
 
 const GIT_STATUS_CLASS_MAP = {
   modified: 'fe-git-modified',
@@ -129,19 +130,23 @@ export async function initExplorerUI() {
 
   // Toggle drawer function matching old IDE
   async function toggleDrawer(open) {
+    if (!root) {
+      return;
+    }
     if (open === undefined) {
-      const willOpen = !(root?.classList.contains('drawer-open'));
-      root?.classList.toggle('drawer-open');
+      const willOpen = !root.classList.contains('drawer-open');
+      root.classList.toggle('drawer-open');
       if (willOpen && treeEl) {
         await refreshTree(treeEl);
       }
     } else if (open) {
-      root?.classList.add('drawer-open');
-      if (treeEl) {
+      const openingNow = !root.classList.contains('drawer-open');
+      root.classList.add('drawer-open');
+      if (openingNow && treeEl) {
         await refreshTree(treeEl);
       }
     } else {
-      root?.classList.remove('drawer-open');
+      root.classList.remove('drawer-open');
     }
   }
 
@@ -153,6 +158,18 @@ export async function initExplorerUI() {
   drawerOpenBtn?.addEventListener('click', () => toggleDrawer(true));
 
   treeEl?.addEventListener('click', onTreeClick);
+
+  cardMenu = document.createElement('div');
+  cardMenu.className = 'fe-card-menu';
+  document.body.appendChild(cardMenu);
+
+  document.addEventListener('click', (ev) => {
+    const isMenuClick = ev.target.closest('.fe-card-menu');
+    const isMenuBtnClick = ev.target.classList.contains('fe-card-menu-btn');
+    if (!isMenuClick && !isMenuBtnClick) {
+      cardMenu.classList.remove('show');
+    }
+  }, true);
 }
 
 function basename(path) {
@@ -258,10 +275,7 @@ async function handleGitAction(endpoint, payload) {
     if (endpoint === '/git/push' && typeof window.__cm6ReloadCurrentFile === 'function') {
       await window.__cm6ReloadCurrentFile();
       // Close drawer to show the updated file (currently not working)
-      const root = document.querySelector('.fe-drawer');
-      if (root) {
-        root.classList.remove('drawer-open');
-      }
+      root.classList.remove('drawer-open');
     }
     
     return;
@@ -460,7 +474,44 @@ async function renderTreeRoot(treeEl) {
     treeEl.appendChild(empty);
     return;
   }
-  await addTreeChildren(treeEl, '.');
+
+  const rootLi = document.createElement('li');
+  rootLi.className = 'fe-tree-node fe-tree-root';
+  rootLi.dataset.kind = 'dir';
+  rootLi.dataset.rel = '.';
+  rootLi.dataset.open = 'true';
+
+  const twisty = document.createElement('button');
+  twisty.className = 'fe-tree-twisty';
+  twisty.textContent = '▾';
+
+  const icon = document.createElement('span');
+  icon.className = 'fe-entry-icon fe-entry-icon-dir';
+
+  const text = document.createElement('span');
+  text.className = 'fe-tree-text';
+  text.textContent = basename(currentProjectPath) || 'Project';
+
+  const menuBtn = document.createElement('button');
+  menuBtn.className = 'fe-card-menu-btn';
+  menuBtn.textContent = '⋮';
+  const rootEntry = { rel: '.', name: basename(currentProjectPath) || 'Project', kind: 'dir' };
+  menuBtn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    showCardMenu(rootEntry, menuBtn);
+  });
+
+  const childList = document.createElement('ul');
+  childList.className = 'fe-tree';
+
+  rootLi.appendChild(twisty);
+  rootLi.appendChild(icon);
+  rootLi.appendChild(text);
+  rootLi.appendChild(menuBtn);
+  rootLi.appendChild(childList);
+  treeEl.appendChild(rootLi);
+
+  await addTreeChildren(childList, '.');
 }
 
 async function addTreeChildren(parentEl, rel) {
@@ -482,6 +533,7 @@ async function addTreeChildren(parentEl, rel) {
       li.className = 'fe-tree-node';
       li.dataset.kind = e.kind;
       li.dataset.rel = e.rel;
+      li.dataset.name = e.name;
       li.dataset.open = 'false';
       if (e.gitStatus) {
         li.dataset.gitStatus = e.gitStatus;
@@ -496,13 +548,26 @@ async function addTreeChildren(parentEl, rel) {
       twisty.textContent = e.kind === 'dir' ? '▸' : '';
       twisty.style.visibility = e.kind === 'dir' ? 'visible' : 'hidden';
 
+      const icon = document.createElement('span');
+      icon.className = `fe-entry-icon fe-entry-icon-${e.kind}`;
+
       const text = document.createElement('span');
       text.className = 'fe-tree-text';
       text.textContent = e.name;
       applyEntryStyling(text, e);
 
+      const menuBtn = document.createElement('button');
+      menuBtn.className = 'fe-card-menu-btn';
+      menuBtn.textContent = '⋮';
+      menuBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        showCardMenu(e, menuBtn);
+      });
+
       li.appendChild(twisty);
+      li.appendChild(icon);
       li.appendChild(text);
+      li.appendChild(menuBtn);
       parentEl.appendChild(li);
     });
   } catch (e) {
@@ -545,15 +610,26 @@ async function expandDirectory(treeEl, rel) {
   if (!segments.length) return;
 
   let currentRel = '.';
-  let container = treeEl;
+  let container = treeEl.querySelector('.fe-tree-root > ul.fe-tree');
+
   for (const segment of segments) {
     const nextRel = currentRel === '.' ? segment : `${currentRel}/${segment}`;
     let dirNode = findDirNode(container, nextRel);
+    
     if (!dirNode) {
-      await addTreeChildren(container, currentRel);
-      dirNode = findDirNode(container, nextRel);
+      // This case should ideally not be hit if restore is called after render.
+      // But as a fallback, we can try to render the parent.
+      const parentRel = nextRel.includes('/') ? nextRel.substring(0, nextRel.lastIndexOf('/')) : '.';
+      const parentNode = findDirNode(treeEl, parentRel);
+      if (parentNode) {
+        const parentChildList = parentNode.querySelector(':scope > ul');
+        if (parentChildList) {
+          await addTreeChildren(parentChildList, parentRel);
+          dirNode = findDirNode(parentChildList, nextRel);
+        }
+      }
       if (!dirNode) {
-        return;
+        return; // still not found, bail.
       }
     }
 
@@ -588,12 +664,21 @@ function findDirNode(container, rel) {
 }
 
 async function onTreeClick(ev) {
+  if (ev.target.classList.contains('fe-card-menu-btn')) {
+    return;
+  }
   if (!currentProjectPath) {
     toast('Select a project before browsing files.');
     return;
   }
   const li = ev.target.closest('li.fe-tree-node');
   if (!li) return;
+
+  // Prevent root from being collapsed
+  if (li.dataset.rel === '.' && li.dataset.kind === 'dir' && !ev.target.classList.contains('fe-tree-text')) {
+    const isMenuBtn = ev.target.classList.contains('fe-card-menu-btn');
+    if(!isMenuBtn) return;
+  }
 
   const rel = li.dataset.rel;
   const kind = li.dataset.kind;
@@ -621,7 +706,7 @@ async function onTreeClick(ev) {
       li.dataset.open = 'true';
       if (twisty) twisty.textContent = '▾';
       const ul = document.createElement('ul');
-      ul.className = 'fe-tree';
+ul.className = 'fe-tree';
       li.appendChild(ul);
       await addTreeChildren(ul, rel);
       if (rel && rel !== '.') {
@@ -632,7 +717,6 @@ async function onTreeClick(ev) {
     // File clicked - open it
     openFileRel(rel, currentProjectPath);
     // Close drawer after opening file
-    const root = document.querySelector('.fe-root');
     root?.classList.remove('drawer-open');
   }
 }
@@ -652,21 +736,192 @@ function applyEntryStyling(labelEl, entry) {
     labelEl.classList.add('fe-entry-symlink');
   }
 
-       // ADD THIS SECTION for badges on files only
-       if (entry.kind === 'file' && entry.gitStatus) {
-         if (entry.gitStatus === 'modified') {
-           const badge = document.createElement('span');
-           badge.className = 'fe-git-badge fe-git-badge-modified';
-           badge.textContent = 'M';
-           labelEl.appendChild(badge);
-         } else if (entry.gitStatus === 'untracked') {
-           const badge = document.createElement('span');
-           badge.className = 'fe-git-badge fe-git-badge-untracked';
-           badge.textContent = 'U';
-           labelEl.appendChild(badge);
-         }
-       }
-     }
+  // ADD THIS SECTION for badges on files only
+  if (entry.kind === 'file' && entry.gitStatus) {
+    if (entry.gitStatus === 'modified') {
+      const badge = document.createElement('span');
+      badge.className = 'fe-git-badge fe-git-badge-modified';
+      badge.textContent = 'M';
+      labelEl.appendChild(badge);
+    } else if (entry.gitStatus === 'untracked') {
+      const badge = document.createElement('span');
+      badge.className = 'fe-git-badge fe-git-badge-untracked';
+      badge.textContent = 'U';
+      labelEl.appendChild(badge);
+    }
+  }
+}
+
+function showCardMenu(entry, anchorEl) {
+  cardMenu.innerHTML = '';
+  cardMenu.classList.add('show');
+
+  const rect = anchorEl.getBoundingClientRect();
+  cardMenu.style.position = 'absolute';
+  cardMenu.style.top = `${rect.bottom}px`;
+  cardMenu.style.left = `${rect.left}px`;
+
+  const items = buildMenuItems(entry);
+  items.forEach(item => {
+    if (item.divider) {
+      const div = document.createElement('div');
+      div.className = 'fe-dd-divider';
+      cardMenu.appendChild(div);
+      return;
+    }
+    const div = document.createElement('div');
+    div.className = 'fe-dd-item';
+    div.textContent = item.label;
+    if (item.destructive) {
+      div.dataset.destructive = 'true';
+    }
+    div.addEventListener('click', () => {
+      cardMenu.classList.remove('show');
+      item.handler(entry);
+    });
+    cardMenu.appendChild(div);
+  });
+
+  const menuWidth = cardMenu.offsetWidth;
+  const menuHeight = cardMenu.offsetHeight;
+  const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = document.documentElement.clientHeight;
+
+  let left = rect.right - menuWidth;
+  if (left < 8) {
+    left = 8;
+  }
+  if (left + menuWidth > viewportWidth - 8) {
+    left = Math.max(8, viewportWidth - menuWidth - 8);
+  }
+
+  let top = rect.bottom;
+  if (top + menuHeight > viewportHeight - 8) {
+    top = Math.max(8, rect.top - menuHeight);
+  }
+
+  cardMenu.style.left = `${left}px`;
+  cardMenu.style.top = `${top}px`;
+}
+
+function buildMenuItems(entry) {
+  const items = [];
+  const isDir = entry.kind === 'dir';
+
+  if (isDir) {
+    items.push({ label: 'Add File', handler: addFile });
+    items.push({ label: 'Add Directory', handler: addDirectory });
+  }
+
+  items.push({ label: 'Rename', handler: renameEntry });
+
+  items.push({ divider: true });
+
+  items.push({ label: 'Delete', handler: deleteEntry, destructive: true });
+
+  return items;
+}
+
+// Functions for card menu actions
+async function addFile(entry) {
+    const name = prompt('File name:');
+    if (!name || !name.trim()) return;
+
+    try {
+        const resp = await fetch('/api/app/file_editor_cm6/explorer/touch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                project: currentProjectPath,
+                parent_rel: entry.rel,
+                name: name.trim()
+            })
+        });
+        const json = await resp.json();
+        if (!json.ok) throw new Error(json.error || 'Failed to create file');
+
+        toast(`File "${name}" created`);
+        await refreshTree(treeElement);
+        await refreshGitStatus(false);
+    } catch (err) {
+        toast(err.message || 'Failed to create file');
+    }
+}
+
+async function addDirectory(entry) {
+    const name = prompt('Directory name:');
+    if (!name || !name.trim()) return;
+
+    try {
+        const resp = await fetch('/api/app/file_editor_cm6/explorer/mkdir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                project: currentProjectPath,
+                parent_rel: entry.rel,
+                name: name.trim()
+            })
+        });
+        const json = await resp.json();
+        if (!json.ok) throw new Error(json.error || 'Failed to create directory');
+
+        toast(`Directory "${name}" created`);
+        await refreshTree(treeElement);
+        await refreshGitStatus(false);
+    } catch (err) {
+        toast(err.message || 'Failed to create directory');
+    }
+}
+
+async function renameEntry(entry) {
+    const currentName = entry.name;
+    const newName = prompt('Rename to:', currentName);
+    if (!newName || !newName.trim() || newName === currentName) return;
+
+    try {
+        const resp = await fetch('/api/app/file_editor_cm6/explorer/rename', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                project: currentProjectPath,
+                rel: entry.rel,
+                new_name: newName.trim()
+            })
+        });
+        const json = await resp.json();
+        if (!json.ok) throw new Error(json.error || 'Failed to rename');
+
+        toast(`Renamed to "${newName}"`);
+        await refreshTree(treeElement);
+        await refreshGitStatus(false);
+    } catch (err) {
+        toast(err.message || 'Failed to rename');
+    }
+}
+
+async function deleteEntry(entry) {
+    const confirmed = confirm(
+        `⚠️ WARNING: Delete "${entry.name}"?\\n\\n` +
+        `This action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+        const resp = await fetch('/api/app/file_editor_cm6/explorer/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rel: entry.rel })
+        });
+        const json = await resp.json();
+        if (!json.ok) throw new Error(json.error || 'Delete failed');
+
+        toast(`Deleted ${entry.name}`);
+        await refreshTree(treeElement);
+        await refreshGitStatus(false);
+    } catch (err) {
+        toast(err.message || 'Delete failed');
+    }
+}
 
 // These functions will be provided by main.js
 function openFile(absPath) {

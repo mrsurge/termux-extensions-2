@@ -6,6 +6,7 @@ import os
 import stat
 import subprocess
 import time
+import shutil
 from typing import Dict, Iterable, Optional
 
 # Global project root for this app (default: HOME)
@@ -283,3 +284,76 @@ def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
 
     rel = resolved.relative_to(project_root_resolved)
     return rel.as_posix()
+
+def create_directory(parent_rel: str, name: str) -> dict:
+    """Create a new directory within parent_rel."""
+    root = get_project_root()
+    parent = (root / parent_rel).resolve()
+    
+    if not str(parent).startswith(str(root.resolve())):
+        raise ValueError("parent outside project root")
+    if not parent.is_dir():
+        raise ValueError("parent is not a directory")
+    
+    new_dir = parent / name
+    if new_dir.exists():
+        raise ValueError(f"'{name}' already exists")
+    
+    new_dir.mkdir(parents=False, exist_ok=False)
+    rel_path = str(new_dir.relative_to(root))
+    return {'rel': rel_path, 'name': name}
+
+def create_file(parent_rel: str, name: str) -> dict:
+    """Create a new empty file within parent_rel."""
+    root = get_project_root()
+    parent = (root / parent_rel).resolve()
+    
+    if not str(parent).startswith(str(root.resolve())):
+        raise ValueError("parent outside project root")
+    if not parent.is_dir():
+        raise ValueError("parent is not a directory")
+    
+    new_file = parent / name
+    if new_file.exists():
+        raise ValueError(f"'{name}' already exists")
+    
+    new_file.touch(exist_ok=False)
+    rel_path = str(new_file.relative_to(root))
+    return {'rel': rel_path, 'name': name}
+
+def rename_entry(rel: str, new_name: str) -> dict:
+    """Rename a file or directory to new_name within same parent."""
+    root = get_project_root()
+    old_path = (root / rel).resolve()
+    
+    if not str(old_path).startswith(str(root.resolve())):
+        raise ValueError("path outside project root")
+    if not old_path.exists():
+        raise ValueError("path does not exist")
+    
+    parent = old_path.parent
+    new_path = parent / new_name
+    
+    if new_path.exists():
+        raise ValueError(f"'{new_name}' already exists")
+    
+    old_path.rename(new_path)
+    new_rel = str(new_path.relative_to(root))
+    return {'old_rel': rel, 'new_rel': new_rel, 'new_name': new_name}
+
+def delete_entry(rel: str) -> dict:
+    """Delete a file or directory."""
+    root = get_project_root()
+    target = (root / rel).resolve()
+    
+    if not str(target).startswith(str(root.resolve())):
+        raise ValueError("path outside project root")
+    if not target.exists():
+        raise ValueError("path does not exist")
+    
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    
+    return {'rel': rel, 'deleted': True}

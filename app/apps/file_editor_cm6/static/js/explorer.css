@@ -3,8 +3,11 @@
 /* explorer.css - File Explorer Drawer Styles */
 
 :root {
-  --drawer-width: 100vw; /* Change from 75vw to 100vw for full width
-*/
+  --drawer-width: 100vw; /* Change from 75vw to 100vw for full width */
+  --explorer-bg: #0b1220;
+  --explorer-card-bg: #111827;
+  --explorer-card-border: #1f2937;
+  --explorer-card-hover: #1c2540;
 }
 
 /* Drawer container - positioned off-screen by default */
@@ -14,8 +17,8 @@
   left: calc(-1 * var(--drawer-width)); /* Position off-screen by its own width */
   width: var(--drawer-width);
   bottom: 0;
-  background: var(--card);
-  backdrop-filter: blur(12px);
+  background: var(--explorer-bg);
+  backdrop-filter: none;
   transform: translateX(0); /* Initial transform */
   transition: transform 0.3s ease;
   z-index: 100;
@@ -51,7 +54,7 @@
   gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(from var(--border) r g b / 0.2);
+  background: var(--explorer-bg);
 }
 
 .fe-label-missing {
@@ -60,25 +63,27 @@
 
 .drawer-action {
   padding: 6px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--explorer-card-border);
   border-radius: 6px;
-  background: rgba(59, 130, 246, 0.1);
+  background: var(--explorer-card-bg);
   color: #3b82f6;
   cursor: pointer;
   font-size: 0.85rem;
   transition: all 0.2s;
 }
 
-.drawer-action:hover {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: #3b82f6;
+@media (hover: hover) and (pointer: fine) {
+  .drawer-action:hover {
+    background: var(--explorer-card-hover);
+    border-color: #3b82f6;
+  }
 }
 
 .drawer-close {
   padding: 4px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--explorer-card-border);
   border-radius: 4px;
-  background: transparent;
+  background: var(--explorer-card-bg);
   color: #e5e7eb;
   cursor: pointer;
   font-size: 1.2rem;
@@ -86,9 +91,11 @@
   transition: all 0.2s;
 }
 
-.drawer-close:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+@media (hover: hover) and (pointer: fine) {
+  .drawer-close:hover {
+    background: var(--explorer-card-hover);
+    border-color: #3b82f6;
+  }
 }
 
 /* Drawer body */
@@ -98,6 +105,7 @@
   flex-direction: column;
   overflow-x: visible;
   overflow-y: hidden;
+  background: var(--explorer-bg);
 }
 
 /* File tree */
@@ -112,17 +120,18 @@
 
 .fe-tree li {
   display: grid;
-  grid-template-columns: 20px 1fr;    /* twisty column + text column*/
-  gap: 6px;
-  padding: 6px 8px;
+  grid-template-columns: 20px 20px 1fr auto;    /* twisty, icon, text, menu */
+  gap: 8px;
+  padding: 6px 10px;
   cursor: pointer;
   border-radius: 8px;
   transition: background 0.15s;
   color: #e5e7eb;
   font-size: 0.8rem;
   border-left: 3px solid transparent;
-  border: 1px solid transparent;
-  margin-left: 20px;
+  border: 1px solid var(--explorer-card-border);
+  background: var(--explorer-card-bg);
+  margin-left: 0;
   align-items: center;
 }
 
@@ -133,8 +142,10 @@
   padding: 0;
 }
 
-.fe-tree li:hover {
-  background: rgba(255, 255, 255, 0.06);
+@media (hover: hover) and (pointer: fine) {
+  .fe-tree li:hover {
+    background: var(--explorer-card-hover);
+  }
 }
 
 .fe-tree-twisty {
@@ -166,8 +177,15 @@
 
 /* Nested tree indentation */
 .fe-tree .fe-tree {
-  padding-left: 0;
+  padding-left: 20px;
   width: 100%;
+}
+
+.fe-tree li > ul {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .fe-dd-item-missing {
@@ -203,6 +221,73 @@
   content: ' ↗';
   font-size: 0.75em;
   opacity: 0.7;
+}
+
+.fe-entry-icon {
+  width: 20px;
+  height: 20px;
+  text-align: center;
+  color: var(--muted, #9ca3af);
+}
+
+.fe-entry-icon-dir::before {
+  content: '📁';
+}
+
+.fe-entry-icon-file::before {
+  content: '📄';
+}
+
+.fe-card-menu-btn {
+  background: none;
+  border: none;
+  color: var(--muted, #9ca3af);
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .fe-card-menu-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+.fe-card-menu {
+  position: absolute;
+  min-width: 180px;
+  background: var(--explorer-card-bg);
+  border: 1px solid var(--explorer-card-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: none;
+  z-index: 160;
+}
+
+.fe-card-menu.show {
+  display: block;
+}
+
+.fe-card-menu .fe-dd-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.fe-card-menu .fe-dd-item[data-destructive="true"] {
+  color: #f87171;
+}
+
+.fe-card-menu .fe-dd-divider {
+  height: 1px;
+  background: var(--explorer-card-border);
+  margin: 4px 0;
 }
 
 .fe-tree-node.fe-git-modified {
@@ -283,7 +368,7 @@
 .fe-git-footer {
   padding: 10px 12px;
   border-top: 1px solid var(--border);
-  background: rgba(8, 11, 18, 0.85);
+  background: var(--explorer-bg);
   display: flex;
   flex-direction: column;
   gap: 8px;

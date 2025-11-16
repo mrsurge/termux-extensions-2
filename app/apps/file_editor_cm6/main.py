@@ -650,6 +650,77 @@ def explorer_list(rel: str = Query('.')):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@file_editor_cm6_bp.post('/explorer/mkdir')
+async def explorer_mkdir(data: dict = Body(...)):
+    project = data.get('project')
+    parent_rel = data.get('parent_rel', '.')
+    name = data.get('name', '').strip()
+    
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    if '/' in name or '\\' in name:
+        raise HTTPException(status_code=400, detail="Invalid name")
+    
+    try:
+        from .explorer_helper import create_directory
+        result = create_directory(parent_rel, name)
+        mark_git_cache_dirty(get_project_root())
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@file_editor_cm6_bp.post('/explorer/touch')
+async def explorer_touch(data: dict = Body(...)):
+    project = data.get('project')
+    parent_rel = data.get('parent_rel', '.')
+    name = data.get('name', '').strip()
+      
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    if '/' in name or '\\' in name:
+        raise HTTPException(status_code=400, detail="Invalid name")
+      
+    try:
+        from .explorer_helper import create_file
+        result = create_file(parent_rel, name)
+        mark_git_cache_dirty(get_project_root())
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@file_editor_cm6_bp.post('/explorer/rename')
+async def explorer_rename(data: dict = Body(...)):
+    rel = data.get('rel')
+    new_name = data.get('new_name', '').strip()
+    
+    if not rel:
+        raise HTTPException(status_code=400, detail="Path required")
+    if not new_name:
+        raise HTTPException(status_code=400, detail="New name required")
+    if '/' in new_name or '\\' in new_name:
+        raise HTTPException(status_code=400, detail="Invalid name")
+    
+    try:
+        from .explorer_helper import rename_entry
+        result = rename_entry(rel, new_name)
+        mark_git_cache_dirty(get_project_root())
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@file_editor_cm6_bp.post('/explorer/delete')
+async def explorer_delete(data: dict = Body(...)):
+    rel = data.get('rel')
+    if not rel:
+        raise HTTPException(status_code=400, detail="Path required")
+    try:
+        from .explorer_helper import delete_entry
+        result = delete_entry(rel)
+        mark_git_cache_dirty(get_project_root())
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @file_editor_cm6_bp.get('/history/files')
 def get_recent_files():
     """Get recent files for the current project."""
