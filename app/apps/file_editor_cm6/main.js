@@ -645,6 +645,71 @@ function formatDisplayDirectory(path) {
   return formatDisplayPath(dir);
 }
 
+// Font scale preset mapping
+const FONT_SCALE_PRESETS = {
+  small: 0.70,   // 85% user-facing (smaller than comfortable)
+  medium: 0.85,  // 100% user-facing (comfortable baseline)
+  large: 1.0     // 115% user-facing (back to browser default)
+};
+
+function applyFontScale(scale) {
+  // This function applies the selected font scale to the UI.
+  // It updates the --chrome-font-scale CSS variable, which is used
+  // by the stylesheet to resize UI elements like menus and the explorer.
+  document.documentElement.style.setProperty('--chrome-font-scale', scale);
+  
+  // Update menu checkmarks
+  updateFontScaleMenuChecks(scale);
+  
+  console.log(`[FontScale] Applied scale: ${scale}`);
+}
+
+function updateFontScaleMenuChecks(currentScale) {
+  // This helper ensures the correct font size preset is checked in the menu.
+  const items = {
+    'mi-font-small': FONT_SCALE_PRESETS.small,
+    'mi-font-medium': FONT_SCALE_PRESETS.medium,
+    'mi-font-large': FONT_SCALE_PRESETS.large
+  };
+  
+  for (const [id, scale] of Object.entries(items)) {
+    const item = document.getElementById(id);
+    if (item) {
+      const isActive = Math.abs(scale - currentScale) < 0.01;
+      item.classList.toggle('fe-menu-item-checked', isActive);
+      item.setAttribute('aria-checked', isActive ? 'true' : 'false');
+    }
+  }
+}
+
+async function setFontScale(preset) {
+  // This function orchestrates changing the font size. It applies the
+  // new scale to the UI, sends the change to the backend to update the
+  // editor iframe, and persists the setting for future sessions.
+  const scale = FONT_SCALE_PRESETS[preset];
+  if (!scale) {
+    console.error(`[FontScale] Invalid preset: ${preset}`);
+    return;
+  }
+  
+  try {
+    // 1. Update chrome immediately
+    applyFontScale(scale);
+    
+    // 2. Update editor via backend
+    await apiPost('editor/set_font_scale', { scale });
+    // apiPost throws on error, so if we reach here, it succeeded
+    
+    // 3. Persist preference
+    await persistEditorPreferences({ fontScale: scale });
+    
+  } catch (error) {
+    console.error('[FontScale] Failed to update:', error);
+    host.toast('Failed to update font scale', 'error');
+  }
+}
+
+
 // ---------- Editor state ----------
 let view = null;
 let currentPath = '';
@@ -886,6 +951,11 @@ function applyPreferencesFromStore(payload) {
   trackAgentEdits = !!editorPrefs.trackAgentEdits;
   const themeId = editorPrefs.theme;
   currentTheme = themeId || 'cm6-dark';
+
+  // Load font scale from preferences and apply it to the UI.
+  const fontScale = editorPrefs.fontScale ?? 0.85;
+  applyFontScale(fontScale);
+
   if (editorState) {
     editorState.preferences = cachedPreferences;
   }
@@ -1740,6 +1810,21 @@ bindMenuToggle(miToggleTerminal, () => {
   terminal.toggle();
 });
 
+// NEW: Font scale radio buttons
+const miFontSmall = document.getElementById('mi-font-small');
+const miFontMedium = document.getElementById('mi-font-medium');
+const miFontLarge = document.getElementById('mi-font-large');
+
+if (miFontSmall) {
+  miFontSmall.addEventListener('click', () => setFontScale('small'));
+}
+if (miFontMedium) {
+  miFontMedium.addEventListener('click', () => setFontScale('medium'));
+}
+if (miFontLarge) {
+  miFontLarge.addEventListener('click', () => setFontScale('large'));
+}
+
 bindMenuToggle(miFind, () => { triggerEditorSearchPanel('menu'); });
 bindMenuToggle(miGoto, () => { const input = window.prompt('Go to line'); const line = Number.parseInt(input || '', 10); if (!Number.isNaN(line)) { const ln = Math.max(1, line); const pos = view.state.doc.line(ln).from; view.dispatch({ selection:{anchor:pos}, scrollIntoView:true }); view.focus(); } });
 
@@ -1806,6 +1891,33 @@ document.addEventListener('keydown', (e) => {
   if (cmdOrCtrl && e.key === 'o') {
     e.preventDefault();
     pickFile().then(p => { if (p) openFile(p); });
+  }
+
+  // NEW: Font scale shortcuts
+  if ((e.ctrlKey || e.metaKey) && e.key === '=' && !e.shiftKey) {
+    // This shortcut allows increasing the font size through presets.
+    e.preventDefault();
+    const currentScale = parseFloat(
+      getComputedStyle(document.documentElement)
+        .getPropertyValue('--chrome-font-scale') || '0.85'
+    );
+    
+    if (currentScale < 0.75) setFontScale('medium');
+    else if (currentScale < 1.0) setFontScale('large');
+    // Already at Large, do nothing
+  }
+
+  if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+    // This shortcut allows decreasing the font size through presets.
+    e.preventDefault();
+    const currentScale = parseFloat(
+      getComputedStyle(document.documentElement)
+        .getPropertyValue('--chrome-font-scale') || '0.85'
+    );
+    
+    if (currentScale > 1.0) setFontScale('medium');
+    else if (currentScale > 0.75) setFontScale('small');
+    // Already at Small, do nothing
   }
 });
 

@@ -68,7 +68,7 @@
   background: var(--explorer-card-bg);
   color: #3b82f6;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: calc(0.85rem * var(--chrome-font-scale));
   transition: all 0.2s;
 }
 
@@ -86,7 +86,7 @@
   background: var(--explorer-card-bg);
   color: #e5e7eb;
   cursor: pointer;
-  font-size: 1.2rem;
+  font-size: calc(1.2rem * var(--chrome-font-scale));
   line-height: 1;
   transition: all 0.2s;
 }
@@ -127,7 +127,7 @@
   border-radius: 8px;
   transition: background 0.15s;
   color: #e5e7eb;
-  font-size: 0.8rem;
+  font-size: calc(0.8rem * var(--chrome-font-scale));
   border-left: 3px solid transparent;
   border: 1px solid var(--explorer-card-border);
   background: var(--explorer-card-bg);
@@ -224,7 +224,7 @@
 
 .fe-entry-symlink::after {
   content: ' ↗';
-  font-size: 0.75em;
+  font-size: calc(0.75em * var(--chrome-font-scale));
   opacity: 0.7;
 }
 
@@ -281,7 +281,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  font-size: 0.85rem;
+  font-size: calc(0.85rem * var(--chrome-font-scale));
   cursor: pointer;
 }
 
@@ -380,7 +380,7 @@
 }
 
 .fe-git-summary {
-  font-size: 0.75rem;
+  font-size: calc(0.75rem * var(--chrome-font-scale));
   color: rgba(229, 231, 235, 0.7);
   min-height: 1.2em;
 }
@@ -393,7 +393,7 @@
 
 .fe-git-actions .fe-btn {
   flex: 0 0 auto;
-  font-size: 0.8rem;
+  font-size: calc(0.8rem * var(--chrome-font-scale));
   padding: 5px 10px;
 }
 
@@ -404,7 +404,7 @@
        width: 1.3em;
        height: 1.3em;
        margin-left: 6px;
-       font-size: 0.75em;
+       font-size: calc(0.75em * var(--chrome-font-scale));
        font-weight: 300;           /* Thin weight */
        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
    Helvetica, Arial, sans-serif;  /* Thin sans-serif */

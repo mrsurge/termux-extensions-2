@@ -17,12 +17,24 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "autoSave": True,
     "showInlineDiffs": True,
     "trackAgentEdits": False,
+    "fontScale": 0.85,  # NEW: Default to Medium preset
 }
 
 DEFAULT_UI_PREFS: Dict[str, Any] = {
     "assistantCollapsed": True,
     "gitIndicators": True,
 }
+
+
+# Font scale validation helper
+ALLOWED_FONT_SCALES = {0.70, 0.85, 1.0}
+
+def validate_font_scale(scale: float) -> float:
+    """Validate and clamp font scale to allowed presets."""
+    if scale not in ALLOWED_FONT_SCALES:
+        # Find nearest preset
+        return min(ALLOWED_FONT_SCALES, key=lambda x: abs(x - scale))
+    return scale
 
 
 def _ensure_dir(path: Path) -> None:

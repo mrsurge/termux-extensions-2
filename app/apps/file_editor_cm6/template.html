@@ -25,6 +25,9 @@
     --diff-del-gap: 0px;
     --keyboard-inset: 0px;
     --keyboard-gap: 16px;
+    /* Font scale control */
+    --chrome-font-scale: 0.85;  /* Default to Medium */
+    --chrome-base-font: calc(14px * var(--chrome-font-scale));
   }
   .fe-root { display: flex; flex-direction: column; height: 100%; background:var(--bg); color:var(--fg); }
 
@@ -304,17 +307,17 @@
   .fe-btn { padding: 6px 10px; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--secondary, #0a0d14); color: var(--foreground, #e5e7eb); cursor: pointer; flex-shrink: 0; align-self: center; }
   #recent-files-btn { font-size: 0.85rem; padding: 4px 8px; white-space: nowrap; }
   .fe-btn:hover { border-color: var(--primary, #3b82f6); }
-  .fe-status { font-size: 0.75rem; color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
-  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: 13px; }
+  .fe-status { font-size: calc(0.85rem * var(--chrome-font-scale)); color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
+  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: var(--chrome-base-font); }
   .fe-menu { position: relative; }
-  .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; }
+  .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; font-size: var(--chrome-base-font); }
   .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
   .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 15; }
   .fe-dropdown.show { display: block; }
   #menu-theme-dd { max-height: calc(80vh - 60px); overflow-y: auto; }
   #recent-files-dd { left: auto; right: 0; }
   #menu-branch-dd { left: auto; right: 0; }
-  .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; cursor: pointer; font-size: 0.9rem; align-items: center; }
+  .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; cursor: pointer; font-size: calc(0.9rem * var(--chrome-font-scale)); align-items: center; }
   .fe-dd-item[data-checkable="true"] { position: relative; padding-left: 32px; }
   .fe-dd-item[data-checkable="true"]::before { content: ''; position: absolute; left: 12px; width: 1em; text-align: center; color: var(--primary, #3b82f6); }
   .fe-dd-item[data-checkable="true"].fe-menu-item-checked::before { content: '✓'; }
@@ -1338,6 +1341,19 @@
         <div class="fe-dd-item" id="mi-toggle-syntax" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Syntax Highlighting</span></div>
         <div class="fe-dd-item" id="mi-toggle-closebrackets" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Close Brackets</span></div>
         <div class="fe-dd-item" id="mi-toggle-autocomplete" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Autocompletion</span></div>
+
+        <!-- NEW: Font Size submenu -->
+        <div class="fe-dd-separator"></div>
+        <div class="fe-dd-label">Font Size</div>
+        <div class="fe-dd-item" id="mi-font-small" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0">
+          <span>Small (85%)</span>
+        </div>
+        <div class="fe-dd-item" id="mi-font-medium" data-checkable="true" role="menuitemradio" aria-checked="true" tabindex="0">
+          <span>Medium (100%)</span>
+        </div>
+        <div class="fe-dd-item" id="mi-font-large" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0">
+          <span>Large (115%)</span>
+        </div>
       </div>
     </div>
     <div class="fe-menu" id="menu-view">

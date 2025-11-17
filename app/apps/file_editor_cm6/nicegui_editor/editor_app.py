@@ -358,7 +358,10 @@ async def editor_page():
             _active_editor = editor
             set_current_file(initial_path, initial_sha256)
             editor.set_zebra_stripes(editor_prefs.get('showShading', False))
-            editor.set_font_scale(0.85)
+            # Load from preferences (default to 0.85 if not set)
+            font_scale = editor_prefs.get('fontScale', 0.85)
+            editor.set_font_scale(font_scale)
+            print(f"[EDITOR] Applied font scale: {font_scale}", file=sys.stderr)
 
             if initial_path:
                 if cached_was_restored:
@@ -756,6 +759,7 @@ async def save_current_file(data: dict = Body(...)):
 
 @editor_router.post('/set_view_settings')
 async def set_view_settings(data: dict = Body(...)):
+    # This endpoint handles live updates to the editor's visual settings.
     editor = get_active_editor()
     editor_updates = {}
     
@@ -792,3 +796,53 @@ async def set_view_settings(data: dict = Body(...)):
         _preferences_store.update_preferences(editor=editor_updates)
     
     return {"ok": True}
+
+@editor_router.post('/set_font_scale')
+async def set_font_scale_endpoint(data: dict = Body(...)):
+    """Set editor font scale from one of three presets: 0.70, 0.85, 1.0"""
+    try:
+        editor = get_active_editor()
+        
+        # Validate input
+        scale = data.get('scale')
+        if not isinstance(scale, (int, float)):
+            raise HTTPException(status_code=400, detail="scale must be a number")
+        
+        scale = float(scale)
+        
+        # Enforce presets
+        ALLOWED_SCALES = {0.70, 0.85, 1.0}
+        if scale not in ALLOWED_SCALES:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"scale must be one of {sorted(ALLOWED_SCALES)}"
+            )
+        
+        # Apply to editor
+        if editor:
+            try:
+                editor.set_font_scale(scale)
+                print(f"[EDITOR] Font scale changed to: {scale}", file=sys.stderr)
+            except Exception as e:
+                print(f"[EDITOR] Failed to set font scale: {e}", file=sys.stderr)
+                raise HTTPException(status_code=500, detail=f"Failed to apply font scale: {e}")
+        
+        # Persist preference (GLOBALLY, not per-project)
+        try:
+            _preferences_store.update_preferences(
+                editor={"fontScale": scale}
+            )
+            print(f"[EDITOR] Persisted font scale: {scale} globally", file=sys.stderr)
+        except Exception as e:
+            print(f"[EDITOR] Failed to persist font scale: {e}", file=sys.stderr)
+            # Don't fail the request if persistence fails - editor is already updated
+        
+        return {"ok": True, "data": {"fontScale": scale}}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"[EDITOR] Unexpected error in set_font_scale: {e}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}")

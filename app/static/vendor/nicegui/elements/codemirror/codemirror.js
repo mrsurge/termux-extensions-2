@@ -178,6 +178,7 @@ export default {
       editorPromise: new Promise((resolve) => {
         this.resolveEditor = resolve;
       }),
+      pendingFontScale: 1,
     };
   },
   methods: {
@@ -278,10 +279,11 @@ export default {
       });
     },
     setFontScale(scale) {
-      if (!this.editor) return;
       const { EditorView, StateEffect, Compartment } = CM;
       const parsed = Number(scale);
       const clamped = Math.min(2, Math.max(0.5, isNaN(parsed) ? 1 : parsed));
+      this.pendingFontScale = clamped;
+      if (!this.editor) return;
 
       if (!this.fontSizeCompartment) {
         this.fontSizeCompartment = new Compartment();
@@ -291,11 +293,11 @@ export default {
       }
 
       const fontTheme = EditorView.theme({
-        ".cm-editor": {
+        "&": {
           fontSize: `${clamped * 100}%`,
           lineHeight: "1.45",
         },
-        ".cm-editor .cm-content, .cm-editor .cm-line": {
+        "& .cm-content, & .cm-line": {
           fontSize: "inherit",
           lineHeight: "inherit",
         },
@@ -497,5 +499,8 @@ export default {
     this.setTheme(this.theme);
     this.setDisabled(this.disable);
     this.setLineWrapping(this.lineWrapping);
+    if (typeof this.pendingFontScale === 'number') {
+      this.setFontScale(this.pendingFontScale);
+    }
   },
 };

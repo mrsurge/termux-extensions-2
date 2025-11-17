@@ -8,7 +8,7 @@
 ## 1. Preserve File Attributes on Save
 - **Pain:** save flow rewrites files via `write_full` and loses original chmod bits (especially execute flag).
 - **Scope:** `app/apps/file_editor_cm6/core_write.py`, `/editor/save` in `nicegui_editor/editor_app.py`.
-- **Plan:** before overwriting, capture `os.stat(path).st_mode`, perform write, then `os.chmod(new_path, old_mode & 0o777)`. Add tests/logging to confirm. Consider opt-out for new files.
+- **Status:** ✅ Completed 2025-11-17. Save endpoints now capture existing `st_mode`, feed it into `write_full`, and executable bits persist on overwrite/new files.
 
 ## 2. Explorer Search UX
 - **Status:** Not designed yet; biggest UX ask.
@@ -38,6 +38,11 @@
 - **Pain:** Theme dropdown doesn’t accurately show current selection; checkmarks/aria state drift from actual theme.
 - **Scope:** Template markup in `app/apps/file_editor_cm6/template.html` + menu logic in `main.js` (`updateThemeMenuChecks`).
 - **Plan:** Ensure each theme item renders a checkmark span toggled via JS, and keep `aria-checked` in sync after theme changes/load so users can see which theme is active.
+
+## 8. Font Size Controls (Editor & Chrome)
+- **Pain:** No way to adjust editor font size or surrounding chrome (menubar/explorer text) without diving into prefs.
+- **Scope:** NiceGUI editor (use `editor.set_font_scale()`), plus host chrome CSS variables.
+- **Plan:** Add “Font Size Increase/Decrease” entries under the Editor menu. When invoked, call backend endpoint to adjust CodeMirror font via `set_font_scale`, and update CSS custom properties for toolbar/drawer text so the UI scales consistently. Persist preference in `preferences_store`.
 
 ---
 
