@@ -691,31 +691,31 @@ For interactive shells (`uses_pty=True`):
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Client (Browser/API)                                    │
-│  ↓ POST /spawn_pty                                      │
-│  ↓ WS /api/framework_shells/<id>/ws (bidirectional)    │
-│  ↓ POST /api/framework_shells/<id>/write               │
+│ Client (Browser/API)                                              │
+│  ↓ POST /spawn_pty                                                │
+│  ↓ WS /api/framework_shells/<id>/ws (bidirectional)               │
+│  ↓ POST /api/framework_shells/<id>/write                          │
 └─────────────────────────────────────────────────────────┘
                     ↓ ↑
 ┌─────────────────────────────────────────────────────────┐
-│ FrameworkShellManager                                   │
-│  - PTYState(master_fd, subscribers[], reader_task)     │
-│  - _pty[shell_id] → PTY state tracking                 │
-│  - Background task: read master_fd → broadcast chunks   │
-│  - write_to_pty(): client input → master_fd            │
-│  - subscribe_output(): register client queue           │
+│ FrameworkShellManager                                             │
+│  - PTYState(master_fd, subscribers[], reader_task)                │
+│  - _pty[shell_id] → PTY state tracking                           │
+│  - Background task: read master_fd → broadcast chunks            │
+│  - write_to_pty(): client input → master_fd                      │
+│  - subscribe_output(): register client queue                      │
 └─────────────────────────────────────────────────────────┘
                     ↓ ↑
 ┌─────────────────────────────────────────────────────────┐
-│ PTY Pair (from pty.openpty())                          │
-│  - master_fd: manager reads/writes                      │
-│  - slave_fd: process stdin/stdout/stderr                │
+│ PTY Pair (from pty.openpty())                                     │
+│  - master_fd: manager reads/writes                                │
+│  - slave_fd: process stdin/stdout/stderr                          │
 └─────────────────────────────────────────────────────────┘
                     ↓ ↑
 ┌─────────────────────────────────────────────────────────┐
-│ Shell Process                                           │
-│  - command[0] as PID with env: TE_TTY=pty              │
-│  - Interactive I/O via PTY slave                        │
+│ Shell Process                                                     │
+│  - command[0] as PID with env: TE_TTY=pty                         │
+│  - Interactive I/O via PTY slave                                  │
 └─────────────────────────────────────────────────────────┘
 ```
 
