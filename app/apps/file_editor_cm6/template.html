@@ -63,13 +63,13 @@
     grid-row: 1;
   }
 
-  /* Menubar spans full width */
+  /* Menubar only on right side (columns 2-3) */
   .layout-desktop .fe-menubar {
-    grid-column: 1 / -1;
+    grid-column: 2 / -1;
     grid-row: 2;
   }
 
-  /* Explorer becomes left sidebar - ALWAYS VISIBLE in desktop */
+  /* Explorer becomes left sidebar - extends from row 2 to bottom */
   .layout-desktop .fe-drawer {
     position: static !important;
     transform: none !important;
@@ -78,7 +78,7 @@
     bottom: auto;
     width: 100%;
     grid-column: 1;
-    grid-row: 3 / 5;
+    grid-row: 2 / 5;
     border-right: 1px solid var(--border);
     overflow-y: auto;
   }
@@ -94,7 +94,7 @@
     display: none !important;
   }
 
-  /* Editor in middle column */
+  /* Editor in middle column - now starts at row 3 */
   .layout-desktop .fe-editor-container {
     grid-column: 2;
     grid-row: 3;
@@ -102,7 +102,7 @@
     overflow: hidden;
   }
 
-  /* Agent becomes right sidebar */
+  /* Agent becomes right sidebar - now spans rows 3-5 */
   .layout-desktop .agent-drawer {
     position: static !important;
     transform: none !important;
