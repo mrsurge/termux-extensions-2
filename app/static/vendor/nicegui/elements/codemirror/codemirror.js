@@ -324,7 +324,7 @@ export default {
         this.indentExtensions = [
           indentationMarkers({
             highlightActiveBlock: true,
-            thickness: 0.5,
+            thickness: 1,
             hideFirstIndent: false,
             markerType: 'fullScope',
             colors: {
