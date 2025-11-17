@@ -186,9 +186,9 @@
   padding: 0;
   list-style: none;
 }
-
+/* ACTUAL CARD DIMENSIONS */
 .fe-tree li > ul > li {
-  margin: 4px 2px 4px 20px;
+  margin: 4px 1px 4px 12px;
   width: auto;
   box-sizing: border-box;
 }
