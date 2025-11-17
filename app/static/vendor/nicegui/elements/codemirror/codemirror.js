@@ -6,6 +6,46 @@ const highlightSelectionMatches = typeof CM.highlightSelectionMatches === 'funct
 const openSearchPanel = typeof CM.openSearchPanel === 'function' ? CM.openSearchPanel : null;
 const indentationMarkers = typeof CM.indentationMarkers === 'function' ? CM.indentationMarkers : null;
 
+// Language-specific indent unit mapping
+const LANGUAGE_INDENT_MAP = {
+  // 2-space languages
+  'javascript': 2,
+  'typescript': 2,
+  'jsx': 2,
+  'tsx': 2,
+  'html': 2,
+  'css': 2,
+  'json': 2,
+  'yaml': 2,
+  'xml': 2,
+  'vue': 2,
+  'svelte': 2,
+  
+  // 4-space languages
+  'python': 4,
+  'java': 4,
+  'c': 4,
+  'cpp': 4,
+  'c++': 4,
+  'csharp': 4,
+  'c#': 4,
+  'php': 4,
+  'ruby': 4,
+  'go': 4,
+  'rust': 4,
+  'shell': 4,
+  'bash': 4,
+  'sh': 4,
+  'markdown': 4,
+  'md': 4,
+};
+
+function getIndentForLanguage(language) {
+  if (!language) return 4;  // Default to 4 spaces
+  const normalized = language.toLowerCase().trim();
+  return LANGUAGE_INDENT_MAP[normalized] || 4;  // Default to 4 if unknown
+}
+
 // Inline diff decorations helper (extracted from diff_decorations.js)
 function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const { Decoration, RangeSetBuilder, WidgetType } = CM;
@@ -213,8 +253,12 @@ export default {
     },
     setLanguage(language) {
       if (!language) {
+        // Default to 4 spaces when no language
         this.editor.dispatch({
-          effects: this.languageConfig.reconfigure([]),
+          effects: [
+            this.languageConfig.reconfigure([]),
+            this.indentUnitCompartment.reconfigure(CM.indentUnit.of('    '))
+          ]
         });
         return;
       }
@@ -226,8 +270,16 @@ export default {
       }
 
       lang_description.load().then((extension) => {
+        // Determine appropriate indent size for this language
+        const indentSize = getIndentForLanguage(language);
+        const indentString = ' '.repeat(indentSize);
+        
+        // Reconfigure both language and indent unit together
         this.editor.dispatch({
-          effects: this.languageConfig.reconfigure([extension]),
+          effects: [
+            this.languageConfig.reconfigure([extension]),
+            this.indentUnitCompartment.reconfigure(CM.indentUnit.of(indentString))
+          ]
         });
       });
     },
@@ -485,13 +537,16 @@ export default {
         }
       );
 
+      // Create compartment for dynamic indent unit (before extensions array)
+      this.indentUnitCompartment = new CM.Compartment();
+      
       const extensions = [
         CM.basicSetup,
         changeSender,
         // Enables the Tab key to indent the current lines https://codemirror.net/examples/tab/
         CM.keymap.of([CM.indentWithTab]),
         // Sets indentation https://codemirror.net/docs/ref/#language.indentUnit
-        CM.indentUnit.of(this.indent),
+        this.indentUnitCompartment.of(CM.indentUnit.of(this.indent)),
         // We will set these Compartments later and dynamically through props
         this.themeConfig.of([]),
         this.languageConfig.of([]),

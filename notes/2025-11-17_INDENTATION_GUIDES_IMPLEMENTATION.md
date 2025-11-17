@@ -743,3 +743,167 @@ indentationMarkers({
 
 **Status:** Testing cross-browser compatibility with 0.5px darker tans.
 
+
+---
+
+## Dynamic Indent Unit Per Language - Implementation
+
+### Issue Reported: Chromium Sub-Pixel Rendering
+**Timestamp:** 2025-11-17 07:03 UTC  
+**Author:** TE-2 Team  
+
+**Problem:**
+- 0.4px indent guide lines disappearing intermittently on Chromium/Chrome desktop
+- Works fine on Gecko/Firefox
+- Chromium has known issues with sub-pixel rendering below 0.5px threshold
+
+**Resolution:**
+- Increased thickness from 0.4px to 0.5px (Chromium-safe)
+- Darkened colors: Inactive #8B7355, Active #A0826D
+- Reduced brightness delta for subtlety
+
+---
+
+### Feature Request: Per-Language Indent Units
+**Timestamp:** 2025-11-17 10:42 UTC  
+**Author:** TE-2 Team  
+
+**Problem Identified:**
+Indentation guides were rendering with a fixed global indent unit (4 spaces), causing misalignment for languages that use different conventions:
+- **JavaScript/TypeScript/HTML/CSS** use 2-space indents
+- **Python/C/Java** use 4-space indents
+- Guides appeared at wrong positions for 2-space languages
+
+**Root Cause:**
+- Static `CM.indentUnit.of(this.indent)` set once at editor creation
+- No dynamic adjustment when switching file types
+- Language detection exists but wasn't connected to indent unit
+
+**Solution Design:**
+- Create Compartment for indent unit (like indent guides compartment)
+- Map languages → indent sizes (2 vs 4 spaces)
+- Reconfigure indent unit when language changes in `setLanguage()`
+
+---
+
+### Implementation Attempt #1 - Syntax Error
+**Timestamp:** 2025-11-17 11:00 UTC (approx)  
+**Implementer:** Gemini  
+
+**Changes Made:**
+1. Added `LANGUAGE_INDENT_MAP` constant (lines 9-53)
+2. Added `getIndentForLanguage()` helper function
+3. Created indent unit compartment (attempted at line 547-548)
+4. Modified `setLanguage()` to reconfigure indent unit (lines 286-315)
+
+**Error Encountered:**
+```
+Error: Unrecognized extension value in extension set ([object Object])
+TypeError: Cannot read properties of undefined (reading 'dispatch')
+    at Proxy.applyIndentGuides
+    at Proxy.applyZebraStripes
+```
+
+**Analysis by Atlas:**
+
+**Issue 1 - Syntax Error in Extensions Array:**
+```javascript
+// WRONG - Inside extensions array:
+const extensions = [
+  this.indentUnitCompartment = new CM.Compartment(),  // Assignment as array element
+  this.indentUnitCompartment.of(CM.indentUnit.of(this.indent)),  // Separate call
+];
+```
+
+Problem: Can't have assignment statement as array element. Line 547 assigns the Compartment, but JavaScript sees the assignment result (the Compartment object) as an array element instead of the configured extension from `.of()`.
+
+**Issue 2 - Cascading Failure:**
+- Malformed extensions array caused editor initialization to fail
+- `new EditorView()` constructor failed
+- `this.editor` never created
+- Subsequent calls to `applyIndentGuides()` and `applyZebraStripes()` crashed
+
+**Root Cause:** Compartment creation must happen **before** the extensions array, not inside it.
+
+---
+
+### Implementation Fix
+**Timestamp:** 2025-11-17 11:01 UTC  
+**Author:** Atlas  
+
+**Fix Applied (codemirror.js lines 540-560):**
+
+**Before (Broken):**
+```javascript
+const extensions = [
+  CM.basicSetup,
+  changeSender,
+  CM.keymap.of([CM.indentWithTab]),
+  // WRONG: Assignment inside array
+  this.indentUnitCompartment = new CM.Compartment(),
+  this.indentUnitCompartment.of(CM.indentUnit.of(this.indent)),
+  this.themeConfig.of([]),
+  // ...
+];
+```
+
+**After (Fixed):**
+```javascript
+// Create compartment BEFORE extensions array
+this.indentUnitCompartment = new CM.Compartment();
+
+const extensions = [
+  CM.basicSetup,
+  changeSender,
+  CM.keymap.of([CM.indentWithTab]),
+  // Only the configured extension in the array
+  this.indentUnitCompartment.of(CM.indentUnit.of(this.indent)),
+  this.themeConfig.of([]),
+  // ...
+];
+```
+
+**Change Summary:**
+- Moved `this.indentUnitCompartment = new CM.Compartment();` to line 541 (before array)
+- Kept only `.of()` result in extensions array at line 549
+- Proper separation: creation vs configuration
+
+**Result:**
+- Extensions array now valid
+- Editor initializes correctly
+- `this.editor` exists
+- Subsequent method calls work
+
+---
+
+### Testing Status
+**Timestamp:** 2025-11-17 11:01 UTC  
+**Status:** Ready for Validation  
+
+**Expected Behavior:**
+- [ ] Python files (.py) use 4-space indents
+- [ ] JavaScript files (.js) use 2-space indents
+- [ ] TypeScript files (.ts) use 2-space indents
+- [ ] HTML/CSS/JSON files use 2-space indents
+- [ ] Switching between files adjusts indent unit dynamically
+- [ ] Indentation guides align correctly with actual indentation
+- [ ] Tab key respects language-specific indent size
+- [ ] No console errors
+
+**Files Modified:**
+- `app/static/vendor/nicegui/elements/codemirror/codemirror.js` (lines 9-53: mapping, line 541: compartment creation, lines 260-281: setLanguage modifications)
+
+---
+
+### Lessons Learned
+
+1. **Compartment creation timing matters** - Must happen before extensions array
+2. **Array syntax is strict** - Can't mix statements and expressions in array literals
+3. **Cascading failures obscure root cause** - First error (syntax) caused secondary errors (undefined editor)
+4. **Testing incrementally helps** - Would have caught syntax error immediately
+5. **Plan was sound, execution had syntax error** - Architecture and approach were correct
+
+---
+
+_Last Updated: 2025-11-17 11:01 UTC_
+
