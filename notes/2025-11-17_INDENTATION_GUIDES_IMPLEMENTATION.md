@@ -413,3 +413,284 @@ setMenuChecked(miToggleIndentGuides, showIndentGuides);
 
 **Status:** Step 4 complete and verified. Ready for Step 5 (Testing).
 
+
+---
+
+### Configuration Update: Color & Thickness Adjustment
+**Timestamp:** 2025-11-17 06:27 UTC  
+**Author:** TE-2 Team  
+
+**Changes Made:**
+- Updated indentation guide colors to tan (#D2B48C) for both light and dark themes
+- Increased thickness from 1px to 2px
+- Set activeThickness to 3px (for future use if highlightActiveBlock enabled)
+
+**Modified Configuration (codemirror.js lines 323-339):**
+```javascript
+indentationMarkers({
+  highlightActiveBlock: false,
+  thickness: 2,              // Changed from 1
+  activeThickness: 3,        // Added (not used while highlightActiveBlock: false)
+  hideFirstIndent: false,
+  markerType: 'fullScope',
+  colors: {                  // Added custom colors
+    light: '#D2B48C',        // tan for light theme
+    dark: '#D2B48C',         // tan for dark theme
+    activeLight: '#D2B48C',
+    activeDark: '#D2B48C'
+  }
+})
+```
+
+**Rationale:**
+- Tan color (#D2B48C) provides better visibility than default subtle grays
+- Thicker lines (2px) make guides easier to see
+- Consistent color across light/dark themes for predictable appearance
+
+**Status:** Configuration updated. Requires page reload to see changes.
+
+
+---
+
+### Configuration Update: Simplified (No Active Thickness)
+**Timestamp:** 2025-11-17 06:30 UTC  
+**Author:** TE-2 Team  
+
+**Changes Made:**
+- Removed `activeThickness` parameter (not needed, may be causing confusion)
+- Removed `activeLight` and `activeDark` from colors (not used when highlightActiveBlock: false)
+- Kept tan color (#D2B48C) and thickness: 2
+
+**Final Configuration (codemirror.js lines 323-336):**
+```javascript
+indentationMarkers({
+  highlightActiveBlock: false,
+  thickness: 2,
+  hideFirstIndent: false,
+  markerType: 'fullScope',
+  colors: {
+    light: '#D2B48C',    // tan for light theme
+    dark: '#D2B48C'      // tan for dark theme
+  }
+})
+```
+
+**Rationale:**
+- Simplified config - only define what we're actually using
+- With `highlightActiveBlock: false`, active colors/thickness are ignored anyway
+- All guides now uniform tan at 2px thickness
+
+**Status:** Configuration simplified. Clean and minimal.
+
+
+---
+
+### Configuration Update: Testing 1px Thickness
+**Timestamp:** 2025-11-17 06:31 UTC  
+**Author:** TE-2 Team  
+
+**Changes Made:**
+- Reduced thickness from 2px back to 1px for testing
+
+**Final Configuration (codemirror.js):**
+```javascript
+indentationMarkers({
+  highlightActiveBlock: false,
+  thickness: 1,
+  hideFirstIndent: false,
+  markerType: 'fullScope',
+  colors: {
+    light: '#D2B48C',    // tan for light theme
+    dark: '#D2B48C'      // tan for dark theme
+  }
+})
+```
+
+**Status:** Testing 1px tan guides. Reload to see if thinner lines look better.
+
+
+---
+
+### Configuration Update: Testing 0.5px Thickness
+**Timestamp:** 2025-11-17 06:33 UTC  
+**Author:** TE-2 Team  
+
+**Changes Made:**
+- Reduced thickness to 0.5px (sub-pixel rendering)
+
+**Final Configuration (codemirror.js):**
+```javascript
+indentationMarkers({
+  highlightActiveBlock: false,
+  thickness: 0.5,
+  hideFirstIndent: false,
+  markerType: 'fullScope',
+  colors: {
+    light: '#D2B48C',    // tan for light theme
+    dark: '#D2B48C'      // tan for dark theme
+  }
+})
+```
+
+**Note:** Sub-pixel values (0.5px) rely on browser anti-aliasing. Results may vary by display and browser. Will appear as very thin, semi-transparent line.
+
+**Status:** Testing 0.5px tan guides. Reload to see ultra-thin lines.
+
+
+---
+
+### Configuration Update: Active Block Highlighting with Darker Base
+**Timestamp:** 2025-11-17 06:38 UTC  
+**Author:** TE-2 Team  
+
+**Changes Made:**
+- Enabled `highlightActiveBlock: true`
+- Reduced thickness to 0.4px (ultra-thin)
+- Changed base color to darker tan (#A0826D)
+- Set active block color to original tan (#D2B48C)
+
+**Final Configuration (codemirror.js):**
+```javascript
+indentationMarkers({
+  highlightActiveBlock: true,
+  thickness: 0.4,
+  hideFirstIndent: false,
+  markerType: 'fullScope',
+  colors: {
+    light: '#A0826D',        // darker tan for inactive guides
+    dark: '#A0826D',         // darker tan for inactive guides
+    activeLight: '#D2B48C',  // original tan for active block
+    activeDark: '#D2B48C'    // original tan for active block
+  }
+})
+```
+
+**Behavior:**
+- Most guides: 0.4px darker tan (#A0826D) - very subtle
+- Active block guides: 0.4px original tan (#D2B48C) - slightly more visible
+- Active block = the indentation level where cursor is currently positioned
+
+**Status:** Testing active block highlighting with ultra-thin darker base. Reload to see effect.
+
+
+---
+
+### Step 5: Testing & Validation ✅ COMPLETE
+**Timestamp:** 2025-11-17 06:39 UTC  
+**Author:** TE-2 Team  
+
+**Testing Results: ALL SYSTEMS GO** ✅
+
+**Configuration Finalized:**
+```javascript
+indentationMarkers({
+  highlightActiveBlock: true,
+  thickness: 0.4,
+  hideFirstIndent: false,
+  markerType: 'fullScope',
+  colors: {
+    light: '#A0826D',        // darker tan for inactive guides
+    dark: '#A0826D',         // darker tan for inactive guides
+    activeLight: '#D2B48C',  // original tan for active block
+    activeDark: '#D2B48C'    // original tan for active block
+  }
+})
+```
+
+**Visual Behavior Confirmed:**
+- ✅ Inactive guides: Ultra-thin (0.4px) darker tan (#A0826D) - very subtle
+- ✅ Active block guides: Ultra-thin (0.4px) lighter tan (#D2B48C) - slightly more visible
+- ✅ Active block highlighting works correctly (highlights current scope)
+- ✅ Guides appear/disappear on toggle
+- ✅ Preference persists across reloads
+- ✅ No interference with other editor features
+
+**Feature Verification:**
+- ✅ Extension loads without errors
+- ✅ Menu item appears in View menu
+- ✅ Toggle works immediately (guides appear/disappear)
+- ✅ Preference persists across page reloads
+- ✅ Works with indented code files
+- ✅ Active block highlighting provides useful visual context
+- ✅ No performance issues
+- ✅ Color and thickness provide good balance of visibility and subtlety
+
+**User Feedback:** "bingo, it all works perfectly"
+
+**Status:** Implementation complete and validated. Feature ready for production use.
+
+---
+
+## Implementation Summary
+
+### Timeline
+- **Started:** 2025-11-17 05:09 UTC
+- **Completed:** 2025-11-17 06:39 UTC
+- **Duration:** ~90 minutes
+
+### Files Modified
+1. `app/static/vendor/nicegui/elements/codemirror/package.json` - Added dependency
+2. `app/static/vendor/nicegui/elements/codemirror/src/index.mjs` - Added export
+3. `app/static/vendor/nicegui/elements/codemirror/dist/` - Rebuilt bundle
+4. `app/static/vendor/nicegui/elements/codemirror/codemirror.js` - Added JS method
+5. `app/static/vendor/nicegui/elements/codemirror/codemirror.py` - Added Python API
+6. `app/apps/file_editor_cm6/preferences_store.py` - Added default preference
+7. `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` - Backend integration
+8. `app/apps/file_editor_cm6/template.html` - Added menu item
+9. `app/apps/file_editor_cm6/main.js` - Frontend integration
+
+### Architecture Compliance
+- ✅ Respects iframe isolation boundary
+- ✅ Follows stateless endpoint pattern
+- ✅ Application backend manages ground truth
+- ✅ Frontend is visual representation layer
+- ✅ All state mutations go through backend
+- ✅ Preferences persist to disk correctly
+
+### Code Quality
+- ✅ No syntax errors
+- ✅ Follows existing patterns exactly
+- ✅ Consistent naming conventions
+- ✅ Proper error handling
+- ✅ Clean, readable code
+- ✅ Well-commented where needed
+
+### Final Configuration Notes
+After iterative testing, settled on:
+- **0.4px thickness** - Ultra-thin hairlines, perfect balance
+- **Active block highlighting** - Provides useful visual context without distraction
+- **Two-tone tan** - Darker (#A0826D) for inactive, lighter (#D2B48C) for active
+- Result: Subtle, elegant, functional
+
+---
+
+## Lessons Learned
+
+1. **Sub-pixel rendering works beautifully** - 0.4px provides excellent subtle guides
+2. **Active block highlighting is valuable** - Helps orient user in current scope
+3. **Color choice matters** - Tan provides warmth without overwhelming
+4. **Iterative refinement essential** - Started with defaults, refined through testing
+5. **Architecture patterns solid** - Compartment pattern, vendoring, iframe isolation all worked flawlessly
+
+---
+
+## Future Enhancements (Optional)
+
+Potential improvements for future consideration:
+- Make thickness/colors configurable via preferences
+- Add keyboard shortcut for quick toggle
+- Experiment with different colors for different indent depths
+- Add option to hide guides in comments/strings
+
+---
+
+**Implementation Status: ✅ COMPLETE**  
+**Feature Status: ✅ PRODUCTION READY**  
+**User Satisfaction: ✅ CONFIRMED**
+
+---
+
+_Implementation completed and validated: 2025-11-17 06:39 UTC_
+_Total implementation time: ~90 minutes_
+_TE-2 Team_
+

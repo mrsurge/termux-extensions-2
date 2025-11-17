@@ -323,10 +323,16 @@ export default {
         // Extension configuration
         this.indentExtensions = [
           indentationMarkers({
-            highlightActiveBlock: false,
-            thickness: 1,
+            highlightActiveBlock: true,
+            thickness: 0.4,
             hideFirstIndent: false,
-            markerType: 'fullScope'
+            markerType: 'fullScope',
+            colors: {
+              light: '#A0826D',    // darker tan for light theme
+              dark: '#A0826D',     // darker tan for dark theme
+              activeLight: '#D2B48C',  // original tan for active
+              activeDark: '#D2B48C'    // original tan for active
+            }
           })
         ];
         
