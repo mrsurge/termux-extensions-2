@@ -11,6 +11,7 @@ sys.path.insert(0, str(vendor_dir))
 import os
 import json
 from pathlib import Path
+import shutil
 from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
 from fastapi.responses import JSONResponse, FileResponse
 import asyncio
@@ -43,6 +44,207 @@ from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
 from .core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
 from .core_write import write_full, BaseMismatchError, _get_file_meta
+
+IGNORE_PATTERNS = [
+    '.git', '__pycache__', 'node_modules', '.venv', 'venv',
+    '.pytest_cache', '.mypy_cache', '.tox', 'dist', 'build',
+    '*.egg-info', '.DS_Store'
+]
+
+async def _search_by_name(root: Path, query: str) -> dict:
+    """Search files/folders by name."""
+    results = []
+    query_lower = query.lower()
+    count = 0
+    max_results = 500
+    
+    def should_ignore(path: Path) -> bool:
+        for part in path.parts:
+            if part in IGNORE_PATTERNS or part.startswith('.'):
+                return True
+        return False
+    
+    # Walk directory
+    for item in root.rglob('*'):
+        if count >= max_results:
+            break
+        if should_ignore(item.relative_to(root)):
+            continue
+        if query_lower in item.name.lower():
+            results.append({
+                "path": str(item),
+                "rel": str(item.relative_to(root)),
+                "type": "dir" if item.is_dir() else "file",
+                "name": item.name
+            })
+            count += 1
+    
+    return {
+        "mode": "name",
+        "query": query,
+        "results": results,
+        "truncated": count >= max_results,
+        "count": count
+    }
+
+async def _search_by_content(root: Path, query: str) -> dict:
+    """Search file contents using ripgrep or fallback."""
+    rg_path = shutil.which('rg')
+    if rg_path:
+        return await _search_with_ripgrep(root, query, rg_path)
+    else:
+        return await _search_with_python(root, query)
+
+async def _search_with_ripgrep(root: Path, query: str, rg_path: str) -> dict:
+    """Use ripgrep for fast content search."""
+    cmd = [
+        rg_path,
+        '--json',
+        '--line-number',
+        '--column',
+        '--max-count', '5',  # Max 5 matches per file
+        '--max-filesize', '1M',  # Skip large files
+        '--',
+        query,
+        str(root)
+    ]
+    
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        
+        # Parse ripgrep JSON output
+        results_by_file = {}
+        for line in stdout.decode('utf-8').splitlines():
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+                if obj.get('type') == 'match':
+                    data = obj['data']
+                    path_str = data['path']['text']
+                    path = Path(path_str)
+                    rel = str(path.relative_to(root))
+                    
+                    if rel not in results_by_file:
+                        results_by_file[rel] = {
+                            "path": path_str,
+                            "rel": rel,
+                            "matches": []
+                        }
+                    
+                    line_num = data['line_number']
+                    line_text = data['lines']['text'].rstrip('\n')
+                    
+                    # Extract snippet around match
+                    submatch = data['submatches'][0] if data['submatches'] else {}
+                    col = submatch.get('start', 0)
+                    match_text = submatch.get('match', {}).get('text', query)
+                    
+                    # Create snippet (75 chars before/after)
+                    start = max(0, col - 75)
+                    end = min(len(line_text), col + len(match_text) + 75)
+                    snippet = line_text[start:end]
+                    
+                    results_by_file[rel]["matches"].append({
+                        "line": line_num,
+                        "column": col,
+                        "text": line_text,
+                        "snippet": snippet
+                    })
+            except (json.JSONDecodeError, KeyError):
+                continue
+        
+        results = list(results_by_file.values())[:50]  # Max 50 files
+        match_count = sum(len(r["matches"]) for r in results)
+        
+        return {
+            "mode": "content",
+            "query": query,
+            "results": results,
+            "truncated": len(results_by_file) > 50,
+            "file_count": len(results),
+            "match_count": match_count
+        }
+        
+    except asyncio.TimeoutError:
+        raise TimeoutError("Ripgrep search timed out")
+
+async def _search_with_python(root: Path, query: str) -> dict:
+    """Fallback Python content search."""
+    results_by_file = {}
+    query_lower = query.lower()
+    file_count = 0
+    max_files = 50
+    
+    def is_binary(path: Path) -> bool:
+        try:
+            with path.open('rb') as f:
+                return b'\x00' in f.read(8192)
+        except:
+            return True
+    
+    def should_ignore(path: Path) -> bool:
+        for part in path.parts:
+            if part in IGNORE_PATTERNS or part.startswith('.'):
+                return True
+        return False
+    
+    for item in root.rglob('*'):
+        if not item.is_file() or file_count >= max_files:
+            break
+        if should_ignore(item.relative_to(root)) or is_binary(item):
+            continue
+        
+        try:
+            content = item.read_text(encoding='utf-8', errors='ignore')
+            lines = content.splitlines()
+            matches = []
+            
+            for line_num, line_text in enumerate(lines, 1):
+                if query_lower in line_text.lower():
+                    col = line_text.lower().find(query_lower)
+                    start = max(0, col - 75)
+                    end = min(len(line_text), col + len(query) + 75)
+                    
+                    matches.append({
+                        "line": line_num,
+                        "column": col,
+                        "text": line_text,
+                        "snippet": line_text[start:end]
+                    })
+                    
+                    if len(matches) >= 5:  # Max 5 per file
+                        break
+            
+            if matches:
+                rel = str(item.relative_to(root))
+                results_by_file[rel] = {
+                    "path": str(item),
+                    "rel": rel,
+                    "matches": matches
+                }
+                file_count += 1
+                
+        except Exception:
+            continue
+    
+    results = list(results_by_file.values())
+    match_count = sum(len(r["matches"]) for r in results)
+    
+    return {
+        "mode": "content",
+        "query": query,
+        "results": results,
+        "truncated": file_count >= max_files,
+        "file_count": len(results),
+        "match_count": match_count
+    }
 
 file_editor_cm6_bp = APIRouter()
 # sock = Sock()
@@ -795,6 +997,39 @@ def explorer_list(rel: str = Query('.')):
     """List directory contents for the file explorer."""
     try:
         return {"ok": True, "data": list_dir(rel)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@file_editor_cm6_bp.post('/explorer/search')
+async def explorer_search(data: dict = Body(...)):
+    """Search files by name or content within project."""
+    mode = data.get('mode', 'name')  # 'name' or 'content'
+    query = data.get('query', '').strip()
+    
+    # Validation
+    if not query:
+        raise HTTPException(status_code=400, detail="Query required")
+    if len(query) < 2:
+        raise HTTPException(status_code=400, detail="Query too short (min 2 chars)")
+    if len(query) > 200:
+        raise HTTPException(status_code=400, detail="Query too long (max 200 chars)")
+    
+    # Get project root
+    project_root = _history_store.get_active_project()
+    if not project_root or not Path(project_root).exists():
+        raise HTTPException(status_code=400, detail="No project open")
+    
+    try:
+        if mode == 'name':
+            results = await _search_by_name(Path(project_root), query)
+        elif mode == 'content':
+            results = await _search_by_content(Path(project_root), query)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid mode")
+        
+        return {"ok": True, "data": results}
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Search timed out")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

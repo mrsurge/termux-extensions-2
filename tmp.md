@@ -1,7 +1,7 @@
 # Explorer Search + Go To Line Integration - Complete Implementation Plan
 
 **Author:** Atlas  
-**Date:** 2025-11-17 17:25 UTC  
+**Date:** 2025-11-17 18:18 UTC  
 **Status:** 100% Complete - Ready for Implementation
 
 ---
@@ -12,6 +12,7 @@ All missing details have been researched and filled in. This plan provides:
 - Complete backend endpoint specification with working code
 - Full frontend integration with exact code locations
 - All edge cases, error handling, and performance limits defined
+- **Full file paths for every edit**
 - No unknowns remaining - ready to execute
 
 ---
@@ -36,11 +37,11 @@ Frontend (explorer.js)
   ├─ openFile(path) → Opens file at line 1
   └─ jumpToFileLine(path, line) → Opens file at specific line
         ↓
-Backend (main.py)
+Backend (app/apps/file_editor_cm6/main.py)
   ├─ POST /explorer/search → Returns matches
-  └─ POST /editor/jump_to_line → Loads file + scrolls
+  └─ POST /editor/jump_to_line → Loads file + scrolls (already exists)
         ↓
-NiceGUI Iframe (editor_app.py)
+NiceGUI Iframe (app/apps/file_editor_cm6/nicegui_editor/editor_app.py)
   └─ Receives commands, scrolls to line
 ```
 
@@ -50,7 +51,8 @@ NiceGUI Iframe (editor_app.py)
 
 ### **1.1 New Endpoint: `/api/app/file_editor_cm6/explorer/search`**
 
-**Location:** Add to `main.py` after line 799
+**File:** `app/apps/file_editor_cm6/main.py`  
+**Location:** Add after line 799 (after `/explorer/list` endpoint)
 
 **Implementation:**
 
@@ -91,7 +93,8 @@ async def explorer_search(data: dict = Body(...)):
 
 ### **1.2 Helper Functions**
 
-**Add to `main.py` (at top level, before routes):**
+**File:** `app/apps/file_editor_cm6/main.py`  
+**Location:** Add at top level, before route definitions (around line 50-100)
 
 ```python
 import asyncio
@@ -307,7 +310,8 @@ async def _search_with_python(root: Path, query: str) -> dict:
 
 ### **2.1 Add Helper Functions**
 
-**Location:** `main.js` before line 1840 (before bindMenuToggle calls)
+**File:** `app/apps/file_editor_cm6/main.js`  
+**Location:** Add before line 1840 (before bindMenuToggle calls, after function definitions around line 1600)
 
 ```javascript
 // Helper: Jump to line in current file
@@ -332,7 +336,8 @@ async function jumpToFileLine(path, line) {
 
 ### **2.2 Replace Go To Line Handler**
 
-**Location:** `main.js` line 1840
+**File:** `app/apps/file_editor_cm6/main.js`  
+**Location:** Line 1840
 
 **Find:**
 ```javascript
@@ -361,7 +366,8 @@ bindMenuToggle(miGoto, async () => {
 
 ### **3.1 Add State Variables**
 
-**Location:** `static/js/explorer.js` at top (after line 14)
+**File:** `app/apps/file_editor_cm6/static/js/explorer.js`  
+**Location:** After line 14 (after existing state variables)
 
 ```javascript
 // Search overlay state
@@ -377,7 +383,8 @@ let lastKnownProjectPath = '';
 
 ### **3.2 Add Search Functions**
 
-**Location:** `static/js/explorer.js` at end (before export if any)
+**File:** `app/apps/file_editor_cm6/static/js/explorer.js`  
+**Location:** At end of file (before export/closing, around line 1450+)
 
 ```javascript
 function openSearchOverlay() {
@@ -686,12 +693,13 @@ window.jumpToFileLine = async (path, line) => {
 };
 ```
 
-### **3.3 Add Search Button to Explorer**
+### **3.3 Add Search Button Initialization**
 
-**Location:** Add button initialization in `initExplorerUI()` function
+**File:** `app/apps/file_editor_cm6/static/js/explorer.js`  
+**Location:** In `initExplorerUI()` function (search for "function initExplorerUI" and add inside it)
 
 ```javascript
-// Add to initExplorerUI() in explorer.js
+// Add to initExplorerUI() function
 const searchBtn = document.getElementById('fe-search-btn');
 if (searchBtn) {
   searchBtn.onclick = openSearchOverlay;
@@ -700,21 +708,21 @@ if (searchBtn) {
 
 ### **3.4 Add HTML Markup**
 
-**Location:** `template.html` inside explorer container
-
-Find the explorer header section and add search button:
+**File:** `app/apps/file_editor_cm6/template.html`  
+**Location:** Find the explorer header section (search for "fe-explorer" or "fe-header"), add search button with other header buttons, and add overlay container at end of explorer
 
 ```html
-<!-- Add after existing header buttons -->
+<!-- Add search button in explorer header (find existing header buttons and add this) -->
 <button id="fe-search-btn" class="fe-header-btn" title="Search">🔍</button>
 
-<!-- Add overlay container at end of explorer -->
+<!-- Add overlay container at end of explorer container -->
 <div id="fe-search-overlay" class="fe-search-overlay"></div>
 ```
 
 ### **3.5 Add CSS**
 
-**Location:** `static/js/explorer.css` at end
+**File:** `app/apps/file_editor_cm6/static/js/explorer.css`  
+**Location:** At end of file
 
 ```css
 /* Search overlay */
@@ -911,6 +919,20 @@ Find the explorer header section and add search button:
 
 ---
 
+## **FILES MODIFIED SUMMARY**
+
+| File | Changes | Lines |
+|------|---------|-------|
+| `app/apps/file_editor_cm6/main.py` | Add search endpoint + helper functions | ~250 lines |
+| `app/apps/file_editor_cm6/main.js` | Add jump helpers + refactor Go To Line | ~30 lines |
+| `app/apps/file_editor_cm6/static/js/explorer.js` | Add search overlay functions | ~400 lines |
+| `app/apps/file_editor_cm6/template.html` | Add search button + overlay container | ~2 lines |
+| `app/apps/file_editor_cm6/static/js/explorer.css` | Add search overlay styles | ~150 lines |
+
+**Total:** 5 files modified
+
+---
+
 ## **PERFORMANCE LIMITS**
 
 | Metric | Limit | Rationale |
@@ -985,23 +1007,11 @@ Find the explorer header section and add search button:
 
 ---
 
-## **KNOWN LIMITATIONS**
-
-1. **No fuzzy matching** - Exact substring match only
-2. **No regex support** - Literal string search
-3. **No search history** - Each search independent
-4. **No result highlighting** - Plain text snippets
-5. **No file preview** - Must open to see full content
-
-These are acceptable for MVP and can be enhanced later.
-
----
-
 ## **IMPLEMENTATION ORDER**
 
-1. **Backend first** (main.py) - Ensure endpoint works
-2. **Go To Line refactor** (main.js) - Simple, isolated change
-3. **Search overlay UI** (explorer.js + template.html + CSS) - Build incrementally
+1. **Backend first** (`app/apps/file_editor_cm6/main.py`) - Ensure endpoint works
+2. **Go To Line refactor** (`app/apps/file_editor_cm6/main.js`) - Simple, isolated change
+3. **Search overlay UI** (`explorer.js` + `template.html` + `explorer.css`) - Build incrementally
 4. **Integration testing** - End-to-end validation
 
 ---
@@ -1009,8 +1019,8 @@ These are acceptable for MVP and can be enhanced later.
 ## **ROLLBACK PLAN**
 
 If issues arise:
-1. Remove `/explorer/search` endpoint from main.py
-2. Revert Go To Line handler to original (keep iframe violation temporarily)
+1. Remove `/explorer/search` endpoint from `app/apps/file_editor_cm6/main.py`
+2. Revert Go To Line handler in `app/apps/file_editor_cm6/main.js` to original
 3. Remove search overlay HTML/CSS/JS
 4. Feature-flag the search button (hide with CSS)
 
@@ -1018,5 +1028,6 @@ If issues arise:
 
 **PLAN STATUS: 100% COMPLETE**
 **ALL GAPS FILLED - READY TO IMPLEMENT**
+**FULL FILE PATHS SPECIFIED**
 
-_Atlas • 2025-11-17 17:25 UTC_
+_Atlas • 2025-11-17 18:18 UTC_

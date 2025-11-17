@@ -1621,6 +1621,25 @@ async function pickSaveTarget() {
   }
 }
 
+// Helper: Jump to line in current file
+async function jumpToCurrentFileLine(line) {
+  const path = window.currentPath;
+  if (!path) {
+    host.toast('No file currently open');
+    return;
+  }
+  await jumpToFileLine(path, line);
+}
+
+// Helper: Jump to specific file + line (reusable for search)
+async function jumpToFileLine(path, line) {
+  try {
+    await apiPost('editor/jump_to_line', { path, line: parseInt(line, 10) });
+  } catch (e) {
+    host.toast('Failed to jump: ' + (e?.message || 'unknown error'));
+  }
+}
+
 // ---------- Menu & keyboard wiring ----------
 function closeAllMenus() {
   menuFileDD.classList.remove('show');
@@ -1837,7 +1856,18 @@ if (miFontLarge) {
 }
 
 bindMenuToggle(miFind, () => { triggerEditorSearchPanel('menu'); });
-bindMenuToggle(miGoto, () => { const input = window.prompt('Go to line'); const line = Number.parseInt(input || '', 10); if (!Number.isNaN(line)) { const ln = Math.max(1, line); const pos = view.state.doc.line(ln).from; view.dispatch({ selection:{anchor:pos}, scrollIntoView:true }); view.focus(); } });
+bindMenuToggle(miGoto, async () => {
+  const input = window.prompt('Go to line:');
+  if (!input) return;
+  
+  const line = parseInt(input, 10);
+  if (isNaN(line) || line < 1) {
+    host.toast('Invalid line number');
+    return;
+  }
+  
+  await jumpToCurrentFileLine(line);
+});
 
 
 

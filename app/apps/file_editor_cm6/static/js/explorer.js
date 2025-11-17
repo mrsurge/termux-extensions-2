@@ -13,6 +13,16 @@ let currentMenuButton = null;
 let selectModeDir = null;
 const selectedEntries = new Set();
 
+// Search overlay state
+let searchOverlayVisible = false;
+let searchMode = 'name'; // 'name' or 'content'
+let searchQuery = '';
+let searchResults = null;
+let searchLoading = false;
+let searchError = null;
+let searchDebounceTimer = null;
+let lastKnownProjectPath = '';
+
 const GIT_STATUS_CLASS_MAP = {
   modified: 'fe-git-modified',
   staged: 'fe-git-staged',
@@ -93,6 +103,11 @@ export async function initExplorerUI() {
     init: document.getElementById('fe-git-init'),
   };
   setGitControlsEnabled(false);
+
+  const searchBtn = document.getElementById('fe-search-btn');
+  if (searchBtn) {
+    searchBtn.onclick = openSearchOverlay;
+  }
 
   const state = await refreshCurrentProject(true);
   await renderRecentMenu(state);
@@ -1450,3 +1465,308 @@ function openFileRel(rel, projectRoot) {
     console.error('appOpenFileRel not available');
   }
 }
+
+function openSearchOverlay() {
+  if (!currentProjectPath) {
+    toast('No project open');
+    return;
+  }
+  
+  searchOverlayVisible = true;
+  lastKnownProjectPath = currentProjectPath;
+  renderSearchOverlay();
+  
+  // Focus search input after render
+  setTimeout(() => {
+    const input = document.getElementById('fe-search-input');
+    if (input) input.focus();
+  }, 0);
+}
+
+function closeSearchOverlay() {
+  searchOverlayVisible = false;
+  clearSearchResults();
+  renderSearchOverlay();
+}
+
+function clearSearchResults() {
+  searchQuery = '';
+  searchResults = null;
+  searchError = null;
+  searchLoading = false;
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+  }
+}
+
+function scheduleSearch(query) {
+  searchQuery = query;
+  
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer);
+  }
+  
+  if (query.length < 2) {
+    searchResults = null;
+    renderSearchOverlay();
+    return;
+  }
+  
+  searchLoading = true;
+  renderSearchOverlay();
+  
+  searchDebounceTimer = setTimeout(() => {
+    performSearch(query);
+  }, 300);
+}
+
+async function performSearch(query) {
+  // Check for project change
+  if (currentProjectPath !== lastKnownProjectPath) {
+    clearSearchResults();
+    lastKnownProjectPath = currentProjectPath;
+    return;
+  }
+  
+  searchLoading = true;
+  searchError = null;
+  renderSearchOverlay();
+  
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/explorer/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: searchMode, query })
+    });
+    
+    const json = await resp.json();
+    
+    if (!resp.ok) {
+      throw new Error(json.detail || resp.statusText);
+    }
+    
+    searchResults = json.data;
+    searchLoading = false;
+    searchError = null;
+    renderSearchOverlay();
+    
+  } catch (err) {
+    searchLoading = false;
+    searchError = err.message || 'Search failed';
+    searchResults = null;
+    renderSearchOverlay();
+  }
+}
+
+function toggleSearchMode() {
+  searchMode = searchMode === 'name' ? 'content' : 'name';
+  if (searchQuery.length >= 2) {
+    performSearch(searchQuery);
+  } else {
+    renderSearchOverlay();
+  }
+}
+
+function renderSearchOverlay() {
+  const overlay = document.getElementById('fe-search-overlay');
+  if (!overlay) return;
+  
+  if (!searchOverlayVisible) {
+    overlay.style.display = 'none';
+    return;
+  }
+  
+  overlay.style.display = 'flex';
+  
+  // Build header
+  const header = document.createElement('div');
+  header.className = 'fe-search-header';
+  
+  const title = document.createElement('h3');
+  title.textContent = 'Search';
+  header.appendChild(title);
+  
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕';
+  closeBtn.className = 'fe-search-close';
+  closeBtn.onclick = closeSearchOverlay;
+  header.appendChild(closeBtn);
+  
+  // Mode toggle
+  const modeToggle = document.createElement('div');
+  modeToggle.className = 'fe-search-mode';
+  
+  const nameBtn = document.createElement('button');
+  nameBtn.textContent = 'Name';
+  nameBtn.className = searchMode === 'name' ? 'active' : '';
+  nameBtn.onclick = () => { searchMode = 'name'; renderSearchOverlay(); };
+  modeToggle.appendChild(nameBtn);
+  
+  const contentBtn = document.createElement('button');
+  contentBtn.textContent = 'Contents';
+  contentBtn.className = searchMode === 'content' ? 'active' : '';
+  contentBtn.onclick = () => { searchMode = 'content'; renderSearchOverlay(); };
+  modeToggle.appendChild(contentBtn);
+  
+  header.appendChild(modeToggle);
+  
+  // Search input
+  const inputContainer = document.createElement('div');
+  inputContainer.className = 'fe-search-input-container';
+  
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'fe-search-input';
+  input.placeholder = searchMode === 'name' ? 'Search files/folders...' : 'Search in files...';
+  input.value = searchQuery;
+  input.oninput = (e) => scheduleSearch(e.target.value);
+  input.onkeydown = (e) => {
+    if (e.key === 'Escape') closeSearchOverlay();
+  };
+  inputContainer.appendChild(input);
+  
+  if (searchQuery) {
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = '✕';
+    clearBtn.className = 'fe-search-clear';
+    clearBtn.onclick = () => {
+      searchQuery = '';
+      searchResults = null;
+      renderSearchOverlay();
+    };
+    inputContainer.appendChild(clearBtn);
+  }
+  
+  // Results area
+  const resultsContainer = document.createElement('div');
+  resultsContainer.className = 'fe-search-results';
+  
+  if (searchLoading) {
+    resultsContainer.innerHTML = '<div class="fe-search-loading">Searching...</div>';
+  } else if (searchError) {
+    resultsContainer.innerHTML = `<div class="fe-search-error">${searchError}</div>`;
+  } else if (searchResults) {
+    renderSearchResults(resultsContainer);
+  } else if (searchQuery.length > 0 && searchQuery.length < 2) {
+    resultsContainer.innerHTML = '<div class="fe-search-hint">Type at least 2 characters</div>';
+  }
+  
+  // Assemble
+  overlay.innerHTML = '';
+  overlay.appendChild(header);
+  overlay.appendChild(inputContainer);
+  overlay.appendChild(resultsContainer);
+}
+
+function renderSearchResults(container) {
+  if (!searchResults || !searchResults.results || searchResults.results.length === 0) {
+    container.innerHTML = '<div class="fe-search-empty">No results found</div>';
+    return;
+  }
+  
+  if (searchMode === 'name') {
+    renderNameResults(container, searchResults);
+  } else {
+    renderContentResults(container, searchResults);
+  }
+}
+
+function renderNameResults(container, data) {
+  const list = document.createElement('div');
+  list.className = 'fe-search-list';
+  
+  data.results.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'fe-search-item';
+    row.onclick = () => {
+      if (item.type === 'file') {
+        openFile(item.path);
+        closeSearchOverlay();
+      }
+    };
+    
+    const icon = document.createElement('span');
+    icon.className = 'fe-search-icon';
+    icon.textContent = item.type === 'dir' ? '📁' : '📄';
+    row.appendChild(icon);
+    
+    const name = document.createElement('span');
+    name.className = 'fe-search-name';
+    name.textContent = item.rel;
+    row.appendChild(name);
+    
+    list.appendChild(row);
+  });
+  
+  container.appendChild(list);
+  
+  if (data.truncated) {
+    const notice = document.createElement('div');
+    notice.className = 'fe-search-notice';
+    notice.textContent = `Showing first ${data.count} results`;
+    container.appendChild(notice);
+  }
+}
+
+function renderContentResults(container, data) {
+  const list = document.createElement('div');
+  list.className = 'fe-search-list';
+  
+  data.results.forEach(fileResult => {
+    const fileGroup = document.createElement('div');
+    fileGroup.className = 'fe-search-file-group';
+    
+    const fileHeader = document.createElement('div');
+    fileHeader.className = 'fe-search-file-header';
+    fileHeader.textContent = `${fileResult.rel} (${fileResult.matches.length})`;
+    fileGroup.appendChild(fileHeader);
+    
+    fileResult.matches.forEach(match => {
+      const matchRow = document.createElement('div');
+      matchRow.className = 'fe-search-match';
+      matchRow.onclick = () => {
+        if (window.jumpToFileLine) {
+          window.jumpToFileLine(fileResult.path, match.line);
+        }
+        closeSearchOverlay();
+      };
+      
+      const lineNum = document.createElement('span');
+      lineNum.className = 'fe-search-line-num';
+      lineNum.textContent = match.line;
+      matchRow.appendChild(lineNum);
+      
+      const snippet = document.createElement('span');
+      snippet.className = 'fe-search-snippet';
+      snippet.textContent = match.snippet;
+      matchRow.appendChild(snippet);
+      
+      fileGroup.appendChild(matchRow);
+    });
+    
+    list.appendChild(fileGroup);
+  });
+  
+  container.appendChild(list);
+  
+  if (data.truncated) {
+    const notice = document.createElement('div');
+    notice.className = 'fe-search-notice';
+    notice.textContent = `Showing ${data.file_count} files, ${data.match_count} matches`;
+    container.appendChild(notice);
+  }
+}
+
+// Expose jumpToFileLine to window for search results
+window.jumpToFileLine = async (path, line) => {
+  try {
+    await fetch('/api/app/file_editor_cm6/editor/jump_to_line', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, line: parseInt(line, 10) })
+    });
+  } catch (e) {
+    toast('Failed to jump: ' + (e?.message || 'unknown error'));
+  }
+};
