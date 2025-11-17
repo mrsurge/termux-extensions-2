@@ -694,3 +694,52 @@ _Implementation completed and validated: 2025-11-17 06:39 UTC_
 _Total implementation time: ~90 minutes_
 _TE-2 Team_
 
+
+---
+
+### Configuration Update: Chromium Sub-Pixel Rendering Fix
+**Timestamp:** 2025-11-17 07:03 UTC  
+**Author:** TE-2 Team  
+
+**Issue Identified:**
+- 0.4px lines disappearing intermittently on Chromium/Chrome (desktop)
+- Works fine on Gecko/Firefox
+- Chromium has known issues with sub-pixel rendering below 0.5px
+
+**Changes Made:**
+- Increased thickness from 0.4px to 0.5px (Chromium-safe threshold)
+- Darkened both color levels for more subdued appearance:
+  - Inactive: #8B7355 (darker muted tan)
+  - Active: #A0826D (medium tan, was previously inactive color)
+- Reduced brightness difference between active/inactive for subtlety
+
+**Final Configuration (codemirror.js):**
+```javascript
+indentationMarkers({
+  highlightActiveBlock: true,
+  thickness: 0.5,
+  hideFirstIndent: false,
+  markerType: 'fullScope',
+  colors: {
+    light: '#8B7355',        // darker muted tan for inactive guides
+    dark: '#8B7355',         // darker muted tan for inactive guides
+    activeLight: '#A0826D',  // medium tan for active block
+    activeDark: '#A0826D'    // medium tan for active block
+  }
+})
+```
+
+**Color Evolution:**
+- Original: #D2B48C (lightest tan)
+- Previous inactive: #A0826D (medium tan)
+- Current inactive: #8B7355 (darker muted tan)
+- Current active: #A0826D (medium tan)
+
+**Rationale:**
+- 0.5px is Chromium's reliable minimum for consistent rendering
+- Darker colors compensate for slightly thicker lines
+- Smaller brightness delta maintains subtlety
+- Should work consistently across all browsers
+
+**Status:** Testing cross-browser compatibility with 0.5px darker tans.
+

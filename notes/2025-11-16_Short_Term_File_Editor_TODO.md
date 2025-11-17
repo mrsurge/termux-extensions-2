@@ -25,9 +25,10 @@
 - **Plan:** when autosave enabled, trigger backend save at intervals or after debounce, then suppress session-cache snapshots (or flag them read-only) to avoid double writes. Re-test existing collision handling (base SHA, watcher skips) against the iframe drift and patch only what changed.
 
 ## 5. Indentation Guides (CM6 extension)
-- **Status:** Desired even though effort > payoff.
-- **Scope:** Vendored CM6; likely need to bundle ts extension (e.g., `@codemirror/view` guide implementation).
+- **Scope:** Vendored CM6; bundle extension (e.g., `@replit/codemirror-indentation-markers`), wire toggle via NiceGUI iframe + preferences.
 - **Plan:** bundle a minimal JS version (transpile TS → JS via esbuild), inline similar to search shim. Expose toggles via `editor_app.py` + menu.
+- **Status (2025-11-17 02:15 UTC):** Desired even though effort > payoff.
+- **Status (2025-11-17 05:30 UTC):** ✅ Completed. See `notes/2025-11-17_INDENTATION_GUIDES_IMPLEMENTATION.md`.
 
 ## 6. Terminal Project Switching Bug
 - **Symptoms:** When project changes, existing terminal keeps old CWD; new terminal inherits stale directory.

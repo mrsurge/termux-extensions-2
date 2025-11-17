@@ -324,14 +324,14 @@ export default {
         this.indentExtensions = [
           indentationMarkers({
             highlightActiveBlock: true,
-            thickness: 0.4,
+            thickness: 0.5,
             hideFirstIndent: false,
             markerType: 'fullScope',
             colors: {
-              light: '#A0826D',    // darker tan for light theme
-              dark: '#A0826D',     // darker tan for dark theme
-              activeLight: '#D2B48C',  // original tan for active
-              activeDark: '#D2B48C'    // original tan for active
+              light: '#8B7355',    // darker muted tan for inactive guides
+              dark: '#8B7355',     // darker muted tan for inactive guides
+              activeLight: '#A0826D',  // medium tan for active block
+              activeDark: '#A0826D'    // medium tan for active block
             }
           })
         ];
