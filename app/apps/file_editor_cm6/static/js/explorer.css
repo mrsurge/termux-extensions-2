@@ -120,7 +120,7 @@
 
 .fe-tree li {
   display: grid;
-  grid-template-columns: 20px 20px 1fr auto;    /* twisty, icon, text, menu */
+  grid-template-columns: 20px 1fr auto;    /* icon, text, menu (twisty removed) */
   gap: 8px;
   padding: 6px 10px;
   cursor: pointer;
@@ -149,21 +149,10 @@
 }
 
 .fe-tree-twisty {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  color: var(--muted, #9ca3af);
-  cursor: pointer;
-  transition: transform 0.2s ease-out;
-}
-
-.fe-tree-node[data-open="true"] .fe-tree-twisty {
-  transform: rotate(90deg);
+  display: none; /* Hidden - directories expand/collapse by clicking anywhere on the row */
+  width: 0;      /* Takes no space */
+  padding: 0;
+  margin: 0;
 }
 
 .fe-tree-text {
