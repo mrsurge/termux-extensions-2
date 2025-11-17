@@ -1,219 +1,153 @@
-# Search Overlay Containment Investigation
+# Search Overlay & Explorer Sync Implementation
 
-**Date:** 2025-11-17 22:05 UTC  
-**Investigator:** Atlas
+**Date:** 2025-11-17 23:50 UTC  
+**Author:** Atlas  
 
 ---
 
-## **Current Structure**
+## **Implementation Summary**
 
-### **HTML Hierarchy:**
-```
-.fe-root
-  └─ .fe-drawer (aside)
-      ├─ .fe-drawer-head (header)
-      └─ .fe-drawer-body (div)
-          ├─ #fe-file-tree (ul.fe-tree)
-          ├─ #fe-search-overlay (div.fe-search-overlay)  ← HERE
-          └─ .fe-git-footer (footer)
-```
+Implemented intelligent search overlay behavior with automatic explorer tree synchronization.
 
-### **Current CSS for Search Overlay:**
-```css
-.fe-search-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--bg);
-  z-index: 10;
-  display: none;
-  flex-direction: column;
-  overflow: hidden;
+---
+
+## **Changes Made**
+
+### **1. Helper Functions Added**
+
+**File:** `app/apps/file_editor_cm6/static/js/explorer.js`
+
+```javascript
+// Helper to check if we're in mobile layout
+function isMobileLayout() {
+  const root = document.querySelector('.fe-root');
+  return root?.classList.contains('layout-mobile') || false;
 }
-```
 
-### **Parent Container (.fe-drawer-body):**
-```css
-.fe-drawer-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow-x: visible;
-  overflow-y: hidden;
-  background: var(--explorer-bg);
+// Helper to close drawer (mobile only)
+function closeDrawerIfMobile() {
+  if (isMobileLayout()) {
+    const root = document.querySelector('.fe-root');
+    root?.classList.remove('drawer-open');
+  }
 }
 ```
 
 ---
 
-## **The Problem**
+### **2. File Name Search Results (renderNameResults)**
 
-**Overlay positioning:** `position: absolute` with `top/left/right/bottom: 0`
+**Updated onclick handlers for both files and directories:**
 
-**Issue:** `position: absolute` positions relative to the **nearest positioned ancestor** (an element with `position: relative`, `absolute`, `fixed`, or `sticky`).
-
-**Current behavior:** 
-- `.fe-drawer-body` has NO positioning context (no `position` property)
-- `.fe-drawer` has NO positioning context
-- `.fe-root` has NO positioning context
-- Therefore overlay positions relative to **viewport** (entire page)
-
-**Result:** Full-page overlay instead of explorer-scoped overlay
-
----
-
-## **Desktop vs Mobile Behavior**
-
-### **Desktop:**
-- `.fe-drawer` is a side panel (tiled layout)
-- Search overlay covering entire viewport = WRONG (obvious)
-- Should only cover the explorer panel
-
-### **Mobile:**
-- `.fe-drawer` becomes full-page drawer via transform
-- Search overlay covering entire viewport = LOOKS OK (accidental)
-- But it's still wrong - just happens to match drawer size
-
----
-
-## **The Fix**
-
-### **Option 1: Add Position Context to Parent** ✅ RECOMMENDED
-
-Add `position: relative` to `.fe-drawer-body`:
-
-```css
-.fe-drawer-body {
-  position: relative;  /* ← Add this */
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow-x: visible;
-  overflow-y: hidden;
-  background: var(--explorer-bg);
+#### **File Clicks:**
+```javascript
+if (item.type === 'file') {
+  window.appOpenFileRel(item.rel, currentProjectPath);
+  closeDrawerIfMobile();  // Close drawer on mobile only
+  
+  // Expand tree to show the file
+  if (treeElement) {
+    const dirPath = item.rel.includes('/') 
+      ? item.rel.substring(0, item.rel.lastIndexOf('/')) 
+      : '.';
+    await expandDirectory(treeElement, dirPath);
+  }
 }
 ```
 
-**Result:** Overlay now positions relative to `.fe-drawer-body`, staying within explorer bounds.
-
-**Pros:**
-- Minimal change (1 line)
-- Overlay automatically contained on desktop
-- Works correctly on mobile (drawer is full-page anyway)
-- No JavaScript changes needed
-- Follows CSS best practices
-
-**Cons:**
-- None (this is the correct approach)
-
----
-
-### **Option 2: Add Position Context to Drawer**
-
-Add `position: relative` to `.fe-drawer` instead:
-
-```css
-.fe-drawer {
-  position: relative;  /* ← Add this */
-  /* existing styles... */
+#### **Directory Clicks:**
+```javascript
+else if (item.type === 'dir') {
+  closeSearchOverlay();  // Close search overlay only
+  
+  // Expand tree to show directory
+  if (treeElement) {
+    await expandDirectory(treeElement, item.rel);
+  }
 }
 ```
 
-**Result:** Overlay positions relative to entire drawer (including header).
-
-**Pros:**
-- Also works
-- Overlay covers header too (might be desirable?)
-
-**Cons:**
-- Overlay would cover header (search button, close button)
-- Less precise than scoping to body only
-- Could interfere with header interactions
-
 ---
 
-### **Option 3: Fixed Positioning with Container Bounds**
+### **3. File Content Search Results (renderContentResults)**
 
-Change overlay to `position: fixed` and calculate bounds with JavaScript:
+**Updated match onclick handler:**
 
-**Cons:**
-- Complex JavaScript needed
-- Breaks on window resize
-- Breaks on drawer open/close
-- Not maintainable
-- ❌ **Not recommended**
-
----
-
-## **Recommendation**
-
-**Use Option 1:** Add `position: relative` to `.fe-drawer-body`
-
-**Why:**
-1. **Correct semantically** - overlay is child of drawer body, should position relative to it
-2. **Minimal change** - single CSS property
-3. **No JS changes** - overlay already uses absolute positioning correctly
-4. **Works everywhere** - desktop tiled, desktop drawer open, mobile drawer
-5. **Future-proof** - any content in drawer body will also be contained
-
-**File to edit:**
-- `app/apps/file_editor_cm6/static/js/explorer.css` line 102
-
-**Change:**
-```diff
- .fe-drawer-body {
-+  position: relative;
-   flex: 1;
-   display: flex;
-   flex-direction: column;
-   overflow-x: visible;
-   overflow-y: hidden;
-   background: var(--explorer-bg);
- }
+```javascript
+matchRow.onclick = async () => {
+  await window.appOpenFileRel(fileResult.rel, currentProjectPath);
+  closeDrawerIfMobile();  // Close drawer on mobile only
+  
+  // Expand tree to show the file
+  if (treeElement) {
+    const dirPath = fileResult.rel.includes('/') 
+      ? fileResult.rel.substring(0, fileResult.rel.lastIndexOf('/')) 
+      : '.';
+    await expandDirectory(treeElement, dirPath);
+  }
+  
+  // Jump to matching line
+  await window.jumpToCurrentFileLine(match.line);
+};
 ```
 
 ---
 
-## **Testing Plan**
+## **Behavior Matrix**
 
-After change, verify:
+### **File Opened from Search**
 
-1. **Desktop Tiled Mode:**
-   - [ ] Search overlay only covers explorer panel
-   - [ ] Main editor still visible
-   - [ ] Overlay edges align with explorer edges
+| Context | Search Overlay | Drawer | Explorer Tree |
+|---------|---------------|--------|---------------|
+| **Mobile** | Stays open | Closes | Expands to file |
+| **Desktop** | Stays open | N/A (always visible) | Expands to file |
 
-2. **Desktop Drawer Open:**
-   - [ ] Search overlay only covers drawer
-   - [ ] Can close drawer behind overlay (shouldn't, but test)
-   - [ ] Overlay contained within drawer bounds
+### **Directory Clicked from Search**
 
-3. **Mobile:**
-   - [ ] Search overlay covers full drawer (which is full-page)
-   - [ ] No visual change from before
-   - [ ] Keyboard behavior still works
-
-4. **All Modes:**
-   - [ ] Close button works
-   - [ ] Mode toggle works
-   - [ ] Search input works
-   - [ ] File opening works
-   - [ ] Drawer closes after file open
+| Context | Search Overlay | Drawer | Explorer Tree |
+|---------|---------------|--------|---------------|
+| **Mobile** | Closes | Stays open | Expands to directory |
+| **Desktop** | Closes | N/A (always visible) | Expands to directory |
 
 ---
 
-## **Implementation Steps**
+## **User Experience**
 
-1. Edit `static/js/explorer.css` line 102
-2. Add `position: relative;` to `.fe-drawer-body`
-3. Test on desktop (tiled + drawer modes)
-4. Test on mobile
-5. Verify no regressions
+### **Mobile Workflow:**
+1. User opens search overlay
+2. User searches for file/directory
+3. **File selected:** Drawer closes, file opens, tree expands, search stays visible
+4. User can search again without reopening overlay
+5. **Directory selected:** Search closes, drawer stays open, tree expands to directory
 
-**Estimated time:** 30 seconds to fix, 2 minutes to test
+### **Desktop Workflow:**
+1. User opens search overlay (over explorer panel)
+2. User searches for file/directory
+3. **File selected:** File opens, tree expands in background, search stays visible
+4. User can continue searching or close search to see explorer
+5. **Directory selected:** Search closes, explorer shows expanded directory
 
 ---
 
-_Investigation complete: 2025-11-17 22:05 UTC_
+## **Technical Notes**
+
+- **Leverages existing `expandDirectory()` function** - No new tree expansion logic needed
+- **Mobile detection** via `.layout-mobile` class on root element
+- **Directory path extraction** from file paths using string manipulation
+- **Async/await** for proper sequencing of open → expand → jump operations
+- **Search overlay** only closes on directory click or manual close (X button, Escape)
+
+---
+
+## **Benefits**
+
+✅ Search overlay is persistent and useful  
+✅ Explorer always shows current file/directory context  
+✅ Smart mobile drawer behavior (closes when appropriate)  
+✅ Desktop experience unaffected by mobile-specific logic  
+✅ Directories are now actionable in search results  
+✅ Tree expansion uses existing, tested code paths  
+
+---
+
+_Implementation complete: 2025-11-17 23:50 UTC_

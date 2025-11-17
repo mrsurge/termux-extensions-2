@@ -23,6 +23,20 @@ let searchError = null;
 let searchDebounceTimer = null;
 let lastKnownProjectPath = '';
 
+// Helper to check if we're in mobile layout
+function isMobileLayout() {
+  const root = document.querySelector('.fe-root');
+  return root?.classList.contains('layout-mobile') || false;
+}
+
+// Helper to close drawer (mobile only)
+function closeDrawerIfMobile() {
+  if (isMobileLayout()) {
+    const root = document.querySelector('.fe-root');
+    root?.classList.remove('drawer-open');
+  }
+}
+
 const GIT_STATUS_CLASS_MAP = {
   modified: 'fe-git-modified',
   staged: 'fe-git-staged',
@@ -1722,13 +1736,27 @@ function renderNameResults(container, data) {
   data.results.forEach(item => {
     const row = document.createElement('div');
     row.className = 'fe-search-item';
-    row.onclick = () => {
+    row.onclick = async () => {
       if (item.type === 'file') {
+        // File clicked: open file, close drawer (mobile only), expand tree to show file
         if (window.appOpenFileRel) {
           window.appOpenFileRel(item.rel, currentProjectPath);
-          // Search overlay and drawer will close automatically together
+          closeDrawerIfMobile();
+          
+          // Expand tree to show the file
+          if (treeElement) {
+            const dirPath = item.rel.includes('/') ? item.rel.substring(0, item.rel.lastIndexOf('/')) : '.';
+            await expandDirectory(treeElement, dirPath);
+          }
         } else {
           toast('File opener not available');
+        }
+      } else if (item.type === 'dir') {
+        // Directory clicked: close search overlay, expand tree to show directory
+        closeSearchOverlay();
+        
+        if (treeElement) {
+          await expandDirectory(treeElement, item.rel);
         }
       }
     };
@@ -1776,11 +1804,19 @@ function renderContentResults(container, data) {
       matchRow.className = 'fe-search-match';
       matchRow.onclick = async () => {
         if (window.appOpenFileRel && window.jumpToCurrentFileLine) {
-          // Search overlay and drawer will close automatically together
+          // File content match clicked: open file, jump to line, close drawer (mobile only), expand tree
           
           // First: Open file using unified flow (matching explorer behavior)
           try {
             await window.appOpenFileRel(fileResult.rel, currentProjectPath);
+            
+            closeDrawerIfMobile();
+            
+            // Expand tree to show the file
+            if (treeElement) {
+              const dirPath = fileResult.rel.includes('/') ? fileResult.rel.substring(0, fileResult.rel.lastIndexOf('/')) : '.';
+              await expandDirectory(treeElement, dirPath);
+            }
             
             // Wait a tick for file to load
             await new Promise(resolve => setTimeout(resolve, 100));
