@@ -380,7 +380,7 @@ export default {
             hideFirstIndent: false,
             markerType: 'fullScope',
             colors: {
-              light: '#3c3226ff',    // darker muted tan for inactive guides
+              light: '#c9b398ff',    // darker muted tan for inactive guides
               dark: '#3c3226ff',     // darker muted tan for inactive guides
               activeLight: '#7a6557ff',  // medium tan for active block
               activeDark: '#7a6557ff'    // medium tan for active block
