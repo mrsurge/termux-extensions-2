@@ -387,6 +387,14 @@ class CodeMirror(ValueElement, DisableableElement,
         """Open the CodeMirror search panel (find/replace)."""
         self.run_method('openSearchPanelFromServer')
 
+    def jump_to_line(self, line: int) -> None:
+        """Jump to a specific line in the editor.
+        
+        Args:
+            line: The line number to jump to (1-based indexing)
+        """
+        self.run_method('jumpToLine', line)
+
     def request_content(self) -> Awaitable[str]:
         """Request the current editor content from the frontend.
 

@@ -567,6 +567,35 @@ export default {
 
       return extensions;
     },
+    jumpToLine(lineNumber) {
+      if (!this.editor) {
+        console.warn('[CodeMirror] jumpToLine: editor not ready');
+        return;
+      }
+      
+      const line = parseInt(lineNumber, 10);
+      if (isNaN(line) || line < 1) {
+        console.warn('[CodeMirror] jumpToLine: invalid line number', lineNumber);
+        return;
+      }
+      
+      try {
+        const doc = this.editor.state.doc;
+        const maxLine = doc.lines;
+        const targetLine = Math.max(1, Math.min(line, maxLine));
+        const pos = doc.line(targetLine).from;
+        
+        this.editor.dispatch({
+          selection: { anchor: pos },
+          scrollIntoView: true
+        });
+        this.editor.focus();
+        
+        console.log('[CodeMirror] jumpToLine: jumped to line', targetLine);
+      } catch (err) {
+        console.error('[CodeMirror] jumpToLine failed:', err);
+      }
+    },
   },
   async mounted() {
     // This is used to prevent emitting the value we just received from the server.

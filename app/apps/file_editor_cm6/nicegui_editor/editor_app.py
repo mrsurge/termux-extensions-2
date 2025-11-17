@@ -595,19 +595,8 @@ async def jump_to_line(data: dict = Body(...)):
     
     print(f"[JUMP_TO_LINE] Scrolling to line {target_line}", file=sys.stderr)
     
-    # Only scroll - assume file is already loaded by frontend via openFile()
-    ui.run_javascript(f'''
-        const view = document.querySelector(".cm-editor")?.cmView.view;
-        if (view) {{
-            const line = Math.max(1, Math.min({target_line}, view.state.doc.lines));
-            const pos = view.state.doc.line(line).from;
-            view.dispatch({{
-                selection: {{ anchor: pos }},
-                scrollIntoView: true
-            }});
-            view.focus();
-        }}
-    ''')
+    # Use the vendored CodeMirror jump_to_line method
+    editor.jump_to_line(target_line)
     
     return {"ok": True, "line": target_line}
 
