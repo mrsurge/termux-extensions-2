@@ -1,6 +1,7 @@
 # Framework Shells Architecture
 
-**Last Updated:** November 2, 2025
+**Last Updated:** November 17, 2025  
+**Updated by:** Atlas
 
 ## 1. Motivation
 
@@ -21,25 +22,34 @@ user-visible session lists while remaining easy to manage.
 
 ## 2. Current Capabilities
 
-- **Manager module:** `FrameworkShellManager` (in `app/framework_shells.py`) stores
-  metadata, launches processes with `subprocess.Popen`, captures stdout/stderr logs,
+- **Manager module:** `FrameworkShellManager` (in `app/libs/framework_shells.py`) stores
+  metadata, launches processes via **FastAPI/asyncio** (not Flask), captures stdout/stderr logs,
   and updates status across restarts.
+- **PTY support:** Shells can optionally use pseudo-terminals (`uses_pty=True`) for interactive
+  processes, with output streaming via WebSocket subscriptions.
+- **IPC integration:** Framework shells register with the IPC server (`app/ipc/server.py`) for
+  coordinated shutdown. The IPC `ProcessRegistry` tracks all processes (type="framework", "worker", "shell").
 - **Metadata layout:**
-  - `~/.cache/te_framework/meta/<id>/meta.json` — serialized `ShellRecord` data.
-  - `~/.cache/te_framework/logs/<id>.stdout.log` and `.stderr.log` — append-only logs.
-- **Lifecycle operations:** spawn, list, describe, graceful terminate, force kill,
-  restart, and full removal (including logs and metadata). Supervisor shutdown
-  (`POST /api/framework/runtime/shutdown`) cascades through the manager to close
-  every recorded shell before the host process exits.
+  - `~/.cache/te_framework/meta/<id>.json` — serialized `ShellRecord` data (flat JSON file, not subdirectory).
+  - `~/.cache/te_framework/logs/fs-<id>/stdout.log` and `stderr.log` — append-only logs organized by shell ID directory.
+- **Lifecycle operations:** spawn (with optional PTY), list, describe, graceful terminate, force kill,
+  restart, and full removal (including logs and metadata). **IPC-orchestrated shutdown** replaces
+  supervisor-managed cleanup: `POST /actions/shutdown` on IPC server triggers `ProcessRegistry.shutdown_all()`,
+  which terminates workers/shells first, then framework process sequentially.
 - **Resource stats:** When `psutil` is installed the manager reports CPU%, RSS, and
   thread counts; otherwise only basic uptime/alive flags are provided.
 - **Access control:** Mutating endpoints may require the `X-Framework-Key` header if
   `TE_FRAMEWORK_SHELL_TOKEN` is configured. Read operations remain open.
-- **Limits:** `TE_FRAMEWORK_SHELL_MAX` (default 5) caps concurrent running shells.
+- **Limits:** 
+  - `TE_MAX_APP_SHELLS` (default 5) caps app-related shells
+  - `TE_MAX_SERVICE_SHELLS` (default 5) caps service-related shells
+  - Total limit is sum of both categories
 - **Run tracking:** Every shell record includes the launcher PID, run ID, and
   `uses_pty` flag. The supervisor writes the current run ID to
   `~/.cache/te_framework/run_id` so dtach sessions and other helpers can discover
   it on restart.
+- **Shell adoption:** On startup, manager calls `_adopt_orphaned_shells()` to reclaim
+  shells from previous runs (if PIDs still alive) or mark them as exited.
 - **Runtime metrics:** `GET /api/framework/runtime/metrics` aggregates all running
   shells (and matching interactive sessions) for use in the Settings app or other
   diagnostics.
@@ -49,46 +59,83 @@ user-visible session lists while remaining easy to manage.
 | Method & Path | Description |
 | --- | --- |
 | `GET /api/framework_shells` | List shells with status and resource stats. |
-| `POST /api/framework_shells` | Spawn a new shell (`command`, optional `cwd`, `env`, `label`, `autostart`). |
+| `POST /api/framework_shells` | Spawn a new shell (`command`, optional `cwd`, `env`, `label`, `autostart`, `uses_pty`). |
 | `GET /api/framework_shells/<id>` | Detailed record; use `logs=true&tail=200` to fetch log tails. |
-| `POST /api/framework_shells/<id>/action` | Accepted actions: `stop`, `kill`, `restart`. |
+| `POST /api/framework_shells/<id>/action` | Accepted actions: `stop`/`terminate` (SIGTERM), `kill`/`force` (SIGKILL + remove), `restart`. |
 | `DELETE /api/framework_shells/<id>` | Remove metadata/logs. `?force=1` forces termination first. |
+| `POST /api/framework_shells/terminate_group` | Terminate all shells matching a group label. |
+| **PTY-specific routes** | |
+| `POST /api/framework_shells/spawn_pty` | Spawn shell with PTY support (returns shell_id). |
+| `POST /api/framework_shells/<id>/write` | Write data to PTY master (for interactive shells). |
+| `GET /api/framework_shells/<id>/stream` | SSE stream of PTY output. |
+| `WS /api/framework_shells/<id>/ws` | WebSocket bidirectional PTY stream. |
 
 All responses honour the `{ "ok": true|false, ... }` envelope.
 
 ## 4. Manager Behaviour
 
-1. **Spawn**
+1. **Spawn (Regular)**
    - Validates that the command is a list of strings and the working directory
      (default `~`) resolves inside the home directory.
-   - Creates unique shell ID `fs_<timestamp>_<uuid8>`, prepares log files, and
-     launches the process with `start_new_session=True` so it survives Flask reloads.
-   - Persists metadata and returns the running `ShellRecord`.
+   - Creates unique shell ID `fs_{timestamp}_{uuid8}`, prepares log directory
+     `~/.cache/te_framework/logs/fs-{id}/`, and launches the process with
+     `start_new_session=True` so it survives Flask reloads.
+   - Uses `subprocess.Popen` with stdout/stderr redirected to log files.
+   - Persists metadata to `~/.cache/te_framework/meta/{id}.json` (flat JSON file).
+   - Registers shell with IPC server (type="shell") for coordinated shutdown.
+   - Returns the running `ShellRecord`.
 
-2. **Terminate / Kill**
-   - Sends `SIGTERM` to the entire process group using `os.killpg` when asked to `stop`. This ensures that the main process and all of its children (e.g., a python worker and a `tee` logger) are terminated together, preventing orphans.
-   - Escalates to `SIGKILL` if the process group fails to exit within a short timeout (or immediately when `kill`).
+2. **Spawn (PTY)**
+   - Similar to regular spawn but uses `pty.openpty()` to create pseudo-terminal pair.
+   - Process runs with PTY slave as stdin/stdout/stderr.
+   - Sets `TE_TTY=pty` environment variable.
+   - Starts background asyncio task to read from PTY master and broadcast to subscribers.
+   - Enables interactive I/O via `/api/framework_shells/<id>/write` and streaming endpoints.
+   - Stores `PTYState` in manager's `_pty` dict with master FD, subscribers queue, and reader task.
+
+3. **Terminate / Kill**
+   - Sends `SIGTERM` to the entire process group using `os.killpg` when asked to `stop` or `terminate`.
+     This ensures that the main process and all of its children (e.g., a python worker and a `tee` logger)
+     are terminated together, preventing orphans.
+   - For PTY shells, stops the PTY reader task and closes the master FD.
+   - Escalates to `SIGKILL` if the process group fails to exit within a short timeout
+     (or immediately when action is `kill` or `force`).
+   - `kill`/`force` actions also remove the shell metadata/logs after termination.
    - Updates metadata with exit code (positive = exit status, negative = signal).
 
-3. **Restart**
-   - Forces termination, resets timestamps, and relaunches the original command with
-     the same overrides/log files while keeping the shell ID stable.
+4. **Restart**
+   - Forces termination (including PTY cleanup), resets timestamps, and relaunches the original
+     command with the same overrides/log files while keeping the shell ID stable.
+   - Re-creates PTY if `uses_pty=True`.
 
-4. **Removal**
-   - Optionally terminates the process, prunes metadata directory, and deletes log files.
-   - Supervisor shutdown automatically removes every shell directory to avoid
-     orphaned metadata between runs.
+5. **Removal**
+   - Optionally terminates the process (including PTY cleanup), prunes metadata file, and deletes
+     log directory (`~/.cache/te_framework/logs/fs-{id}/`).
+   - **IPC shutdown**: IPC server's `ProcessRegistry.shutdown_all()` terminates all registered
+     processes sequentially (workers and shells first, framework last), then cleans registry.
+     Shell logs are preserved during shutdown; next startup archives them to
+     `~/.cache/te_framework/preserved_logs/logs_{timestamp}/`.
 
-5. **Sweep**
+6. **Sweep**
    - Opportunistically marks shells as `exited` when the process is no longer alive.
+   - For PTY shells, checks if master FD is still valid.
+
+7. **Adoption**
+   - On manager initialization, `_adopt_orphaned_shells()` scans metadata directory.
+   - If shell PID is still alive, adopts it into current run (sets `adopted=True`).
+   - If shell PID is dead, marks as exited with exit code.
+   - Cleans up stale PTY state from previous runs.
 
 ## 5. Authentication & Configuration
 
 | Setting | Source | Effect |
 | --- | --- | --- |
-| `TE_FRAMEWORK_SHELL_TOKEN` | Env or `app.config` | Required value for `X-Framework-Key` header on mutating requests. Leave unset to allow local access without a token. |
-| `TE_FRAMEWORK_SHELL_MAX` | Env or `app.config` | Max number of concurrent running shells (default 5). |
-| `TE_FRAMEWORK_SHELL_DIR` | Env or `app.config` | Override metadata/log base directory (defaults to `~/.cache/te_framework`). |
+| `TE_FRAMEWORK_SHELL_TOKEN` | Env or settings | Required value for `X-Framework-Key` header on mutating requests. Leave unset to allow local access without a token. |
+| `TE_MAX_APP_SHELLS` | Env or settings | Max number of concurrent app-related shells (default 5). |
+| `TE_MAX_SERVICE_SHELLS` | Env or settings | Max number of concurrent service-related shells (default 5). |
+| `TE_FRAMEWORK_SHELL_DIR` | Env (deprecated) | Override metadata/log base directory. **Note:** Current implementation uses hardcoded `~/.cache/te_framework`. |
+| `TE_RUN_ID` | Env (set by startup script) | Unique run identifier written to `~/.cache/te_framework/run_id` for cross-process coordination. |
+| `TE_IPC_HOST`, `TE_IPC_PORT` | Env (default 127.0.0.1:9123) | IPC server address for process registry and coordinated shutdown. |
 
 ## 6. Usage Walkthrough
 
@@ -608,7 +655,137 @@ for line in stream_shell_output(shell):
 
 ---
 
-These notes reflect the implementation currently available in
-`app/framework_shells.py`, `app/supervisor.py`, and the Settings app.
+**Last Updated:** November 17, 2025  
+**Updated by:** Atlas
 
-**Last Updated:** November 2, 2025
+---
+
+## 12. Architecture Integration
+
+### Shutdown Sequence
+
+The framework uses **IPC-orchestrated shutdown** instead of direct supervisor management:
+
+1. **User triggers**: `Ctrl+C` or `kill` signal to supervisor process
+2. **Supervisor handler** (`app/supervisor.py`): 
+   - Catches `SIGTERM`/`SIGINT`
+   - POSTs to `http://127.0.0.1:9123/actions/shutdown` (IPC server)
+3. **IPC ProcessRegistry** (`app/ipc/process_manager.py`):
+   - `shutdown_all()` terminates registered processes sequentially:
+     - Workers (type="worker") and shells (type="shell") first
+     - Framework (type="framework") last
+   - Per-process: `SIGTERM` → poll up to 2s (checking `/proc/{pid}/stat`) → `SIGKILL` if needed
+   - Tracks force-killed shells for log preservation
+4. **Supervisor cleanup**:
+   - Kills IPC server (`TE_IPC_PID`)
+   - Deletes `~/.cache/te_framework/run_id`
+   - Exits
+5. **Next startup**:
+   - `scripts/run_framework.sh` calls `cleanup_framework_shell_logs()`
+   - Archives leftover logs to `~/.cache/te_framework/preserved_logs/logs_{timestamp}/`
+   - Cleans archives older than 7 days
+
+### PTY Architecture
+
+For interactive shells (`uses_pty=True`):
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Client (Browser/API)                                    │
+│  ↓ POST /spawn_pty                                      │
+│  ↓ WS /api/framework_shells/<id>/ws (bidirectional)    │
+│  ↓ POST /api/framework_shells/<id>/write               │
+└─────────────────────────────────────────────────────────┘
+                    ↓ ↑
+┌─────────────────────────────────────────────────────────┐
+│ FrameworkShellManager                                   │
+│  - PTYState(master_fd, subscribers[], reader_task)     │
+│  - _pty[shell_id] → PTY state tracking                 │
+│  - Background task: read master_fd → broadcast chunks   │
+│  - write_to_pty(): client input → master_fd            │
+│  - subscribe_output(): register client queue           │
+└─────────────────────────────────────────────────────────┘
+                    ↓ ↑
+┌─────────────────────────────────────────────────────────┐
+│ PTY Pair (from pty.openpty())                          │
+│  - master_fd: manager reads/writes                      │
+│  - slave_fd: process stdin/stdout/stderr                │
+└─────────────────────────────────────────────────────────┘
+                    ↓ ↑
+┌─────────────────────────────────────────────────────────┐
+│ Shell Process                                           │
+│  - command[0] as PID with env: TE_TTY=pty              │
+│  - Interactive I/O via PTY slave                        │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Log Architecture
+
+```
+~/.cache/te_framework/
+├── run_id                           # Current run ID (deleted on shutdown)
+├── ipc.pid                          # IPC server PID
+├── meta/
+│   ├── fs_1700000001_abc123.json   # ShellRecord (flat JSON)
+│   └── fs_1700000002_def456.json
+├── logs/
+│   ├── fs-1700000001_abc123/       # Shell-specific log directory
+│   │   ├── stdout.log
+│   │   └── stderr.log
+│   └── fs-1700000002_def456/
+│       ├── stdout.log
+│       └── stderr.log
+└── preserved_logs/
+    ├── logs_1700000000/            # Archived from previous run
+    │   └── fs-<old_id>/
+    └── logs_1699999000/            # Cleaned after 7 days
+```
+
+### Process Registry (IPC)
+
+All framework-managed processes register with IPC:
+
+```python
+# Registration at startup (app/main.py lifespan)
+register_process(
+    pid=framework_pid,
+    type="framework",
+    label="main-framework",
+    metadata={"run_id": TE_RUN_ID, "port": 8088}
+)
+
+# Workers register via app_manager.py
+register_process(
+    pid=worker_pid,
+    type="worker",
+    label=f"worker-{app_id}",
+    metadata={"app_id": app_id, "port": port}
+)
+
+# Shells register via framework_shells.py
+register_process(
+    pid=shell.pid,
+    type="shell",
+    label=shell.label or f"shell-{shell.id}",
+    metadata={"shell_id": shell.id, "uses_pty": shell.uses_pty}
+)
+```
+
+### Missing from Original Documentation
+
+1. **PTY support**: Entire PTY infrastructure (`spawn_pty`, `/write`, `/ws`, streaming)
+2. **IPC integration**: Process registry, coordinated shutdown sequence
+3. **Adoption behavior**: `_adopt_orphaned_shells()` reclaiming processes from crashes
+4. **Log directory structure**: Flat JSON metadata files, shell-specific log directories
+5. **Separate limits**: `TE_MAX_APP_SHELLS` vs `TE_MAX_SERVICE_SHELLS`
+6. **Group termination**: `POST /api/framework_shells/terminate_group`
+7. **FastAPI migration**: No longer uses Flask (now async FastAPI with APIRouter)
+
+---
+
+These notes reflect the implementation currently available in
+`app/libs/framework_shells.py`, `app/supervisor.py`, `app/ipc/process_manager.py`,
+`scripts/run_framework.sh`, and the Settings app.
+
+**Last Updated:** November 17, 2025  
+**Updated by:** Atlas
