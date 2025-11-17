@@ -328,10 +328,10 @@ export default {
             hideFirstIndent: false,
             markerType: 'fullScope',
             colors: {
-              light: '#8B7355',    // darker muted tan for inactive guides
-              dark: '#8B7355',     // darker muted tan for inactive guides
-              activeLight: '#A0826D',  // medium tan for active block
-              activeDark: '#A0826D'    // medium tan for active block
+              light: '#3c3226ff',    // darker muted tan for inactive guides
+              dark: '#3c3226ff',     // darker muted tan for inactive guides
+              activeLight: '#7a6557ff',  // medium tan for active block
+              activeDark: '#7a6557ff'    // medium tan for active block
             }
           })
         ];
