@@ -33,16 +33,19 @@ def _get_file_meta(path: Path) -> dict:
         return {"sha256": None, "size": 0, "mtime": 0}
 
 
-def write_full(project_root: Path, path: str, content: str, *, base_sha256: str | None = None) -> dict:
+def write_full(project_root: Path, path: str, content: str, *, 
+               base_sha256: str | None = None,
+               mode: int | None = None) -> dict:
+    # Edit 2025-11-17T00:13:07+00:00: This function performs the core atomic file write operation.
+    # It was updated to accept an optional 'mode' parameter to explicitly set file permissions
+    # on the temporary file before moving it, which is crucial for preserving the executable bit.
     """
     Performs an atomic write, optionally checking for a base SHA256 match.
-
-    Returns:
-        A dictionary with mtime, size, and sha256 of the new file.
-    Raises:
-        PermissionError: If the path is outside the project root.
-        BaseMismatchError: If base_sha256 is provided and doesn't match.
-        IOError: For other file-related errors.
+    
+    Args:
+        mode: Optional file permissions (0-777 octal). If None and file exists,
+              permissions are preserved via os.replace(). If None for new files,
+              uses umask default.
     """
     try:
         target_path = project_root.joinpath(path).resolve()
@@ -64,21 +67,31 @@ def write_full(project_root: Path, path: str, content: str, *, base_sha256: str 
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=target_path.parent, delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', 
+                                        dir=target_path.parent, delete=False) as tmp:
             tmp_path = Path(tmp.name)
             tmp.write(content)
             tmp.flush()
             os.fsync(tmp.fileno())
-
+        
+        # NEW: Apply explicit mode if provided
+        if mode is not None:
+            try:
+                os.chmod(tmp_path, mode)
+            except OSError as e:
+                # Log warning but continue - save is more important than mode
+                import sys
+                print(f"[SAVE] Warning: Failed to chmod temp file: {e}", file=sys.stderr)
+        
         os.replace(tmp_path, target_path)
-
-        # fsync the directory to ensure the rename is persisted
+        
+        # fsync directory
         dir_fd = os.open(target_path.parent, os.O_RDONLY)
         try:
             os.fsync(dir_fd)
         finally:
             os.close(dir_fd)
-
+    
     except Exception as e:
         if 'tmp_path' in locals() and tmp_path.exists():
             tmp_path.unlink()

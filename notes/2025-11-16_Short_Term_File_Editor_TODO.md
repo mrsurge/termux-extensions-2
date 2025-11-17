@@ -34,6 +34,11 @@
 - **Scope:** `createTerminalDrawer` (frontend), `terminal_backend.py`, project root setters (`explorer_helper`, `history_store`).
 - **Plan:** ensure project-change events broadcast to terminal drawer; auto-close existing session + reinit with new `cwd`. Audit “New Project” flow to ensure `_history_store.set_active_project` and `set_project_root` remain in sync.
 
+## 7. Theme Menu Checkmarks
+- **Pain:** Theme dropdown doesn’t accurately show current selection; checkmarks/aria state drift from actual theme.
+- **Scope:** Template markup in `app/apps/file_editor_cm6/template.html` + menu logic in `main.js` (`updateThemeMenuChecks`).
+- **Plan:** Ensure each theme item renders a checkmark span toggled via JS, and keep `aria-checked` in sync after theme changes/load so users can see which theme is active.
+
 ---
 
 ### Next Steps

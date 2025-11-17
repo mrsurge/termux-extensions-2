@@ -318,6 +318,9 @@ def read_file(path: str = Query(...)):
 
 @file_editor_cm6_bp.post('/write')
 async def write_file_route(data: dict = Body(...)):
+    # Edit 2025-11-17T00:13:07+00:00: This is the legacy write endpoint.
+    # It was updated to capture the original file's mode before writing and
+    # pass it to the `write_full` function to preserve permissions.
     path = data.get('path')
     content = data.get('content')
     client_id = data.get('client_id', 'unknown')
@@ -336,13 +339,23 @@ async def write_file_route(data: dict = Body(...)):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     
+    # NEW: Capture original mode before write
+    target_path = project_root.joinpath(rel_path).resolve()
+    orig_mode = None
+    if target_path.exists() and target_path.is_file():
+        try:
+            orig_mode = target_path.stat().st_mode & 0o777
+        except OSError:
+            pass  # Proceed without mode preservation
+    
     try:
         # Initialize watcher if not already running
         init_watcher(project_root)
 
-        # Perform atomic write with optional conflict check
+        # NEW: Pass mode to write_full
         file_meta = await anyio.to_thread.run_sync(
-            lambda: write_full(project_root, str(rel_path), content, base_sha256=base_sha256)
+            lambda: write_full(project_root, str(rel_path), content, 
+                             base_sha256=base_sha256, mode=orig_mode)
         )
         
         # NEW: Purge cache entry on successful save
