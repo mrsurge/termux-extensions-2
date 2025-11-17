@@ -100,6 +100,7 @@
 
 /* Drawer body */
 .fe-drawer-body {
+  position: relative;  /* ← This one line fixes it */
   flex: 1;
   display: flex;
   flex-direction: column;
