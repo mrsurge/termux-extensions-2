@@ -542,20 +542,22 @@
 .fe-search-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
 }
 
 .fe-search-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px;
-  border-radius: 4px;
+  padding: 8px 12px;
+  border-radius: 0;
   cursor: pointer;
+  background: var(--explorer-bg);
+  border-bottom: 1px solid #333;
 }
 
 .fe-search-item:hover {
-  background: var(--border);
+  background: rgba(59, 130, 246, 0.1);
 }
 
 .fe-search-icon {
@@ -571,30 +573,31 @@
 }
 
 .fe-search-file-group {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .fe-search-file-header {
-  padding: 8px;
-  background: var(--border);
-  border-radius: 4px;
+  padding: 8px 12px;
+  background: var(--explorer-bg);
+  border-radius: 0;
   font-size: 13px;
   font-weight: 500;
-  margin-bottom: 4px;
+  margin-bottom: 0;
 }
 
 .fe-search-match {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 6px 12px;
   cursor: pointer;
-  border-radius: 4px;
-  margin-left: 12px;
+  border-radius: 0;
+  margin-left: 0;
+  background: #333;
 }
 
 .fe-search-match:hover {
-  background: var(--border);
+  background: rgba(59, 130, 246, 0.1);
 }
 
 .fe-search-line-num {

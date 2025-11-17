@@ -1726,10 +1726,7 @@ function renderNameResults(container, data) {
       if (item.type === 'file') {
         if (window.appOpenFileRel) {
           window.appOpenFileRel(item.rel, currentProjectPath);
-          closeSearchOverlay();
-          // Close drawer after opening file (matching explorer behavior)
-          const root = document.querySelector('.fe-root');
-          root?.classList.remove('drawer-open');
+          // Search overlay and drawer will close automatically together
         } else {
           toast('File opener not available');
         }
@@ -1779,11 +1776,7 @@ function renderContentResults(container, data) {
       matchRow.className = 'fe-search-match';
       matchRow.onclick = async () => {
         if (window.appOpenFileRel && window.jumpToCurrentFileLine) {
-          closeSearchOverlay();
-          
-          // Close drawer after opening file (matching explorer behavior)
-          const root = document.querySelector('.fe-root');
-          root?.classList.remove('drawer-open');
+          // Search overlay and drawer will close automatically together
           
           // First: Open file using unified flow (matching explorer behavior)
           try {
