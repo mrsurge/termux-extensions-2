@@ -1628,17 +1628,16 @@ async function jumpToCurrentFileLine(line) {
     host.toast('No file currently open');
     return;
   }
-  await jumpToFileLine(path, line);
-}
-
-// Helper: Jump to specific file + line (reusable for search)
-async function jumpToFileLine(path, line) {
+  
   try {
-    await apiPost('editor/jump_to_line', { path, line: parseInt(line, 10) });
+    await apiPost('editor/jump_to_line', { line: parseInt(line, 10) });
   } catch (e) {
     host.toast('Failed to jump: ' + (e?.message || 'unknown error'));
   }
 }
+
+// Expose for search overlay
+window.jumpToCurrentFileLine = jumpToCurrentFileLine;
 
 // ---------- Menu & keyboard wiring ----------
 function closeAllMenus() {

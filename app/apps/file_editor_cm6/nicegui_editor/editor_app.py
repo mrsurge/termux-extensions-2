@@ -587,48 +587,29 @@ async def toggle_edit_tracking(data: dict = Body(...)):
 
 @editor_router.post('/jump_to_line')
 async def jump_to_line(data: dict = Body(...)):
-    target_path, target_line = data.get('path'), data.get('line', 1)
+    """Jump to a line in the currently loaded file. Does NOT load new files."""
+    target_line = data.get('line', 1)
     editor = get_active_editor()
-    if not editor: return {"ok": False, "error": "Editor not ready"}
-    print(f"[JUMP_TO_LINE] target={target_path!r} line={target_line}", file=sys.stderr)
+    if not editor: 
+        return {"ok": False, "error": "Editor not ready"}
     
-    current_file = get_current_file()
-    project_path = _history_store.get_active_project()
-    if target_path and target_path != current_file:
-        try:
-            content = Path(target_path).read_text(encoding='utf-8', errors='replace')
-            language = 'python' if target_path.endswith('.py') else 'javascript' if target_path.endswith('.js') else 'markdown' if target_path.endswith('.md') else 'text'
-            editor.set_value(content)
-            editor.set_language(language)
-            content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
-            set_current_file(target_path, content_sha256)
-            editor._cached_content = content
-            _broadcast_cache_state(
-                project_path,
-                target_path,
-                state='clean',
-                unsaved=False,
-                reason='jump_to_line',
-            )
-            print(f"[JUMP_TO_LINE] loaded file sha={content_sha256}", file=sys.stderr)
-            
-            project_root = get_project_root()
-            init_watcher(project_root)
-            def on_file_change(event):
-                if event.get('type') == 'replace_full':
-                    print(f"[JUMP_TO_LINE][WATCHER] replace_full path={target_path!r}", file=sys.stderr)
-                    _apply_watcher_replace(
-                        path=target_path,
-                        content=event.get('content', ''),
-                        sha256=event.get('sha256'),
-                        project_path=project_path,
-                    )
-            subscribe(target_path, 'nicegui_backend_jump', on_file_change)
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-            
-    ui.run_javascript(f'const view = document.querySelector(".cm-editor")?.cmView.view; if(view) {{ const pos = view.state.doc.line({target_line}).from; view.dispatch({{ selection: {{ anchor: pos }}, scrollIntoView: true }}); }}')
-    return {"ok": True, "file": target_path or current_file, "line": target_line}
+    print(f"[JUMP_TO_LINE] Scrolling to line {target_line}", file=sys.stderr)
+    
+    # Only scroll - assume file is already loaded by frontend via openFile()
+    ui.run_javascript(f'''
+        const view = document.querySelector(".cm-editor")?.cmView.view;
+        if (view) {{
+            const line = Math.max(1, Math.min({target_line}, view.state.doc.lines));
+            const pos = view.state.doc.line(line).from;
+            view.dispatch({{
+                selection: {{ anchor: pos }},
+                scrollIntoView: true
+            }});
+            view.focus();
+        }}
+    ''')
+    
+    return {"ok": True, "line": target_line}
 
 @editor_router.post('/search/open')
 async def editor_search_open(data: dict = Body(...)):

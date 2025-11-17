@@ -1579,84 +1579,127 @@ function renderSearchOverlay() {
   
   overlay.style.display = 'flex';
   
-  // Build header
-  const header = document.createElement('div');
-  header.className = 'fe-search-header';
-  
-  const title = document.createElement('h3');
-  title.textContent = 'Search';
-  header.appendChild(title);
-  
-  const closeBtn = document.createElement('button');
-  closeBtn.textContent = '✕';
-  closeBtn.className = 'fe-search-close';
-  closeBtn.onclick = closeSearchOverlay;
-  header.appendChild(closeBtn);
-  
-  // Mode toggle
-  const modeToggle = document.createElement('div');
-  modeToggle.className = 'fe-search-mode';
-  
-  const nameBtn = document.createElement('button');
-  nameBtn.textContent = 'Name';
-  nameBtn.className = searchMode === 'name' ? 'active' : '';
-  nameBtn.onclick = () => { searchMode = 'name'; renderSearchOverlay(); };
-  modeToggle.appendChild(nameBtn);
-  
-  const contentBtn = document.createElement('button');
-  contentBtn.textContent = 'Contents';
-  contentBtn.className = searchMode === 'content' ? 'active' : '';
-  contentBtn.onclick = () => { searchMode = 'content'; renderSearchOverlay(); };
-  modeToggle.appendChild(contentBtn);
-  
-  header.appendChild(modeToggle);
-  
-  // Search input
-  const inputContainer = document.createElement('div');
-  inputContainer.className = 'fe-search-input-container';
-  
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.id = 'fe-search-input';
-  input.placeholder = searchMode === 'name' ? 'Search files/folders...' : 'Search in files...';
-  input.value = searchQuery;
-  input.oninput = (e) => scheduleSearch(e.target.value);
-  input.onkeydown = (e) => {
-    if (e.key === 'Escape') closeSearchOverlay();
-  };
-  inputContainer.appendChild(input);
-  
-  if (searchQuery) {
+  // First render - create structure
+  if (!overlay.querySelector('.fe-search-header')) {
+    // Build header
+    const header = document.createElement('div');
+    header.className = 'fe-search-header';
+    
+    const title = document.createElement('h3');
+    title.textContent = 'Search';
+    header.appendChild(title);
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.className = 'fe-search-close';
+    closeBtn.onclick = closeSearchOverlay;
+    header.appendChild(closeBtn);
+    
+    // Mode toggle
+    const modeToggle = document.createElement('div');
+    modeToggle.className = 'fe-search-mode';
+    
+    const nameBtn = document.createElement('button');
+    nameBtn.textContent = 'Name';
+    nameBtn.className = searchMode === 'name' ? 'active' : '';
+    nameBtn.onclick = () => { searchMode = 'name'; renderSearchOverlay(); };
+    modeToggle.appendChild(nameBtn);
+    
+    const contentBtn = document.createElement('button');
+    contentBtn.textContent = 'Contents';
+    contentBtn.className = searchMode === 'content' ? 'active' : '';
+    contentBtn.onclick = () => { searchMode = 'content'; renderSearchOverlay(); };
+    modeToggle.appendChild(contentBtn);
+    
+    header.appendChild(modeToggle);
+    
+    // Search input
+    const inputContainer = document.createElement('div');
+    inputContainer.className = 'fe-search-input-container';
+    
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'fe-search-input';
+    input.placeholder = searchMode === 'name' ? 'Search files/folders...' : 'Search in files...';
+    input.value = searchQuery;
+    input.oninput = (e) => scheduleSearch(e.target.value);
+    input.onkeydown = (e) => {
+      if (e.key === 'Escape') closeSearchOverlay();
+    };
+    inputContainer.appendChild(input);
+    
     const clearBtn = document.createElement('button');
     clearBtn.textContent = '✕';
     clearBtn.className = 'fe-search-clear';
+    clearBtn.style.display = searchQuery ? 'block' : 'none';
     clearBtn.onclick = () => {
       searchQuery = '';
       searchResults = null;
       renderSearchOverlay();
     };
     inputContainer.appendChild(clearBtn);
+    
+    // Results area
+    const resultsDiv = document.createElement('div');
+    resultsDiv.className = 'fe-search-results';
+    
+    // Assemble
+    overlay.innerHTML = '';
+    overlay.appendChild(header);
+    overlay.appendChild(inputContainer);
+    overlay.appendChild(resultsDiv);
   }
   
-  // Results area
-  const resultsContainer = document.createElement('div');
-  resultsContainer.className = 'fe-search-results';
+  // Subsequent renders - only update dynamic parts
   
-  if (searchLoading) {
-    resultsContainer.innerHTML = '<div class="fe-search-loading">Searching...</div>';
-  } else if (searchError) {
-    resultsContainer.innerHTML = `<div class="fe-search-error">${searchError}</div>`;
-  } else if (searchResults) {
-    renderSearchResults(resultsContainer);
-  } else if (searchQuery.length > 0 && searchQuery.length < 2) {
-    resultsContainer.innerHTML = '<div class="fe-search-hint">Type at least 2 characters</div>';
+  // Update mode toggle active state
+  const nameBtn = overlay.querySelector('.fe-search-mode button:first-child');
+  const contentBtn = overlay.querySelector('.fe-search-mode button:last-child');
+  if (nameBtn) {
+    nameBtn.className = searchMode === 'name' ? 'active' : '';
+    nameBtn.onclick = () => { searchMode = 'name'; renderSearchOverlay(); };
+  }
+  if (contentBtn) {
+    contentBtn.className = searchMode === 'content' ? 'active' : '';
+    contentBtn.onclick = () => { searchMode = 'content'; renderSearchOverlay(); };
   }
   
-  // Assemble
-  overlay.innerHTML = '';
-  overlay.appendChild(header);
-  overlay.appendChild(inputContainer);
-  overlay.appendChild(resultsContainer);
+  // Update input placeholder and value
+  const input = overlay.querySelector('#fe-search-input');
+  if (input) {
+    input.placeholder = searchMode === 'name' ? 'Search files/folders...' : 'Search in files...';
+    if (input.value !== searchQuery) {
+      input.value = searchQuery;
+    }
+  }
+  
+  // Update clear button visibility
+  const clearBtn = overlay.querySelector('.fe-search-clear');
+  if (clearBtn) {
+    clearBtn.style.display = searchQuery ? 'block' : 'none';
+    clearBtn.onclick = () => {
+      searchQuery = '';
+      searchResults = null;
+      renderSearchOverlay();
+    };
+  }
+  
+  // Update results container
+  const resultsContainer = overlay.querySelector('.fe-search-results');
+  if (resultsContainer) {
+    if (searchLoading) {
+      resultsContainer.innerHTML = '<div class="fe-search-loading">Searching...</div>';
+    } else if (searchError) {
+      resultsContainer.innerHTML = `<div class="fe-search-error">${searchError}</div>`;
+    } else if (searchResults) {
+      resultsContainer.innerHTML = '';
+      renderSearchResults(resultsContainer);
+    } else if (searchQuery.length > 0 && searchQuery.length < 2) {
+      resultsContainer.innerHTML = '<div class="fe-search-hint">Type at least 2 characters</div>';
+    } else {
+      resultsContainer.innerHTML = '';
+    }
+  }
 }
 
 function renderSearchResults(container) {
@@ -1681,8 +1724,12 @@ function renderNameResults(container, data) {
     row.className = 'fe-search-item';
     row.onclick = () => {
       if (item.type === 'file') {
-        openFile(item.path);
-        closeSearchOverlay();
+        if (window.appOpenFile) {
+          window.appOpenFile(item.path);
+          closeSearchOverlay();
+        } else {
+          toast('File opener not available');
+        }
       }
     };
     
@@ -1717,19 +1764,35 @@ function renderContentResults(container, data) {
     const fileGroup = document.createElement('div');
     fileGroup.className = 'fe-search-file-group';
     
+    const matches = fileResult.matches || [];
+    
     const fileHeader = document.createElement('div');
     fileHeader.className = 'fe-search-file-header';
-    fileHeader.textContent = `${fileResult.rel} (${fileResult.matches.length})`;
+    fileHeader.textContent = `${fileResult.rel} (${matches.length})`;
     fileGroup.appendChild(fileHeader);
     
-    fileResult.matches.forEach(match => {
+    matches.forEach(match => {
       const matchRow = document.createElement('div');
       matchRow.className = 'fe-search-match';
-      matchRow.onclick = () => {
-        if (window.jumpToFileLine) {
-          window.jumpToFileLine(fileResult.path, match.line);
+      matchRow.onclick = async () => {
+        if (window.appOpenFile && window.jumpToCurrentFileLine) {
+          closeSearchOverlay();
+          
+          // First: Open file using unified flow
+          try {
+            await window.appOpenFile(fileResult.path);
+            
+            // Wait a tick for file to load
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Then: Jump to line
+            await window.jumpToCurrentFileLine(match.line);
+          } catch (e) {
+            toast('Failed to open file: ' + (e?.message || 'unknown error'));
+          }
+        } else {
+          toast('File opener not available');
         }
-        closeSearchOverlay();
       };
       
       const lineNum = document.createElement('span');
@@ -1758,15 +1821,5 @@ function renderContentResults(container, data) {
   }
 }
 
-// Expose jumpToFileLine to window for search results
-window.jumpToFileLine = async (path, line) => {
-  try {
-    await fetch('/api/app/file_editor_cm6/editor/jump_to_line', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, line: parseInt(line, 10) })
-    });
-  } catch (e) {
-    toast('Failed to jump: ' + (e?.message || 'unknown error'));
-  }
-};
+// Note: File opening from search uses window.appOpenFile (main.js)
+// and window.jumpToCurrentFileLine (main.js) for unified flow
