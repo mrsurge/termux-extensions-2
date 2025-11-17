@@ -435,6 +435,282 @@ initial_sha256 = cached_entry.get('base_sha256')  # SHA of file on disk
 
 ---
 
+## Best Practices for Feature Development
+
+**Added:** 2025-11-17 (Lessons from Explorer Search Implementation)
+
+### **Before You Start**
+
+#### **1. Trace Existing Implementations First** 🔍
+
+Before adding any new file operation, navigation, or UI interaction:
+
+1. Find similar existing feature in codebase
+2. Trace the EXACT execution path with line numbers
+3. Document the full call chain in your implementation plan
+4. Use the SAME functions and helpers
+
+**Example from Explorer Search:**
+```
+User clicks file in tree
+  → onTreeClick() (explorer.js:902)
+    → openFileRel(rel, currentProjectPath) (explorer.js:1462)
+      → window.appOpenFileRel(rel, projectRoot) (main.js:1989)
+        → openFile(absolutePath) (main.js:1303)
+```
+
+**Why:** Different code paths have different guarantees. Using wrong path (e.g., `appOpenFile` vs `appOpenFileRel`) bypasses important features like project context resolution.
+
+#### **2. Identify Correct API Surface** 🎯
+
+**For Vendored Components:**
+
+Check if component is vendored:
+```bash
+ls app/static/vendor/nicegui/elements/
+```
+
+If vendored:
+- ❌ **Don't** use `ui.run_javascript()` to bypass vendor
+- ✅ **Do** add methods to both `.js` and `.py` vendor files
+- ✅ **Do** use `run_method()` for Python → JavaScript calls
+- ✅ **Do** document custom methods with date/team/purpose
+
+**Example:**
+```python
+# In codemirror.py
+def jump_to_line(self, line: int) -> None:
+    """Jump to a specific line in the editor."""
+    self.run_method('jumpToLine', line)
+```
+
+```javascript
+// In codemirror.js - methods section
+jumpToLine(lineNumber) {
+  const doc = this.editor.state.doc;
+  const pos = doc.line(lineNumber).from;
+  this.editor.dispatch({
+    selection: { anchor: pos },
+    scrollIntoView: true
+  });
+}
+```
+
+**Why:** Vendored components have their own API surface. Direct DOM access bypasses the vendor's architecture and breaks reliability.
+
+#### **3. Verify Backend Response Contracts** 📋
+
+Before using backend response fields:
+
+1. Check endpoint response shape in backend code
+2. See which fields existing features use (trace it!)
+3. Use relative paths (`.rel`) with project context
+4. Don't assume field meanings - verify with existing usage
+
+**Example:**
+```python
+# Backend returns both:
+{
+  "path": "/home/user/project/file.py",  # Absolute
+  "rel": "src/file.py"                    # Relative to project
+}
+
+# Explorer uses .rel - you should too:
+window.appOpenFileRel(item.rel, currentProjectPath)  // ✅ Correct
+window.appOpenFile(item.path)                        // ❌ Bypasses project context
+```
+
+**Why:** Backend returns fields for specific reasons. Using wrong field breaks project-relative resolution.
+
+---
+
+### **During Development**
+
+#### **4. Mobile-First UI Patterns** 📱
+
+**Critical for search/filter interfaces:**
+
+```javascript
+// ❌ Bad: Destroys input on every update
+function render() {
+  overlay.innerHTML = '';  // Input destroyed
+  overlay.appendChild(createInput());  // Recreated
+  overlay.appendChild(createResults());
+}
+
+// ✅ Good: Create structure once, update content only
+function render() {
+  if (!overlay.querySelector('input')) {
+    // First render - create structure
+    overlay.appendChild(createInput());
+    overlay.appendChild(createResultsContainer());
+  }
+  // Subsequent renders - update content only
+  const results = overlay.querySelector('.results');
+  results.innerHTML = newResults;
+}
+```
+
+**Why:** Mobile browsers close keyboard when input element loses focus. DOM recreation = focus loss = keyboard closes every keystroke.
+
+**Testing:** Use Chrome DevTools mobile emulation or actual mobile device.
+
+#### **5. Defensive Programming** 🛡️
+
+Always guard optional fields:
+
+```javascript
+// ❌ Crashes if matches undefined
+fileResult.matches.forEach(...)
+fileResult.matches.length
+
+// ✅ Safe with defaults
+const matches = fileResult.matches || [];
+matches.forEach(...)
+matches.length
+
+// ✅ Also safe with optional chaining
+fileResult.matches?.length ?? 0
+```
+
+**Apply to:**
+- Array fields that might be undefined
+- Nested object access
+- All async operation results
+- User input parsing
+
+**Why:** Production data has edge cases development data doesn't. One guard = one crash prevented.
+
+#### **6. Respect State Hierarchy** 📊
+
+**The Three-Layer Architecture:**
+
+```
+Application Backend (Ground Truth)
+  ├─ Reads files from disk
+  ├─ Manages history/cache
+  └─ Source of truth
+       ↓
+Host Frontend (Orchestrator)
+  ├─ Calls openFile() (unified)
+  ├─ Tracks currentPath, lastSha256
+  └─ Manages WebSocket, diff, session
+       ↓
+NiceGUI Iframe Backend (Display)
+  ├─ Receives already-loaded content
+  ├─ Only handles editor UI
+  └─ NEVER reads files from disk
+```
+
+**Rules:**
+- ❌ **Never** load files in NiceGUI iframe backend
+- ✅ **Always** use frontend's `openFile()` helper
+- ✅ **Always** go through `/api/app/file_editor_cm6/read` endpoint
+- ✅ **Always** update history via `/state/file_activity`
+
+**Why:** Multiple sources of truth = state drift bugs. Application backend is the single authority.
+
+---
+
+### **Testing & Verification**
+
+#### **7. UX Consistency Checks** 🎨
+
+Before considering feature complete:
+
+1. List all side effects of similar existing feature
+2. Test in parallel: open same file via old feature, then new feature
+3. Verify: "Does this feel EXACTLY the same?"
+
+**Common side effects to replicate:**
+- Drawer closing on mobile
+- Keyboard focus management
+- Loading indicators
+- Toast notifications
+- Browser history updates
+- Visual feedback (selection, highlight)
+
+**Example from Explorer Search:**
+```javascript
+// Explorer tree closes drawer when opening file
+const root = document.querySelector('.fe-root');
+root?.classList.remove('drawer-open');
+
+// Search must do the same!
+```
+
+**Why:** Users learn UI patterns from existing features. Inconsistency causes confusion and "is it broken?" reports.
+
+#### **8. Architecture Compliance Verification** ✅
+
+Before submitting, verify:
+
+- [ ] All file operations go through `/read` endpoint
+- [ ] History tracking via `/state/file_activity` works
+- [ ] WebSocket connection established
+- [ ] Diff decorations work if file modified externally
+- [ ] Session persistence works (reload test)
+- [ ] No state drift between frontend and iframe
+- [ ] Mobile keyboard stays open during typing
+- [ ] Drawer/UI behavior matches existing features
+
+**Test procedure:**
+1. Open file via new feature
+2. Edit and save
+3. Close and reopen from history
+4. Modify file externally (different editor)
+5. Reload page
+6. Verify all features still work
+
+**Why:** Architecture guidelines prevent entire classes of bugs. Compliance = confidence.
+
+---
+
+### **Common Pitfalls**
+
+#### **❌ Don't Do This:**
+
+1. Skip tracing existing implementations ("I know how it works")
+2. Use `ui.run_javascript()` for vendored components (breaks reliability)
+3. Load files in NiceGUI iframe backend (violates single source of truth)
+4. Destroy DOM on every render (breaks mobile keyboard)
+5. Assume field meanings without checking usage (wrong fields break features)
+6. Ignore architecture guidelines "just this once" (technical debt compounds)
+7. Test only on desktop (mobile has different UX requirements)
+8. Copy absolute paths when relative paths exist (breaks project context)
+
+#### **✅ Do This Instead:**
+
+1. Trace first, implement second (saves debugging time)
+2. Add methods to vendored files properly (reliable API)
+3. Use unified file opener `openFile()` (architecture compliance)
+4. Update content only, preserve structure (mobile-friendly)
+5. Use same fields as existing features (proven patterns)
+6. Follow architecture patterns religiously (bug prevention)
+7. Test on mobile early and often (different constraints)
+8. Use relative paths with project context (proper resolution)
+
+---
+
+### **When to Update These Guidelines**
+
+Add new best practices when:
+- Bug required architecture change to fix
+- Pattern used in 3+ features should be documented
+- Mobile/desktop difference caused production issue
+- State drift bug occurred
+- New vendor component added
+- Same mistake made twice
+
+**Process:**
+1. Document the lesson learned
+2. Explain why the mistake happened
+3. Show correct pattern with example
+4. Add to this Best Practices section
+5. Update relevant checklist items
+
+---
+
 ## Feature Implementation Checklist
 
 When adding a new feature:
@@ -817,7 +1093,8 @@ Check browser DevTools → Network → WS to see NiceGUI messages:
 - **Vendoring Journey:** `notes/NICEGUI_VENDORING_JOURNEY.md`
 - **WebSocket Architecture:** `docs/core/websockets.md`
 - **Search Integration Logs:** `notes/2025-11-16_CONSOLIDATED_SEARCH_LOG.md`
+- **Explorer Search Implementation:** `notes/2025-11-17_EXPLORER_SEARCH_FIXES.md`
 
 ---
 
-_Last Updated: 2025-11-17 04:42 UTC - Clarified three-layer architecture (Application Backend vs NiceGUI Iframe Backend vs Frontend)_
+_Last Updated: 2025-11-17 20:32 UTC - Added "Best Practices for Feature Development" section with 8 lessons learned from Explorer Search implementation_

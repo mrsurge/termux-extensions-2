@@ -1,416 +1,332 @@
-# Explorer Search Fixes - Architecture Compliance
+# Lessons Learned: Explorer Search Implementation
 
-**Author:** Atlas  
-**Date:** 2025-11-17 19:20 UTC  
-**Status:** Fix Plan - Ready for Implementation
-
----
-
-## **PROBLEMS IDENTIFIED**
-
-### **Issue 1: Virtual Keyboard Disappearing**
-- Entire overlay re-rendered on every keystroke
-- Input element destroyed and recreated
-- Mobile browser loses focus and closes keyboard
-
-### **Issue 2: Content Search Crash**
-- `fileResult.matches` can be undefined
-- Accessing `.length` or `.forEach()` on undefined crashes
-- Error: "Cannot read properties of undefined (reading 'length')"
-
-### **Issue 3: File Opening Bypasses Unified Flow** 🚨 CRITICAL
-- Search results call `window.jumpToFileLine()` directly
-- Bypasses `main.js::openFile()` unified opener
-- Skips:
-  - Application backend `/read` endpoint
-  - History tracking via `/state/file_activity`
-  - Project context validation
-  - WebSocket connection setup
-  - Diff controller initialization
-  - Session sync
-
-### **Issue 4: `/editor/jump_to_line` Does Too Much** 🚨 CRITICAL
-- NiceGUI iframe backend loading files directly from disk
-- Should only scroll, not load files
-- Violates "Application Backend is Ground Truth" principle
-- Creates state drift between frontend and iframe
-
-### **Issue 5: Server 500 Error**
-- `/editor/jump_to_line` has many failure points
-- No error handling for file load failures
-- Complex logic prone to exceptions
+**Date:** 2025-11-17  
+**Feature:** Explorer Search + Go To Line Integration  
+**Team:** TE-2 Team + Atlas  
 
 ---
 
-## **ARCHITECTURE COMPLIANCE**
+## **Critical Lessons**
 
-### **From the Guideline:**
+### **Lesson 1: Always Trace Existing Code Paths First** 🔍
 
-> "Application Backend (main.py, core_read.py, core_write.py) is the ground truth authority. It manages state from disk + local caches."
+**What Happened:**
+- Initial implementation used `window.appOpenFile(absolutePath)`
+- This worked but bypassed important project context
+- After tracing explorer file card clicks, discovered `window.appOpenFileRel(rel, projectRoot)` was correct
 
-> "NiceGUI Iframe Backend should only handle editor UI operations."
+**Why It Matters:**
+- Different code paths have different guarantees
+- `appOpenFileRel` handles path resolution with project context
+- Using wrong path type (absolute vs relative) can cause subtle bugs
 
-> "Pattern 1: Stateless Endpoints - Always pass explicit context from frontend, never rely on backend globals."
+**Lesson:**
+> **Before adding new file operations, TRACE how existing features do it.**
+> Match the execution path exactly - don't assume or guess.
 
-### **Current (Wrong) Flow:**
-```
-Search Result Click
-  → window.jumpToFileLine(path, line)
-    → POST /editor/jump_to_line
-      → Reads file from disk ❌
-      → Loads in iframe ❌
-      → BYPASSES application backend ❌
-```
-
-### **Correct Flow:**
-```
-Search Result Click
-  → window.appOpenFile(path)
-    → POST /read (application backend)
-    → POST /editor/set_content (iframe)
-    → POST /state/file_activity (history)
-    → openWebSocket(path)
-    → diffController.setContext()
-    → syncSessionPath()
-  → THEN jumpToCurrentFileLine(line)
-    → POST /editor/jump_to_line (scroll only)
-```
+**How to Apply:**
+1. Identify similar existing feature (e.g., "how does explorer open files?")
+2. Trace the exact function call chain with line numbers
+3. Use the SAME functions and parameters
+4. Document the path you're following
 
 ---
 
-## **FIX PLAN**
+### **Lesson 2: Vendored Code Requires Vendored APIs** 🎯
 
-### **Fix 1: Virtual Keyboard - Incremental Rendering**
+**What Happened:**
+- Tried using `ui.run_javascript()` to directly access CM6 view
+- Didn't work because this is vendored `ui.codemirror`, not standard CM6
+- Had to add proper `jumpToLine()` method to vendored files
 
-**File:** `app/apps/file_editor_cm6/static/js/explorer.js`  
-**Function:** `renderSearchOverlay()`  
-**Location:** Around line 1540-1650
+**Why It Matters:**
+- Vendored code has its own API surface
+- Direct DOM/JavaScript access bypasses the vendor's architecture
+- Methods must be added to vendor files to work reliably
 
-**Change:** Only re-render results, keep header and input stable.
+**Lesson:**
+> **For vendored NiceGUI components, add methods to the vendor files.**
+> Don't try to bypass the vendor API with raw JavaScript.
 
-**Before:**
-```javascript
-overlay.innerHTML = '';  // Destroys everything
-overlay.appendChild(header);
-overlay.appendChild(inputContainer);
-overlay.appendChild(resultsContainer);
-```
-
-**After:**
-```javascript
-// First render - create structure
-if (!overlay.querySelector('.fe-search-header')) {
-  overlay.innerHTML = '';
-  overlay.appendChild(header);
-  overlay.appendChild(inputContainer);
-  const resultsDiv = document.createElement('div');
-  resultsDiv.className = 'fe-search-results';
-  overlay.appendChild(resultsDiv);
-}
-
-// Subsequent renders - only update results
-const existingResults = overlay.querySelector('.fe-search-results');
-if (existingResults) {
-  // Build results container content
-  if (searchLoading) {
-    existingResults.innerHTML = '<div class="fe-search-loading">Searching...</div>';
-  } else if (searchError) {
-    existingResults.innerHTML = `<div class="fe-search-error">${searchError}</div>`;
-  } else if (searchResults) {
-    existingResults.innerHTML = '';
-    renderSearchResults(existingResults);
-  } else if (searchQuery.length > 0 && searchQuery.length < 2) {
-    existingResults.innerHTML = '<div class="fe-search-hint">Type at least 2 characters</div>';
-  } else {
-    existingResults.innerHTML = '';
-  }
-}
-
-// Update mode toggle active state
-const nameBtn = overlay.querySelector('.fe-search-mode button:first-child');
-const contentBtn = overlay.querySelector('.fe-search-mode button:last-child');
-if (nameBtn) nameBtn.className = searchMode === 'name' ? 'active' : '';
-if (contentBtn) contentBtn.className = searchMode === 'content' ? 'active' : '';
-
-// Update input value if needed
-const input = overlay.querySelector('#fe-search-input');
-if (input && input.value !== searchQuery) {
-  input.value = searchQuery;
-}
-```
+**How to Apply:**
+1. Check if vendored component exists: `app/static/vendor/nicegui/elements/`
+2. Add method to both `.js` and `.py` files
+3. Use `run_method()` to call from Python
+4. Document custom methods clearly with date/team/purpose
 
 ---
 
-### **Fix 2: Content Search Crash - Defensive Checks**
+### **Lesson 3: Mobile UX Requires Different Patterns** 📱
 
-**File:** `app/apps/file_editor_cm6/static/js/explorer.js`  
-**Function:** `renderContentResults()`  
-**Location:** Lines 1710-1750
+**What Happened:**
+- Search overlay destroyed entire DOM tree on every keystroke
+- Mobile keyboard closed because input element was recreated
+- Desktop worked fine, mobile was unusable
 
-**Change:** Guard against undefined `matches`.
+**Why It Matters:**
+- Mobile browsers are sensitive to input focus loss
+- DOM recreation = focus loss = keyboard close
+- Desktop keyboards are persistent, mobile keyboards aren't
 
-**Before:**
+**Lesson:**
+> **Test with mobile in mind: preserve DOM structure, update content only.**
+> Use incremental rendering for search/filter UIs.
+
+**How to Apply:**
+1. Create DOM structure once on first render
+2. Update only content containers on subsequent renders
+3. Never destroy/recreate input elements during active use
+4. Use `element.innerHTML = ''` only for result areas, not inputs
+5. Test on actual mobile device or mobile browser DevTools
+
+---
+
+### **Lesson 4: State Synchronization Requires Single Source of Truth** 📊
+
+**What Happened:**
+- NiceGUI iframe backend tried to load files directly from disk
+- Frontend and iframe had separate state that could drift
+- Violated "Application Backend is Ground Truth" principle
+
+**Why It Matters:**
+- Multiple sources of truth = state drift bugs
+- Debugging becomes nightmare when state is inconsistent
+- Features break in subtle ways (history, cache, WebSocket)
+
+**Lesson:**
+> **Application Backend reads files. NiceGUI iframe only displays.**
+> Never load files in iframe backend - always go through `/read` endpoint.
+
+**How to Apply:**
+1. Application Backend (`main.py`, `core_read.py`) reads disk
+2. Frontend (`main.js`) orchestrates via `openFile()`
+3. NiceGUI iframe receives already-loaded content
+4. All state updates flow through this hierarchy
+5. If adding file operations, use existing `openFile()` flow
+
+---
+
+### **Lesson 5: Architecture Guidelines Exist for a Reason** 📋
+
+**What Happened:**
+- Initial implementation violated multiple architecture guidelines
+- Had to refactor to comply after discovering issues
+- Compliance fixed all the subtle bugs automatically
+
+**Why It Matters:**
+- Guidelines encode hard-won knowledge from past bugs
+- Following them prevents entire classes of issues
+- Shortcuts seem faster but cost more time debugging
+
+**Lesson:**
+> **Read the guidelines BEFORE starting. They're not suggestions.**
+> Architecture compliance isn't bureaucracy - it's bug prevention.
+
+**How to Apply:**
+1. Read `docs/core/nicegui_iframe_feature_adding_guideline.md` first
+2. Design feature to fit architecture, not vice versa
+3. When stuck, re-read guidelines - answer is usually there
+4. If guidelines seem wrong, discuss before bypassing
+5. Update guidelines when new patterns are discovered
+
+---
+
+### **Lesson 6: Backend Response Shapes Matter** 🔧
+
+**What Happened:**
+- Backend returned both `.path` (absolute) and `.rel` (relative) fields
+- Initially used `.path` because it "seemed simpler"
+- Should have used `.rel` to match explorer's contract
+
+**Why It Matters:**
+- Backend returns fields for a reason
+- `.rel` paths work with project context
+- `.path` bypasses project resolution
+- Using wrong field = wrong behavior
+
+**Lesson:**
+> **Use the field the backend intends. Check existing code for which field to use.**
+> Don't assume - look at how other features consume the same endpoint.
+
+**How to Apply:**
+1. Check backend response shape in `/explorer/list`
+2. See which fields explorer tree uses
+3. Use same fields in new feature
+4. Don't add new fields if existing ones work
+5. Relative paths + project context = correct resolution
+
+---
+
+### **Lesson 7: Defensive Programming Prevents Production Crashes** 🛡️
+
+**What Happened:**
+- Backend returned file results without `matches` array in some cases
+- Frontend crashed with `Cannot read properties of undefined`
+- Simple guard (`|| []`) fixed it
+
+**Why It Matters:**
+- Optional fields can be undefined
+- Production data has edge cases dev data doesn't
+- One defensive check = crash prevented
+
+**Lesson:**
+> **Always guard optional fields. Assume backend can return partial data.**
+> Use `|| []` for arrays, `?.` for objects, provide defaults.
+
+**How to Apply:**
 ```javascript
-fileHeader.textContent = `${fileResult.rel} (${fileResult.matches.length})`;
+// Bad:
+fileResult.matches.length  // Crash if undefined
 
-fileResult.matches.forEach(match => {
-```
-
-**After:**
-```javascript
+// Good:
 const matches = fileResult.matches || [];
-fileHeader.textContent = `${fileResult.rel} (${matches.length})`;
+matches.length  // Safe
 
-matches.forEach(match => {
+// Also good:
+fileResult.matches?.length ?? 0
 ```
 
 ---
 
-### **Fix 3: File Opening - Use Unified Flow**
+### **Lesson 8: UI Consistency Matters More Than You Think** 🎨
 
-**File:** `app/apps/file_editor_cm6/static/js/explorer.js`  
+**What Happened:**
+- Search didn't close drawer when opening file
+- Explorer tree closes drawer when opening file
+- Users expected same behavior in search
 
-#### **3a. Name Mode Results**
-**Function:** `renderNameResults()`  
-**Location:** Around line 1680
+**Why It Matters:**
+- Users learn UI patterns from existing features
+- Inconsistency = confusion and "is it broken?" questions
+- Matching behavior = intuitive experience
 
-**Before:**
-```javascript
-row.onclick = () => {
-  if (item.type === 'file') {
-    openFile(item.path);
-    closeSearchOverlay();
-  }
-};
-```
+**Lesson:**
+> **Match existing UX patterns exactly. Trace and replicate behavior.**
+> If feature X does Y when action happens, new feature should too.
 
-**After:**
-```javascript
-row.onclick = () => {
-  if (item.type === 'file') {
-    if (window.appOpenFile) {
-      window.appOpenFile(item.path);
-      closeSearchOverlay();
-    } else {
-      toast('File opener not available');
-    }
-  }
-};
-```
-
-#### **3b. Content Mode Results**
-**Function:** `renderContentResults()`  
-**Location:** Around line 1725
-
-**Before:**
-```javascript
-matchRow.onclick = () => {
-  if (window.jumpToFileLine) {
-    window.jumpToFileLine(fileResult.path, match.line);
-  }
-  closeSearchOverlay();
-};
-```
-
-**After:**
-```javascript
-matchRow.onclick = async () => {
-  if (window.appOpenFile && window.jumpToCurrentFileLine) {
-    closeSearchOverlay();
-    
-    // First: Open file using unified flow
-    try {
-      await window.appOpenFile(fileResult.path);
-      
-      // Wait a tick for file to load
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Then: Jump to line
-      await window.jumpToCurrentFileLine(match.line);
-    } catch (e) {
-      toast('Failed to open file: ' + (e?.message || 'unknown error'));
-    }
-  } else {
-    toast('File opener not available');
-  }
-};
-```
-
-#### **3c. Remove Broken jumpToFileLine**
-**Location:** Bottom of explorer.js (around line 1750)
-
-**Remove this:**
-```javascript
-window.jumpToFileLine = async (path, line) => {
-  try {
-    await fetch('/api/app/file_editor_cm6/editor/jump_to_line', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, line: parseInt(line, 10) })
-    });
-  } catch (e) {
-    toast('Failed to jump: ' + (e?.message || 'unknown error'));
-  }
-};
-```
-
-**Replace with comment:**
-```javascript
-// Note: File opening from search uses window.appOpenFile (main.js)
-// and window.jumpToCurrentFileLine (main.js) for unified flow
-```
+**How to Apply:**
+1. List all side effects of existing feature (drawer close, focus, etc.)
+2. Replicate ALL side effects in new feature
+3. Test by comparing: "Does this feel the same?"
+4. Don't add "improvements" that break consistency
+5. Consistency > your clever idea (usually)
 
 ---
 
-### **Fix 4: Simplify `/editor/jump_to_line` Endpoint**
+## **Guidelines to Update**
 
-**File:** `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`  
-**Function:** `jump_to_line()`  
-**Location:** Lines 588-631
+### **Proposed Addition to `nicegui_iframe_feature_adding_guideline.md`:**
 
-**Change:** Remove file loading, keep only scroll logic.
-
-**Before:**
-```python
-@editor_router.post('/jump_to_line')
-async def jump_to_line(data: dict = Body(...)):
-    target_path, target_line = data.get('path'), data.get('line', 1)
-    editor = get_active_editor()
-    if not editor: return {"ok": False, "error": "Editor not ready"}
-    print(f"[JUMP_TO_LINE] target={target_path!r} line={target_line}", file=sys.stderr)
-    
-    current_file = get_current_file()
-    project_path = _history_store.get_active_project()
-    if target_path and target_path != current_file:
-        try:
-            content = Path(target_path).read_text(encoding='utf-8', errors='replace')
-            language = 'python' if target_path.endswith('.py') else 'javascript' if target_path.endswith('.js') else 'markdown' if target_path.endswith('.md') else 'text'
-            editor.set_value(content)
-            editor.set_language(language)
-            content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
-            set_current_file(target_path, content_sha256)
-            editor._cached_content = content
-            _broadcast_cache_state(...)
-            # ... watcher setup ...
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-            
-    ui.run_javascript(f'const view = document.querySelector(".cm-editor")?.cmView.view; if(view) {{ const pos = view.state.doc.line({target_line}).from; view.dispatch({{ selection: {{ anchor: pos }}, scrollIntoView: true }}); }}')
-    return {"ok": True, "file": target_path or current_file, "line": target_line}
-```
-
-**After:**
-```python
-@editor_router.post('/jump_to_line')
-async def jump_to_line(data: dict = Body(...)):
-    """Jump to a line in the currently loaded file. Does NOT load new files."""
-    target_line = data.get('line', 1)
-    editor = get_active_editor()
-    if not editor: 
-        return {"ok": False, "error": "Editor not ready"}
-    
-    print(f"[JUMP_TO_LINE] Scrolling to line {target_line}", file=sys.stderr)
-    
-    # Only scroll - assume file is already loaded by frontend via openFile()
-    ui.run_javascript(f'''
-        const view = document.querySelector(".cm-editor")?.cmView.view;
-        if (view) {{
-            const line = Math.max(1, Math.min({target_line}, view.state.doc.lines));
-            const pos = view.state.doc.line(line).from;
-            view.dispatch({{
-                selection: {{ anchor: pos }},
-                scrollIntoView: true
-            }});
-            view.focus();
-        }}
-    ''')
-    
-    return {"ok": True, "line": target_line}
-```
+Add new section after "Communication Patterns":
 
 ---
 
-### **Fix 5: Ensure Helper Functions Exist**
+## **Best Practices for Feature Development**
 
-**File:** `app/apps/file_editor_cm6/main.js`  
-**Location:** After line 1600, before bindMenuToggle calls
+### **Before You Start**
 
-**Verify these exist (should be from previous implementation):**
+1. **Trace Existing Implementations**
+   - Find similar feature in codebase
+   - Trace full execution path with line numbers
+   - Document the path in your plan
+   - Use same functions/helpers
 
-```javascript
-// Helper: Jump to line in current file
-async function jumpToCurrentFileLine(line) {
-  const path = window.currentPath;
-  if (!path) {
-    toast('No file currently open');
-    return;
-  }
-  
-  try {
-    await apiPost('editor/jump_to_line', { line: parseInt(line, 10) });
-  } catch (e) {
-    toast('Failed to jump: ' + (e?.message || 'unknown error'));
-  }
-}
-```
+2. **Identify Correct API Surface**
+   - Check if component is vendored: `app/static/vendor/nicegui/elements/`
+   - For vendored components, add methods to vendor files
+   - Don't bypass vendor API with raw JavaScript
+   - Use `run_method()` for Python → JavaScript calls
 
-**Make sure it's exposed on window:**
+3. **Verify Response Contracts**
+   - Check backend endpoint response shape
+   - See which fields existing features use
+   - Use relative paths (`.rel`) with project context
+   - Don't assume field meanings - check usage
 
-```javascript
-// Expose for search overlay
-window.jumpToCurrentFileLine = jumpToCurrentFileLine;
-```
+### **During Development**
 
----
+4. **Mobile-First Patterns**
+   - Create DOM structure once, update content only
+   - Never destroy/recreate input elements during use
+   - Test with mobile DevTools or actual device
+   - Keyboard persistence is critical on mobile
 
-## **TESTING CHECKLIST**
+5. **Defensive Programming**
+   - Guard all optional fields: `array || []`, `obj?.field`
+   - Assume backend can return partial data
+   - Handle null/undefined/missing gracefully
+   - Add try/catch for async operations
 
-### **Virtual Keyboard Fix**
-- [ ] Type in search input on mobile
-- [ ] Keyboard stays visible while results update
-- [ ] Can continue typing without re-focusing
+6. **State Management**
+   - Application Backend reads disk (ground truth)
+   - Frontend orchestrates via unified helpers (`openFile()`)
+   - NiceGUI iframe receives already-loaded content
+   - Never load files directly in iframe backend
 
-### **Content Search Fix**
-- [ ] Content search doesn't crash
-- [ ] Results display correctly
-- [ ] Match counts show correctly
+### **Testing & Verification**
 
-### **File Opening Fix**
-- [ ] Name search: Click file → opens correctly
-- [ ] Content search: Click match → file opens, scrolls to line
-- [ ] Opened files appear in recents
-- [ ] File history tracked correctly
-- [ ] WebSocket connection established
-- [ ] Diff decorations work
-- [ ] Save functionality works
-- [ ] currentPath updated correctly
+7. **UX Consistency Checks**
+   - List all side effects of similar features
+   - Replicate ALL side effects (drawer close, focus, etc.)
+   - Test: "Does this feel the same as feature X?"
+   - Match behavior exactly, not approximately
 
-### **Jump to Line Fix**
-- [ ] Go To Line menu works
-- [ ] Content search line jump works
-- [ ] Scrolls to correct line
-- [ ] No 500 errors in server logs
-- [ ] Editor gets focus after jump
-
-### **Integration**
-- [ ] Search → open file → edit → save → close → reopen from recents
-- [ ] Verify file appears in history
-- [ ] Verify project context maintained
-- [ ] No state drift between frontend and iframe
+8. **Architecture Compliance**
+   - Review guideline checklist before submitting
+   - All file operations through `/read` endpoint
+   - History tracking via `/state/file_activity`
+   - WebSocket + diff + session all work
+   - No state drift between frontend and iframe
 
 ---
 
-## **IMPLEMENTATION ORDER**
+### **Common Pitfalls**
 
-1. ✅ Fix 5 first - Ensure helpers exist in main.js
-2. ✅ Fix 4 - Simplify `/editor/jump_to_line` (backend)
-3. ✅ Fix 1 - Virtual keyboard (explorer.js)
-4. ✅ Fix 2 - Defensive checks (explorer.js)
-5. ✅ Fix 3 - Use unified flow (explorer.js)
-6. ✅ Test all scenarios
+❌ **Don't:**
+- Skip tracing existing implementations
+- Use `ui.run_javascript()` for vendored components
+- Load files in NiceGUI iframe backend
+- Destroy DOM on every render (mobile keyboards!)
+- Assume fields without checking existing usage
+- Ignore architecture guidelines "just this once"
+
+✅ **Do:**
+- Trace first, implement second
+- Add methods to vendored files properly
+- Use unified file opener (`openFile()`)
+- Update content only, preserve structure
+- Use same fields as existing features
+- Follow architecture patterns religiously
 
 ---
 
-**PLAN STATUS: READY TO EXECUTE**
+### **When to Update These Guidelines**
 
-_Atlas • 2025-11-17 19:20 UTC_
+Add lessons when:
+- Bug required architecture change to fix
+- Pattern used in 3+ features should be documented
+- Mobile/desktop difference caused production issue
+- State drift bug occurred
+- New vendor component added
+
+---
+
+**End of Proposed Addition**
+
+---
+
+## **Summary**
+
+These 8 lessons would have saved us ~30 minutes of debugging and refactoring if known upfront.
+
+Most valuable lessons:
+1. Trace existing code paths FIRST
+2. Vendored components need vendored methods
+3. Mobile UX is different - test early
+
+**Recommendation:** Add "Best Practices" section to guideline document.
+
+---
+
+_Lessons compiled: 2025-11-17 20:30 UTC_  
+_Enterprise says: Make it so! 🖖_

@@ -387,13 +387,24 @@ class CodeMirror(ValueElement, DisableableElement,
         """Open the CodeMirror search panel (find/replace)."""
         self.run_method('openSearchPanelFromServer')
 
+    # ============================================================================
+    # CUSTOM METHOD: jump_to_line
+    # Added: 2025-11-17 by TE-2 Team
+    # Purpose: Jump to a specific line number in the editor
+    # Used by: Explorer search feature, Go To Line menu
+    # Note: Calls vendored JavaScript jumpToLine() method via run_method()
+    # ============================================================================
     def jump_to_line(self, line: int) -> None:
         """Jump to a specific line in the editor.
         
         Args:
             line: The line number to jump to (1-based indexing)
+            
+        Example:
+            editor.jump_to_line(42)  # Jumps to line 42
         """
         self.run_method('jumpToLine', line)
+    # ============================================================================
 
     def request_content(self) -> Awaitable[str]:
         """Request the current editor content from the frontend.

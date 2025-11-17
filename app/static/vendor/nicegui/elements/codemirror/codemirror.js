@@ -567,6 +567,13 @@ export default {
 
       return extensions;
     },
+    // ============================================================================
+    // CUSTOM METHOD: jumpToLine
+    // Added: 2025-11-17 by TE-2 Team
+    // Purpose: Jump to a specific line number in the editor
+    // Used by: Explorer search feature, Go To Line menu
+    // Note: Uses proper CM6 API via editor.dispatch() for reliable scrolling
+    // ============================================================================
     jumpToLine(lineNumber) {
       if (!this.editor) {
         console.warn('[CodeMirror] jumpToLine: editor not ready');
@@ -596,6 +603,7 @@ export default {
         console.error('[CodeMirror] jumpToLine failed:', err);
       }
     },
+    // ============================================================================
   },
   async mounted() {
     // This is used to prevent emitting the value we just received from the server.
