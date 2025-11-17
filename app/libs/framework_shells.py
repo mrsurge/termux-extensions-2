@@ -49,7 +49,7 @@ LOG_TAIL_BYTES = 4096
 LOG_TAIL_LINES = 200
 
 def _drawer_debug(stage: str, message: str) -> None:
-    print(f"[AgentDrawer][{stage}] {message}")
+    print(f"[PTY][{stage}] {message}")
 
 
 @dataclass

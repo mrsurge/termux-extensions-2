@@ -363,6 +363,8 @@ async def editor_page():
             editor.set_font_scale(font_scale)
             print(f"[EDITOR] Applied font scale: {font_scale}", file=sys.stderr)
 
+            editor.set_indent_guides(editor_prefs.get('showIndentGuides', False))
+
             if initial_path:
                 if cached_was_restored:
                     _broadcast_cache_state(
@@ -539,6 +541,7 @@ async def set_editor_content(data: dict = Body(...)):
     
     editor_prefs = _preferences_store.get_preferences().get('editor', {})
     editor.set_zebra_stripes(editor_prefs.get('showShading', False))
+    editor.set_indent_guides(editor_prefs.get('showIndentGuides', False))
     editor.set_line_wrapping(editor_prefs.get('wordWrap', False))
     editor.set_theme(editor_prefs.get('theme', 'oneDark'))
     editor.update()
@@ -772,6 +775,11 @@ async def set_view_settings(data: dict = Body(...)):
         line_shading = bool(data['line_shading'])
         editor_updates['showShading'] = line_shading
         if editor: editor.set_zebra_stripes(line_shading)
+
+    if 'indent_guides' in data:
+        show_guides = bool(data['indent_guides'])
+        editor_updates['showIndentGuides'] = show_guides
+        if editor: editor.set_indent_guides(show_guides)
     
     if 'show_inline_diffs' in data:
         show_diffs = bool(data['show_inline_diffs'])

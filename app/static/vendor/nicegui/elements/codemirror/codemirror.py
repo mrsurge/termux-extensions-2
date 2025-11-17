@@ -370,6 +370,10 @@ class CodeMirror(ValueElement, DisableableElement,
         """Adjust base font scaling (1.0 = 100%)."""
         self.run_method('setFontScale', scale)
 
+    def set_indent_guides(self, enabled: bool) -> None:
+        """Toggle indentation guide lines."""
+        self.run_method('applyIndentGuides', enabled)
+
     def set_diff_decorations(self, hunks: list) -> None:
         """Apply inline git diff decorations to the editor.
         

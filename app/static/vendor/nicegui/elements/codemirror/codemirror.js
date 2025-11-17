@@ -4,6 +4,7 @@ const searchExtension = typeof CM.search === 'function' ? CM.search : null;
 const searchKeymap = Array.isArray(CM.searchKeymap) ? CM.searchKeymap : null;
 const highlightSelectionMatches = typeof CM.highlightSelectionMatches === 'function' ? CM.highlightSelectionMatches : null;
 const openSearchPanel = typeof CM.openSearchPanel === 'function' ? CM.openSearchPanel : null;
+const indentationMarkers = typeof CM.indentationMarkers === 'function' ? CM.indentationMarkers : null;
 
 // Inline diff decorations helper (extracted from diff_decorations.js)
 function buildDiffDecorations(view, hunks, CM, getWordWrap) {
@@ -305,6 +306,40 @@ export default {
 
       this.editor.dispatch({
         effects: this.fontSizeCompartment.reconfigure([fontTheme]),
+      });
+    },
+    async applyIndentGuides(enabled) {
+      // Initialize indent guides compartment on first call
+      if (!this.indentCompartment) {
+        if (!indentationMarkers) {
+          console.warn('[CM6] indentationMarkers not available in bundle');
+          return;
+        }
+        
+        const { Compartment, StateEffect } = CM;
+        
+        this.indentCompartment = new Compartment();
+        
+        // Extension configuration
+        this.indentExtensions = [
+          indentationMarkers({
+            highlightActiveBlock: false,
+            thickness: 1,
+            hideFirstIndent: false,
+            markerType: 'fullScope'
+          })
+        ];
+        
+        // Install empty compartment
+        this.editor.dispatch({
+          effects: StateEffect.appendConfig.of(this.indentCompartment.of([]))
+        });
+      }
+      
+      // Reconfigure compartment
+      const extensions = enabled ? this.indentExtensions : [];
+      this.editor.dispatch({
+        effects: this.indentCompartment.reconfigure(extensions)
       });
     },
     async applyZebraStripes(enabled) {

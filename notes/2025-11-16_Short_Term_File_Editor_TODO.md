@@ -43,6 +43,7 @@
 - **Pain:** No way to adjust editor font size or surrounding chrome (menubar/explorer text) without diving into prefs.
 - **Scope:** NiceGUI editor (use `editor.set_font_scale()`), plus host chrome CSS variables.
 - **Plan:** Add “Font Size Increase/Decrease” entries under the Editor menu. When invoked, call backend endpoint to adjust CodeMirror font via `set_font_scale`, and update CSS custom properties for toolbar/drawer text so the UI scales consistently. Persist preference in `preferences_store`.
+- **Status:** ✅ Completed 2025-11-17. Selector fix + menu wiring shipped: Small/Medium/Large presets adjust CM6 font scale and chrome CSS variables, persisted via preferences.
 
 ---
 

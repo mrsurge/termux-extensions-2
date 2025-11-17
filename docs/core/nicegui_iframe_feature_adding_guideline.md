@@ -14,11 +14,34 @@ This document provides guidelines for adding features to the NiceGUI CodeMirror 
 
 ## Core Architecture Constraints
 
+### Architecture Layers (Clarification)
+
+**Important Note:** This document focuses on extending the NiceGUI editor iframe. When we refer to "backend" in this context, we specifically mean the **NiceGUI iframe backend** (`editor_app.py`), NOT the main **Application Backend** (`main.py`, `core_write.py`, `core_read.py`).
+
+**Three distinct layers:**
+
+1. **Application Backend** - Ground truth authority
+   - Manages state from disk + local caches (`history_store`, `preferences_store`)
+   - Serves `/api/app/file_editor_cm6/read` and `/api/app/file_editor_cm6/write`
+   - Source of truth for file operations
+
+2. **Host Frontend** (`main.js`) - Visual representation layer
+   - Displays application backend's state
+   - Sends user actions to application backend
+   - Does NOT hold canonical state
+
+3. **NiceGUI Iframe Backend** (`editor_app.py`) - Editor UI component
+   - Python FastAPI endpoints for editor-specific features
+   - Has access to `editor` instance (vendored CodeMirror)
+   - Tracks editor-specific state in globals (`_current_file_path`, `_active_editor`)
+   - Runs in iframe at `/nc`
+   - **These globals can drift from application backend state**
+
 ### The Iframe Barrier
 
-**The fundamental challenge:** The NiceGUI editor backend and host frontend are **separate execution contexts** that cannot directly communicate:
+**The fundamental challenge:** The NiceGUI iframe backend and host frontend are **separate execution contexts** that cannot directly communicate:
 
-- **NiceGUI Backend** (`app/apps/file_editor_cm6/nicegui_editor/editor_app.py`)
+- **NiceGUI Iframe Backend** (`app/apps/file_editor_cm6/nicegui_editor/editor_app.py`)
   - Python FastAPI endpoints
   - Has access to `editor` instance (vendored CodeMirror)
   - Tracks state in global variables (`_current_file_path`, `_active_editor`, etc.)
@@ -52,9 +75,11 @@ app/static/vendor/nicegui/elements/codemirror/
 
 ## Communication Patterns
 
-### Pattern 1: Backend → Frontend (Stateless Endpoints)
+### Pattern 1: Iframe Backend → Frontend (Stateless Endpoints)
 
-**Use Case:** Frontend needs to query backend state
+**Use Case:** Frontend needs to query NiceGUI iframe backend state
+
+**Note:** This pattern is for **frontend ↔ NiceGUI iframe** communication. For **frontend ↔ application backend**, use standard stateful APIs where the application backend is the authority.
 
 **Implementation:**
 1. Create stateless endpoint in `editor_app.py`:
@@ -64,7 +89,7 @@ def get_feature_state(
     path: str = Query(...),  # Frontend passes context
     project: str = Query(...)
 ):
-    # Don't rely on get_current_file() - it may be stale
+    # Don't rely on get_current_file() - iframe globals may be stale
     # Use parameters passed from frontend
     result = compute_state(path, project)
     return {"ok": True, "data": result}
@@ -78,11 +103,11 @@ const resp = await fetch(
 );
 ```
 
-**Why:** Backend global state (`_current_file_path`) and frontend state (`currentPath`) are separate and can drift out of sync. Always pass explicit context.
+**Why:** NiceGUI iframe global state (`_current_file_path`) and frontend state (`currentPath`) are separate and can drift out of sync. Always pass explicit context to iframe endpoints.
 
-### Pattern 2: Backend → Frontend (Real-time Updates)
+### Pattern 2: Iframe Backend → Frontend (Real-time Updates)
 
-**Use Case:** Notify frontend immediately when backend state changes
+**Use Case:** Notify frontend immediately when NiceGUI iframe state changes
 
 **Option A: Polling (Simple)**
 ```javascript
@@ -795,4 +820,4 @@ Check browser DevTools → Network → WS to see NiceGUI messages:
 
 ---
 
-_Last Updated: 2025-11-16 19:42 UTC - Added search panel implementation example and bundle management guidelines_
+_Last Updated: 2025-11-17 04:42 UTC - Clarified three-layer architecture (Application Backend vs NiceGUI Iframe Backend vs Frontend)_

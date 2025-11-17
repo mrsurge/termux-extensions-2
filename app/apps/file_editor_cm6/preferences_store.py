@@ -18,6 +18,7 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "showInlineDiffs": True,
     "trackAgentEdits": False,
     "fontScale": 0.85,  # NEW: Default to Medium preset
+    "showIndentGuides": False,
 }
 
 DEFAULT_UI_PREFS: Dict[str, Any] = {

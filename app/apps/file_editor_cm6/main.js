@@ -337,6 +337,7 @@ const miToggleSyntax  = requireEl('#mi-toggle-syntax');
 const miToggleCloseBrackets = requireEl('#mi-toggle-closebrackets');
 const miToggleAutocomplete = requireEl('#mi-toggle-autocomplete');
 const miToggleShading = requireEl('#mi-toggle-shading');
+const miToggleIndentGuides = requireEl('#mi-toggle-indent-guides');
 const miToggleWrap    = requireEl('#mi-toggle-wrap');
 const miToggleAutosave = requireEl('#mi-toggle-autosave');
 const miToggleDiffs  = requireEl('#mi-toggle-diffs');
@@ -718,6 +719,7 @@ let lastSavedContent = '';
 let unsaved = false;
 let showLineNumbers = true;
 let showLineShading = false; // cosmetic; not implemented for CM6 here
+let showIndentGuides = false;
 let showSyntaxHighlight = true;
 let wordWrap = false;
 let autoCloseBrackets = true;  // New: ON by default
@@ -942,6 +944,7 @@ function applyPreferencesFromStore(payload) {
   const editorPrefs = (cachedPreferences && cachedPreferences.editor) || {};
   showLineNumbers = editorPrefs.showLineNumbers !== false;
   showLineShading = !!editorPrefs.showShading;
+  showIndentGuides = !!editorPrefs.showIndentGuides;
   showSyntaxHighlight = editorPrefs.showSyntax !== false;
   wordWrap = !!editorPrefs.wordWrap;
   autoCloseBrackets = editorPrefs.autoCloseBrackets !== false;  // Default true
@@ -970,6 +973,7 @@ function applyMenuState() {
   setMenuChecked(miToggleCloseBrackets, autoCloseBrackets);
   setMenuChecked(miToggleAutocomplete, enableAutocompletion);
   setMenuChecked(miToggleShading, showLineShading);
+  setMenuChecked(miToggleIndentGuides, showIndentGuides);
   setMenuChecked(miToggleWrap, wordWrap);
   setMenuChecked(miToggleAutosave, autoSaveEnabled);
   setMenuChecked(miToggleDiffs, showInlineDiffs);
@@ -1732,6 +1736,13 @@ bindMenuToggle(miToggleShading, async () => {
   persistEditorPreferences({ showShading: showLineShading });
   // Sync to NiceGUI state - use set_view_settings to update immediately
   apiPost('editor/set_view_settings', { line_shading: showLineShading }).catch(e => console.warn('[Menu] Failed to sync line shading:', e));
+});
+bindMenuToggle(miToggleIndentGuides, async () => {
+  showIndentGuides = !showIndentGuides;
+  setMenuChecked(miToggleIndentGuides, showIndentGuides);
+  persistEditorPreferences({ showIndentGuides: showIndentGuides });
+  apiPost('editor/set_view_settings', { indent_guides: showIndentGuides })
+    .catch(e => console.warn('[Menu] Failed to sync indent guides:', e));
 });
 bindMenuToggle(miToggleSyntax, () => {
   showSyntaxHighlight = !showSyntaxHighlight;

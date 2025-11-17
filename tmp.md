@@ -1,401 +1,328 @@
-# Font Scale Implementation - Critical Fixes
-**Author**: Atlas  
-**Date**: 2025-11-17 02:50 UTC  
-**Status**: URGENT - Two Critical Issues
+# CM6 Indentation Guides - Implementation Plan
+
+**Author:** Atlas  
+**Date:** 2025-11-17 05:00 UTC  
+**Status:** Ready for Implementation (Validated Against Codebase)
 
 ---
 
-## Issue 1: INVERTED SCALE LOGIC (All Presets Wrong)
+## Objective
 
-### The Problem
+Expose toggleable indentation guide lines in the NiceGUI CM6 iframe editor, respecting the iframe-guideline architecture and existing preference patterns.
 
-**Current implementation has it backwards!** The scale values are inverted:
+---
 
-| What User Sees | What Should Happen | What's Actually Coded |
-|----------------|-------------------|----------------------|
-| Small (85%) | Scale DOWN to 70% | ❌ Coded as 0.70 (which displays as 70%) |
-| Medium (100%) | Default browser scale 85% → shows as 100% | ❌ Coded as 0.85 |
-| Large (115%) | Scale UP to 115% FROM 85% baseline | ❌ Coded as 1.15 (but 1.15 × 85% = 97.75%, NOT 115%) |
+## Step 1: Vendor the Extension
 
-### Why This Happened
+### Install Package
 
-The 0.85 baseline is INVISIBLE to the user - they see it as "100%". All user-facing percentages must be calculated FROM that 85% baseline.
-
-### Correct Math
-
-```
-Actual CSS value = (User-Facing %) ÷ 100 × 0.85
-
-Small (85%):  0.85 ÷ 100 × 0.85 = 0.7225 ≈ 0.70 ✅ (accidental correct)
-Medium (100%): 1.00 × 0.85 = 0.85 ✅ (works)
-Large (115%): 1.15 × 0.85 = 0.9775 ≈ 0.98 ❌ WRONG! Currently coded as 1.15
+```bash
+cd app/static/vendor/nicegui/elements/codemirror
+npm install @replit/codemirror-indentation-markers
 ```
 
-**Wait, that's also wrong!** Let me recalculate...
+**Note:** Package is currently at `/data/data/com.termux/files/home/test/codemirror-indentation-markers`
 
-Actually, the user explanation is:
-- Browser default shows editor at what appears to be "115%" to the user
-- The 0.85 scale brings it DOWN to what feels like "100%" (comfortable reading size)
-- User wants to go SMALLER (85% = 0.70) or LARGER (115% = back to original = 1.0)
+### Add to Bundle Exports
 
-### CORRECT Scale Values
+Edit `src/index.mjs` and add:
 
-| User Label | User-Facing % | Actual CSS Scale | Explanation |
-|------------|---------------|------------------|-------------|
-| **Small** | "85%" | `0.70` | 85% of the "comfortable" size |
-| **Medium** | "100%" | `0.85` | Current default (comfortable baseline) |
-| **Large** | "115%" | `1.0` | Back to browser default (larger) |
-
-The current code has:
 ```javascript
-const FONT_SCALE_PRESETS = {
-  small: 0.70,   // ✅ Correct
-  medium: 0.85,  // ✅ Correct
-  large: 1.15    // ❌ WRONG - should be 1.0
-};
+export * from "@replit/codemirror-indentation-markers";
 ```
+
+Add this line after the existing exports (around line 10).
+
+### Build Bundle
+
+```bash
+npm run build
+```
+
+This creates updated `dist/` files used by NiceGUI.
+
+### Verify Export
+
+```bash
+grep -r "indentationMarkers" dist/
+```
+
+Should return matches showing the function is exported.
 
 ---
 
-## Issue 2: 500 INTERNAL SERVER ERROR
+## Step 2: Wire Extension in codemirror.js
 
-### The Error
+**File:** `app/static/vendor/nicegui/elements/codemirror/codemirror.js`
 
-```
-POST /api/app/file_editor_cm6/editor/set_font_scale HTTP/1.1" 500 Internal Server Error
-```
+### Add Import Guard
 
-### Root Cause
+Add near top of file (around line 6, after search extension guards):
 
-The endpoint calls `_preferences_store.update_preferences()` which expects specific parameters. Looking at the error, likely one of these issues:
-
-1. **Missing import**: `_preferences_store` might not be imported
-2. **Wrong parameter structure**: `update_preferences()` might need different args
-3. **Exception not caught**: Some validation or file I/O is failing
-
-Let me check the signature...
-
-**Actual issue**: The `update_preferences()` call structure is wrong. Looking at `preferences_store.py`:
-
-```python
-def update_preferences(
-    self,
-    *,
-    project_path: Optional[str] = None,
-    editor: Optional[Dict[str, Any]] = None,
-    ui: Optional[Dict[str, Any]] = None,
-    project: Optional[Dict[str, Any]] = None,
-) -> None:
-```
-
-The endpoint code does:
-```python
-_preferences_store.update_preferences(
-    project_path=project_path,
-    editor={"fontScale": scale}
-)
-```
-
-This SHOULD work... unless `project_path` is None. Let me trace:
-
-```python
-project_path = _history_store.get_active_project()
-if project_path:
-    _preferences_store.update_preferences(...)
-```
-
-**AH!** If there's NO active project, the preference update is SKIPPED, but the function still tries to return success. That's not the issue then.
-
-**Real issue**: Exception happening INSIDE the try block but not caught. Need to wrap the whole endpoint in try/except.
-
----
-
-## Fixes Required
-
-### Fix 1: Correct Scale Values
-
-**File**: `app/apps/file_editor_cm6/main.js`
-
-**Find** (around line 675):
 ```javascript
-const FONT_SCALE_PRESETS = {
-  small: 0.70,
-  medium: 0.85,
-  large: 1.15
-};
+const indentationMarkers = typeof CM.indentationMarkers === 'function' ? CM.indentationMarkers : null;
 ```
 
-**Replace with**:
+### Add Method to Component
+
+Add method to the component (follow pattern of `applyZebraStripes` around line 310):
+
 ```javascript
-const FONT_SCALE_PRESETS = {
-  small: 0.70,   // 85% user-facing (smaller than comfortable)
-  medium: 0.85,  // 100% user-facing (comfortable baseline)
-  large: 1.0     // 115% user-facing (back to browser default)
-};
+async applyIndentGuides(enabled) {
+  // Initialize indent guides compartment on first call
+  if (!this.indentCompartment) {
+    if (!indentationMarkers) {
+      console.warn('[CM6] indentationMarkers not available in bundle');
+      return;
+    }
+    
+    const { Compartment, StateEffect } = CM;
+    
+    this.indentCompartment = new Compartment();
+    
+    // Extension configuration
+    this.indentExtensions = [
+      indentationMarkers({
+        highlightActiveBlock: false,
+        thickness: 1,
+        hideFirstIndent: false,
+        markerType: 'fullScope'
+      })
+    ];
+    
+    // Install empty compartment
+    this.editor.dispatch({
+      effects: StateEffect.appendConfig.of(this.indentCompartment.of([]))
+    });
+  }
+  
+  // Reconfigure compartment
+  const extensions = enabled ? this.indentExtensions : [];
+  this.editor.dispatch({
+    effects: this.indentCompartment.reconfigure(extensions)
+  });
+},
 ```
 
-**Also update** (around line 815):
+### Expose via Python API
+
+**File:** `app/static/vendor/nicegui/elements/codemirror/codemirror.py`
+
+Add method (around line 370, near `set_zebra_stripes`):
+
+```python
+def set_indent_guides(self, enabled: bool) -> None:
+    """Toggle indentation guide lines."""
+    self.run_method('applyIndentGuides', enabled)
+```
+
+---
+
+## Step 3: Backend Plumbing
+
+### Add Default Preference
+
+**File:** `app/apps/file_editor_cm6/preferences_store.py`
+
+Add to `DEFAULT_EDITOR_PREFS` (around line 19):
+
+```python
+"showIndentGuides": False,
+```
+
+### Apply on Editor Creation
+
+**File:** `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+
+Add after line 360 (where other editor settings are applied):
+
+```python
+editor.set_indent_guides(editor_prefs.get('showIndentGuides', False))
+```
+
+Also add around line 541 (in file reload section):
+
+```python
+editor.set_indent_guides(editor_prefs.get('showIndentGuides', False))
+```
+
+### Add to /set_view_settings Endpoint
+
+**File:** `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+
+Add to `/set_view_settings` endpoint (around line 774, after `line_shading`):
+
+```python
+if 'indent_guides' in data:
+    show_guides = bool(data['indent_guides'])
+    editor_updates['showIndentGuides'] = show_guides
+    if editor: editor.set_indent_guides(show_guides)
+```
+
+---
+
+## Step 4: Frontend UI
+
+### Add Menu Item
+
+**File:** `app/apps/file_editor_cm6/template.html`
+
+Add to View menu dropdown (after line 1363, after "Line Shading"):
+
+```html
+<div class="fe-dd-item" id="mi-toggle-indent-guides" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Indentation Guides</span></div>
+```
+
+### Add State Variable
+
+**File:** `app/apps/file_editor_cm6/main.js`
+
+Add state variable (around line 200-250 with other state vars):
+
 ```javascript
-ALLOWED_SCALES = {0.70, 0.85, 1.15}
+let showIndentGuides = false;
 ```
 
-**To**:
+### Add Menu Element Reference
+
+**File:** `app/apps/file_editor_cm6/main.js`
+
+Add after line 339 (with other menu element references):
+
 ```javascript
-ALLOWED_SCALES = {0.70, 0.85, 1.0}
+const miToggleIndentGuides = requireEl('#mi-toggle-indent-guides');
 ```
 
-**File**: `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+### Bind Menu Toggle
 
-**Find** (around line 814):
-```python
-ALLOWED_SCALES = {0.70, 0.85, 1.15}
-```
+**File:** `app/apps/file_editor_cm6/main.js`
 
-**Replace with**:
-```python
-ALLOWED_SCALES = {0.70, 0.85, 1.0}
-```
+Add binding (with other `bindMenuToggle` calls, after shading toggle):
 
-**File**: `app/apps/file_editor_cm6/preferences_store.py`
-
-**Find** (around line 23):
-```python
-ALLOWED_FONT_SCALES = {0.70, 0.85, 1.15}
-```
-
-**Replace with**:
-```python
-ALLOWED_FONT_SCALES = {0.70, 0.85, 1.0}
-```
-
----
-
-### Fix 2: Add Error Handling to Endpoint
-
-**File**: `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
-
-**Replace entire endpoint** (lines 800-834):
-
-```python
-@editor_router.post('/set_font_scale')
-async def set_font_scale_endpoint(data: dict = Body(...)):
-    """Set editor font scale from one of three presets: 0.70, 0.85, 1.0"""
-    try:
-        editor = get_active_editor()
-        
-        # Validate input
-        scale = data.get('scale')
-        if not isinstance(scale, (int, float)):
-            raise HTTPException(status_code=400, detail="scale must be a number")
-        
-        scale = float(scale)
-        
-        # Enforce presets
-        ALLOWED_SCALES = {0.70, 0.85, 1.0}
-        if scale not in ALLOWED_SCALES:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"scale must be one of {sorted(ALLOWED_SCALES)}"
-            )
-        
-        # Apply to editor
-        if editor:
-            try:
-                editor.set_font_scale(scale)
-                print(f"[EDITOR] Font scale changed to: {scale}", file=sys.stderr)
-            except Exception as e:
-                print(f"[EDITOR] Failed to set font scale: {e}", file=sys.stderr)
-                raise HTTPException(status_code=500, detail=f"Failed to apply font scale: {e}")
-        
-        # Persist preference
-        project_path = _history_store.get_active_project()
-        if project_path:
-            try:
-                _preferences_store.update_preferences(
-                    project_path=project_path,
-                    editor={"fontScale": scale}
-                )
-                print(f"[EDITOR] Persisted font scale: {scale} for project: {project_path}", file=sys.stderr)
-            except Exception as e:
-                print(f"[EDITOR] Failed to persist font scale: {e}", file=sys.stderr)
-                # Don't fail the request if persistence fails - editor is already updated
-        else:
-            print(f"[EDITOR] No active project - font scale not persisted", file=sys.stderr)
-        
-        return {"ok": True, "data": {"fontScale": scale}}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        print(f"[EDITOR] Unexpected error in set_font_scale: {e}", file=sys.stderr)
-        print(traceback.format_exc(), file=sys.stderr)
-        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
-```
-
----
-
-## Why The Confusion Happened
-
-### The Scale Perception Problem
-
-The CodeMirror editor with 0.85 scale looks "normal" to users because:
-1. Browser default CodeMirror is actually quite large (feels like 115%)
-2. The 0.85 scale brings it to comfortable reading size (feels like 100%)
-3. Users think of THIS as the baseline, not the browser default
-
-So when implementing presets:
-- ❌ **Wrong thinking**: "Small=70%, Medium=85%, Large=115% of browser default"
-- ✅ **Right thinking**: "Small=85%, Medium=100%, Large=115% of comfortable size"
-
-Which translates to CSS values:
-- Small = 0.70 (85% of 0.85 baseline)
-- Medium = 0.85 (the comfortable baseline)
-- Large = 1.0 (115% of 0.85 baseline = back to browser default)
-
----
-
-## Testing After Fixes
-
-1. **Stop the server**
-2. **Apply all three fixes** (main.js, editor_app.py, preferences_store.py)
-3. **Restart server**
-4. **Test each preset**:
-   - Small → Should make text noticeably smaller
-   - Medium → Should match current comfortable size
-   - Large → Should make text larger (back to browser default)
-5. **Check for 500 errors** → Should see detailed error messages now if any occur
-6. **Check console** → Should see `[EDITOR] Font scale changed to: X` messages
-
----
-
-## Who's To Blame?
-
-**Whose fault**: Shared responsibility, but mostly **communication failure**:
-
-1. **Dex**: Didn't clearly explain that 0.85 is the "feels like 100%" baseline
-2. **Atlas (me)**: Should have questioned why "Large (115%)" was 1.15 instead of calculating from 0.85 baseline
-3. **Gemini**: Implemented code literally without understanding the perceptual baseline shift
-
-**Root cause**: The plan said "Small = 0.70 (renders as ~85% of baseline)" which is ambiguous. Does "baseline" mean browser default or comfortable reading size?
-
----
-
-**Status**: Apply these fixes immediately. The scale values are wrong and the error handling is insufficient.
-
-**Signed**: Atlas
-
----
-
-## ACTUAL ROOT CAUSE - 2025-11-17 02:53 UTC
-
-**The real error from traceback**:
-
-```
-TypeError: PreferencesStore.update_preferences() got an unexpected keyword argument 'project_path'
-```
-
-### The Real Problem
-
-The `update_preferences()` method signature is:
-
-```python
-def update_preferences(
-    self,
-    *,
-    editor: Optional[Dict[str, Any]] = None,
-    ui: Optional[Dict[str, Any]] = None,
-    project: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-```
-
-**NO `project_path` parameter!** The preferences are GLOBAL, not per-project.
-
-### The Correct Fix
-
-**File**: `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
-
-**Replace the endpoint** (lines 800-834) with:
-
-```python
-@editor_router.post('/set_font_scale')
-async def set_font_scale_endpoint(data: dict = Body(...)):
-    """Set editor font scale from one of three presets: 0.70, 0.85, 1.0"""
-    try:
-        editor = get_active_editor()
-        
-        # Validate input
-        scale = data.get('scale')
-        if not isinstance(scale, (int, float)):
-            raise HTTPException(status_code=400, detail="scale must be a number")
-        
-        scale = float(scale)
-        
-        # Enforce presets
-        ALLOWED_SCALES = {0.70, 0.85, 1.0}
-        if scale not in ALLOWED_SCALES:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"scale must be one of {sorted(ALLOWED_SCALES)}"
-            )
-        
-        # Apply to editor
-        if editor:
-            try:
-                editor.set_font_scale(scale)
-                print(f"[EDITOR] Font scale changed to: {scale}", file=sys.stderr)
-            except Exception as e:
-                print(f"[EDITOR] Failed to set font scale: {e}", file=sys.stderr)
-                raise HTTPException(status_code=500, detail=f"Failed to apply font scale: {e}")
-        
-        # Persist preference (GLOBALLY, not per-project)
-        try:
-            _preferences_store.update_preferences(
-                editor={"fontScale": scale}
-            )
-            print(f"[EDITOR] Persisted font scale: {scale} globally", file=sys.stderr)
-        except Exception as e:
-            print(f"[EDITOR] Failed to persist font scale: {e}", file=sys.stderr)
-            # Don't fail the request if persistence fails - editor is already updated
-        
-        return {"ok": True, "data": {"fontScale": scale}}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        print(f"[EDITOR] Unexpected error in set_font_scale: {e}", file=sys.stderr)
-        print(traceback.format_exc(), file=sys.stderr)
-        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
-```
-
-**Key change**: Remove the `project_path` logic entirely. Font scale is a GLOBAL preference, not per-project.
-
----
-
-## Summary of ALL Required Fixes
-
-### 1. Fix Scale Value (main.js)
 ```javascript
-const FONT_SCALE_PRESETS = {
-  small: 0.70,
-  medium: 0.85,
-  large: 1.0    // Changed from 1.15
-};
+bindMenuToggle(miToggleIndentGuides, async () => {
+  showIndentGuides = !showIndentGuides;
+  setMenuChecked(miToggleIndentGuides, showIndentGuides);
+  persistEditorPreferences({ showIndentGuides: showIndentGuides });
+  apiPost('editor/set_view_settings', { indent_guides: showIndentGuides })
+    .catch(e => console.warn('[Menu] Failed to sync indent guides:', e));
+});
 ```
 
-### 2. Fix Allowed Scales (preferences_store.py)
-```python
-ALLOWED_FONT_SCALES = {0.70, 0.85, 1.0}  # Changed from {0.70, 0.85, 1.15}
+### Initialize from Preferences
+
+**File:** `app/apps/file_editor_cm6/main.js`
+
+Find where preferences are loaded (search for `showLineShading = ` initialization) and add:
+
+```javascript
+showIndentGuides = editorPrefs.showIndentGuides ?? false;
 ```
 
-### 3. Fix Endpoint (editor_app.py)
-- Change `ALLOWED_SCALES = {0.70, 0.85, 1.0}`
-- Remove `project_path` parameter from `update_preferences()` call
-- Call as: `_preferences_store.update_preferences(editor={"fontScale": scale})`
+Then in `applyMenuState()` function, add:
+
+```javascript
+setMenuChecked(miToggleIndentGuides, showIndentGuides);
+```
 
 ---
 
-**Status**: Apply all three fixes. The 500 error was caused by incorrect parameter name.
+## Step 5: Validation & Testing
 
-**Signed**: Atlas
+### Test Checklist
+
+- [ ] Extension loads without errors (check browser console)
+- [ ] Menu item appears in View menu
+- [ ] Toggle works immediately (guides appear/disappear)
+- [ ] Preference persists across page reloads
+- [ ] Works with Python files (space indents)
+- [ ] Works with JavaScript files (tab indents)
+- [ ] Works with Markdown files
+- [ ] Doesn't interfere with zebra stripes when both enabled
+- [ ] Doesn't interfere with inline diffs when both enabled
+- [ ] Respects word wrap (guides don't break layout)
+
+### Graceful Degradation
+
+If bundle export fails or extension is missing:
+- Console warning logged
+- Feature silently disabled
+- No UI errors
+- Menu toggle still appears but does nothing
+
+---
+
+## Notes
+
+### Theming
+
+The `@replit/codemirror-indentation-markers` extension includes built-in theming via `EditorView.baseTheme()`. It automatically adapts to light/dark themes using CSS variables:
+
+- `--indent-marker-bg-color`
+- `--indent-marker-active-bg-color`
+
+**No custom CSS needed** - the extension handles styling internally.
+
+### Configuration Options
+
+Available configuration (from package source):
+
+```typescript
+{
+  hideFirstIndent?: boolean;        // Hide guides at column 0
+  highlightActiveBlock?: boolean;    // Highlight current block
+  thickness?: number;                // Line thickness in px
+  activeThickness?: number;          // Active line thickness
+  colors?: {                         // Custom colors
+    light?: string;
+    dark?: string;
+    activeLight?: string;
+    activeDark?: string;
+  };
+  markerType?: 'fullScope' | 'codeOnly';  // Render mode
+}
+```
+
+Current plan uses conservative defaults:
+- `highlightActiveBlock: false` - Keep it simple initially
+- `thickness: 1` - Subtle guides
+- `markerType: 'fullScope'` - Show guides for entire scope
+
+These can be adjusted based on user feedback.
+
+### Architecture Compliance
+
+This implementation:
+- ✅ Respects iframe isolation (no cross-boundary hacks)
+- ✅ Follows stateless endpoint pattern for iframe communication
+- ✅ Uses established Compartment pattern for toggleable extensions
+- ✅ Matches existing zebra stripes and diff decorations patterns
+- ✅ Persists preferences via application backend (ground truth)
+- ✅ Frontend reflects backend state (visual representation layer)
+
+---
+
+## Implementation Order
+
+Execute in this exact order:
+
+1. **Vendor extension** (Step 1) - Ensures bundle has required exports
+2. **Wire in codemirror.js** (Step 2) - Makes feature available to Python API
+3. **Backend plumbing** (Step 3) - Enables preference storage and endpoints
+4. **Frontend UI** (Step 4) - Exposes toggle to user
+5. **Test** (Step 5) - Verify everything works
+
+Do not skip steps or change order - each depends on the previous.
+
+---
+
+**Plan validated against:**
+- `runtime_paths/framework_startup_to_file_editor_cm6.md`
+- `docs/core/nicegui_iframe_feature_adding_guideline.md`
+- Actual codebase inspection (verified patterns exist and match)
+
+**Ready for implementation.**
+
+---
+
+_Atlas • 2025-11-17 05:00 UTC_

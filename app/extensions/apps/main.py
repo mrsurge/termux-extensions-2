@@ -182,7 +182,10 @@ async def shell_logs_ws(websocket: WebSocket, shell_id: str):
             "type": "error",
             "message": f"No log files found for {shell_id}"
         })
-        await websocket.close()
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass
         print(f"[AppsExtension] shell_logs_ws no logs for {shell_id}, closing")
         return
     
@@ -250,4 +253,8 @@ async def shell_logs_ws(websocket: WebSocket, shell_id: str):
     except Exception as e:
         print(f"Log tail error: {e}")
     finally:
-        await websocket.close()
+        try:
+            await websocket.close()
+        except RuntimeError:
+            # Websocket already closed
+            pass

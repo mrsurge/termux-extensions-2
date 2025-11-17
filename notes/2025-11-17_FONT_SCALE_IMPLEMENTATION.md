@@ -150,3 +150,40 @@ Now the THREE requested areas scale properly:
 3. Explorer (entire drawer including file tree, git actions, buttons)
 
 ---
+
+---
+### Bug Fixes - Unrelated Issues
+**Timestamp:** 2025-11-17T03:58:00+00:00
+**Implementer:** Atlas
+
+**Three separate bugs identified and fixed:**
+
+**1. Git Actions False Error Toast - "root is not defined"**
+   - **Problem**: After git push action, code tried to close explorer drawer using undefined `root` variable
+   - **Location**: `app/apps/file_editor_cm6/static/js/explorer.js` line 371
+   - **Root cause**: Variable `root` was defined in different function scope, not accessible in `handleGitAction()`
+   - **Fix**: Query for root element fresh: `const root = document.querySelector('.fe-root')`
+   - **Result**: Git actions no longer throw error toast, drawer closes properly after push
+   - **File**: `app/apps/file_editor_cm6/static/js/explorer.js`
+
+**2. Terminal Logging Mislabeled as "[AgentDrawer]"**
+   - **Problem**: PTY/terminal output logged with `[AgentDrawer]` prefix, but agent drawer is completely different component
+   - **Location**: `app/libs/framework_shells.py` line 51-52
+   - **Fix**: Changed prefix from `[AgentDrawer]` to `[PTY]`
+   - **Result**: Terminal/shell logs now correctly labeled
+   - **File**: `app/libs/framework_shells.py`
+
+**3. WebSocket Already Closed Error**
+   - **Problem**: Occasional crash with `RuntimeError: Cannot call "send" once a close message has been sent`
+   - **Location**: `app/extensions/apps/main.py` lines 185, 253
+   - **Root cause**: Code attempted to close websocket that was already closed (client disconnect, network error, etc.)
+   - **Fix**: Wrapped `await websocket.close()` in try/except to catch RuntimeError
+   - **Result**: No more crashes on websocket cleanup
+   - **File**: `app/extensions/apps/main.py` (2 locations)
+
+**Files Modified:**
+- `app/apps/file_editor_cm6/static/js/explorer.js` (1 change)
+- `app/libs/framework_shells.py` (1 change)
+- `app/extensions/apps/main.py` (2 changes)
+
+---
