@@ -1724,8 +1724,8 @@ function renderNameResults(container, data) {
     row.className = 'fe-search-item';
     row.onclick = () => {
       if (item.type === 'file') {
-        if (window.appOpenFile) {
-          window.appOpenFile(item.path);
+        if (window.appOpenFileRel) {
+          window.appOpenFileRel(item.rel, currentProjectPath);
           closeSearchOverlay();
         } else {
           toast('File opener not available');
@@ -1775,12 +1775,12 @@ function renderContentResults(container, data) {
       const matchRow = document.createElement('div');
       matchRow.className = 'fe-search-match';
       matchRow.onclick = async () => {
-        if (window.appOpenFile && window.jumpToCurrentFileLine) {
+        if (window.appOpenFileRel && window.jumpToCurrentFileLine) {
           closeSearchOverlay();
           
-          // First: Open file using unified flow
+          // First: Open file using unified flow (matching explorer behavior)
           try {
-            await window.appOpenFile(fileResult.path);
+            await window.appOpenFileRel(fileResult.rel, currentProjectPath);
             
             // Wait a tick for file to load
             await new Promise(resolve => setTimeout(resolve, 100));

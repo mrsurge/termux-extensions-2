@@ -575,3 +575,106 @@ Search Click
 _Implementation completed: 2025-11-17 13:25 UTC_  
 _Total execution time: ~3 minutes_  
 _TE-2 Team_
+
+---
+
+## **Phase 8: Critical Path Discovery**
+
+### **Explorer Path Trace**
+**Timestamp:** 2025-11-17 19:45 UTC  
+**Investigator:** Atlas  
+
+**Discovery:** Search implementation was using wrong file opener function!
+
+**Traced Explorer File Card Click:**
+1. User clicks file in explorer tree
+2. `onTreeClick()` calls `openFileRel(rel, currentProjectPath)` (line 902)
+3. `openFileRel()` calls `window.appOpenFileRel(rel, projectRoot)` (line 1462)
+4. `window.appOpenFileRel()` converts rel to absolute, then calls `openFile()` (main.js:1989)
+5. `openFile()` executes unified flow
+
+**What Search Was Using (WRONG):**
+- `window.appOpenFile(item.path)` - absolute path, different code path
+
+**What Explorer Uses (CORRECT):**
+- `window.appOpenFileRel(rel, currentProjectPath)` - relative path + project context
+
+**Why This Matters:**
+- Path resolution: `appOpenFileRel` handles project context correctly
+- Consistency: Same code path as explorer = same behavior
+- Backend response: Search returns `.rel` field, not absolute `.path`
+
+---
+
+## **Phase 9: Final Fix Applied**
+
+### **Corrected File Opening Functions**
+**Timestamp:** 2025-11-17 19:47 UTC  
+**Author:** Atlas  
+
+**Name Mode Fix:**
+```javascript
+// Before:
+window.appOpenFile(item.path);
+
+// After:
+window.appOpenFileRel(item.rel, currentProjectPath);
+```
+
+**Content Mode Fix:**
+```javascript
+// Before:
+await window.appOpenFile(fileResult.path);
+
+// After:
+await window.appOpenFileRel(fileResult.rel, currentProjectPath);
+```
+
+**NiceGUI Line Jump Verification:**
+- Searched `../niceguijson-doc/sitewide_index.json` for documentation
+- No specific line jump docs found
+- Current implementation uses standard CM6 API (correct)
+- JavaScript directly accesses CM view and dispatches selection change
+- This is the proper CodeMirror 6 way to scroll to a line
+
+**Files Modified (Final):**
+- `app/apps/file_editor_cm6/static/js/explorer.js`
+  - Line ~1726: Changed name mode to use `appOpenFileRel`
+  - Line ~1780: Changed content mode to use `appOpenFileRel`
+
+---
+
+## **Final Status**
+
+### **All Issues Resolved** ✅
+
+1. **Virtual Keyboard** ✅ - Incremental rendering preserves input focus
+2. **Content Search Crash** ✅ - Defensive checks for undefined matches
+3. **File Opening Path** ✅ - Now uses `appOpenFileRel` matching explorer exactly
+4. **Line Jump** ✅ - Simplified backend, correct CM6 API usage
+5. **Architecture Compliance** ✅ - Follows unified flow, respects guidelines
+
+### **Execution Path Now Identical to Explorer:**
+
+```
+Search Result Click
+  → window.appOpenFileRel(rel, currentProjectPath)
+    → toAbsolute(rel, projectRoot) 
+    → openFile(absolutePath)
+      → POST /read (application backend - ground truth)
+      → POST /editor/set_content (NiceGUI iframe)
+      → POST /state/file_activity (history tracking)
+      → openWebSocket()
+      → diffController.setContext()
+      → syncSessionPath()
+  → THEN jumpToCurrentFileLine(line)
+    → POST /editor/jump_to_line (scroll only)
+```
+
+**This is EXACTLY the same path as clicking a file card in the explorer.**
+
+---
+
+_Final implementation completed: 2025-11-17 19:47 UTC_  
+_Total time: 25 minutes_  
+_TE-2 Team + Atlas_
