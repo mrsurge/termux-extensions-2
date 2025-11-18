@@ -2,10 +2,10 @@ package com.termux.extensions
 
 import android.annotation.SuppressLint
 import android.os.Bundle
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
@@ -19,37 +19,26 @@ class MainActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.webview)
 
-        // Configure WebView settings for PWA-like experience
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            
-            // Enable modern web features
             allowFileAccess = true
             allowContentAccess = true
             setGeolocationEnabled(true)
-            
-            // Performance optimizations
             setRenderPriority(WebSettings.RenderPriority.HIGH)
-            
-            // Display settings
             loadWithOverviewMode = true
             useWideViewPort = true
             setSupportZoom(true)
             builtInZoomControls = true
             displayZoomControls = false
-            
-            // Set initial zoom to 80%
             textZoom = 80
         }
 
-        // Add JavaScript interface for native bridge
         webView.addJavascriptInterface(NativeBridge(this), "Android")
 
-        // Set WebViewClient to handle navigation
         webView.webViewClient = object : WebViewClient() {
             override fun onReceivedError(
                 view: WebView?,
@@ -69,10 +58,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Set WebChromeClient for console logging and other features
         webView.webChromeClient = WebChromeClient()
-
-        // Load the framework URL
         webView.loadUrl("http://127.0.0.1:8088")
     }
 

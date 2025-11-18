@@ -408,7 +408,7 @@ function attachEventListeners() {
         if (target.classList.contains('framework-log')) {
             const shellId = target.dataset.shell;
             if (shellId) {
-                window.open(`/shell-logs/${shellId}`, '_blank');
+                window.location.href = `/shell-logs/${shellId}`;
             }
             return;
         }
