@@ -440,20 +440,66 @@ async def editor_page():
     ui.add_head_html('''
     <style>
     :root {
-      --diff-marker-width: 1.65rem; --diff-add-bg: rgba(52, 211, 153, 0.22); --diff-add-border: rgba(52, 211, 153, 0.75);
-      --diff-add-marker: rgba(52, 211, 153, 0.9); --diff-context-border: rgba(148, 163, 184, 0.35); --diff-context-marker: rgba(148, 163, 184, 0.55);
-      --diff-del-bg: rgba(248, 113, 113, 0.18); --diff-del-border: rgba(248, 113, 113, 0.7); --diff-del-fg: rgba(248, 113, 113, 0.95);
-      --diff-del-marker: rgba(248, 113, 113, 0.85); --diff-del-gap: 0;
+      --diff-marker-width: 1.65rem;
+      --diff-add-bg: rgba(52, 211, 153, 0.22);
+      --diff-add-border: rgba(52, 211, 153, 0.75);
+      --diff-add-marker: rgba(52, 211, 153, 0.9);
+      --diff-context-border: rgba(148, 163, 184, 0.35);
+      --diff-context-marker: rgba(148, 163, 184, 0.55);
+      --diff-del-bg: rgba(248, 113, 113, 0.18);
+      --diff-del-border: rgba(248, 113, 113, 0.7);
+      --diff-del-fg: rgba(248, 113, 113, 0.95);
+      --diff-del-marker: rgba(248, 113, 113, 0.85);
     }
-    .cm-line.cm-diff-line { position: relative; padding-left: calc(var(--diff-marker-width) + 0.35rem); }
-    .cm-line.cm-diff-line::before { content: attr(data-diff-marker); position: absolute; left: 0; width: var(--diff-marker-width); text-align: center; font-weight: 600; opacity: 0.85; color: rgba(148, 163, 184, 0.65); user-select: none; -webkit-user-select: none; }
-    .cm-line.cm-diff-line-added { background: var(--diff-add-bg) !important; border-left: 3px solid var(--diff-add-border) !important; }
-    .cm-line.cm-diff-line-added::before { color: var(--diff-add-marker); }
-    .cm-line.cm-diff-line-context { border-left: 3px solid var(--diff-context-border); }
-    .cm-line.cm-diff-line-context::before { color: var(--diff-context-marker); }
-    .cm-line.cm-diff-line-plain { border-left: 3px solid transparent; }
-    .cm-diff-line-removed { position: relative; margin: 0 0 var(--diff-del-gap, 0); padding: 0 10px 0 calc(var(--diff-marker-width) + 6px); border-left: 3px solid var(--diff-del-border); background: var(--diff-del-bg); color: var(--diff-del-fg); font: inherit; white-space: pre; line-height: inherit; user-select: none; -webkit-user-select: none; contain: layout paint; }
-    .cm-diff-line-removed::before { content: attr(data-diff-marker); position: absolute; left: 0; width: var(--diff-marker-width); text-align: center; font-weight: 600; color: var(--diff-del-marker); user-select: none; -webkit-user-select: none; }
+    .cm-diff-gutter {
+      width: var(--diff-marker-width);
+      min-width: var(--diff-marker-width);
+    }
+    .cm-diff-gutter .cm-gutterElement {
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+    }
+    .cm-diff-gutter-marker {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      font-weight: 600;
+      font-size: 0.9rem;
+      user-select: none;
+      -webkit-user-select: none;
+      line-height: inherit;
+    }
+    .cm-diff-marker-add { color: var(--diff-add-marker); }
+    .cm-diff-marker-del { color: var(--diff-del-marker); }
+    .cm-diff-marker-context { color: var(--diff-context-marker); }
+    .cm-diff-line-added { background: var(--diff-add-bg) !important; border-left: 3px solid var(--diff-add-border) !important; }
+    .cm-diff-line-context { border-left: 3px solid var(--diff-context-border); }
+    .cm-diff-line-removed {
+      position: relative;
+      padding: 0 10px 0 calc(var(--diff-marker-width) + 6px);
+      border-left: 3px solid var(--diff-del-border);
+      background: var(--diff-del-bg);
+      color: var(--diff-del-fg);
+      font: inherit;
+      white-space: pre;
+      line-height: inherit;
+      user-select: none;
+      -webkit-user-select: none;
+      contain: layout paint;
+    }
+    .cm-diff-line-removed::before {
+      content: attr(data-diff-marker);
+      position: absolute;
+      left: 0;
+      width: var(--diff-marker-width);
+      text-align: center;
+      font-weight: 600;
+      color: var(--diff-del-marker);
+      user-select: none;
+      -webkit-user-select: none;
+    }
     .cm-diff-removed-text { display: block; white-space: pre; }
     .cm-diff-line-removed.cm-diff-wrap { white-space: pre-wrap; word-break: break-word; }
     .cm-diff-line-removed.cm-diff-wrap .cm-diff-removed-text { white-space: pre-wrap; word-break: break-word; }

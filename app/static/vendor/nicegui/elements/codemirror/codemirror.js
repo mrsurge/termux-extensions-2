@@ -55,17 +55,11 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   }
 
   const lineAddedDeco = Decoration.line({
-    class: 'cm-diff-line cm-diff-line-added',
-    attributes: { 'data-diff-marker': '+' },
+    class: 'cm-diff-line-added',
   });
 
   const lineContextDeco = Decoration.line({
-    class: 'cm-diff-line cm-diff-line-context',
-    attributes: { 'data-diff-marker': '│' },
-  });
-
-  const linePlainDeco = Decoration.line({
-    class: 'cm-diff-line cm-diff-line-plain',
+    class: 'cm-diff-line-context',
   });
 
   class RemovedLineWidget extends WidgetType {
@@ -151,9 +145,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       }));
       widgetIndex++;
     }
-    
-    builder.add(lineInfo.from, lineInfo.from, linePlainDeco);
-    
+
     if (lineDecorations.has(lineNum)) {
       builder.add(lineInfo.from, lineInfo.from, lineDecorations.get(lineNum));
     }
@@ -183,6 +175,68 @@ function safeLine(doc, lineNumber) {
     return doc.line(total);
   }
   return doc.line(lineNumber);
+}
+
+class DiffGutterMarker extends CM.GutterMarker {
+  constructor(marker) {
+    super();
+    this.marker = marker;
+  }
+  eq(other) {
+    return other instanceof DiffGutterMarker && other.marker === this.marker;
+  }
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = 'cm-diff-gutter-marker';
+    span.textContent = this.marker;
+    if (this.marker === '+') {
+      span.classList.add('cm-diff-marker-add');
+    } else if (this.marker === '−') {
+      span.classList.add('cm-diff-marker-del');
+    } else {
+      span.classList.add('cm-diff-marker-context');
+    }
+    span.setAttribute('aria-hidden', 'true');
+    return span;
+  }
+}
+
+function buildDiffGutterMarkers(view, hunks) {
+  if (!hunks || hunks.length === 0) {
+    const builder = new CM.RangeSetBuilder();
+    return builder.finish();
+  }
+  const doc = view.state.doc;
+  const builder = new CM.RangeSetBuilder();
+  const lineMarkers = new Map();
+
+  for (const hunk of hunks) {
+    let newLine = Math.max(1, hunk.newStart || 1);
+    for (const line of hunk.lines || []) {
+      const kind = line.type;
+      if (kind === 'add') {
+        lineMarkers.set(newLine, new DiffGutterMarker('+'));
+        newLine += 1;
+      } else if (kind === 'context') {
+        lineMarkers.set(newLine, new DiffGutterMarker('│'));
+        newLine += 1;
+      } else if (kind === 'del') {
+        if (!lineMarkers.has(newLine)) {
+          lineMarkers.set(newLine, new DiffGutterMarker('−'));
+        }
+      }
+    }
+  }
+
+  for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
+    const marker = lineMarkers.get(lineNum);
+    if (!marker) continue;
+    const lineInfo = safeLine(doc, lineNum);
+    if (!lineInfo) continue;
+    builder.add(lineInfo.from, lineInfo.from, marker);
+  }
+
+  return builder.finish();
 }
 
 export default {
@@ -220,6 +274,7 @@ export default {
         this.resolveEditor = resolve;
       }),
       pendingFontScale: 1,
+      currentDiffHunks: [],
     };
   },
   methods: {
@@ -462,21 +517,17 @@ export default {
         this.setDiffEffect = StateEffect.define();
         this.clearDiffEffect = StateEffect.define();
         
-        // Capture effects for use in the field
         const setDiffEffect = this.setDiffEffect;
         const clearDiffEffect = this.clearDiffEffect;
         
-        // Create a StateField to hold diff decorations
         const diffField = StateField.define({
           create() {
             return CM.Decoration.none;
           },
           update(value, tr) {
-            // Map decorations through document changes
             if (tr.docChanged && value !== CM.Decoration.none) {
               value = value.map(tr.changes);
             }
-            // Apply effects
             for (const effect of tr.effects) {
               if (effect.is(setDiffEffect)) {
                 value = effect.value;
@@ -489,25 +540,47 @@ export default {
           provide: field => CM.EditorView.decorations.from(field)
         });
         
-        // Store the field for effects
         this.diffField = diffField;
         
-        // Install the compartment with the field
         this.editor.dispatch({
           effects: StateEffect.appendConfig.of(this.diffCompartment.of([diffField]))
         });
       }
+
+      if (!this.diffGutterCompartment) {
+        this.diffGutterCompartment = new CM.Compartment();
+        this.currentDiffHunks = [];
+        this.diffGutterExtension = CM.gutter({
+          class: 'cm-diff-gutter',
+          markers: view => buildDiffGutterMarkers(view, this.currentDiffHunks),
+          initialSpacer: () => new DiffGutterMarker('+'),
+        });
+        this.editor.dispatch({
+          effects: CM.StateEffect.appendConfig.of(this.diffGutterCompartment.of([]))
+        });
+      }
+
+      const normalizedHunks = Array.isArray(hunks) ? hunks : [];
+      this.currentDiffHunks = normalizedHunks;
+      const gutterActive = normalizedHunks.length > 0;
       
-      // Build decorations using the proven helper function
       const getWordWrap = () => this.lineWrapping || false;
       console.log('[applyDiffDecorations] Building decorations, wordWrap:', getWordWrap());
-      const decoSet = buildDiffDecorations(this.editor, hunks, CM, getWordWrap);
+      const decoSet = buildDiffDecorations(this.editor, normalizedHunks, CM, getWordWrap);
       console.log('[applyDiffDecorations] Built', decoSet.size, 'decorations');
       
-      // Dispatch the decoration update via effect
-      this.editor.dispatch({
-        effects: this.setDiffEffect.of(decoSet)
-      });
+      const effects = [
+        this.setDiffEffect.of(decoSet)
+      ];
+      if (this.diffGutterCompartment && this.diffGutterExtension) {
+        effects.push(
+          this.diffGutterCompartment.reconfigure(
+            gutterActive ? [this.diffGutterExtension] : []
+          )
+        );
+      }
+      
+      this.editor.dispatch({ effects });
     },
     setupExtensions() {
       const self = this;
