@@ -857,3 +857,293 @@ _TE-2 Team + Atlas_
 
 _Implementation completed: 2025-11-17 20:25 UTC_  
 _Final log entry by: Atlas (TE-2 Team)_
+
+---
+
+## **Phase 13: Search Overlay Enhancements & Layout Refinement**
+
+### **Search Overlay Scoping Fix**
+**Timestamp:** 2025-11-17 23:15 UTC  
+**Reporter:** User  
+**Author:** Atlas  
+
+**Issue Discovered:**
+- Search overlay was full-page instead of scoped to explorer boundaries
+- Not obvious on mobile (explorer is full-screen drawer anyway)
+- Very obvious on desktop (search covered entire viewport)
+
+**Root Cause:**
+- Search overlay positioned fixed to viewport, not relative to explorer
+- No containment within `.fe-drawer` element
+
+**Solution:**
+- User fixed manually using the new search feature itself! 🎯
+- Scoped overlay to explorer panel boundaries
+
+---
+
+### **Search Overlay Button Styling**
+**Timestamp:** 2025-11-17 23:20 UTC  
+**Implemented by:** Atlas  
+
+**Enhancement 1: Button Outlines**
+- Added thin gray outlines to "Name" and "Content" toggle buttons
+- Matches rest of interface styling
+- Maintains clean, minimal search overlay chrome
+
+**Enhancement 2: Active State Glow**
+- Added subtle green glow (`box-shadow`) to active search mode button
+- Visual indicator of which search mode is active
+- Color: Green (matching project theme)
+- Style: Thin, subtle glow (not overpowering)
+
+**Files Modified:**
+- `app/apps/file_editor_cm6/static/js/explorer.css`
+
+---
+
+### **Desktop Layout Restructure**
+**Timestamp:** 2025-11-17 23:25 UTC  
+**Implemented by:** Atlas  
+
+**Goal:** Maximize screen space efficiency on desktop
+
+**Layout Changes:**
+
+**Before:**
+```
++-------------------------------------+
+|   Title Bar                         |
++-------------------------------------+
+|   Menu Bar                          |
++------------------+------------------+
+|  Explorer        |      Editor      |
+|   Panel          |                  |
++------------------+------------------+
+```
+
+**After:**
+```
++-------------------------------------+
+|   Title Bar                         |
++-------------------------------------+
+|                  |   Menu Bar       |
+|                  +------------------+
+|  Explorer        |      Editor      |
+|   Panel          |                  |
++------------------+------------------+
+```
+
+**Key Changes:**
+1. Explorer panel now extends up to title bar
+2. Menu bar sits directly to right of explorer (same row)
+3. More vertical space for both explorer and editor
+4. Mobile layout unaffected (already full-screen drawer)
+
+**Files Modified:**
+- `app/apps/file_editor_cm6/template.html` (desktop grid layout)
+
+---
+
+### **Header Shadow Enhancement**
+**Timestamp:** 2025-11-17 23:30 UTC  
+**Implemented by:** Atlas  
+
+**Enhancement:** Faint shadows under headers for depth
+
+**Added shadows to:**
+1. **Explorer drawer header** (`.fe-drawer-head`)
+2. **Menu bar** (`.fe-menubar`)
+
+**Shadow Specification:**
+```css
+box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+```
+- Offset: 2px down
+- Blur: 8px (soft)
+- Opacity: 15% (faint, not overpowering)
+
+**Result:** Subtle elevation effect, better visual hierarchy
+
+**Files Modified:**
+- `app/apps/file_editor_cm6/static/js/explorer.css`
+- `app/apps/file_editor_cm6/template.html`
+
+---
+
+### **Menubar Edge Borders**
+**Timestamp:** 2025-11-17 23:35 UTC  
+**Implemented by:** Atlas  
+
+**Enhancement:** Define menubar boundaries more clearly
+
+**Added:**
+- Dark gray outline on left and right edges of menubar
+- Matches "Open Project" button outline color
+- Clean separation from adjacent panels
+
+**Files Modified:**
+- `app/apps/file_editor_cm6/template.html`
+
+---
+
+### **Search Results Visual Refinement**
+**Timestamp:** 2025-11-17 23:40 UTC  
+**Implemented by:** Atlas  
+
+**Enhancement:** Better visual hierarchy in search results
+
+**Name Mode (File Search):**
+- Files/directories: Dark blue background (matches header chrome)
+- Separator: Thin dark gray horizontal line between items
+- Edge-to-edge styling
+
+**Content Mode (Text Search):**
+- File path: Dark blue background (matches header chrome)
+- Match previews: Dark gray background
+- No separators between matches (grouped by file)
+- Edge-to-edge styling
+
+**Colors Used:**
+- Dark blue: Same as `.fe-toolbar` and header backgrounds
+- Dark gray: Same as border color used throughout interface
+
+**Files Modified:**
+- `app/apps/file_editor_cm6/static/js/explorer.css`
+
+---
+
+### **Search Overlay Persistence Enhancement**
+**Timestamp:** 2025-11-17 23:45 UTC  
+**Implemented by:** Atlas  
+
+**Problem:** Search overlay closing too aggressively
+
+**Root Cause Analysis:**
+- Originally closed when file opened (bad UX - user might want to search again)
+- Was workaround for scoping issue (overlay appeared to "stay visible" because it was full-page)
+
+**Solution:** Smart persistence behavior
+
+**New Behavior:**
+
+| Action | Mobile | Desktop | Search Overlay | Drawer | Explorer Tree |
+|--------|--------|---------|----------------|--------|---------------|
+| **File clicked** | ✅ | ✅ | Stays open | Closes (mobile only) | Expands to file |
+| **Directory clicked** | ✅ | ✅ | Closes | Stays open | Expands to directory |
+
+**Rationale:**
+- Search stays open: User might want to search again immediately
+- Drawer auto-closes with file open (mobile): Reveals editor
+- Desktop unaffected: Drawer always visible, search closes with drawer (natural)
+- Directory click: User wants to explore tree, search closes naturally
+
+**Files Modified:**
+- `app/apps/file_editor_cm6/static/js/explorer.js`
+  - Added `isMobileLayout()` helper
+  - Added `closeDrawerIfMobile()` helper
+  - Updated `renderNameResults()` click handlers
+  - Updated `renderContentResults()` click handlers
+
+---
+
+### **Explorer Tree Auto-Expansion**
+**Timestamp:** 2025-11-17 23:50 UTC  
+**Implemented by:** Atlas  
+
+**Feature:** Explorer tree automatically expands to show context
+
+**Behavior:**
+- When file opened from search → tree expands to show file location
+- When directory clicked in search → tree expands to show directory
+- Uses existing `expandDirectory()` function (no new code paths)
+
+**Implementation:**
+```javascript
+// Extract directory path from file path
+const dirPath = item.rel.includes('/') 
+  ? item.rel.substring(0, item.rel.lastIndexOf('/')) 
+  : '.';
+
+// Expand tree to show context
+if (treeElement) {
+  await expandDirectory(treeElement, dirPath);
+}
+```
+
+**Result:** Explorer always shows current file/directory context
+
+**Files Modified:**
+- `app/apps/file_editor_cm6/static/js/explorer.js`
+
+---
+
+## **Final Feature Set Summary**
+
+### **Search Overlay Features** 🔍
+✅ Two modes: File name search + content search  
+✅ Debounced input (performance)  
+✅ Scoped to explorer panel boundaries  
+✅ Styled toggle buttons with active state glow  
+✅ Incremental rendering (mobile keyboard stays open)  
+✅ Smart persistence (stays open for repeated searches)  
+✅ Visual hierarchy (dark blue files, dark gray content)  
+
+### **Integration Features** 🔗
+✅ Uses `appOpenFileRel` (unified flow with explorer)  
+✅ Full history tracking and cache management  
+✅ Automatic drawer close (mobile only)  
+✅ Automatic tree expansion to show context  
+✅ Line jump with vendored CodeMirror method  
+✅ Directory click support (expands tree)  
+
+### **Layout Enhancements** 📐
+✅ Desktop: Explorer extends to title bar  
+✅ Desktop: Menu bar sits beside explorer (space efficient)  
+✅ Mobile: Unchanged (full-screen drawer behavior preserved)  
+✅ Faint shadows under headers (depth/hierarchy)  
+✅ Menubar edge borders (clean boundaries)  
+
+### **Architecture Compliance** ✅
+✅ Application backend is ground truth  
+✅ No NiceGUI backend file loading  
+✅ Stateless iframe operations  
+✅ Unified file opening flow  
+✅ Proper WebSocket connections  
+✅ Diff controller integration  
+
+---
+
+## **Lessons Learned**
+
+**Added to Guidelines:** `docs/core/nicegui_iframe_feature_adding_guideline.md`
+
+**New Section: "Search Features"**
+
+1. **Always scope overlays to their parent container**
+   - Not obvious on mobile if parent is full-screen
+   - Test on desktop to verify containment
+
+2. **Explorer tree should reflect editor state**
+   - Auto-expand tree when files opened via alternate paths
+   - Maintains "unified file-driven" philosophy
+
+3. **Smart drawer behavior on mobile**
+   - Close drawer when file opened (reveal editor)
+   - Keep drawer open when exploring (directory clicks)
+
+4. **Search overlay persistence**
+   - Don't auto-close after every action
+   - Let user decide when to close (X button, Escape, directory click)
+
+5. **Vendored CodeMirror integration**
+   - Use `run_method()` not `run_javascript()` hacks
+   - Add methods to vendored files with documentation
+   - Document: Date, team, purpose, usage
+
+---
+
+_Search feature implementation completed: 2025-11-18 00:20 UTC_  
+_Total implementation time: ~4 hours_  
+_Final entries by: Atlas (TE-2 Team)_
+
