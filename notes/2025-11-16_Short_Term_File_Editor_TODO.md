@@ -49,5 +49,36 @@
 ---
 
 ### Next Steps
-1. Decide implementation order (attribute preservation + terminal bug are “must fix”, search/indent guides are “nice-to-have” UX).
-2. After each item ships, update this file with completion date + commit hash so roadmap stays current.
+
+#### Explorer Drawer
+1. New Project modal with two options instead of direct picker:
+   - (a) New project directory: reuse existing New Project behavior and let user optionally init Git via existing explorer Git actions.
+   - (b) Clone from Git repo URL: user enters URL, chooses target directory and optional custom project name via shared file picker; clone uses Termux environment (reuses existing credentials where applicable).
+2. Add external file explorer integration:
+   - Add "Open in external explorer" entry to directory card "..." menus, launching the framework’s native file explorer app worker at that directory.
+3. Add "Copy from" and "Move from" actions:
+   - Add to directory card "..." menus; use shared file picker to choose source path, then copy/move into the selected directory.
+4. Add "cd in terminal" action:
+   - In directory card "..." menus, send a request to open (or reuse) a terminal shell with CWD set to that directory.
+5. Add "Make executable" action (VERY IMPORTANT):
+   - In file card "..." menus, add action that sets the executable bit (preserving other mode bits) via backend helper.
+6. Git jobs progress (least important):
+   - Use framework jobs library to track clone/pull/push operations and expose their status to explorer.
+   - Show a slim progress bar sitting on top of the explorer footer border; only visible while a job is active.
+7. "Mention file in agent drawer" (least least important):
+   - Add "Mention in agent drawer" to file/dir card "..." menus; action prepends a message like `user mentioned:<file_or_dir_path>` into the agent drawer for that path.
+
+#### Editor
+8. Fix indentation guide spacing when inline diff gutter is enabled:
+   - Ensure indentation markers account for the extra "+/-" gutter so guides line up correctly with code when both features are on.
+9. Add remote branch checkout to Branch menu:
+   - Extend menubar Branch menu to list remote branches and allow checking them out (likely via new git helper + endpoint).
+10. Import CSS color picker npm module for CodeMirror (VERY IMPORTANT):
+    - Vendor a CM-compatible CSS color picker extension, bundle via the existing CodeMirror build, and expose a toggle/feature in the editor (e.g., color swatches or in-place picker for CSS color literals).
+
+#### Agent Drawer
+11. Fix Agent Drawer mobile layout (transcript/chat only):
+    - Fix the transcript box and chat input layout/behavior on mobile where they currently misbehave in some browsers/implementations.
+    - The drawer itself is a full-screen overlay on mobile and is fine; focus is on making the transcript scroll region and chat box usable and stable.
+
+12. After each item ships, update this file with completion date + commit hash so roadmap stays current.
