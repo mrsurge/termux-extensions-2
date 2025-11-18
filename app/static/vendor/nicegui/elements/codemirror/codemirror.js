@@ -46,12 +46,17 @@ function getIndentForLanguage(language) {
   return LANGUAGE_INDENT_MAP[normalized] || 4;  // Default to 4 if unknown
 }
 
+const EMPTY_GUTTER_RANGESET = (() => {
+  const builder = new CM.RangeSetBuilder();
+  return builder.finish();
+})();
+
 // Inline diff decorations helper (extracted from diff_decorations.js)
 function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const { Decoration, RangeSetBuilder, WidgetType } = CM;
   
   if (!hunks || hunks.length === 0) {
-    return Decoration.none;
+    return { decorations: Decoration.none, gutter: EMPTY_GUTTER_RANGESET };
   }
 
   const lineAddedDeco = Decoration.line({
@@ -74,7 +79,6 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       if (this.wordWrap) {
         lineEl.classList.add('cm-diff-wrap');
       }
-      lineEl.setAttribute('data-diff-marker', '−');
 
       const content = document.createElement('span');
       content.className = 'cm-diff-removed-text';
@@ -88,6 +92,8 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
 
   const wordWrap = getWordWrap();
   const builder = new RangeSetBuilder();
+  const gutterBuilder = new RangeSetBuilder();
+  let gutterCount = 0;
   const doc = view.state.doc;
   
   console.log('[buildDiffDecorations] Doc has', doc.lines, 'lines');
@@ -103,7 +109,8 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       console.log('[buildDiffDecorations]   Line type:', kind, 'newLine:', newLine, 'text:', line.text?.substring(0, 30));
       if (kind === 'add' || kind === 'context') {
         const deco = kind === 'add' ? lineAddedDeco : lineContextDeco;
-        lineDecorations.set(newLine, deco);
+        const markerKind = kind === 'add' ? '+' : '│';
+        lineDecorations.set(newLine, { decoration: deco, markerKind });
         newLine += 1;
       } else if (kind === 'del') {
         deletionWidgets.push({
@@ -133,6 +140,8 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
         block: true,
         widget: new RemovedLineWidget(widget.text, wordWrap),
       }));
+      gutterBuilder.add(pos, pos, new DiffGutterMarker('−'));
+      gutterCount++;
       widgetIndex++;
     }
     
@@ -143,11 +152,16 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
         block: true,
         widget: new RemovedLineWidget(widget.text, wordWrap),
       }));
+      gutterBuilder.add(lineInfo.from, lineInfo.from, new DiffGutterMarker('−'));
+      gutterCount++;
       widgetIndex++;
     }
 
-    if (lineDecorations.has(lineNum)) {
-      builder.add(lineInfo.from, lineInfo.from, lineDecorations.get(lineNum));
+    const entry = lineDecorations.get(lineNum);
+    if (entry) {
+      builder.add(lineInfo.from, lineInfo.from, entry.decoration);
+      gutterBuilder.add(lineInfo.from, lineInfo.from, new DiffGutterMarker(entry.markerKind));
+      gutterCount++;
     }
   }
   
@@ -160,10 +174,14 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       block: true,
       widget: new RemovedLineWidget(widget.text, wordWrap),
     }));
+    gutterBuilder.add(pos, pos, new DiffGutterMarker('−'));
+    gutterCount++;
     widgetIndex++;
   }
 
-  return builder.finish();
+  const decorations = builder.finish();
+  const gutter = gutterCount ? gutterBuilder.finish() : EMPTY_GUTTER_RANGESET;
+  return { decorations, gutter };
 }
 
 function safeLine(doc, lineNumber) {
@@ -201,43 +219,6 @@ class DiffGutterMarker extends CM.GutterMarker {
   }
 }
 
-function buildDiffGutterMarkers(view, hunks) {
-  if (!hunks || hunks.length === 0) {
-    const builder = new CM.RangeSetBuilder();
-    return builder.finish();
-  }
-  const doc = view.state.doc;
-  const builder = new CM.RangeSetBuilder();
-  const lineMarkers = new Map();
-
-  for (const hunk of hunks) {
-    let newLine = Math.max(1, hunk.newStart || 1);
-    for (const line of hunk.lines || []) {
-      const kind = line.type;
-      if (kind === 'add') {
-        lineMarkers.set(newLine, new DiffGutterMarker('+'));
-        newLine += 1;
-      } else if (kind === 'context') {
-        lineMarkers.set(newLine, new DiffGutterMarker('│'));
-        newLine += 1;
-      } else if (kind === 'del') {
-        if (!lineMarkers.has(newLine)) {
-          lineMarkers.set(newLine, new DiffGutterMarker('−'));
-        }
-      }
-    }
-  }
-
-  for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
-    const marker = lineMarkers.get(lineNum);
-    if (!marker) continue;
-    const lineInfo = safeLine(doc, lineNum);
-    if (!lineInfo) continue;
-    builder.add(lineInfo.from, lineInfo.from, marker);
-  }
-
-  return builder.finish();
-}
 
 export default {
   template: `
@@ -274,7 +255,6 @@ export default {
         this.resolveEditor = resolve;
       }),
       pendingFontScale: 1,
-      currentDiffHunks: [],
     };
   },
   methods: {
@@ -548,36 +528,63 @@ export default {
       }
 
       if (!this.diffGutterCompartment) {
-        this.diffGutterCompartment = new CM.Compartment();
-        this.currentDiffHunks = [];
-        this.diffGutterExtension = CM.gutter({
-          class: 'cm-diff-gutter',
-          markers: view => buildDiffGutterMarkers(view, this.currentDiffHunks),
-          initialSpacer: () => new DiffGutterMarker('+'),
+        const { StateEffect, StateField, Compartment } = CM;
+        this.diffGutterCompartment = new Compartment();
+        this.setDiffGutterEffect = StateEffect.define();
+        this.clearDiffGutterEffect = StateEffect.define();
+        const setDiffGutterEffect = this.setDiffGutterEffect;
+        const clearDiffGutterEffect = this.clearDiffGutterEffect;
+        const diffGutterField = StateField.define({
+          create() {
+            return EMPTY_GUTTER_RANGESET;
+          },
+          update(value, tr) {
+            if (tr.docChanged && value && typeof value.map === 'function') {
+              value = value.map(tr.changes);
+            }
+            for (const effect of tr.effects) {
+              if (effect.is(setDiffGutterEffect)) {
+                value = effect.value;
+              } else if (effect.is(clearDiffGutterEffect)) {
+                value = EMPTY_GUTTER_RANGESET;
+              }
+            }
+            return value;
+          },
         });
+        this.diffGutterField = diffGutterField;
+        this.diffGutterExtension = [
+          diffGutterField,
+          CM.gutter({
+            class: 'cm-diff-gutter',
+            markers: view => view.state.field(diffGutterField),
+            initialSpacer: () => new DiffGutterMarker(''),
+          }),
+        ];
         this.editor.dispatch({
           effects: CM.StateEffect.appendConfig.of(this.diffGutterCompartment.of([]))
         });
       }
 
       const normalizedHunks = Array.isArray(hunks) ? hunks : [];
-      this.currentDiffHunks = normalizedHunks;
-      const gutterActive = normalizedHunks.length > 0;
       
       const getWordWrap = () => this.lineWrapping || false;
       console.log('[applyDiffDecorations] Building decorations, wordWrap:', getWordWrap());
-      const decoSet = buildDiffDecorations(this.editor, normalizedHunks, CM, getWordWrap);
-      console.log('[applyDiffDecorations] Built', decoSet.size, 'decorations');
+      const { decorations: decoSet, gutter: gutterSet } = buildDiffDecorations(this.editor, normalizedHunks, CM, getWordWrap);
+      console.log('[applyDiffDecorations] Built diff decorations');
+      const gutterActive = gutterSet !== EMPTY_GUTTER_RANGESET;
       
       const effects = [
         this.setDiffEffect.of(decoSet)
       ];
       if (this.diffGutterCompartment && this.diffGutterExtension) {
-        effects.push(
-          this.diffGutterCompartment.reconfigure(
-            gutterActive ? [this.diffGutterExtension] : []
-          )
-        );
+        if (gutterActive) {
+          effects.push(this.diffGutterCompartment.reconfigure(this.diffGutterExtension));
+          effects.push(this.setDiffGutterEffect.of(gutterSet));
+        } else {
+          effects.push(this.clearDiffGutterEffect.of(null));
+          effects.push(this.diffGutterCompartment.reconfigure([]));
+        }
       }
       
       this.editor.dispatch({ effects });

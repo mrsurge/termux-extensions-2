@@ -440,7 +440,8 @@ async def editor_page():
     ui.add_head_html('''
     <style>
     :root {
-      --diff-marker-width: 1.65rem;
+      --diff-gutter-width: 1.2rem;
+      --diff-marker-width: var(--diff-gutter-width);
       --diff-add-bg: rgba(52, 211, 153, 0.22);
       --diff-add-border: rgba(52, 211, 153, 0.75);
       --diff-add-marker: rgba(52, 211, 153, 0.9);
@@ -452,8 +453,8 @@ async def editor_page():
       --diff-del-marker: rgba(248, 113, 113, 0.85);
     }
     .cm-diff-gutter {
-      width: var(--diff-marker-width);
-      min-width: var(--diff-marker-width);
+      width: var(--diff-gutter-width);
+      min-width: var(--diff-gutter-width);
     }
     .cm-diff-gutter .cm-gutterElement {
       display: flex;
@@ -474,11 +475,16 @@ async def editor_page():
     .cm-diff-marker-add { color: var(--diff-add-marker); }
     .cm-diff-marker-del { color: var(--diff-del-marker); }
     .cm-diff-marker-context { color: var(--diff-context-marker); }
-    .cm-diff-line-added { background: var(--diff-add-bg) !important; border-left: 3px solid var(--diff-add-border) !important; }
-    .cm-diff-line-context { border-left: 3px solid var(--diff-context-border); }
+    .cm-diff-line-added {
+      background: var(--diff-add-bg) !important;
+      box-shadow: inset 3px 0 var(--diff-add-border);
+    }
+    .cm-diff-line-context {
+      box-shadow: inset 3px 0 var(--diff-context-border);
+    }
     .cm-diff-line-removed {
       position: relative;
-      padding: 0 10px 0 calc(var(--diff-marker-width) + 6px);
+      padding: 0 10px 0 calc(var(--diff-gutter-width) + 6px);
       border-left: 3px solid var(--diff-del-border);
       background: var(--diff-del-bg);
       color: var(--diff-del-fg);
@@ -488,17 +494,6 @@ async def editor_page():
       user-select: none;
       -webkit-user-select: none;
       contain: layout paint;
-    }
-    .cm-diff-line-removed::before {
-      content: attr(data-diff-marker);
-      position: absolute;
-      left: 0;
-      width: var(--diff-marker-width);
-      text-align: center;
-      font-weight: 600;
-      color: var(--diff-del-marker);
-      user-select: none;
-      -webkit-user-select: none;
     }
     .cm-diff-removed-text { display: block; white-space: pre; }
     .cm-diff-line-removed.cm-diff-wrap { white-space: pre-wrap; word-break: break-word; }
