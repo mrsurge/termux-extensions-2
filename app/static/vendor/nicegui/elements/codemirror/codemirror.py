@@ -373,6 +373,10 @@ class CodeMirror(ValueElement, DisableableElement,
     def set_indent_guides(self, enabled: bool) -> None:
         """Toggle indentation guide lines."""
         self.run_method('applyIndentGuides', enabled)
+    
+    def toggle_color_picker(self, enabled: bool) -> None:
+        """Toggle CSS color picker extension."""
+        self.run_method('applyColorPicker', enabled)
 
     def set_diff_decorations(self, hunks: list) -> None:
         """Apply inline git diff decorations to the editor.

@@ -699,12 +699,8 @@ async function setFontScale(preset) {
     // 1. Update chrome immediately
     applyFontScale(scale);
     
-    // 2. Update editor via backend
-    await apiPost('editor/set_font_scale', { scale });
-    // apiPost throws on error, so if we reach here, it succeeded
-    
-    // 3. Persist preference
-    await persistEditorPreferences({ fontScale: scale });
+    // 2. Update editor via backend and persist
+    await updatePreference('fontScale', scale);
     
   } catch (error) {
     console.error('[FontScale] Failed to update:', error);
@@ -719,24 +715,13 @@ let currentPath = '';
 let currentPathExists = false;
 let lastSavedContent = '';
 let unsaved = false;
-let showLineNumbers = true;
-let showLineShading = false; // cosmetic; not implemented for CM6 here
-let showIndentGuides = false;
-let showSyntaxHighlight = true;
-let wordWrap = false;
-let autoCloseBrackets = true;  // New: ON by default
-let enableAutocompletion = true;  // New: ON by default
-let autoSaveEnabled = true;
-let showInlineDiffs = true;
-let colorPickerEnabled = true;   // CSS color picker default ON
-let readOnlyMode = false;         // Read-only mode toggle
-let trackAgentEdits = false;
-let currentTheme = 'cm6-dark';
-let lastPickerPath = HOME_DIR;
+
+// Preferences are managed by backend; frontend displays state only (no caching)
+let editorViewState = null; // Loaded from backend at startup via /editor/view_state
+
 let currentModeLanguage = null;
 let cachedProjectRoot = null;
 let editorState = null;
-let cachedPreferences = null;
 let branchMenuHandle = null;
 let agentDrawerHandle = null;
 let sessionState = {
@@ -751,6 +736,7 @@ let sessionStateTimer = null;
 let persistedSessionSnapshot = null;
 let restoredSessionActive = false;
 let externalRefreshInProgress = false;
+let lastPickerPath = HOME_DIR;
 
 // WebSocket and autosave state
 let ws = null;
@@ -943,137 +929,75 @@ async function triggerEditorSearchPanel(reason = 'menu') {
   }
 }
 
-function applyPreferencesFromStore(payload) {
-  cachedPreferences = payload || {};
-  const editorPrefs = (cachedPreferences && cachedPreferences.editor) || {};
-  showLineNumbers = editorPrefs.showLineNumbers !== false;
-  showLineShading = !!editorPrefs.showShading;
-  showIndentGuides = !!editorPrefs.showIndentGuides;
-  showSyntaxHighlight = editorPrefs.showSyntax !== false;
-  wordWrap = !!editorPrefs.wordWrap;
-  autoCloseBrackets = editorPrefs.autoCloseBrackets !== false;  // Default true
-  enableAutocompletion = editorPrefs.autocompletion !== false;  // Default true
-  autoSaveEnabled = editorPrefs.autoSave !== false;
-  showInlineDiffs = editorPrefs.showInlineDiffs !== false;
-  colorPickerEnabled = !!editorPrefs.colorPicker;  // Default false
-  readOnlyMode = !!editorPrefs.readOnly;            // Default false
-  trackAgentEdits = !!editorPrefs.trackAgentEdits;
-  const themeId = editorPrefs.theme;
-  currentTheme = themeId || 'cm6-dark';
+// ---------- Unified Preference Management (Backend as Single Source of Truth) ----------
 
-  // Load font scale from preferences and apply it to the UI.
-  const fontScale = editorPrefs.fontScale ?? 0.85;
-  applyFontScale(fontScale);
-
-  // Update theme menu checkmarks to reflect loaded preference
-  updateThemeMenuChecks();
-
-  if (editorState) {
-    editorState.preferences = cachedPreferences;
-  }
-  
-  // NOTE: Do NOT sync to NiceGUI here! editor_app.py already loads correct settings
-  // from preferences_store on startup. Menu toggles sync directly when changed.
-}
-
-function applyMenuState() {
-  setMenuChecked(miToggleLines, showLineNumbers);
-  setMenuChecked(miToggleSyntax, showSyntaxHighlight);
-  setMenuChecked(miToggleCloseBrackets, autoCloseBrackets);
-  setMenuChecked(miToggleAutocomplete, enableAutocompletion);
-  setMenuChecked(miToggleShading, showLineShading);
-  setMenuChecked(miToggleIndentGuides, showIndentGuides);
-  setMenuChecked(miToggleWrap, wordWrap);
-  setMenuChecked(miToggleAutosave, autoSaveEnabled);
-  setMenuChecked(miToggleDiffs, showInlineDiffs);
-  setMenuChecked(miToggleColorPicker, colorPickerEnabled);
-  setMenuChecked(miToggleReadonly, readOnlyMode);
-  setMenuChecked(miTrackEdits, trackAgentEdits);
-}
-
-function updateThemeMenuChecks() {
-  themeMenuItems.forEach(item => {
-    const isChecked = item.dataset.theme === currentTheme;
-    setMenuChecked(item, isChecked);
-  });
-}
-
-function mapThemeToNiceGUI(themeId) {
-  const themeMap = {
-    'cm6-dark': 'basicDark',
-    'one-dark': 'oneDark',
-    'termux': 'consoleDark',
-    'github-dark': 'githubDark',
-    'github-light': 'githubLight',
-    'vscode-dark': 'vscodeDark',
-    'vscode-light': 'vscodeLight',
-    'xcode-dark': 'vscodeDark',
-    'xcode-light': 'vscodeLight',
-    'solarized-dark': 'solarizedDark',
-    'solarized-light': 'solarizedLight',
-    'nord': 'nord',
-    'dracula': 'dracula',
-    'okaidia': 'okaidia',
-    'sublime': 'sublime',
-    'androidstudio': 'androidstudio',
-    'darcula': 'darcula',
-    'basic-dark': 'basicDark',
-    'basic-light': 'basicLight',
-  };
-  return themeMap[themeId] || 'oneDark';
-}
-
-async function fetchPreferencesFromServer() {
+async function fetchEditorState() {
+  // Query backend for current editor state (for menu checkmarks only)
   try {
-    const resp = await fetch('/api/app/file_editor_cm6/preferences', { cache: 'no-store' });
+    const resp = await fetch('/api/app/file_editor_cm6/editor/view_state', { cache: 'no-store' });
     const json = await resp.json();
     return json?.data || null;
   } catch (err) {
-    console.error('Failed to fetch preferences:', err);
+    console.error('[EditorState] Failed to fetch:', err);
     return null;
   }
 }
 
-async function loadPreferences(initialPayload = null) {
-  const payload = initialPayload || await fetchPreferencesFromServer();
-  applyPreferencesFromStore(payload);
-  diffController.setEnabled(showInlineDiffs);
-  
-  // Apply color picker state
-  if (colorPickerEnabled) {
-    apiPost('editor/color_picker/toggle', { enabled: true })
-      .catch(e => console.warn('[Prefs] Failed to enable color picker:', e));
-  }
-  
-  // Apply read-only state
-  if (readOnlyMode) {
-    apiPost('editor/read_only/set', { readonly: true })
-      .catch(e => console.warn('[Prefs] Failed to set read-only mode:', e));
-  }
-  
-  // Connect/disconnect edit tracker based on preference
-  if (trackAgentEdits) {
-    connectEditTracker();
-  } else {
-    disconnectEditTracker();
+async function updatePreference(key, value) {
+  // Send preference change to backend; backend handles persistence + application
+  // Returns full state in single round trip (Jimmy's optimization)
+  try {
+    const resp = await apiPost('editor/update_preference', { key, value });
+    
+    // apiPost already unwraps the response (returns res.data)
+    // Backend sends {ok: true, data: {...}}, apiPost returns the data object
+    if (resp && typeof resp === 'object' && Object.keys(resp).length > 0) {
+      // resp is the state object (not wrapped in {ok, data})
+      applyStateToMenus(resp);
+      editorViewState = resp;
+      return true;
+    }
+    
+    // Empty response or error
+    console.error(`[Preference] Update ${key} failed: empty or invalid response`, resp);
+    return false;
+  } catch (err) {
+    console.error(`[Preference] Failed to update ${key}:`, err);
+    return false;
   }
 }
 
-async function persistEditorPreferences(partialEditor = null) {
-  if (!partialEditor || Object.keys(partialEditor).length === 0) {
-    return;
-  }
-  try {
-    const data = await apiPost('preferences', { editor: partialEditor });
-    if (data && typeof data === 'object') {
-      cachedPreferences = data;
-      if (editorState) {
-        editorState.preferences = data;
-      }
-    }
-  } catch (err) {
-    console.error('Failed to persist editor preferences:', err);
-  }
+async function refreshMenuState() {
+  // Query backend for current state and update menu checkmarks
+  const state = await fetchEditorState();
+  if (!state) return;
+  
+  applyStateToMenus(state);
+  editorViewState = state;
+}
+
+function applyStateToMenus(state) {
+  // Update all menu checkmarks from backend state
+  setMenuChecked(miToggleLines, state.showLineNumbers);
+  setMenuChecked(miToggleSyntax, state.showSyntax);
+  setMenuChecked(miToggleCloseBrackets, state.autoCloseBrackets);
+  setMenuChecked(miToggleAutocomplete, state.autocompletion);
+  setMenuChecked(miToggleShading, state.showShading);
+  setMenuChecked(miToggleIndentGuides, state.showIndentGuides);
+  setMenuChecked(miToggleWrap, state.wordWrap);
+  setMenuChecked(miToggleAutosave, state.autoSave);
+  setMenuChecked(miToggleDiffs, state.showInlineDiffs);
+  setMenuChecked(miToggleColorPicker, state.colorPicker);
+  setMenuChecked(miToggleReadonly, state.readOnly);
+  setMenuChecked(miTrackEdits, state.trackAgentEdits);
+  
+  // Update theme menu checkmarks
+  themeMenuItems.forEach(item => {
+    setMenuChecked(item, item.dataset.theme === state.theme);
+  });
+  
+  // Apply font scale to UI
+  applyFontScale(state.fontScale ?? 0.85);
 }
 
 function broadcastRecentsUpdate(state) {
@@ -1240,7 +1164,7 @@ function handleWSMessage(msg) {
       setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 2000);
       diffController.invalidateCacheForPath(currentPath);
       diffController.setContext({ path: currentPath, sha: lastSha256 });
-      if (showInlineDiffs) {
+      if (editorViewState?.showInlineDiffs) {
         diffController.refresh(true);
       }
       // Refresh explorer on file changes (debounced)
@@ -1254,7 +1178,7 @@ function handleWSMessage(msg) {
       setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
     }
   } else if (type === 'diff_changed') {
-    if (diffController && showInlineDiffs && currentPath) {
+    if (diffController && editorViewState?.showInlineDiffs && currentPath) {
       diffController.invalidateCacheForPath(currentPath);
       diffController.refresh(true);
     }
@@ -1371,7 +1295,7 @@ async function openFile(path, options = {}) {
     // Open WebSocket for this file
     openWebSocket(resolved);
     diffController.setContext({ path: resolved, sha: lastSha256 });
-    if (showInlineDiffs) {
+    if (editorViewState?.showInlineDiffs) {
       diffController.refresh(true);
     }
 
@@ -1560,7 +1484,7 @@ async function saveAsDialog() {
     openWebSocket(currentPath);
     diffController.invalidateCacheForPath(currentPath);
     diffController.setContext({ path: currentPath, sha: lastSha256 });
-    if (showInlineDiffs) {
+    if (editorViewState?.showInlineDiffs) {
       diffController.refresh(true);
     }
 
@@ -1592,7 +1516,7 @@ function scheduleAutosave() {
   }
 
   // Don't autosave if disabled OR if native selection is active (ZWSPs present)
-  if (!autoSaveEnabled || nativeSelectionActive) {
+  if (!(editorViewState?.autoSave) || nativeSelectionActive) {
     return;
   }
 
@@ -1681,17 +1605,12 @@ function bindThemeMenu() {
     item.addEventListener('click', async (e) => {
       e.stopPropagation();
       const newTheme = item.dataset.theme;
-      if (newTheme && newTheme !== currentTheme) {
-        currentTheme = newTheme;
-        updateThemeMenuChecks();
-        
-        // 1. Persist to disk
-        await persistEditorPreferences({ theme: currentTheme });
-        
-        // 2. Update shared state for live sync
-        // Send raw theme ID (kebab-case); backend maps it for editor but saves raw ID for persistence
-        apiPost('editor/set_view_settings', { theme: currentTheme })
-          .catch(e => console.warn('[Theme] Failed to sync theme:', e));
+      if (newTheme && newTheme !== editorViewState?.theme) {
+        // Update preference via unified method
+        const success = await updatePreference('theme', newTheme);
+        if (!success) {
+          host.toast('Failed to change theme');
+        }
       }
       menuThemeDD.classList.remove('show');
     });
@@ -1760,114 +1679,72 @@ bindMenuToggle(miSelectAll, () => {
   view.focus();
 });
 
-bindMenuToggle(miToggleLines, () => {
-  showLineNumbers = !showLineNumbers;
-  applyMenuState();
-  createView(getText());
-  persistEditorPreferences({ showLineNumbers });
+bindMenuToggle(miToggleLines, async () => {
+  const success = await updatePreference('showLineNumbers', !(editorViewState?.showLineNumbers));
+  if (!success) host.toast('Failed to update preference');
 });
+
 bindMenuToggle(miToggleShading, async () => {
-  showLineShading = !showLineShading;
-  setMenuChecked(miToggleShading, showLineShading);
-  persistEditorPreferences({ showShading: showLineShading });
-  // Sync to NiceGUI state - use set_view_settings to update immediately
-  apiPost('editor/set_view_settings', { line_shading: showLineShading }).catch(e => console.warn('[Menu] Failed to sync line shading:', e));
+  const success = await updatePreference('showShading', !(editorViewState?.showShading));
+  if (!success) host.toast('Failed to update preference');
 });
+
 bindMenuToggle(miToggleIndentGuides, async () => {
-  showIndentGuides = !showIndentGuides;
-  setMenuChecked(miToggleIndentGuides, showIndentGuides);
-  persistEditorPreferences({ showIndentGuides: showIndentGuides });
-  apiPost('editor/set_view_settings', { indent_guides: showIndentGuides })
-    .catch(e => console.warn('[Menu] Failed to sync indent guides:', e));
+  const success = await updatePreference('showIndentGuides', !(editorViewState?.showIndentGuides));
+  if (!success) host.toast('Failed to update preference');
 });
-bindMenuToggle(miToggleSyntax, () => {
-  showSyntaxHighlight = !showSyntaxHighlight;
-  applyMenuState();
-  createView(getText());
-  persistEditorPreferences({ showSyntax: showSyntaxHighlight });
+
+bindMenuToggle(miToggleSyntax, async () => {
+  const success = await updatePreference('showSyntax', !(editorViewState?.showSyntax));
+  if (!success) host.toast('Failed to update preference');
 });
-bindMenuToggle(miToggleCloseBrackets, () => {
-  autoCloseBrackets = !autoCloseBrackets;
-  applyMenuState();
-  createView(getText());
-  if (showInlineDiffs && currentPath && currentPathExists) {
-    diffController.refresh(true);
-  }
-  persistEditorPreferences({ autoCloseBrackets });
+
+bindMenuToggle(miToggleCloseBrackets, async () => {
+  const success = await updatePreference('autoCloseBrackets', !(editorViewState?.autoCloseBrackets));
+  if (!success) host.toast('Failed to update preference');
 });
-bindMenuToggle(miToggleAutocomplete, () => {
-  enableAutocompletion = !enableAutocompletion;
-  applyMenuState();
-  createView(getText());
-  if (showInlineDiffs && currentPath && currentPathExists) {
-    diffController.refresh(true);
-  }
-  persistEditorPreferences({ autocompletion: enableAutocompletion });
+
+bindMenuToggle(miToggleAutocomplete, async () => {
+  const success = await updatePreference('autocompletion', !(editorViewState?.autocompletion));
+  if (!success) host.toast('Failed to update preference');
 });
+
 bindMenuToggle(miToggleWrap, async () => {
-  wordWrap = !wordWrap;
-  setMenuChecked(miToggleWrap, wordWrap);
-  persistEditorPreferences({ wordWrap });
-  // Sync to NiceGUI state
-  apiPost('editor/set_view_settings', { word_wrap: wordWrap }).catch(e => console.warn('[Menu] Failed to sync word wrap:', e));
+  const success = await updatePreference('wordWrap', !(editorViewState?.wordWrap));
+  if (!success) host.toast('Failed to update preference');
 });
-bindMenuToggle(miToggleAutosave, () => {
-  autoSaveEnabled = !autoSaveEnabled;
-  applyMenuState();
-  if (autoSaveEnabled && unsaved && currentPath && currentPathExists) {
-    scheduleAutosave(); // Trigger autosave immediately if there are unsaved changes
+
+bindMenuToggle(miToggleAutosave, async () => {
+  const success = await updatePreference('autoSave', !(editorViewState?.autoSave));
+  if (!success) host.toast('Failed to update preference');
+  // Trigger autosave immediately if there are unsaved changes and autosave was enabled
+  if (success && editorViewState?.autoSave && unsaved && currentPath && currentPathExists) {
+    scheduleAutosave();
   }
-  persistEditorPreferences({ autoSave: autoSaveEnabled });
 });
+
 bindMenuToggle(miToggleDiffs, async () => {
-  showInlineDiffs = !showInlineDiffs;
-  setMenuChecked(miToggleDiffs, showInlineDiffs);
-  persistEditorPreferences({ showInlineDiffs });
-  // Sync to NiceGUI state - will trigger diff decorations in iframe
-  apiPost('editor/set_view_settings', { 
-    show_inline_diffs: showInlineDiffs,
-    current_path: currentPath  // Send current file for diff loading
-  }).catch(e => console.warn('[Menu] Failed to sync inline diffs:', e));
+  const success = await updatePreference('showInlineDiffs', !(editorViewState?.showInlineDiffs));
+  if (!success) host.toast('Failed to update preference');
 });
 
-// Color picker toggle
 bindMenuToggle(miToggleColorPicker, async () => {
-  colorPickerEnabled = !colorPickerEnabled;
-  setMenuChecked(miToggleColorPicker, colorPickerEnabled);
-  persistEditorPreferences({ colorPicker: colorPickerEnabled });
-  
-  try {
-    await apiPost('editor/color_picker/toggle', { enabled: colorPickerEnabled });
-  } catch (e) {
-    host.toast('Failed to toggle color picker');
-    console.warn('[Menu] Color picker toggle failed:', e);
-  }
+  const success = await updatePreference('colorPicker', !(editorViewState?.colorPicker));
+  if (!success) host.toast('Failed to update color picker');
 });
 
-// Read-only mode toggle
 bindMenuToggle(miToggleReadonly, async () => {
-  readOnlyMode = !readOnlyMode;
-  setMenuChecked(miToggleReadonly, readOnlyMode);
-  persistEditorPreferences({ readOnly: readOnlyMode });
-  
-  try {
-    await apiPost('editor/read_only/set', { readonly: readOnlyMode });
-    host.toast(readOnlyMode ? 'Editor is now read-only' : 'Editor is now editable', 'info');
-  } catch (e) {
+  const success = await updatePreference('readOnly', !(editorViewState?.readOnly));
+  if (success) {
+    host.toast(editorViewState?.readOnly ? 'Editor is now read-only' : 'Editor is now editable', 'info');
+  } else {
     host.toast('Failed to toggle read-only mode');
-    console.warn('[Menu] Read-only toggle failed:', e);
   }
 });
 
-bindMenuToggle(miTrackEdits, () => {
-  trackAgentEdits = !trackAgentEdits;
-  applyMenuState();
-  if (trackAgentEdits) {
-    connectEditTracker();
-  } else {
-    disconnectEditTracker();
-  }
-  persistEditorPreferences({ trackAgentEdits });
+bindMenuToggle(miTrackEdits, async () => {
+  const success = await updatePreference('trackAgentEdits', !(editorViewState?.trackAgentEdits));
+  if (!success) host.toast('Failed to update preference');
 });
 
 // Initialize terminal drawer
@@ -2087,17 +1964,12 @@ async function main() {
   branchMenuHandle = initBranchMenu();
   agentDrawerHandle = initAgentDrawer();
 
-  // Apply host-side fallback preferences while we wait for disk-backed settings.
-  applyPreferencesFromStore(cachedPreferences);
-  applyMenuState();
-  updateThemeMenuChecks();
-
   const serverState = await syncEditorState(true);
 
-  await loadPreferences(serverState?.preferences || cachedPreferences);
-  applyMenuState();
-  updateThemeMenuChecks();
+  // Load menu state from backend (backend already configured editor at page render)
+  await refreshMenuState();
   bindThemeMenu();
+  
   await fetchPersistedSessionState();
   initSessionStateContext(serverState);
   queueSessionStateUpdate({ activeProject: serverState?.activeProject || null });

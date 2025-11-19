@@ -1,358 +1,686 @@
-# FINAL CORRECT Solution: Diff Gutter Using Actual Pattern
+# Unified Preference Loading System - Implementation Plan
 
-**Timestamp:** 2025-11-18T21:12:00Z  
-**Analyst:** Atlas 3 (Atlas)
-
-## The Pattern (From Actual Code)
-
-**Inline diffs use this pattern** (`codemirror.js:453-510`):
-
-1. **First call**: Create `Compartment`, install with `StateEffect.appendConfig.of(compartment.of([field]))`
-2. **Subsequent calls**: Dispatch effects to update state (`setDiffEffect` or `clearDiffEffect`)
-3. **Empty array** = turn off, **Non-empty array** = turn on
-
-**We use the SAME pattern for the gutter.**
+**Created:** 2025-11-19 20:27 UTC  
+**Status:** Ready for Implementation  
+**Testing:** Separate team will conduct testing after implementation
 
 ---
 
-## Implementation
+## Executive Summary
 
-### Step 1: Verify Gutter is Already Exported
+**Problem:** Multiple preference loading paths cause erratic behavior. Frontend caches preferences, backend loads them independently, and different features use inconsistent sync patterns.
 
-Gutter is already in the bundle via `src/index.mjs` line 2:
-```javascript
-export * from "@codemirror/view";  // Includes gutter, GutterMarker
+**Solution:** Backend becomes the SINGLE source of truth. Preferences are loaded ONCE from disk at page render. Frontend becomes stateless, only displaying what backend tells it.
+
+**Key Principle:** `preferences_store.py` on disk → Backend loads at `/nc` page render → Backend applies to editor → Frontend queries backend for display state only
+
+---
+
+## Architecture Changes
+
+### Current (Broken) Flow
+```
+preferences_store.py (disk)
+    ↓
+    ├─→ Frontend loads via /preferences → cachedPreferences variable
+    └─→ Backend loads at page render → applies some settings
+    
+Frontend state variables (showLineNumbers, wordWrap, etc.)
+    ↓
+Menu toggles may or may not sync to backend
+    ↓
+State drift occurs
 ```
 
-No rebuild needed.
-
----
-
-### Step 2: Add DiffGutterMarker Class (codemirror.js ~line 187)
-
-Add after `safeLine` function:
-
-```javascript
-// Diff gutter marker class
-class DiffGutterMarker extends CM.GutterMarker {
-  constructor(marker) {
-    super();
-    this.marker = marker; // '+', '−', '│'
-  }
-  
-  eq(other) {
-    return other instanceof DiffGutterMarker && this.marker === other.marker;
-  }
-  
-  toDOM() {
-    const span = document.createElement('span');
-    span.className = 'cm-diff-gutter-marker';
-    span.textContent = this.marker;
-    
-    if (this.marker === '+') {
-      span.classList.add('cm-diff-marker-add');
-    } else if (this.marker === '−') {
-      span.classList.add('cm-diff-marker-del');
-    } else if (this.marker === '│') {
-      span.classList.add('cm-diff-marker-context');
-    }
-    
-    return span;
-  }
-}
-
-// Build gutter markers from hunks
-function buildDiffGutterMarkers(view, hunks) {
-  if (!hunks || hunks.length === 0) {
-    return CM.RangeSet.empty;
-  }
-  
-  const { RangeSetBuilder } = CM;
-  const builder = new RangeSetBuilder();
-  const doc = view.state.doc;
-  
-  const lineMarkers = new Map();
-  
-  for (const hunk of hunks) {
-    let newLine = Math.max(1, hunk.newStart || 1);
-    
-    for (const line of hunk.lines || []) {
-      const kind = line.type;
-      
-      if (kind === 'add') {
-        lineMarkers.set(newLine, new DiffGutterMarker('+'));
-        newLine++;
-      } else if (kind === 'context') {
-        lineMarkers.set(newLine, new DiffGutterMarker('│'));
-        newLine++;
-      } else if (kind === 'del') {
-        if (!lineMarkers.has(newLine)) {
-          lineMarkers.set(newLine, new DiffGutterMarker('−'));
-        }
-      }
-    }
-  }
-  
-  for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
-    if (lineMarkers.has(lineNum)) {
-      const lineInfo = safeLine(doc, lineNum);
-      if (lineInfo) {
-        builder.add(lineInfo.from, lineInfo.from, lineMarkers.get(lineNum));
-      }
-    }
-  }
-  
-  return builder.finish();
-}
+### New (Fixed) Flow
+```
+preferences_store.py (disk) ← SINGLE SOURCE OF TRUTH
+    ↓
+Backend loads ONCE at /nc page render
+    ↓
+Backend applies ALL settings to editor
+    ↓
+Frontend queries backend for menu checkmarks ONLY
+    ↓
+Menu toggles → Backend updates disk + applies to editor
+    ↓
+Backend broadcasts state change to frontend
 ```
 
 ---
 
-### Step 3: Modify applyDiffDecorations to Add Gutter
+## Files to Modify
 
-**Replace the entire `applyDiffDecorations` method** (lines 453-510):
+### 1. **app/apps/file_editor_cm6/main.js** (MAJOR CHANGES)
 
+#### Changes Required:
+
+**A. Remove All Preference State Variables (Lines ~100-130)**
 ```javascript
-async applyDiffDecorations(hunks) {
-  console.log('[applyDiffDecorations] Called with hunks:', JSON.stringify(hunks, null, 2));
-  
-  // Initialize diff compartment on first call
-  if (!this.diffCompartment) {
-    const { StateEffect, StateField, Compartment } = CM;
-    
-    this.diffCompartment = new Compartment();
-    this.setDiffEffect = StateEffect.define();
-    this.clearDiffEffect = StateEffect.define();
-    
-    const setDiffEffect = this.setDiffEffect;
-    const clearDiffEffect = this.clearDiffEffect;
-    
-    const diffField = StateField.define({
-      create() {
-        return CM.Decoration.none;
-      },
-      update(value, tr) {
-        if (tr.docChanged && value !== CM.Decoration.none) {
-          value = value.map(tr.changes);
-        }
-        for (const effect of tr.effects) {
-          if (effect.is(setDiffEffect)) {
-            value = effect.value;
-          } else if (effect.is(clearDiffEffect)) {
-            value = CM.Decoration.none;
-          }
-        }
-        return value;
-      },
-      provide: field => CM.EditorView.decorations.from(field)
-    });
-    
-    this.diffField = diffField;
-    
-    // NEW: Initialize gutter compartment
-    this.diffGutterCompartment = new Compartment();
-    
-    // Store hunks for gutter markers
-    this.currentDiffHunks = [];
-    
-    // Create gutter extension with markers function
-    const diffGutterExtension = CM.gutter({
-      class: 'cm-diff-gutter',
-      markers: view => buildDiffGutterMarkers(view, this.currentDiffHunks),
-      initialSpacer: () => new DiffGutterMarker('+'),
-    });
-    
-    this.diffGutterExtension = diffGutterExtension;
-    
-    // Install both compartments at once
-    this.editor.dispatch({
-      effects: StateEffect.appendConfig.of([
-        this.diffCompartment.of([diffField]),
-        this.diffGutterCompartment.of([]) // Start with empty array (gutter off)
-      ])
-    });
+// DELETE THESE:
+let showLineNumbers = true;
+let showLineShading = false;
+let showIndentGuides = false;
+let showSyntaxHighlight = true;
+let wordWrap = false;
+let autoCloseBrackets = true;
+let enableAutocompletion = true;
+let autoSaveEnabled = true;
+let showInlineDiffs = true;
+let colorPickerEnabled = true;
+let readOnlyMode = false;
+let trackAgentEdits = false;
+let currentTheme = 'cm6-dark';
+let cachedPreferences = null;
+
+// REPLACE WITH:
+// Preferences are managed by backend; frontend displays state only
+let editorViewState = null; // Loaded from backend at startup
+```
+
+**B. Delete Functions (Remove Entirely)**
+```javascript
+// DELETE lines 946-1076 (entire section):
+function applyPreferencesFromStore(payload) { ... }
+async function fetchPreferencesFromServer() { ... }
+async function loadPreferences(initialPayload = null) { ... }
+async function persistEditorPreferences(partialEditor = null) { ... }
+```
+
+**C. Replace with Minimal Query Functions**
+```javascript
+// ADD after line ~945:
+async function fetchEditorState() {
+  // Query backend for current editor state (for menu checkmarks only)
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/editor/view_state', { cache: 'no-store' });
+    const json = await resp.json();
+    return json?.data || null;
+  } catch (err) {
+    console.error('[EditorState] Failed to fetch:', err);
+    return null;
   }
+}
+
+async function updatePreference(key, value) {
+  // Send preference change to backend; backend handles persistence + application
+  try {
+    const resp = await apiPost('editor/update_preference', { key, value });
+    if (resp?.ok) {
+      // Backend has updated; refresh menu state
+      await refreshMenuState();
+    }
+    return resp?.ok || false;
+  } catch (err) {
+    console.error(`[Preference] Failed to update ${key}:`, err);
+    return false;
+  }
+}
+
+async function refreshMenuState() {
+  // Query backend for current state and update menu checkmarks
+  const state = await fetchEditorState();
+  if (!state) return;
   
-  // Store hunks for gutter
-  this.currentDiffHunks = hunks || [];
+  editorViewState = state;
   
-  // Build decorations
-  const getWordWrap = () => this.lineWrapping || false;
-  const decoSet = buildDiffDecorations(this.editor, hunks, CM, getWordWrap);
+  // Update all menu checkmarks from backend state
+  setMenuChecked(miToggleLines, state.showLineNumbers);
+  setMenuChecked(miToggleSyntax, state.showSyntax);
+  setMenuChecked(miToggleCloseBrackets, state.autoCloseBrackets);
+  setMenuChecked(miToggleAutocomplete, state.autocompletion);
+  setMenuChecked(miToggleShading, state.showShading);
+  setMenuChecked(miToggleIndentGuides, state.showIndentGuides);
+  setMenuChecked(miToggleWrap, state.wordWrap);
+  setMenuChecked(miToggleAutosave, state.autoSave);
+  setMenuChecked(miToggleDiffs, state.showInlineDiffs);
+  setMenuChecked(miToggleColorPicker, state.colorPicker);
+  setMenuChecked(miToggleReadonly, state.readOnly);
+  setMenuChecked(miTrackEdits, state.trackAgentEdits);
   
-  // Determine if gutter should be on or off
-  const gutterActive = hunks && hunks.length > 0;
-  
-  // Dispatch: update decorations AND gutter state
-  this.editor.dispatch({
-    effects: [
-      this.setDiffEffect.of(decoSet),
-      this.diffGutterCompartment.reconfigure(
-        gutterActive ? [this.diffGutterExtension] : []
-      )
-    ]
+  // Update theme menu checkmarks
+  themeMenuItems.forEach(item => {
+    setMenuChecked(item, item.dataset.theme === state.theme);
   });
-},
+}
 ```
 
-**Key changes:**
-- Gutter compartment starts empty (`[]`)
-- When `hunks.length > 0`: reconfigure to `[diffGutterExtension]` (on)
-- When `hunks` empty/null: reconfigure to `[]` (off)
-- Store hunks in `this.currentDiffHunks` so markers function can access them
-- Same effect dispatch pattern as existing code
+**D. Rewrite All Menu Toggles (Lines 1750-1870)**
 
----
-
-### Step 4: Remove Padding from Line Decorations
-
-**In `buildDiffDecorations` (line 58-68):**
-
+Replace ALL toggle handlers with unified pattern:
 ```javascript
-// CHANGE THIS:
-const lineAddedDeco = Decoration.line({
-  class: 'cm-diff-line cm-diff-line-added',
-  attributes: { 'data-diff-marker': '+' },
+bindMenuToggle(miToggleLines, async () => {
+  const success = await updatePreference('showLineNumbers', !(editorViewState?.showLineNumbers));
+  if (!success) host.toast('Failed to update preference');
 });
 
-const lineContextDeco = Decoration.line({
-  class: 'cm-diff-line cm-diff-line-context',
-  attributes: { 'data-diff-marker': '│' },
+bindMenuToggle(miToggleSyntax, async () => {
+  const success = await updatePreference('showSyntax', !(editorViewState?.showSyntax));
+  if (!success) host.toast('Failed to update preference');
 });
 
-// TO THIS:
-const lineAddedDeco = Decoration.line({
-  class: 'cm-diff-line-added',
+bindMenuToggle(miToggleCloseBrackets, async () => {
+  const success = await updatePreference('autoCloseBrackets', !(editorViewState?.autoCloseBrackets));
+  if (!success) host.toast('Failed to update preference');
 });
 
-const lineContextDeco = Decoration.line({
-  class: 'cm-diff-line-context',
+bindMenuToggle(miToggleAutocomplete, async () => {
+  const success = await updatePreference('autocompletion', !(editorViewState?.autocompletion));
+  if (!success) host.toast('Failed to update preference');
 });
 
-// DELETE linePlainDeco entirely
+bindMenuToggle(miToggleShading, async () => {
+  const success = await updatePreference('showShading', !(editorViewState?.showShading));
+  if (!success) host.toast('Failed to update preference');
+});
+
+bindMenuToggle(miToggleIndentGuides, async () => {
+  const success = await updatePreference('showIndentGuides', !(editorViewState?.showIndentGuides));
+  if (!success) host.toast('Failed to update preference');
+});
+
+bindMenuToggle(miToggleWrap, async () => {
+  const success = await updatePreference('wordWrap', !(editorViewState?.wordWrap));
+  if (!success) host.toast('Failed to update preference');
+});
+
+bindMenuToggle(miToggleAutosave, async () => {
+  const success = await updatePreference('autoSave', !(editorViewState?.autoSave));
+  if (!success) host.toast('Failed to update preference');
+});
+
+bindMenuToggle(miToggleDiffs, async () => {
+  const success = await updatePreference('showInlineDiffs', !(editorViewState?.showInlineDiffs));
+  if (!success) host.toast('Failed to update preference');
+});
+
+bindMenuToggle(miToggleColorPicker, async () => {
+  const success = await updatePreference('colorPicker', !(editorViewState?.colorPicker));
+  if (!success) host.toast('Failed to update preference');
+});
+
+bindMenuToggle(miToggleReadonly, async () => {
+  const success = await updatePreference('readOnly', !(editorViewState?.readOnly));
+  if (!success) host.toast('Failed to update preference');
+});
+
+bindMenuToggle(miTrackEdits, async () => {
+  const success = await updatePreference('trackAgentEdits', !(editorViewState?.trackAgentEdits));
+  if (!success) host.toast('Failed to update preference');
+});
 ```
 
-**In the decoration loop (line ~160), DELETE:**
+**E. Remove Theme Toggle Logic (Lines ~1680-1720)**
 
+Replace complex theme toggle with:
 ```javascript
-builder.add(lineInfo.from, lineInfo.from, linePlainDeco);
+bindMenuToggle(themeItem, async () => {
+  const newTheme = themeItem.dataset.theme;
+  const success = await updatePreference('theme', newTheme);
+  if (!success) host.toast('Failed to change theme');
+});
+```
+
+**F. Remove Font Scale Persistence (Line ~707)**
+
+Replace:
+```javascript
+await persistEditorPreferences({ fontScale: scale });
+```
+
+With:
+```javascript
+await updatePreference('fontScale', scale);
+```
+
+**G. Simplify Initialization (Lines 2080-2120)**
+
+Replace entire initialization block with:
+```javascript
+// Initialize UI components
+initResizeManager();
+
+await initExplorerUI().catch(e => {
+  console.error('Failed to initialize explorer UI:', e);
+});
+
+branchMenuHandle = initBranchMenu();
+agentDrawerHandle = initAgentDrawer();
+
+const serverState = await syncEditorState(true);
+
+// Load menu state from backend (menus only, editor already configured)
+await refreshMenuState();
+bindThemeMenu();
+
+await fetchPersistedSessionState();
+initSessionStateContext(serverState);
+queueSessionStateUpdate({ activeProject: serverState?.activeProject || null });
+
+const initialDoc = '';
+createView(initialDoc);
+lastSavedContent = getText();
+markUnsaved(false);
+updatePathDisplay();
+
+if (!serverState || !serverState.activeProject || !serverState.activeProjectExists) {
+  statusEl.textContent = serverState?.activeProjectMessage || 'Select a project to begin.';
+  fileNameEl.textContent = 'No file';
+  fileNameEl.title = 'No file';
+  filePathEl.textContent = '';
+  filePathEl.title = '';
+  return;
+}
+
+// Open file via URL param or saved state
+// ... rest of initialization
+```
+
+**H. Remove Preference References in createView()**
+
+Find all references to deleted state variables in `createView()` function and replace with backend state queries:
+```javascript
+// BEFORE:
+if (showSyntaxHighlight) { ... }
+if (showLineNumbers) { ... }
+if (autoCloseBrackets) { ... }
+
+// AFTER:
+// These are now handled by backend during set_content
+// createView() becomes purely a frontend UI concern
+// Remove all preference conditionals from createView()
 ```
 
 ---
 
-### Step 5: Update CSS
+### 2. **app/apps/file_editor_cm6/nicegui_editor/editor_app.py** (MAJOR CHANGES)
 
-**Location:** `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` (lines 440-480)
+#### Changes Required:
 
-**Replace with:**
+**A. Add New Endpoint: `/editor/view_state` (After line 700)**
 
-```css
-<style>
-:root {
-  --diff-marker-width: 1.65rem;
-  --diff-add-bg: rgba(52, 211, 153, 0.22);
-  --diff-add-border: rgba(52, 211, 153, 0.75);
-  --diff-add-marker: rgba(52, 211, 153, 0.9);
-  --diff-context-border: rgba(148, 163, 184, 0.35);
-  --diff-context-marker: rgba(148, 163, 184, 0.55);
-  --diff-del-bg: rgba(248, 113, 113, 0.18);
-  --diff-del-border: rgba(248, 113, 113, 0.7);
-  --diff-del-fg: rgba(248, 113, 113, 0.95);
-  --diff-del-marker: rgba(248, 113, 113, 0.85);
-}
-
-.cm-diff-gutter {
-  width: var(--diff-marker-width);
-  min-width: var(--diff-marker-width);
-}
-
-.cm-diff-gutter-marker {
-  display: block;
-  text-align: center;
-  font-weight: 600;
-  line-height: inherit;
-  user-select: none;
-  padding: 0 0.25rem;
-}
-
-.cm-diff-marker-add { color: var(--diff-add-marker); }
-.cm-diff-marker-del { color: var(--diff-del-marker); }
-.cm-diff-marker-context { color: var(--diff-context-marker); }
-
-.cm-diff-line-added {
-  background: var(--diff-add-bg) !important;
-  border-left: 3px solid var(--diff-add-border) !important;
-}
-
-.cm-diff-line-context {
-  border-left: 3px solid var(--diff-context-border);
-}
-
-.cm-diff-line-removed {
-  position: relative;
-  padding: 0 10px 0 calc(var(--diff-marker-width) + 6px);
-  border-left: 3px solid var(--diff-del-border);
-  background: var(--diff-del-bg);
-  color: var(--diff-del-fg);
-  font: inherit;
-  white-space: pre;
-  line-height: inherit;
-  user-select: none;
-  contain: layout paint;
-}
-
-.cm-diff-line-removed::before {
-  content: attr(data-diff-marker);
-  position: absolute;
-  left: 0;
-  width: var(--diff-marker-width);
-  text-align: center;
-  font-weight: 600;
-  color: var(--diff-del-marker);
-  user-select: none;
-}
-
-.cm-diff-removed-text { display: block; white-space: pre; }
-.cm-diff-line-removed.cm-diff-wrap { white-space: pre-wrap; word-break: break-word; }
-.cm-diff-line-removed.cm-diff-wrap .cm-diff-removed-text { white-space: pre-wrap; word-break: break-word; }
-</style>
+```python
+@editor_router.get('/view_state')
+async def get_view_state():
+    """Return current editor view settings for frontend display (menu checkmarks)."""
+    prefs = _preferences_store.get_preferences()
+    editor_prefs = prefs.get('editor', {})
+    
+    # Return current state from disk (single source of truth)
+    return {
+        "ok": True,
+        "data": {
+            "showLineNumbers": editor_prefs.get('showLineNumbers', True),
+            "showSyntax": editor_prefs.get('showSyntax', True),
+            "showShading": editor_prefs.get('showShading', False),
+            "wordWrap": editor_prefs.get('wordWrap', False),
+            "autoCloseBrackets": editor_prefs.get('autoCloseBrackets', True),
+            "autocompletion": editor_prefs.get('autocompletion', True),
+            "theme": editor_prefs.get('theme', 'cm6-dark'),
+            "autoSave": editor_prefs.get('autoSave', True),
+            "showInlineDiffs": editor_prefs.get('showInlineDiffs', True),
+            "trackAgentEdits": editor_prefs.get('trackAgentEdits', False),
+            "fontScale": editor_prefs.get('fontScale', 0.85),
+            "showIndentGuides": editor_prefs.get('showIndentGuides', False),
+            "colorPicker": editor_prefs.get('colorPicker', True),
+            "readOnly": editor_prefs.get('readOnly', False),
+        }
+    }
 ```
 
-**DELETE all old CSS:**
-- `.cm-line.cm-diff-line` padding rules
-- `.cm-line.cm-diff-line::before` marker rules
-- `.cm-indent-markers::before` offset hacks
-- `--cm-inline-diff-offset` variable
+**B. Add New Endpoint: `/editor/update_preference` (After view_state)**
 
-**Also update `template.html` (lines 360-420) identically.**
+```python
+@editor_router.post('/update_preference')
+async def update_preference(data: dict = Body(...)):
+    """
+    Update a single preference and apply it to the editor immediately.
+    This is the ONLY way frontend should change preferences.
+    """
+    key = data.get('key')
+    value = data.get('value')
+    
+    if not key:
+        raise HTTPException(status_code=400, detail="key is required")
+    
+    editor = get_active_editor()
+    if not editor:
+        raise HTTPException(status_code=404, detail="Editor not initialized")
+    
+    # Validate key is in DEFAULT_EDITOR_PREFS
+    from app.apps.file_editor_cm6.preferences_store import DEFAULT_EDITOR_PREFS
+    if key not in DEFAULT_EDITOR_PREFS:
+        raise HTTPException(status_code=400, detail=f"Invalid preference key: {key}")
+    
+    # Update disk immediately
+    _preferences_store.update_preferences(editor={key: value})
+    
+    # Apply to editor immediately based on key
+    try:
+        if key == 'wordWrap':
+            editor.set_line_wrapping(bool(value))
+        elif key == 'showShading':
+            editor.set_zebra_stripes(bool(value))
+        elif key == 'showIndentGuides':
+            editor.set_indent_guides(bool(value))
+        elif key == 'theme':
+            editor.set_theme(THEME_MAP.get(value, 'basicDark'))
+        elif key == 'fontScale':
+            editor.set_font_scale(float(value))
+        elif key == 'colorPicker':
+            editor.toggle_color_picker(bool(value))
+        elif key == 'readOnly':
+            editor.set_read_only(bool(value))
+        elif key == 'showInlineDiffs':
+            if value and get_current_file():
+                # Load and apply diffs
+                project_path = _history_store.get_active_project() or str(get_project_root())
+                if project_path:
+                    rel = _normalize_rel_path(Path(project_path).expanduser(), get_current_file())
+                    diff_data = collect_diff(Path(project_path).expanduser(), rel)
+                    editor.set_diff_decorations(diff_data.get('hunks', []))
+            else:
+                editor.set_diff_decorations([])
+        elif key == 'trackAgentEdits':
+            if value:
+                enable_edit_tracking()
+            else:
+                disable_edit_tracking()
+        elif key in ['showLineNumbers', 'showSyntax', 'autoCloseBrackets', 'autocompletion', 'autoSave']:
+            # These require frontend to rebuild view (legacy behavior)
+            # Backend has updated disk; frontend will handle rebuild
+            pass
+        
+        editor.update()
+        
+        print(f"[PREFERENCE] Updated {key}={value}", file=sys.stderr)
+        
+        return {"ok": True, "key": key, "value": value}
+        
+    except Exception as e:
+        print(f"[PREFERENCE] Failed to apply {key}={value}: {e}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Failed to apply preference: {e}")
+```
+
+**C. Modify `/set_content` Endpoint (Lines 630-650)**
+
+Add comprehensive preference application at file load:
+```python
+# AFTER line 645 (after subscribe call), ADD:
+# Apply ALL preferences from disk to ensure consistency
+editor_prefs = _preferences_store.get_preferences().get('editor', {})
+editor.set_zebra_stripes(editor_prefs.get('showShading', False))
+editor.set_indent_guides(editor_prefs.get('showIndentGuides', False))
+editor.set_line_wrapping(editor_prefs.get('wordWrap', False))
+editor.set_theme(THEME_MAP.get(editor_prefs.get('theme', 'cm6-dark'), 'basicDark'))
+editor.set_font_scale(editor_prefs.get('fontScale', 0.85))
+editor.toggle_color_picker(editor_prefs.get('colorPicker', True))
+editor.set_read_only(editor_prefs.get('readOnly', False))
+editor.update()
+
+print(f"[SET_CONTENT] Applied all preferences from disk", file=sys.stderr)
+```
+
+**D. Enhance Page Load (Lines 380-390)**
+
+After line 389 (after setting zebra stripes), add comprehensive settings:
+```python
+# REPLACE lines 385-391 with:
+# Apply ALL preferences from disk (single source of truth)
+editor.set_zebra_stripes(editor_prefs.get('showShading', False))
+editor.set_font_scale(editor_prefs.get('fontScale', 0.85))
+editor.set_indent_guides(editor_prefs.get('showIndentGuides', False))
+editor.set_theme(THEME_MAP.get(editor_prefs.get('theme', 'cm6-dark'), 'basicDark'))
+editor.set_line_wrapping(editor_prefs.get('wordWrap', False))
+editor.toggle_color_picker(editor_prefs.get('colorPicker', True))
+editor.set_read_only(editor_prefs.get('readOnly', False))
+
+print(f"[EDITOR_APP] Applied preferences: theme={editor_prefs.get('theme')}, wrap={editor_prefs.get('wordWrap')}, shading={editor_prefs.get('showShading')}, guides={editor_prefs.get('showIndentGuides')}, fontScale={editor_prefs.get('fontScale')}, colorPicker={editor_prefs.get('colorPicker')}, readOnly={editor_prefs.get('readOnly')}", file=sys.stderr)
+```
+
+**E. Remove `/set_view_settings` Endpoint (Lines 869-920)**
+
+This endpoint becomes redundant. All preference updates go through `/update_preference`.
+
+```python
+# DELETE entire function from line 869 to line 920
+# @editor_router.post('/set_view_settings')
+# async def set_view_settings(data: dict = Body(...)): ...
+```
+
+**F. Remove Color Picker Toggle Endpoint (Find and delete)**
+
+```python
+# DELETE wherever it exists:
+# @editor_router.post('/color_picker/toggle')
+# async def toggle_color_picker(...): ...
+```
+
+**G. Remove Read-Only Toggle Endpoint (Find and delete)**
+
+```python
+# DELETE wherever it exists:
+# @editor_router.post('/read_only/set')
+# async def set_read_only(...): ...
+```
 
 ---
 
-## Testing
+### 3. **app/apps/file_editor_cm6/preferences_store.py** (MINOR CHANGES)
 
-1. Toggle **View → Show Inline Diffs** on → Gutter appears
-2. Toggle off → Gutter disappears
-3. Toggle **Editor → Indentation Guides** on (with diffs on) → Guides spread horizontally correctly
-4. Verify all marker types: `+`, `−`, `│`
-5. Test with word wrap, zebra stripes
+#### Changes Required:
+
+**A. Remove Default Fallback Logic (Line 97)**
+
+```python
+# BEFORE (line 97):
+def get_preferences(self, project_path: Optional[str] = None) -> Dict[str, Any]:
+    with self._lock:
+        editor = {**DEFAULT_EDITOR_PREFS, **(self._data.get("editor") or {})}
+        ui = {**DEFAULT_UI_PREFS, **(self._data.get("ui") or {})}
+
+# AFTER:
+def get_preferences(self, project_path: Optional[str] = None) -> Dict[str, Any]:
+    with self._lock:
+        # Return ONLY what's on disk; no defaults merged
+        # If preference missing, backend will use vendored codemirror defaults
+        editor = self._data.get("editor") or {}
+        ui = self._data.get("ui") or {}
+```
+
+**RATIONALE:** User explicitly requested "I don't even want the default preferences to ever be loaded." The vendored codemirror.py has its own defaults for each setting method (e.g., `set_line_wrapping(False)` has a default). Let those be the source of defaults, not Python constants.
+
+**ALTERNATIVE (if above breaks things):** Keep defaults but add a flag:
+```python
+def get_preferences(self, project_path: Optional[str] = None, apply_defaults: bool = True) -> Dict[str, Any]:
+    with self._lock:
+        if apply_defaults:
+            editor = {**DEFAULT_EDITOR_PREFS, **(self._data.get("editor") or {})}
+            ui = {**DEFAULT_UI_PREFS, **(self._data.get("ui") or {})}
+        else:
+            editor = self._data.get("editor") or {}
+            ui = self._data.get("ui") or {}
+```
+
+Then backend calls `get_preferences(apply_defaults=False)` to get pure disk state.
+
+---
+
+### 4. **app/apps/file_editor_cm6/main.py** (REMOVE ENDPOINT)
+
+#### Changes Required:
+
+**A. Delete `/preferences` Endpoint (Find and delete entirely)**
+
+This endpoint is no longer needed; frontend doesn't cache preferences.
+
+```python
+# FIND and DELETE:
+@app_router.get('/preferences')
+async def get_preferences(...): ...
+
+@app_router.post('/preferences')
+async def update_preferences(...): ...
+```
+
+---
+
+### 5. **app/static/vendor/nicegui/elements/codemirror/codemirror.py** (ADD METHOD)
+
+#### Changes Required:
+
+**A. Add `toggle_color_picker` Method (After line 377)**
+
+```python
+def toggle_color_picker(self, enabled: bool) -> None:
+    """Toggle CSS color picker extension."""
+    self.run_method('applyColorPicker', enabled)
+```
+
+**RATIONALE:** Ensure all preferences have dedicated methods for clean application.
+
+---
+
+## Critical Implementation Notes
+
+### 1. **Document Cache vs Preference Cache**
+
+**DO NOT CONFUSE:**
+- **Document cache** (lines 340-360 in editor_app.py) = Restores unsaved edits when user returns
+- **Preference cache** (cachedPreferences in main.js) = Frontend caching of preferences (THIS IS WHAT WE'RE REMOVING)
+
+**Document cache MUST remain untouched.** It's managed by `history_store.py` and handles crash recovery.
+
+### 2. **Initial Page Load Sequence**
+
+**New guaranteed order:**
+1. Frontend requests `/nc` page
+2. Backend renders page, loads preferences from disk ONCE
+3. Backend creates editor with ALL preferences applied
+4. Page loads in browser
+5. Frontend queries `/editor/view_state` for menu checkmarks only
+6. User clicks menu → `/editor/update_preference` → disk + editor updated
+7. Backend broadcasts state change (optional enhancement)
+
+### 3. **Fallback Elimination**
+
+**What gets removed:**
+- ✅ `cachedPreferences` variable in main.js
+- ✅ `applyPreferencesFromStore()` function
+- ✅ `fetchPreferencesFromServer()` function
+- ✅ `loadPreferences()` function
+- ✅ `persistEditorPreferences()` function
+- ✅ All frontend preference state variables
+- ✅ `/preferences` endpoint in main.py
+- ✅ Default merging in preferences_store.py (optional, see note)
+
+**What remains:**
+- ✅ `preferences_store.py` file on disk (THE source of truth)
+- ✅ `history_store.py` file on disk (document cache, unrelated to preferences)
+- ✅ Backend preference loading at page render
+- ✅ Backend preference methods (set_zebra_stripes, etc.)
+
+### 4. **Testing Checklist**
+
+For separate testing team:
+
+- [ ] Fresh page load applies all preferences correctly
+- [ ] Toggle each menu item updates editor immediately
+- [ ] Page refresh preserves all preference changes
+- [ ] Theme changes work and persist
+- [ ] Font scale changes work and persist
+- [ ] Document cache still works (unsaved edits preserved)
+- [ ] Crash recovery still works (draft restored after shutdown)
+- [ ] No console errors about missing preference variables
+- [ ] Menu checkmarks always match editor behavior
+- [ ] Multiple rapid toggles don't cause state drift
+- [ ] Preferences persist across worker restarts
+- [ ] Opening different files doesn't reset preferences
+- [ ] Color picker toggle works correctly
+- [ ] Read-only mode toggle works correctly
+- [ ] Inline diffs toggle loads/clears decorations
+
+### 5. **Migration Path**
+
+**Order of implementation:**
+1. Create new endpoints in editor_app.py (`/view_state`, `/update_preference`)
+2. Add `toggle_color_picker()` method to codemirror.py
+3. Modify main.js (remove cache, add query functions, rewrite toggles)
+4. Remove old endpoints (`/preferences`, `/set_view_settings`, etc.)
+5. Test thoroughly with checklist above
+6. (Optional) Remove default merging from preferences_store.py
+
+**Rollback plan:**
+If issues arise, git revert the main.js changes first (largest risk surface area).
 
 ---
 
 ## Summary
 
-- ✅ Uses EXACT pattern from existing `applyDiffDecorations`
-- ✅ Gutter toggles via `compartment.reconfigure([ext])` vs `reconfigure([])`
-- ✅ Same on/off rule as diffs: empty hunks = off, hunks present = on
-- ✅ Stores hunks in `this.currentDiffHunks` for markers function
-- ✅ All inline in `codemirror.js` using `CM` namespace
-- ✅ No invented patterns - traced actual code
+**Single Source of Truth:** `preferences_store.py` file on disk
 
-**Status:** Ready for implementation
+**Authority Flow:** Disk → Backend loads → Backend applies → Frontend displays
+
+**No Caching:** Frontend never caches preferences, only queries for display
+
+**No Fallbacks:** No default preference merging (optional), no cached preference variables, no multiple load paths
+
+**Unified Pattern:** All menu toggles use identical pattern: `updatePreference()` → backend updates disk + applies → frontend refreshes menu
+
+**Result:** Deterministic preference behavior, no state drift, preferences always match between menu and editor.
 
 ---
 
-### Status Update – 2025-11-18T15:20:00-06:00 – Dex 2 (Dex)
-- Followed the guide above: updated `app/static/vendor/nicegui/elements/codemirror/codemirror.js` with `DiffGutterMarker`, a `buildDiffGutterMarkers()` helper, and an enhanced `applyDiffDecorations()` that stores `currentDiffHunks` and toggles a dedicated gutter `Compartment` on/off while keeping the existing decoration field.
-- Simplified `buildDiffDecorations()` so additions/context lines no longer rely on pseudo-element markers; deletion widgets still expose `data-diff-marker` for the `−` symbol.
-- Mirrored CSS changes in both `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` and `app/apps/file_editor_cm6/template.html` to style `.cm-diff-gutter` / `.cm-diff-gutter-marker` and remove the old padding-based `.cm-line.cm-diff-line` rules.
-- Manual test still pending: reload the editor, toggle inline diffs + indentation guides, and confirm the gutter appears only when diffs are active and indentation guides remain aligned.
+**Implementation Time Estimate:** 4-6 hours  
+**Risk Level:** Medium (large refactor but clear path)  
+**Testing Required:** Full regression suite (see checklist)
+
+
+---
+
+## Verification Report - 2025-11-19
+
+**Reviewer:** Jimmy
+**Time:** 21:45 UTC
+
+### Critical Issue: Agent Drawer Breakage
+
+The plan instructs to **delete** the `/preferences` endpoints in `main.py` (Step 4).
+
+My verification of `app/apps/file_editor_cm6/static/js/agent_drawer.js` confirms that the Agent Drawer **explicitly uses** these endpoints to persist its state, specifically the `last_active_session_id`.
+
+**Code Reference:**
+```javascript
+// agent_drawer.js lines 234 & 884
+const prefResp = await fetch('/api/app/file_editor_cm6/preferences/get?key=last_active_session_id');
+// ...
+await fetch('/api/app/file_editor_cm6/preferences/set', { ... });
+```
+
+**Impact:**
+If the `/preferences` endpoints are deleted as planned, the Agent Drawer will lose its ability to remember the last active session, degrading the user experience.
+
+**Recommendation:**
+**DO NOT** delete the generic `/preferences` endpoints in `main.py`. They must be preserved for the Agent Drawer and other potential consumers. Instead, simply stop using them in `main.js` (the editor frontend) as planned.
+
+### Optimization: Round Trip Reduction
+
+The current plan involves a two-step process for every preference toggle:
+1.  `POST /editor/update_preference` (Update backend)
+2.  `GET /editor/view_state` (Fetch new state to update UI)
+
+This results in two network round trips for every user action, which may feel sluggish.
+
+**Recommendation:**
+Modify the `/editor/update_preference` endpoint to return the full updated `view_state` in its response. This allows the frontend to update the UI immediately in a single round trip.
+
+### Modified Plan Excerpt (Recommended)
+
+**Step 4 (Corrected):**
+> **SKIP** deleting `/preferences` in `main.py`. Leave it intact for legacy/agent support.
+
+**Step 2B (Optimized):**
+> Update `/editor/update_preference` to return the full state dictionary in `data`, identical to `/editor/view_state`.
+
+---
+*Signed: Jimmy*

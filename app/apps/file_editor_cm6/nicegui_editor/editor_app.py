@@ -371,22 +371,29 @@ async def editor_page():
             editor = ui.codemirror(
                 value=initial_content,
                 language=initial_language,
-                theme=THEME_MAP.get(editor_prefs.get('theme'), 'basicDark'),
+                theme=THEME_MAP.get(editor_prefs.get('theme', 'cm6-dark'), 'basicDark'),
                 line_wrapping=editor_prefs.get('wordWrap', False),
                 on_change=_on_editor_change,
             ).style('flex: 1; border: none;').classes('editor-content w-full h-full').props('flat borderless')
             editor._cached_content = initial_content
 
-            # 5. Set Global State and Apply Settings
+            # 5. Set Global State and Apply ALL Settings (Single Source of Truth)
             _active_editor = editor
             set_current_file(initial_path, initial_sha256)
+            
+            # Apply runtime-only preferences (not available in constructor)
+            # NOTE: theme and line_wrapping already set in constructor above
+            theme_id = editor_prefs.get('theme', 'cm6-dark')
+            print(f"[EDITOR_APP] Editor created with theme={theme_id}, wrap={editor_prefs.get('wordWrap')}", file=sys.stderr)
+            
             editor.set_zebra_stripes(editor_prefs.get('showShading', False))
-            # Load from preferences (default to 0.85 if not set)
-            font_scale = editor_prefs.get('fontScale', 0.85)
-            editor.set_font_scale(font_scale)
-            print(f"[EDITOR] Applied font scale: {font_scale}", file=sys.stderr)
-
+            editor.set_font_scale(editor_prefs.get('fontScale', 0.85))
             editor.set_indent_guides(editor_prefs.get('showIndentGuides', False))
+            # Theme and line wrapping already applied in constructor - don't re-apply
+            editor.toggle_color_picker(editor_prefs.get('colorPicker', True))
+            editor.set_read_only(editor_prefs.get('readOnly', False))
+            
+            print(f"[EDITOR_APP] Applied runtime preferences: shading={editor_prefs.get('showShading')}, guides={editor_prefs.get('showIndentGuides')}, fontScale={editor_prefs.get('fontScale')}, colorPicker={editor_prefs.get('colorPicker')}, readOnly={editor_prefs.get('readOnly')}", file=sys.stderr)
 
             if initial_path:
                 if cached_was_restored:
@@ -630,12 +637,20 @@ async def set_editor_content(data: dict = Body(...)):
 
     subscribe(new_path, 'nicegui_backend_set_content', on_file_change)
     
+    # Apply ALL preferences from disk to ensure consistency (Single Source of Truth)
+    # These are applied every time content changes to maintain consistent editor state
     editor_prefs = _preferences_store.get_preferences().get('editor', {})
-    editor.set_zebra_stripes(editor_prefs.get('showShading', False))
-    editor.set_indent_guides(editor_prefs.get('showIndentGuides', False))
     editor.set_line_wrapping(editor_prefs.get('wordWrap', False))
-    editor.set_theme(editor_prefs.get('theme', 'oneDark'))
+    editor.set_theme(THEME_MAP.get(editor_prefs.get('theme', 'cm6-dark'), 'basicDark'))
+    editor.set_zebra_stripes(editor_prefs.get('showShading', False))
+    editor.set_font_scale(editor_prefs.get('fontScale', 0.85))
+    editor.set_indent_guides(editor_prefs.get('showIndentGuides', False))
+    editor.toggle_color_picker(editor_prefs.get('colorPicker', True))
+    editor.set_read_only(editor_prefs.get('readOnly', False))
+    # Single update() call after all preferences applied
     editor.update()
+    
+    print(f"[SET_CONTENT] Applied all preferences from disk", file=sys.stderr)
     
     if editor_prefs.get('showInlineDiffs', False) and new_path:
         try:
@@ -755,6 +770,110 @@ async def editor_set_read_only(data: dict = Body(...)):
             detail=f"Failed to set read-only mode: {str(e)}"
         )
 
+
+# --- Helper Function for View State ---
+def _get_view_state_dict() -> dict:
+    """Helper to get current view state from preferences (single source of truth)."""
+    prefs = _preferences_store.get_preferences()
+    editor_prefs = prefs.get('editor', {})
+    return {
+        "showLineNumbers": editor_prefs.get('showLineNumbers', True),
+        "showSyntax": editor_prefs.get('showSyntax', True),
+        "showShading": editor_prefs.get('showShading', False),
+        "wordWrap": editor_prefs.get('wordWrap', False),
+        "autoCloseBrackets": editor_prefs.get('autoCloseBrackets', True),
+        "autocompletion": editor_prefs.get('autocompletion', True),
+        "theme": editor_prefs.get('theme', 'cm6-dark'),
+        "autoSave": editor_prefs.get('autoSave', True),
+        "showInlineDiffs": editor_prefs.get('showInlineDiffs', True),
+        "trackAgentEdits": editor_prefs.get('trackAgentEdits', False),
+        "fontScale": editor_prefs.get('fontScale', 0.85),
+        "showIndentGuides": editor_prefs.get('showIndentGuides', False),
+        "colorPicker": editor_prefs.get('colorPicker', True),
+        "readOnly": editor_prefs.get('readOnly', False),
+    }
+
+
+@editor_router.get('/view_state')
+async def get_view_state():
+    """Return current editor view settings for frontend display (menu checkmarks)."""
+    return {"ok": True, "data": _get_view_state_dict()}
+
+
+@editor_router.post('/update_preference')
+async def update_preference(data: dict = Body(...)):
+    """
+    Update a single preference and apply it to the editor immediately.
+    This is the ONLY way frontend should change preferences.
+    Returns full view state to eliminate double round-trip (Jimmy's optimization).
+    """
+    key = data.get('key')
+    value = data.get('value')
+    
+    if not key:
+        raise HTTPException(status_code=400, detail="key is required")
+    
+    editor = get_active_editor()
+    if not editor:
+        raise HTTPException(status_code=404, detail="Editor not initialized")
+    
+    # Validate key is in DEFAULT_EDITOR_PREFS
+    from app.apps.file_editor_cm6.preferences_store import DEFAULT_EDITOR_PREFS
+    if key not in DEFAULT_EDITOR_PREFS:
+        raise HTTPException(status_code=400, detail=f"Invalid preference key: {key}")
+    
+    # Update disk immediately
+    _preferences_store.update_preferences(editor={key: value})
+    
+    # Apply to editor immediately based on key
+    try:
+        if key == 'wordWrap':
+            editor.set_line_wrapping(bool(value))
+        elif key == 'showShading':
+            editor.set_zebra_stripes(bool(value))
+        elif key == 'showIndentGuides':
+            editor.set_indent_guides(bool(value))
+        elif key == 'theme':
+            editor.set_theme(THEME_MAP.get(value, 'basicDark'))
+        elif key == 'fontScale':
+            editor.set_font_scale(float(value))
+        elif key == 'colorPicker':
+            editor.toggle_color_picker(bool(value))
+        elif key == 'readOnly':
+            editor.set_read_only(bool(value))
+        elif key == 'showInlineDiffs':
+            if value and get_current_file():
+                # Load and apply diffs
+                project_path = _history_store.get_active_project() or str(get_project_root())
+                if project_path:
+                    try:
+                        rel = _normalize_rel_path(Path(project_path).expanduser(), get_current_file())
+                        diff_data = collect_diff(Path(project_path).expanduser(), rel)
+                        editor.set_diff_decorations(diff_data.get('hunks', []))
+                    except Exception as e:
+                        print(f"[PREFERENCE] Failed to load diffs: {e}", file=sys.stderr)
+            else:
+                editor.set_diff_decorations([])
+        elif key == 'trackAgentEdits':
+            if value:
+                enable_edit_tracking()
+            else:
+                disable_edit_tracking()
+        elif key in ['showLineNumbers', 'showSyntax', 'autoCloseBrackets', 'autocompletion', 'autoSave']:
+            # These require frontend to rebuild view (legacy behavior)
+            # Backend has updated disk; frontend will handle rebuild
+            pass
+        
+        editor.update()
+        
+        print(f"[PREFERENCE] Updated {key}={value}", file=sys.stderr)
+        
+        # Return full state (Jimmy's optimization - single round trip)
+        return {"ok": True, "data": _get_view_state_dict()}
+        
+    except Exception as e:
+        print(f"[PREFERENCE] Failed to apply {key}={value}: {e}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Failed to apply preference: {e}")
 
 
 @editor_router.get('/cache_state')
