@@ -182,7 +182,7 @@
 }
 /* ACTUAL CARD DIMENSIONS */
 .fe-tree li > ul > li {
-  margin: 4px 1px 4px 12px;
+  margin: 4px 0px 4px 4px;
   width: auto;
   box-sizing: border-box;
 }
