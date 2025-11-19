@@ -475,6 +475,19 @@ async def editor_page():
     .cm-diff-marker-add { color: var(--diff-add-marker); }
     .cm-diff-marker-del { color: var(--diff-del-marker); }
     .cm-diff-marker-context { color: var(--diff-context-marker); }
+    
+    .cm-diff-minus-marker {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--diff-del-marker);
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    
     .cm-diff-line-added,
     .cm-diff-line-context,
     .cm-diff-line-removed {

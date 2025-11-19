@@ -51,9 +51,33 @@ const EMPTY_GUTTER_RANGESET = (() => {
   return builder.finish();
 })();
 
+// Deletion widget class (moved to outer scope for facet access)
+class RemovedLineWidget extends CM.WidgetType {
+  constructor(text, wordWrap) {
+    super();
+    this.text = text;
+    this.wordWrap = wordWrap;
+  }
+  toDOM() {
+    const lineEl = document.createElement('div');
+    lineEl.className = 'cm-diff-line cm-diff-line-removed';
+    if (this.wordWrap) {
+      lineEl.classList.add('cm-diff-wrap');
+    }
+
+    const content = document.createElement('span');
+    content.className = 'cm-diff-removed-text';
+    content.textContent = this.text ?? '';
+
+    lineEl.append(content);
+    return lineEl;
+  }
+  ignoreEvent() { return true; }
+}
+
 // Inline diff decorations helper (extracted from diff_decorations.js)
 function buildDiffDecorations(view, hunks, CM, getWordWrap) {
-  const { Decoration, RangeSetBuilder, WidgetType } = CM;
+  const { Decoration, RangeSetBuilder } = CM;
   
   if (!hunks || hunks.length === 0) {
     return { decorations: Decoration.none, gutter: EMPTY_GUTTER_RANGESET };
@@ -66,29 +90,6 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const lineContextDeco = Decoration.line({
     class: 'cm-diff-line-context',
   });
-
-  class RemovedLineWidget extends WidgetType {
-    constructor(text, wordWrap) {
-      super();
-      this.text = text;
-      this.wordWrap = wordWrap;
-    }
-    toDOM() {
-      const lineEl = document.createElement('div');
-      lineEl.className = 'cm-diff-line cm-diff-line-removed';
-      if (this.wordWrap) {
-        lineEl.classList.add('cm-diff-wrap');
-      }
-
-      const content = document.createElement('span');
-      content.className = 'cm-diff-removed-text';
-      content.textContent = this.text ?? '';
-
-      lineEl.append(content);
-      return lineEl;
-    }
-    ignoreEvent() { return true; }
-  }
 
   const wordWrap = getWordWrap();
   const builder = new RangeSetBuilder();
@@ -190,6 +191,21 @@ function safeLine(doc, lineNumber) {
   }
   return doc.line(lineNumber);
 }
+
+// Deletion widget gutter marker (Chad's solution)
+class MinusGutterMarker extends CM.GutterMarker {
+  toDOM() {
+    const span = document.createElement('span');
+    span.textContent = '−';
+    span.className = 'cm-diff-minus-marker';
+    return span;
+  }
+  eq(other) {
+    return other instanceof MinusGutterMarker;
+  }
+}
+
+const minusMarker = new MinusGutterMarker();
 
 class DiffGutterMarker extends CM.GutterMarker {
   constructor(marker) {
@@ -555,6 +571,15 @@ export default {
             class: 'cm-diff-gutter',
             markers: view => view.state.field(diffGutterField),
             initialSpacer: () => new DiffGutterMarker(''),
+            // Add widget marker support to THIS gutter (not line numbers)
+            ...(CM.gutterWidgetClass ? { 
+              widgetMarker: (view, widget, block) => {
+                if (widget instanceof RemovedLineWidget) {
+                  return minusMarker;
+                }
+                return null;
+              }
+            } : {}),
           }),
         ];
         this.editor.dispatch({
