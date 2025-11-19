@@ -1,5 +1,5 @@
-## Agent Operating Instructionshi
-hi
+## Agent Operating Instructions 
+
 - **Aesthetics and Styling**: Do not modify styling, layouts, themes, or other project aesthetics without the user's explicit consent. There is no implied consent for visual changes.
 **NUMBER ONE RULE:** I MUST **NEVER EVER FOR ANY REASON UNDER ANY CIRCUMSTANCE UNLESS EXPLICITLY INSTRUCTED TO, USE GIT. THIS COMMAND MUST ALWAYS BE EXPLICIT AND NEVER IMPLIED.**
 - **Bug Fix Logging**: When a bug fix is completed, append an entry to AGENTS.log in plain text console output style. Include: commit hash, bug description, conversation summary leading to the fix, fix details, and files modified. Only log when fix is complete or session ends with outstanding bug.

@@ -11,7 +11,7 @@
 - **Status:** ✅ Completed 2025-11-17. Save endpoints now capture existing `st_mode`, feed it into `write_full`, and executable bits persist on overwrite/new files.
 
 ## 2. Explorer Search UX
-- **Status:** Not designed yet; biggest UX ask.
+- **Status:** ✅ Completed (with caveats - still a little buggy).
 - **Scope:** `explorer_helper.list_dir`, `app/apps/file_editor_cm6/static/js/explorer.js`, drawer template.
 - **Plan:** decide whether search is global (project-wide) or scoped to current directory. Likely flow: input box in drawer header → call new backend endpoint (re-using `list_dir` with fuzzy match) → render results list with same card component. Needs debounce + “clear search” affordance.
 - **References:** `notes/2025-11-17_EXPLORER_SEARCH_FIXES.md`, `notes/2025-11-17_LESSONS_LEARNED.md`, `docs/core/nicegui_iframe_feature_adding_guideline.md` (lines 78-107: stateless endpoints, 109-140: real-time updates)

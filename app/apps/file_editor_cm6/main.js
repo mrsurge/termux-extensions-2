@@ -965,6 +965,9 @@ function applyPreferencesFromStore(payload) {
   const fontScale = editorPrefs.fontScale ?? 0.85;
   applyFontScale(fontScale);
 
+  // Update theme menu checkmarks to reflect loaded preference
+  updateThemeMenuChecks();
+
   if (editorState) {
     editorState.preferences = cachedPreferences;
   }
@@ -991,12 +994,7 @@ function applyMenuState() {
 function updateThemeMenuChecks() {
   themeMenuItems.forEach(item => {
     const isChecked = item.dataset.theme === currentTheme;
-    item.setAttribute('aria-checked', isChecked ? 'true' : 'false');
-    if (isChecked) {
-      item.setAttribute('data-checked', 'true');
-    } else {
-      item.removeAttribute('data-checked');
-    }
+    setMenuChecked(item, isChecked);
   });
 }
 
@@ -1691,8 +1689,8 @@ function bindThemeMenu() {
         await persistEditorPreferences({ theme: currentTheme });
         
         // 2. Update shared state for live sync
-        const niceGUITheme = mapThemeToNiceGUI(currentTheme);
-        apiPost('editor/set_view_settings', { theme: niceGUITheme })
+        // Send raw theme ID (kebab-case); backend maps it for editor but saves raw ID for persistence
+        apiPost('editor/set_view_settings', { theme: currentTheme })
           .catch(e => console.warn('[Theme] Failed to sync theme:', e));
       }
       menuThemeDD.classList.remove('show');

@@ -32,6 +32,29 @@ _edit_tracker_subscription = None
 _cache_persist_timer = None
 _cache_persist_debounce_ms = 1000  # 1 second debounce
 
+# --- Constants ---
+THEME_MAP = {
+    'cm6-dark': 'basicDark',
+    'one-dark': 'oneDark',
+    'termux': 'consoleDark',
+    'github-dark': 'githubDark',
+    'github-light': 'githubLight',
+    'vscode-dark': 'vscodeDark',
+    'vscode-light': 'vscodeLight',
+    'xcode-dark': 'xcodeDark',
+    'xcode-light': 'xcodeLight',
+    'solarized-dark': 'solarizedDark',
+    'solarized-light': 'solarizedLight',
+    'nord': 'nord',
+    'dracula': 'dracula',
+    'okaidia': 'okaidia',
+    'sublime': 'sublime',
+    'androidstudio': 'androidstudio',
+    'darcula': 'darcula',
+    'basic-dark': 'basicDark',
+    'basic-light': 'basicLight',
+}
+
 # --- State Accessors ---
 def get_active_editor():
     return _active_editor
@@ -348,7 +371,7 @@ async def editor_page():
             editor = ui.codemirror(
                 value=initial_content,
                 language=initial_language,
-                theme=editor_prefs.get('theme', 'cm6-dark'),
+                theme=THEME_MAP.get(editor_prefs.get('theme'), 'basicDark'),
                 line_wrapping=editor_prefs.get('wordWrap', False),
                 on_change=_on_editor_change,
             ).style('flex: 1; border: none;').classes('editor-content w-full h-full').props('flat borderless')
@@ -881,7 +904,7 @@ async def set_view_settings(data: dict = Body(...)):
     if 'theme' in data:
         theme_name = str(data['theme'])
         editor_updates['theme'] = theme_name
-        if editor: editor.set_theme(theme_name)
+        if editor: editor.set_theme(THEME_MAP.get(theme_name, 'basicDark'))
         
     if editor_updates:
         _preferences_store.update_preferences(editor=editor_updates)
