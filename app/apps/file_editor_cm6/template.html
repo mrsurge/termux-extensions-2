@@ -394,13 +394,11 @@
   .cm-diff-marker-add { color: var(--diff-add-marker); }
   .cm-diff-marker-context { color: var(--diff-context-marker); }
   .cm-diff-marker-del { color: var(--diff-del-marker); }
-  .cm-diff-line-added { background: var(--diff-add-bg) !important; box-shadow: inset 3px 0 var(--diff-add-border); }
-  .cm-diff-line-context { box-shadow: inset 3px 0 var(--diff-context-border); }
+  .cm-diff-line-added { background: var(--diff-add-bg) !important; }
+  .cm-diff-line-context { background: transparent; }
   .cm-diff-line-removed {
-    position: relative;
     margin: 0 0 var(--diff-del-gap, 0);
-    padding: 0 10px 0 calc(var(--diff-gutter-width) + 6px);
-    border-left: 3px solid var(--diff-del-border);
+    padding: 0 10px;
     background: var(--diff-del-bg);
     color: var(--diff-del-fg);
     font: inherit;

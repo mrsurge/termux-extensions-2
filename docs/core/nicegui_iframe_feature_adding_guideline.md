@@ -1,7 +1,7 @@
 # NiceGUI Iframe Feature Adding Guideline
 
 **Created:** 2025-11-15 19:06 UTC  
-**Status:** Living Document  
+**Sthhgatus:** Living Document  
 **Audience:** Developers extending the vendored NiceGUI CodeMirror 6 editor
 
 ---

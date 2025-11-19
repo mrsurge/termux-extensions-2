@@ -140,8 +140,6 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
         block: true,
         widget: new RemovedLineWidget(widget.text, wordWrap),
       }));
-      gutterBuilder.add(pos, pos, new DiffGutterMarker('−'));
-      gutterCount++;
       widgetIndex++;
     }
     
@@ -152,16 +150,16 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
         block: true,
         widget: new RemovedLineWidget(widget.text, wordWrap),
       }));
-      gutterBuilder.add(lineInfo.from, lineInfo.from, new DiffGutterMarker('−'));
-      gutterCount++;
       widgetIndex++;
     }
 
     const entry = lineDecorations.get(lineNum);
     if (entry) {
       builder.add(lineInfo.from, lineInfo.from, entry.decoration);
-      gutterBuilder.add(lineInfo.from, lineInfo.from, new DiffGutterMarker(entry.markerKind));
-      gutterCount++;
+      if (entry.markerKind) {
+        gutterBuilder.add(lineInfo.from, lineInfo.from, new DiffGutterMarker(entry.markerKind));
+        gutterCount++;
+      }
     }
   }
   
@@ -174,8 +172,6 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       block: true,
       widget: new RemovedLineWidget(widget.text, wordWrap),
     }));
-    gutterBuilder.add(pos, pos, new DiffGutterMarker('−'));
-    gutterCount++;
     widgetIndex++;
   }
 
@@ -211,7 +207,7 @@ class DiffGutterMarker extends CM.GutterMarker {
       span.classList.add('cm-diff-marker-add');
     } else if (this.marker === '−') {
       span.classList.add('cm-diff-marker-del');
-    } else {
+    } else if (this.marker === '│') {
       span.classList.add('cm-diff-marker-context');
     }
     span.setAttribute('aria-hidden', 'true');

@@ -475,17 +475,17 @@ async def editor_page():
     .cm-diff-marker-add { color: var(--diff-add-marker); }
     .cm-diff-marker-del { color: var(--diff-del-marker); }
     .cm-diff-marker-context { color: var(--diff-context-marker); }
-    .cm-diff-line-added {
-      background: var(--diff-add-bg) !important;
-      box-shadow: inset 3px 0 var(--diff-add-border);
-    }
-    .cm-diff-line-context {
-      box-shadow: inset 3px 0 var(--diff-context-border);
-    }
+    .cm-diff-line-added,
+    .cm-diff-line-context,
     .cm-diff-line-removed {
       position: relative;
-      padding: 0 10px 0 calc(var(--diff-gutter-width) + 6px);
-      border-left: 3px solid var(--diff-del-border);
+    }
+    .cm-diff-line-added {
+      background: var(--diff-add-bg) !important;
+    }
+    .cm-diff-line-context { background: transparent; }
+    .cm-diff-line-removed {
+      padding: 0 10px 0 6px;
       background: var(--diff-del-bg);
       color: var(--diff-del-fg);
       font: inherit;
@@ -495,6 +495,20 @@ async def editor_page():
       -webkit-user-select: none;
       contain: layout paint;
     }
+    .cm-diff-line-added::after,
+    .cm-diff-line-context::after,
+    .cm-diff-line-removed::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      pointer-events: none;
+    }
+    .cm-diff-line-added::after { background: var(--diff-add-border); }
+    .cm-diff-line-context::after { background: var(--diff-context-border); }
+    .cm-diff-line-removed::after { background: var(--diff-del-border); }
     .cm-diff-removed-text { display: block; white-space: pre; }
     .cm-diff-line-removed.cm-diff-wrap { white-space: pre-wrap; word-break: break-word; }
     .cm-diff-line-removed.cm-diff-wrap .cm-diff-removed-text { white-space: pre-wrap; word-break: break-word; }
