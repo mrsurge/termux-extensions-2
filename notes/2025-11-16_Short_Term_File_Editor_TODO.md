@@ -81,9 +81,11 @@
    - **References:** `notes/2025-11-16_EXPLORER_REWRITE_PROGRESS_LOG.md`
 
 #### Editor
-8. Fix indentation guide spacing when inline diff gutter is enabled:
-   - Ensure indentation markers account for the extra "+/-" gutter so guides line up correctly with code when both features are on.
-   - **References:** `notes/2025-11-17_INDENTATION_GUIDES_IMPLEMENTATION.md`, `docs/core/nicegui_iframe_feature_adding_guideline.md` (lines 957-1002: adding CM6 packages)
+8. ~~Fix indentation guide spacing when inline diff gutter is enabled~~:
+   - **Status:** ✅ Completed 2025-11-19. Deletion widgets now show "−" markers in diff gutter using CM6's `widgetMarker` option on custom gutters.
+   - Indentation guides display correctly alongside diff markers ("+", "−", "│") without spacing issues.
+   - Solution uses official CM6 architecture - no hacks, overlays, or manual positioning required.
+   - **References:** `notes/NICEGUI_VENDORING_JOURNEY.md` (2025-11-19 entry), `docs/core/nicegui_iframe_feature_adding_guideline.md` (new lesson on widget markers)
 9. Add remote branch checkout to Branch menu:
    - Extend menubar Branch menu to list remote branches and allow checking them out (likely via new git helper + endpoint).
    - **References:** `notes/2025-11-16_EXPLORER_REWRITE_PROGRESS_LOG.md` (git operations)

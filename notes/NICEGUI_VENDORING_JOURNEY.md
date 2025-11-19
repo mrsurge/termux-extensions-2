@@ -344,3 +344,96 @@ After the editor refactor (making editor self-sufficient with auto-load), the `r
 **Related Documentation:**
 - See `2025-11-13_EDITOR_REFACTOR_PLAN.md` for full refactor details
 - See `2025-11-13_RECONNECT_TIMEOUT_EXPLAINED.md` for detailed explanation of reconnect behavior
+
+---
+
+## Update: 2025-11-19 03:28 UTC
+
+**Feature:** Deletion markers in diff gutter
+
+**Context:**
+After implementing indentation guides extension, we discovered that deletion widgets (block widgets inserted between lines to show removed content) had no visual marker in the gutter. The diff gutter showed "+" for additions and "│" for context, but deletions were unmarked.
+
+**The Problem:**
+- Deletion content is rendered as **block widgets** (not document lines)
+- CodeMirror gutters are **line-based** - they only render markers for actual document lines
+- Deletion widgets create "phantom" visual lines that don't exist in the document
+- Therefore, gutters have no line number to attach a "−" marker to
+
+**Attempts That Failed:**
+
+1. **CSS-based pseudo-elements with negative margins** - Tried to pull "−" symbol into gutter space using `margin-left: calc(var(--diff-gutter-width) * -1)`, but widgets are trapped in content area
+2. **Absolute positioning with negative offsets** - Deletion widget DOM can't escape its container; gutter or editor swallows positioned elements
+3. **Custom overlay with pixel positioning** - Created overlay div with markers at measured pixel positions, but markers didn't scroll with content (overlay stayed fixed while editor scrolled)
+4. **Marker column in document flow** - Built a fake column with divs matching visible lines, but couldn't reliably map deletion widgets to column indices due to word wrap complexity
+
+**The Solution (Chad's Email):**
+
+External contributor "Chad" identified the official CM6 hook: **`widgetMarker` option on custom gutters**.
+
+From CodeMirror 6 documentation:
+- `lineNumberWidgetMarker` facet exists but only works with **line number gutter**
+- Custom gutters created via `CM.gutter()` can accept a `widgetMarker` callback option
+- This callback receives `(view, widget, block)` and returns a `GutterMarker` if the widget should have one
+
+**Implementation:**
+
+```javascript
+// 1. Move RemovedLineWidget to outer scope (so facet can reference it)
+class RemovedLineWidget extends CM.WidgetType {
+  // ... widget implementation
+}
+
+// 2. Create minus marker class
+class MinusGutterMarker extends CM.GutterMarker {
+  toDOM() {
+    const span = document.createElement('span');
+    span.textContent = '−';
+    span.className = 'cm-diff-minus-marker';
+    return span;
+  }
+}
+
+const minusMarker = new MinusGutterMarker();
+
+// 3. Add widgetMarker option to custom diff gutter
+CM.gutter({
+  class: 'cm-diff-gutter',
+  markers: view => view.state.field(diffGutterField),
+  widgetMarker: (view, widget, block) => {
+    if (widget instanceof RemovedLineWidget) {
+      return minusMarker;
+    }
+    return null;
+  }
+})
+```
+
+**Key Insights:**
+1. **Gutters are custom-configurable** - The `widgetMarker` option lets custom gutters attach markers to widgets
+2. **Widget type checking works** - Can use `instanceof` to identify specific widget types
+3. **No pixel math required** - CM6 handles all positioning automatically as part of layout engine
+4. **Scrolling is automatic** - Since markers are part of gutter system, they scroll naturally with content
+
+**Result:**
+- ✅ Deletion widgets now show "−" in diff gutter
+- ✅ Markers stay aligned during scroll, edit, viewport changes
+- ✅ No manual position tracking or DOM queries needed
+- ✅ Works with word wrap (widgets can span multiple visual lines; marker appears at first line)
+- ✅ Clean architecture using official CM6 APIs
+
+**Files Modified:**
+- `app/static/vendor/nicegui/elements/codemirror/codemirror.js` (lines 51-75, 191-206, 571-582)
+- `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` (lines 475-488: CSS for `.cm-diff-minus-marker`)
+
+**Time Invested:** ~4 hours of exploration, 10 minutes to implement once correct approach identified
+
+**Lessons Learned:**
+1. **Read the docs thoroughly** - `widgetMarker` option was documented but easy to miss
+2. **Check for widget-specific hooks** - CM6 has different facets for different gutter types (line numbers vs custom)
+3. **Test with external knowledge** - Sometimes a fresh perspective (Chad's email) reveals the obvious solution
+4. **Don't fight the architecture** - If you're doing complex pixel math or DOM hacks, you're probably missing an official API
+
+**Related Documentation:**
+- See `docs/core/nicegui_iframe_feature_adding_guideline.md` (new section on widget markers in custom gutters)
+- See `2025-11-17_INDENTATION_GUIDES_IMPLEMENTATION.md` (similar extension pattern)

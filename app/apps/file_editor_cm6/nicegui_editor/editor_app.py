@@ -688,6 +688,51 @@ async def editor_search_open(data: dict = Body(...)):
             detail=f"Failed to open search panel: {str(e)}"
         )
 
+@editor_router.post('/color_picker/toggle')
+async def editor_toggle_color_picker(data: dict = Body(...)):
+    """Toggle CSS color picker extension."""
+    editor = get_active_editor()
+    
+    if not editor:
+        raise HTTPException(
+            status_code=404,
+            detail="Editor not initialized. Open a file first."
+        )
+    
+    enabled = data.get('enabled', False)
+    
+    try:
+        editor.toggle_color_picker(enabled)
+        return {"ok": True, "enabled": enabled}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to toggle color picker: {str(e)}"
+        )
+
+@editor_router.post('/read_only/set')
+async def editor_set_read_only(data: dict = Body(...)):
+    """Set editor read-only mode."""
+    editor = get_active_editor()
+    
+    if not editor:
+        raise HTTPException(
+            status_code=404,
+            detail="Editor not initialized. Open a file first."
+        )
+    
+    readonly = data.get('readonly', False)
+    
+    try:
+        editor.set_read_only(readonly)
+        return {"ok": True, "readonly": readonly}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to set read-only mode: {str(e)}"
+        )
+
+
 
 @editor_router.get('/cache_state')
 def get_cache_state(project: str | None = Query(None), path: str | None = Query(None)):

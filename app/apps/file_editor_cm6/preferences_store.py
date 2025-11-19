@@ -19,6 +19,8 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "trackAgentEdits": False,
     "fontScale": 0.85,  # NEW: Default to Medium preset
     "showIndentGuides": False,
+    "colorPicker": True,   # CSS color picker extension (default ON)
+    "readOnly": False,     # Read-only mode
 }
 
 DEFAULT_UI_PREFS: Dict[str, Any] = {

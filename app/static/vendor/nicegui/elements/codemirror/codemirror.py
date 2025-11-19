@@ -406,6 +406,40 @@ class CodeMirror(ValueElement, DisableableElement,
         self.run_method('jumpToLine', line)
     # ============================================================================
 
+    # ============================================================================
+    # CUSTOM METHOD: toggle_color_picker
+    # Added: 2025-11-19 by TE-2 Team
+    # Purpose: Toggle CSS color picker extension on/off
+    # ============================================================================
+    def toggle_color_picker(self, enabled: bool) -> None:
+        """Toggle the CSS color picker extension.
+        
+        Args:
+            enabled: True to enable color picker, False to disable
+            
+        Example:
+            editor.toggle_color_picker(True)  # Enable color picker
+        """
+        self.run_method('toggleColorPicker', enabled)
+    # ============================================================================
+
+    # ============================================================================
+    # CUSTOM METHOD: set_read_only
+    # Added: 2025-11-19 by TE-2 Team
+    # Purpose: Set editor to read-only mode (disable editing)
+    # ============================================================================
+    def set_read_only(self, readonly: bool) -> None:
+        """Set the editor to read-only mode.
+        
+        Args:
+            readonly: True to enable read-only mode, False to allow editing
+            
+        Example:
+            editor.set_read_only(True)  # Make editor read-only
+        """
+        self.run_method('setReadOnly', readonly)
+    # ============================================================================
+
     def request_content(self) -> Awaitable[str]:
         """Request the current editor content from the frontend.
 

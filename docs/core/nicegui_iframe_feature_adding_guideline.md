@@ -461,7 +461,59 @@ User clicks file in tree
 
 **Why:** Different code paths have different guarantees. Using wrong path (e.g., `appOpenFile` vs `appOpenFileRel`) bypasses important features like project context resolution.
 
-#### **2. Identify Correct API Surface** 🎯
+#### **2. Check for Widget-Specific Extension Hooks** 🪝
+
+**When working with CodeMirror widgets and gutters:**
+
+CodeMirror 6 has specific extension points for attaching gutter markers to widgets. Don't try to hack positioning with CSS or overlays.
+
+**The Problem:**
+- Block widgets (like deletion diff widgets) create "phantom" visual lines
+- Gutters are line-based - they only render for document lines
+- You can't position gutter markers at widget positions using normal methods
+
+**The Solution:**
+Custom gutters accept a `widgetMarker` option:
+
+```javascript
+CM.gutter({
+  class: 'my-custom-gutter',
+  markers: view => view.state.field(myGutterField),
+  widgetMarker: (view, widget, block) => {
+    // Return a GutterMarker if this widget should have one
+    if (widget instanceof MyWidgetType) {
+      return myMarker;
+    }
+    return null;
+  }
+})
+```
+
+**Key Points:**
+- `widgetMarker` receives `(view, widget, block)` for each widget
+- Use `instanceof` to check widget type
+- Return a `GutterMarker` instance or `null`
+- CM6 handles all positioning automatically
+- Works with scroll, word wrap, viewport changes
+
+**Example Use Case:**
+Showing "−" markers in diff gutter for deletion widgets that don't correspond to document lines.
+
+**What NOT to do:**
+- ❌ Absolute positioning with negative offsets
+- ❌ CSS pseudo-elements with negative margins
+- ❌ Overlay divs with pixel positioning
+- ❌ Fake columns in document flow
+
+**Why:** CodeMirror's layout engine handles widget positioning. Fighting it with manual pixel math is fragile and breaks on scroll/wrap.
+
+**References:**
+- See `notes/NICEGUI_VENDORING_JOURNEY.md` (2025-11-19 entry on deletion markers)
+- CodeMirror docs: `gutterWidgetClass` and custom gutter options
+
+---
+
+#### **3. Identify Correct API Surface** 🎯
 
 **For Vendored Components:**
 
@@ -498,7 +550,7 @@ jumpToLine(lineNumber) {
 
 **Why:** Vendored components have their own API surface. Direct DOM access bypasses the vendor's architecture and breaks reliability.
 
-#### **3. Verify Backend Response Contracts** 📋
+#### **4. Verify Backend Response Contracts** 📋
 
 Before using backend response fields:
 
@@ -526,7 +578,7 @@ window.appOpenFile(item.path)                        // ❌ Bypasses project con
 
 ### **During Development**
 
-#### **4. Mobile-First UI Patterns** 📱
+#### **5. Mobile-First UI Patterns** 📱
 
 **Critical for search/filter interfaces:**
 
@@ -555,7 +607,7 @@ function render() {
 
 **Testing:** Use Chrome DevTools mobile emulation or actual mobile device.
 
-#### **5. Defensive Programming** 🛡️
+#### **6. Defensive Programming** 🛡️
 
 Always guard optional fields:
 
@@ -581,7 +633,7 @@ fileResult.matches?.length ?? 0
 
 **Why:** Production data has edge cases development data doesn't. One guard = one crash prevented.
 
-#### **6. Respect State Hierarchy** 📊
+#### **7. Respect State Hierarchy** 📊
 
 **The Three-Layer Architecture:**
 
@@ -614,7 +666,7 @@ NiceGUI Iframe Backend (Display)
 
 ### **Testing & Verification**
 
-#### **7. UX Consistency Checks** 🎨
+#### **8. UX Consistency Checks** 🎨
 
 Before considering feature complete:
 
@@ -641,7 +693,7 @@ root?.classList.remove('drawer-open');
 
 **Why:** Users learn UI patterns from existing features. Inconsistency causes confusion and "is it broken?" reports.
 
-#### **8. Architecture Compliance Verification** ✅
+#### **9. Architecture Compliance Verification** ✅
 
 Before submitting, verify:
 
@@ -1087,6 +1139,182 @@ Check browser DevTools → Network → WS to see NiceGUI messages:
 
 ---
 
+## Preference Store Integration
+
+**Added:** 2025-11-19 05:05 UTC (Lessons from Color Picker & Read-Only Mode Implementation)
+
+### Overview
+
+User preferences (theme, line numbers, word wrap, etc.) are managed by `preferences_store.py` and must persist across sessions. When adding toggleable features, you MUST register them in the preference store.
+
+### Architecture
+
+**Preference Flow:**
+```
+Frontend Toggle → persistEditorPreferences() → POST /preferences (main.py) 
+                                              ↓
+                                     preferences_store.py
+                                              ↓
+                                    Saved to disk JSON
+                                              ↓
+                              On load: GET /preferences (main.py)
+                                              ↓
+                          loadPreferences() → applyPreferencesFromStore()
+                                              ↓
+                               Menu checkmarks + Backend calls
+```
+
+### Required Steps for Toggleable Features
+
+#### 1. Add to Default Preferences Schema
+
+**File:** `app/apps/file_editor_cm6/preferences_store.py`
+
+```python
+DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
+    # ... existing preferences ...
+    "colorPicker": True,   # Your new preference
+    "readOnly": False,     # Another example
+}
+```
+
+**⚠️ Critical:** If you don't add your key here, it will be **silently ignored** when saved!
+
+#### 2. Add State Variable in Frontend
+
+**File:** `app/apps/file_editor_cm6/main.js`
+
+```javascript
+// Global state variables
+let colorPickerEnabled = true;   // Match DEFAULT_EDITOR_PREFS default
+let readOnlyMode = false;
+```
+
+#### 3. Load from Preferences on Startup
+
+**File:** `app/apps/file_editor_cm6/main.js` → `applyPreferencesFromStore()`
+
+```javascript
+function applyPreferencesFromStore(editorPrefs) {
+  // ... existing preferences ...
+  colorPickerEnabled = !!editorPrefs.colorPicker;  // Load your preference
+  readOnlyMode = !!editorPrefs.readOnly;
+}
+```
+
+#### 4. Update Menu Checkmarks
+
+**File:** `app/apps/file_editor_cm6/main.js` → `applyMenuState()`
+
+```javascript
+function applyMenuState() {
+  // ... existing menu items ...
+  setMenuChecked(miToggleColorPicker, colorPickerEnabled);
+  setMenuChecked(miToggleReadonly, readOnlyMode);
+}
+```
+
+#### 5. Apply on Preferences Load
+
+**File:** `app/apps/file_editor_cm6/main.js` → `loadPreferences()`
+
+```javascript
+async function loadPreferences(initialPayload = null) {
+  const payload = initialPayload || await fetchPreferencesFromServer();
+  applyPreferencesFromStore(payload);
+  
+  // Apply your feature state to the editor
+  if (colorPickerEnabled) {
+    apiPost('editor/color_picker/toggle', { enabled: true })
+      .catch(e => console.warn('[Prefs] Failed to enable color picker:', e));
+  }
+}
+```
+
+#### 6. Persist When Toggled
+
+**File:** `app/apps/file_editor_cm6/main.js` → Menu event handler
+
+```javascript
+bindMenuToggle(miToggleColorPicker, async () => {
+  colorPickerEnabled = !colorPickerEnabled;
+  setMenuChecked(miToggleColorPicker, colorPickerEnabled);
+  persistEditorPreferences({ colorPicker: colorPickerEnabled });  // Save to disk
+  
+  // Apply to editor
+  await apiPost('editor/color_picker/toggle', { enabled: colorPickerEnabled });
+});
+```
+
+### Common Mistakes
+
+#### ❌ Mistake 1: Not Adding to DEFAULT_EDITOR_PREFS
+
+```python
+# preferences_store.py - Missing your key!
+DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
+    "theme": "cm6-dark",
+    # colorPicker NOT listed = silently ignored when saved!
+}
+```
+
+**Result:** Preference saves but doesn't persist across sessions.
+
+#### ❌ Mistake 2: Wrong Default Value
+
+```python
+# preferences_store.py
+"colorPicker": False,   # Store says OFF
+
+# main.js
+let colorPickerEnabled = true;   # Variable says ON
+```
+
+**Result:** Mismatch causes feature to reset unexpectedly on refresh.
+
+#### ❌ Mistake 3: Not Applying on Load
+
+```javascript
+// loadPreferences() only sets the variable but never calls the backend
+colorPickerEnabled = !!editorPrefs.colorPicker;  // ✅ Variable updated
+// ❌ Missing: apiPost('editor/color_picker/toggle', ...)
+```
+
+**Result:** Menu checkbox is correct but feature doesn't actually activate.
+
+#### ❌ Mistake 4: Not Using persistEditorPreferences()
+
+```javascript
+bindMenuToggle(miToggleColorPicker, async () => {
+  colorPickerEnabled = !colorPickerEnabled;
+  // ❌ Missing: persistEditorPreferences({ colorPicker: colorPickerEnabled });
+  await apiPost('editor/color_picker/toggle', { enabled: colorPickerEnabled });
+});
+```
+
+**Result:** Toggle works during session but resets on page reload.
+
+### Testing Checklist
+
+1. ✅ Toggle feature ON → verify menu checkmark
+2. ✅ Toggle feature OFF → verify menu checkmark clears
+3. ✅ Refresh page → verify feature state persists
+4. ✅ Toggle ON → refresh → verify still ON
+5. ✅ Check `~/.local/share/termux-extensions-2/preferences_{project_slug}.json`
+6. ✅ Verify your key is present in the JSON file
+7. ✅ Open DevTools Console → check for preference-related errors
+
+### Example: Complete Implementation
+
+See the Color Picker feature implementation in commits from 2025-11-19:
+- `preferences_store.py`: Added `"colorPicker": True` to defaults
+- `main.js`: State variable, load, apply, persist
+- `codemirror.js`: Toggle method
+- `codemirror.py`: Python wrapper
+- `editor_app.py`: Backend endpoint
+
+---
+
 ## Related Documentation
 
 - **Session Cache Implementation:** `notes/2025-11-14_Session_Cache_Implementation_Plan.md`
@@ -1097,4 +1325,4 @@ Check browser DevTools → Network → WS to see NiceGUI messages:
 
 ---
 
-_Last Updated: 2025-11-17 20:32 UTC - Added "Best Practices for Feature Development" section with 8 lessons learned from Explorer Search implementation_
+_Last Updated: 2025-11-19 05:05 UTC - Added Preference Store Integration section with complete guide for toggleable feature persistence_

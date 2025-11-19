@@ -5,6 +5,8 @@ const searchKeymap = Array.isArray(CM.searchKeymap) ? CM.searchKeymap : null;
 const highlightSelectionMatches = typeof CM.highlightSelectionMatches === 'function' ? CM.highlightSelectionMatches : null;
 const openSearchPanel = typeof CM.openSearchPanel === 'function' ? CM.openSearchPanel : null;
 const indentationMarkers = typeof CM.indentationMarkers === 'function' ? CM.indentationMarkers : null;
+// Color picker extension is exported as colorView() function and colorTheme
+const colorExtension = (typeof CM.colorView === 'function' && CM.colorTheme) ? [CM.colorView(), CM.colorTheme] : null;
 
 // Language-specific indent unit mapping
 const LANGUAGE_INDENT_MAP = {
@@ -267,6 +269,8 @@ export default {
         this.resolveEditor = resolve;
       }),
       pendingFontScale: 1,
+      colorPickerCompartment: null, // Color picker toggle compartment
+      readOnlyCompartment: null,     // Read-only mode compartment
     };
   },
   methods: {
@@ -641,6 +645,10 @@ export default {
       // Create compartment for dynamic indent unit (before extensions array)
       this.indentUnitCompartment = new CM.Compartment();
       
+      // Create compartments for toggleable features
+      this.colorPickerCompartment = new CM.Compartment();
+      this.readOnlyCompartment = new CM.Compartment();
+      
       const extensions = [
         CM.basicSetup,
         changeSender,
@@ -653,6 +661,8 @@ export default {
         this.languageConfig.of([]),
         this.editableConfig.of([]),
         this.lineWrappingConfig.of([]),
+        this.colorPickerCompartment.of([]), // Color picker toggle
+        this.readOnlyCompartment.of([]),     // Read-only mode toggle
         CM.EditorView.theme({
           "&": { height: "100%" },
           ".cm-scroller": { overflow: "auto" },
@@ -702,6 +712,61 @@ export default {
         console.log('[CodeMirror] jumpToLine: jumped to line', targetLine);
       } catch (err) {
         console.error('[CodeMirror] jumpToLine failed:', err);
+      }
+    },
+    // ============================================================================
+    // CUSTOM METHOD: toggleColorPicker
+    // Added: 2025-11-19 by TE-2 Team
+    // Purpose: Toggle CSS color picker extension on/off
+    // Used by: Editor menu "Show Color Picker" toggle
+    // ============================================================================
+    toggleColorPicker(enabled) {
+      if (!this.editor || !this.colorPickerCompartment) {
+        console.warn('[CodeMirror] toggleColorPicker: editor not ready');
+        return;
+      }
+      
+      if (!colorExtension) {
+        console.warn('[CodeMirror] colorExtension not available in bundle');
+        return;
+      }
+      
+      try {
+        const effects = enabled
+          ? this.colorPickerCompartment.reconfigure(colorExtension)
+          : this.colorPickerCompartment.reconfigure([]);
+        
+        this.editor.dispatch({ effects });
+        console.log('[CodeMirror] Color picker:', enabled ? 'enabled' : 'disabled');
+      } catch (err) {
+        console.error('[CodeMirror] toggleColorPicker failed:', err);
+      }
+    },
+    // ============================================================================
+    // CUSTOM METHOD: setReadOnly
+    // Added: 2025-11-19 by TE-2 Team
+    // Purpose: Set editor to read-only mode (disable editing)
+    // Used by: Editor menu "Read Only Mode" toggle
+    // Note: On mobile, keyboard may still appear on tap - this is a CM6 limitation
+    // ============================================================================
+    setReadOnly(readonly) {
+      if (!this.editor || !this.readOnlyCompartment) {
+        console.warn('[CodeMirror] setReadOnly: editor not ready');
+        return;
+      }
+      
+      try {
+        const effects = readonly
+          ? this.readOnlyCompartment.reconfigure([
+              CM.EditorState.readOnly.of(true),
+              CM.EditorView.editable.of(false)
+            ])
+          : this.readOnlyCompartment.reconfigure([]);
+        
+        this.editor.dispatch({ effects });
+        console.log('[CodeMirror] Read-only mode:', readonly ? 'enabled' : 'disabled');
+      } catch (err) {
+        console.error('[CodeMirror] setReadOnly failed:', err);
       }
     },
     // ============================================================================

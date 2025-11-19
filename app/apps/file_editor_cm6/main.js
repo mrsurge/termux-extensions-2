@@ -341,6 +341,8 @@ const miToggleIndentGuides = requireEl('#mi-toggle-indent-guides');
 const miToggleWrap    = requireEl('#mi-toggle-wrap');
 const miToggleAutosave = requireEl('#mi-toggle-autosave');
 const miToggleDiffs  = requireEl('#mi-toggle-diffs');
+const miToggleColorPicker = requireEl('#mi-toggle-color-picker');
+const miToggleReadonly = requireEl('#mi-toggle-readonly');
 const miTrackEdits   = requireEl('#mi-track-edits');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
@@ -726,6 +728,8 @@ let autoCloseBrackets = true;  // New: ON by default
 let enableAutocompletion = true;  // New: ON by default
 let autoSaveEnabled = true;
 let showInlineDiffs = true;
+let colorPickerEnabled = true;   // CSS color picker default ON
+let readOnlyMode = false;         // Read-only mode toggle
 let trackAgentEdits = false;
 let currentTheme = 'cm6-dark';
 let lastPickerPath = HOME_DIR;
@@ -951,6 +955,8 @@ function applyPreferencesFromStore(payload) {
   enableAutocompletion = editorPrefs.autocompletion !== false;  // Default true
   autoSaveEnabled = editorPrefs.autoSave !== false;
   showInlineDiffs = editorPrefs.showInlineDiffs !== false;
+  colorPickerEnabled = !!editorPrefs.colorPicker;  // Default false
+  readOnlyMode = !!editorPrefs.readOnly;            // Default false
   trackAgentEdits = !!editorPrefs.trackAgentEdits;
   const themeId = editorPrefs.theme;
   currentTheme = themeId || 'cm6-dark';
@@ -977,6 +983,8 @@ function applyMenuState() {
   setMenuChecked(miToggleWrap, wordWrap);
   setMenuChecked(miToggleAutosave, autoSaveEnabled);
   setMenuChecked(miToggleDiffs, showInlineDiffs);
+  setMenuChecked(miToggleColorPicker, colorPickerEnabled);
+  setMenuChecked(miToggleReadonly, readOnlyMode);
   setMenuChecked(miTrackEdits, trackAgentEdits);
 }
 
@@ -1032,6 +1040,18 @@ async function loadPreferences(initialPayload = null) {
   const payload = initialPayload || await fetchPreferencesFromServer();
   applyPreferencesFromStore(payload);
   diffController.setEnabled(showInlineDiffs);
+  
+  // Apply color picker state
+  if (colorPickerEnabled) {
+    apiPost('editor/color_picker/toggle', { enabled: true })
+      .catch(e => console.warn('[Prefs] Failed to enable color picker:', e));
+  }
+  
+  // Apply read-only state
+  if (readOnlyMode) {
+    apiPost('editor/read_only/set', { readonly: true })
+      .catch(e => console.warn('[Prefs] Failed to set read-only mode:', e));
+  }
   
   // Connect/disconnect edit tracker based on preference
   if (trackAgentEdits) {
@@ -1811,6 +1831,36 @@ bindMenuToggle(miToggleDiffs, async () => {
     current_path: currentPath  // Send current file for diff loading
   }).catch(e => console.warn('[Menu] Failed to sync inline diffs:', e));
 });
+
+// Color picker toggle
+bindMenuToggle(miToggleColorPicker, async () => {
+  colorPickerEnabled = !colorPickerEnabled;
+  setMenuChecked(miToggleColorPicker, colorPickerEnabled);
+  persistEditorPreferences({ colorPicker: colorPickerEnabled });
+  
+  try {
+    await apiPost('editor/color_picker/toggle', { enabled: colorPickerEnabled });
+  } catch (e) {
+    host.toast('Failed to toggle color picker');
+    console.warn('[Menu] Color picker toggle failed:', e);
+  }
+});
+
+// Read-only mode toggle
+bindMenuToggle(miToggleReadonly, async () => {
+  readOnlyMode = !readOnlyMode;
+  setMenuChecked(miToggleReadonly, readOnlyMode);
+  persistEditorPreferences({ readOnly: readOnlyMode });
+  
+  try {
+    await apiPost('editor/read_only/set', { readonly: readOnlyMode });
+    host.toast(readOnlyMode ? 'Editor is now read-only' : 'Editor is now editable', 'info');
+  } catch (e) {
+    host.toast('Failed to toggle read-only mode');
+    console.warn('[Menu] Read-only toggle failed:', e);
+  }
+});
+
 bindMenuToggle(miTrackEdits, () => {
   trackAgentEdits = !trackAgentEdits;
   applyMenuState();
