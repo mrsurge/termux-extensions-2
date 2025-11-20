@@ -675,47 +675,11 @@ recents = _history_store.get_recent_projects()
 files = _history_store.get_recent_files("/path/to/project")
 ```
 
-**Example Actual File (condensed):**
-```json
-{
-  "recent_projects": [
-    {
-      "path": "/data/data/com.termux/files/home/test/termux-extensions-2",
-      "label": "termux-extensions-2",
-      "opened_at": "2025-11-12T15:38:11.625209Z"
-    },
-    {
-      "path": "/data/data/com.termux/files/home/mrselect",
-      "label": "mrselect",
-      "opened_at": "2025-11-12T06:18:27.202215Z"
-    }
-  ],
-  "projects": {
-    "/data/data/com.termux/files/home/mrselect": {
-      "files": [
-        {
-          "path": "/data/data/com.termux/files/home/mrselect/.nicegui/storage-general.json",
-          "label": "storage-general.json",
-          "opened_at": "2025-11-12T06:18:27.202248Z"
-        },
-        {
-          "path": "/data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/main.js",
-          "label": "main.js",
-          "opened_at": "2025-11-12T06:02:21.720343Z"
-        }
-      ],
-      "last_file": "/data/data/com.termux/files/home/mrselect/.nicegui/storage-general.json",
-      "label": "mrselect",
-      "opened_at": "2025-11-12T06:18:27.202215Z"
-    }
-  },
-  "active_project": "/data/data/com.termux/files/home/test/termux-extensions-2"
-}
-```
-
 **Thread Safety:** Uses `threading.Lock()` for atomic read/write operations.
 
 **Atomic Writes:** Uses temp file + rename pattern to prevent corruption.
+
+**Singleton Usage:** `_history_store` (from `app/apps/file_editor_cm6/stores.py`) is instantiated once per worker and imported everywhere (editor app, terminal backend, REST endpoints). This enforces the “single source of truth” model: every subsystem reads/writes the same `code_oss_history.json`, so project roots, recents, and terminal shell IDs always stay in sync.
 
 **Max Limits:**
 - Recent projects: 12 entries (`MAX_RECENT_PROJECTS`)

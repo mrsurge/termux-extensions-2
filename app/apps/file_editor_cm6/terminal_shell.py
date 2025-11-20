@@ -67,20 +67,3 @@ async def resize_editor_shell(shell_id, cols, rows):
         return True
     except Exception:
         return False
-
-
-async def get_shell_info(shell_id):
-    """
-    Get shell session information.
-    
-    Args:
-        shell_id: Shell session ID
-    
-    Returns:
-        dict: Shell metadata or None if not found
-    """
-    mgr = await _manager()
-    rec = await mgr.get_shell(shell_id)
-    if not rec:
-        return None
-    return await mgr.describe(rec)

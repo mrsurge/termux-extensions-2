@@ -296,7 +296,8 @@
 
   .fe-toolbar { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
   .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .fe-file-name { font-size: 0.88rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 0.35rem; }
+  .fe-file-name { font-size: 0.88rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; display: flex; align-items: center; gap: 0.35rem; width: 100%; min-width: 0; overflow: hidden; }
+  #fe-file-name { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fe-file-name.fe-unsaved::after { content: ' *'; color: var(--primary, #3b82f6); }
   .fe-file-draft-indicator { font-size: 0.75rem; font-weight: 600; min-width: 0.85rem; text-align: center; }
   .fe-file-draft-indicator[data-state='cached'] { color: #facc15; }

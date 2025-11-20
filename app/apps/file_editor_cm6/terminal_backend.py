@@ -8,29 +8,22 @@ Provides REST endpoints and WebSocket PTY streaming for embedded terminal.
 import asyncio
 import json
 from pathlib import Path
-from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query, Depends
+from fastapi import APIRouter, HTTPException, WebSocket, Body, Query, Depends
 
 from app.libs.framework_shells import FrameworkShellManager, get_manager
 from app.apps.file_editor_cm6 import edit_tracker
+from app.apps.file_editor_cm6.stores import _history_store as _shared_history_store
 from app.apps.file_editor_cm6.terminal_shell import (
     create_editor_shell,
     destroy_editor_shell,
     resize_editor_shell,
-    get_shell_info
 )
 
 terminal_router = APIRouter()
 
-# Module-level singleton for history store to persist across requests
-_history_store_singleton = None
-
 def get_history_store():
-    """Get or create the singleton HistoryStore instance."""
-    global _history_store_singleton
-    if _history_store_singleton is None:
-        from app.apps.file_editor_cm6.history_store import HistoryStore
-        _history_store_singleton = HistoryStore()
-    return _history_store_singleton
+    """Return the shared HistoryStore instance used across the app."""
+    return _shared_history_store
 
 @terminal_router.get('/terminal/shell-id')
 async def get_terminal_shell_id():
@@ -75,28 +68,6 @@ async def set_terminal_shell_id(data: dict = Body(...)):
         return {"ok": True, "data": {"shell_id": shell_id}}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@terminal_router.post('/terminal/create')
-async def terminal_create(data: dict = Body(...)):
-    """
-    Create a new terminal shell session.
-    
-    Body (JSON):
-        cwd: Working directory (optional, defaults to home or current project)
-        shell: Custom shell command (optional, defaults to bash -l -i)
-    
-    Returns:
-        Shell session info including ID
-    """
-    cwd = data.get('cwd')
-    shell_cmd = data.get('shell')
-    
-    try:
-        shell_info = await create_editor_shell(cwd=cwd, shell_cmd=shell_cmd)
-        return {"ok": True, "data": shell_info}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @terminal_router.delete('/terminal/{shell_id}')
 async def terminal_destroy(shell_id: str):
