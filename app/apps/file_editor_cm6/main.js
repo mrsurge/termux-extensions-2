@@ -319,6 +319,21 @@ const themeMenuItems = Array.from(menuThemeDD.querySelectorAll('[data-theme]'));
 const recentFilesBtn = requireEl('#recent-files-btn');
 const recentFilesDD  = requireEl('#recent-files-dd');
 const runActiveBtn   = requireEl('#run-active-file-btn');
+const MAX_FILENAME_DISPLAY = 34;
+
+function formatFileNameDisplay(name) {
+  if (!name) return '';
+  if (name.length <= MAX_FILENAME_DISPLAY) return name;
+  const keepStart = Math.max(6, Math.floor((MAX_FILENAME_DISPLAY - 1) * 0.6));
+  const keepEnd = Math.max(4, MAX_FILENAME_DISPLAY - keepStart - 1);
+  return `${name.slice(0, keepStart)}…${name.slice(-keepEnd)}`;
+}
+
+function setToolbarFileName(rawName) {
+  const safe = rawName || '';
+  fileNameEl.textContent = formatFileNameDisplay(safe);
+  fileNameEl.title = safe;
+}
 const miNew       = requireEl('#mi-new');
 const miOpen      = requireEl('#mi-open');
 const miSave      = requireEl('#mi-save');
@@ -1222,20 +1237,18 @@ function updateRunButtonState() {
 
 function updatePathDisplay() {
   if (!currentPath) {
-    fileNameEl.textContent = 'Untitled';
+    setToolbarFileName('Untitled');
     cacheStateBadge.textContent = '';
     cacheStateBadge.dataset.state = '';
-    fileNameEl.title = 'Untitled';
     filePathEl.textContent = 'No file open';
     filePathEl.title = '';
     updateRunButtonState();
     return;
   }
   const abs = toAbsolute(currentPath, null, HOME_DIR);
-  fileNameEl.textContent = basename(abs);
+  setToolbarFileName(basename(abs));
   cacheStateBadge.textContent = '';
   cacheStateBadge.dataset.state = '';
-  fileNameEl.title = basename(abs);
   filePathEl.textContent = formatDisplayDirectory(abs);
   filePathEl.title = abs;
   updateRunButtonState();
@@ -2035,8 +2048,7 @@ async function main() {
 
   if (!serverState || !serverState.activeProject || !serverState.activeProjectExists) {
     statusEl.textContent = serverState?.activeProjectMessage || 'Select a project to begin.';
-    fileNameEl.textContent = 'No file';
-    fileNameEl.title = 'No file';
+    setToolbarFileName('No file');
     filePathEl.textContent = '';
     filePathEl.title = '';
     return;

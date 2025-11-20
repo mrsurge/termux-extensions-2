@@ -295,9 +295,10 @@
   }
 
   .fe-toolbar { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
-  .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .fe-file-name { font-size: 0.88rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; display: flex; align-items: center; gap: 0.35rem; width: 100%; min-width: 0; overflow: hidden; }
-  #fe-file-name { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+  .fe-file-name { font-size: 0.70rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; display: flex; align-items: center; gap: 0.35rem; width: 100%; min-width: 0; }
+  #fe-file-name { display: block; flex: 1 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #fe-file-draft-badge { flex: 0 0 auto; }
   .fe-file-name.fe-unsaved::after { content: ' *'; color: var(--primary, #3b82f6); }
   .fe-file-draft-indicator { font-size: 0.75rem; font-weight: 600; min-width: 0.85rem; text-align: center; }
   .fe-file-draft-indicator[data-state='cached'] { color: #facc15; }
@@ -1299,11 +1300,12 @@
   <div class="fe-toolbar">
     <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer">☰</button>
     <div class="fe-title-block">
-      <div class="fe-file-name"><span id="fe-file-name" title="Current file">Untitled</span><span id="fe-file-draft-badge" class="fe-file-draft-indicator"></span></div>
+      <div class="fe-file-name"><span id="fe-file-name" title="Current file">Untitled</span></div>
       <div id="fe-file-path" class="fe-file-path" title="Current path">No file open</div>
     </div>
 
     <div class="fe-menu" style="position: relative; margin-left: auto; display: flex; gap: 0.35rem; align-items: center;">
+      <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
       <div style="position: relative;">
         <button id="recent-files-btn" class="fe-btn" style="margin: 0;" disabled>Recents ▾</button>
