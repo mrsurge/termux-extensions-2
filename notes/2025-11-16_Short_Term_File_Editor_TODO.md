@@ -17,7 +17,7 @@
 - **References:** `notes/2025-11-17_EXPLORER_SEARCH_FIXES.md`, `notes/2025-11-17_LESSONS_LEARNED.md`, `docs/core/nicegui_iframe_feature_adding_guideline.md` (lines 78-107: stateless endpoints, 109-140: real-time updates)
 
 ## 3. Go To Line (UI already exists)
-- **Status:** Menu item prompts for line but relies on legacy CM6 host `view`.
+- **Status:** ✅ Completed 2025-11-19. Menu item wired to backend endpoint.
 - **Scope:** Replace prompt handler with backend call to `/editor/jump_to_line` (already implemented). Frontend should gather `currentPath` + line, post, and surface errors.
 - **References:** `notes/2025-11-17_EXPLORER_SEARCH_FIXES.md` (includes Go To Line refactor), `docs/core/nicegui_iframe_feature_adding_guideline.md` (lines 78-107: stateless endpoints)
 
@@ -90,6 +90,7 @@
    - Extend menubar Branch menu to list remote branches and allow checking them out (likely via new git helper + endpoint).
    - **References:** `notes/2025-11-16_EXPLORER_REWRITE_PROGRESS_LOG.md` (git operations)
 10. Import CSS color picker npm module for CodeMirror (VERY IMPORTANT):
+    - **Status:** ✅ Completed 2025-11-19. Vendored and bundled CSS color picker extension.
     - Vendor a CM-compatible CSS color picker extension, bundle via the existing CodeMirror build, and expose a toggle/feature in the editor (e.g., color swatches or in-place picker for CSS color literals).
     - **References:** `notes/NICEGUI_VENDORING_JOURNEY.md`, `notes/2025-11-17_INDENTATION_GUIDES_IMPLEMENTATION.md` (similar bundling pattern), `docs/core/nicegui_iframe_feature_adding_guideline.md` (lines 957-1051: adding/verifying CM6 packages)
 
