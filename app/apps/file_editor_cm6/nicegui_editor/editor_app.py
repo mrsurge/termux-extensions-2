@@ -15,6 +15,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, Response
 # --- Local Imports ---
 # Import stores as singletons from the new stores module
 from app.apps.file_editor_cm6.stores import _history_store, _preferences_store
+from app.apps.file_editor_cm6.preferences_store import ALLOWED_FONT_SCALES
 # Import helpers
 from app.apps.file_editor_cm6.explorer_helper import get_project_root, _normalize_rel_path, mark_git_cache_dirty
 from app.apps.file_editor_cm6.core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe
@@ -72,6 +73,31 @@ def _resolve_theme_preference(theme_key: Optional[str]) -> str:
             f"Preference file{location_hint} references unsupported theme '{theme_key}'. "
             "Add it to THEME_MAP or update the preference file."
         ) from exc
+
+
+def _resolve_font_scale(scale_value: Optional[float]) -> float:
+    """Validate and return the stored font scale, raising if it's missing/invalid."""
+    pref_path = getattr(_preferences_store, 'path', None)
+    location_hint = f" ({pref_path})" if pref_path else ''
+
+    if scale_value is None:
+        raise RuntimeError(f"Preference file{location_hint} is missing required 'editor.fontScale'")
+
+    try:
+        numeric = float(scale_value)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"Preference file{location_hint} has non-numeric fontScale value: {scale_value!r}"
+        ) from exc
+
+    if numeric not in ALLOWED_FONT_SCALES:
+        allowed_str = ', '.join(str(v) for v in sorted(ALLOWED_FONT_SCALES))
+        raise RuntimeError(
+            f"Preference file{location_hint} references unsupported fontScale {numeric}. "
+            f"Allowed values: {allowed_str}"
+        )
+
+    return numeric
 
 # --- State Accessors ---
 def get_active_editor():
@@ -322,6 +348,7 @@ async def editor_page():
     # 1. Load Preferences and History
     prefs = _preferences_store.get_preferences()
     editor_prefs = prefs.get('editor', {})
+    font_scale_pref = _resolve_font_scale(editor_prefs.get('fontScale'))
     
     # 2. Determine and Load Initial File
     project_path = _history_store.get_active_project()
@@ -390,13 +417,17 @@ async def editor_page():
             # Debug: What are we passing to the editor?
             theme_from_prefs = editor_prefs.get('theme')
             theme_mapped = _resolve_theme_preference(theme_from_prefs)
-            print(f"[EDITOR_APP] Theme loading: file={theme_from_prefs} -> mapped={theme_mapped}", file=sys.stderr)
+            print(
+                f"[EDITOR_APP] Theme loading: file={theme_from_prefs} -> mapped={theme_mapped}; fontScale={font_scale_pref}",
+                file=sys.stderr,
+            )
             
             editor = ui.codemirror(
                 value=initial_content,
                 language=initial_language,
                 theme=theme_mapped,
                 line_wrapping=editor_prefs.get('wordWrap'),
+                font_scale=font_scale_pref,
                 on_change=_on_editor_change,
             ).style('flex: 1; border: none;').classes('editor-content w-full h-full').props('flat borderless')
             editor._cached_content = initial_content
@@ -410,7 +441,7 @@ async def editor_page():
             print(f"[EDITOR_APP] Editor created with theme={theme_from_prefs}, wrap={editor_prefs.get('wordWrap')}", file=sys.stderr)
             
             editor.set_zebra_stripes(editor_prefs.get('showShading', False))
-            editor.set_font_scale(editor_prefs.get('fontScale', 0.85))
+            editor.set_font_scale(font_scale_pref)
             editor.set_indent_guides(editor_prefs.get('showIndentGuides', False))
             # Theme and line wrapping already applied in constructor - don't re-apply
             editor.toggle_color_picker(editor_prefs.get('colorPicker', True))
@@ -664,9 +695,10 @@ async def set_editor_content(data: dict = Body(...)):
     # These are applied every time content changes to maintain consistent editor state
     # NOTE: theme and line_wrapping are constructor-only, don't re-apply here
     editor_prefs = _preferences_store.get_preferences().get('editor', {})
+    font_scale_pref = _resolve_font_scale(editor_prefs.get('fontScale'))
     
     editor.set_zebra_stripes(editor_prefs.get('showShading'))
-    editor.set_font_scale(editor_prefs.get('fontScale'))
+    editor.set_font_scale(font_scale_pref)
     editor.set_indent_guides(editor_prefs.get('showIndentGuides'))
     editor.toggle_color_picker(editor_prefs.get('colorPicker'))
     editor.set_read_only(editor_prefs.get('readOnly', False))
@@ -876,7 +908,12 @@ async def update_preference(data: dict = Body(...)):
             value = theme_value
             editor.set_theme(mapped_theme)
         elif key == 'fontScale':
-            editor.set_font_scale(float(value))
+            try:
+                scale = _resolve_font_scale(value)
+            except RuntimeError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            value = scale
+            editor.set_font_scale(scale)
         elif key == 'colorPicker':
             editor.toggle_color_picker(bool(value))
         elif key == 'readOnly':
@@ -1084,20 +1121,11 @@ async def set_font_scale_endpoint(data: dict = Body(...)):
     try:
         editor = get_active_editor()
         
-        # Validate input
-        scale = data.get('scale')
-        if not isinstance(scale, (int, float)):
-            raise HTTPException(status_code=400, detail="scale must be a number")
-        
-        scale = float(scale)
-        
-        # Enforce presets
-        ALLOWED_SCALES = {0.70, 0.85, 1.0}
-        if scale not in ALLOWED_SCALES:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"scale must be one of {sorted(ALLOWED_SCALES)}"
-            )
+        # Validate input (reuse preference helper for consistent messaging)
+        try:
+            scale = _resolve_font_scale(data.get('scale'))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         
         # Apply to editor
         if editor:
@@ -1116,7 +1144,7 @@ async def set_font_scale_endpoint(data: dict = Body(...)):
             print(f"[EDITOR] Persisted font scale: {scale} globally", file=sys.stderr)
         except Exception as e:
             print(f"[EDITOR] Failed to persist font scale: {e}", file=sys.stderr)
-            # Don't fail the request if persistence fails - editor is already updated
+            raise HTTPException(status_code=500, detail=f"Failed to persist font scale: {e}")
         
         return {"ok": True, "data": {"fontScale": scale}}
         

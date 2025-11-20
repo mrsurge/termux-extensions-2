@@ -8,6 +8,30 @@ const indentationMarkers = typeof CM.indentationMarkers === 'function' ? CM.inde
 // Color picker extension is exported as colorView() function and colorTheme
 const colorExtension = (typeof CM.colorView === 'function' && CM.colorTheme) ? [CM.colorView(), CM.colorTheme] : null;
 
+const FONT_SCALE_MIN = 0.5;
+const FONT_SCALE_MAX = 2.0;
+
+const clampFontScale = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+  return Math.min(FONT_SCALE_MAX, Math.max(FONT_SCALE_MIN, parsed));
+};
+
+const buildFontScaleTheme = (scale) => {
+  return CM.EditorView.theme({
+    "&": {
+      fontSize: `${scale * 100}%`,
+      lineHeight: "1.45",
+    },
+    "& .cm-content, & .cm-line": {
+      fontSize: "inherit",
+      lineHeight: "inherit",
+    },
+  });
+};
+
 // Language-specific indent unit mapping
 const LANGUAGE_INDENT_MAP = {
   // 2-space languages
@@ -242,6 +266,7 @@ export default {
     value: String,
     language: String,
     theme: { type: String, required: true },
+    fontScale: { type: Number, default: 1 },
     lineWrapping: Boolean,
     disable: Boolean,
     indent: String,
@@ -268,7 +293,7 @@ export default {
       editorPromise: new Promise((resolve) => {
         this.resolveEditor = resolve;
       }),
-      pendingFontScale: 1,
+      pendingFontScale: clampFontScale(this.fontScale),
       colorPickerCompartment: null, // Color picker toggle compartment
       readOnlyCompartment: null,     // Read-only mode compartment
     };
@@ -392,9 +417,8 @@ export default {
       });
     },
     setFontScale(scale) {
-      const { EditorView, StateEffect, Compartment } = CM;
-      const parsed = Number(scale);
-      const clamped = Math.min(2, Math.max(0.5, isNaN(parsed) ? 1 : parsed));
+      const { StateEffect, Compartment } = CM;
+      const clamped = clampFontScale(scale);
       this.pendingFontScale = clamped;
       if (!this.editor) return;
 
@@ -405,16 +429,7 @@ export default {
         });
       }
 
-      const fontTheme = EditorView.theme({
-        "&": {
-          fontSize: `${clamped * 100}%`,
-          lineHeight: "1.45",
-        },
-        "& .cm-content, & .cm-line": {
-          fontSize: "inherit",
-          lineHeight: "inherit",
-        },
-      });
+      const fontTheme = buildFontScaleTheme(clamped);
 
       this.editor.dispatch({
         effects: this.fontSizeCompartment.reconfigure([fontTheme]),
@@ -657,7 +672,12 @@ export default {
       // Create compartments for toggleable features
       this.colorPickerCompartment = new CM.Compartment();
       this.readOnlyCompartment = new CM.Compartment();
-      
+      this.fontSizeCompartment = new CM.Compartment();
+
+      const initialFontScale = clampFontScale(this.fontScale);
+      const initialFontTheme = buildFontScaleTheme(initialFontScale);
+      this.pendingFontScale = initialFontScale;
+
       if (!this.theme) {
         throw new Error('[CodeMirror] Missing required theme prop; CodeMirror cannot initialize');
       }
@@ -676,6 +696,7 @@ export default {
         this.languageConfig.of([]),
         this.editableConfig.of([]),
         this.lineWrappingConfig.of([]),
+        this.fontSizeCompartment.of([initialFontTheme]),
         this.colorPickerCompartment.of([]), // Color picker toggle
         this.readOnlyCompartment.of([]),     // Read-only mode toggle
         CM.EditorView.theme({

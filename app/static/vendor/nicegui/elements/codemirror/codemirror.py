@@ -260,6 +260,7 @@ class CodeMirror(ValueElement, DisableableElement,
         theme: Optional[SUPPORTED_THEMES] = None,
         indent: str = ' ' * 4,
         line_wrapping: bool = False,
+        font_scale: float = 1.0,
         highlight_whitespace: bool = False,
     ) -> None:
         """CodeMirror
@@ -280,6 +281,7 @@ class CodeMirror(ValueElement, DisableableElement,
         :param theme: initial theme of the editor (required - no fallback)
         :param indent: string to use for indentation (any string consisting entirely of the same whitespace character, default: "    ")
         :param line_wrapping: whether to wrap lines (default: `False`)
+        :param font_scale: initial font scale multiplier (default: 1.0)
         :param highlight_whitespace: whether to highlight whitespace (default: `False`)
         """
         super().__init__(value=value, on_value_change=on_change)
@@ -294,6 +296,7 @@ class CodeMirror(ValueElement, DisableableElement,
         self._props['theme'] = theme
         self._props['indent'] = indent
         self._props['lineWrapping'] = line_wrapping
+        self._props['fontScale'] = font_scale
         self._props['highlightWhitespace'] = highlight_whitespace
         self._update_method = 'setEditorValueFromProps'
 
