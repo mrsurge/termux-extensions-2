@@ -252,7 +252,12 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
             try:
                 await websocket.send_text(chunk)
             except Exception:
+                # Force the websocket loop to unwind so a fresh connection can start cleanly
                 stop_event.set()
+                try:
+                    await websocket.close(code=1011, reason='terminal stream error')
+                except Exception:
+                    pass
                 break
     
     forward_task = asyncio.create_task(forward_pty_to_ws())

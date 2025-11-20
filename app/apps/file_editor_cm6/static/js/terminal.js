@@ -24,6 +24,8 @@ export function createTerminalDrawer(options = {}) {
   let fitAddon = null;
   let isOpen = false;
   let isFullscreen = false;
+  let lastShellId = null;
+  let shellHistoryPrimed = false;
 
   const drawer = document.getElementById('terminal-drawer');
   const container = document.getElementById('terminal-container');
@@ -91,6 +93,8 @@ export function createTerminalDrawer(options = {}) {
 
     const currentShellId = shellId;
     shellId = null;  // Clear immediately to prevent reconnection
+    lastShellId = null;
+    shellHistoryPrimed = false;
 
     // Send destroy command through WebSocket
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -129,12 +133,19 @@ export function createTerminalDrawer(options = {}) {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'shell_id') {
-          // Server sent us the real shell ID
-          shellId = msg.shell_id;
+          const receivedShellId = msg.shell_id;
+          const isNewShell = receivedShellId !== lastShellId;
+          shellId = receivedShellId;
           console.log('Received shell ID from server:', shellId);
           
-          // Now fetch logs with the real shell ID
-          if (term) {
+          if (isNewShell) {
+            shellHistoryPrimed = false;
+          }
+          lastShellId = receivedShellId;
+
+          // Now fetch logs with the real shell ID (only once per shell)
+          if (term && !shellHistoryPrimed) {
+            let primed = false;
             try {
               const res = await fetch(`/api/app/file_editor_cm6/terminal/${shellId}?logs=true&tail=2000`);
               const result = await res.json();
@@ -146,8 +157,13 @@ export function createTerminalDrawer(options = {}) {
                   console.log('Preloaded terminal history:', result.data.logs.stdout_tail.length, 'lines');
                 }
               }
+              primed = true;
             } catch (err) {
               console.warn('Failed to preload terminal history:', err);
+            }
+
+            if (primed) {
+              shellHistoryPrimed = true;
             }
           }
           return;
@@ -169,9 +185,12 @@ export function createTerminalDrawer(options = {}) {
       console.error('Terminal WebSocket error:', err);
     };
 
-    socket.onclose = () => {
-      console.log('Terminal WebSocket closed');
-      ws = null;
+    socket.onclose = (event) => {
+      console.log('Terminal WebSocket closed', event?.code);
+      // Only drop reference if we intentionally closed the socket
+      if (socket.forcedClose && ws === socket) {
+        ws = null;
+      }
     };
 
     socket.onreconnect = (attempt) => {
@@ -264,8 +283,12 @@ export function createTerminalDrawer(options = {}) {
     }
 
     // Connect WebSocket - use 'auto' to let backend manage shell ID
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      ws = await connectWebSocket('auto');  // Backend will send us the real ID
+    if (!ws) {
+      ws = await connectWebSocket('auto');
+    } else if (ws.readyState === WebSocket.CLOSED && ws.forcedClose) {
+      ws = await connectWebSocket('auto');
+    } else if (ws.readyState === WebSocket.CLOSED) {
+      ws.reconnect();
     }
 
     // Fit terminal to drawer size and manually send initial resize
