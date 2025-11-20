@@ -42,6 +42,13 @@ class GitCommit:
     date: str
 
 
+@dataclass
+class GitChangeEntry:
+    path: str
+    code: str
+    original_path: Optional[str] = None
+
+
 def _run_git(project_root: Path, *args: str) -> str:
     try:
         completed = subprocess.run(
@@ -111,6 +118,48 @@ def _collect_status(project_root: Path) -> Tuple[List[str], List[str], List[str]
             if code[1] != ' ':
                 unstaged.append(path)
     return staged, unstaged, untracked
+
+
+def _normalize_status_path(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    cleaned = raw.strip()
+    if not cleaned:
+        return None
+    return cleaned.replace("\\", "/")
+
+
+def get_worktree_changes(project_root: Path) -> List[GitChangeEntry]:
+    """Return porcelain status entries describing working tree changes."""
+    _ensure_repo(project_root)
+    output = _run_git_optional(
+        project_root,
+        "status",
+        "--short",
+        "--untracked-files=all",
+        "--renames",
+    ) or ""
+
+    entries: List[GitChangeEntry] = []
+    for line in output.splitlines():
+        if not line or len(line) < 3:
+            continue
+        code = line[:2]
+        remainder = line[3:]
+        original_path = None
+        path_part = remainder
+        if " -> " in remainder:
+            original_path, path_part = remainder.split(" -> ", 1)
+
+        path = _normalize_status_path(path_part)
+        original = _normalize_status_path(original_path)
+
+        if not path:
+            continue
+
+        entries.append(GitChangeEntry(path=path, code=code, original_path=original))
+
+    return entries
 
 
 def list_branches(project_root: Path) -> GitBranches:

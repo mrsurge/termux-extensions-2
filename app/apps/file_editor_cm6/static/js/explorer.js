@@ -15,7 +15,7 @@ const selectedEntries = new Set();
 
 // Search overlay state
 let searchOverlayVisible = false;
-let searchMode = 'name'; // 'name' or 'content'
+let searchMode = 'name'; // 'name' | 'content' | 'changes'
 let searchQuery = '';
 let searchResults = null;
 let searchLoading = false;
@@ -1480,6 +1480,29 @@ function openFileRel(rel, projectRoot) {
   }
 }
 
+async function openFileAndMaybeJump(rel, lineNumber = null) {
+  if (!window.appOpenFileRel) {
+    toast('File opener not available');
+    return;
+  }
+  try {
+    await window.appOpenFileRel(rel, currentProjectPath);
+    closeDrawerIfMobile();
+
+    if (treeElement) {
+      const dirPath = rel.includes('/') ? rel.substring(0, rel.lastIndexOf('/')) : '.';
+      await expandDirectory(treeElement, dirPath);
+    }
+
+    if (typeof lineNumber === 'number' && window.jumpToCurrentFileLine) {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      await window.jumpToCurrentFileLine(lineNumber);
+    }
+  } catch (err) {
+    toast('Failed to open file: ' + (err?.message || 'unknown error'));
+  }
+}
+
 function openSearchOverlay() {
   if (!currentProjectPath) {
     toast('No project open');
@@ -1492,8 +1515,12 @@ function openSearchOverlay() {
   
   // Focus search input after render
   setTimeout(() => {
-    const input = document.getElementById('fe-search-input');
-    if (input) input.focus();
+    if (searchMode === 'changes') {
+      fetchChangesResults(true);
+    } else {
+      const input = document.getElementById('fe-search-input');
+      if (input) input.focus();
+    }
   }, 0);
 }
 
@@ -1503,8 +1530,10 @@ function closeSearchOverlay() {
   renderSearchOverlay();
 }
 
-function clearSearchResults() {
-  searchQuery = '';
+function clearSearchResults(preserveQuery = false) {
+  if (!preserveQuery) {
+    searchQuery = '';
+  }
   searchResults = null;
   searchError = null;
   searchLoading = false;
@@ -1515,6 +1544,9 @@ function clearSearchResults() {
 }
 
 function scheduleSearch(query) {
+  if (searchMode === 'changes') {
+    return;
+  }
   searchQuery = query;
   
   if (searchDebounceTimer) {
@@ -1536,6 +1568,9 @@ function scheduleSearch(query) {
 }
 
 async function performSearch(query) {
+  if (searchMode === 'changes') {
+    return;
+  }
   // Check for project change
   if (currentProjectPath !== lastKnownProjectPath) {
     clearSearchResults();
@@ -1570,6 +1605,79 @@ async function performSearch(query) {
     searchError = err.message || 'Search failed';
     searchResults = null;
     renderSearchOverlay();
+  }
+}
+
+async function fetchChangesResults(force = false) {
+  if (searchMode !== 'changes') {
+    return;
+  }
+  if (searchLoading && !force) {
+    return;
+  }
+
+  const targetProject = currentProjectPath;
+  lastKnownProjectPath = targetProject;
+  searchLoading = true;
+  searchError = null;
+  renderSearchOverlay();
+
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/explorer/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'changes' })
+    });
+
+    const json = await resp.json();
+    if (!resp.ok) {
+      throw new Error(json.detail || resp.statusText);
+    }
+
+    if (targetProject !== currentProjectPath) {
+      return;
+    }
+
+    searchResults = json.data;
+    searchLoading = false;
+    searchError = null;
+    renderSearchOverlay();
+  } catch (err) {
+    if (targetProject !== currentProjectPath) {
+      return;
+    }
+    searchLoading = false;
+    searchError = err.message || 'Changes lookup failed';
+    searchResults = null;
+    renderSearchOverlay();
+  }
+}
+
+function setSearchMode(mode) {
+  if (mode === searchMode) {
+    return;
+  }
+
+  clearSearchResults(true);
+  searchMode = mode;
+
+  if (mode === 'changes') {
+    searchLoading = true;
+    renderSearchOverlay();
+    fetchChangesResults(true);
+    return;
+  }
+
+  searchLoading = false;
+  searchError = null;
+  renderSearchOverlay();
+  if (searchQuery.length >= 2) {
+    performSearch(searchQuery);
+  } else {
+    setTimeout(() => {
+      const input = document.getElementById('fe-search-input');
+      if (input) input.focus();
+    }, 0);
   }
 }
 
@@ -1614,16 +1722,19 @@ function renderSearchOverlay() {
     modeToggle.className = 'fe-search-mode';
     
     const nameBtn = document.createElement('button');
-    nameBtn.textContent = 'Name';
-    nameBtn.className = searchMode === 'name' ? 'active' : '';
-    nameBtn.onclick = () => { searchMode = 'name'; renderSearchOverlay(); };
+    nameBtn.textContent = 'By Name';
+    nameBtn.dataset.mode = 'name';
     modeToggle.appendChild(nameBtn);
     
     const contentBtn = document.createElement('button');
-    contentBtn.textContent = 'Contents';
-    contentBtn.className = searchMode === 'content' ? 'active' : '';
-    contentBtn.onclick = () => { searchMode = 'content'; renderSearchOverlay(); };
+    contentBtn.textContent = 'By Contents';
+    contentBtn.dataset.mode = 'content';
     modeToggle.appendChild(contentBtn);
+    
+    const changesBtn = document.createElement('button');
+    changesBtn.textContent = 'By Changes';
+    changesBtn.dataset.mode = 'changes';
+    modeToggle.appendChild(changesBtn);
     
     header.appendChild(modeToggle);
     
@@ -1652,6 +1763,28 @@ function renderSearchOverlay() {
       renderSearchOverlay();
     };
     inputContainer.appendChild(clearBtn);
+
+    const changesToolbar = document.createElement('div');
+    changesToolbar.className = 'fe-search-changes-toolbar';
+    const headLabel = document.createElement('span');
+    headLabel.className = 'fe-search-changes-label';
+    headLabel.textContent = 'Working tree vs';
+    changesToolbar.appendChild(headLabel);
+
+    // stub/placeholder for future 'commit to document state diffing'
+    const headBtn = document.createElement('button');
+    headBtn.type = 'button';
+    headBtn.id = 'fe-search-head-btn';
+    headBtn.className = 'fe-search-head-btn';
+    headBtn.disabled = true;
+    headBtn.textContent = 'HEAD —';
+    headBtn.title = 'HEAD selector coming soon';
+    changesToolbar.appendChild(headBtn);
+
+    const headNote = document.createElement('span');
+    headNote.className = 'fe-search-changes-note';
+    headNote.textContent = 'Shows unstaged/staged/untracked diff hunks.';
+    changesToolbar.appendChild(headNote);
     
     // Results area
     const resultsDiv = document.createElement('div');
@@ -1661,22 +1794,19 @@ function renderSearchOverlay() {
     overlay.innerHTML = '';
     overlay.appendChild(header);
     overlay.appendChild(inputContainer);
+    overlay.appendChild(changesToolbar);
     overlay.appendChild(resultsDiv);
   }
   
   // Subsequent renders - only update dynamic parts
   
   // Update mode toggle active state
-  const nameBtn = overlay.querySelector('.fe-search-mode button:first-child');
-  const contentBtn = overlay.querySelector('.fe-search-mode button:last-child');
-  if (nameBtn) {
-    nameBtn.className = searchMode === 'name' ? 'active' : '';
-    nameBtn.onclick = () => { searchMode = 'name'; renderSearchOverlay(); };
-  }
-  if (contentBtn) {
-    contentBtn.className = searchMode === 'content' ? 'active' : '';
-    contentBtn.onclick = () => { searchMode = 'content'; renderSearchOverlay(); };
-  }
+  const modeButtons = overlay.querySelectorAll('.fe-search-mode button');
+  modeButtons.forEach((btn) => {
+    const mode = btn.dataset.mode;
+    btn.className = mode === searchMode ? 'active' : '';
+    btn.onclick = () => setSearchMode(mode);
+  });
   
   // Update input placeholder and value
   const input = overlay.querySelector('#fe-search-input');
@@ -1685,12 +1815,25 @@ function renderSearchOverlay() {
     if (input.value !== searchQuery) {
       input.value = searchQuery;
     }
+    input.parentElement.style.display = searchMode === 'changes' ? 'none' : 'flex';
+  }
+
+  const changesToolbar = overlay.querySelector('.fe-search-changes-toolbar');
+  if (changesToolbar) {
+    changesToolbar.style.display = searchMode === 'changes' ? 'flex' : 'none';
+    const headBtn = overlay.querySelector('#fe-search-head-btn');
+    if (headBtn) {
+      const head = searchResults?.head;
+      const shortLabel = head?.short ? head.short : '—';
+      headBtn.textContent = head ? `HEAD ${head.short}` : 'HEAD —';
+      headBtn.title = head?.subject || 'Working tree diffs vs HEAD';
+    }
   }
   
   // Update clear button visibility
   const clearBtn = overlay.querySelector('.fe-search-clear');
   if (clearBtn) {
-    clearBtn.style.display = searchQuery ? 'block' : 'none';
+    clearBtn.style.display = searchQuery && searchMode !== 'changes' ? 'block' : 'none';
     clearBtn.onclick = () => {
       searchQuery = '';
       searchResults = null;
@@ -1718,14 +1861,20 @@ function renderSearchOverlay() {
 
 function renderSearchResults(container) {
   if (!searchResults || !searchResults.results || searchResults.results.length === 0) {
+    if (searchMode === 'changes') {
+      renderChangesResults(container, searchResults);
+      return;
+    }
     container.innerHTML = '<div class="fe-search-empty">No results found</div>';
     return;
   }
   
   if (searchMode === 'name') {
     renderNameResults(container, searchResults);
-  } else {
+  } else if (searchMode === 'content') {
     renderContentResults(container, searchResults);
+  } else {
+    renderChangesResults(container, searchResults);
   }
 }
 
@@ -1853,6 +2002,130 @@ function renderContentResults(container, data) {
     const notice = document.createElement('div');
     notice.className = 'fe-search-notice';
     notice.textContent = `Showing ${data.file_count} files, ${data.match_count} matches`;
+    container.appendChild(notice);
+  }
+}
+
+function firstDiffLine(change) {
+  const hunks = change?.hunks || [];
+  for (const h of hunks) {
+    if (typeof h?.newStart === 'number' && h.newStart > 0) {
+      return h.newStart;
+    }
+    if (typeof h?.oldStart === 'number' && h.oldStart > 0) {
+      return h.oldStart;
+    }
+  }
+  return 1;
+}
+
+function renderChangesResults(container, data) {
+  if (!data) {
+    container.innerHTML = '<div class="fe-search-empty">No changes loaded</div>';
+    return;
+  }
+
+  if (data.git === false) {
+    container.innerHTML = '<div class="fe-search-empty">Open a Git project to view changes.</div>';
+    return;
+  }
+
+  const entries = data.changes || [];
+  if (!entries.length) {
+    container.innerHTML = '<div class="fe-search-empty">Working tree is clean.</div>';
+    return;
+  }
+
+  const list = document.createElement('div');
+  list.className = 'fe-search-changes-list';
+
+  entries.forEach((change) => {
+    const card = document.createElement('div');
+    card.className = 'fe-search-change-card';
+    card.onclick = () => {
+      openFileAndMaybeJump(change.rel, firstDiffLine(change));
+    };
+
+    const header = document.createElement('div');
+    header.className = 'fe-search-change-header';
+
+    const title = document.createElement('div');
+    title.className = 'fe-search-change-title';
+    title.textContent = change.rel;
+    header.appendChild(title);
+
+    const status = document.createElement('span');
+    status.className = 'fe-search-change-status';
+    status.dataset.status = change.status || '';
+    status.textContent = change.statusText || change.status || '';
+    header.appendChild(status);
+
+    card.appendChild(header);
+
+    if (change.summary) {
+      const summary = document.createElement('div');
+      summary.className = 'fe-search-change-summary';
+      summary.textContent = `+${change.summary.added || 0}  -${change.summary.deleted || 0}`;
+      card.appendChild(summary);
+    }
+
+    if (change.error) {
+      const err = document.createElement('div');
+      err.className = 'fe-search-change-error';
+      err.textContent = change.error === 'diff_too_large' ? 'Diff too large to preview' : change.error;
+      card.appendChild(err);
+    } else {
+      const diffBlock = document.createElement('div');
+      diffBlock.className = 'fe-search-diff';
+
+      const hunks = change.hunks || [];
+      let renderedLines = 0;
+      const MAX_LINES = 120;
+      hunks.forEach((hunk) => {
+        if (renderedLines >= MAX_LINES) {
+          return;
+        }
+        const hunkEl = document.createElement('div');
+        hunkEl.className = 'fe-search-diff-hunk';
+        const headerEl = document.createElement('div');
+        headerEl.className = 'fe-search-diff-header';
+        headerEl.textContent = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
+        hunkEl.appendChild(headerEl);
+
+        (hunk.lines || []).forEach((line) => {
+          if (renderedLines >= MAX_LINES) {
+            return;
+          }
+          const lineEl = document.createElement('pre');
+          lineEl.className = `fe-search-diff-line fe-search-diff-${line.type || 'context'}`;
+          const prefix = line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ';
+          lineEl.textContent = `${prefix}${line.text}`;
+          hunkEl.appendChild(lineEl);
+          renderedLines += 1;
+        });
+
+        diffBlock.appendChild(hunkEl);
+      });
+
+      if (renderedLines >= MAX_LINES) {
+        const moreEl = document.createElement('div');
+        moreEl.className = 'fe-search-diff-more';
+        moreEl.textContent = '… diff truncated';
+        diffBlock.appendChild(moreEl);
+      }
+
+      card.appendChild(diffBlock);
+    }
+
+    list.appendChild(card);
+  });
+
+  container.appendChild(list);
+
+  if (data.truncated) {
+    const notice = document.createElement('div');
+    notice.className = 'fe-search-notice';
+    notice.textContent = `Showing ${entries.length} of ${data.total || entries.length} files`;
     container.appendChild(notice);
   }
 }

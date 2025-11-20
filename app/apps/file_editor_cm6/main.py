@@ -39,6 +39,7 @@ from .git_helper import (
     reset_hard,
     is_git_repository,
     init_repository,
+    get_worktree_changes,
 )
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
@@ -50,6 +51,18 @@ IGNORE_PATTERNS = [
     '.pytest_cache', '.mypy_cache', '.tox', 'dist', 'build',
     '*.egg-info', '.DS_Store'
 ]
+
+CHANGE_RESULT_LIMIT = 40
+STATUS_TEXT_MAP = {
+    'M': 'Modified',
+    'A': 'Added',
+    'D': 'Deleted',
+    'R': 'Renamed',
+    'C': 'Copied',
+    'U': 'Conflict',
+    '?': 'Untracked',
+    '!': 'Ignored',
+}
 
 async def _search_by_name(root: Path, query: str) -> dict:
     """Search files/folders by name."""
@@ -244,6 +257,86 @@ async def _search_with_python(root: Path, query: str) -> dict:
         "truncated": file_count >= max_files,
         "file_count": len(results),
         "match_count": match_count
+    }
+
+
+def _status_meta_from_code(code: str) -> tuple[str, str]:
+    if not code:
+        return '', STATUS_TEXT_MAP['?']
+    if code in ('??', '!!'):
+        key = '?' if code == '??' else '!'
+        short = '?' if code == '??' else '!'
+        return short, STATUS_TEXT_MAP[key]
+    compact = code.replace(' ', '')
+    primary = compact[0] if compact else '?'
+    key = primary if primary in STATUS_TEXT_MAP else '?'
+    return primary, STATUS_TEXT_MAP[key]
+
+
+def _search_by_changes(project_root: Path) -> dict:
+    if not is_git_repository(project_root):
+        return {
+            "mode": "changes",
+            "git": False,
+            "head": None,
+            "changes": [],
+            "truncated": False,
+            "count": 0,
+        }
+
+    try:
+        entries = get_worktree_changes(project_root)
+    except GitError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    truncated = len(entries) > CHANGE_RESULT_LIMIT
+    selected = entries[:CHANGE_RESULT_LIMIT]
+    changes = []
+
+    for entry in selected:
+        rel_path = entry.path.replace('\\', '/')
+        diff_payload = collect_diff(project_root, rel_path)
+        status_short, status_text = _status_meta_from_code(entry.code)
+        summary = diff_payload.get("summary", {"added": 0, "deleted": 0, "tracked": False})
+
+        change = {
+            "rel": rel_path,
+            "path": str((project_root / rel_path).resolve()),
+            "label": Path(rel_path).name,
+            "status": status_short,
+            "statusCode": entry.code,
+            "statusText": status_text,
+            "summary": summary,
+            "hunks": diff_payload.get("hunks", []),
+            "isTracked": summary.get("tracked", True),
+        }
+        if entry.original_path:
+            change["renamedFrom"] = entry.original_path
+        if "error" in diff_payload:
+            change["error"] = diff_payload["error"]
+        changes.append(change)
+
+    head_info = None
+    try:
+        commits = get_commits(project_root, limit=1)
+        if commits:
+            head = commits[0]
+            head_info = {
+                "hash": head.hash,
+                "short": head.short_hash,
+                "subject": head.summary,
+            }
+    except GitError:
+        head_info = None
+
+    return {
+        "mode": "changes",
+        "git": True,
+        "head": head_info,
+        "changes": changes,
+        "truncated": truncated,
+        "count": len(changes),
+        "total": len(entries),
     }
 
 file_editor_cm6_bp = APIRouter()
@@ -1003,27 +1096,30 @@ def explorer_list(rel: str = Query('.')):
 @file_editor_cm6_bp.post('/explorer/search')
 async def explorer_search(data: dict = Body(...)):
     """Search files by name or content within project."""
-    mode = data.get('mode', 'name')  # 'name' or 'content'
-    query = data.get('query', '').strip()
-    
-    # Validation
-    if not query:
-        raise HTTPException(status_code=400, detail="Query required")
-    if len(query) < 2:
-        raise HTTPException(status_code=400, detail="Query too short (min 2 chars)")
-    if len(query) > 200:
-        raise HTTPException(status_code=400, detail="Query too long (max 200 chars)")
+    mode = data.get('mode', 'name')
+    query = (data.get('query') or '').strip()
     
     # Get project root
     project_root = _history_store.get_active_project()
     if not project_root or not Path(project_root).exists():
         raise HTTPException(status_code=400, detail="No project open")
+    root_path = Path(project_root)
+
+    if mode in ('name', 'content'):
+        if not query:
+            raise HTTPException(status_code=400, detail="Query required")
+        if len(query) < 2:
+            raise HTTPException(status_code=400, detail="Query too short (min 2 chars)")
+        if len(query) > 200:
+            raise HTTPException(status_code=400, detail="Query too long (max 200 chars)")
     
     try:
         if mode == 'name':
-            results = await _search_by_name(Path(project_root), query)
+            results = await _search_by_name(root_path, query)
         elif mode == 'content':
-            results = await _search_by_content(Path(project_root), query)
+            results = await _search_by_content(root_path, query)
+        elif mode == 'changes':
+            results = _search_by_changes(root_path)
         else:
             raise HTTPException(status_code=400, detail="Invalid mode")
         
