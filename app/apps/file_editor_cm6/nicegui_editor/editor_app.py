@@ -5,6 +5,7 @@ import sys
 import os
 import hashlib
 import time
+import shlex
 from pathlib import Path
 from typing import Optional
 import anyio
@@ -20,6 +21,8 @@ from app.apps.file_editor_cm6.preferences_store import ALLOWED_FONT_SCALES
 from app.apps.file_editor_cm6.explorer_helper import get_project_root, _normalize_rel_path, mark_git_cache_dirty
 from app.apps.file_editor_cm6.core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe
 from app.apps.file_editor_cm6.core_write import write_full, BaseMismatchError
+from app.apps.file_editor_cm6.terminal_shell import create_editor_shell
+from app.libs.framework_shells import get_manager
 from app.apps.file_editor_cm6.diff_helper import invalidate_diff_cache, collect_diff
 
 
@@ -55,6 +58,14 @@ THEME_MAP = {
     'darcula': 'darcula',
     'basic-dark': 'basicDark',
     'basic-light': 'basicLight',
+}
+
+RUNNABLE_COMMANDS = {
+    '.py': ['python3'],
+    '.pyw': ['python3'],
+    '.sh': ['bash'],
+    '.bash': ['bash'],
+    '.zsh': ['zsh'],
 }
 
 
@@ -98,6 +109,12 @@ def _resolve_font_scale(scale_value: Optional[float]) -> float:
         )
 
     return numeric
+
+
+class SaveValidationError(Exception):
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
 
 # --- State Accessors ---
 def get_active_editor():
@@ -988,82 +1005,154 @@ def debug_editor_state():
     content = editor.value or ''
     return {"ok": True, "editor_exists": True, "current_file": get_current_file(), "content_length": len(content), "content_hash": hashlib.sha256(content.encode('utf-8')).hexdigest()}
 
-@editor_router.post('/save')
-async def save_current_file(data: dict = Body(...)):
-    # Edit 2025-11-17T00:13:07+00:00: This is the primary save endpoint for the NiceGUI editor.
-    # It was updated to capture the original file's mode before writing and
-    # pass it to the `write_full` function to preserve permissions.
+
+async def _write_editor_buffer_to_disk(*, client_id: str, op_id: Optional[str]) -> dict:
     editor = get_active_editor()
-    if not editor: return {"ok": False, "error": "Editor not ready"}
+    if not editor:
+        raise SaveValidationError("Editor not ready")
+
     current_file = get_current_file()
-    if not current_file: return {"ok": False, "error": "No file is currently open"}
-    
-    content, base_sha256 = editor.value or '', get_current_file_sha256()
-    client_id, op_id = data.get('client_id', 'unknown'), data.get('op_id', f"op_{int(time.time() * 1000)}")
+    if not current_file:
+        raise SaveValidationError("No file is currently open")
+
+    content = editor.value or ''
+    base_sha256 = get_current_file_sha256()
+    op_identifier = op_id or f"op_{int(time.time() * 1000)}"
     project_root = get_project_root()
     print(f"[SAVE] Attempting path={current_file!r} len={len(content)} base={base_sha256}", file=sys.stderr)
-    
-    try:
-        rel_path = _normalize_rel_path(project_root, current_file)
-        
-        # NEW: Capture original mode before write
-        target_path = project_root.joinpath(rel_path).resolve()
-        orig_mode = None
-        if target_path.exists() and target_path.is_file():
-            try:
-                orig_mode = target_path.stat().st_mode & 0o777
-                print(f"[SAVE] Preserving mode {oct(orig_mode)} for {current_file!r}", file=sys.stderr)
-            except OSError:
-                pass
-        
-        init_watcher(project_root)
-        
-        # NEW: Pass mode to write_full
-        file_meta = await anyio.to_thread.run_sync(
-            lambda: write_full(project_root, str(rel_path), content, 
-                             base_sha256=base_sha256, mode=orig_mode)
+
+    rel_path = _normalize_rel_path(project_root, current_file)
+
+    target_path = project_root.joinpath(rel_path).resolve()
+    orig_mode = None
+    if target_path.exists() and target_path.is_file():
+        try:
+            orig_mode = target_path.stat().st_mode & 0o777
+            print(f"[SAVE] Preserving mode {oct(orig_mode)} for {current_file!r}", file=sys.stderr)
+        except OSError:
+            pass
+
+    init_watcher(project_root)
+
+    file_meta = await anyio.to_thread.run_sync(
+        lambda: write_full(
+            project_root,
+            str(rel_path),
+            content,
+            base_sha256=base_sha256,
+            mode=orig_mode,
         )
-        
-        push_save_ack(str(rel_path), op_id, client_id, file_meta)
-        emit_diff_changed(str(rel_path), file_meta["sha256"])
-        mark_git_cache_dirty(project_root)
-        invalidate_diff_cache(project_root, str(rel_path))
-        set_current_file(current_file, file_meta["sha256"])
-        project_path = _history_store.get_active_project()
-        if project_path and current_file:
-            runtime_meta = _get_runtime_metadata()
-            cache_entry = _history_store.upsert_cached_document(
-                project_path=project_path,
-                file_path=current_file,
-                content=content,
-                base_sha256=file_meta["sha256"],
-                run_id=runtime_meta["run_id"],
-                shell_id=runtime_meta["shell_id"],
-                shell_run_id=runtime_meta["shell_run_id"],
-                launcher_pid=runtime_meta["launcher_pid"],
-                worker_pid=runtime_meta["worker_pid"],
-            )
-            _broadcast_cache_state(
-                project_path,
-                current_file,
-                state='clean',
-                unsaved=cache_entry.get('unsaved', False),
-                cache_entry=cache_entry,
-                reason='save',
-            )
-        
-        if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
-            diff_data = collect_diff(project_root, str(rel_path))
-            editor.set_diff_decorations(diff_data.get('hunks', []))
-            
-        print(f"[SAVE] Success path={current_file!r} sha={file_meta['sha256']}", file=sys.stderr)
+    )
+
+    push_save_ack(str(rel_path), op_identifier, client_id, file_meta)
+    emit_diff_changed(str(rel_path), file_meta["sha256"])
+    mark_git_cache_dirty(project_root)
+    invalidate_diff_cache(project_root, str(rel_path))
+    set_current_file(current_file, file_meta["sha256"])
+
+    project_path = _history_store.get_active_project()
+    if project_path and current_file:
+        runtime_meta = _get_runtime_metadata()
+        cache_entry = _history_store.upsert_cached_document(
+            project_path=project_path,
+            file_path=current_file,
+            content=content,
+            base_sha256=file_meta["sha256"],
+            run_id=runtime_meta.get('run_id'),
+            shell_id=runtime_meta.get('shell_id'),
+            shell_run_id=runtime_meta.get('shell_run_id'),
+            launcher_pid=runtime_meta.get('launcher_pid'),
+            worker_pid=runtime_meta.get('worker_pid'),
+        )
+        _broadcast_cache_state(
+            project_path,
+            current_file,
+            state='clean',
+            unsaved=cache_entry.get('unsaved', False),
+            cache_entry=cache_entry,
+            reason='save',
+        )
+
+    if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
+        diff_data = collect_diff(project_root, str(rel_path))
+        editor.set_diff_decorations(diff_data.get('hunks', []))
+
+    print(f"[SAVE] Success path={current_file!r} sha={file_meta['sha256']}", file=sys.stderr)
+    return file_meta
+
+@editor_router.post('/save')
+async def save_current_file(data: dict = Body(...)):
+    client_id = data.get('client_id', 'unknown')
+    op_id = data.get('op_id')
+    current_file = get_current_file()
+    base_snapshot = get_current_file_sha256()
+    try:
+        file_meta = await _write_editor_buffer_to_disk(client_id=client_id, op_id=op_id)
         return {"ok": True, "data": file_meta}
+    except SaveValidationError as e:
+        return {"ok": False, "error": e.message}
     except BaseMismatchError as e:
-        print(f"[SAVE] BASE_MISMATCH path={current_file!r} expected={base_sha256} actual={e.current_meta.get('sha256') if getattr(e, 'current_meta', None) else 'unknown'}", file=sys.stderr)
+        print(f"[SAVE] BASE_MISMATCH path={current_file!r} expected={base_snapshot} actual={e.current_meta.get('sha256') if getattr(e, 'current_meta', None) else 'unknown'}", file=sys.stderr)
         return Response(status_code=409, content=json.dumps({"ok": False, "error": "BASE_MISMATCH", "data": {"current": e.current_meta}}), media_type="application/json")
     except Exception as e:
         print(f"[SAVE] ERROR path={current_file!r} error={e}", file=sys.stderr)
         return {"ok": False, "error": str(e)}
+
+
+@editor_router.post('/run_active_file')
+async def run_active_file():
+    current_file = get_current_file()
+    if not current_file:
+        raise HTTPException(status_code=400, detail="No file is currently open")
+
+    try:
+        await _write_editor_buffer_to_disk(client_id='run_active_file', op_id=f"run_{int(time.time() * 1000)}")
+    except SaveValidationError as e:
+        raise HTTPException(status_code=400, detail=e.message)
+    except BaseMismatchError as e:
+        raise HTTPException(status_code=409, detail={"error": "BASE_MISMATCH", "current": e.current_meta})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file before running: {e}")
+
+    path_obj = Path(current_file).expanduser().resolve(strict=False)
+
+    ext = path_obj.suffix.lower()
+    runner = RUNNABLE_COMMANDS.get(ext)
+    if not runner:
+        raise HTTPException(status_code=400, detail="Only Python and shell scripts can be executed")
+
+    workdir = str(path_obj.parent)
+    cmd_tokens = runner + [str(path_obj)]
+    command_preview = ' '.join(shlex.quote(part) for part in cmd_tokens)
+
+    mgr = await get_manager()
+    shell_id = _history_store.get_terminal_shell_id()
+    if shell_id:
+        rec = await mgr.get_shell(shell_id)
+        if not rec or rec.status != 'running':
+            _history_store.set_terminal_shell_id(None)
+            shell_id = None
+
+    if not shell_id:
+        project_path = _history_store.get_active_project()
+        preferred_cwd = project_path if project_path and Path(project_path).is_dir() else workdir
+        shell_info = await create_editor_shell(cwd=preferred_cwd)
+        shell_id = shell_info['id']
+        _history_store.set_terminal_shell_id(shell_id)
+
+    try:
+        await mgr.write_to_pty(shell_id, command_preview + "\n")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to dispatch command: {e}")
+
+    return {
+        "ok": True,
+        "data": {
+            "shell_id": shell_id,
+            "command_preview": command_preview,
+            "working_dir": workdir,
+        },
+    }
 
 @editor_router.post('/set_view_settings')
 async def set_view_settings(data: dict = Body(...)):

@@ -318,6 +318,7 @@ const themeMenuItems = Array.from(menuThemeDD.querySelectorAll('[data-theme]'));
 
 const recentFilesBtn = requireEl('#recent-files-btn');
 const recentFilesDD  = requireEl('#recent-files-dd');
+const runActiveBtn   = requireEl('#run-active-file-btn');
 const miNew       = requireEl('#mi-new');
 const miOpen      = requireEl('#mi-open');
 const miSave      = requireEl('#mi-save');
@@ -626,6 +627,15 @@ function detectLanguageFromFilename(filename) {
   return map[ext] || null;
 }
 
+function isRunnableFile(path) {
+  if (!path) return false;
+  const normalized = String(path).toLowerCase().trim();
+  const idx = normalized.lastIndexOf('.');
+  if (idx === -1) return false;
+  const ext = normalized.slice(idx);
+  return RUNNABLE_EXTENSIONS.has(ext);
+}
+
 function setMenuChecked(element, checked) {
   if (!element) return;
   element.classList.toggle('fe-menu-item-checked', !!checked);
@@ -654,6 +664,8 @@ const FONT_SCALE_PRESETS = {
   medium: 0.85,  // 100% user-facing (comfortable baseline)
   large: 1.0     // 115% user-facing (back to browser default)
 };
+
+const RUNNABLE_EXTENSIONS = new Set(['.py', '.pyw', '.sh', '.bash', '.zsh']);
 
 function applyFontScale(scale) {
   // This function applies the selected font scale to the UI.
@@ -1201,14 +1213,22 @@ function scheduleExplorerRefresh() {
 }
 
 // ---------- File ops ----------
+function updateRunButtonState() {
+  if (!runActiveBtn) return;
+  const runnable = Boolean(currentPath && currentPathExists && isRunnableFile(currentPath));
+  runActiveBtn.disabled = !runnable;
+  runActiveBtn.title = runnable ? 'Run active file in terminal' : 'Open a Python or shell script to enable running';
+}
+
 function updatePathDisplay() {
   if (!currentPath) {
     fileNameEl.textContent = 'Untitled';
-  cacheStateBadge.textContent = '';
-  cacheStateBadge.dataset.state = '';
+    cacheStateBadge.textContent = '';
+    cacheStateBadge.dataset.state = '';
     fileNameEl.title = 'Untitled';
     filePathEl.textContent = 'No file open';
     filePathEl.title = '';
+    updateRunButtonState();
     return;
   }
   const abs = toAbsolute(currentPath, null, HOME_DIR);
@@ -1218,6 +1238,7 @@ function updatePathDisplay() {
   fileNameEl.title = basename(abs);
   filePathEl.textContent = formatDisplayDirectory(abs);
   filePathEl.title = abs;
+  updateRunButtonState();
 }
 
 function applyCacheIndicator(info) {
@@ -1456,6 +1477,34 @@ async function saveFile() {
   }
 }
 
+async function runCurrentFile() {
+  const runnable = currentPath && currentPathExists && isRunnableFile(currentPath);
+  if (!runnable) {
+    host.toast('Open a Python or shell script to run it in the terminal');
+    return;
+  }
+
+  runActiveBtn.disabled = true;
+  try {
+    if (terminal && typeof terminal.open === 'function') {
+      await terminal.open();
+    }
+
+    const response = await apiPost('editor/run_active_file', {});
+    if (response?.ok) {
+      const preview = response.data?.command_preview || basename(currentPath);
+      host.toast(`Running ${preview} in terminal`);
+    } else {
+      host.toast(response?.error || 'Failed to run file');
+    }
+  } catch (err) {
+    console.error('[RUN] Failed to execute file:', err);
+    host.toast(err?.message || 'Failed to run file');
+  } finally {
+    updateRunButtonState();
+  }
+}
+
 async function saveAsDialog() {
   const target = await pickSaveTarget();
   if (!target || !target.path) return;
@@ -1623,6 +1672,10 @@ menuEditorBtn.addEventListener('click', (e) => { e.stopPropagation(); const open
 menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuViewDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
 menuThemeBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuThemeDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
 recentFilesBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = recentFilesDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+runActiveBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  runCurrentFile();
+});
 document.addEventListener('click', () => closeAllMenus());
 
 bindMenuToggle(miNew, () => {
