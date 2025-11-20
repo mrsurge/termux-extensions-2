@@ -257,7 +257,7 @@ class CodeMirror(ValueElement, DisableableElement,
         *,
         on_change: Optional[Callable[..., Any]] = None,
         language: Optional[SUPPORTED_LANGUAGES] = None,
-        theme: SUPPORTED_THEMES = 'basicLight',
+        theme: Optional[SUPPORTED_THEMES] = None,
         indent: str = ' ' * 4,
         line_wrapping: bool = False,
         highlight_whitespace: bool = False,
@@ -277,7 +277,7 @@ class CodeMirror(ValueElement, DisableableElement,
         :param value: initial value of the editor (default: "")
         :param on_change: callback to be executed when the value changes (default: `None`)
         :param language: initial language of the editor (case-insensitive, default: `None`)
-        :param theme: initial theme of the editor (default: "basicLight")
+        :param theme: initial theme of the editor (required - no fallback)
         :param indent: string to use for indentation (any string consisting entirely of the same whitespace character, default: "    ")
         :param line_wrapping: whether to wrap lines (default: `False`)
         :param highlight_whitespace: whether to highlight whitespace (default: `False`)
@@ -286,6 +286,9 @@ class CodeMirror(ValueElement, DisableableElement,
         # Prevent ValueElement from pushing model-value updates back to the client; we only
         # need the server-side state and dispatch explicit JS updates when required.
         self._send_update_on_value_change = False
+
+        if theme is None:
+            raise ValueError('CodeMirror theme is required; no fallback theme is configured')
 
         self._props['language'] = language
         self._props['theme'] = theme
@@ -309,11 +312,16 @@ class CodeMirror(ValueElement, DisableableElement,
 
     @theme.setter
     def theme(self, theme: SUPPORTED_THEMES) -> None:
+        if theme is None:
+            raise ValueError('CodeMirror theme cannot be None')
         self._props['theme'] = theme
 
     def set_theme(self, theme: SUPPORTED_THEMES) -> None:
         """Sets the theme of the editor."""
+        if theme is None:
+            raise ValueError('CodeMirror theme cannot be None')
         self._props['theme'] = theme
+        self.run_method('setTheme', theme)
 
     @property
     def supported_themes(self) -> list[str]:

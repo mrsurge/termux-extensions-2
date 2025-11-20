@@ -1326,3 +1326,171 @@ See the Color Picker feature implementation in commits from 2025-11-19:
 ---
 
 _Last Updated: 2025-11-19 05:05 UTC - Added Preference Store Integration section with complete guide for toggleable feature persistence_
+
+---
+
+# Adding Preference-Managed Editor Features
+
+**Added:** 2025-11-19 21:51 UTC  
+**Context:** Unified Preference System Implementation
+
+---
+
+## How to Add a New Toggleable Preference
+
+### Step 1: Add to Preference Schema
+**File:** `preferences_store.py`
+```python
+DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
+    "yourFeature": False,  # Add your feature with default value
+}
+```
+
+### Step 2: Add Vendored Method (if needed)
+**File:** `app/static/vendor/nicegui/elements/codemirror/codemirror.py`
+```python
+def set_your_feature(self, enabled: bool) -> None:
+    """Toggle your feature."""
+    self.run_method('applyYourFeature', enabled)
+```
+
+**File:** `app/static/vendor/nicegui/elements/codemirror/codemirror.js`
+```javascript
+applyYourFeature(enabled) {
+  if (!this.editor) return;
+  // Implementation here
+}
+```
+
+### Step 3: Backend Integration
+**File:** `editor_app.py`
+
+Add to `_get_view_state_dict()`:
+```python
+return {
+    # ...
+    "yourFeature": editor_prefs.get('yourFeature', False),
+}
+```
+
+Add to `update_preference()`:
+```python
+elif key == 'yourFeature':
+    editor.set_your_feature(bool(value))
+```
+
+Add to page load (~line 390):
+```python
+editor.set_your_feature(editor_prefs.get('yourFeature', False))
+```
+
+Add to file load (~line 640):
+```python
+editor.set_your_feature(editor_prefs.get('yourFeature', False))
+```
+
+### Step 4: Frontend Toggle
+**File:** `main.js`
+```javascript
+bindMenuToggle(miYourFeature, async () => {
+  const success = await updatePreference('yourFeature', !(editorViewState?.yourFeature));
+  if (!success) host.toast('Failed to update preference');
+});
+```
+
+---
+
+## Key Principles
+
+1. **Backend is Authority**: preferences_store.py on disk is single source of truth
+2. **Stateless Frontend**: Never create preference variables in frontend
+3. **Unified Pattern**: All toggles use `updatePreference(key, value)`
+4. **Constructor vs Runtime**:
+   - Constructor params (theme, line_wrapping): Set ONLY in constructor
+   - Runtime params (zebra stripes, font scale): Set after creation
+5. **Single Update**: Call `editor.update()` once after all settings
+
+---
+
+## Common Patterns
+
+### Pattern: Simple Toggle
+```python
+elif key == 'readOnly':
+    editor.set_read_only(bool(value))
+```
+
+### Pattern: Toggle with Side Effect
+```python
+elif key == 'wordWrap':
+    editor.set_line_wrapping(bool(value))
+    # Refresh diffs if showing (widgets need re-render)
+    if value and get_current_file():
+        current_prefs = _preferences_store.get_preferences().get('editor', {})
+        if current_prefs.get('showInlineDiffs', False):
+            # Refresh diffs...
+```
+
+### Pattern: Toggle with Data Loading
+```python
+elif key == 'showInlineDiffs':
+    if value and get_current_file():
+        # Load and display diffs
+        diff_data = collect_diff(...)
+        editor.set_diff_decorations(diff_data.get('hunks', []))
+    else:
+        # Clear diffs
+        editor.set_diff_decorations([])
+```
+
+---
+
+## Testing Checklist
+
+- [ ] Default added to `DEFAULT_EDITOR_PREFS`
+- [ ] Case added to `update_preference`
+- [ ] Added to `_get_view_state_dict`
+- [ ] Applied at page load
+- [ ] Applied at file load
+- [ ] Frontend uses `updatePreference()` pattern
+- [ ] Toggle ON works
+- [ ] Toggle OFF works
+- [ ] Persists across page refresh
+- [ ] No console errors
+
+---
+
+## Common Mistakes
+
+❌ **Not adding to DEFAULT_EDITOR_PREFS** → Preference won't persist  
+❌ **Setting constructor params twice** → Visual thrashing  
+❌ **Creating frontend state variables** → State drift  
+❌ **Custom toggle logic** → Inconsistent behavior  
+❌ **Forgetting page/file load** → Only works after manual toggle  
+
+---
+
+## Architecture Flow
+
+```
+User clicks toggle
+  ↓
+updatePreference('key', value)
+  ↓  
+POST /editor/update_preference
+  ↓
+Backend:
+  1. Updates disk (preferences_store.py)
+  2. Applies to editor
+  3. Returns full state
+  ↓
+Frontend:
+  1. Receives state
+  2. Updates menu checkmarks
+  3. Stores in editorViewState
+```
+
+---
+
+_Last Updated: 2025-11-19 21:51 UTC - Unified Preference System_
+

@@ -6,6 +6,7 @@ import os
 import hashlib
 import time
 from pathlib import Path
+from typing import Optional
 import anyio
 
 from nicegui import ui, app as nicegui_app
@@ -54,6 +55,23 @@ THEME_MAP = {
     'basic-dark': 'basicDark',
     'basic-light': 'basicLight',
 }
+
+
+def _resolve_theme_preference(theme_key: Optional[str]) -> str:
+    """Map stored preference theme id to the CodeMirror theme name or raise."""
+    pref_path = getattr(_preferences_store, 'path', None)
+    location_hint = f" ({pref_path})" if pref_path else ''
+
+    if not theme_key:
+        raise RuntimeError(f"Preference file{location_hint} is missing required 'editor.theme'")
+
+    try:
+        return THEME_MAP[theme_key]
+    except KeyError as exc:
+        raise RuntimeError(
+            f"Preference file{location_hint} references unsupported theme '{theme_key}'. "
+            "Add it to THEME_MAP or update the preference file."
+        ) from exc
 
 # --- State Accessors ---
 def get_active_editor():
@@ -368,11 +386,17 @@ async def editor_page():
                 print(f"[ON_CHANGE] len={len(value)} sha={hashlib.sha256(value.encode('utf-8')).hexdigest() if value else '0'*64}", file=sys.stderr)
                 editor._cached_content = value
                 _schedule_cache_persist()
+            
+            # Debug: What are we passing to the editor?
+            theme_from_prefs = editor_prefs.get('theme')
+            theme_mapped = _resolve_theme_preference(theme_from_prefs)
+            print(f"[EDITOR_APP] Theme loading: file={theme_from_prefs} -> mapped={theme_mapped}", file=sys.stderr)
+            
             editor = ui.codemirror(
                 value=initial_content,
                 language=initial_language,
-                theme=THEME_MAP.get(editor_prefs.get('theme', 'cm6-dark'), 'basicDark'),
-                line_wrapping=editor_prefs.get('wordWrap', False),
+                theme=theme_mapped,
+                line_wrapping=editor_prefs.get('wordWrap'),
                 on_change=_on_editor_change,
             ).style('flex: 1; border: none;').classes('editor-content w-full h-full').props('flat borderless')
             editor._cached_content = initial_content
@@ -383,8 +407,7 @@ async def editor_page():
             
             # Apply runtime-only preferences (not available in constructor)
             # NOTE: theme and line_wrapping already set in constructor above
-            theme_id = editor_prefs.get('theme', 'cm6-dark')
-            print(f"[EDITOR_APP] Editor created with theme={theme_id}, wrap={editor_prefs.get('wordWrap')}", file=sys.stderr)
+            print(f"[EDITOR_APP] Editor created with theme={theme_from_prefs}, wrap={editor_prefs.get('wordWrap')}", file=sys.stderr)
             
             editor.set_zebra_stripes(editor_prefs.get('showShading', False))
             editor.set_font_scale(editor_prefs.get('fontScale', 0.85))
@@ -639,13 +662,13 @@ async def set_editor_content(data: dict = Body(...)):
     
     # Apply ALL preferences from disk to ensure consistency (Single Source of Truth)
     # These are applied every time content changes to maintain consistent editor state
+    # NOTE: theme and line_wrapping are constructor-only, don't re-apply here
     editor_prefs = _preferences_store.get_preferences().get('editor', {})
-    editor.set_line_wrapping(editor_prefs.get('wordWrap', False))
-    editor.set_theme(THEME_MAP.get(editor_prefs.get('theme', 'cm6-dark'), 'basicDark'))
-    editor.set_zebra_stripes(editor_prefs.get('showShading', False))
-    editor.set_font_scale(editor_prefs.get('fontScale', 0.85))
-    editor.set_indent_guides(editor_prefs.get('showIndentGuides', False))
-    editor.toggle_color_picker(editor_prefs.get('colorPicker', True))
+    
+    editor.set_zebra_stripes(editor_prefs.get('showShading'))
+    editor.set_font_scale(editor_prefs.get('fontScale'))
+    editor.set_indent_guides(editor_prefs.get('showIndentGuides'))
+    editor.toggle_color_picker(editor_prefs.get('colorPicker'))
     editor.set_read_only(editor_prefs.get('readOnly', False))
     # Single update() call after all preferences applied
     editor.update()
@@ -777,20 +800,20 @@ def _get_view_state_dict() -> dict:
     prefs = _preferences_store.get_preferences()
     editor_prefs = prefs.get('editor', {})
     return {
-        "showLineNumbers": editor_prefs.get('showLineNumbers', True),
-        "showSyntax": editor_prefs.get('showSyntax', True),
-        "showShading": editor_prefs.get('showShading', False),
-        "wordWrap": editor_prefs.get('wordWrap', False),
-        "autoCloseBrackets": editor_prefs.get('autoCloseBrackets', True),
-        "autocompletion": editor_prefs.get('autocompletion', True),
-        "theme": editor_prefs.get('theme', 'cm6-dark'),
-        "autoSave": editor_prefs.get('autoSave', True),
-        "showInlineDiffs": editor_prefs.get('showInlineDiffs', True),
-        "trackAgentEdits": editor_prefs.get('trackAgentEdits', False),
-        "fontScale": editor_prefs.get('fontScale', 0.85),
-        "showIndentGuides": editor_prefs.get('showIndentGuides', False),
-        "colorPicker": editor_prefs.get('colorPicker', True),
-        "readOnly": editor_prefs.get('readOnly', False),
+        "showLineNumbers": editor_prefs.get('showLineNumbers'),
+        "showSyntax": editor_prefs.get('showSyntax'),
+        "showShading": editor_prefs.get('showShading'),
+        "wordWrap": editor_prefs.get('wordWrap'),
+        "autoCloseBrackets": editor_prefs.get('autoCloseBrackets'),
+        "autocompletion": editor_prefs.get('autocompletion'),
+        "theme": editor_prefs.get('theme'),
+        "autoSave": editor_prefs.get('autoSave'),
+        "showInlineDiffs": editor_prefs.get('showInlineDiffs'),
+        "trackAgentEdits": editor_prefs.get('trackAgentEdits'),
+        "fontScale": editor_prefs.get('fontScale'),
+        "showIndentGuides": editor_prefs.get('showIndentGuides'),
+        "colorPicker": editor_prefs.get('colorPicker'),
+        "readOnly": editor_prefs.get('readOnly'),
     }
 
 
@@ -805,7 +828,7 @@ async def update_preference(data: dict = Body(...)):
     """
     Update a single preference and apply it to the editor immediately.
     This is the ONLY way frontend should change preferences.
-    Returns full view state to eliminate double round-trip (Jimmy's optimization).
+    Returns full view state to eliminate double round-trip (Jimmy's optimization). (also a new thing here... test)
     """
     key = data.get('key')
     value = data.get('value')
@@ -822,19 +845,36 @@ async def update_preference(data: dict = Body(...)):
     if key not in DEFAULT_EDITOR_PREFS:
         raise HTTPException(status_code=400, detail=f"Invalid preference key: {key}")
     
-    # Update disk immediately
-    _preferences_store.update_preferences(editor={key: value})
-    
-    # Apply to editor immediately based on key
+    # Apply to editor immediately based on key; persist only after success
     try:
         if key == 'wordWrap':
             editor.set_line_wrapping(bool(value))
+            # If turning word wrap ON and diffs are showing, refresh them
+            # Deletion widgets don't auto-adapt to word wrap changes
+            if value and get_current_file():
+                current_prefs = _preferences_store.get_preferences().get('editor', {})
+                if current_prefs.get('showInlineDiffs', False):
+                    project_path = _history_store.get_active_project() or str(get_project_root())
+                    if project_path:
+                        try:
+                            rel = _normalize_rel_path(Path(project_path).expanduser(), get_current_file())
+                            diff_data = collect_diff(Path(project_path).expanduser(), rel)
+                            editor.set_diff_decorations(diff_data.get('hunks', []))
+                            print(f"[PREFERENCE] Refreshed diffs after word wrap enabled", file=sys.stderr)
+                        except Exception as e:
+                            print(f"[PREFERENCE] Failed to refresh diffs: {e}", file=sys.stderr)
         elif key == 'showShading':
             editor.set_zebra_stripes(bool(value))
         elif key == 'showIndentGuides':
             editor.set_indent_guides(bool(value))
         elif key == 'theme':
-            editor.set_theme(THEME_MAP.get(value, 'basicDark'))
+            theme_value = str(value)
+            try:
+                mapped_theme = _resolve_theme_preference(theme_value)
+            except RuntimeError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            value = theme_value
+            editor.set_theme(mapped_theme)
         elif key == 'fontScale':
             editor.set_font_scale(float(value))
         elif key == 'colorPicker':
@@ -861,16 +901,19 @@ async def update_preference(data: dict = Body(...)):
                 disable_edit_tracking()
         elif key in ['showLineNumbers', 'showSyntax', 'autoCloseBrackets', 'autocompletion', 'autoSave']:
             # These require frontend to rebuild view (legacy behavior)
-            # Backend has updated disk; frontend will handle rebuild
+            # Persistence happens after this block once runtime updates succeed
             pass
         
         editor.update()
+        _preferences_store.update_preferences(editor={key: value})
         
         print(f"[PREFERENCE] Updated {key}={value}", file=sys.stderr)
         
         # Return full state (Jimmy's optimization - single round trip)
         return {"ok": True, "data": _get_view_state_dict()}
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[PREFERENCE] Failed to apply {key}={value}: {e}", file=sys.stderr)
         raise HTTPException(status_code=500, detail=f"Failed to apply preference: {e}")
@@ -1023,7 +1066,12 @@ async def set_view_settings(data: dict = Body(...)):
     if 'theme' in data:
         theme_name = str(data['theme'])
         editor_updates['theme'] = theme_name
-        if editor: editor.set_theme(THEME_MAP.get(theme_name, 'basicDark'))
+        try:
+            mapped_theme = _resolve_theme_preference(theme_name)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if editor:
+            editor.set_theme(mapped_theme)
         
     if editor_updates:
         _preferences_store.update_preferences(editor=editor_updates)

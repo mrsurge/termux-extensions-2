@@ -241,7 +241,7 @@ export default {
   props: {
     value: String,
     language: String,
-    theme: String,
+    theme: { type: String, required: true },
     lineWrapping: Boolean,
     disable: Boolean,
     indent: String,
@@ -342,12 +342,21 @@ export default {
         .filter((key) => Array.isArray(this.themes[key]))
         .sort(Intl.Collator("en").compare);
     },
-    setTheme(theme) {
-      const new_theme = this.themes[theme];
-      if (new_theme === undefined) {
-        console.error("Theme not found:", theme);
-        return;
+    resolveThemeExtension(themeName) {
+      if (!themeName) {
+        throw new Error('[CodeMirror] No theme name provided by backend preferences');
       }
+      if (!this.themes || typeof this.themes !== 'object') {
+        throw new Error('[CodeMirror] Theme bundle not available; cannot resolve theme');
+      }
+      const extension = this.themes[themeName];
+      if (!extension) {
+        throw new Error(`[CodeMirror] Theme not found: ${themeName}`);
+      }
+      return extension;
+    },
+    setTheme(theme) {
+      const new_theme = this.resolveThemeExtension(theme);
       this.editor.dispatch({
         effects: this.themeConfig.reconfigure([new_theme]),
       });
@@ -649,6 +658,12 @@ export default {
       this.colorPickerCompartment = new CM.Compartment();
       this.readOnlyCompartment = new CM.Compartment();
       
+      if (!this.theme) {
+        throw new Error('[CodeMirror] Missing required theme prop; CodeMirror cannot initialize');
+      }
+
+      const initialThemeExtension = this.resolveThemeExtension(this.theme);
+
       const extensions = [
         CM.basicSetup,
         changeSender,
@@ -657,7 +672,7 @@ export default {
         // Sets indentation https://codemirror.net/docs/ref/#language.indentUnit
         this.indentUnitCompartment.of(CM.indentUnit.of(this.indent)),
         // We will set these Compartments later and dynamically through props
-        this.themeConfig.of([]),
+        this.themeConfig.of([initialThemeExtension]),
         this.languageConfig.of([]),
         this.editableConfig.of([]),
         this.lineWrappingConfig.of([]),

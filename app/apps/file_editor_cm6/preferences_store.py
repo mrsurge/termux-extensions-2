@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -45,7 +46,7 @@ def _ensure_dir(path: Path) -> None:
 
 
 class PreferencesStore:
-    """Disk-backed store for Code OSS editor/UI preferences."""
+    """Disk-backed store for Code OSS editor/UI preferences - always reads from disk."""
 
     def __init__(self, storage_path: Optional[Path] = None) -> None:
         default_root = Path.home() / ".local" / "share" / "termux-extensions-2"
@@ -53,38 +54,65 @@ class PreferencesStore:
         self._path = storage_path or (default_root / "code_oss_prefs.json")
         _ensure_dir(self._path)
         self._lock = threading.Lock()
-        self._data: Dict[str, Any] = {
-            "editor": {},
-            "ui": {},
-            "projects": {},
-        }
-        self._load()
+        # NO in-memory cache - file is always authority
+        self._initialize_if_missing()
+
+    @property
+    def path(self) -> Path:
+        """Absolute path to the backing preference file."""
+        return self._path
 
     # ---------------------------------------------------------------------
     # internal helpers
-
-    def _load(self) -> None:
+    
+    def _initialize_if_missing(self) -> None:
+        """Create preference file with defaults if it doesn't exist."""
         if not self._path.exists():
-            return
+            # File doesn't exist - write defaults to disk
+            defaults = {
+                "editor": dict(DEFAULT_EDITOR_PREFS),
+                "ui": dict(DEFAULT_UI_PREFS),
+                "projects": {},
+            }
+            # Write to disk - MUST succeed
+            tmp_path = self._path.with_suffix(".tmp")
+            try:
+                payload = json.dumps(defaults, ensure_ascii=False, indent=2)
+                tmp_path.write_text(payload, encoding="utf-8")
+                tmp_path.replace(self._path)
+                print(f"[PREFS] Created preference file with defaults: {self._path}", file=sys.stderr)
+            except Exception as e:
+                # FAIL HARD - cannot operate without preference file
+                print(f"[PREFS] FATAL: Cannot create preference file: {e}", file=sys.stderr)
+                raise RuntimeError(f"Cannot initialize preferences at {self._path}: {e}") from e
+            finally:
+                if tmp_path.exists():
+                    tmp_path.unlink(missing_ok=True)
+
+    def _read_from_disk(self) -> Dict[str, Any]:
+        """Read preferences directly from disk - file MUST exist."""
+        if not self._path.exists():
+            raise RuntimeError(f"Preference file doesn't exist: {self._path}")
         try:
             content = self._path.read_text(encoding="utf-8")
             if not content.strip():
-                return
+                raise RuntimeError(f"Preference file is empty: {self._path}")
             data = json.loads(content)
-            if isinstance(data, dict):
-                self._data["editor"] = data.get("editor", {}) or {}
-                self._data["ui"] = data.get("ui", {}) or {}
-                self._data["projects"] = data.get("projects", {}) or {}
-        except Exception:
-            # Corrupt or unreadable preferences; start fresh.
-            self._data = {"editor": {}, "ui": {}, "projects": {}}
+            if not isinstance(data, dict):
+                raise RuntimeError(f"Preference file is not a dict: {self._path}")
+            return data
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Preference file has invalid JSON: {self._path}: {e}") from e
 
-    def _save_locked(self) -> None:
+    def _write_to_disk(self, data: Dict[str, Any]) -> None:
+        """Write preferences directly to disk - atomic replace."""
         tmp_path = self._path.with_suffix(".tmp")
         try:
-            payload = json.dumps(self._data, ensure_ascii=False, indent=2)
+            payload = json.dumps(data, ensure_ascii=False, indent=2)
             tmp_path.write_text(payload, encoding="utf-8")
             tmp_path.replace(self._path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to write preferences to {self._path}: {e}") from e
         finally:
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
@@ -93,12 +121,14 @@ class PreferencesStore:
     # public API
 
     def get_preferences(self, project_path: Optional[str] = None) -> Dict[str, Any]:
+        """Read preferences directly from disk - NO cache, NO defaults merged."""
         with self._lock:
-            editor = {**DEFAULT_EDITOR_PREFS, **(self._data.get("editor") or {})}
-            ui = {**DEFAULT_UI_PREFS, **(self._data.get("ui") or {})}
+            data = self._read_from_disk()
+            editor = data.get("editor") or {}
+            ui = data.get("ui") or {}
             project_entry: Dict[str, Any] = {}
             if project_path:
-                projects = self._data.get("projects", {}) or {}
+                projects = data.get("projects", {}) or {}
                 project = projects.get(project_path, {}) or {}
                 project_entry = {
                     "path": project_path,
@@ -117,15 +147,19 @@ class PreferencesStore:
         ui: Optional[Dict[str, Any]] = None,
         project: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Update preferences - read from disk, modify, write back atomically."""
         with self._lock:
+            # Read current state from disk
+            data = self._read_from_disk()
+            
             if editor:
-                editor_store = self._data.setdefault("editor", {})
+                editor_store = data.setdefault("editor", {})
                 for key, value in editor.items():
                     if key in DEFAULT_EDITOR_PREFS:
                         editor_store[key] = value
 
             if ui:
-                ui_store = self._data.setdefault("ui", {})
+                ui_store = data.setdefault("ui", {})
                 for key, value in ui.items():
                     if key in DEFAULT_UI_PREFS:
                         ui_store[key] = value
@@ -135,7 +169,7 @@ class PreferencesStore:
                 path = project.get("path")
                 if not path:
                     raise ValueError("project.path is required when updating project preferences")
-                projects = self._data.setdefault("projects", {})
+                projects = data.setdefault("projects", {})
                 entry = projects.setdefault(path, {})
                 if "last_file" in project:
                     last_file = project.get("last_file")
@@ -145,10 +179,11 @@ class PreferencesStore:
                     "last_file": entry.get("last_file"),
                 }
 
-            self._save_locked()
+            # Write back to disk
+            self._write_to_disk(data)
 
             return {
-                "editor": {**DEFAULT_EDITOR_PREFS, **(self._data.get("editor") or {})},
-                "ui": {**DEFAULT_UI_PREFS, **(self._data.get("ui") or {})},
+                "editor": data.get("editor") or {},
+                "ui": data.get("ui") or {},
                 "project": project_result,
             }
