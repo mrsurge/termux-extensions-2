@@ -71,6 +71,31 @@ app/static/vendor/nicegui/elements/codemirror/
 - System-installed NiceGUI at `/data/data/com.termux/files/usr/lib/python3.12/site-packages/nicegui/`
 - The vendor path is loaded first via `sys.path` override in `main.py`
 
+### Preference Enforcement & Constructor Props (Theme + Font Scale)
+
+**Current contract (2025-11-20):** The iframe must fail fast unless both the theme and font scale come directly from the disk-backed preference file. There are no defaults or silent fallbacks.
+
+- `_resolve_theme_preference()` and `_resolve_font_scale()` live in `editor_app.py` and must be used **before** creating `ui.codemirror`. They raise immediately with the preference file path when a value is missing/invalid.
+- `ui.codemirror(...)` now requires `theme=` and passes `font_scale=`. Example:
+  ```python
+  editor_prefs = _preferences_store.get_preferences().get('editor', {})
+  theme = _resolve_theme_preference(editor_prefs.get('theme'))
+  font_scale = _resolve_font_scale(editor_prefs.get('fontScale'))
+  editor = ui.codemirror(
+      value=initial_content,
+      language=initial_language,
+      theme=theme,
+      line_wrapping=editor_prefs.get('wordWrap'),
+      font_scale=font_scale,
+  )
+  ```
+- Vendored `codemirror.py` refuses to initialize without a theme (`ValueError`) and forwards `font_scale` to the Vue component via `_props['fontScale']`.
+- Vendored `codemirror.js` declares `theme` as `required: true`, ingests the numeric `fontScale` prop, and applies both **before** instantiating `EditorView`. This eliminates the “flash” of default styling or text size.
+- Preference updates (`/editor/update_preference`, `/editor/set_font_scale`) call the same resolver helpers and only persist **after** the live editor successfully applies the change, guaranteeing the on-disk file matches the running state.
+- If the preference file cannot be read or the theme/font scale cannot be resolved, let the exception bubble so the iframe returns HTTP 500 and the page refuses to load. Do **not** catch-and-default these errors; the missing preference is a fatal configuration issue by design.
+
+**Implication for new features:** Any additional constructor-only props should follow the same pattern—validate from disk, pass through the Python wrapper, expose as Vue props, and configure CodeMirror **during** editor creation so no fallback state ever renders.
+
 ---
 
 ## Communication Patterns
@@ -1493,4 +1518,3 @@ Frontend:
 ---
 
 _Last Updated: 2025-11-19 21:51 UTC - Unified Preference System_
-
