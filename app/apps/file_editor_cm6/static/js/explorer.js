@@ -13,6 +13,8 @@ let currentMenuButton = null;
 let selectModeDir = null;
 const selectedEntries = new Set();
 let gitDiffBase = { ref: 'HEAD', mode: 'none', commit: null };
+let lastChangesData = null;
+let lastChangesContainer = null;
 let gitBaseBtn = null;
 let gitBaseDropdown = null;
 let searchBaseBtn = null;
@@ -1975,10 +1977,54 @@ function renderSearchOverlay() {
     changesToolbar.appendChild(headDropdown);
     searchBaseDropdown = headDropdown;
 
-    const headNote = document.createElement('span');
-    headNote.className = 'fe-search-changes-note';
-    headNote.textContent = 'This list compares files against the selected commit.';
-    changesToolbar.appendChild(headNote);
+    // Filter Controls
+    const filterContainer = document.createElement('div');
+    filterContainer.className = 'fe-changes-filter-container';
+    
+    // Filter Active Checkbox
+    const filterLabel = document.createElement('label');
+    filterLabel.className = 'fe-changes-filter-label';
+    const filterCheck = document.createElement('input');
+    filterCheck.type = 'checkbox';
+    filterCheck.id = 'fe-changes-filter-active';
+    filterLabel.appendChild(filterCheck);
+    filterLabel.appendChild(document.createTextNode(' Filter'));
+    
+    // Filename Only Checkbox
+    const filenameLabel = document.createElement('label');
+    filenameLabel.className = 'fe-changes-filter-label';
+    const filenameCheck = document.createElement('input');
+    filenameCheck.type = 'checkbox';
+    filenameCheck.id = 'fe-changes-filter-filename';
+    filenameCheck.disabled = true;
+    filenameLabel.appendChild(filenameCheck);
+    filenameLabel.appendChild(document.createTextNode(' Filename only'));
+    
+    // Filter Input
+    const filterInput = document.createElement('input');
+    filterInput.type = 'text';
+    filterInput.id = 'fe-changes-filter-input';
+    filterInput.className = 'fe-changes-filter-input';
+    filterInput.placeholder = 'Filter changes...';
+    filterInput.style.display = 'none';
+
+    // Event Listeners
+    filterCheck.addEventListener('change', () => {
+        const active = filterCheck.checked;
+        filenameCheck.disabled = !active;
+        filterInput.style.display = active ? 'inline-block' : 'none';
+        if (active) filterInput.focus();
+        applyChangesFilter();
+    });
+
+    filenameCheck.addEventListener('change', applyChangesFilter);
+    filterInput.addEventListener('input', applyChangesFilter);
+
+    filterContainer.appendChild(filterLabel);
+    filterContainer.appendChild(filenameLabel);
+    filterContainer.appendChild(filterInput);
+    
+    changesToolbar.appendChild(filterContainer);
     
     // Results area
     const resultsDiv = document.createElement('div');
@@ -2212,6 +2258,43 @@ function firstDiffLine(change) {
 }
 
 function renderChangesResults(container, data) {
+  lastChangesContainer = container;
+  lastChangesData = data;
+  applyChangesFilter();
+}
+
+function applyChangesFilter() {
+  if (!lastChangesContainer || !lastChangesData) return;
+  
+  const container = lastChangesContainer;
+  const data = lastChangesData;
+  
+  const filterActive = document.getElementById('fe-changes-filter-active')?.checked;
+  const filenameOnly = document.getElementById('fe-changes-filter-filename')?.checked;
+  const query = (document.getElementById('fe-changes-filter-input')?.value || '').toLowerCase();
+  
+  let entries = data.changes || [];
+  
+  if (filterActive && query) {
+    entries = entries.filter(change => {
+      if (change.rel.toLowerCase().includes(query)) return true;
+      
+      if (!filenameOnly) {
+        const hunks = change.hunks || [];
+        for (const hunk of hunks) {
+            for (const line of (hunk.lines || [])) {
+                if (line.text.toLowerCase().includes(query)) return true;
+            }
+        }
+      }
+      return false;
+    });
+  }
+  
+  renderChangesList(container, { ...data, changes: entries, total: data.changes?.length }, (data.changes || []).length === 0);
+}
+
+function renderChangesList(container, data, wasOriginallyEmpty) {
   container.innerHTML = '';
   if (!data) {
     container.innerHTML = '<div class="fe-search-empty">No changes loaded</div>';
@@ -2237,7 +2320,7 @@ function renderChangesResults(container, data) {
   if (!entries.length) {
     const empty = document.createElement('div');
     empty.className = 'fe-search-empty';
-    empty.textContent = 'Working tree is clean.';
+    empty.textContent = wasOriginallyEmpty ? 'Working tree is clean.' : 'No matching changes found.';
     container.appendChild(empty);
     return;
   }

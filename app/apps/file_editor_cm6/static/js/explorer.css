@@ -870,6 +870,41 @@
   margin-top: 8px;
 }
 
+.fe-changes-filter-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.fe-changes-filter-label {
+  font-size: 12px;
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.fe-changes-filter-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  flex: 1;
+  min-width: 120px;
+}
+
+.fe-changes-filter-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
 @media (hover: hover) and (pointer: fine) {
   .fe-search-close:hover {
     opacity: 0.7;
