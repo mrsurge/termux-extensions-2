@@ -1,0 +1,20 @@
+--------------------------------------------------------------------------------
+[2025-11-21 04:03:03] BUG FIX: Diff Base Selector Persistence
+
+DESCRIPTION:
+The diff base selector in the file explorer was failing to persist the selected commit, always reverting to HEAD.
+
+CONVERSATION SUMMARY:
+User reported that the selector never reflects the selected commit and diffs are not calculated against it.
+Investigation revealed that the frontend function `changeDiffBase` was incorrectly calling `gitRequest`.
+It was passing `fetch` options (method, body string) as the payload argument, causing the backend to receive a nested JSON object where the expected `ref` key was missing.
+The backend defaulted to 'HEAD' as a result.
+
+FIX DETAILS:
+Modified `app/apps/file_editor_cm6/static/js/explorer.js`:
+- Updated `changeDiffBase` to pass `{ ref }` directly to `gitRequest`.
+- `gitRequest` handles the method and stringification internally when a body object is provided.
+
+FILES MODIFIED:
+- app/apps/file_editor_cm6/static/js/explorer.js
+--------------------------------------------------------------------------------

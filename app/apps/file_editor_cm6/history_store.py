@@ -90,7 +90,15 @@ class HistoryStore:
 
     # ----- internal helpers ----------------------------------------------------
 
+    def _normalize_project_path(self, project_path: str) -> str:
+        try:
+            # Force resolve to handle trailing slashes, symlinks, etc.
+            return str(Path(project_path).expanduser().resolve(strict=False))
+        except Exception:
+            return project_path.strip()
+
     def _touch_project_locked(self, path: str) -> Dict[str, object]:
+        # path is assumed to be normalized by caller
         projects: Dict[str, Dict[str, object]] = self._data.setdefault("projects", {})
         project_entry = projects.get(path)
         if not project_entry:
@@ -181,19 +189,21 @@ class HistoryStore:
     # ----- public API ----------------------------------------------------------
 
     def touch_project(self, project_path: str) -> Dict[str, object]:
+        normalized = self._normalize_project_path(project_path)
         with self._lock:
-            entry = self._touch_project_locked(project_path)
+            entry = self._touch_project_locked(normalized)
             self._save_locked()
             return {
-                "path": project_path,
+                "path": normalized,
                 "label": entry["label"],
                 "opened_at": entry["opened_at"],
             }
 
     def touch_file(self, project_path: str, file_path: str) -> Dict[str, object]:
+        normalized_project = self._normalize_project_path(project_path)
         normalized_file = self._normalize_file_path(file_path)
         with self._lock:
-            project_entry = self._touch_project_locked(project_path)
+            project_entry = self._touch_project_locked(normalized_project)
             files: List[Dict[str, object]] = project_entry.setdefault("files", [])
             files = [entry for entry in files if entry.get("path") != normalized_file]
             timestamp = _utc_timestamp()
@@ -209,10 +219,11 @@ class HistoryStore:
         return file_entry
 
     def remove_file(self, project_path: str, file_path: str) -> bool:
+        normalized_project = self._normalize_project_path(project_path)
         normalized_file = self._normalize_file_path(file_path)
         with self._lock:
             projects: Dict[str, Dict[str, object]] = self._data.setdefault("projects", {})
-            project_entry = projects.get(project_path)
+            project_entry = projects.get(normalized_project)
             if not project_entry:
                 return False
             files: List[Dict[str, object]] = project_entry.get("files") or []
@@ -227,9 +238,10 @@ class HistoryStore:
 
     def clear_all_files(self, project_path: str) -> bool:
         """Clear all recent files for a project."""
+        normalized_project = self._normalize_project_path(project_path)
         with self._lock:
             projects: Dict[str, Dict[str, object]] = self._data.setdefault("projects", {})
-            project_entry = projects.get(project_path)
+            project_entry = projects.get(normalized_project)
             if not project_entry:
                 return False
             project_entry["files"] = []
@@ -242,9 +254,10 @@ class HistoryStore:
             return list(self._data.get("recent_projects", []))
 
     def list_files(self, project_path: str) -> List[Dict[str, object]]:
+        normalized_project = self._normalize_project_path(project_path)
         with self._lock:
             projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
-            entry = projects.get(project_path)
+            entry = projects.get(normalized_project)
             if not entry:
                 return []
             return list(entry.get("files") or [])
@@ -252,12 +265,13 @@ class HistoryStore:
     # ----- state helpers -------------------------------------------------------
 
     def set_active_project(self, project_path: Optional[str]) -> Optional[str]:
+        normalized = self._normalize_project_path(project_path) if project_path else None
         with self._lock:
-            if project_path:
-                self._touch_project_locked(project_path)
-            self._data["active_project"] = project_path
+            if normalized:
+                self._touch_project_locked(normalized)
+            self._data["active_project"] = normalized
             self._save_locked()
-            return project_path
+            return normalized
 
     def get_active_project(self) -> Optional[str]:
         with self._lock:
@@ -276,40 +290,45 @@ class HistoryStore:
             return self._data.get("terminal_shell_id")
 
     def set_last_file(self, project_path: str, file_path: Optional[str]) -> Optional[str]:
-        normalized = self._normalize_file_path(file_path) if file_path else None
+        normalized_project = self._normalize_project_path(project_path)
+        normalized_file = self._normalize_file_path(file_path) if file_path else None
         with self._lock:
-            project_entry = self._touch_project_locked(project_path)
-            project_entry["last_file"] = normalized
-            if normalized:
+            project_entry = self._touch_project_locked(normalized_project)
+            project_entry["last_file"] = normalized_file
+            if normalized_file:
                 files: List[Dict[str, object]] = project_entry.setdefault("files", [])
-                files = [entry for entry in files if entry.get("path") != normalized]
+                files = [entry for entry in files if entry.get("path") != normalized_file]
                 timestamp = _utc_timestamp()
                 files.insert(
                     0,
                     {
-                        "path": normalized,
-                        "label": _project_label(normalized),
+                        "path": normalized_file,
+                        "label": _project_label(normalized_file),
                         "opened_at": timestamp,
                     },
                 )
                 project_entry["files"] = files[:MAX_RECENT_FILES]
             self._save_locked()
-            return normalized
+            return normalized_file
 
     def get_last_file(self, project_path: Optional[str]) -> Optional[str]:
         if not project_path:
             return None
+        normalized_project = self._normalize_project_path(project_path)
         with self._lock:
             projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
-            entry = projects.get(project_path)
+            entry = projects.get(normalized_project)
             if not entry:
                 return None
             return entry.get("last_file")
 
     def set_diff_base(self, project_path: str, ref: Optional[str]) -> str:
+        normalized_project = self._normalize_project_path(project_path)
         value = (ref or 'HEAD').strip() or 'HEAD'
+        timestamp = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
+        print(f"[{timestamp}] [HistoryStore] set_diff_base project={normalized_project!r} ref={value!r}", flush=True)
         with self._lock:
-            project_entry = self._touch_project_locked(project_path)
+            project_entry = self._touch_project_locked(normalized_project)
             project_entry["diff_base"] = value
             self._save_locked()
             return value
@@ -317,24 +336,31 @@ class HistoryStore:
     def get_diff_base(self, project_path: Optional[str]) -> str:
         if not project_path:
             return 'HEAD'
+        normalized_project = self._normalize_project_path(project_path)
+        timestamp = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
+        # print(f"[{timestamp}] [HistoryStore] get_diff_base project={normalized_project!r}", flush=True)
         with self._lock:
             projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
-            entry = projects.get(project_path)
+            entry = projects.get(normalized_project)
             if not entry:
+                print(f"[{timestamp}] [HistoryStore] get_diff_base entry NOT FOUND for {normalized_project!r}", flush=True)
                 return 'HEAD'
-            return (entry.get("diff_base") or 'HEAD').strip() or 'HEAD'
+            val = (entry.get("diff_base") or 'HEAD').strip() or 'HEAD'
+            print(f"[{timestamp}] [HistoryStore] get_diff_base found {val!r} for {normalized_project!r}", flush=True)
+            return val
 
     def record_file_activity(self, project_path: str, file_path: str) -> Dict[str, object]:
-        normalized = self._normalize_file_path(file_path)
+        normalized_project = self._normalize_project_path(project_path)
+        normalized_file = self._normalize_file_path(file_path)
         with self._lock:
-            project_entry = self._touch_project_locked(project_path)
-            project_entry["last_file"] = normalized
+            project_entry = self._touch_project_locked(normalized_project)
+            project_entry["last_file"] = normalized_file
             files: List[Dict[str, object]] = project_entry.setdefault("files", [])
-            files = [entry for entry in files if entry.get("path") != normalized]
+            files = [entry for entry in files if entry.get("path") != normalized_file]
             timestamp = _utc_timestamp()
             entry = {
-                "path": normalized,
-                "label": _project_label(normalized),
+                "path": normalized_file,
+                "label": _project_label(normalized_file),
                 "opened_at": timestamp,
             }
             files.insert(0, entry)

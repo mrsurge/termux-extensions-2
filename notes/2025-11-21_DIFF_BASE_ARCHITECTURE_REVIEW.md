@@ -11,8 +11,8 @@ Document every code change made while adding the “diff base” selector, expla
 | `app/apps/file_editor_cm6/git_helper.py` | `get_worktree_changes()` now accepts a base ref: HEAD uses porcelain status, other refs use `git diff --name-status <ref>` + `ls-files --others`. Added `get_commit_info()` to resolve hash/subject metadata for the selector. |
 | `app/apps/file_editor_cm6/edit_tracker.py` | Tracks the currently selected base (via history store) so live inline diffs and edit events compare against the same baseline. |
 | `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` | All calls to `collect_diff()` now pass `_current_diff_base(project_path)` so CodeMirror decorations honour the selector from startup through file watcher refreshes. |
-| `app/apps/file_editor_cm6/main.py` | Baked the diff base into `_build_state_payload()`, `/explorer/list`, `/diff`, and `/explorer/search`. Added `/git/diff_base` (GET/POST), `_resolve_diff_base`, `_diff_base_payload`, and `_ensure_git_actions_allowed` (blocks stage/commit/etc. unless the base is HEAD). `/git/diff_base` also invalidates diff caches and marks git caches dirty so explorers refresh automatically. |
-| `app/apps/file_editor_cm6/static/js/explorer.js` | Frontend now mirrors the backend base state, exposes the Status button + dropdown in both explorer footer and search overlay, auto-enables inline diffs when clicking hunks, hides git action buttons when base ≠ HEAD, and refreshes “By Changes” when the base moves. |
+| `app/apps/file_editor_cm6/main.py` | Baked the diff base into `_build_state_payload()`, `/diff`, and `/explorer/search`. Added `/git/diff_base` (GET/POST) plus `_resolve_diff_base` / `_diff_base_payload` so every consumer reads the same stored value. Git actions remain untouched—Git itself is still the lone validator. |
+| `app/apps/file_editor_cm6/static/js/explorer.js` | Frontend simply displays whatever the backend stores. Selecting a commit POSTs `/git/diff_base`, waits for the write, re-fetches the stored value, then refreshes git status, explorer tree, inline diffs, and “By Changes.” No more local caching or action-hiding. |
 | `app/apps/file_editor_cm6/static/js/explorer.css` | Styles for the two-row footer, responsive dropdowns (50 vh scrollable, right-aligned, explorer dropdown pops upward), and the new “By Changes” presentation (line/diff gutters, toolbar layout). |
 | `app/apps/file_editor_cm6/template.html` | Explorer footer rewritten into two rows; inserted Status button + dropdown anchor. |
 
@@ -23,19 +23,15 @@ Document every code change made while adding the “diff base” selector, expla
 - **Backend endpoints** read from the history store for every git/diff request and never trust frontend state.
 
 ### 3.2 Data Flow
-1. When a project loads, `_build_state_payload()` injects `gitDiffBase` into `/state`, `/explorer/list`, and `/explorer/search` payloads.
-2. Explorer JS caches that value (`gitDiffBase`) and:
-   - Updates the footer/search buttons.
-   - Hides git mutator buttons when `mode !== 'head'`.
-   - Passes the value back to `/git/diff_base` when user selects a new commit.
-3. Backend `/git/diff_base` validates the ref (`git rev-parse` via `get_commit_info`), persists it, invalidates diff cache, and marks git status dirty.
+1. When a project loads, `_build_state_payload()` injects `gitDiffBase` into `/state`; explorer.js immediately re-fetches `/git/diff_base` to confirm the stored value.
+2. Selecting a commit from either Status button POSTs `/git/diff_base`, awaits the response, re-fetches the stored value, then refreshes git status, explorer tree, inline diffs, and “By Changes.”
+3. Backend `/git/diff_base` validates refs (`get_commit_info`) and persists them—no additional gating or UI heuristics.
 4. Diff-producing endpoints (`/diff`, `/explorer/search?mode=changes`, inline diff loaders, edit tracker) all pass the same base into `collect_diff` / `get_worktree_changes`.
 5. Terminal/editor watchers simply reload buffers; diff cache ensures the baseline switch is visible without restarting.
 
 ### 3.3 Modes and Guardrails
 - **Mode: none** – repository unavailable; git UI stays hidden but Status button reads “No Git.”
-- **Mode: head (“Cruise”)** – default; full git UI enabled.
-- **Mode: detached** – user selected a historical commit; backend refuses stage/commit/push/pull/reset/restore with HTTP 409 via `_ensure_git_actions_allowed`. Explorer tree drops git badges; footer actions vanish. Status button + search overlay still work so the user can jump back to HEAD.
+- **Mode: active** – regardless of whether the baseline equals HEAD, Status buttons simply display the stored ref while git controls remain enabled. Git CLI (`git status`, `git log`, etc.) continues to be the single source of truth for validation.
 
 ### 3.4 Outstanding Issue
 The selector occasionally appears to “stick” at HEAD after a restart. Likely causes:
@@ -46,16 +42,28 @@ The selector occasionally appears to “stick” at HEAD after a restart. Likely
 ## 4. Desired Functionality
 1. **Single Source of Truth** – The history store must always return the latest baseline for the active project; all readers should subscribe to `/state` updates instead of caching their own copy.
 2. **Stateful UI** – The Status button and “By Changes” toolbar must always show the currently stored base, even after reconnects.
-3. **Deterministic Mutations** – Git mutation endpoints should be hard-blocked unless the selector is set back to HEAD, ensuring staging/committing never secretly targets the wrong comparison.
-4. **Diff Consistency** – Every view (inline diffs, search results, explorer badges, watcher jolts) must render against the same baseline so users never see conflicting answers depending on the surface.
+3. **Deterministic Mutations** – Leave git commands alone; Git itself remains the validator. The selector is purely a display preference for diff views.
+4. **Diff Consistency** – Every view (inline diffs, search results, explorer badges, watcher jolts) must render against the same stored baseline so users never see conflicting answers depending on the surface.
 5. **Graceful Recovery** – If the stored base ref is invalid (gc’d commit, shallow clone, etc.) the backend should fall back to HEAD automatically and notify the frontend.
 
 ## 5. Intended Architecture (Next Steps)
-1. **State bootstrap hook** – Extend `/state` to include both `gitDiffBase` and a monotonically increasing `gitStateVersion`. Explorer (and other clients) should re-fetch `/git/diff_base` whenever `gitStateVersion` changes so reconnects update immediately.
-2. **Server-side enforcement for explorer list** – Instead of forcing explorer.js to hide badges, return stripped metadata from `/explorer/list` whenever `_diff_base_payload().mode === 'detached'`. (Partial step already done by zeroing `gitStatus`.)
-3. **Diff-base watcher** – When `_history_store.set_diff_base()` succeeds, push a websocket or SSE event so the NiceGUI frontend can call `/git/diff_base` without polling.
-4. **Commit validation UX** – The dropdown should warn when the selected ref is unreachable (e.g., fetch required) and automatically revert to HEAD.
-5. **Persistence diagnostics** – Add a lightweight `/git/diff_base/log` endpoint (or logging hook) to verify what value is being read/written during session restarts; this will help root-cause the “resets to HEAD” behaviour you’re seeing.
+1. **State bootstrap hook** – `/state` already contains `gitDiffBase`; we still want a monotonic `gitStateVersion` so other clients can invalidate caches without polling.
+2. **Diff-base watcher** – When `_history_store.set_diff_base()` succeeds, push a websocket or SSE event so the NiceGUI frontend can call `/git/diff_base` without guessing.
+3. **Commit validation UX** – The dropdown should warn when the selected ref is unreachable (e.g., fetch required) and automatically revert to HEAD.
+4. **Persistence diagnostics** – Add a lightweight `/git/diff_base/log` endpoint (or logging hook) to verify what value is being read/written during session restarts; this will help root-cause any future “stuck at HEAD” reports.
 
 ---
 Feel free to append troubleshooting notes to this document as we chase the baseline persistence issue.
+
+## 6. Troubleshooting Log
+
+### 6.1 Sticky HEAD / Persistence Reset (2025-11-21)
+- **Symptom:** Selector appeared to reset to `HEAD` after reconnects.
+- **Cause:** `HistoryStore` key mismatch (raw vs resolved paths) created duplicate entries that defaulted `diff_base` to `HEAD`.
+- **Fix:** Added `_normalize_project_path`, normalized all history-store calls, and logged accesses for diagnostics.
+- **Status:** Persistent state now maps reliably to the correct project entry.
+
+### 6.2 UX Simplification (2025-11-21)
+- **Symptom:** Disabling git buttons when browsing historic commits created confusion and didn’t add safety (Git already validates HEAD).
+- **Fix:** Removed `_ensure_git_actions_allowed` and all front-end gating. Status buttons now *only* display the stored ref and trigger the write → read → refresh loop.
+- **Status:** Git commands and explorer UI behave exactly as before; the selector is display-only and always sourced from the backend.

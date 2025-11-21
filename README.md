@@ -99,6 +99,8 @@ TE_SESSION_TYPE="framework" gunicorn -w 2 -k gthread --threads 8 -b 0.0.0.0:8088
 
 Then open from another device on the same network: `http://<your-device-ip>:8088`
 
+
+
 ## Testing
 
 The framework now exposes runtime metadata via `TE_RUN_ID` and a metrics endpoint. To verify a deployment:
@@ -109,7 +111,7 @@ The framework now exposes runtime metadata via `TE_RUN_ID` and a metrics endpoin
    ```
    The script prints the generated `TE_RUN_ID` and keeps the Flask app in the foreground.
 
-2. In a separate shell, confirm the server is reporting metrics:
+2. In a separate shell, confirm the server is reporting metrics: hi?
    ```bash
    curl http://localhost:8088/api/framework/runtime/metrics | jq
    ```

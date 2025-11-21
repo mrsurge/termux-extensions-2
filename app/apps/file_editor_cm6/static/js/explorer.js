@@ -325,7 +325,7 @@ async function refreshCurrentProject(forceRefresh = false) {
   const label = document.getElementById('fe-project-label');
 
   currentProjectPath = state?.activeProjectExists ? state.activeProject : '';
-  applyGitDiffBaseFromState(state?.gitDiffBase || null);
+  await refreshDiffBaseState(state?.gitDiffBase || null);
 
   if (!currentProjectPath) {
     gitStatusCache = null;
@@ -353,30 +353,21 @@ async function refreshCurrentProject(forceRefresh = false) {
 
 function setGitControlsEnabled(enabled, showInit = false) {
   if (!gitButtons) return;
-  const allowActions = gitDiffBase.mode === 'head';
-  const effectiveEnabled = enabled && allowActions;
-
-  if (gitButtons.init) {
-    gitButtons.init.style.display = showInit ? 'inline-block' : 'none';
-    gitButtons.init.disabled = !enabled;
+  
+  for (const [key, btn] of Object.entries(gitButtons)) {
+      if (!btn) continue;
+      if (key === 'init') {
+          btn.style.display = showInit ? 'inline-block' : 'none';
+          btn.disabled = !enabled;
+      } else {
+          btn.disabled = !enabled;
+          btn.style.display = showInit ? 'none' : 'inline-block';
+      }
   }
-
-  Object.entries(gitButtons).forEach(([key, btn]) => {
-    if (!btn || key === 'init') return;
-    const visible = !showInit && allowActions;
-    btn.style.display = visible ? 'inline-block' : 'none';
-    btn.disabled = !effectiveEnabled;
-  });
-
-  updateGitActionsVisibility();
-}
-
-function updateGitActionsVisibility() {
-  const actionsRow = document.querySelector('.fe-git-actions');
-  if (!actionsRow) return;
-  const showInit = gitButtons?.init && gitButtons.init.style.display !== 'none';
-  const hideRow = (gitDiffBase.mode !== 'head') && !showInit;
-  actionsRow.classList.toggle('detached', hideRow);
+  // Ensure reset is always hidden when other controls are, unless init is being shown
+  if (gitButtons.reset) {
+    gitButtons.reset.style.display = (enabled && !showInit) ? 'inline-block' : 'none';
+  }
 }
 
 function applyGitDiffBaseFromState(payload) {
@@ -392,7 +383,6 @@ function applyGitDiffBaseFromState(payload) {
     gitDiffBase = fallback;
   }
   updateDiffBaseButtons();
-  updateGitActionsVisibility();
 }
 
 function updateDiffBaseButtons() {
@@ -403,6 +393,21 @@ function updateDiffBaseButtons() {
   if (searchBaseBtn) {
     searchBaseBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, false)} ▾`;
     searchBaseBtn.disabled = gitDiffBase.mode === 'none';
+  }
+}
+
+async function refreshDiffBaseState(prefetched = null) {
+  if (prefetched) {
+    applyGitDiffBaseFromState(prefetched);
+    return prefetched;
+  }
+  try {
+    const data = await gitRequest('/git/diff_base');
+    applyGitDiffBaseFromState(data);
+    return data;
+  } catch (err) {
+    console.warn('Failed to load diff base:', err);
+    return null;
   }
 }
 
@@ -465,11 +470,8 @@ function renderDiffBaseDropdown(dropdown, commits) {
 
 async function changeDiffBase(ref) {
   try {
-    const resp = await gitRequest('/git/diff_base', {
-      method: 'POST',
-      body: JSON.stringify({ ref })
-    });
-    applyGitDiffBaseFromState(resp);
+    await gitRequest('/git/diff_base', { ref });
+    await refreshDiffBaseState();
     await refreshGitStatus(false);
     if (treeElement) {
       await refreshTree(treeElement);
@@ -511,14 +513,6 @@ function renderGitSummary(status, message) {
   if (!gitSummaryEl) return;
   if (!status) {
     gitSummaryEl.textContent = message || 'Git status unavailable.';
-    return;
-  }
-
-  if (gitDiffBase.mode === 'detached') {
-    const description = gitDiffBase.commit?.subject
-      ? `${gitDiffBase.commit.short} · ${truncateText(gitDiffBase.commit.subject, 40)}`
-      : gitDiffBase.ref || 'HEAD';
-    gitSummaryEl.textContent = `Viewing ${description}. Git actions disabled.`;
     return;
   }
 
@@ -1826,7 +1820,7 @@ async function fetchChangesResults(force = false) {
     }
 
     if (json.data?.base) {
-      applyGitDiffBaseFromState(json.data.base);
+      await refreshDiffBaseState(json.data.base);
     }
     searchResults = json.data;
     searchLoading = false;
