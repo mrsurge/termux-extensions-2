@@ -798,7 +798,7 @@
   font-size: 12px;
   font-family: monospace;
   padding: 4px 12px;
-  background: rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.18); /* hunk-header */
   color: #e5e7eb;
 }
 
@@ -856,7 +856,7 @@
 }
 
 .fe-highlight-text {
-  background: rgba(148, 163, 184, 0.18);
+  background: rgba(48, 63, 84); /*highlight*/
   color: #ffffff;
   border-radius: 2px;
   padding: 0 1px;
