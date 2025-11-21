@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, Optional, Set, Callable
 
 from .diff_helper import collect_diff
+from .stores import _history_store
 
 _lock = threading.Lock()
 
@@ -29,13 +30,19 @@ _last_edit: Optional[dict] = None
 
 # Project root (set by main app)
 _project_root: Optional[Path] = None
+_project_root_str: Optional[str] = None
 
 
 def set_project_root(root: Path) -> None:
     """Set the active project root for diff tracking."""
-    global _project_root
+    global _project_root, _project_root_str
     with _lock:
         _project_root = root
+        try:
+            resolved = str(root.resolve())
+        except Exception:
+            resolved = str(root)
+        _project_root_str = resolved
 
 
 def register_shell_watcher(shell_id: str, shell_type: str) -> None:
@@ -105,7 +112,8 @@ def on_file_modified(path: str) -> None:
         print(f"[EDIT_TRACKER] File modified: {rel_path}", file=sys.stderr)
         
         # Collect diff
-        diff_data = collect_diff(_project_root, str(rel_path))
+        base_ref = _history_store.get_diff_base(_project_root_str) if _project_root_str else 'HEAD'
+        diff_data = collect_diff(_project_root, str(rel_path), base_ref=base_ref)
         
         if not diff_data or not diff_data.get('summary', {}).get('tracked'):
             print(f"[EDIT_TRACKER] No tracked changes in diff", file=sys.stderr)

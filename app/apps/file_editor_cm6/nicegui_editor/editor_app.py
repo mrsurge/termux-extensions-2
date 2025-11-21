@@ -69,6 +69,10 @@ RUNNABLE_COMMANDS = {
 }
 
 
+def _current_diff_base(project_path: Optional[str]) -> str:
+    return _history_store.get_diff_base(project_path) if project_path else 'HEAD'
+
+
 def _resolve_theme_preference(theme_key: Optional[str]) -> str:
     """Map stored preference theme id to the CodeMirror theme name or raise."""
     pref_path = getattr(_preferences_store, 'path', None)
@@ -497,7 +501,7 @@ async def editor_page():
                 try:
                     project_root = Path(project_path).expanduser()
                     rel = _normalize_rel_path(project_root, initial_path)
-                    diff_data = collect_diff(project_root, rel)
+                    diff_data = collect_diff(project_root, rel, base_ref=_current_diff_base(project_path))
                     editor.set_diff_decorations(diff_data.get('hunks', []))
                 except Exception as e:
                     print(f"[DIFF] Failed to auto-load diffs on init: {e}", file=sys.stderr)
@@ -530,7 +534,7 @@ async def editor_page():
                         if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
                             try:
                                 rel_path = _normalize_rel_path(project_root, initial_path)
-                                diff_data = collect_diff(project_root, rel_path)
+                                diff_data = collect_diff(project_root, rel_path, base_ref=_current_diff_base(project_path))
                                 editor.set_diff_decorations(diff_data.get('hunks', []))
                             except Exception as e:
                                 print(f"[FILE_WATCH] Failed to recalculate diffs: {e}", file=sys.stderr)
@@ -701,7 +705,7 @@ async def set_editor_content(data: dict = Body(...)):
             if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
                 try:
                     rel_path = _normalize_rel_path(project_root, new_path)
-                    diff_data = collect_diff(project_root, rel_path)
+                    diff_data = collect_diff(project_root, rel_path, base_ref=_current_diff_base(project_path))
                     editor.set_diff_decorations(diff_data.get('hunks', []))
                 except Exception as e:
                     print(f"[FILE_WATCH] Failed to recalculate diffs: {e}", file=sys.stderr)
@@ -728,7 +732,7 @@ async def set_editor_content(data: dict = Body(...)):
         try:
             project_path = _history_store.get_active_project() or str(get_project_root())
             rel = _normalize_rel_path(Path(project_path).expanduser(), new_path)
-            diff_data = collect_diff(Path(project_path).expanduser(), rel)
+            diff_data = collect_diff(Path(project_path).expanduser(), rel, base_ref=_current_diff_base(project_path))
             editor.set_diff_decorations(diff_data.get('hunks', []))
         except Exception: editor.set_diff_decorations([])
     else: editor.set_diff_decorations([])
@@ -748,7 +752,7 @@ async def refresh_diffs(data: dict = Body(...)):
         
         project_root = Path(project_path).expanduser()
         rel = _normalize_rel_path(project_root, path)
-        diff_data = collect_diff(project_root, rel)
+        diff_data = collect_diff(project_root, rel, base_ref=_current_diff_base(project_path))
         hunks = diff_data.get('hunks', [])
         editor.set_diff_decorations(hunks)
         return {"ok": True, "hunks_count": len(hunks)}
@@ -907,7 +911,7 @@ async def update_preference(data: dict = Body(...)):
                     if project_path:
                         try:
                             rel = _normalize_rel_path(Path(project_path).expanduser(), get_current_file())
-                            diff_data = collect_diff(Path(project_path).expanduser(), rel)
+                            diff_data = collect_diff(Path(project_path).expanduser(), rel, base_ref=_current_diff_base(project_path))
                             editor.set_diff_decorations(diff_data.get('hunks', []))
                             print(f"[PREFERENCE] Refreshed diffs after word wrap enabled", file=sys.stderr)
                         except Exception as e:
@@ -942,7 +946,7 @@ async def update_preference(data: dict = Body(...)):
                 if project_path:
                     try:
                         rel = _normalize_rel_path(Path(project_path).expanduser(), get_current_file())
-                        diff_data = collect_diff(Path(project_path).expanduser(), rel)
+                        diff_data = collect_diff(Path(project_path).expanduser(), rel, base_ref=_current_diff_base(project_path))
                         editor.set_diff_decorations(diff_data.get('hunks', []))
                     except Exception as e:
                         print(f"[PREFERENCE] Failed to load diffs: {e}", file=sys.stderr)
@@ -1074,7 +1078,7 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: Optional[str]) 
         )
 
     if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
-        diff_data = collect_diff(project_root, str(rel_path))
+        diff_data = collect_diff(project_root, str(rel_path), base_ref=_current_diff_base(project_path))
         editor.set_diff_decorations(diff_data.get('hunks', []))
 
     print(f"[SAVE] Success path={current_file!r} sha={file_meta['sha256']}", file=sys.stderr)
@@ -1182,7 +1186,7 @@ async def set_view_settings(data: dict = Body(...)):
             try:
                 project_path = _history_store.get_active_project() or str(get_project_root())
                 rel = _normalize_rel_path(Path(project_path).expanduser(), data['current_path'])
-                diff_data = collect_diff(Path(project_path).expanduser(), rel)
+                diff_data = collect_diff(Path(project_path).expanduser(), rel, base_ref=_current_diff_base(project_path))
                 editor.set_diff_decorations(diff_data.get('hunks', []))
             except Exception as e:
                 print(f"[DIFF] Failed to load diffs on toggle: {e}", file=sys.stderr)

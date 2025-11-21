@@ -373,6 +373,18 @@
   gap: 8px;
 }
 
+.fe-git-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.fe-git-meta {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  position: relative;
+}
+
 .fe-git-summary {
   font-size: calc(0.75rem * var(--chrome-font-scale));
   color: rgba(229, 231, 235, 0.7);
@@ -385,10 +397,44 @@
   gap: 8px;
 }
 
+.fe-git-actions.detached {
+  display: none;
+}
+
 .fe-git-actions .fe-btn {
   flex: 0 0 auto;
   font-size: calc(0.8rem * var(--chrome-font-scale));
   padding: 5px 10px;
+}
+
+.fe-git-status-btn {
+  margin-left: auto;
+  font-size: calc(0.8rem * var(--chrome-font-scale));
+  white-space: nowrap;
+}
+
+#fe-git-base-dd,
+#fe-search-base-dd {
+  right: 0;
+  left: auto;
+  z-index: 260;
+  min-width: 240px;
+  max-width: calc(100vw - 40px);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+#fe-search-base-dd {
+  right: 12px;
+}
+
+.fe-git-footer {
+  position: relative;
+}
+
+.fe-git-footer #fe-git-base-dd {
+  bottom: calc(100% + 4px);
+  top: auto;
 }
 
      .fe-git-badge {
@@ -537,6 +583,7 @@
   padding: 12px;
   border-bottom: 1px solid var(--border);
   background: var(--explorer-bg);
+  position: relative;
 }
 
 .fe-search-changes-label {
@@ -550,8 +597,19 @@
   color: var(--fg);
   padding: 4px 12px;
   border-radius: 4px;
-  cursor: not-allowed;
+  cursor: pointer;
   font-size: 13px;
+}
+
+#fe-search-base-dd {
+  right: 12px;
+  left: auto;
+  z-index: 250;
+}
+
+.fe-search-head-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .fe-search-changes-note {

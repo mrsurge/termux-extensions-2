@@ -12,6 +12,7 @@ import os
 import json
 from pathlib import Path
 import shutil
+from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
 from fastapi.responses import JSONResponse, FileResponse
 import asyncio
@@ -40,6 +41,7 @@ from .git_helper import (
     is_git_repository,
     init_repository,
     get_worktree_changes,
+    get_commit_info,
 )
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
@@ -274,18 +276,29 @@ def _status_meta_from_code(code: str) -> tuple[str, str]:
 
 
 def _search_by_changes(project_root: Path) -> dict:
+    project_path = _history_store.get_active_project()
+    if not project_path:
+        return {
+            "mode": "changes",
+            "git": False,
+            "base": _diff_base_payload(None),
+            "changes": [],
+            "truncated": False,
+            "count": 0,
+        }
     if not is_git_repository(project_root):
         return {
             "mode": "changes",
             "git": False,
-            "head": None,
+            "base": _diff_base_payload(project_path),
             "changes": [],
             "truncated": False,
             "count": 0,
         }
 
     try:
-        entries = get_worktree_changes(project_root)
+        base_ref = _resolve_diff_base(project_path)
+        entries = get_worktree_changes(project_root, base_ref)
     except GitError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -295,7 +308,7 @@ def _search_by_changes(project_root: Path) -> dict:
 
     for entry in selected:
         rel_path = entry.path.replace('\\', '/')
-        diff_payload = collect_diff(project_root, rel_path)
+        diff_payload = collect_diff(project_root, rel_path, base_ref=base_ref)
         status_short, status_text = _status_meta_from_code(entry.code)
         summary = diff_payload.get("summary", {"added": 0, "deleted": 0, "tracked": False})
 
@@ -316,23 +329,12 @@ def _search_by_changes(project_root: Path) -> dict:
             change["error"] = diff_payload["error"]
         changes.append(change)
 
-    head_info = None
-    try:
-        commits = get_commits(project_root, limit=1)
-        if commits:
-            head = commits[0]
-            head_info = {
-                "hash": head.hash,
-                "short": head.short_hash,
-                "subject": head.summary,
-            }
-    except GitError:
-        head_info = None
+    base_info = _diff_base_payload(project_path)
 
     return {
         "mode": "changes",
         "git": True,
-        "head": head_info,
+        "base": base_info,
         "changes": changes,
         "truncated": truncated,
         "count": len(changes),
@@ -440,6 +442,50 @@ def _get_active_project_root() -> Path:
     return project
 
 
+def _resolve_diff_base(project_path: Optional[str]) -> str:
+    base = _history_store.get_diff_base(project_path)
+    return base.strip() if base else 'HEAD'
+
+
+def _diff_base_payload(project_path: Optional[str]) -> dict:
+    base_ref = _resolve_diff_base(project_path)
+    mode = 'none'
+    commit_info = None
+    root_path = None
+
+    if project_path:
+        root_path = Path(project_path)
+        if root_path.exists() and is_git_repository(root_path):
+            mode = 'head' if base_ref == 'HEAD' else 'detached'
+            try:
+                commit = get_commit_info(root_path, base_ref)
+            except GitError:
+                commit = None
+            if commit:
+                commit_info = {
+                    "hash": commit.hash,
+                    "short": commit.short_hash,
+                    "subject": commit.summary,
+                    "author": commit.author,
+                    "date": commit.date,
+                }
+        else:
+            mode = 'none'
+
+    return {
+        "ref": base_ref,
+        "mode": mode,
+        "commit": commit_info,
+    }
+
+
+def _ensure_git_actions_allowed() -> None:
+    project_path = _history_store.get_active_project()
+    base = _resolve_diff_base(project_path)
+    if base != 'HEAD':
+        raise HTTPException(status_code=409, detail="Git actions require status to be set to HEAD")
+
+
 def _status_to_payload(status) -> dict:
     return {
         "branch": status.branch,
@@ -500,6 +546,7 @@ def _build_state_payload() -> dict:
 
     editor_prefs = _preferences_store.get_preferences(project_path)
     runtime_meta = _get_runtime_metadata()
+    diff_base_info = _diff_base_payload(project_path if project_exists else None)
 
     return {
         "activeProject": project_path,
@@ -512,6 +559,7 @@ def _build_state_payload() -> dict:
         "lastFileMessage": last_file_message,
         "recents": recents,
         "preferences": editor_prefs,
+        "gitDiffBase": diff_base_info,
         "runtime": runtime_meta,
     }
 
@@ -820,8 +868,40 @@ def git_status_route():
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@file_editor_cm6_bp.get('/git/diff_base')
+def git_diff_base_route():
+    project_path = _history_store.get_active_project()
+    return {"ok": True, "data": _diff_base_payload(project_path)}
+
+
+@file_editor_cm6_bp.post('/git/diff_base')
+def git_set_diff_base_route(payload: dict = Body(...)):
+    project_path = _history_store.get_active_project()
+    if not project_path:
+        raise HTTPException(status_code=400, detail="No project selected")
+
+    ref = (payload.get('ref') or 'HEAD').strip() or 'HEAD'
+    project_root = _get_active_project_root()
+    if not is_git_repository(project_root):
+        raise HTTPException(status_code=400, detail="Not a git repository")
+
+    if ref != 'HEAD':
+        try:
+            commit = get_commit_info(project_root, ref)
+        except GitError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if not commit:
+            raise HTTPException(status_code=400, detail="Commit not found")
+
+    _history_store.set_diff_base(project_path, ref)
+    invalidate_diff_cache(project_root)
+    mark_git_cache_dirty(project_root)
+    return {"ok": True, "data": _diff_base_payload(project_path)}
+
+
 @file_editor_cm6_bp.post('/git/stage_all')
 def git_stage_all_route():
+    _ensure_git_actions_allowed()
     try:
         project_root = _get_active_project_root()
         status = git_stage_all(project_root)
@@ -832,6 +912,7 @@ def git_stage_all_route():
 
 @file_editor_cm6_bp.post('/git/unstage_all')
 def git_unstage_all_route():
+    _ensure_git_actions_allowed()
     try:
         project_root = _get_active_project_root()
         status = git_unstage_all(project_root)
@@ -847,6 +928,7 @@ async def git_commit_route(data: dict = Body(...)):
     if not message:
         raise HTTPException(status_code=400, detail="Commit message required")
     try:
+        _ensure_git_actions_allowed()
         project_root = _get_active_project_root()
         status = git_commit_changes(project_root, message, amend=amend)
         return {"ok": True, "data": _status_to_payload(status)}
@@ -860,6 +942,7 @@ async def git_push_route(data: dict = Body(...)):
     branch = (data.get('branch') or '').strip() or None
     force = bool(data.get('force'))
     try:
+        _ensure_git_actions_allowed()
         project_root = _get_active_project_root()
         status = git_push_changes(project_root, remote=remote, branch=branch, force=force)
         return {"ok": True, "data": _status_to_payload(status)}
@@ -873,6 +956,7 @@ async def git_pull_route(data: dict = Body(...)):
     branch = (data.get('branch') or '').strip() or None
     rebase = bool(data.get('rebase'))
     try:
+        _ensure_git_actions_allowed()
         project_root = _get_active_project_root()
         status = git_pull_changes(project_root, remote=remote, branch=branch, rebase=rebase)
         return {"ok": True, "data": _status_to_payload(status)}
@@ -885,6 +969,7 @@ async def git_stage_route(data: dict = Body(...)):
     if not paths:
         raise HTTPException(status_code=400, detail="Paths required")
     try:
+        _ensure_git_actions_allowed()
         project_root = _get_active_project_root()
         status = stage_paths(project_root, paths)
         mark_git_cache_dirty(project_root)
@@ -898,6 +983,7 @@ async def git_unstage_route(data: dict = Body(...)):
     if not paths:
         raise HTTPException(status_code=400, detail="Paths required")
     try:
+        _ensure_git_actions_allowed()
         project_root = _get_active_project_root()
         status = unstage_paths(project_root, paths)
         mark_git_cache_dirty(project_root)
@@ -930,6 +1016,7 @@ async def git_restore_route(data: dict = Body(...)):
     if not path:
         raise HTTPException(status_code=400, detail="Path required")
     try:
+        _ensure_git_actions_allowed()
         project_root = _get_active_project_root()
         restore_path(project_root, path, commit)
         mark_git_cache_dirty(project_root)
@@ -960,6 +1047,7 @@ async def git_commits():
 async def git_reset_hard_route(data: dict = Body(...)):
     commit = data.get('commit', 'HEAD')
     try:
+        _ensure_git_actions_allowed()
         project_root = _get_active_project_root()
         status = reset_hard(project_root, commit)
         mark_git_cache_dirty(project_root)
@@ -1082,14 +1170,22 @@ def get_diff(path: str = Query(...)):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    payload = collect_diff(project_root, rel)
+    base_ref = _resolve_diff_base(project_path)
+    payload = collect_diff(project_root, rel, base_ref=base_ref)
     return {"ok": True, "data": payload}
 
 @file_editor_cm6_bp.get('/explorer/list')
 def explorer_list(rel: str = Query('.')):
     """List directory contents for the file explorer."""
     try:
-        return {"ok": True, "data": list_dir(rel)}
+        data = list_dir(rel)
+        project_path = _history_store.get_active_project()
+        diff_info = _diff_base_payload(project_path)
+        if diff_info.get('mode') == 'detached':
+            for entry in data.get('entries', []) or []:
+                entry['gitStatus'] = 'clean'
+        data['gitDiffBase'] = diff_info
+        return {"ok": True, "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

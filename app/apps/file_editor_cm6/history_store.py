@@ -67,6 +67,9 @@ class HistoryStore:
                 self._data["session_state"] = data.get("session_state", {})
                 # Session cache is primarily stored in sidecars, but we can load keys here
                 self._data["session_cache"] = data.get("session_cache", {})
+                for entry in self._data["projects"].values():
+                    if isinstance(entry, dict):
+                        entry.setdefault("diff_base", "HEAD")
         except Exception:
             # Corrupt or unreadable history; start fresh.
             self._data = {"recent_projects": [], "projects": {}, "active_project": None, "session_state": {}, "session_cache": {}}
@@ -95,6 +98,8 @@ class HistoryStore:
         else:
             project_entry.setdefault("files", [])
             project_entry.setdefault("last_file", None)
+            project_entry.setdefault("diff_base", "HEAD")
+        project_entry.setdefault("diff_base", "HEAD")
         project_entry["label"] = _project_label(path)
         timestamp = _utc_timestamp()
         project_entry["opened_at"] = timestamp
@@ -198,10 +203,10 @@ class HistoryStore:
                 "opened_at": timestamp,
             }
             files.insert(0, file_entry)
-            project_entry["files"] = files[:MAX_RECENT_FILES]
-            project_entry["last_file"] = normalized_file
-            self._save_locked()
-            return file_entry
+        project_entry["files"] = files[:MAX_RECENT_FILES]
+        project_entry["last_file"] = normalized_file
+        self._save_locked()
+        return file_entry
 
     def remove_file(self, project_path: str, file_path: str) -> bool:
         normalized_file = self._normalize_file_path(file_path)
@@ -300,6 +305,24 @@ class HistoryStore:
             if not entry:
                 return None
             return entry.get("last_file")
+
+    def set_diff_base(self, project_path: str, ref: Optional[str]) -> str:
+        value = (ref or 'HEAD').strip() or 'HEAD'
+        with self._lock:
+            project_entry = self._touch_project_locked(project_path)
+            project_entry["diff_base"] = value
+            self._save_locked()
+            return value
+
+    def get_diff_base(self, project_path: Optional[str]) -> str:
+        if not project_path:
+            return 'HEAD'
+        with self._lock:
+            projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
+            entry = projects.get(project_path)
+            if not entry:
+                return 'HEAD'
+            return (entry.get("diff_base") or 'HEAD').strip() or 'HEAD'
 
     def record_file_activity(self, project_path: str, file_path: str) -> Dict[str, object]:
         normalized = self._normalize_file_path(file_path)

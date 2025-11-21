@@ -12,6 +12,11 @@ let cardMenu = null;
 let currentMenuButton = null;
 let selectModeDir = null;
 const selectedEntries = new Set();
+let gitDiffBase = { ref: 'HEAD', mode: 'none', commit: null };
+let gitBaseBtn = null;
+let gitBaseDropdown = null;
+let searchBaseBtn = null;
+let searchBaseDropdown = null;
 
 // Search overlay state
 let searchOverlayVisible = false;
@@ -81,6 +86,23 @@ function toast(message) {
   }
 }
 
+function truncateText(text, limit = 40) {
+  if (!text) return '';
+  if (text.length <= limit) return text;
+  return text.slice(0, limit - 1) + '…';
+}
+
+function formatDiffBaseLabel(info, withPrefix = true) {
+  if (!info || info.mode === 'none') {
+    return withPrefix ? 'Status: (no git)' : 'No Git';
+  }
+  const commit = info.commit || null;
+  const short = commit?.short || info.ref || 'HEAD';
+  const summary = commit?.subject ? truncateText(commit.subject, 36) : '';
+  const prefix = withPrefix ? 'Status: ' : '';
+  return summary ? `${prefix}${short} · ${summary}` : `${prefix}${short}`;
+}
+
 window.__cm6RefreshRecents = (state) => {
   if (state) {
     cachedState = state;
@@ -116,7 +138,24 @@ export async function initExplorerUI() {
     reset: document.getElementById('fe-git-reset'),
     init: document.getElementById('fe-git-init'),
   };
+  gitBaseBtn = document.getElementById('fe-git-base-btn');
+  gitBaseDropdown = document.getElementById('fe-git-base-dd');
   setGitControlsEnabled(false);
+
+  if (gitBaseBtn && gitBaseDropdown) {
+    gitBaseBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      toggleDiffBaseMenu(gitBaseBtn, gitBaseDropdown);
+    });
+  }
+
+  document.addEventListener('click', (ev) => {
+    const inBaseButton = ev.target.closest('#fe-git-base-btn') || ev.target.closest('#fe-search-base-btn');
+    const inBaseDropdown = ev.target.closest('#fe-git-base-dd') || ev.target.closest('#fe-search-base-dd');
+    if (!inBaseButton && !inBaseDropdown) {
+      closeDiffBaseMenus();
+    }
+  });
 
   const searchBtn = document.getElementById('fe-search-btn');
   if (searchBtn) {
@@ -286,6 +325,7 @@ async function refreshCurrentProject(forceRefresh = false) {
   const label = document.getElementById('fe-project-label');
 
   currentProjectPath = state?.activeProjectExists ? state.activeProject : '';
+  applyGitDiffBaseFromState(state?.gitDiffBase || null);
 
   if (!currentProjectPath) {
     gitStatusCache = null;
@@ -313,19 +353,157 @@ async function refreshCurrentProject(forceRefresh = false) {
 
 function setGitControlsEnabled(enabled, showInit = false) {
   if (!gitButtons) return;
-  
-  for (const [key, btn] of Object.entries(gitButtons)) {
-      if (!btn) continue;
-      if (key === 'init') {
-          btn.style.display = showInit ? 'inline-block' : 'none';
-      } else {
-          btn.disabled = !enabled;
-          btn.style.display = showInit ? 'none' : 'inline-block';
-      }
+  const allowActions = gitDiffBase.mode === 'head';
+  const effectiveEnabled = enabled && allowActions;
+
+  if (gitButtons.init) {
+    gitButtons.init.style.display = showInit ? 'inline-block' : 'none';
+    gitButtons.init.disabled = !enabled;
   }
-  // Ensure reset is always hidden when other controls are, unless init is being shown
-  if (gitButtons.reset) {
-    gitButtons.reset.style.display = (enabled && !showInit) ? 'inline-block' : 'none';
+
+  Object.entries(gitButtons).forEach(([key, btn]) => {
+    if (!btn || key === 'init') return;
+    const visible = !showInit && allowActions;
+    btn.style.display = visible ? 'inline-block' : 'none';
+    btn.disabled = !effectiveEnabled;
+  });
+
+  updateGitActionsVisibility();
+}
+
+function updateGitActionsVisibility() {
+  const actionsRow = document.querySelector('.fe-git-actions');
+  if (!actionsRow) return;
+  const showInit = gitButtons?.init && gitButtons.init.style.display !== 'none';
+  const hideRow = (gitDiffBase.mode !== 'head') && !showInit;
+  actionsRow.classList.toggle('detached', hideRow);
+}
+
+function applyGitDiffBaseFromState(payload) {
+  const fallback = { ref: 'HEAD', mode: 'none', commit: null };
+  if (payload && typeof payload === 'object') {
+    gitDiffBase = {
+      ...fallback,
+      ...payload,
+      commit: payload.commit || null,
+    };
+    if (!gitDiffBase.ref) gitDiffBase.ref = 'HEAD';
+  } else {
+    gitDiffBase = fallback;
+  }
+  updateDiffBaseButtons();
+  updateGitActionsVisibility();
+}
+
+function updateDiffBaseButtons() {
+  if (gitBaseBtn) {
+    gitBaseBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, true)} ▾`;
+    gitBaseBtn.disabled = gitDiffBase.mode === 'none';
+  }
+  if (searchBaseBtn) {
+    searchBaseBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, false)} ▾`;
+    searchBaseBtn.disabled = gitDiffBase.mode === 'none';
+  }
+}
+
+function closeDiffBaseMenus(except) {
+  [gitBaseDropdown, searchBaseDropdown].forEach((dropdown) => {
+    if (!dropdown) return;
+    if (dropdown !== except) {
+      dropdown.classList.remove('show');
+    }
+  });
+}
+
+function renderDiffBaseDropdown(dropdown, commits) {
+  dropdown.innerHTML = '';
+  const mode = gitDiffBase.mode;
+  if (mode === 'none') {
+    const empty = document.createElement('div');
+    empty.className = 'fe-dd-item';
+    empty.style.opacity = '0.65';
+    empty.textContent = 'Not a git repository';
+    dropdown.appendChild(empty);
+    return;
+  }
+
+  const options = [];
+  options.push({
+    ref: 'HEAD',
+    short: 'HEAD',
+    summary: 'Working tree',
+  });
+  (commits || []).forEach((c) => {
+    options.push({ ref: c.hash, short: c.short_hash, summary: c.summary });
+  });
+
+  const currentHash = (gitDiffBase.commit && gitDiffBase.commit.hash) || null;
+  const currentRef = gitDiffBase.ref || 'HEAD';
+  const hasCurrent = options.some((opt) => opt.ref === currentHash || opt.ref === currentRef);
+  if (!hasCurrent && gitDiffBase.commit) {
+    options.unshift({ ref: gitDiffBase.commit.hash, short: gitDiffBase.commit.short, summary: gitDiffBase.commit.subject });
+  }
+
+  options.forEach((opt) => {
+    const item = document.createElement('div');
+    item.className = 'fe-dd-item';
+    const isCurrent = (opt.ref === 'HEAD' && currentRef === 'HEAD') || (opt.ref !== 'HEAD' && (opt.ref === currentRef || opt.ref === currentHash));
+    if (isCurrent) {
+      item.classList.add('fe-menu-item-checked');
+    }
+    item.textContent = `${opt.short || opt.ref} · ${truncateText(opt.summary || '', 40)}`;
+    item.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      closeDiffBaseMenus();
+      if (!isCurrent) {
+        await changeDiffBase(opt.ref);
+      }
+    });
+    dropdown.appendChild(item);
+  });
+}
+
+async function changeDiffBase(ref) {
+  try {
+    const resp = await gitRequest('/git/diff_base', {
+      method: 'POST',
+      body: JSON.stringify({ ref })
+    });
+    applyGitDiffBaseFromState(resp);
+    await refreshGitStatus(false);
+    if (treeElement) {
+      await refreshTree(treeElement);
+    }
+    if (typeof window.__cm6ReloadCurrentFile === 'function') {
+      await window.__cm6ReloadCurrentFile();
+    }
+    if (searchMode === 'changes') {
+      await fetchChangesResults(true);
+    }
+  } catch (err) {
+    toast(err.message || 'Failed to update status base');
+  }
+}
+
+async function toggleDiffBaseMenu(button, dropdown) {
+  if (!button || !dropdown || button.disabled) return;
+  const isOpen = dropdown.classList.contains('show');
+  closeDiffBaseMenus(dropdown);
+  if (isOpen) {
+    dropdown.classList.remove('show');
+    return;
+  }
+  dropdown.innerHTML = '<div class="fe-dd-item" style="opacity:0.6">Loading…</div>';
+  dropdown.classList.add('show');
+  if (gitDiffBase.mode === 'none') {
+    renderDiffBaseDropdown(dropdown, []);
+    return;
+  }
+  try {
+    const commits = await gitRequest('/git/commits');
+    renderDiffBaseDropdown(dropdown, commits);
+  } catch (err) {
+    dropdown.innerHTML = `<div class="fe-dd-item" style="opacity:0.7">${err.message || 'Failed to load commits'}</div>`;
   }
 }
 
@@ -333,6 +511,14 @@ function renderGitSummary(status, message) {
   if (!gitSummaryEl) return;
   if (!status) {
     gitSummaryEl.textContent = message || 'Git status unavailable.';
+    return;
+  }
+
+  if (gitDiffBase.mode === 'detached') {
+    const description = gitDiffBase.commit?.subject
+      ? `${gitDiffBase.commit.short} · ${truncateText(gitDiffBase.commit.subject, 40)}`
+      : gitDiffBase.ref || 'HEAD';
+    gitSummaryEl.textContent = `Viewing ${description}. Git actions disabled.`;
     return;
   }
 
@@ -1528,6 +1714,7 @@ function closeSearchOverlay() {
   searchOverlayVisible = false;
   clearSearchResults();
   renderSearchOverlay();
+  closeDiffBaseMenus();
 }
 
 function clearSearchResults(preserveQuery = false) {
@@ -1638,6 +1825,9 @@ async function fetchChangesResults(force = false) {
       return;
     }
 
+    if (json.data?.base) {
+      applyGitDiffBaseFromState(json.data.base);
+    }
     searchResults = json.data;
     searchLoading = false;
     searchError = null;
@@ -1768,22 +1958,32 @@ function renderSearchOverlay() {
     changesToolbar.className = 'fe-search-changes-toolbar';
     const headLabel = document.createElement('span');
     headLabel.className = 'fe-search-changes-label';
-    headLabel.textContent = 'Working tree vs';
+    headLabel.textContent = 'Diff vs';
     changesToolbar.appendChild(headLabel);
 
-    // stub/placeholder for future 'commit to document state diffing'
     const headBtn = document.createElement('button');
     headBtn.type = 'button';
-    headBtn.id = 'fe-search-head-btn';
+    headBtn.id = 'fe-search-base-btn';
     headBtn.className = 'fe-search-head-btn';
-    headBtn.disabled = true;
-    headBtn.textContent = 'HEAD —';
-    headBtn.title = 'HEAD selector coming soon';
+    headBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, false)} ▾`;
+    headBtn.disabled = gitDiffBase.mode === 'none';
+    headBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (!searchBaseDropdown) return;
+      toggleDiffBaseMenu(headBtn, searchBaseDropdown);
+    });
     changesToolbar.appendChild(headBtn);
+    searchBaseBtn = headBtn;
+
+    const headDropdown = document.createElement('div');
+    headDropdown.id = 'fe-search-base-dd';
+    headDropdown.className = 'fe-dropdown';
+    changesToolbar.appendChild(headDropdown);
+    searchBaseDropdown = headDropdown;
 
     const headNote = document.createElement('span');
     headNote.className = 'fe-search-changes-note';
-    headNote.textContent = 'Shows unstaged/staged/untracked diff hunks.';
+    headNote.textContent = 'This list compares files against the selected commit.';
     changesToolbar.appendChild(headNote);
     
     // Results area
@@ -1821,12 +2021,10 @@ function renderSearchOverlay() {
   const changesToolbar = overlay.querySelector('.fe-search-changes-toolbar');
   if (changesToolbar) {
     changesToolbar.style.display = searchMode === 'changes' ? 'flex' : 'none';
-    const headBtn = overlay.querySelector('#fe-search-head-btn');
-    if (headBtn) {
-      const head = searchResults?.head;
-      const shortLabel = head?.short ? head.short : '—';
-      headBtn.textContent = head ? `HEAD ${head.short}` : 'HEAD —';
-      headBtn.title = head?.subject || 'Working tree diffs vs HEAD';
+    if (searchBaseBtn) {
+      searchBaseBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, false)} ▾`;
+      searchBaseBtn.disabled = gitDiffBase.mode === 'none';
+      searchBaseBtn.title = gitDiffBase.commit?.subject || 'Diff base selector';
     }
   }
   
@@ -2020,6 +2218,7 @@ function firstDiffLine(change) {
 }
 
 function renderChangesResults(container, data) {
+  container.innerHTML = '';
   if (!data) {
     container.innerHTML = '<div class="fe-search-empty">No changes loaded</div>';
     return;
@@ -2031,8 +2230,21 @@ function renderChangesResults(container, data) {
   }
 
   const entries = data.changes || [];
+
+  const baseInfo = data.base || gitDiffBase;
+  if (baseInfo && baseInfo.mode !== 'none') {
+    const note = document.createElement('div');
+    note.className = 'fe-search-changes-note';
+    note.style.margin = '4px 0 8px';
+    note.textContent = `Comparing against ${formatDiffBaseLabel(baseInfo, false)}`;
+    container.appendChild(note);
+  }
+
   if (!entries.length) {
-    container.innerHTML = '<div class="fe-search-empty">Working tree is clean.</div>';
+    const empty = document.createElement('div');
+    empty.className = 'fe-search-empty';
+    empty.textContent = 'Working tree is clean.';
+    container.appendChild(empty);
     return;
   }
 

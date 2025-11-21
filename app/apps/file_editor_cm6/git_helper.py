@@ -129,38 +129,110 @@ def _normalize_status_path(raw: Optional[str]) -> Optional[str]:
     return cleaned.replace("\\", "/")
 
 
-def get_worktree_changes(project_root: Path) -> List[GitChangeEntry]:
-    """Return porcelain status entries describing working tree changes."""
+def get_worktree_changes(project_root: Path, base_ref: Optional[str] = None) -> List[GitChangeEntry]:
+    """Return diff-style entries describing changes vs the requested base."""
     _ensure_repo(project_root)
-    output = _run_git_optional(
+    ref = (base_ref or 'HEAD').strip() or 'HEAD'
+
+    if ref == 'HEAD':
+        output = _run_git_optional(
+            project_root,
+            "status",
+            "--short",
+            "--untracked-files=all",
+            "--renames",
+        ) or ""
+
+        entries: List[GitChangeEntry] = []
+        for line in output.splitlines():
+            if not line or len(line) < 3:
+                continue
+            code = line[:2]
+            idx = 3 if len(line) > 3 and line[2] == ' ' else 2
+            remainder = line[idx:]
+            original_path = None
+            path_part = remainder
+            if " -> " in remainder:
+                original_path, path_part = remainder.split(" -> ", 1)
+
+            path = _normalize_status_path(path_part)
+            original = _normalize_status_path(original_path)
+
+            if not path:
+                continue
+
+            entries.append(GitChangeEntry(path=path, code=code, original_path=original))
+
+        return entries
+
+    diff_output = _run_git_optional(
         project_root,
-        "status",
-        "--short",
-        "--untracked-files=all",
-        "--renames",
+        "diff",
+        "--name-status",
+        ref,
+        "--",
     ) or ""
 
     entries: List[GitChangeEntry] = []
-    for line in output.splitlines():
-        if not line or len(line) < 3:
+    seen_paths: set[str] = set()
+    for raw in diff_output.splitlines():
+        if not raw:
             continue
-        code = line[:2]
-        idx = 3 if len(line) > 3 and line[2] == ' ' else 2
-        remainder = line[idx:]
-        original_path = None
-        path_part = remainder
-        if " -> " in remainder:
-            original_path, path_part = remainder.split(" -> ", 1)
-
-        path = _normalize_status_path(path_part)
-        original = _normalize_status_path(original_path)
+        parts = raw.split('\t')
+        if not parts:
+            continue
+        code = parts[0].strip()
+        path = None
+        original = None
+        if code.startswith('R') and len(parts) >= 3:
+            original = _normalize_status_path(parts[1])
+            path = _normalize_status_path(parts[2])
+            code = 'R'
+        elif len(parts) >= 2:
+            path = _normalize_status_path(parts[1])
+        else:
+            path = _normalize_status_path(parts[0])
 
         if not path:
             continue
 
-        entries.append(GitChangeEntry(path=path, code=code, original_path=original))
+        entries.append(GitChangeEntry(path=path, code=code or 'M', original_path=original))
+        seen_paths.add(path)
+
+    untracked_output = _run_git_optional(
+        project_root,
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+    ) or ""
+
+    for raw in untracked_output.splitlines():
+        path = _normalize_status_path(raw)
+        if not path:
+            continue
+        if path in seen_paths:
+            continue
+        entries.append(GitChangeEntry(path=path, code='??'))
 
     return entries
+
+
+def get_commit_info(project_root: Path, ref: str = 'HEAD') -> Optional[GitCommit]:
+    _ensure_repo(project_root)
+    fmt = "%H|%h|%s|%an|%ai"
+    out = _run_git_optional(project_root, "log", "-1", f"--format={fmt}", ref)
+    if not out:
+        return None
+    parts = out.split('|', 4)
+    if len(parts) != 5:
+        return None
+    return GitCommit(
+        hash=parts[0],
+        short_hash=parts[1],
+        summary=parts[2],
+        author=parts[3],
+        date=parts[4],
+    )
 
 
 def list_branches(project_root: Path) -> GitBranches:

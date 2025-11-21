@@ -19,7 +19,7 @@ class DiffCacheEntry:
     size: int
 
 
-_DIFF_CACHE: Dict[Tuple[str, str], DiffCacheEntry] = {}
+_DIFF_CACHE: Dict[Tuple[str, str, str], DiffCacheEntry] = {}
 
 
 def invalidate_diff_cache(project_root: Optional[Path] = None, rel_path: Optional[str] = None) -> None:
@@ -39,10 +39,12 @@ def invalidate_diff_cache(project_root: Optional[Path] = None, rel_path: Optiona
                 _DIFF_CACHE.pop(key, None)
         return
 
-    _DIFF_CACHE.pop((root_key, rel_path), None)
+    for key in list(_DIFF_CACHE.keys()):
+        if key[0] == root_key and key[1] == rel_path:
+            _DIFF_CACHE.pop(key, None)
 
 
-def collect_diff(project_root: Path, rel_path: str) -> dict:
+def collect_diff(project_root: Path, rel_path: str, base_ref: Optional[str] = None) -> dict:
     """
     Collect a unified diff (0 context) for the given file relative to the project root.
 
@@ -65,7 +67,8 @@ def collect_diff(project_root: Path, rel_path: str) -> dict:
     except Exception:
         root_key = str(project_root)
 
-    cache_key = (root_key, rel_path)
+    base = (base_ref or 'HEAD').strip() or 'HEAD'
+    cache_key = (root_key, rel_path, base)
     now = time.time()
     entry = _DIFF_CACHE.get(cache_key)
     if entry and now - entry.timestamp < CACHE_TTL_SECONDS:
@@ -101,17 +104,20 @@ def collect_diff(project_root: Path, rel_path: str) -> dict:
     status_output = result.stdout.strip()
     is_tracked = bool(status_output) or result.returncode == 0
 
+    args = [
+        "git",
+        "-C",
+        str(project_root),
+        "diff",
+        "--unified=0",
+        "--no-color",
+    ]
+    if base != 'HEAD':
+        args.append(base)
+    args.extend(["--", rel_path_posix])
+
     diff_proc = subprocess.Popen(
-        [
-            "git",
-            "-C",
-            str(project_root),
-            "diff",
-            "--unified=0",
-            "--no-color",
-            "--",
-            rel_path_posix,
-        ],
+        args,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
