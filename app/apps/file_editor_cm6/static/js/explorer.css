@@ -855,6 +855,21 @@
   font-style: italic;
 }
 
+.fe-highlight-text {
+  background: rgba(148, 163, 184, 0.18);
+  color: #ffffff;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.fe-highlight-file {
+  background: #e2e8f0;
+  color: #0f172a;
+  border-radius: 2px;
+  padding: 0 1px;
+  font-weight: 600;
+}
+
 .fe-search-change-empty-hunk {
   padding: 8px 12px;
   font-size: 12px;

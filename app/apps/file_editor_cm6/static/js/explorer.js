@@ -2000,6 +2000,16 @@ function renderSearchOverlay() {
     filenameLabel.appendChild(filenameCheck);
     filenameLabel.appendChild(document.createTextNode(' Filename only'));
     
+    // Hunks Only Checkbox
+    const hunksLabel = document.createElement('label');
+    hunksLabel.className = 'fe-changes-filter-label';
+    const hunksCheck = document.createElement('input');
+    hunksCheck.type = 'checkbox';
+    hunksCheck.id = 'fe-changes-filter-hunks';
+    hunksCheck.disabled = true;
+    hunksLabel.appendChild(hunksCheck);
+    hunksLabel.appendChild(document.createTextNode(' Hunks only'));
+    
     // Filter Input
     const filterInput = document.createElement('input');
     filterInput.type = 'text';
@@ -2012,16 +2022,27 @@ function renderSearchOverlay() {
     filterCheck.addEventListener('change', () => {
         const active = filterCheck.checked;
         filenameCheck.disabled = !active;
+        hunksCheck.disabled = !active;
         filterInput.style.display = active ? 'inline-block' : 'none';
         if (active) filterInput.focus();
         applyChangesFilter();
     });
 
-    filenameCheck.addEventListener('change', applyChangesFilter);
+    filenameCheck.addEventListener('change', () => {
+        if (filenameCheck.checked) hunksCheck.checked = false;
+        applyChangesFilter();
+    });
+
+    hunksCheck.addEventListener('change', () => {
+        if (hunksCheck.checked) filenameCheck.checked = false;
+        applyChangesFilter();
+    });
+
     filterInput.addEventListener('input', applyChangesFilter);
 
     filterContainer.appendChild(filterLabel);
     filterContainer.appendChild(filenameLabel);
+    filterContainer.appendChild(hunksLabel);
     filterContainer.appendChild(filterInput);
     
     changesToolbar.appendChild(filterContainer);
@@ -2271,30 +2292,71 @@ function applyChangesFilter() {
   
   const filterActive = document.getElementById('fe-changes-filter-active')?.checked;
   const filenameOnly = document.getElementById('fe-changes-filter-filename')?.checked;
+  const hunksOnly = document.getElementById('fe-changes-filter-hunks')?.checked;
   const query = (document.getElementById('fe-changes-filter-input')?.value || '').toLowerCase();
   
   let entries = data.changes || [];
   
   if (filterActive && query) {
-    entries = entries.filter(change => {
-      if (change.rel.toLowerCase().includes(query)) return true;
-      
-      if (!filenameOnly) {
-        const hunks = change.hunks || [];
-        for (const hunk of hunks) {
-            for (const line of (hunk.lines || [])) {
-                if (line.text.toLowerCase().includes(query)) return true;
+    entries = entries.map(change => {
+        // Create a shallow copy to avoid mutating original data
+        const newChange = { ...change };
+        
+        // 1. Filename match?
+        const filenameMatch = change.rel.toLowerCase().includes(query);
+        
+        // 2. Hunk filtering
+        if (hunksOnly) {
+            // In "Hunks Only" mode, we filter the hunks list itself
+            const matchingHunks = (change.hunks || []).filter(hunk => {
+                for (const line of (hunk.lines || [])) {
+                    if (line.text.toLowerCase().includes(query)) return true;
+                }
+                return false;
+            });
+            
+            // If filename matches, we show ALL hunks (unless user wants ONLY matching hunks? 
+            // The prompt said "only returns just what the name makes it sound like only the exact hunk")
+            // So even if filename matches, "Hunks Only" implies we narrow down the content.
+            // BUT usually if I search for a file, I want to see it.
+            // Let's stick to the strict interpretation: "Hunks Only" filters hunks.
+            
+            if (matchingHunks.length > 0) {
+                newChange.hunks = matchingHunks;
+                return newChange;
+            } else if (filenameMatch) {
+                // If filename matches but no hunks match, do we show empty file?
+                // Or do we show all hunks?
+                // "Hunks only" suggests we are looking for code.
+                // Let's show the file but with NO hunks if none match, 
+                // effectively showing just the file header.
+                newChange.hunks = []; 
+                return newChange;
+            }
+            return null; // No match
+        }
+        
+        // 3. Standard / Filename Only logic
+        if (filenameMatch) return newChange; // Match by name -> show everything
+        
+        if (!filenameOnly) {
+            // Check if ANY hunk matches (but keep all hunks if one does)
+            const hunks = change.hunks || [];
+            for (const hunk of hunks) {
+                for (const line of (hunk.lines || [])) {
+                    if (line.text.toLowerCase().includes(query)) return newChange;
+                }
             }
         }
-      }
-      return false;
-    });
+        
+        return null;
+    }).filter(Boolean);
   }
   
-  renderChangesList(container, { ...data, changes: entries, total: data.changes?.length }, (data.changes || []).length === 0);
+  renderChangesList(container, { ...data, changes: entries, total: data.changes?.length }, (data.changes || []).length === 0, query);
 }
 
-function renderChangesList(container, data, wasOriginallyEmpty) {
+function renderChangesList(container, data, wasOriginallyEmpty, query) {
   container.innerHTML = '';
   if (!data) {
     container.innerHTML = '<div class="fe-search-empty">No changes loaded</div>';
@@ -2347,7 +2409,11 @@ function renderChangesList(container, data, wasOriginallyEmpty) {
 
     const title = document.createElement('span');
     title.className = 'fe-search-change-path';
-    title.textContent = change.rel;
+    if (query) {
+        title.innerHTML = highlightText(change.rel, query, 'fe-highlight-file');
+    } else {
+        title.textContent = change.rel;
+    }
     header.appendChild(title);
 
     const meta = document.createElement('div');
@@ -2416,7 +2482,18 @@ function renderChangesList(container, data, wasOriginallyEmpty) {
 
           const text = document.createElement('pre');
           text.className = 'fe-search-diff-text';
-          text.textContent = line.text || ' ';
+          
+          // Only highlight content if NOT in "filename only" mode
+          const filenameOnly = document.getElementById('fe-changes-filter-filename')?.checked;
+          const hunksOnly = document.getElementById('fe-changes-filter-hunks')?.checked;
+          
+          if (query && !filenameOnly) {
+            // In "Hunks Only" mode, we definitely highlight.
+            // In standard mode (neither checked), we also highlight.
+            text.innerHTML = highlightText(line.text || ' ', query, 'fe-highlight-text');
+          } else {
+            text.textContent = line.text || ' ';
+          }
 
           if (line.type === 'add') {
             row.classList.add('is-add');
@@ -2475,6 +2552,34 @@ function renderChangesList(container, data, wasOriginallyEmpty) {
     notice.textContent = `Showing ${entries.length} of ${data.total || entries.length} files`;
     container.appendChild(notice);
   }
+}
+
+function highlightText(text, query, className) {
+    if (!query) return escapeHtml(text);
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    
+    if (!lowerText.includes(lowerQuery)) return escapeHtml(text);
+    
+    let result = '';
+    let i = 0;
+    while (i < text.length) {
+        const matchIndex = lowerText.indexOf(lowerQuery, i);
+        if (matchIndex === -1) {
+            result += escapeHtml(text.substring(i));
+            break;
+        }
+        result += escapeHtml(text.substring(i, matchIndex));
+        result += `<span class="${className}">${escapeHtml(text.substring(matchIndex, matchIndex + query.length))}</span>`;
+        i = matchIndex + query.length;
+    }
+    return result;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 function describeHunkRange(hunk) {
