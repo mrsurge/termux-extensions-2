@@ -1067,7 +1067,22 @@ window.__cm6SyncState = syncEditorState;
 // Expose function to reload current file (for git operations)
 window.__cm6ReloadCurrentFile = async function() {
   if (currentPath) {
-    await openFile(currentPath);
+    await openFile(currentPath, { allowOverwrite: true, forceRefresh: true });
+  }
+};
+
+window.__cm6EnsureInlineDiffs = async function ensureInlineDiffsEnabled(forceOn = true) {
+  if (!forceOn) {
+    return true;
+  }
+  if (editorViewState?.showInlineDiffs) {
+    return true;
+  }
+  try {
+    return await updatePreference('showInlineDiffs', true);
+  } catch (err) {
+    console.warn('Auto-enable inline diffs failed:', err);
+    return false;
   }
 };
 

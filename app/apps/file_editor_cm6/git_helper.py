@@ -145,7 +145,8 @@ def get_worktree_changes(project_root: Path) -> List[GitChangeEntry]:
         if not line or len(line) < 3:
             continue
         code = line[:2]
-        remainder = line[3:]
+        idx = 3 if len(line) > 3 and line[2] == ' ' else 2
+        remainder = line[idx:]
         original_path = None
         path_part = remainder
         if " -> " in remainder:

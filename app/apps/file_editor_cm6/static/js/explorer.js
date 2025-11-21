@@ -2037,87 +2037,145 @@ function renderChangesResults(container, data) {
   }
 
   const list = document.createElement('div');
-  list.className = 'fe-search-changes-list';
+  list.className = 'fe-search-changes';
 
   entries.forEach((change) => {
-    const card = document.createElement('div');
-    card.className = 'fe-search-change-card';
-    card.onclick = () => {
-      openFileAndMaybeJump(change.rel, firstDiffLine(change));
+    const group = document.createElement('div');
+    group.className = 'fe-search-file-group fe-search-change-group';
+    group.onclick = async () => {
+      if (typeof window.__cm6EnsureInlineDiffs === 'function') {
+        try {
+          await window.__cm6EnsureInlineDiffs(true);
+        } catch (err) {
+          console.warn('Failed to auto-enable inline diffs:', err);
+        }
+      }
+      await openFileAndMaybeJump(change.rel, firstDiffLine(change));
     };
 
     const header = document.createElement('div');
-    header.className = 'fe-search-change-header';
+    header.className = 'fe-search-file-header fe-search-change-header';
 
-    const title = document.createElement('div');
-    title.className = 'fe-search-change-title';
+    const title = document.createElement('span');
+    title.className = 'fe-search-change-path';
     title.textContent = change.rel;
     header.appendChild(title);
 
-    const status = document.createElement('span');
-    status.className = 'fe-search-change-status';
-    status.dataset.status = change.status || '';
-    status.textContent = change.statusText || change.status || '';
-    header.appendChild(status);
+    const meta = document.createElement('div');
+    meta.className = 'fe-search-change-meta';
 
-    card.appendChild(header);
+    const status = document.createElement('span');
+    status.className = `fe-search-change-status-text ${statusClassFor(change.status)}`;
+    status.textContent = change.statusText || change.status || '';
+    meta.appendChild(status);
 
     if (change.summary) {
-      const summary = document.createElement('div');
+      const summary = document.createElement('span');
       summary.className = 'fe-search-change-summary';
-      summary.textContent = `+${change.summary.added || 0}  -${change.summary.deleted || 0}`;
-      card.appendChild(summary);
+      summary.textContent = `+${change.summary.added || 0} / -${change.summary.deleted || 0}`;
+      meta.appendChild(summary);
     }
+
+    header.appendChild(meta);
+    group.appendChild(header);
 
     if (change.error) {
       const err = document.createElement('div');
       err.className = 'fe-search-change-error';
       err.textContent = change.error === 'diff_too_large' ? 'Diff too large to preview' : change.error;
-      card.appendChild(err);
+      group.appendChild(err);
     } else {
-      const diffBlock = document.createElement('div');
-      diffBlock.className = 'fe-search-diff';
-
       const hunks = change.hunks || [];
+      const hunksContainer = document.createElement('div');
+      hunksContainer.className = 'fe-search-change-hunks';
+
       let renderedLines = 0;
-      const MAX_LINES = 120;
+      const MAX_LINES = 160;
+
       hunks.forEach((hunk) => {
         if (renderedLines >= MAX_LINES) {
           return;
         }
-        const hunkEl = document.createElement('div');
-        hunkEl.className = 'fe-search-diff-hunk';
-        const headerEl = document.createElement('div');
-        headerEl.className = 'fe-search-diff-header';
-        headerEl.textContent = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
-        hunkEl.appendChild(headerEl);
+
+        const hunkBlock = document.createElement('div');
+        hunkBlock.className = 'fe-search-hunk';
+
+        const hunkHeader = document.createElement('div');
+        hunkHeader.className = 'fe-search-hunk-header';
+        hunkHeader.textContent = describeHunkRange(hunk);
+        hunkBlock.appendChild(hunkHeader);
+
+        const diffRows = document.createElement('div');
+        diffRows.className = 'fe-search-diff-rows';
+
+        let oldLine = Number(hunk.oldStart) || 0;
+        let newLine = Number(hunk.newStart) || 0;
 
         (hunk.lines || []).forEach((line) => {
           if (renderedLines >= MAX_LINES) {
             return;
           }
-          const lineEl = document.createElement('pre');
-          lineEl.className = `fe-search-diff-line fe-search-diff-${line.type || 'context'}`;
-          const prefix = line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ';
-          lineEl.textContent = `${prefix}${line.text}`;
-          hunkEl.appendChild(lineEl);
+
+          const row = document.createElement('div');
+          row.className = 'fe-search-diff-row';
+
+          const lineNum = document.createElement('span');
+          lineNum.className = 'fe-search-diff-line-num';
+
+          const sign = document.createElement('span');
+          sign.className = 'fe-search-diff-sign';
+
+          const text = document.createElement('pre');
+          text.className = 'fe-search-diff-text';
+          text.textContent = line.text || ' ';
+
+          if (line.type === 'add') {
+            row.classList.add('is-add');
+            lineNum.textContent = newLine || '';
+            sign.textContent = '+';
+            newLine += 1;
+          } else if (line.type === 'del') {
+            row.classList.add('is-del');
+            lineNum.textContent = oldLine || '';
+            sign.textContent = '-';
+            oldLine += 1;
+          } else {
+            row.classList.add('is-context');
+            lineNum.textContent = newLine || oldLine || '';
+            sign.textContent = '';
+            newLine += 1;
+            oldLine += 1;
+          }
+
+          row.appendChild(lineNum);
+          row.appendChild(sign);
+          row.appendChild(text);
+          diffRows.appendChild(row);
           renderedLines += 1;
         });
 
-        diffBlock.appendChild(hunkEl);
+        hunkBlock.appendChild(diffRows);
+        hunksContainer.appendChild(hunkBlock);
       });
+
+      if (renderedLines === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'fe-search-change-empty-hunk';
+        empty.textContent = 'No diff available (binary or metadata change).';
+        hunksContainer.appendChild(empty);
+      }
 
       if (renderedLines >= MAX_LINES) {
         const moreEl = document.createElement('div');
         moreEl.className = 'fe-search-diff-more';
         moreEl.textContent = '… diff truncated';
-        diffBlock.appendChild(moreEl);
+        hunksContainer.appendChild(moreEl);
       }
 
-      card.appendChild(diffBlock);
+      group.appendChild(hunksContainer);
     }
 
-    list.appendChild(card);
+    list.appendChild(group);
   });
 
   container.appendChild(list);
@@ -2127,6 +2185,52 @@ function renderChangesResults(container, data) {
     notice.className = 'fe-search-notice';
     notice.textContent = `Showing ${entries.length} of ${data.total || entries.length} files`;
     container.appendChild(notice);
+  }
+}
+
+function describeHunkRange(hunk) {
+  const formatRange = (start, length) => {
+    const s = Number(start) || 0;
+    const len = Number(length);
+    if (!s && !len) return '—';
+    if (!len || len <= 0) return `${s}`;
+    if (len === 1) return `${s}`;
+    return `${s}–${s + len - 1}`;
+  };
+
+  const oldDesc = formatRange(hunk.oldStart, hunk.oldLines);
+  const newDesc = formatRange(hunk.newStart, hunk.newLines);
+
+  const oldLen = Number(hunk.oldLines) || 0;
+  const newLen = Number(hunk.newLines) || 0;
+
+  if (oldLen === 0 && newLen > 0) {
+    return `Added around line ${newDesc}`;
+  }
+  if (newLen === 0 && oldLen > 0) {
+    return `Removed lines ${oldDesc}`;
+  }
+  return `Lines ${oldDesc} → ${newDesc}`;
+}
+
+function statusClassFor(status) {
+  switch ((status || '').trim()) {
+    case 'A':
+      return 'is-added';
+    case 'D':
+      return 'is-deleted';
+    case 'R':
+      return 'is-renamed';
+    case 'C':
+      return 'is-copied';
+    case 'U':
+      return 'is-conflict';
+    case '?':
+      return 'is-untracked';
+    case '!':
+      return 'is-ignored';
+    default:
+      return 'is-modified';
   }
 }
 
