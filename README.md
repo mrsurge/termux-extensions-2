@@ -1,174 +1,463 @@
-# termux-extensions-2
-<!-- Campfire rumor: this README once guided a runaway daemon back home. -->
+# Termux Extensions 2
 
-**`termux-extensions-2`** is a web framework for Termux that provides a mobile-friendly UI to manage and interact with the Termux environment. It operates as a local Flask-powered web server, presenting a clean UI for controlling your terminal sessions.
+**`termux-extensions-2`** is an application platform for Termux that provides mobile-optimized apps with shared infrastructure, process isolation, and multi-device convergence. It runs as a local FastAPI/IPC hybrid server presenting a unified launcher and app container.
 
-The core functionality is delivered through a system of "extensions" that leverage standard command-line tools to provide rich, interactive control over your Termux sessions.
+The platform delivers functionality through isolated "apps" that leverage framework services (process management, terminal shells, state persistence) to provide rich, touch-friendly experiences on Android devices.
+
+---
 
 ## Project Philosophy
 
-While this framework can assist users unfamiliar with shell scripting, its primary audience is **power users**. The core goal is to transcend the inherent limitations of using touchscreen keyboards with a traditional command-line interface. Even with excellent terminal emulators like Termux, typing complex commands and managing multiple sessions on a touch device has reached a plateau of efficiency.
+While this platform can assist users unfamiliar with shell scripting, its primary audience is **power users**. The goal is to transcend the limitations of touchscreen keyboards with traditional CLI by providing a **fluid, touch-friendly interface** for managing the Termux environment.
 
-This project aims to break through that plateau by creating a fluid, intuitive, and **touch-friendly interface** for navigating and controlling the Termux multitasking environment. It draws inspiration from the philosophy of frameworks like *Oh My Zsh* and *Oh My Fish*—which enhance the shell experience with smart helpers and plugins—and adapts that spirit to a graphical, touch-centric paradigm.
+This project draws inspiration from frameworks like *Oh My Zsh* and *Oh My Fish*—which enhance the shell with smart helpers and plugins—and adapts that spirit to a graphical, touch-optimized paradigm for mobile development and system administration.
+
+---
 
 ## Architecture Overview
 
-### WebSocket Infrastructure
+### Three-Layer System
 
-The framework uses a unified WebSocket proxy architecture for real-time communication:
+```
+┌─────────────────────────────────────────┐
+│  Supervisor (bash)                      │
+│  - Signal handling (SIGTERM/SIGINT)    │
+│  - Spawns framework + IPC               │
+│  - Orchestrates shutdown                │
+└─────┬────────────────────┬──────────────┘
+      │                    │
+┌─────▼──────────┐   ┌────▼──────────────┐
+│ IPC Server     │   │ Framework (Main)  │
+│ (Flask/sync)   │◄──┤ (FastAPI/async)   │
+│ :9123          │   │ :8088             │
+│                │   │                    │
+│ - Process reg  │   │ - App launcher    │
+│ - Shutdown seq │   │ - WebSocket proxy │
+│ - Shell mgmt   │   │ - Static serving  │
+└────────────────┘   └────┬───────────────┘
+                          │
+         ┌────────────────┼────────────────┐
+         │                │                │
+    ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
+    │ Worker 1 │    │ Worker 2 │    │ Worker 3 │
+    │ Code CM6 │    │ File Exp │    │ Terminal │
+    │ :5001    │    │ :5002    │    │ :5003    │
+    └──────────┘    └──────────┘    └──────────┘
+```
 
-- **Main App Proxy**: All WebSocket connections to app workers are routed through the main application at paths matching `/ws/app/<app_name>/*`
-- **Worker Discovery**: Workers expose their port via the `X-App-Worker-Port` response header, allowing clients to dynamically discover backend URLs
-- **Bidirectional Proxying**: The main app establishes WebSocket connections to workers and forwards traffic in both directions using `simple-websocket` client connections
-- **Session Isolation**: Each app worker runs in its own process with dedicated WebSocket routes registered via `flask-sock`
+### Key Components
 
-### On-Demand App Workers
+**Supervisor** (`scripts/run_framework.sh` → `app/supervisor.py`)
+- Generates unique `TE_RUN_ID` for each boot
+- Spawns IPC server and framework main process
+- Handles SIGTERM/SIGINT for graceful shutdown
+- Cleans up logs from force-killed shells (>7 days removed)
 
-Application backends are launched on-demand in isolated framework shell processes:
+**IPC Server** (`app/ipc/server.py`)
+- Flask-based synchronous operation server
+- Process registry for all framework/worker/shell PIDs
+- Handles blocking operations (shutdown, sequential tasks)
+- Apps can extend via `ipc_stack` modules in manifests
 
-- **Resource Efficiency**: Workers only run when their app is active, minimizing memory and CPU usage
-- **Process Isolation**: Each worker has its own Python interpreter, preventing conflicts and enabling clean restarts
-- **Automatic Lifecycle**: The supervisor tracks worker health, cleans up orphaned processes, and handles graceful shutdowns
-- **Port Management**: Workers bind to dynamic ports assigned by the framework, with the main app maintaining a registry
+**Framework Main** (`app/main.py`)
+- FastAPI-based async web server
+- Serves app launcher dashboard (`app_shell.html`)
+- Proxies requests to app workers by port
+- WebSocket multiplexing for real-time updates
 
-### Framework Shells
+**App Workers** (`app/libs/app_worker.py`)
+- Isolated subprocesses per app (own Python interpreter)
+- Dynamic port assignment (5001+)
+- Registered with IPC for lifecycle tracking
+- Spawn on-demand when user clicks app card
 
-Long-running background processes are managed via the framework shells subsystem:
+**Framework Shells** (`app/libs/framework_shells.py`)
+- Unified process management for long-lived services
+- PTY support for interactive terminals
+- Log capture to `~/.cache/te_framework/logs/`
+- Adoption of orphaned processes on restart
+- Resource monitoring (CPU, memory, threads via psutil)
 
-- **PTY Support**: Interactive shells use pseudo-terminals for full terminal emulation with ANSI escape codes
-- **Log Persistence**: stdout/stderr are captured to `~/.cache/te_framework/logs/` and survive restarts
-- **Health Monitoring**: The `/api/framework/runtime/metrics` endpoint aggregates CPU, memory, and process stats
-- **Automatic Cleanup**: The supervisor terminates all framework shells on shutdown, preventing orphaned processes
+---
+
+## Shutdown Lifecycle
+
+When user presses Ctrl+C or sends SIGTERM to supervisor:
+
+1. **Supervisor receives signal** → Sets `shutting_down = True`
+2. **IPC orchestrated shutdown** → `POST http://127.0.0.1:9123/actions/shutdown`
+3. **Process registry termination** → `ProcessRegistry.shutdown_all()`:
+   - **Phase 1**: Terminate workers (type="worker") and shells (type="shell")
+     - Send SIGTERM to process group
+     - Poll for 2 seconds (check `/proc/{pid}/stat`)
+     - If still alive: Send SIGKILL (force kill)
+     - Track force-killed shells → logs preserved
+   - **Phase 2**: Terminate framework (type="framework")
+4. **Supervisor cleanup**:
+   - Kill IPC server (SIGTERM to `TE_IPC_PID`)
+   - Delete `~/.cache/te_framework/run_id`
+   - Exit with framework's exit code
+
+**Log Management:**
+- Clean exits: Logs left in `~/.cache/te_framework/logs/`
+- Force-killed: Logs archived to `~/.cache/te_framework/preserved_logs/logs_{timestamp}/`
+- On next boot: Previous logs archived, old archives (>7 days) deleted
+
+---
 
 ## Quick Start
 
-The framework now ships with a bootstrap helper tailored for Termux devices. On a fresh Termux install you can get up and running with:
+### Bootstrap (Fresh Termux Install)
 
 ```bash
-pkg update
-pkg install git
-git clone https://github.com/mrsurge/termux-extensions-2.git
+pkg update && pkg install git
+git clone https://github.com/yourusername/termux-extensions-2.git
 cd termux-extensions-2
 ./scripts/bootstrap_termux.sh
 ```
 
-The script (see [`docs/apps/termux_lm/termux_lm_setup_termux.md`](docs/apps/termux_lm/termux_lm_setup_termux.md)) checks that you are running `bash`, installs required Termux packages (including `llama-cpp`), installs Python requirements, ensures `scripts/init.sh` is sourced from `~/.bashrc`, and links a `start-te` helper into `~/bin/`.
+The bootstrap script:
+- Installs required Termux packages
+- Installs Python dependencies
+- Sources `scripts/init.sh` in `~/.bashrc`
+- Creates `~/bin/start-te` helper
 
-After the bootstrap completes, open a new shell (so `.bashrc` reloads) and launch the supervisor:
+After bootstrap completes, open new shell and run:
 
 ```bash
 start-te
 ```
 
-Then browse to `http://localhost:8088` from the device (or another host on your LAN if you bind externally).
+Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another device on LAN).
 
-### Manual setup
-
-If you prefer a manual install, follow these steps instead:
-
-1. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Hook monitored shells**
-   ```bash
-   source scripts/init.sh
-   ```
-   Add the above line to `~/.bashrc` to make new shells register automatically.
-
-3. **Run the server (dev)**
-   ```bash
-   TE_SESSION_TYPE="framework" python app/main.py
-   ```
-
-4. **Access the UI**
-   Navigate to `http://localhost:8088` in a browser.
-
-### Production run (serve to other devices)
-
-To allow other devices on your network to access the UI, run with Gunicorn and bind to all interfaces:
+### Manual Setup
 
 ```bash
-# Install requirements (if not already)
+# 1. Install Python dependencies
 pip install -r requirements.txt
 
-# Run Gunicorn, binding to 0.0.0.0:8088
-TE_SESSION_TYPE="framework" gunicorn -w 2 -k gthread --threads 8 -b 0.0.0.0:8088 wsgi:application
+# 2. (Optional) Hook for shell monitoring
+echo "source $(pwd)/scripts/init.sh" >> ~/.bashrc
+source ~/.bashrc
+
+# 3. Run framework
+./scripts/run_framework.sh
 ```
 
-Then open from another device on the same network: `http://<your-device-ip>:8088`
+Access UI at `http://localhost:8088`.
 
+### Run Modes
 
+**Local-only (localhost):**
+```bash
+./scripts/run_framework.sh --run-local
+```
 
-## Testing
+**Network-accessible (all interfaces, default):**
+```bash
+./scripts/run_framework.sh --broadcast
+```
 
-The framework now exposes runtime metadata via `TE_RUN_ID` and a metrics endpoint. To verify a deployment:
+---
 
-1. Launch the supervisor entrypoint, which tags the run automatically:
-   ```bash
-   scripts/run_framework.sh
-   ```
-   The script prints the generated `TE_RUN_ID` and keeps the Flask app in the foreground.
+## Multi-Device Convergence
 
-2. In a separate shell, confirm the server is reporting metrics: hi?
-   ```bash
-   curl http://localhost:8088/api/framework/runtime/metrics | jq
-   ```
-   The response includes the active `run_id`, supervisor/app PIDs, aggregate CPU usage, RSS totals for all framework-managed shells, and the list of interactive sessions stamped with the current run.
+The platform implements the **code-server pattern** - disk-backed state with stateless UI clients:
 
-3. Spawn a framework shell (either from the UI or via the API) and re-query the metrics endpoint. The process list and memory totals should reflect the new shell.
+**Single Backend, Multiple Clients:**
+- Desktop browser at `http://192.168.1.100:8088`
+- Mobile browser at `http://localhost:8088`
+- Both see same state (files, preferences, terminals)
 
-If you are iterating on backend changes, restart the supervisor script to issue a fresh `TE_RUN_ID` for the next test cycle. Press `Ctrl+C` in the supervisor window to trigger an orderly shutdown (framework shells and dtach sessions tagged with the run ID are cleaned up automatically).
+**How It Works:**
+1. All state lives in JSON files on disk
+2. Clients read from backend on every request (no frontend cache)
+3. File watcher broadcasts changes via WebSocket
+4. Edits from any client appear instantly on all others
 
-Notes:
-- The built-in Flask server is now non-debug by default and binds to `0.0.0.0` on port 8088, but Gunicorn is recommended for multi-client stability.
-- Adjust workers/threads based on your device resources. On low-memory phones/tablets, `-w 1 --threads 4` might be better.
+**Example Flow:**
+```
+Desktop: Types in Code CM6 editor
+  ↓
+Backend: Saves to disk (atomic write with SHA validation)
+  ↓
+File Watcher: Detects change
+  ↓
+WebSocket: Broadcasts to all subscribers
+  ↓
+Mobile: Updates editor content in real-time
+```
 
+No CRDT, no OT, no sync protocol. Just **last write wins** with SHA-based conflict detection.
 
-### Install as a Web App (PWA)
-
-On mobile (Android Chrome/Edge, recent Firefox):
-
-- Open `http://localhost:8088` in the browser on the same device.
-- Use the browser menu and select "Install app" or "Add to Home screen".
-- Launch from the home screen icon for a full-screen experience.
-
-Notes:
-
-- A service worker and manifest are included; localhost is treated as a secure context, so installation works without HTTPS.
-- If you previously installed an older version, you may need to remove it and re-install after updating.
+---
 
 ## Key Features
 
-*   **On-Demand App Backends:** Application backends are launched in their own isolated processes on-demand, ensuring efficient resource usage and stability.
-*   **WebSocket Proxy Architecture:** Unified WebSocket routing through the main app enables seamless real-time communication with worker processes.
-*   **Web-Based UI:** A clean, modern interface accessible from any local browser.
-*   **Session Management:** The Sessions & Shortcuts extension controls active shells, launches shortcuts (now with the universal picker), and renames or kills sessions without leaving the UI.
-*   **Background Framework Shells:** Long-running jobs (aria2, distro helpers, etc.) are tracked with health checks, log tails, a cleanup action, and inline debug consoles.
-*   **Settings App:** A full-page diagnostics hub for runtime metrics, framework shell management, and supervised shutdown controls.
-*   **Universal File/Directory Picker:** A shared modal with breadcrumb navigation, hidden-file toggle, home button, and per-mode start-path memory is available to every app/extension.
-*   **Built-In Diagnostics:** Apps such as the Distro manager ship with inline debug consoles so you can pause, inspect, and clear log streams while reproducing issues.
-*   **Embedded Terminal App:** A full-page app built atop framework shells offers multi-terminal management with xterm.js, WebSocket streaming, and soft-key controls directly in the browser.
-*   **Easy Installation:** Designed to be installed as a standard Debian package via `apt`.
+### Platform Infrastructure
+- **On-Demand App Workers:** Apps spawn in isolated processes, exit when idle
+- **IPC Server:** Synchronous operation layer for blocking tasks, sequential operations
+- **Framework Shells:** Unified management for background services (terminals, MCP servers, aria2, etc.)
+- **Process Adoption:** Orphaned processes reclaimed on restart
+- **Coordinated Shutdown:** Sequential termination prevents orphans
+- **Log Persistence:** All shell output captured with automatic archival and cleanup
 
-## Code CM6 App
+### User-Facing Features
+- **Web-Based UI:** Clean, touch-optimized interface in browser
+- **App Launcher:** Dashboard with app cards, metadata, and quick launch
+- **Multi-Device Access:** Same backend serves desktop and mobile simultaneously
+- **PWA Install:** Add to home screen for full-screen app experience
+- **Real-Time Updates:** WebSocket-based live updates across all clients
+- **State Persistence:** Settings, preferences, and session state survive restarts
 
-One of the bundled apps is a full-featured CodeMirror 6 editor (`file_editor_cm6`) that provides a native-feeling code editing experience optimized for mobile devices. Key features include:
+### Bundled Apps
+- **Code CM6:** Full CodeMirror 6 editor with Git integration, terminal drawer, AI agent support
+- **Terminal:** Multi-session PTY terminal with xterm.js (planned)
+- **File Explorer:** Native file browser with git status badges (exists, needs linking)
+- **Settings:** Runtime diagnostics, framework shell management, shutdown controls
 
-- **Real-time file change notifications** via WebSocket (`/ws/app/file_editor_cm6/read`)
-- **Live inline Git diffs** with automatic refresh triggered by saves and external changes
-- **Embedded terminal drawer** with session persistence, history replay, and PTY streaming
-- **Android-native selection mode** with long-press detection and contenteditable overlay
-- **Project-based file management** with explorer drawer and recent files tracking
-- **Disk-backed preferences** for themes, view options, and editor settings
-- **Note** While testing agentic features, some of the tasks given to the agents/angentic tools was to complete some of the documentation / insert random goofy comments throughout the repo that have no effect on how the code is run. Please excuse any goofy comments in the code or redundancies in the documentation as some of these may have slipped my radar.
+---
 
-For detailed technical documentation, see [`README_code_cm6.md`](docs/apps/code_cm6/README_code_cm6.md).
+## Testing & Verification
 
-## Persistent State Store
+**1. Launch the supervisor:**
+```bash
+./scripts/run_framework.sh
+```
 
-Front-end settings that need to survive browser reloads (framework tokens, custom
-session names, picker preferences, etc.) use the shared `/api/state` endpoints via
-`window.teState`. See [`docs/core/state_store.md`](docs/core/state_store.md) for details on the
-available helper methods and storage format.
+Prints generated `TE_RUN_ID` and keeps framework in foreground.
+
+**2. Verify runtime metrics:**
+```bash
+curl http://localhost:8088/api/framework/runtime/metrics | jq
+```
+
+Response includes:
+- Active `run_id`
+- Supervisor/framework PIDs
+- CPU usage, memory (RSS)
+- Framework shell list
+- Interactive session count
+
+**3. Test app worker spawn:**
+- Open `http://localhost:8088` in browser
+- Click "Code CM6" app card
+- Worker should spawn on dynamic port (check metrics)
+
+**4. Test graceful shutdown:**
+- Press `Ctrl+C` in supervisor window
+- Watch sequential termination log
+- Verify no orphaned processes: `ps aux | grep python`
+
+**5. Test log archival:**
+- Force-kill a framework shell: `kill -9 <pid>`
+- Restart supervisor
+- Check `~/.cache/te_framework/preserved_logs/` for archived logs
+
+---
+
+## Mobile Access
+
+### Browser Access (PWA)
+
+On mobile browsers (Chrome, Edge, Firefox):
+
+1. Open `http://localhost:8088` or `http://<device-ip>:8088`
+2. Browser menu → "Install app" or "Add to Home screen"
+3. Launch from home screen icon for full-screen experience
+
+**Notes:**
+- Service worker and manifest included
+- Localhost treated as secure context (no HTTPS needed)
+- Remove old version before reinstalling after updates
+
+### Native GeckoView App (Recommended)
+
+A native Android APK wrapper using GeckoView (Firefox's rendering engine) provides superior mobile experience:
+
+- **Better text selection:** Firefox selection behavior works properly across line breaks (Chrome mobile has known selection issues)
+- **Native feel:** Full-screen app without browser chrome
+- **Proper touch handling:** Optimized for code editing on mobile devices
+- **Custom context menus:** Non-intrusive menus that don't block content during selection
+
+The APK is a thin wrapper that connects to the framework backend running in Termux - all app logic remains in Python/JavaScript.
+
+**Status:** Under development, will be merged to main branch soon.
+
+---
+
+## Code CM6 Editor
+
+One of the flagship bundled apps is **Code CM6**, a full-featured mobile code editor built on CodeMirror 6:
+
+**Key Features:**
+- Real-time file change notifications via WebSocket
+- Live inline Git diffs with automatic refresh
+- Embedded terminal drawer with PTY streaming
+- Project-based file management with explorer drawer
+- Disk-backed preferences (themes, word wrap, font scale)
+- Multi-device convergence (edit on desktop, see on mobile instantly)
+- Session cache for crash recovery
+
+The editor demonstrates the platform's convergence capabilities - multiple browsers editing the same files simultaneously with sub-second sync latency.
+
+---
+
+## Framework Shells in Detail
+
+Framework shells provide lifecycle management for any long-lived process:
+
+**Shell Types:**
+- **PTY shells** (`uses_pty=True`): Interactive terminals with full ANSI support
+- **STDIO shells** (`uses_pty=False`): Daemons, servers, background services
+
+**Use Cases:**
+- Terminal sessions in app drawers
+- MCP servers for AI agent communication
+- Aria2 RPC daemon for download management
+- Archive extraction/compression services
+- Language servers (LSP)
+- Custom chatbots or agents
+
+**Management:**
+- Label-based discovery (multiple apps can share one shell)
+- Automatic log capture and rotation
+- Health monitoring (CPU, memory, thread count)
+- Graceful termination with force-kill fallback
+- Orphan adoption on framework restart
+
+**API:**
+- `GET /api/framework_shells` - List all shells with stats
+- `POST /api/framework_shells` - Spawn new shell
+- `POST /api/framework_shells/<id>/action` - Stop/kill/restart
+- `POST /api/framework_shells/<id>/write` - Write to PTY (interactive shells)
+- `WS /api/framework_shells/<id>/ws` - Bidirectional PTY stream
+
+---
+
+## State Persistence
+
+Frontend state that survives browser reloads uses the shared state store:
+
+**Storage:**
+- Location: `~/.cache/termux_extensions/state_store.json`
+- Thread-safe atomic writes
+- Accessible via `window.teState` helper
+
+**JavaScript API:**
+```javascript
+// Read state
+const theme = window.teState.get('theme', 'dark');
+
+// Write state
+await window.teState.set('theme', 'monokai');
+
+// Delete key
+await window.teState.delete('theme');
+```
+
+**Python API:**
+```python
+from app.libs.state_store import get_state, set_state, delete_state
+
+theme = get_state('theme', default='dark')
+set_state('theme', 'monokai')
+delete_state('theme')
+```
+
+---
+
+## Development Notes
+
+**Repository Structure:**
+```
+termux-extensions-2/
+├── scripts/                  # Startup scripts, bootstrap helpers
+├── app/
+│   ├── main.py              # FastAPI framework entrypoint
+│   ├── supervisor.py        # Process supervisor
+│   ├── ipc/                 # IPC server (Flask/sync)
+│   ├── libs/                # Shared libraries
+│   │   ├── app_worker.py    # App worker spawner
+│   │   ├── framework_shells.py  # Shell manager
+│   │   └── state_store.py   # Persistent state
+│   ├── templates/           # HTML templates
+│   │   └── app_shell.html   # App container UI
+│   ├── apps/                # Bundled applications
+│   │   ├── file_editor_cm6/ # Code CM6 editor
+│   │   └── ...
+│   └── static/              # Static assets, vendored libs
+├── docs/                    # Documentation
+├── requirements.txt         # Python dependencies
+└── README.md                # This file
+```
+
+**Adding New Apps:**
+
+1. Create app directory: `app/apps/my_app/`
+2. Add `manifest.json`:
+   ```json
+   {
+     "id": "my_app",
+     "name": "My App",
+     "backend_module": "app.apps.my_app.main",
+     "icon": "📦"
+   }
+   ```
+3. Create `main.py` with FastAPI router:
+   ```python
+   from fastapi import APIRouter
+   my_app_bp = APIRouter()
+   
+   @my_app_bp.get('/hello')
+   def hello():
+       return {"message": "Hello from My App"}
+   ```
+4. Restart framework - app appears in launcher
+
+---
+
+## Platform Architecture Details
+
+**Why IPC Server Exists:**
+
+FastAPI/ASGI excels at async web requests but struggles with sequential blocking operations. The IPC server provides:
+- Synchronous operation runtime (Flask)
+- Sequential task execution (shutdown, agent conversations)
+- Blocking I/O allowed (subprocess, file locks)
+- Isolated from async event loop
+
+Apps can extend IPC via `ipc_stack` modules declared in manifest, enabling custom orchestration without async complexity.
+
+**Why Framework Shells Exist:**
+
+Without unified process management:
+- Apps spawn own terminals → orphans on crash
+- Each app runs own MCP server → resource waste
+- No log capture → debugging blind
+- No adoption → restart loses state
+
+With framework shells:
+- One PTY manager for all terminals
+- Shared MCP servers (labeled, discoverable)
+- Unified logging with archival
+- Orphan adoption on restart
+- Coordinated shutdown prevents leaks
+
+---
+
+## License
+
+[Your License Here]
+
+## Contributing
+
+[Contributing guidelines when ready]
+
+## Credits
+
+Built with: FastAPI, Flask, CodeMirror 6, xterm.js, NiceGUI (vendored), and many other open source projects.
+
+---
+
+**Last Updated:** November 21, 2025
