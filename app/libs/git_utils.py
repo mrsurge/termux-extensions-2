@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Body
 
 git_utils_bp = APIRouter(prefix="/api")
 
@@ -51,6 +51,33 @@ def _run_git_optional(project_root: Path, *args: str) -> Optional[str]:
     return completed.stdout.strip()
 
 
+def clone_repository(url: str, target_path: Path) -> None:
+    """Clone a git repository to the target path."""
+    git_exec = shutil.which('git')
+    if not git_exec:
+        raise GitError("Git executable not found")
+    
+    # Ensure parent exists
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Basic validation: if target exists, it must be empty
+    if target_path.exists() and any(target_path.iterdir()):
+        raise GitError(f"Target directory '{target_path}' already exists and is not empty")
+
+    try:
+        subprocess.run(
+            [git_exec, "clone", url, str(target_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=300 # Longer timeout for cloning
+        )
+    except subprocess.CalledProcessError as exc:
+        raise GitError(exc.stderr.strip() or f"Failed to clone {url}")
+    except subprocess.TimeoutExpired as exc:
+        raise GitError(f"Clone timed out for {url}")
+
+
 def _ensure_repo(project_root: Path) -> None:
     out = _run_git_optional(project_root, "rev-parse", "--is-inside-work-tree")
     if out is None or out.strip() != "true":
@@ -85,6 +112,25 @@ def is_git_repository(project_root: Path) -> bool:
     """Check if directory is a git repository."""
     out = _run_git_optional(project_root, "rev-parse", "--is-inside-work-tree")
     return out is not None and out.strip() == "true"
+
+
+@git_utils_bp.post('/git/clone')
+async def git_clone_endpoint(data: dict = Body(...)):
+    """Clone a repository."""
+    url = data.get('url')
+    target_path_str = data.get('target_path')
+    
+    if not url or not target_path_str:
+        raise HTTPException(status_code=400, detail="url and target_path are required")
+    
+    target_path = Path(target_path_str).expanduser().resolve()
+    
+    try:
+        # Running synchronously for now, could offload to thread if needed
+        clone_repository(url, target_path)
+        return {"ok": True, "data": {"path": str(target_path)}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @git_utils_bp.get('/git/summary')

@@ -1,6 +1,8 @@
 // app/apps/file_editor_cm6/static/js/explorer.js
 // diff test... please ignore this comment
 // explorer.js - File Explorer Drawer for CM6 Editor
+import { showNewProjectModal } from './new_project_modal.js';
+
 let currentProjectPath = '';
 let cachedState = null;
 const expandedDirs = new Set();
@@ -619,14 +621,19 @@ async function gitRequest(path, body) {
 }
 
 async function openProjectPrompt() {
-  // 1. Verify the shared picker is available
+  // 1. Safety Check
+  if (!confirm("Any unsaved changes in the current project will be lost. Continue?")) {
+    return;
+  }
+
+  // 2. Verify the shared picker is available
   if (!window.teFilePicker) {
     alert('File picker is not available.');
     return;
   }
 
   try {
-    // 2. Launch the directory picker modal
+    // 3. Launch the directory picker modal
     const choice = await window.teFilePicker.openDirectory({
       title: 'Open Project Directory',
       selectLabel: 'Set as Project'
@@ -656,7 +663,8 @@ async function openProjectPrompt() {
 }
 
 async function openNewProjectPrompt() {
-    if (!confirm("This will create a new directory for your project. Continue?")) {
+    // 1. Native confirmation (Safety Check)
+    if (!confirm("Any unsaved changes in the current project will be lost. Continue?")) {
         return;
     }
 
@@ -666,40 +674,90 @@ async function openNewProjectPrompt() {
     }
 
     try {
-        // Use saveFile mode which includes a filename input
-        const result = await window.teFilePicker.saveFile({
-            title: 'Create New Project',
-            filename: 'my-project',  // Default suggestion
-            selectLabel: 'Create Project'
-        });
+        // 2. Show the New Project Modal (Local vs Clone)
+        const choice = await showNewProjectModal(toast);
+        
+        if (choice.type === 'clone') {
+            // --- CLONE FLOW ---
+            let name = 'repo';
+            try {
+                const parts = choice.url.split('/');
+                let last = parts[parts.length - 1];
+                if (last.endsWith('.git')) last = last.slice(0, -4);
+                if (last.trim()) name = last.trim();
+            } catch (_) {}
 
-        // result.directory is the parent path
-        // result.path is the full path (parent + filename)
-        // result.existed tells us if it already exists
+            const result = await window.teFilePicker.saveFile({
+                title: 'Clone Repository Destination',
+                filename: name,
+                selectLabel: 'Clone Here'
+            });
+            
+            if (result.existed) {
+                if (!confirm(`Directory "${result.path}" already exists. Clone might fail if not empty. Continue?`)) {
+                    return;
+                }
+            }
+            
+            toast(`Cloning repository...`);
+            
+            const resp = await fetch('/api/git/clone', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    url: choice.url, 
+                    target_path: result.path 
+                })
+            });
+            
+            const json = await resp.json();
+            if (!json.ok) throw new Error(json.detail || 'Clone failed');
+            
+            toast('Repository cloned successfully.');
+            
+            // Switch to new project
+            const openResp = await fetch('/api/app/file_editor_cm6/project/open', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: result.path })
+            });
+            
+            if ((await openResp.json()).ok) {
+                location.reload();
+            }
+            
+        } else {
+            // --- LOCAL FLOW (Standard) ---
+            const result = await window.teFilePicker.saveFile({
+                title: 'Create New Project',
+                filename: 'my-project',
+                selectLabel: 'Create Project'
+            });
 
-        if (result.existed) {
-            if (!confirm(`Directory "${result.path}" already exists. Use it anyway?`)) {
-                return;
+            if (result.existed) {
+                if (!confirm(`Directory "${result.path}" already exists. Use it anyway?`)) {
+                    return;
+                }
+            }
+
+            const r = await fetch('/api/app/file_editor_cm6/project/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    parent_path: result.directory,
+                    name: result.name
+                })
+            });
+            const j = await r.json();
+            if (j?.ok) {
+                location.reload();
+            } else {
+                alert(`Failed to create project: ${j?.error || 'Unknown error'}`);
             }
         }
-
-        const r = await fetch('/api/app/file_editor_cm6/project/create', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                parent_path: result.directory,  // Parent directory
-                name: result.name               // Folder name from the input
-            })
-        });
-        const j = await r.json();
-        if (j?.ok) {
-            location.reload();
-        } else {
-            alert(`Failed to create project: ${j?.error || 'Unknown error'}`);
-        }
     } catch (e) {
-        if (e && e.message !== 'cancelled') {
-            alert(`An error occurred: ${e.message}`);
+        if (e !== 'cancelled') {
+            alert(`An error occurred: ${e.message || e}`);
         }
     }
 }
