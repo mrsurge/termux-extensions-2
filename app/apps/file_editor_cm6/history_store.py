@@ -349,6 +349,22 @@ class HistoryStore:
             print(f"[{timestamp}] [HistoryStore] get_diff_base found {val!r} for {normalized_project!r}", flush=True)
             return val
 
+    def set_project_origin(self, project_path: str, origin: Optional[str]) -> None:
+        normalized_project = self._normalize_project_path(project_path)
+        with self._lock:
+            project_entry = self._touch_project_locked(normalized_project)
+            project_entry["origin"] = origin
+            self._save_locked()
+
+    def get_project_origin(self, project_path: Optional[str]) -> Optional[str]:
+        if not project_path:
+            return None
+        normalized_project = self._normalize_project_path(project_path)
+        with self._lock:
+            projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
+            entry = projects.get(normalized_project)
+            return entry.get("origin") if entry else None
+
     def record_file_activity(self, project_path: str, file_path: str) -> Dict[str, object]:
         normalized_project = self._normalize_project_path(project_path)
         normalized_file = self._normalize_file_path(file_path)

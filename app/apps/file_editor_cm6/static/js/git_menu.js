@@ -58,8 +58,31 @@ export function initBranchMenu() {
       });
       await loadBranches(false);
       toast(`Checked out ${name}`);
+      // Reload file to reflect changes
+      if (typeof window.__cm6ReloadCurrentFile === 'function') {
+        window.__cm6ReloadCurrentFile();
+      }
     } catch (err) {
       toast(err.message || 'Checkout failed');
+    }
+  }
+
+  async function addOrigin() {
+    const url = prompt('Git Origin URL:');
+    if (!url || !url.trim()) return;
+    
+    try {
+      await request('/api/app/file_editor_cm6/git/remote/add', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'origin', url: url.trim() }),
+      });
+      toast('Origin added');
+      // Refresh state to update UI cache
+      if (typeof window.__cm6SyncState === 'function') {
+        window.__cm6SyncState(true);
+      }
+    } catch (err) {
+      toast(err.message || 'Failed to add origin');
     }
   }
 
@@ -81,6 +104,12 @@ export function initBranchMenu() {
 
   function renderDropdown(current, branches) {
     dropdown.innerHTML = '';
+    
+    // 1. Local Branches
+    const localBranches = branches.filter(b => !b.includes('/'));
+    // 2. Remote Branches (simple heuristic: contains '/')
+    const remoteBranches = branches.filter(b => b.includes('/') && !b.includes('->'));
+
     if (!branches.length) {
       const empty = document.createElement('div');
       empty.className = 'fe-dd-item';
@@ -88,7 +117,53 @@ export function initBranchMenu() {
       empty.textContent = 'No branches';
       dropdown.appendChild(empty);
     } else {
-      branches.forEach((branch) => {
+      // Render Local
+      if (localBranches.length > 0) {
+          const label = document.createElement('div');
+          label.className = 'fe-dd-label';
+          label.textContent = 'Local';
+          label.style.fontSize = '0.75rem';
+          label.style.padding = '4px 12px';
+          label.style.opacity = '0.6';
+          dropdown.appendChild(label);
+          
+          localBranches.forEach(renderBranchItem);
+      }
+      
+      // Render Remote
+      if (remoteBranches.length > 0) {
+          const sep = document.createElement('div');
+          sep.className = 'fe-dd-separator';
+          dropdown.appendChild(sep);
+          
+          const label = document.createElement('div');
+          label.className = 'fe-dd-label';
+          label.textContent = 'Remote';
+          label.style.fontSize = '0.75rem';
+          label.style.padding = '4px 12px 0 12px'; // Reduce bottom padding
+          label.style.opacity = '0.6';
+          dropdown.appendChild(label);
+
+          const state = window.__cm6EditorState || {};
+          if (state.projectOrigin) {
+              const originUrl = document.createElement('div');
+              originUrl.className = 'fe-dd-label';
+              originUrl.textContent = state.projectOrigin;
+              originUrl.style.fontSize = '0.65rem';
+              originUrl.style.padding = '0 12px 4px 12px';
+              originUrl.style.opacity = '0.4';
+              originUrl.style.wordBreak = 'break-all';
+              dropdown.appendChild(originUrl);
+          } else {
+              // Add padding back if no URL
+              label.style.paddingBottom = '4px';
+          }
+          
+          remoteBranches.forEach(renderBranchItem);
+      }
+    }
+
+    function renderBranchItem(branch) {
         const item = document.createElement('div');
         item.className = 'fe-dd-item';
         if (branch === current) {
@@ -103,15 +178,10 @@ export function initBranchMenu() {
           }
         });
         dropdown.appendChild(item);
-      });
     }
 
     const separator = document.createElement('div');
-    separator.className = 'fe-dd-item';
-    separator.style.pointerEvents = 'none';
-    separator.style.opacity = '0.3';
-    separator.style.justifyContent = 'center';
-    separator.textContent = '────';
+    separator.className = 'fe-dd-separator';
     dropdown.appendChild(separator);
 
     const createItem = document.createElement('div');
@@ -123,6 +193,20 @@ export function initBranchMenu() {
       createBranch();
     });
     dropdown.appendChild(createItem);
+    
+    // Add Origin option if missing (check global state)
+    const state = window.__cm6EditorState || {};
+    if (!state.projectOrigin) {
+        const originItem = document.createElement('div');
+        originItem.className = 'fe-dd-item';
+        originItem.textContent = 'Add Origin…';
+        originItem.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            closeDropdown();
+            addOrigin();
+        });
+        dropdown.appendChild(originItem);
+    }
   }
 
   btn.addEventListener('click', async (ev) => {

@@ -242,7 +242,8 @@ def list_branches(project_root: Path) -> GitBranches:
         current = "HEAD"
     else:
         current = symbolic.strip()
-    raw = _run_git_optional(project_root, "branch", "--list", "--format=%(refname:short)") or ""
+    # Use -a to list local and remote branches
+    raw = _run_git_optional(project_root, "branch", "-a", "--format=%(refname:short)") or ""
     branches = [line.strip() for line in raw.splitlines() if line.strip()]
     return GitBranches(current=current, branches=branches)
 
@@ -472,3 +473,28 @@ def is_git_repository(project_root: Path) -> bool:
     """Check if directory is a git repository."""
     out = _run_git_optional(project_root, "rev-parse", "--is-inside-work-tree")
     return out is not None and out.strip() == "true"
+
+def get_origin_url(project_root: Path) -> Optional[str]:
+    """Get the URL of the 'origin' remote if it exists."""
+    _ensure_repo(project_root)
+    return _run_git_optional(project_root, "remote", "get-url", "origin")
+
+def get_remotes(project_root: Path) -> List[Dict[str, str]]:
+    """Get list of remotes with their URLs."""
+    _ensure_repo(project_root)
+    output = _run_git_optional(project_root, "remote", "-v") or ""
+    remotes = {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            name, url = parts[0], parts[1]
+            remotes[name] = url
+    # Convert unique remotes dict to list
+    return [{"name": k, "url": v} for k, v in remotes.items()]
+
+def add_remote(project_root: Path, name: str, url: str) -> None:
+    """Add a new remote."""
+    if not name or not url:
+        raise GitError("Name and URL required")
+    _ensure_repo(project_root)
+    _run_git(project_root, "remote", "add", name, url)

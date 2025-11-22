@@ -1060,11 +1060,119 @@ async def git_init_route():
     except GitError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    state = history.get_session_state()
+    
+    # If we have an active project, check/refresh its origin cache
+    active_project_path = history.get_active_project()
+    project_origin = None
+    if active_project_path and os.path.isdir(active_project_path):
+        try:
+            from . import git_helper
+            if git_helper.is_git_repository(Path(active_project_path)):
+                project_origin = git_helper.get_origin_url(Path(active_project_path))
+                history.set_project_origin(active_project_path, project_origin)
+            else:
+                history.set_project_origin(active_project_path, None)
+        except Exception:
+            pass
+    else:
+        project_origin = history.get_project_origin(active_project_path)
+
+    return {
+        "ok": True,
+        "data": {
+            "activeProject": history.get_active_project(),
+            "activeProjectExists": bool(history.get_active_project() and os.path.isdir(history.get_active_project())),
+            "activeProjectLabel": HistoryStore.format_label(history.get_active_project()),
+            "projectOrigin": project_origin,
+            "currentPath": state.get("currentPath"),
+            "unsaved": state.get("unsaved"),
+            "recents": history.list_files(history.get_active_project()) if history.get_active_project() else [],
+            "gitDiffBase": diff_base_info,
+            "editorState": state,
+        }
+    }
+
+@file_editor_cm6_bp.post('/git/remote/add')
+async def add_git_remote(data: dict = Body(...)):
+    name = data.get('name')
+    url = data.get('url')
+    if not name or not url:
+        raise HTTPException(status_code=400, detail="Name and URL required")
+    
+    root = get_project_root()
+    try:
+        from . import git_helper
+        git_helper.add_remote(root, name, url)
+        
+        # Refresh cache
+        origin = git_helper.get_origin_url(root)
+        history.set_project_origin(str(root), origin)
+        
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @file_editor_cm6_bp.get('/state')
-def get_project_state():
-    """Return consolidated editor state."""
-    state = _build_state_payload()
-    return {"ok": True, "data": state}
+async def get_editor_state_deprecated():
+    """
+    Combined state endpoint for the frontend (files + project + git base).
+    Now also returns 'projectOrigin'.
+    """
+    history = _history_store
+    
+    # Get Diff Base info
+    diff_base_info = {"ref": "HEAD", "mode": "none"}
+    active_project = history.get_active_project()
+    if active_project and os.path.isdir(active_project):
+        try:
+            from . import git_helper
+            if git_helper.is_git_repository(Path(active_project)):
+                base = history.get_diff_base(active_project)
+                commit_info = git_helper.get_commit_info(Path(active_project), base)
+                diff_base_info = {
+                    "ref": base,
+                    "mode": "commit" if base != "HEAD" else "head",
+                    "commit": {
+                        "hash": commit_info.hash,
+                        "short": commit_info.short_hash,
+                        "subject": commit_info.summary
+                    } if commit_info else None
+                }
+        except Exception:
+            pass
+
+    state = history.get_session_state()
+    
+    # If we have an active project, check/refresh its origin cache
+    project_origin = None
+    if active_project and os.path.isdir(active_project):
+        try:
+            from . import git_helper
+            if git_helper.is_git_repository(Path(active_project)):
+                project_origin = git_helper.get_origin_url(Path(active_project))
+                history.set_project_origin(active_project, project_origin)
+            else:
+                history.set_project_origin(active_project, None)
+        except Exception:
+            pass
+    else:
+        project_origin = history.get_project_origin(active_project)
+
+    return {
+        "ok": True,
+        "data": {
+            "activeProject": active_project,
+            "activeProjectExists": bool(active_project and os.path.isdir(active_project)),
+            "activeProjectLabel": HistoryStore.format_label(active_project),
+            "projectOrigin": project_origin,
+            "currentPath": state.get("currentPath"),
+            "unsaved": state.get("unsaved"),
+            "recents": history.list_files(active_project) if active_project else [],
+            "gitDiffBase": diff_base_info,
+            "editorState": state,
+        }
+    }
 
 @file_editor_cm6_bp.get('/session_state')
 def get_session_state():
