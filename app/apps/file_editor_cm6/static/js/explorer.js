@@ -202,8 +202,16 @@ export async function initExplorerUI() {
       }
       await handleGitAction('/git/commit', { message: trimmed });
     });
-    gitButtons.push?.addEventListener('click', () => handleGitAction('/git/push', {}));
-    gitButtons.pull?.addEventListener('click', () => handleGitAction('/git/pull', {}));
+    gitButtons.push?.addEventListener('click', () => {
+      if (confirm('Are you sure you want to push changes to remote?')) {
+        handleGitAction('/git/push', {});
+      }
+    });
+    gitButtons.pull?.addEventListener('click', () => {
+      if (confirm('Are you sure you want to pull changes from remote?')) {
+        handleGitAction('/git/pull', {});
+      }
+    });
     gitButtons.reset?.addEventListener('click', async () => {
         try {
           const resp = await fetch('/api/app/file_editor_cm6/git/commits');
