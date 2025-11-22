@@ -1232,6 +1232,10 @@ function buildMenuItems(entry) {
     }
 
     items.push({ label: 'Rename', handler: renameEntry });
+    items.push({ divider: true });
+    items.push({ label: 'Copy Name', handler: copyName });
+    items.push({ label: 'Copy Path', handler: copyPath });
+    items.push({ divider: true });
     items.push({ label: 'Copy to…', handler: copyTo });
     items.push({ label: 'Move to…', handler: moveTo });
     
@@ -1396,6 +1400,28 @@ function disableSelectMode() {
 
 function isInSelectMode(parentRel) {
   return selectModeDir === parentRel;
+}
+
+async function copyName(entry) {
+    try {
+        await navigator.clipboard.writeText(entry.name);
+        toast(`Copied "${entry.name}" to clipboard`);
+    } catch (err) {
+        toast('Failed to copy name');
+    }
+}
+
+async function copyPath(entry) {
+    try {
+        let fullPath = currentProjectPath;
+        if (entry.rel && entry.rel !== '.') {
+            fullPath = currentProjectPath.replace(/\/+$/, '') + '/' + entry.rel.replace(/^\/+/, '');
+        }
+        await navigator.clipboard.writeText(fullPath);
+        toast('Copied path to clipboard');
+    } catch (err) {
+        toast('Failed to copy path');
+    }
 }
 
 async function copyTo(entry) {

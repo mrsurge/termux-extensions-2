@@ -209,6 +209,7 @@ No CRDT, no OT, no sync protocol. Just **last write wins** with SHA-based confli
 - **PWA Install:** Add to home screen for full-screen app experience
 - **Real-Time Updates:** WebSocket-based live updates across all clients
 - **State Persistence:** Settings, preferences, and session state survive restarts
+- **Deep Linking:** Centralized mechanism for apps to launch other apps with context (see [docs/core/DEEPLINKING.md](docs/core/DEEPLINKING.md))
 
 ### Bundled Apps
 - **Code CM6:** Full CodeMirror 6 editor with Git integration, terminal drawer, AI agent support
@@ -322,7 +323,7 @@ Framework shells provide lifecycle management for any long-lived process:
 **Management:**
 - Label-based discovery (multiple apps can share one shell)
 - Automatic log capture and rotation
-- Health monitoring (CPU, memory, thread count)
+- Health monitoring (CPU, memory, threads via psutil)
 - Graceful termination with force-kill fallback
 - Orphan adoption on framework restart
 
