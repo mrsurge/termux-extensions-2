@@ -1239,6 +1239,11 @@ function buildMenuItems(entry) {
     items.push({ label: 'Copy to…', handler: copyTo });
     items.push({ label: 'Move to…', handler: moveTo });
     
+    if (isDir) {
+        items.push({ label: 'Copy from…', handler: copyFrom });
+        items.push({ label: 'Move from…', handler: moveFrom });
+    }
+    
     if (entry.gitStatus && (entry.gitStatus === 'modified' || entry.gitStatus === 'untracked' || entry.gitStatus === 'added')) {
         items.push({ label: 'Stage', handler: stageEntry });
     }
@@ -1489,6 +1494,76 @@ async function moveTo(entry) {
       if (err.message !== 'cancelled') {
         toast(err.message || 'Move failed');
       }
+    }
+}
+
+async function copyFrom(entry) {
+    if (!window.teFilePicker) {
+        toast('File picker not available');
+        return;
+    }
+    try {
+        const source = await window.teFilePicker.open({
+            title: `Copy into "${entry.name}"`,
+            startPath: currentProjectPath,
+            mode: 'any',
+            selectLabel: 'Copy Here'
+        });
+        if (!source || !source.path) return;
+
+        const resp = await fetch('/api/app/file_editor_cm6/explorer/copy_from', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source_path: source.path,
+                dest_rel: entry.rel
+            })
+        });
+        const json = await resp.json();
+        if (!json.ok) throw new Error(json.error || 'Copy failed');
+
+        toast(`Copied "${source.name}" into ${entry.name}`);
+        await refreshTree(treeElement);
+        await refreshGitStatus(false);
+    } catch (err) {
+        if (err.message !== 'cancelled') {
+            toast(err.message || 'Copy failed');
+        }
+    }
+}
+
+async function moveFrom(entry) {
+    if (!window.teFilePicker) {
+        toast('File picker not available');
+        return;
+    }
+    try {
+        const source = await window.teFilePicker.open({
+            title: `Move into "${entry.name}"`,
+            startPath: currentProjectPath,
+            mode: 'any',
+            selectLabel: 'Move Here'
+        });
+        if (!source || !source.path) return;
+
+        const resp = await fetch('/api/app/file_editor_cm6/explorer/move_from', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source_path: source.path,
+                dest_rel: entry.rel
+            })
+        });
+        const json = await resp.json();
+        if (!json.ok) throw new Error(json.error || 'Move failed');
+
+        toast(`Moved "${source.name}" into ${entry.name}`);
+        await refreshTree(treeElement);
+        await refreshGitStatus(false);
+    } catch (err) {
+        if (err.message !== 'cancelled') {
+            toast(err.message || 'Move failed');
+        }
     }
 }
 

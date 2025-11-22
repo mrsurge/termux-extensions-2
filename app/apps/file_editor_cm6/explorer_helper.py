@@ -453,3 +453,68 @@ def create_project(parent_path_str: str, name: str) -> dict:
     # (new_project_path / "README.md").write_text("# My New Project")
 
     return {'path': str(new_project_path)}
+
+# --- Inbound Operations (Importing) ---
+# These functions are specifically for "Copy From" / "Move From" operations where
+# the source is an absolute path (potentially outside the project) and the
+# destination is strictly inside the project root.
+
+def copy_entry_inbound(abs_source: str, dest_rel: str) -> dict:
+    """
+    Copy a file or directory from an absolute path (external) INTO the project.
+    Source can be anywhere; Destination must be inside project root.
+    """
+    root = get_project_root()
+    source = Path(abs_source).resolve()
+    dest_dir = (root / dest_rel).resolve()
+
+    if not source.exists():
+        raise ValueError(f"Source path does not exist: {abs_source}")
+
+    # Enforce destination is inside project root
+    if not str(dest_dir).startswith(str(root.resolve())):
+        raise ValueError("Destination is outside project root")
+    
+    if not dest_dir.is_dir():
+        raise ValueError("Destination is not a directory")
+
+    dest = dest_dir / source.name
+    if dest.exists():
+        raise ValueError(f"'{source.name}' already exists in destination")
+
+    if source.is_dir():
+        shutil.copytree(source, dest)
+    else:
+        shutil.copy2(source, dest)
+
+    new_rel = str(dest.relative_to(root))
+    return {'source_path': str(source), 'dest_rel': new_rel}
+
+
+def move_entry_inbound(abs_source: str, dest_rel: str) -> dict:
+    """
+    Move a file or directory from an absolute path (external) INTO the project.
+    Source can be anywhere; Destination must be inside project root.
+    """
+    root = get_project_root()
+    source = Path(abs_source).resolve()
+    dest_dir = (root / dest_rel).resolve()
+
+    if not source.exists():
+        raise ValueError(f"Source path does not exist: {abs_source}")
+
+    # Enforce destination is inside project root
+    if not str(dest_dir).startswith(str(root.resolve())):
+        raise ValueError("Destination is outside project root")
+    
+    if not dest_dir.is_dir():
+        raise ValueError("Destination is not a directory")
+
+    dest = dest_dir / source.name
+    if dest.exists():
+        raise ValueError(f"'{source.name}' already exists in destination")
+
+    shutil.move(str(source), str(dest))
+
+    new_rel = str(dest.relative_to(root))
+    return {'source_path': str(source), 'dest_rel': new_rel}

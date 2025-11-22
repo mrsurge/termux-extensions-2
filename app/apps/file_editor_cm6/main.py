@@ -1343,6 +1343,36 @@ async def explorer_batch_move(data: dict = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@file_editor_cm6_bp.post('/explorer/copy_from')
+async def explorer_copy_from(data: dict = Body(...)):
+    """Import (copy) a file/folder from an absolute path into the project."""
+    source_path = data.get('source_path')
+    dest_rel = data.get('dest_rel')
+    if not source_path or not dest_rel:
+        raise HTTPException(status_code=400, detail="Source path and destination relative path required")
+    try:
+        from .explorer_helper import copy_entry_inbound
+        result = copy_entry_inbound(source_path, dest_rel)
+        mark_git_cache_dirty(get_project_root())
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@file_editor_cm6_bp.post('/explorer/move_from')
+async def explorer_move_from(data: dict = Body(...)):
+    """Import (move) a file/folder from an absolute path into the project."""
+    source_path = data.get('source_path')
+    dest_rel = data.get('dest_rel')
+    if not source_path or not dest_rel:
+        raise HTTPException(status_code=400, detail="Source path and destination relative path required")
+    try:
+        from .explorer_helper import move_entry_inbound
+        result = move_entry_inbound(source_path, dest_rel)
+        mark_git_cache_dirty(get_project_root())
+        return {"ok": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @file_editor_cm6_bp.get('/history/files')
 def get_recent_files():
     """Get recent files for the current project."""
