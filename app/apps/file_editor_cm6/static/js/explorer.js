@@ -568,8 +568,15 @@ async function handleGitAction(endpoint, payload) {
     }
     
     // After commit: reload current file (HEAD changed, diff baseline stale)
-    if (endpoint === '/git/commit' && typeof window.__cm6ReloadCurrentFile === 'function') {
-      await window.__cm6ReloadCurrentFile();
+    if (endpoint === '/git/commit') {
+      if (typeof window.__cm6ReloadCurrentFile === 'function') {
+        await window.__cm6ReloadCurrentFile();
+      }
+      // If we were diffing against HEAD, ensure we stay on HEAD (which has moved)
+      // This updates the diff base label to the new commit hash/subject
+      if (gitDiffBase.ref === 'HEAD' || gitDiffBase.mode === 'head') {
+        await changeDiffBase('HEAD');
+      }
     }
     
     // After push: reload file AND close drawer (push is usually final git action)

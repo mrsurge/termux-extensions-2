@@ -320,6 +320,7 @@ const recentFilesBtn = requireEl('#recent-files-btn');
 const recentFilesDD  = requireEl('#recent-files-dd');
 const runActiveBtn   = requireEl('#run-active-file-btn');
 const MAX_FILENAME_DISPLAY = 34;
+const MAX_FILEPATH_DISPLAY = 43;
 
 function formatFileNameDisplay(name) {
   if (!name) return '';
@@ -327,6 +328,14 @@ function formatFileNameDisplay(name) {
   const keepStart = Math.max(6, Math.floor((MAX_FILENAME_DISPLAY - 1) * 0.6));
   const keepEnd = Math.max(4, MAX_FILENAME_DISPLAY - keepStart - 1);
   return `${name.slice(0, keepStart)}…${name.slice(-keepEnd)}`;
+}
+
+function formatFilePathDisplay(path) {
+  if (!path) return '';
+  if (path.length <= MAX_FILEPATH_DISPLAY) return path;
+  const keepStart = Math.max(6, Math.floor((MAX_FILEPATH_DISPLAY - 1) * 0.6));
+  const keepEnd = Math.max(4, MAX_FILEPATH_DISPLAY - keepStart - 1);
+  return `${path.slice(0, keepStart)}…${path.slice(-keepEnd)}`;
 }
 
 function setToolbarFileName(rawName) {
@@ -1264,7 +1273,7 @@ function updatePathDisplay() {
   setToolbarFileName(basename(abs));
   cacheStateBadge.textContent = '';
   cacheStateBadge.dataset.state = '';
-  filePathEl.textContent = formatDisplayDirectory(abs);
+  filePathEl.textContent = formatFilePathDisplay(formatDisplayDirectory(abs));
   filePathEl.title = abs;
   updateRunButtonState();
 }
