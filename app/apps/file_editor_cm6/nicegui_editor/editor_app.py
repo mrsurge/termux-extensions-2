@@ -672,7 +672,10 @@ async def set_editor_content(data: dict = Body(...)):
     if old_path and old_path != new_path and project_path:
         _history_store.clear_cached_document(project_path, old_path)
     
-    content, language = data.get('content', ''), data.get('language', 'python')
+    content = data.get('content')
+    if content is None:
+        content = ''
+    language = data.get('language', 'python')
     content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
     set_current_file(new_path, content_sha256)
     

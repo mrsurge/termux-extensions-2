@@ -1213,6 +1213,7 @@ function buildMenuItems(entry) {
       items.push({ divider: true });
       items.push({ label: 'Add File', handler: addFile });
       items.push({ label: 'Add Directory', handler: addDirectory });
+      items.push({ label: 'Open in File Explorer', handler: openInFileExplorer });
     }
 
     items.push({ label: 'Rename', handler: renameEntry });
@@ -1234,6 +1235,23 @@ function buildMenuItems(entry) {
   }
 
   return items;
+}
+
+async function openInFileExplorer(entry) {
+    let fullPath = currentProjectPath;
+    if (entry.rel && entry.rel !== '.') {
+        // Simple join; backend handles normalization if needed, but usually correct here
+        fullPath = currentProjectPath.replace(/\/+$/, '') + '/' + entry.rel.replace(/^\/+/, '');
+    }
+
+    try {
+        // Navigate to File Explorer app with path parameter
+        const targetUrl = `/app/file_explorer?path=${encodeURIComponent(fullPath)}`;
+        window.location.href = targetUrl;
+    } catch (err) {
+        console.error(err);
+        toast('Failed to open File Explorer');
+    }
 }
 
 // Functions for card menu actions

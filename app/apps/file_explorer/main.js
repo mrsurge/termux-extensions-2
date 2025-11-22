@@ -506,8 +506,12 @@ export default function initFileExplorer(root, api, host) {
     ? host.loadState(null)
     : null;
 
+  // Check for path in URL query params (deep linking)
+  const urlParams = new URLSearchParams(window.location.search);
+  const queryPath = urlParams.get('path');
+
   const prefs = {
-    path: savedState?.path && typeof savedState.path === 'string' ? savedState.path : HOME_DIR,
+    path: queryPath || (savedState?.path && typeof savedState.path === 'string' ? savedState.path : HOME_DIR),
     showHidden: !!(savedState && savedState.showHidden),
     view: savedState?.view === 'grid' ? 'grid' : 'list',
     sortBy: savedState?.sortBy || 'name',
