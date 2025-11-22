@@ -1260,9 +1260,20 @@ async function openInFileExplorer(entry) {
     }
 
     try {
-        // Navigate to File Explorer app with path parameter
-        const targetUrl = `/app/file_explorer?path=${encodeURIComponent(fullPath)}`;
-        window.location.href = targetUrl;
+        // Use the app launch API to ensure the app is running and get the deep link
+        const resp = await fetch('/api/apps/file_explorer/open', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ params: { path: fullPath } })
+        });
+        const json = await resp.json();
+        
+        if (json.ok && json.data && json.data.url) {
+            window.location.href = json.data.url;
+        } else {
+            console.error('Launch failed', json);
+            toast('Failed to open File Explorer');
+        }
     } catch (err) {
         console.error(err);
         toast('Failed to open File Explorer');

@@ -8,11 +8,12 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(app.__file__)))
 import time
 import asyncio
 from pathlib import Path
-from fastapi import APIRouter, Depends, Request, HTTPException, WebSocket
+from fastapi import APIRouter, Depends, Request, HTTPException, WebSocket, Body
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from app.libs.app_manager import ensure_app_running
 from app.libs import app_lifecycle
 from app.libs.framework_shells import FrameworkShellManager, get_manager as get_framework_shell_manager
+from urllib.parse import urlencode
 
 # Avoid circular import - will be accessed dynamically
 def get_loaded_apps():
@@ -22,7 +23,37 @@ def get_loaded_apps():
 
 apps_bp = APIRouter()
 
+@apps_bp.post('/api/apps/{app_id}/open')
+async def open_app(app_id: str, payload: dict = Body(...)):
+    """
+    Launch an app, ensuring it is running, and return the deep-link URL.
+    Payload can contain 'params' (dict) which will be converted to query string.
+    """
+    print(f"[AppsExtension] open_app requested for {app_id}")
+    manifest = next((app for app in get_loaded_apps() if app.get('id') == app_id), None)
+    if not manifest:
+        raise HTTPException(status_code=404, detail=f"App '{app_id}' not found")
 
+    try:
+        app_info = await ensure_app_running(app_id)
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start app: {e}")
+
+    # Construct the URL
+    base_url = f"/app/{app_id}"
+    params = payload.get("params", {})
+    
+    # If it's a nicegui app running on a different port, redirect directly?
+    # No, for standard apps we route through /app/{app_id} which loads app_shell.html
+    # app_shell.html -> loads main.js -> main.js checks query params.
+    
+    query_string = ""
+    if params:
+        query_string = "?" + urlencode(params)
+    
+    full_url = f"{base_url}{query_string}"
+    
+    return {"ok": True, "data": {"url": full_url, "app_info": app_info}}
 
 @apps_bp.post('/api/apps/{app_id}/start')
 async def start_app(app_id: str):

@@ -111,7 +111,7 @@ When user presses Ctrl+C or sends SIGTERM to supervisor:
 
 ```bash
 pkg update && pkg install git
-git clone https://github.com/yourusername/termux-extensions-2.git
+git clone https://github.com/mrsurge/termux-extensions-2.git
 cd termux-extensions-2
 ./scripts/bootstrap_termux.sh
 ```
