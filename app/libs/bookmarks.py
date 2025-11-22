@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Request
 
-bookmarks_bp = APIRouter()
+bookmarks_bp = APIRouter(prefix="/api")
 
 BOOKMARKS_DIR = Path(os.path.expanduser("~/.cache/termux_extensions/file_explorer/bookmarks"))
 BOOKMARKS_FILE = BOOKMARKS_DIR / "bookmarks.json"

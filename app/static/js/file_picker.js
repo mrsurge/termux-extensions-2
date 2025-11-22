@@ -47,6 +47,16 @@ const CSS = `
   font-size: 1rem;
   flex: 1;
 }
+.te-fp-git-status {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--success, #22c55e);
+  margin-left: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
 .te-fp-close {
   background: none;
   border: none;
@@ -255,6 +265,7 @@ const TEMPLATE = `
       <div class="te-fp-header">
         <button class="te-fp-home" aria-label="Go to home directory" title="Home">🏠</button>
         <div class="te-fp-title">Select Item</div>
+        <div class="te-fp-git-status"></div>
         <button class="te-fp-close" aria-label="Close picker">&times;</button>
       </div>
       <div class="te-fp-body">
@@ -677,6 +688,27 @@ async function requestBrowse(absPath, includeHidden) {
   return { entries: mapped, resolvedPath };
 }
 
+async function fetchGitStatus(path) {
+  if (!elements.gitStatus) return;
+  elements.gitStatus.textContent = ''; // Clear previous
+  
+  try {
+    const resp = await fetch(`/api/git/summary?path=${encodeURIComponent(path)}`, { cache: 'no-store' });
+    if (!resp.ok) return;
+    
+    const json = await resp.json();
+    if (json.ok && json.data && json.data.is_repo) {
+      const { branch, head_short } = json.data;
+      if (branch && head_short) {
+        elements.gitStatus.textContent = `⎇ ${branch} / ${head_short}`;
+        elements.gitStatus.title = json.data.summary || '';
+      }
+    }
+  } catch (err) {
+    // Silent fail for git status
+  }
+}
+
 async function navigate(targetPath) {
   const normalized = toAbsolute(targetPath, state.currentPath || prefs.lastPath || DEFAULT_START);
   const previousPath = state.currentPath;
@@ -692,6 +724,8 @@ async function navigate(targetPath) {
     renderBreadcrumbs(resolvedPath);
     renderEntries(sorted);
     updateButtons();
+    // Async fetch git status
+    fetchGitStatus(resolvedPath);
   } catch (err) {
     const message = err?.message || 'Failed to browse';
     elements.list.innerHTML = `<div class="te-fp-loading" style="color:#f87171;">${escapeHtml(message)}</div>`;
@@ -790,10 +824,26 @@ function init() {
   ensureStyle();
   createRoot();
   const rootEl = document.getElementById(ROOT_ID);
+
+  // DOM Repair: Ensure git status element exists if root was cached/stale
+  const header = rootEl.querySelector('.te-fp-header');
+  if (header && !header.querySelector('.te-fp-git-status')) {
+    const statusEl = document.createElement('div');
+    statusEl.className = 'te-fp-git-status';
+    // Insert before close button (which is usually the last element or close to it)
+    const closeBtn = header.querySelector('.te-fp-close');
+    if (closeBtn) {
+        header.insertBefore(statusEl, closeBtn);
+    } else {
+        header.appendChild(statusEl);
+    }
+  }
+
   elements = {
     root: rootEl,
     overlay: rootEl.querySelector('.te-fp-overlay'),
     title: rootEl.querySelector('.te-fp-title'),
+    gitStatus: rootEl.querySelector('.te-fp-git-status'),
     close: rootEl.querySelector('.te-fp-close'),
     home: rootEl.querySelector('.te-fp-home'),
     breadcrumbs: rootEl.querySelector('.te-fp-breadcrumbs'),

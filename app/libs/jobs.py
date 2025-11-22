@@ -18,7 +18,7 @@ __all__ = ["jobs_bp", "register_job_handler", "JobCancelled"]
 _JOBS_DIR = Path.home() / ".cache" / "termux_extensions"
 _JOBS_FILE = _JOBS_DIR / "jobs.json"
 
-jobs_bp = APIRouter()
+jobs_bp = APIRouter(prefix="/api")
 
 
 class JobStatus:

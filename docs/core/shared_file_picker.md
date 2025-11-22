@@ -64,6 +64,11 @@ if (target && target.existed) {
   etc.), the modal displays the error message inline so you can see exactly what
   failed without digging through server logs.
 
+### Git Awareness
+
+The picker automatically detects if the current directory is inside a Git repository.
+If detected, it displays the current **Branch** and **Commit Hash** in the header (e.g., `⎇ main / a1b2c3d`) in green text. This helps users stay oriented when browsing complex project structures.
+
 ## Notes
 
 - The picker relies on `window.teUI.toast` for error messages; ensure the global UI

@@ -21,7 +21,7 @@ This project draws inspiration from frameworks like *Oh My Zsh* and *Oh My Fish*
 ```
 ┌─────────────────────────────────────────┐
 │  Supervisor (bash)                      │
-│  - Signal handling (SIGTERM/SIGINT)    │
+│  - Signal handling (SIGTERM/SIGINT)     │
 │  - Spawns framework + IPC               │
 │  - Orchestrates shutdown                │
 └─────┬────────────────────┬──────────────┘
@@ -30,11 +30,11 @@ This project draws inspiration from frameworks like *Oh My Zsh* and *Oh My Fish*
 │ IPC Server     │   │ Framework (Main)  │
 │ (Flask/sync)   │◄──┤ (FastAPI/async)   │
 │ :9123          │   │ :8088             │
-│                │   │                    │
+│                │   │                   │
 │ - Process reg  │   │ - App launcher    │
 │ - Shutdown seq │   │ - WebSocket proxy │
 │ - Shell mgmt   │   │ - Static serving  │
-└────────────────┘   └────┬───────────────┘
+└────────────────┘   └────┬──────────────┘
                           │
          ┌────────────────┼────────────────┐
          │                │                │

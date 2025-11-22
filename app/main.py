@@ -33,7 +33,6 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 import requests
 from app.libs.app_lifecycle import start_background_tasks
 from app.libs.app_manager import ensure_app_running, get_running_apps, initialize_running_apps
-from app.libs.bookmarks import bookmarks_bp
 
 # Create FastAPI app instance with lifespan
 from contextlib import asynccontextmanager, suppress
@@ -99,13 +98,8 @@ static_dir = os.path.join(os.path.dirname(__file__), 'static')
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-app.include_router(bookmarks_bp, prefix="/api")
-from app.libs.framework_shells import FrameworkShellManager, get_manager, framework_shells_bp
-
-app.include_router(framework_shells_bp)
-from app.libs.jobs import jobs_bp
-from app.apps.file_editor_cm6.agent_bridge import get_bridge
-app.include_router(jobs_bp, prefix="/api")
+from app.libs.framework_shells import FrameworkShellManager
+from app.apps.file_editor_cm6.agent_bridge import get_bridge # This has to go... ASAP
 
 
 
@@ -523,7 +517,7 @@ def run_script(script_name, app_root_path, args=None):
         return None, str(e)
 
 def load_services():
-    """Scans for services in app/libs and imports them to register job handlers."""
+    """Scans for services in app/libs and imports them to register job handlers and routers."""
     libs_dir = os.path.join(os.path.dirname(__file__), 'libs')
     if not os.path.exists(libs_dir):
         return
@@ -532,8 +526,18 @@ def load_services():
         if filename.endswith('.py') and not filename.startswith('__'):
             module_name = f"app.libs.{filename.replace('.py', '')}"
             try:
-                importlib.import_module(module_name)
+                module = importlib.import_module(module_name)
                 print(f"Loaded service: {module_name}")
+                
+                # Auto-register routers
+                from fastapi import APIRouter
+                for attr_name in dir(module):
+                    if attr_name.startswith('_'): continue
+                    attr = getattr(module, attr_name)
+                    if isinstance(attr, APIRouter):
+                        app.include_router(attr)
+                        print(f"  - Registered router: {attr_name}")
+                            
             except Exception as e:
                 print(f"Error loading service {module_name}: {e}")
 
@@ -1171,7 +1175,7 @@ async def _nicegui_assets_dynamic(request: Request, rest: str):
     if not app_id:
         # ESM module imports often lack Referer - default to file_editor_cm6 for now
         # TODO: Make this more generic if multiple apps use NiceGUI
-        app_id = "file_editor_cm6"
+        app_id = "file_editor_cm6" # AND THIS
         print(f"[NiceGUI Assets] No Referer, defaulting to {app_id}", file=sys.stderr)
     
     running_apps = await get_running_apps()
