@@ -13,3 +13,5 @@ MEM_USED=$(echo $MEM_STATS | awk '{print $3}')
 MEM_USAGE=$(echo "scale=2; ($MEM_USED / $MEM_TOTAL) * 100" | bc | cut -d'.' -f1)
 
 printf '{"cpu_usage": %s, "mem_usage": %s}' "$CPU_USAGE" "$MEM_USAGE"
+
+# hi

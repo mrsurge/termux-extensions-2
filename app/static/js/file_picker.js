@@ -7,7 +7,7 @@ if (typeof window.teUI.toast !== 'function') {
 
 const STYLE_ID = 'te-file-picker-style';
 const ROOT_ID = 'te-file-picker-root';
-const HOME_DIR = '/data/data/com.termux/files/home';
+const HOME_DIR = '~';
 const DEFAULT_START = HOME_DIR;
 
 const START_STORAGE_KEY = 'te.filepicker.startPaths';
