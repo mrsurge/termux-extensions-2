@@ -3,11 +3,13 @@
 ## What TE2 Gives You
 
 An integrated developement environment & complete with
-
-## IDE
+/home/mrsurge/Documents/te-2-cm6-iframe-main/docs/apps/code_cm6/README.md
+## IDE (Code-CM6)
+(see [/docs/apps/code_cm6/README.md](/docs/apps/code_cm6/README.md))
+(im sorry this is AI generated... i dont have the time to create a full feature spec for the ide... maybe you can? anyway... you can read what I have below and if you want to find out more about it you can read the readme in the link)
 
 1. Convergant UI
-   -
+   -/home/mrsurge/Documents/te-2-cm6-iframe-main/notes
    - Works with desktop and mobile displays... I have spent many hours making sure it works VERY well on mobile. Im going to include the `GeckoView` based app in the releases soon... so look out for that.
    - The same UI that is in the desktop browser is in the mobile.  Carefully positioned breakpoints make sure of this.  You can host this from your desktop and use it on your mobile/tablet to review and make changes to your desktop repos, and vice versa.
 3. Fully `git` integrated
@@ -26,6 +28,21 @@ An integrated developement environment & complete with
 5. Room to grow
    -
    - help me please i have no idea what im doing
+
+## Integrated File Explorer
+
+1. Works remotely
+2. Has deep linking with the IDE
+3. can open files and archives, extract archives
+4. Easier to use than termux
+5. Works in termuxes security context or with su...
+6. can change file attributes and modes
+7. fully featured
+
+## Terminal Emulater....
+
+1. kinda redundant, but allows unlimited shells in mobile enviroment
+2. in ADDITITON to the shell that is included with the ide
 
 ## AI GENERATED READ ME!!
 
@@ -203,24 +220,6 @@ When user presses Ctrl+C or sends SIGTERM to supervisor:
 
 ---
 
-
-
-Access UI at `http://localhost:8088`.
-
-### Run Modes
-
-**Local-only (localhost):**
-```bash
-./scripts/run_framework.sh --run-local
-```
-
-**Network-accessible (all interfaces, default):**
-```bash
-./scripts/run_framework.sh --broadcast
-```
-
----
-
 ## Multi-Device Convergence
 
 The platform implements the **code-server pattern** - disk-backed state with stateless UI clients:
@@ -279,32 +278,6 @@ No CRDT, no OT, no sync protocol. Just **last write wins** with SHA-based confli
 - **Settings:** Runtime diagnostics, framework shell management, shutdown controls
 
 ---
-
-## Testing & Verification
-
-**1. Launch the supervisor:**
-```bash
-./scripts/run_framework.sh
-```
-
-Prints generated `TE_RUN_ID` and keeps framework in foreground.
-
-**2. Verify runtime metrics:**
-```bash
-curl http://localhost:8088/api/framework/runtime/metrics | jq
-```
-
-Response includes:
-- Active `run_id`
-- Supervisor/framework PIDs
-- CPU usage, memory (RSS)
-- Framework shell list
-- Interactive session count
-
-**3. Test app worker spawn:**
-- Open `http://localhost:8088` in browser
-- Click "Code CM6" app card
-- Worker should spawn on dynamic port (check metrics)
 
 **4. Test graceful shutdown:**
 - Press `Ctrl+C` in supervisor window
