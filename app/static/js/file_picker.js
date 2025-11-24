@@ -395,6 +395,8 @@ function escapeHtml(value) {
 
 function simplifyAbsolute(path) {
   if (!path) return '/';
+  // Don't touch ~ paths - let backend handle them
+  if (path === '~' || path.startsWith('~/')) return path;
   const segments = [];
   const parts = String(path).split('/');
   for (const part of parts) {
