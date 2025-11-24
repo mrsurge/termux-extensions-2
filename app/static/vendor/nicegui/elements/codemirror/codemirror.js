@@ -79,10 +79,11 @@ const EMPTY_GUTTER_RANGESET = (() => {
 
 // Deletion widget class (moved to outer scope for facet access)
 class RemovedLineWidget extends CM.WidgetType {
-  constructor(text, wordWrap) {
+  constructor(text, wordWrap, originalLine) {
     super();
     this.text = text;
     this.wordWrap = wordWrap;
+    this.originalLine = originalLine;
   }
   toDOM() {
     const lineEl = document.createElement('div');
@@ -99,6 +100,21 @@ class RemovedLineWidget extends CM.WidgetType {
     return lineEl;
   }
   ignoreEvent() { return true; }
+}
+
+// Deleted line number marker for the standard line-number gutter
+class DeletedLineNumberMarker extends CM.GutterMarker {
+  constructor(num) {
+    super();
+    this.num = num;
+  }
+  eq(other) { return other instanceof DeletedLineNumberMarker && other.num === this.num; }
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = 'cm-diff-deleted-lineno';
+    span.textContent = this.num;
+    return span;
+  }
 }
 
 // Inline diff decorations helper (extracted from diff_decorations.js)
@@ -130,26 +146,36 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   
   for (const hunk of hunks) {
     let newLine = Math.max(1, hunk.newStart || 1);
-    console.log('[buildDiffDecorations] Processing hunk, newStart:', hunk.newStart, 'lines:', hunk.lines?.length);
+    let oldLine = Math.max(1, hunk.oldStart || 1);
+    
+    console.log('[buildDiffDecorations] Processing hunk, newStart:', hunk.newStart, 'oldStart:', hunk.oldStart, 'lines:', hunk.lines?.length);
     for (const line of hunk.lines || []) {
       const kind = line.type;
-      console.log('[buildDiffDecorations]   Line type:', kind, 'newLine:', newLine, 'text:', line.text?.substring(0, 30));
-      if (kind === 'add' || kind === 'context') {
-        const deco = kind === 'add' ? lineAddedDeco : lineContextDeco;
-        const markerKind = kind === 'add' ? '+' : '│';
+      console.log('[buildDiffDecorations]   Line type:', kind, 'newLine:', newLine, 'oldLine:', oldLine);
+      if (kind === 'add') {
+        const deco = lineAddedDeco;
+        const markerKind = '+';
         lineDecorations.set(newLine, { decoration: deco, markerKind });
         newLine += 1;
+      } else if (kind === 'context') {
+        const deco = lineContextDeco;
+        const markerKind = '│';
+        lineDecorations.set(newLine, { decoration: deco, markerKind });
+        newLine += 1;
+        oldLine += 1;
       } else if (kind === 'del') {
         deletionWidgets.push({
           line: newLine > 0 ? newLine : 1,
           text: line.text || '',
+          originalLine: oldLine
         });
+        oldLine += 1;
       }
     }
   }
   
   console.log('[buildDiffDecorations] Line decorations:', Array.from(lineDecorations.keys()));
-  console.log('[buildDiffDecorations] Deletion widgets:', deletionWidgets.map(w => `line ${w.line}: ${w.text.substring(0, 20)}`));
+  console.log('[buildDiffDecorations] Deletion widgets:', deletionWidgets.map(w => `line ${w.line} (orig ${w.originalLine}): ${w.text.substring(0, 20)}`));
   
   deletionWidgets.sort((a, b) => a.line - b.line);
   
@@ -165,7 +191,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       builder.add(pos, pos, Decoration.widget({
         side: -1,
         block: true,
-        widget: new RemovedLineWidget(widget.text, wordWrap),
+        widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine),
       }));
       widgetIndex++;
     }
@@ -175,7 +201,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       builder.add(lineInfo.from, lineInfo.from, Decoration.widget({
         side: -1,
         block: true,
-        widget: new RemovedLineWidget(widget.text, wordWrap),
+        widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine),
       }));
       widgetIndex++;
     }
@@ -197,7 +223,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
     builder.add(pos, pos, Decoration.widget({
       side: -1,
       block: true,
-      widget: new RemovedLineWidget(widget.text, wordWrap),
+      widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine),
     }));
     widgetIndex++;
   }
@@ -608,6 +634,13 @@ export default {
                 return null;
               }
             } : {}),
+          }),
+          // Facet to inject markers into the standard line-number gutter
+          CM.lineNumberWidgetMarker.of((view, widget, block) => {
+            if (widget instanceof RemovedLineWidget) {
+              return new DeletedLineNumberMarker(widget.originalLine);
+            }
+            return null;
           }),
         ];
         this.editor.dispatch({

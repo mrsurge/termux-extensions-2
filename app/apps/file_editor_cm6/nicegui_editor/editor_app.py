@@ -630,6 +630,13 @@ async def editor_page():
     .cm-diff-removed-text { display: block; white-space: pre; }
     .cm-diff-line-removed.cm-diff-wrap { white-space: pre-wrap; word-break: break-word; }
     .cm-diff-line-removed.cm-diff-wrap .cm-diff-removed-text { white-space: pre-wrap; word-break: break-word; }
+    
+    /* Deleted line number in standard gutter */
+    .cm-diff-deleted-lineno {
+      color: var(--diff-del-marker);
+      user-select: none;
+      -webkit-user-select: none;
+    }
     </style>
     ''')
 
