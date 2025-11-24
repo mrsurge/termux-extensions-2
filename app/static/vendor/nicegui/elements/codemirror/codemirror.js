@@ -107,22 +107,33 @@ class DeletedLineNumberMarker extends CM.GutterMarker {
   constructor(num) {
     super();
     this.num = num;
+    // Apply class to the gutter element itself
+    this.elementClass = 'cm-diff-deleted-lineno';
   }
   eq(other) { return other instanceof DeletedLineNumberMarker && other.num === this.num; }
   toDOM() {
     const span = document.createElement('span');
-    span.className = 'cm-diff-deleted-lineno';
     span.textContent = this.num;
     return span;
   }
 }
+
+// Marker to add class to added lines (for gutterLineClass)
+class AddedLineClassMarker extends CM.GutterMarker {
+  constructor() { 
+    super(); 
+    this.elementClass = 'cm-diff-added-lineno';
+  }
+  eq(other) { return other instanceof AddedLineClassMarker; }
+}
+const addedLineClassMarker = new AddedLineClassMarker();
 
 // Inline diff decorations helper (extracted from diff_decorations.js)
 function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const { Decoration, RangeSetBuilder } = CM;
   
   if (!hunks || hunks.length === 0) {
-    return { decorations: Decoration.none, gutter: EMPTY_GUTTER_RANGESET };
+    return { decorations: Decoration.none, gutter: EMPTY_GUTTER_RANGESET, gutterClasses: EMPTY_GUTTER_RANGESET };
   }
 
   const lineAddedDeco = Decoration.line({
@@ -136,7 +147,9 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const wordWrap = getWordWrap();
   const builder = new RangeSetBuilder();
   const gutterBuilder = new RangeSetBuilder();
+  const gutterClassBuilder = new RangeSetBuilder(); // For line number coloring
   let gutterCount = 0;
+  let classCount = 0;
   const doc = view.state.doc;
   
   console.log('[buildDiffDecorations] Doc has', doc.lines, 'lines');
@@ -155,7 +168,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       if (kind === 'add') {
         const deco = lineAddedDeco;
         const markerKind = '+';
-        lineDecorations.set(newLine, { decoration: deco, markerKind });
+        lineDecorations.set(newLine, { decoration: deco, markerKind, isAdd: true });
         newLine += 1;
       } else if (kind === 'context') {
         const deco = lineContextDeco;
@@ -213,6 +226,10 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
         gutterBuilder.add(lineInfo.from, lineInfo.from, new DiffGutterMarker(entry.markerKind));
         gutterCount++;
       }
+      if (entry.isAdd) {
+        gutterClassBuilder.add(lineInfo.from, lineInfo.from, addedLineClassMarker);
+        classCount++;
+      }
     }
   }
   
@@ -230,7 +247,8 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
 
   const decorations = builder.finish();
   const gutter = gutterCount ? gutterBuilder.finish() : EMPTY_GUTTER_RANGESET;
-  return { decorations, gutter };
+  const gutterClasses = classCount ? gutterClassBuilder.finish() : EMPTY_GUTTER_RANGESET;
+  return { decorations, gutter, gutterClasses };
 }
 
 function safeLine(doc, lineNumber) {
@@ -652,7 +670,7 @@ export default {
       
       const getWordWrap = () => this.lineWrapping || false;
       console.log('[applyDiffDecorations] Building decorations, wordWrap:', getWordWrap());
-      const { decorations: decoSet, gutter: gutterSet } = buildDiffDecorations(this.editor, normalizedHunks, CM, getWordWrap);
+      const { decorations: decoSet, gutter: gutterSet, gutterClasses: gutterClassSet } = buildDiffDecorations(this.editor, normalizedHunks, CM, getWordWrap);
       console.log('[applyDiffDecorations] Built diff decorations');
       const gutterActive = gutterSet !== EMPTY_GUTTER_RANGESET;
       
@@ -666,6 +684,15 @@ export default {
         } else {
           effects.push(this.clearDiffGutterEffect.of(null));
           effects.push(this.diffGutterCompartment.reconfigure([]));
+        }
+      }
+      
+      // Reconfigure gutter classes
+      if (this.gutterClassCompartment) {
+        if (gutterActive && gutterClassSet !== EMPTY_GUTTER_RANGESET) {
+          effects.push(this.gutterClassCompartment.reconfigure(CM.gutterLineClass.of(gutterClassSet)));
+        } else {
+          effects.push(this.gutterClassCompartment.reconfigure([]));
         }
       }
       
@@ -706,6 +733,7 @@ export default {
       this.colorPickerCompartment = new CM.Compartment();
       this.readOnlyCompartment = new CM.Compartment();
       this.fontSizeCompartment = new CM.Compartment();
+      this.gutterClassCompartment = new CM.Compartment();
 
       const initialFontScale = clampFontScale(this.fontScale);
       const initialFontTheme = buildFontScaleTheme(initialFontScale);
@@ -732,6 +760,7 @@ export default {
         this.fontSizeCompartment.of([initialFontTheme]),
         this.colorPickerCompartment.of([]), // Color picker toggle
         this.readOnlyCompartment.of([]),     // Read-only mode toggle
+        this.gutterClassCompartment.of([]), // Gutter line classes
         CM.EditorView.theme({
           "&": { height: "100%" },
           ".cm-scroller": { overflow: "auto" },

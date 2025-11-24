@@ -563,16 +563,16 @@ async def editor_page():
     }
     .cm-diff-gutter .cm-gutterElement {
       display: flex;
-      align-items: stretch;
+      align-items: flex-start;
       justify-content: center;
     }
     .cm-diff-gutter-marker {
       display: inline-flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
       width: 100%;
+      height: 100%;
       font-weight: 600;
-      font-size: 0.9rem;
       user-select: none;
       -webkit-user-select: none;
       line-height: inherit;
@@ -583,12 +583,13 @@ async def editor_page():
     
     .cm-diff-minus-marker {
       display: inline-flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
       width: 100%;
+      height: 100%;
       font-weight: 600;
-      font-size: 0.9rem;
       color: var(--diff-del-marker);
+      background-color: var(--diff-del-bg);
       user-select: none;
       -webkit-user-select: none;
     }
@@ -634,8 +635,22 @@ async def editor_page():
     /* Deleted line number in standard gutter */
     .cm-diff-deleted-lineno {
       color: var(--diff-del-marker);
+      background-color: var(--diff-del-bg);
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      width: 100%;
+      margin: 0 -4px;
+      padding-right: 4px;
       user-select: none;
       -webkit-user-select: none;
+    }
+    
+    /* Added line number in ALL gutters (applied via gutterLineClass) */
+    .cm-diff-added-lineno {
+      color: var(--diff-add-marker);
+      background-color: var(--diff-add-bg);
+      font-weight: 600;
     }
     </style>
     ''')
