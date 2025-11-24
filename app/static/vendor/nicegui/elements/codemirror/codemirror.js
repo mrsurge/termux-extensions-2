@@ -118,6 +118,18 @@ class DeletedLineNumberMarker extends CM.GutterMarker {
   }
 }
 
+// Marker for the fold gutter on deletion lines
+class DeletedFoldMarker extends CM.GutterMarker {
+  constructor() {
+    super();
+    this.elementClass = 'cm-diff-deleted-lineno';
+  }
+  eq(other) { return other instanceof DeletedFoldMarker; }
+  toDOM() {
+    return document.createElement('div');
+  }
+}
+
 // Marker to add class to added lines (for gutterLineClass)
 class AddedLineClassMarker extends CM.GutterMarker {
   constructor() { 
@@ -761,6 +773,17 @@ export default {
         this.colorPickerCompartment.of([]), // Color picker toggle
         this.readOnlyCompartment.of([]),     // Read-only mode toggle
         this.gutterClassCompartment.of([]), // Gutter line classes
+        // Use a custom fold gutter that supports widget markers (for deletion diffs)
+        // We will hide the default fold gutter via CSS using the .cm-custom-fold-gutter class
+        (typeof CM.foldGutter === 'function' ? CM.foldGutter({
+          class: "cm-foldGutter cm-custom-fold-gutter",
+          widgetMarker: (view, widget, block) => {
+            if (widget instanceof RemovedLineWidget) {
+              return new DeletedFoldMarker();
+            }
+            return null;
+          }
+        }) : []),
         CM.EditorView.theme({
           "&": { height: "100%" },
           ".cm-scroller": { overflow: "auto" },
