@@ -1,18 +1,77 @@
 # Termux Extensions 2
 
+## What TE2 Gives You
+
+An integrated developement environment & complete with
+
+### IDE
+1. Convergant UI
+   - Works with desktop and mobile displays... I have spent many hours making sure it works VERY well on mobile. Im going to include the `GeckoView` based app in the releases soon... so look out for that.
+   - The same UI that is in the desktop browser is in the mobile.  Carefully positioned breakpoints make sure of this.  You can host this from your desktop and use it on your mobile/tablet to review and make changes to your desktop repos, and vice versa.
+2. Fully `git` integrated
+   -
+   - You can run on your desktop and mobile seperately and use all the intergrated git featrures to push changes in tandem.
+4. Fully Featured
+   -
+   - Fully integrated project exporer/ agent chat / terminal
+   - Terminal included can be used interchangably in desktop or mobile from either. No SSH.  (Keep it on your personal LAN if you run it in this way.)
+
 **`termux-extensions-2`** is an application platform for Termux that provides mobile-optimized apps with shared infrastructure, process isolation, and multi-device convergence. It runs as a local FastAPI/IPC hybrid server presenting a unified launcher and app container.
 
 The platform delivers functionality through isolated "apps" that leverage framework services (process management, terminal shells, state persistence) to provide rich, touch-friendly experiences on Android devices.
 
 ---
+## Quick Start
 
-## Project Philosophy
+**Bootstrap (Fresh install will not work if you are using a shell other than bash, a simple `bash` command can fix this)**
 
-While this platform can assist users unfamiliar with shell scripting, its primary audience is **power users**. The goal is to transcend the limitations of touchscreen keyboards with traditional CLI by providing a **fluid, touch-friendly interface** for managing the Termux environment.
+### Ubuntu:
 
-This project draws inspiration from frameworks like *Oh My Zsh* and *Oh My Fish*—which enhance the shell with smart helpers and plugins—and adapts that spirit to a graphical, touch-optimized paradigm for mobile development and system administration.
+```bash
+sudo apt update ; sudo apt upgrade -y ; sudo apt install git -y
+git clone https://github.com/mrsurge/termux-extensions-2.git
+cd termux-extensions-2
+sudo apt install python3-venv
+python3 -m venv te-venv
+source te-venv/bin/activate
+pip install -r requirements.txt
+./scripts/run_framework.sh
+```
+**Subsequent runs:**
+```bash
+source te-venv/bin/activate
+./scripts/run_framework.sh
+```
+### Termux: <--- this is why were all here folks
+```bash
+pkg upgrade -y ; apt install git -y
+git clone https://github.com/mrsurge/termux-extensions-2.git
+cd termux-extensions-2
+apt install python3-venv -y
+pip install -r requirements.txt
+./scripts/run_framework.sh
+```
+**Subsequent runs:**
+```bash
+./scripts/run_framework.sh
+```
 
----
+```bash
+# 1. Install Python dependencies
+pip install -r requirements.txt
+
+# 3. Run framework
+./scripts/run_framework.sh
+```
+
+Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another device on LAN).
+
+
+```bash
+start-te
+```
+### Manual Setup
+
 
 ## Architecture Overview
 
@@ -26,7 +85,7 @@ This project draws inspiration from frameworks like *Oh My Zsh* and *Oh My Fish*
 │  - Orchestrates shutdown                │
 └─────┬────────────────────┬──────────────┘
       │                    │
-┌─────▼──────────┐   ┌────▼──────────────┐
+┌─────▼──────────┐   ┌─────▼─────────────┐
 │ IPC Server     │   │ Framework (Main)  │
 │ (Flask/sync)   │◄──┤ (FastAPI/async)   │
 │ :9123          │   │ :8088             │
@@ -38,7 +97,7 @@ This project draws inspiration from frameworks like *Oh My Zsh* and *Oh My Fish*
                           │
          ┌────────────────┼────────────────┐
          │                │                │
-    ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
+    ┌────▼─────┐    ┌─────▼────┐    ┌──────▼───┐
     │ Worker 1 │    │ Worker 2 │    │ Worker 3 │
     │ Code CM6 │    │ File Exp │    │ Terminal │
     │ :5001    │    │ :5002    │    │ :5003    │
@@ -105,44 +164,7 @@ When user presses Ctrl+C or sends SIGTERM to supervisor:
 
 ---
 
-## Quick Start
 
-### Bootstrap (Fresh Termux Install)
-
-```bash
-pkg update && pkg install git
-git clone https://github.com/mrsurge/termux-extensions-2.git
-cd termux-extensions-2
-./scripts/bootstrap_termux.sh
-```
-
-The bootstrap script:
-- Installs required Termux packages
-- Installs Python dependencies
-- Sources `scripts/init.sh` in `~/.bashrc`
-- Creates `~/bin/start-te` helper
-
-After bootstrap completes, open new shell and run:
-
-```bash
-start-te
-```
-
-Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another device on LAN).
-
-### Manual Setup
-
-```bash
-# 1. Install Python dependencies
-pip install -r requirements.txt
-
-# 2. (Optional) Hook for shell monitoring
-echo "source $(pwd)/scripts/init.sh" >> ~/.bashrc
-source ~/.bashrc
-
-# 3. Run framework
-./scripts/run_framework.sh
-```
 
 Access UI at `http://localhost:8088`.
 

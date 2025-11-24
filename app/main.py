@@ -1381,11 +1381,189 @@ async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
 
 
 if __name__ == '__main__':
+    # Use the app instance from the imported module to ensure consistency
+    # with extensions that import 'app.main'.
+    # This prevents "split-brain" where __main__.app runs but extensions
+    # attach to/read from app.main.app.
+    import app.main
+    app = app.main.app
+
+    import argparse
     import uvicorn
-    print("--- Starting ASGI Server ---")
-    # Lifespan handler will handle all initialization
+    import subprocess
+    import re
+    from ipaddress import ip_address, ip_network, AddressValueError
+    
+    parser = argparse.ArgumentParser(description='Termux Extensions Framework')
+    parser.add_argument('--broadcast', nargs='+', metavar='IP_SUBNET_OR_IFACE',
+                        help='Enable broadcasting. Requires args: "all", IPs, subnets, or interfaces')
+    parser.add_argument('--list-interfaces', action='store_true', help='Show network interfaces and exit')
+    args = parser.parse_args()
+    
+    # Handle --list-interfaces
+    if args.list_interfaces:
+        try:
+            result = subprocess.run(['ifconfig'], capture_output=True, text=True)
+            print(result.stdout)
+            sys.exit(0)
+        except Exception as e:
+            print(f"Error running ifconfig: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Build IP allowlist
+    allowlist = set()
+    allow_all = False
+    
+    # Always allow localhost
+    allowlist.add(ip_address('127.0.0.1'))
+    allowlist.add(ip_address('::1'))
+    
+    if args.broadcast is not None:
+        if 'all' in args.broadcast:
+            # --broadcast all = allow everything
+            allow_all = True
+            print("[main] WARNING: Broadcasting to all IPs (no filtering)")
+        else:
+            # Pre-fetch interface data (running ifconfig once)
+            interfaces_data = {}
+            try:
+                ifconfig_proc = subprocess.run(['ifconfig'], capture_output=True, text=True)
+                if ifconfig_proc.returncode == 0:
+                    current_iface = None
+                    for line in ifconfig_proc.stdout.splitlines():
+                        line = line.rstrip()
+                        # Match interface start "wlan0: ..."
+                        m_start = re.match(r'^([a-zA-Z0-9_\-]+):', line)
+                        if m_start:
+                            current_iface = m_start.group(1)
+                            interfaces_data[current_iface] = {}
+                            continue
+                        
+                        if current_iface:
+                            # Parse inet and netmask
+                            m_ip = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)', line)
+                            m_mask = re.search(r'netmask\s+(\d+\.\d+\.\d+\.\d+)', line)
+                            if m_ip:
+                                interfaces_data[current_iface]['ip'] = m_ip.group(1)
+                            if m_mask:
+                                interfaces_data[current_iface]['netmask'] = m_mask.group(1)
+            except Exception as e:
+                print(f"[main] Failed to parse ifconfig: {e}", file=sys.stderr)
+
+            # Process each filter
+            for item in args.broadcast:
+                item = item.strip()
+                
+                # Check if it's a CIDR subnet
+                if '/' in item:
+                    try:
+                        network = ip_network(item, strict=False)
+                        allowlist.add(network)
+                        print(f"[main] Allowing subnet: {network}")
+                    except (AddressValueError, ValueError) as e:
+                        print(f"[main] Invalid subnet {item}: {e}", file=sys.stderr)
+                        continue
+                
+                # Check if it's an IP address
+                elif re.match(r'^\d+\.\d+\.\d+\.\d+$', item):
+                    try:
+                        ip = ip_address(item)
+                        allowlist.add(ip)
+                        print(f"[main] Allowing IP: {ip}")
+                    except AddressValueError as e:
+                        print(f"[main] Invalid IP {item}: {e}", file=sys.stderr)
+                        continue
+                
+                # Check if it's an interface
+                elif item in interfaces_data:
+                    data = interfaces_data[item]
+                    if 'ip' not in data:
+                         print(f"[main] Interface {item} found but has no IP address")
+                         continue
+                    
+                    ip_str = data['ip']
+                    mask_str = data.get('netmask')
+                    
+                    if not mask_str:
+                        print(f"[main] Interface {item} has no netmask, adding IP only: {ip_str}")
+                        allowlist.add(ip_address(ip_str))
+                        continue
+                        
+                    try:
+                        mask_parts = [int(x) for x in mask_str.split('.')]
+                        cidr = sum([bin(x).count('1') for x in mask_parts])
+                        
+                        if cidr == 32:
+                             print(f"[main] Interface {item} is /32 (likely VPN), skipping subnet allowlist. (Use 'all' or specific IPs if needed)")
+                             continue
+                             
+                        subnet = ip_network(f"{ip_str}/{cidr}", strict=False)
+                        allowlist.add(subnet)
+                        print(f"[main] Allowing subnet from {item}: {subnet}")
+                    except Exception as e:
+                        print(f"[main] Failed to calculate subnet for {item}: {e}", file=sys.stderr)
+                
+                else:
+                    print(f"[main] Warning: '{item}' is not a valid IP, subnet, or interface name.", file=sys.stderr)
+    else:
+        # No --broadcast flag = localhost only
+        print("[main] Localhost only (secure default)")
+    
+    # Add IP filtering middleware
+    if not allow_all:
+        @app.middleware("http")
+        async def ip_filter_middleware(request: Request, call_next):
+            client_ip = request.client.host
+            
+            # Check if IP is allowed
+            try:
+                client_addr = ip_address(client_ip)
+                allowed = False
+                
+                print(f"[main] Checking IP: {client_ip} (parsed as {client_addr})")
+                
+                for allowed_item in allowlist:
+                    if isinstance(allowed_item, type(client_addr)):
+                        # Direct IP match
+                        if client_addr == allowed_item:
+                            print(f"[main] ✓ IP {client_ip} matched allowed IP {allowed_item}")
+                            allowed = True
+                            break
+                    else:
+                        # Network/subnet match
+                        try:
+                            if client_addr in allowed_item:
+                                print(f"[main] ✓ IP {client_ip} matched subnet {allowed_item}")
+                                allowed = True
+                                break
+                        except Exception as subnet_err:
+                            print(f"[main] Subnet check failed for {allowed_item}: {subnet_err}", file=sys.stderr)
+                
+                if not allowed:
+                    print(f"[main] ✗ BLOCKED connection from {client_ip} - not in allowlist")
+                    return JSONResponse(
+                        status_code=403,
+                        content={"ok": False, "error": "Access denied"}
+                    )
+                
+                # IP is allowed, proceed
+                return await call_next(request)
+            
+            except Exception as e:
+                print(f"[main] ✗ IP filter error for {client_ip}: {e}", file=sys.stderr)
+                traceback.print_exc()
+                # On error, block the request (fail secure)
+                return JSONResponse(
+                    status_code=403,
+                    content={"ok": False, "error": "IP validation error"}
+                )
+    
+    print(f"--- Starting ASGI Server on 0.0.0.0:8088 ---")
+    if not allow_all and len(allowlist) > 2:  # More than just localhost
+        print(f"[main] IP filtering enabled ({len(allowlist) - 2} filters + localhost)")
+    
     uvicorn.run(
-        "app.main:app",
+        app,
         host='0.0.0.0',
         port=8088,
     )
