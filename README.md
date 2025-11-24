@@ -9,7 +9,7 @@ An integrated developement environment & complete with
 (im sorry this is AI generated... i dont have the time to create a full feature spec for the ide... maybe you can? anyway... you can read what I have below and if you want to find out more about it you can read the readme in the link)
 
 1. Convergant UI
-   -/home/mrsurge/Documents/te-2-cm6-iframe-main/notes
+   -
    - Works with desktop and mobile displays... I have spent many hours making sure it works VERY well on mobile. Im going to include the `GeckoView` based app in the releases soon... so look out for that.
    - The same UI that is in the desktop browser is in the mobile.  Carefully positioned breakpoints make sure of this.  You can host this from your desktop and use it on your mobile/tablet to review and make changes to your desktop repos, and vice versa.
 3. Fully `git` integrated
