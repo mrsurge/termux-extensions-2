@@ -577,14 +577,8 @@ async def editor_page():
       -webkit-user-select: none;
       line-height: inherit;
     }
-    /* Hide the default fold gutter (which doesn't support widget markers)
-       and keep only our custom one */
-    .cm-foldGutter:not(.cm-custom-fold-gutter) {
-      display: none !important;
-    }
-
     /* tint the fold/twisty gutter for deletion rows */
-    .cm-custom-fold-gutter .cm-gutterElement.cm-diff-deleted-lineno {
+    .cm-foldGutter .cm-gutterElement.cm-diff-deleted-lineno {
        background-color: var(--diff-del-bg);
     }
 
