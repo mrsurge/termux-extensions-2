@@ -62,7 +62,6 @@ source te-venv/bin/activate
 pkg upgrade -y ; apt install git -y
 git clone https://github.com/mrsurge/termux-extensions-2.git
 cd termux-extensions-2
-apt install python3-venv -y
 pip install -r requirements.txt
 ./scripts/run_framework.sh
 ```
@@ -70,12 +69,42 @@ pip install -r requirements.txt
 ```bash
 ./scripts/run_framework.sh
 ```
+**For all platforms**
+-
+## Network Security & IP Filtering
 
+By default, the framework is **locked down to localhost only**. To allow external connections, use the `--broadcast` flag with specific filters.
+
+### Usage Examples
+
+**1. Allow specific devices (Recommended)**
+Restrict access to specific IP addresses.
 ```bash
-# 1. Install Python dependencies
-pip install -r requirements.txt
+./scripts/run_framework.sh --broadcast 192.168.1.50 192.168.1.51
+```
 
-# 3. Run framework
+**2. Allow entire Wi-Fi network**
+Automatically calculates the subnet for `wlan0` (e.g., `192.168.1.0/24`) and allows all devices on it.
+```bash
+./scripts/run_framework.sh --broadcast wlan0
+```
+*Note: Interfaces with `/32` masks (like Tailscale) are ignored for subnet calculation to prevent accidental exposure. You must add their specific IPs manually.*
+
+**3. Allow specific subnets**
+Manually whitelist a CIDR range.
+```bash
+./scripts/run_framework.sh --broadcast 10.0.0.0/24
+```
+
+**4. Allow ALL connections (Insecure)**
+Disable all IP filtering. Not recommended.
+```bash
+./scripts/run_framework.sh --broadcast all
+```
+
+**5. Localhost Only (Default)**
+Running without arguments denies all external connections.
+```bash
 ./scripts/run_framework.sh
 ```
 
