@@ -17,6 +17,17 @@ An integrated developement environment & complete with
    -
    - Fully integrated project exporer/ agent chat / terminal
    - Terminal included can be used interchangably in desktop or mobile from either. No SSH.  (Keep it on your personal LAN if you run it in this way.)
+   - VS Code - Code-OSS Code-Server Feature parity
+   - CM6 Backend with all the bells and whistles
+   - Feels native on mobile... no selection jank
+   - Code completions
+   - Syntax Highlighting
+   - **Inline Diff Engine**
+5. Room to grow
+   -
+   - help me please i have no idea what im doing
+
+## AI GENERATED READ ME!!
 
 **`termux-extensions-2`** is an application platform for Termux that provides mobile-optimized apps with shared infrastructure, process isolation, and multi-device convergence. It runs as a local FastAPI/IPC hybrid server presenting a unified launcher and app container.
 
@@ -24,6 +35,8 @@ The platform delivers functionality through isolated "apps" that leverage framew
 
 ---
 ## Quick Start
+
+- Ok im back
 
 **Bootstrap (Fresh install will not work if you are using a shell other than bash, a simple `bash` command can fix this)**
 
