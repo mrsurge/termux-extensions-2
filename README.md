@@ -483,11 +483,12 @@ With framework shells:
 
 ## License
 
-[Your License Here]
+GPL-3.0 (see gpl-3.0.md in repository root)
 
 ## Contributing
 
-[Contributing guidelines when ready]
+email me?
+xrsurge@gmail.com
 
 ## Credits
 
