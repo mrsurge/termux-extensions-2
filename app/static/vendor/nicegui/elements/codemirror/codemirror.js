@@ -276,6 +276,10 @@ function safeLine(doc, lineNumber) {
 
 // Deletion widget gutter marker (Chad's solution)
 class MinusGutterMarker extends CM.GutterMarker {
+  constructor() {
+    super();
+    this.elementClass = 'cm-diff-deleted-lineno';
+  }
   toDOM() {
     const span = document.createElement('span');
     span.textContent = '−';

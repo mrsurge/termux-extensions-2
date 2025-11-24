@@ -594,7 +594,6 @@ async def editor_page():
       height: 100%;
       font-weight: 600;
       color: var(--diff-del-marker);
-      background-color: var(--diff-del-bg);
       user-select: none;
       -webkit-user-select: none;
     }
