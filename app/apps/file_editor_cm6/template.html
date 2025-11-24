@@ -192,6 +192,21 @@
     overflow: hidden;
   }
 
+  /* Lower agent drawer z-index in mobile so explorer (100) can overlay it */
+  .layout-mobile .agent-drawer {
+    z-index: 95;
+  }
+
+  /* Hide session card ONLY when keyboard is open in mobile layout */
+  .layout-mobile.keyboard-open .agent-section--current-session {
+    display: none;
+  }
+
+  /* Show files toggle button in mobile agent drawer */
+  .layout-mobile #agent-files-toggle {
+    display: block !important;
+  }
+
   /* Terminal becomes tiled in mobile mode */
   .layout-mobile .terminal-drawer {
     position: static !important;
@@ -1472,6 +1487,7 @@
                   <option value="gemini">Gemini</option>
                 </select>
               </label>
+              <button class="fe-btn" id="agent-files-toggle" title="Files" style="display: none; margin-left: auto;">📁</button>
               <button class="fe-btn" id="agent-send">Send</button>
             </div>
           </div>

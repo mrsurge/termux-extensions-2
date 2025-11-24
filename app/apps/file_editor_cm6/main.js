@@ -168,11 +168,14 @@ function requireEl(selector, scope=document) {
   return el;
 }
 
-function initVirtualKeyboardAdjustments({ root, agentDrawer, composer, transcript, editorSurface }) {
+function initVirtualKeyboardAdjustments({ root }) {
   if (!root) return;
 
   const docEl = document.documentElement;
   const viewport = window.visualViewport;
+
+  // We only care about detecting if the keyboard is likely open to toggle a class.
+  // We do NOT want to manually resize elements or set CSS variables that fight native behavior.
 
   const getViewportHeight = () => {
     if (viewport) return viewport.height;
@@ -180,113 +183,43 @@ function initVirtualKeyboardAdjustments({ root, agentDrawer, composer, transcrip
   };
 
   let baselineHeight = getViewportHeight() || window.innerHeight || docEl.clientHeight || 0;
-  let activeContext = null; // 'agent' | 'editor' | null
   let keyboardActive = false;
 
-  const applyClasses = () => {
-    const agentActive = keyboardActive && activeContext === 'agent';
-    const editorActive = keyboardActive && activeContext === 'editor';
-    root.classList.toggle('keyboard-open', keyboardActive);
-    root.classList.toggle('keyboard-agent', agentActive);
-    root.classList.toggle('keyboard-editor', editorActive);
-    root.style.height = '';
-    root.style.maxHeight = '';
-    root.style.overflow = '';
-    if (document.body) {
-      document.body.classList.toggle('keyboard-locked', keyboardActive);
-    }
-    if (agentDrawer) {
-      agentDrawer.classList.toggle('agent-drawer--keyboard', agentActive);
-    }
-  };
-
-  const scrollTranscriptToEnd = () => {
-    if (!transcript) return;
-    requestAnimationFrame(() => {
-      transcript.scrollTop = transcript.scrollHeight;
-    });
-  };
-
-  const updateInset = () => {
+  const updateKeyboardState = () => {
     const currentHeight = getViewportHeight();
     if (!currentHeight) return;
 
-    if (!keyboardActive && currentHeight > baselineHeight) {
+    // specific check: if height shrinks by > 150px, assume keyboard
+    const diff = baselineHeight - currentHeight;
+    const likelyKeyboard = diff > 150;
+
+    if (likelyKeyboard !== keyboardActive) {
+      keyboardActive = likelyKeyboard;
+      root.classList.toggle('keyboard-open', keyboardActive);
+    }
+    
+    // Update baseline if we get a larger height (e.g. keyboard closed or orientation changed)
+    if (currentHeight > baselineHeight) {
       baselineHeight = currentHeight;
     }
-
-    let inset = Math.round(baselineHeight - currentHeight);
-    if (inset < 0) inset = 0;
-
-    if (inset < 80) {
-      inset = 0;
-      baselineHeight = currentHeight;
-    }
-
-    docEl.style.setProperty('--keyboard-inset', `${inset}px`);
-
-    const shouldActivate = inset > 0 && activeContext !== null;
-    if (shouldActivate !== keyboardActive) {
-      keyboardActive = shouldActivate;
-      applyClasses();
-    } else if (!shouldActivate) {
-      applyClasses();
-    }
-
-    if (keyboardActive && activeContext === 'agent') {
-      scrollTranscriptToEnd();
-    }
   };
-
-  const setContext = (context) => {
-    if (activeContext === context) return;
-    activeContext = context;
-    applyClasses();
-    updateInset();
-  };
-
-  const clearContext = (context) => {
-    if (activeContext !== context) return;
-    activeContext = null;
-    applyClasses();
-    updateInset();
-  };
-
-  composer?.addEventListener('focus', () => setContext('agent'));
-  composer?.addEventListener('pointerdown', () => setContext('agent'));
-  composer?.addEventListener('blur', () => clearContext('agent'));
-
-  if (root && editorSurface) {
-    root.addEventListener('focusin', (event) => {
-      if (editorSurface.contains(event.target)) {
-        setContext('editor');
-      }
-    });
-
-    root.addEventListener('focusout', (event) => {
-      if (editorSurface.contains(event.target) && (!event.relatedTarget || !editorSurface.contains(event.relatedTarget))) {
-        clearContext('editor');
-      }
-    });
-  }
-
-  const onViewportChange = () => updateInset();
 
   if (viewport) {
-    viewport.addEventListener('resize', onViewportChange);
-    viewport.addEventListener('scroll', onViewportChange);
+    viewport.addEventListener('resize', updateKeyboardState);
   } else {
-    window.addEventListener('resize', onViewportChange);
+    window.addEventListener('resize', updateKeyboardState);
   }
 
+  // Handle orientation changes by resetting baseline
   window.addEventListener('orientationchange', () => {
     setTimeout(() => {
       baselineHeight = getViewportHeight() || window.innerHeight || baselineHeight;
-      updateInset();
+      updateKeyboardState();
     }, 250);
   });
 
-  updateInset();
+  // Initial check
+  updateKeyboardState();
 }
 
 const container = requireEl('#editor-container');

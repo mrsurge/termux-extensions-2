@@ -29,6 +29,9 @@ export function initAgentDrawer() {
   const sessionsModalClose = document.getElementById('agent-sessions-modal-close');
   const sessionsModalList = document.getElementById('agent-sessions-modal-list');
   
+  // Files toggle button (mobile only)
+  const filesToggleBtn = document.getElementById('agent-files-toggle');
+  
   // Session config modal elements
   const sessionModal = document.getElementById('agent-session-modal');
   const sessionModalClose = document.getElementById('agent-session-modal-close');
@@ -1255,6 +1258,12 @@ export function initAgentDrawer() {
   // Sessions modal handlers
   sessionsModalClose?.addEventListener('click', hideSessionsModal);
   sessionsModal?.querySelector('.agent-modal__backdrop')?.addEventListener('click', hideSessionsModal);
+
+  // Files toggle handler
+  filesToggleBtn?.addEventListener('click', () => {
+    const drawerOpenBtn = document.getElementById('fe-drawer-open');
+    drawerOpenBtn?.click();
+  });
 
   // Refresh button now triggers manual reconnection
   refreshBtn?.addEventListener('click', async () => {

@@ -1448,11 +1448,24 @@ async function deleteEntry(entry) {
     }
 }
 
-function enableSelectMode(entry) {
+async function enableSelectMode(entry) {
   if (entry.kind !== 'dir') return;
   selectModeDir = entry.rel;
   selectedEntries.clear();
-  refreshTree(treeElement); // This will re-render with checkboxes
+  
+  // Manually refresh to preserve the expansion
+  // 1. Capture current state
+  syncExpandedDirsFromTree(treeElement);
+  
+  // 2. Auto-expand the target directory
+  if (entry.rel && entry.rel !== '.') {
+    expandedDirs.add(entry.rel);
+  }
+  
+  // 3. Re-render without calling refreshTree() which would wipe our change
+  await renderTreeRoot(treeElement);
+  await restoreExpandedDirs(treeElement);
+  await refreshGitStatus(false);
 }
 
 function disableSelectMode() {
