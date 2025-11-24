@@ -577,6 +577,11 @@ async def editor_page():
       -webkit-user-select: none;
       line-height: inherit;
     }
+    /* tint the fold/twisty gutter for  deletion rows */
+    .cm-foldGutter .cm-gutterElement.cm-diff-deleted-lineno {
+       background-color: var(--diff-del-bg);
+    }
+
     .cm-diff-marker-add { color: var(--diff-add-marker); }
     .cm-diff-marker-del { color: var(--diff-del-marker); }
     .cm-diff-marker-context { color: var(--diff-context-marker); }
@@ -636,12 +641,7 @@ async def editor_page():
     .cm-diff-deleted-lineno {
       color: var(--diff-del-marker);
       background-color: var(--diff-del-bg);
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-      width: 100%;
-      margin: 0 -4px;
-      padding-right: 4px;
+      display: block;
       user-select: none;
       -webkit-user-select: none;
     }
