@@ -4,11 +4,13 @@
 
 An integrated developement environment & complete with
 
-### IDE
+## IDE
+
 1. Convergant UI
+   -
    - Works with desktop and mobile displays... I have spent many hours making sure it works VERY well on mobile. Im going to include the `GeckoView` based app in the releases soon... so look out for that.
    - The same UI that is in the desktop browser is in the mobile.  Carefully positioned breakpoints make sure of this.  You can host this from your desktop and use it on your mobile/tablet to review and make changes to your desktop repos, and vice versa.
-2. Fully `git` integrated
+3. Fully `git` integrated
    -
    - You can run on your desktop and mobile seperately and use all the intergrated git featrures to push changes in tandem.
 4. Fully Featured
