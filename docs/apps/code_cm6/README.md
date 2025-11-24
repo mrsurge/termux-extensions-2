@@ -207,11 +207,11 @@ Without Framework Shells, Code CM6 would need custom process management for term
 - 🚧 **Autosave Backend:** Optional autosave with configurable intervals (frontend exists, needs backend integration)
 
 ### Planned Enhancements
-- 📋 **Remote Branch Checkout:** Extend branch menu to list and checkout remote branches
-- 📋 **Agent Drawer Mobile UX:** Fix transcript/chat layout on mobile browsers
+- (Done) **Remote Branch Checkout:** Extend branch menu to list and checkout remote branches
+- (Done) **Agent Drawer Mobile UX:** Fix transcript/chat layout on mobile browsers
 - 📋 **Git Jobs Progress:** Framework jobs library integration for long-running git operations
-- 📋 **External File Explorer:** "Open in external explorer" action for directories
-- 📋 **Copy From/Move From:** Additional batch operations in explorer context menus
+- (Done) **External File Explorer:** "Open in external explorer" action for directories
+- (Done) **Copy From/Move From:** Additional batch operations in explorer context menus
 
 ---
 
@@ -281,9 +281,9 @@ pip install -r requirements.txt
 # Run the framework
 ./scripts/run_framework.sh
 ```
-
+(Its a little more complicated than this... View the project Readme )
 ### Usage
-1. Open browser to `http://localhost:5000`
+1. Open browser to `http://localhost:8088`
 2. Click "Code CM6" from the apps menu
 3. Use "New Project" to open a directory or "Recent Files" to resume work
 4. Edit files, stage changes, commit, and push—all from the integrated interface
