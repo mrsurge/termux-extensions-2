@@ -564,7 +564,7 @@
 .fe-search-results {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 0; /* Removed all padding */
 }
 
 .fe-search-changes-toolbar {
@@ -807,8 +807,8 @@
 
 .fe-search-diff-row {
   display: flex;
-  gap: 8px;
-  padding: 2px 12px;
+  gap: 2px; /* Reduced gap */
+  padding: 2px 2px 2px 4px;
   font-family: monospace;
   font-size: 12px;
   background: rgba(15, 23, 42, 0.85);
@@ -829,15 +829,19 @@
 }
 
 .fe-search-diff-line-num {
-  width: 54px;
+  width: 36px; /* Reduced width */
   text-align: right;
   color: var(--muted);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .fe-search-diff-sign {
   width: 16px;
   text-align: center;
   font-weight: 600;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .fe-search-diff-text {

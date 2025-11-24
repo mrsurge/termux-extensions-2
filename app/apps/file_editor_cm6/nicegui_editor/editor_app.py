@@ -545,7 +545,7 @@ async def editor_page():
     ui.add_head_html('''
     <style>
     :root {
-      --diff-gutter-width: 1.2rem;
+      --diff-gutter-width: 0.7rem;
       --diff-marker-width: var(--diff-gutter-width);
       --diff-add-bg: rgba(52, 211, 153, 0.22);
       --diff-add-border: rgba(52, 211, 153, 0.75);
