@@ -110,12 +110,7 @@ Running without arguments denies all external connections.
 
 Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another device on LAN).
 
-
-```bash
-start-te
-```
-### Manual Setup
-
+## Back to AI Generated Read-Me 
 
 ## Architecture Overview
 
