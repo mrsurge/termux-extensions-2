@@ -1039,8 +1039,8 @@ export default {
             create,
             // VS Code-ish “blocky” look works well in a tiny view
             displayText: 'blocks',
-            // For desktop you might prefer "mouse-over", for mobile always-on
-            showOverlay: isMobile ? 'always' : 'mouse-over',
+            // Always show overlay (we control visibility/opacity via CSS/Mode)
+            showOverlay: 'always',
             // Inject the collected diff gutters
             gutters: gutters,
           };

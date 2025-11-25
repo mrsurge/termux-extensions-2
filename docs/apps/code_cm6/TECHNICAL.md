@@ -1999,6 +1999,43 @@ For questions about architecture, implementation details, or contribution:
 
 **Package:** `@uiw/codemirror-extensions-color@^4.25.3`
 
+---
+
+## 17. Minimap Extension
+
+### 17.1 Architecture
+
+**Status:** ✅ Completed 2025-11-24
+
+The minimap implementation uses a **responsive hybrid architecture** that adapts to device constraints while maintaining a unified codebase.
+
+**Component Stack:**
+1. **Vendor Layer:** `@replit/codemirror-minimap` bundled into `nicegui-codemirror`.
+2. **Wrapper Layer (`codemirror.js`):**
+   - Watches `showMinimap` prop (user preference).
+   - Watches `window.matchMedia` (device capabilities).
+   - Computes mode: `desktop` (sidebar), `mobile` (overlay), or `off`.
+   - Uses a **Compartment** to hot-swap configuration without re-initializing.
+3. **Presentation Layer (`editor_app.py` CSS):**
+   - **Desktop:** `position: fixed`, opaque background, pushes editor content via padding.
+   - **Mobile:** `position: fixed`, transparent overlay, fades in on scroll activity.
+
+### 17.2 Diff Integration
+
+The minimap is deeply integrated with the **Inline Diff Pipeline** (Section 6). It visualizes git changes by scanning the existing diff decorations.
+
+**Data Flow:**
+1. `buildDiffDecorations` tags editor decorations with metadata:
+   ```javascript
+   Decoration.line({ diffKind: 'insert' })
+   Decoration.widget({ diffKind: 'delete' })
+   ```
+2. `diffMinimapGuttersFromDecorations` scans the active `DecorationSet`.
+3. Minimap `compute` function receives `diffField` as a dependency.
+4. Markers are rendered into the minimap gutter using the extension's API.
+
+This ensures the minimap is always in sync with the editor's inline diffs with zero additional network overhead (reuses existing diff data).
+
 The CSS color picker extension was vendored following the same pattern as indentation guides:
 
 **Installation:**

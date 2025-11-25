@@ -51,7 +51,8 @@ First-class Git support with branch management, staging, committing, and diff vi
 - **Search by Changes:** Filter project files by git status or diff content with live highlighting
 - **Repository Detection:** Automatic Git repo discovery with fallback to plain file browsing
 - **Git Init:** Initialize new repositories from non-repo projects
-- **File Restore:** Restore files to previous commits via context menu
+- **Git Integration:** Status indicators, diff view, staging, committing, and branch management.
+- **Minimap:** VS Code-style minimap with responsive desktop (sidebar) and mobile (overlay) modes, including git diff markers.
 
 ### 5. **Project Explorer**
 Hierarchical file tree with search, git status badges, and extensive file operations.

@@ -572,11 +572,15 @@ async def editor_page():
 
     /* Desktop: Sidebar style */
     .cm-editor .cm-minimap-desktop {
+      position: fixed; /* Fixed to iframe viewport so it doesn't scroll */
+      top: 0;
+      right: 0;
+      bottom: 0;
       width: 75px;
       opacity: 1.0;
       background: var(--bg, #0b0f1a); /* Fallback to dark bg */
       border-left: 1px solid rgba(128, 128, 128, 0.2);
-      float: right; /* Attempt to float it to the right side of the flow */
+      z-index: 100;
     }
     
     /* Desktop: Push content to the left */
