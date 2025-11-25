@@ -581,7 +581,7 @@ async def editor_page():
     
     /* Desktop: Push content to the left */
     .cm-editor.cm-has-minimap-desktop .cm-content {
-      padding-right: 85px; /* 75px width + 10px gap */
+      padding-right: 75px; /* 75px width */
     }
 
     /* Mobile: semi-transparent overlay “preview” on the right */
@@ -599,7 +599,7 @@ async def editor_page():
     
     /* Show mobile minimap when scrolling */
     .cm-editor.cm-scrolling .cm-minimap-mobile {
-      opacity: 0.4;
+      opacity: 0.7;
     }
 
     /* You can also hide desktop style when really narrow, if you ever send mode=desktop on a phone */
