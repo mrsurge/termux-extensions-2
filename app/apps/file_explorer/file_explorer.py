@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from fastapi import APIRouter, Request, HTTPException, Body, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 
 from app.libs.jobs import JobCancelled, register_job_handler
 
@@ -238,7 +238,29 @@ async def list_directory(path: str = Query(str(HOME_DIR)), hidden: bool = Query(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     entries.sort(key=lambda item: (item.get('type') != 'directory', (item.get('name') or '').lower()))
-    return {"ok": True, "data": entries}
+    return {"ok": True, "data": {"entries": entries, "path": str(abs_path)}}
+
+
+@file_explorer_bp.get('/download')
+async def download_file(path: str = Query(...)):
+    """
+    Download a file.
+
+    Example:
+        GET /api/app/file_explorer/download?path=/tmp/test.txt
+    """
+    if not path:
+        raise HTTPException(status_code=400, detail='Path is required')
+    
+    abs_path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.isfile(abs_path):
+        raise HTTPException(status_code=404, detail='File not found')
+    
+    # Check permissions (basic check, though FileResponse handles reading)
+    if not os.access(abs_path, os.R_OK):
+        raise HTTPException(status_code=403, detail='Permission denied')
+
+    return FileResponse(abs_path, filename=os.path.basename(abs_path))
 
 
 @file_explorer_bp.post('/mkdir')

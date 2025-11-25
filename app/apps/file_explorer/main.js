@@ -1,5 +1,4 @@
-const HOME_DIR = '/data/data/com.termux/files/home';
-const TERMUX_BASE = HOME_DIR.replace(/\/files\/home$/, '');
+const HOME_DIR = '~';
 const TYPE_ICON = {
   directory: '📁',
   file: '📄',
@@ -119,13 +118,6 @@ function parentPath(path) {
   if (idx <= 0) return '/';
   const parent = trimmed.slice(0, idx);
   return parent || '/';
-}
-
-function isWithinTermux(path) {
-  if (!path) return false;
-  const abs = path.endsWith('/') ? path.slice(0, -1) : path;
-  if (!TERMUX_BASE) return abs === HOME_DIR || abs.startsWith(`${HOME_DIR}/`);
-  return abs === TERMUX_BASE || abs === HOME_DIR || abs.startsWith(`${TERMUX_BASE}/`);
 }
 
 function formatSize(bytes) {
@@ -545,6 +537,7 @@ export default function initFileExplorer(root, api, host) {
     selectionCount: container.querySelector('.fx-selection-count'),
     sortSelect: container.querySelector('[data-action="sort-by"]'),
     btnSortDir: container.querySelector('[data-action="toggle-sort-direction"]'),
+    btnDownload: container.querySelector('[data-action="download"]'),
     viewMenuButtons: Array.from(container.querySelectorAll('[data-menu-panel="view"] [data-command]')),
     propertiesModal: container.querySelector('[data-modal="properties"]'),
     propertiesOverlay: container.querySelector('[data-role="properties-overlay"]'),
@@ -781,6 +774,18 @@ export default function initFileExplorer(root, api, host) {
     
     // Rename only works with single selection (either click or checkbox)
     if (ui.btnRename) ui.btnRename.disabled = !(hasSelection || hasSingleSelection);
+
+    if (ui.btnDownload) {
+      let isDownloadable = false;
+      if (hasSelection && state.selected.type === 'file') {
+        isDownloadable = true;
+      } else if (hasSingleSelection) {
+        const path = Array.from(state.selectedPaths)[0];
+        const entry = state.entries.find(e => e.path === path);
+        if (entry && entry.type === 'file') isDownloadable = true;
+      }
+      ui.btnDownload.disabled = !isDownloadable;
+    }
     
     // Copy, Move, Delete work with batch selections
     const batchDisabled = !(hasSelection || hasBatchSelection);
@@ -843,6 +848,7 @@ export default function initFileExplorer(root, api, host) {
     'file:new-file': () => createNewFile(),
     'file:open': () => openSelected(),
     'file:open-editor': () => openSelectedInEditor(),
+    'file:download': () => downloadSelected(),
     'file:extract': () => extractSelectedArchive(),
     'edit:properties': () => openSelectedProperties(),
     'edit:rename': () => renameSelected(),
@@ -891,26 +897,17 @@ export default function initFileExplorer(root, api, host) {
     if (!ui.breadcrumbs) return;
     const path = state.currentPath;
     const crumbs = [];
-    if (isWithinTermux(path)) {
-      if (path === HOME_DIR || path.startsWith(`${HOME_DIR}/`)) {
-        crumbs.push({ label: 'Home', value: HOME_DIR });
-        const remainder = path.slice(HOME_DIR.length).split('/').filter(Boolean);
-        let accumulator = HOME_DIR;
-        remainder.forEach((segment) => {
-          accumulator = `${accumulator.replace(/\/+$/, '')}/${segment}`;
-          crumbs.push({ label: segment, value: accumulator });
-        });
-      } else {
-        crumbs.push({ label: 'Termux', value: TERMUX_BASE || '/data/data/com.termux' });
-        const relative = path.slice((TERMUX_BASE || '/data/data/com.termux').length).split('/').filter(Boolean);
-        let accumulator = TERMUX_BASE || '/data/data/com.termux';
-        relative.forEach((segment) => {
-          accumulator = `${accumulator.replace(/\/+$/, '')}/${segment}`;
-          crumbs.push({ label: segment, value: accumulator });
-        });
-      }
+
+    if (path === '~' || path.startsWith('~/')) {
+      crumbs.push({ label: 'Home', value: '~' });
+      const segments = path.slice(1).split('/').filter(Boolean);
+      let accumulator = '~';
+      segments.forEach((segment) => {
+        accumulator += `/${segment}`;
+        crumbs.push({ label: segment, value: accumulator });
+      });
     } else {
-      crumbs.push({ label: '⚡ /', value: '/' });
+      crumbs.push({ label: '/', value: '/' });
       const segments = path.replace(/\/+$/, '').split('/').filter(Boolean);
       let accumulator = '';
       segments.forEach((segment) => {
@@ -1103,8 +1100,21 @@ export default function initFileExplorer(root, api, host) {
     try {
       const hiddenParam = showHidden ? '1' : '0';
       const payload = await api.get(`list?path=${encodeURIComponent(normalized)}&hidden=${hiddenParam}`);
-      const entries = Array.isArray(payload) ? payload : [];
-      state.currentPath = normalized;
+      
+      let entries = [];
+      let resolvedPath = normalized;
+      
+      // Handle both old (array) and new (object) response formats for compatibility
+      if (Array.isArray(payload)) {
+        entries = payload;
+      } else if (payload && typeof payload === 'object') {
+        entries = payload.entries || [];
+        if (payload.path) {
+          resolvedPath = payload.path;
+        }
+      }
+
+      state.currentPath = resolvedPath;
       state.entries = entries;
       state.selected = null;
       renderBreadcrumbs();
@@ -1493,6 +1503,24 @@ export default function initFileExplorer(root, api, host) {
       if (error && error.message === 'cancelled') return;
       toast(host, error?.message || 'Move failed');
     }
+  }
+
+  function downloadSelected() {
+    let entry = state.selected;
+    if (!entry && state.selectedPaths.size === 1) {
+      const path = Array.from(state.selectedPaths)[0];
+      entry = state.entries.find(e => e.path === path);
+    }
+
+    if (!entry || entry.type !== 'file') return;
+
+    const url = `/api/app/file_explorer/download?path=${encodeURIComponent(entry.path)}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = entry.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
 
   async function followSymlink(entry) {
@@ -2188,6 +2216,7 @@ export default function initFileExplorer(root, api, host) {
   if (ui.btnDelete) ui.btnDelete.addEventListener('click', deleteSelected);
   if (ui.btnCopy) ui.btnCopy.addEventListener('click', copySelected);
   if (ui.btnMove) ui.btnMove.addEventListener('click', moveSelected);
+  if (ui.btnDownload) ui.btnDownload.addEventListener('click', downloadSelected);
 
   // Add event handlers for footer buttons in mobile view
   const footerHandlers = {
