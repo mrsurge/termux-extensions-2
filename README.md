@@ -511,3 +511,7 @@ Built with: FastAPI, Flask, CodeMirror 6, xterm.js, NiceGUI (vendored), and many
 ---
 
 **Last Updated:** November 21, 2025
+More screens:
+<img width="1913" height="1014" alt="Screenshot From 2025-11-25 17-20-52" src="https://github.com/user-attachments/assets/d3f40310-6a13-4bd5-8032-a21c240675fc" />
+<img width="1913" height="1014" alt="Screenshot From 2025-11-25 17-17-25" src="https://github.com/user-attachments/assets/acbcea7e-4663-48d2-b7a9-b84173b26ae1" />
+
