@@ -177,7 +177,13 @@ Those are your **mark / line** diff decorations tagged with `spec.diffKind = "in
 Those are your **inline widgets** used to show deleted content, tagged with `spec.diffKind = "delete"`, collected into `deleteLines` → second minimap gutter.
 
 As long as both your mark decorations and widget decorations carry that `diffKind` metadata, the aggregation function above doesn’t care how they render in the main editor; it only cares “what line(s) does this diff thing touch?” and turns that into colored line markers in the minimap.
+
+(maintainers note.... 
+getting this error in the console:
+```console-message
 VM1271 nicegui.js:354 reloading because handshake failed for clientId d88437c7-227e-4b26-8477-e08148bf21f4
+```
+to be delt with later... only experiencing on remote device... may be becase of edge case testing issues)
 
 [1]: https://codemirror.net/docs/ref/ "Reference Manual"
 [2]: https://codemirror.net/examples/decoration/ "Example: Decorations"
