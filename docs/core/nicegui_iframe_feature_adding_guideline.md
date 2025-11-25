@@ -1517,4 +1517,51 @@ Frontend:
 
 ---
 
-_Last Updated: 2025-11-19 21:51 UTC - Unified Preference System_
+_Last Updated: 2025-11-24 22:15 UTC - Added Minimap Example and New Lessons Learned_
+
+### Example 5: Minimap (Responsive & Interactive)
+
+**Goal:** Add a VS Code-style minimap that adapts to mobile/desktop and shows git diff markers.
+
+**Challenges:**
+1.  **Responsiveness:** Needs to be a sidebar on desktop but an overlay on mobile.
+2.  **Integration:** Needs to visualize data from another extension (Inline Diffs).
+3.  **Persistence:** Preference must load instantly without flicker.
+
+**Approach:**
+1.  **Vendor Package:** Added `@replit/codemirror-minimap` to bundle.
+2.  **Self-Contained Layout Logic:**
+    - Instead of `main.js` telling the editor "be mobile", the editor component (`codemirror.js`) watches `window.matchMedia` itself.
+    - It combines `props.showMinimap` (preference) AND layout state to determine mode (`desktop`, `mobile`, `off`).
+3.  **Compartment Reconfiguration:** Used a `Compartment` to swap the extension configuration dynamically without destroying editor state.
+4.  **Cross-Extension Dependency:**
+    - Minimap needs to know where diffs are.
+    - We passed `this.diffField` (created by the diff extension) into the minimap's `compute` dependency array.
+    - We forced a minimap update (`updateMinimapState`) whenever diffs changed.
+
+**Key Decision:** Moving layout logic *into* the component prevented "prop drilling" and race conditions between the parent frame and iframe layout states.
+
+## Lessons Learned: Component Autonomy
+
+**Added:** 2025-11-24
+
+### Lesson 1: Self-Contained Responsive Logic
+
+**Context:** The minimap needs to change modes (sidebar vs overlay) based on screen width.
+**Old Pattern:** `main.js` detects resize → sends mode to backend → backend calls component.
+**Problem:** Latency, potential state drift, complex coordination.
+**Better Pattern:** Component (`codemirror.js`) watches `window.matchMedia` directly.
+**Why:** The view component is the best place for view-specific layout logic. It reacts instantly to resize events without round-tripping to the backend.
+
+### Lesson 2: Computed Extension Dependencies
+
+**Context:** Minimap needs to visualize git diffs, which are stored in a separate CM6 StateField (`diffField`).
+**Problem:** `showMinimap.compute(['doc'], ...)` doesn't update when `diffField` changes.
+**Solution:** Dynamically construct dependency array: `['doc', this.diffField]`.
+**Why:** CM6 extensions need explicit dependencies to trigger re-computation. If you consume external data (like a StateField), you must declare it.
+
+### Lesson 3: Forcing Updates via Props
+
+**Context:** When the backend loads new diffs, the minimap needs to refresh immediately.
+**Solution:** Call `updateMinimapState()` (reconfigure) explicitly after setting diff decorations.
+**Why:** Changing one part of the editor state (diff field) doesn't automatically trigger reconfiguration of unrelated extensions (minimap) unless explicitly linked or forced.
