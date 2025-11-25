@@ -1,6 +1,10 @@
 # Termux Extensions 2
 
 ## What TE2 Gives You
+<img width="225" height="500" alt="Screenshot_20251124-203443 Termux Extensions" src="https://github.com/user-attachments/assets/32c2031a-bbec-4ad1-87df-4f75911c8c0f" />
+<img width="225" height="500" alt="Screenshot_20251124-212029 Termux Extensions" src="https://github.com/user-attachments/assets/70bf817d-ddba-4956-af68-2603d247abce" />
+<img width="225" height="500" alt="Screenshot_20251123-233724 Termux Extensions" src="https://github.com/user-attachments/assets/a6315058-aac9-4301-aff8-88ad4de5463a" />
+<img width="225" height="500" alt="Screenshot_20251124-091516 Termux Extensions" src="https://github.com/user-attachments/assets/7aa5f90c-4c9b-451a-b6c0-8172bde87fe9" />
 
 An integrated developement environment & complete with
 /home/mrsurge/Documents/te-2-cm6-iframe-main/docs/apps/code_cm6/README.md
@@ -12,6 +16,9 @@ An integrated developement environment & complete with
    -
    - Works with desktop and mobile displays... I have spent many hours making sure it works VERY well on mobile. Im going to include the `GeckoView` based app in the releases soon... so look out for that.
    - The same UI that is in the desktop browser is in the mobile.  Carefully positioned breakpoints make sure of this.  You can host this from your desktop and use it on your mobile/tablet to review and make changes to your desktop repos, and vice versa.
+  <img width="1913" height="1014" alt="Screenshot From 2025-11-24 22-22-14" src="https://github.com/user-attachments/assets/80fed2e0-2f2e-462f-969d-bc90b7150316" />
+
+
 3. Fully `git` integrated
    -
    - You can run on your desktop and mobile seperately and use all the intergrated git featrures to push changes in tandem.
@@ -25,6 +32,13 @@ An integrated developement environment & complete with
    - Code completions
    - Syntax Highlighting
    - **Inline Diff Engine**
+
+<img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/user-attachments/assets/5e6aef7c-2c11-4ce3-9783-5db505ad66c4" />
+<img width="225" height="500" alt="Screenshot_20251124-223352 Termux Extensions" src="https://github.com/user-attachments/assets/8f3ce5fb-7923-46df-9732-73a06d1c7971" />
+<img width="225" height="500" alt="Screenshot_20251123-221530 Termux Extensions" src="https://github.com/user-attachments/assets/14752214-3ffd-4a66-a290-7bf36ccc3774" />
+<img width="225" height="500" alt="Screenshot_20251124-095030 Termux Extensions" src="https://github.com/user-attachments/assets/9c0f64f6-5cd5-44ee-8d7b-5828293526ce" />
+
+
 5. Room to grow
    -
    - help me please i have no idea what im doing
