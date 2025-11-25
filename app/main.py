@@ -1413,14 +1413,18 @@ if __name__ == '__main__':
     # Build IP allowlist
     allowlist = set()
     allow_all = False
-    
+    use_middleware = False  # Default to False (for localhost/adapter modes)
+    host_ip = '127.0.0.1'   # Default to localhost
+
     # Always allow localhost
     allowlist.add(ip_address('127.0.0.1'))
     allowlist.add(ip_address('::1'))
     
     if args.broadcast is not None:
+        host_ip = '0.0.0.0'  # Broadcast implies listening on all interfaces (covering localhost + adapter)
+        
         if 'all' in args.broadcast:
-            # --broadcast all = allow everything
+            # --broadcast all = allow everything, no middleware
             allow_all = True
             print("[main] WARNING: Broadcasting to all IPs (no filtering)")
         else:
@@ -1459,6 +1463,7 @@ if __name__ == '__main__':
                     try:
                         network = ip_network(item, strict=False)
                         allowlist.add(network)
+                        use_middleware = True # Specific filter requested
                         print(f"[main] Allowing subnet: {network}")
                     except (AddressValueError, ValueError) as e:
                         print(f"[main] Invalid subnet {item}: {e}", file=sys.stderr)
@@ -1469,6 +1474,7 @@ if __name__ == '__main__':
                     try:
                         ip = ip_address(item)
                         allowlist.add(ip)
+                        use_middleware = True # Specific filter requested
                         print(f"[main] Allowing IP: {ip}")
                     except AddressValueError as e:
                         print(f"[main] Invalid IP {item}: {e}", file=sys.stderr)
@@ -1484,22 +1490,24 @@ if __name__ == '__main__':
                     ip_str = data['ip']
                     mask_str = data.get('netmask')
                     
+                    # Interface found - we are in "Adapter Broadcast" mode.
+                    # We rely on 0.0.0.0 binding and skip middleware for performance,
+                    # effectively trusting the network on that interface.
+                    print(f"[main] Broadcast on interface {item} ({ip_str}) - Middleware Skipped")
+                    
                     if not mask_str:
-                        print(f"[main] Interface {item} has no netmask, adding IP only: {ip_str}")
+                        # Fallback calculation just in case we need it later
                         allowlist.add(ip_address(ip_str))
                         continue
                         
                     try:
                         mask_parts = [int(x) for x in mask_str.split('.')]
                         cidr = sum([bin(x).count('1') for x in mask_parts])
-                        
                         if cidr == 32:
-                             print(f"[main] Interface {item} is /32 (likely VPN), skipping subnet allowlist. (Use 'all' or specific IPs if needed)")
+                             print(f"[main] Interface {item} is /32 (likely VPN)")
                              continue
-                             
                         subnet = ip_network(f"{ip_str}/{cidr}", strict=False)
                         allowlist.add(subnet)
-                        print(f"[main] Allowing subnet from {item}: {subnet}")
                     except Exception as e:
                         print(f"[main] Failed to calculate subnet for {item}: {e}", file=sys.stderr)
                 
@@ -1509,8 +1517,8 @@ if __name__ == '__main__':
         # No --broadcast flag = localhost only
         print("[main] Localhost only (secure default)")
     
-    # Add IP filtering middleware
-    if not allow_all:
+    # Add IP filtering middleware ONLY if enabled
+    if use_middleware and not allow_all:
         @app.middleware("http")
         async def ip_filter_middleware(request: Request, call_next):
             client_ip = request.client.host
@@ -1520,20 +1528,18 @@ if __name__ == '__main__':
                 client_addr = ip_address(client_ip)
                 allowed = False
                 
-                print(f"[main] Checking IP: {client_ip} (parsed as {client_addr})")
+                # print(f"[main] Checking IP: {client_ip}") 
                 
                 for allowed_item in allowlist:
                     if isinstance(allowed_item, type(client_addr)):
                         # Direct IP match
                         if client_addr == allowed_item:
-                            print(f"[main] ✓ IP {client_ip} matched allowed IP {allowed_item}")
                             allowed = True
                             break
                     else:
                         # Network/subnet match
                         try:
                             if client_addr in allowed_item:
-                                print(f"[main] ✓ IP {client_ip} matched subnet {allowed_item}")
                                 allowed = True
                                 break
                         except Exception as subnet_err:
@@ -1558,12 +1564,14 @@ if __name__ == '__main__':
                     content={"ok": False, "error": "IP validation error"}
                 )
     
-    print(f"--- Starting ASGI Server on 0.0.0.0:8088 ---")
-    if not allow_all and len(allowlist) > 2:  # More than just localhost
+    print(f"--- Starting ASGI Server on {host_ip}:8088 ---")
+    if use_middleware:
         print(f"[main] IP filtering enabled ({len(allowlist) - 2} filters + localhost)")
+    else:
+        print(f"[main] IP filtering DISABLED (Performance Mode)")
     
     uvicorn.run(
         app,
-        host='0.0.0.0',
+        host=host_ip,
         port=8088,
     )

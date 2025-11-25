@@ -262,6 +262,7 @@ class CodeMirror(ValueElement, DisableableElement,
         line_wrapping: bool = False,
         font_scale: float = 1.0,
         highlight_whitespace: bool = False,
+        show_minimap: bool = False,
     ) -> None:
         """CodeMirror
 
@@ -283,6 +284,7 @@ class CodeMirror(ValueElement, DisableableElement,
         :param line_wrapping: whether to wrap lines (default: `False`)
         :param font_scale: initial font scale multiplier (default: 1.0)
         :param highlight_whitespace: whether to highlight whitespace (default: `False`)
+        :param show_minimap: whether to show the minimap (default: `False`)
         """
         super().__init__(value=value, on_value_change=on_change)
         # Prevent ValueElement from pushing model-value updates back to the client; we only
@@ -298,6 +300,7 @@ class CodeMirror(ValueElement, DisableableElement,
         self._props['lineWrapping'] = line_wrapping
         self._props['fontScale'] = font_scale
         self._props['highlightWhitespace'] = highlight_whitespace
+        self._props['showMinimap'] = show_minimap
         self._update_method = 'setEditorValueFromProps'
 
         self.on('change', self._handle_change)
@@ -307,6 +310,16 @@ class CodeMirror(ValueElement, DisableableElement,
         # and update the BindableProperty storage, but won't enqueue prop updates
         # back to the client (because _send_update_on_value_change is False).
         self.value = e.args['value']
+
+    @property
+    def show_minimap(self) -> bool:
+        """Whether the minimap is shown."""
+        return self._props['showMinimap']
+
+    @show_minimap.setter
+    def show_minimap(self, value: bool) -> None:
+        self._props['showMinimap'] = value
+        self.update()
 
     @property
     def theme(self) -> str:
@@ -453,6 +466,25 @@ class CodeMirror(ValueElement, DisableableElement,
             editor.set_read_only(True)  # Make editor read-only
         """
         self.run_method('setReadOnly', readonly)
+    # ============================================================================
+
+    # ============================================================================
+    # CUSTOM METHOD: set_minimap_mode
+    # Added: 2025-11-24 by TE-2 Team
+    # Purpose: Set minimap mode ('desktop', 'mobile', or 'off')
+    # ============================================================================
+    def set_minimap_mode(self, mode: str) -> None:
+        """Set the minimap mode.
+        
+        Args:
+            mode: 'desktop', 'mobile', or 'off'
+            
+        Example:
+            editor.set_minimap_mode('desktop')
+        """
+        if mode not in ('desktop', 'mobile', 'off'):
+            mode = 'off'
+        self.run_method('applyMinimapMode', mode)
     # ============================================================================
 
     def request_content(self) -> Awaitable[str]:

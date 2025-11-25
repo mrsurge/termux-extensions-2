@@ -19,9 +19,12 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "showInlineDiffs": True,
     "trackAgentEdits": False,
     "fontScale": 0.85,  # NEW: Default to Medium preset
-    "showIndentGuides": False,
-    "colorPicker": True,   # CSS color picker extension (default ON)
-    "readOnly": False,     # Read-only mode
+    "showIndentGuides": True,
+    "showLineShading": False,
+    "showInlineDiffs": True,
+    "colorPicker": True,
+    "readOnly": False,
+    "showMinimap": False,
 }
 
 DEFAULT_UI_PREFS: Dict[str, Any] = {
@@ -56,6 +59,7 @@ class PreferencesStore:
         self._lock = threading.Lock()
         # NO in-memory cache - file is always authority
         self._initialize_if_missing()
+        self._ensure_schema_compliance()
 
     @property
     def path(self) -> Path:
@@ -88,6 +92,32 @@ class PreferencesStore:
             finally:
                 if tmp_path.exists():
                     tmp_path.unlink(missing_ok=True)
+
+    def _ensure_schema_compliance(self) -> None:
+        """Ensure all defined defaults exist in the store (migration)."""
+        with self._lock:
+            try:
+                data = self._read_from_disk()
+            except RuntimeError:
+                # File might be corrupt or missing (handled by _initialize_if_missing)
+                return
+
+            modified = False
+            editor_store = data.setdefault("editor", {})
+            for key, default_val in DEFAULT_EDITOR_PREFS.items():
+                if key not in editor_store:
+                    editor_store[key] = default_val
+                    modified = True
+            
+            ui_store = data.setdefault("ui", {})
+            for key, default_val in DEFAULT_UI_PREFS.items():
+                if key not in ui_store:
+                    ui_store[key] = default_val
+                    modified = True
+            
+            if modified:
+                print(f"[PREFS] Migrating preferences with new defaults", file=sys.stderr)
+                self._write_to_disk(data)
 
     def _read_from_disk(self) -> Dict[str, Any]:
         """Read preferences directly from disk - file MUST exist."""

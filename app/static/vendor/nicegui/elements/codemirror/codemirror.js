@@ -7,6 +7,7 @@ const openSearchPanel = typeof CM.openSearchPanel === 'function' ? CM.openSearch
 const indentationMarkers = typeof CM.indentationMarkers === 'function' ? CM.indentationMarkers : null;
 // Color picker extension is exported as colorView() function and colorTheme
 const colorExtension = (typeof CM.colorView === 'function' && CM.colorTheme) ? [CM.colorView(), CM.colorTheme] : null;
+const showMinimap = CM.showMinimap;
 
 const FONT_SCALE_MIN = 0.5;
 const FONT_SCALE_MAX = 2.0;
@@ -331,6 +332,7 @@ export default {
     disable: Boolean,
     indent: String,
     highlightWhitespace: Boolean,
+    showMinimap: Boolean,
   },
   watch: {
     language(newLanguage) {
@@ -345,6 +347,9 @@ export default {
     lineWrapping(newLineWrapping) {
       this.setLineWrapping(newLineWrapping);
     },
+    showMinimap(newVal) {
+      this.updateMinimapState();
+    },
   },
   data() {
     return {
@@ -356,9 +361,24 @@ export default {
       pendingFontScale: clampFontScale(this.fontScale),
       colorPickerCompartment: null, // Color picker toggle compartment
       readOnlyCompartment: null,     // Read-only mode compartment
+      isMobileLayout: false,
     };
   },
   methods: {
+    updateMinimapState() {
+      if (!this.showMinimap) {
+        this.applyMinimapMode('off');
+        return;
+      }
+      const mode = this.isMobileLayout ? 'mobile' : 'desktop';
+      this.applyMinimapMode(mode);
+    },
+    handleLayoutChange(e) {
+      this.isMobileLayout = e.matches;
+      if (this.showMinimap) {
+        this.updateMinimapState();
+      }
+    },
     openSearchPanelFromServer() {
       if (!this.editor || typeof openSearchPanel !== 'function') return;
       try {
@@ -742,6 +762,36 @@ export default {
         }
       );
 
+      // Scroll activity detector for mobile minimap fade-in
+      const scrollActivityPlugin = CM.ViewPlugin.fromClass(
+        class {
+          constructor(view) {
+            this.view = view;
+            this.timeout = null;
+            this.onScroll = this.onScroll.bind(this);
+            // Attach to scroller DOM
+            this.view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
+          }
+          
+          onScroll() {
+            const wrapper = this.view.dom;
+            if (!wrapper.classList.contains('cm-scrolling')) {
+              wrapper.classList.add('cm-scrolling');
+            }
+            
+            if (this.timeout) clearTimeout(this.timeout);
+            this.timeout = setTimeout(() => {
+              wrapper.classList.remove('cm-scrolling');
+            }, 1500); // Keep visible for 1.5s after scroll stops
+          }
+          
+          destroy() {
+            this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
+            if (this.timeout) clearTimeout(this.timeout);
+          }
+        }
+      );
+
       // Create compartment for dynamic indent unit (before extensions array)
       this.indentUnitCompartment = new CM.Compartment();
       
@@ -764,6 +814,7 @@ export default {
       const extensions = [
         CM.basicSetup,
         changeSender,
+        scrollActivityPlugin, // Add the scroll listener
         // Enables the Tab key to indent the current lines https://codemirror.net/examples/tab/
         CM.keymap.of([CM.indentWithTab]),
         // Sets indentation https://codemirror.net/docs/ref/#language.indentUnit
@@ -891,6 +942,72 @@ export default {
       }
     },
     // ============================================================================
+    // CUSTOM METHOD: applyMinimapMode
+    // Added: 2025-11-24 by TE-2 Team
+    // Purpose: Configure minimap extension based on mode (desktop/mobile/off)
+    // Used by: Editor preferences and layout detection
+    // ============================================================================
+    async applyMinimapMode(mode) {
+      // mode: "desktop" | "mobile" | "off"
+      if (!this.editor || !showMinimap || typeof showMinimap.compute !== 'function') {
+        console.warn('[CodeMirror] minimap not available');
+        return;
+      }
+
+      if (!this.minimapCompartment) {
+        this.minimapCompartment = new CM.Compartment();
+        
+        // Install empty compartment once
+        this.editor.dispatch({
+          effects: CM.StateEffect.appendConfig.of(
+            this.minimapCompartment.of([])
+          ),
+        });
+      }
+
+      const targetMode = mode || 'off';
+      let extensions = [];
+
+      if (targetMode !== 'off') {
+        const minimapExt = showMinimap.compute(['doc'], (state) => {
+          // We just need to give it a container DOM node and config
+          const create = (view) => {
+            const dom = document.createElement('div');
+            // Base class + mode class; CSS will do the heavy lifting
+            dom.className = `cm-minimap-container cm-minimap-${targetMode}`;
+            return { dom };
+          };
+
+          // Desktop vs mobile are just different config knobs
+          const isMobile = targetMode === 'mobile';
+
+          return {
+            create,
+            // VS Code-ish “blocky” look works well in a tiny view
+            displayText: 'blocks',
+            // For desktop you might prefer "mouse-over", for mobile always-on
+            showOverlay: isMobile ? 'always' : 'mouse-over',
+            // Leave gutters empty for now
+            gutters: [],
+          };
+        });
+
+        extensions = [minimapExt];
+      }
+
+      this.editor.dispatch({
+        effects: this.minimapCompartment.reconfigure(extensions),
+      });
+      console.log('[CodeMirror] Minimap mode set to:', targetMode);
+      
+      // Add class to editor DOM for desktop sidebar layout
+      if (targetMode === 'desktop') {
+        this.editor.dom.classList.add('cm-has-minimap-desktop');
+      } else {
+        this.editor.dom.classList.remove('cm-has-minimap-desktop');
+      }
+    },
+    // ============================================================================
   },
   async mounted() {
     // This is used to prevent emitting the value we just received from the server.
@@ -922,5 +1039,13 @@ export default {
     if (typeof this.pendingFontScale === 'number') {
       this.setFontScale(this.pendingFontScale);
     }
+    
+    // Initialize layout detection for minimap
+    const mql = window.matchMedia('(max-width: 900px)');
+    this.isMobileLayout = mql.matches;
+    mql.addEventListener('change', this.handleLayoutChange);
+    
+    // Apply initial minimap state
+    this.updateMinimapState();
   },
 };

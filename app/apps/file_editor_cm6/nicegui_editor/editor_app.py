@@ -449,6 +449,8 @@ async def editor_page():
                 theme=theme_mapped,
                 line_wrapping=editor_prefs.get('wordWrap'),
                 font_scale=font_scale_pref,
+                highlight_whitespace=False,
+                show_minimap=editor_prefs.get('showMinimap', False),
                 on_change=_on_editor_change,
             ).style('flex: 1; border: none;').classes('editor-content w-full h-full').props('flat borderless')
             editor._cached_content = initial_content
@@ -556,6 +558,55 @@ async def editor_page():
       --diff-del-border: rgba(248, 113, 113, 0.7);
       --diff-del-fg: rgba(248, 113, 113, 0.95);
       --diff-del-marker: rgba(248, 113, 113, 0.85);
+    }
+    /* Base minimap container */
+    .cm-editor .cm-minimap-container {
+      position: sticky; /* Changed from absolute to sticky to fix scrolling issue */
+      top: 0;
+      right: 0;
+      height: 100%;
+      pointer-events: auto;
+      z-index: 100; /* Increased z-index */
+      contain: strict;
+    }
+
+    /* Desktop: Sidebar style */
+    .cm-editor .cm-minimap-desktop {
+      width: 75px;
+      opacity: 1.0;
+      background: var(--bg, #0b0f1a); /* Fallback to dark bg */
+      border-left: 1px solid rgba(128, 128, 128, 0.2);
+      float: right; /* Attempt to float it to the right side of the flow */
+    }
+    
+    /* Desktop: Push content to the left */
+    .cm-editor.cm-has-minimap-desktop .cm-content {
+      padding-right: 85px; /* 75px width + 10px gap */
+    }
+
+    /* Mobile: semi-transparent overlay “preview” on the right */
+    .cm-editor .cm-minimap-mobile {
+      position: fixed; /* Changed to fixed to stay in viewport */
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 30%;
+      opacity: 0; /* Hidden by default */
+      pointer-events: none;
+      transition: opacity 0.3s ease; /* Smooth fade */
+      z-index: 200; /* Ensure it's above everything */
+    }
+    
+    /* Show mobile minimap when scrolling */
+    .cm-editor.cm-scrolling .cm-minimap-mobile {
+      opacity: 0.4;
+    }
+
+    /* You can also hide desktop style when really narrow, if you ever send mode=desktop on a phone */
+    @media (max-width: 600px) {
+      .cm-editor .cm-minimap-desktop {
+        display: none;
+      }
     }
     .cm-diff-gutter {
       width: var(--diff-gutter-width);
@@ -870,6 +921,19 @@ async def editor_set_read_only(data: dict = Body(...)):
             detail=f"Failed to set read-only mode: {str(e)}"
         )
 
+@editor_router.post('/minimap/mode')
+async def editor_minimap_mode(data: dict = Body(...)):
+    """Set the minimap mode for the current editor."""
+    mode = data.get('mode', 'off')
+    editor = get_active_editor()
+    if not editor:
+        raise HTTPException(status_code=404, detail='Editor not initialized')
+    try:
+        editor.set_minimap_mode(mode)
+        return {'ok': True, 'mode': mode}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Failed to set minimap mode: {e}')
+
 
 # --- Helper Function for View State ---
 def _get_view_state_dict() -> dict:
@@ -891,6 +955,7 @@ def _get_view_state_dict() -> dict:
         "showIndentGuides": editor_prefs.get('showIndentGuides'),
         "colorPicker": editor_prefs.get('colorPicker'),
         "readOnly": editor_prefs.get('readOnly'),
+        "showMinimap": editor_prefs.get('showMinimap'),
     }
 
 
@@ -963,6 +1028,9 @@ async def update_preference(data: dict = Body(...)):
             editor.toggle_color_picker(bool(value))
         elif key == 'readOnly':
             editor.set_read_only(bool(value))
+        elif key == 'showMinimap':
+            # Use prop setter to trigger client-side auto-detect logic
+            editor.show_minimap = bool(value)
         elif key == 'showInlineDiffs':
             if value and get_current_file():
                 # Load and apply diffs

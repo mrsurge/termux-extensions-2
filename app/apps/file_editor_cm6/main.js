@@ -922,8 +922,8 @@ async function updatePreference(key, value) {
     // Backend sends {ok: true, data: {...}}, apiPost returns the data object
     if (resp && typeof resp === 'object' && Object.keys(resp).length > 0) {
       // resp is the state object (not wrapped in {ok, data})
+      editorViewState = resp; // Update state BEFORE applying (fixes minimap toggle inversion)
       applyStateToMenus(resp);
-      editorViewState = resp;
       return true;
     }
     
@@ -958,6 +958,7 @@ function applyStateToMenus(state) {
   setMenuChecked(miToggleDiffs, state.showInlineDiffs);
   setMenuChecked(miToggleColorPicker, state.colorPicker);
   setMenuChecked(miToggleReadonly, state.readOnly);
+  setMenuChecked(miToggleMinimap, state.showMinimap);
   setMenuChecked(miTrackEdits, state.trackAgentEdits);
   
   // Update theme menu checkmarks
@@ -1763,6 +1764,12 @@ bindMenuToggle(miToggleReadonly, async () => {
   } else {
     host.toast('Failed to toggle read-only mode');
   }
+});
+
+const miToggleMinimap = requireEl('#mi-toggle-minimap');
+bindMenuToggle(miToggleMinimap, async () => {
+  const success = await updatePreference('showMinimap', !(editorViewState?.showMinimap));
+  if (!success) host.toast('Failed to update preference');
 });
 
 bindMenuToggle(miTrackEdits, async () => {

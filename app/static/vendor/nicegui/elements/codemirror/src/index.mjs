@@ -9,3 +9,4 @@ export * as themes from "@uiw/codemirror-themes-all";
 export * from "@codemirror/search";
 export * from "@replit/codemirror-indentation-markers";
 export * from "@uiw/codemirror-extensions-color";
+export { showMinimap } from "@replit/codemirror-minimap";

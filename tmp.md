@@ -1,183 +1,301 @@
-# Intended Architecture - mrselect Framework
+You don’t need two separate extensions. One minimap extension + a “mode” switch (desktop vs mobile) is enough. The mode just changes how you configure / style the minimap, not which CM6 code you load.
 
-## Overview
-A Python-based application framework running on Android (Termux) that manages multiple independent NiceGUI applications through a central FastAPI server. The framework provides process management, IPC communication, and network access control.
+Below is how I’d wire `@replit/codemirror-minimap` into your existing **vendored NiceGUI CM6** pipeline with a `desktop/mobile/off` mode that plays nicely with your architecture.
 
-## Core Components
+---
 
-### 1. Framework Server (main.py)
-**Intended Purpose:** Central FastAPI server that:
-- Hosts on 0.0.0.0:8088
-- Manages lifecycle of child application processes
-- Routes HTTP requests to appropriate child apps via reverse proxy
-- Enforces IP-based access control via middleware
-- Handles graceful shutdown and cleanup
+## 1. Vendor the minimap package into your CM6 bundle
 
-**Key Responsibilities:**
-- Start/stop/monitor child application processes
-- Proxy requests from `/app/<app_id>/*` to child app ports
-- Filter incoming connections based on network interface allowlist
-- Maintain IPC socket for process registration/communication
-- Serve NiceGUI framework assets
+Same pattern as your search panel and color picker: add the package, export it from `src/index.mjs`, rebuild.
 
-### 2. IP Filtering Middleware
-**Intended Purpose:** Block all connections except from explicitly allowed networks
+### 1.1 Install the package
 
-**Design:**
-- `--broadcast all` → Allow from any IP (no filtering)
-- `--broadcast` → Allow from localhost only (127.0.0.1, ::1)
-- `--broadcast <interface>` → Allow from that interface's subnet
-- `--broadcast <ip/cidr>` → Allow from specific IP or CIDR range
+From `app/static/vendor/nicegui/elements/codemirror`:
 
-**Logic Flow:**
-1. Parse allowlist items (interfaces, IPs, CIDR ranges)
-2. For interfaces: resolve to subnet using ifconfig + netmask
-3. Skip /32 masks (single host, not a subnet)
-4. On each request: check client IP against allowlist
-5. Match by direct IP comparison OR subnet membership
-6. Block (403) if no match found
-7. Fail secure: block on any error during validation
+```bash
+cd app/static/vendor/nicegui/elements/codemirror
+npm install @replit/codemirror-minimap
+```
 
-### 3. Application Management
-**Intended Purpose:** Launch and monitor child NiceGUI applications
+### 1.2 Export `showMinimap` in the bundle
 
-**Design:**
-- Each app defined in JSON config file
-- Apps run as separate Python processes on unique ports (8090+)
-- Framework maintains registry of running apps
-- Apps register with framework via IPC socket
-- Apps can be started/stopped/restarted independently
+Edit: `app/static/vendor/nicegui/elements/codemirror/src/index.mjs`
 
-**App Configuration Structure:**
-```json
-{
-  "app_id": "unique-identifier",
-  "label": "Display Name",
-  "module_path": "path/to/app.py",
-  "port": 8090,
-  "enabled": true
+Add:
+
+```javascript
+// existing exports...
+export * from "@codemirror/view";
+export * from "@codemirror/state";
+export * from "@codemirror/language";
+// ...
+
+// NEW: minimap
+export { showMinimap } from "@replit/codemirror-minimap";
+```
+
+This makes `showMinimap` available via your global `CM` object in `codemirror.js`, same pattern as `@codemirror/search` and `@uiw/codemirror-extensions-color`.
+
+### 1.3 Rebuild
+
+```bash
+npm run build
+# comment out terser in rollup config if OOM, like you did before
+```
+
+The `dist/index.js` now includes the minimap extension. 
+
+---
+
+## 2. Add a minimap “mode” method in `codemirror.js`
+
+Follow the same **Compartment + method** pattern you already use for indentation guides and zebra stripes.
+
+Edit: `app/static/vendor/nicegui/elements/codemirror/codemirror.js`
+
+Near the top, after you pull CM exports, add a local alias:
+
+```javascript
+const showMinimap = CM.showMinimap; // from @replit/codemirror-minimap
+```
+
+Then add a Vue method on the component, next to `applyZebraStripes` / `applyIndentGuides`:
+
+```javascript
+async applyMinimapMode(mode) {
+  // mode: "desktop" | "mobile" | "off"
+  if (!this.editor || !showMinimap || typeof showMinimap.compute !== 'function') {
+    console.warn('[CodeMirror] minimap not available');
+    return;
+  }
+
+  if (!this.minimapCompartment) {
+    this.minimapCompartment = new CM.Compartment();
+    this.minimapMode = 'off';
+
+    // Install empty compartment once
+    this.editor.dispatch({
+      effects: CM.StateEffect.appendConfig.of(
+        this.minimapCompartment.of([])
+      ),
+    });
+  }
+
+  this.minimapMode = mode || 'off';
+
+  let extensions = [];
+
+  if (mode !== 'off') {
+    const minimapExt = showMinimap.compute(['doc'], (state) => {
+      // We just need to give it a container DOM node and config
+      const create = (view) => {
+        const dom = document.createElement('div');
+        // Base class + mode class; CSS will do the heavy lifting
+        dom.className = `cm-minimap-container cm-minimap-${mode}`;
+        return { dom };
+      };
+
+      // Desktop vs mobile are just different config knobs
+      const isMobile = mode === 'mobile';
+
+      return {
+        create,
+        // VS Code-ish “blocky” look works well in a tiny view
+        displayText: 'blocks',
+        // For desktop you might prefer "mouse-over", for mobile always-on
+        showOverlay: isMobile ? 'always' : 'mouse-over',
+        // Leave gutters empty for now; you can feed git info later if you want
+        gutters: [],
+      };
+    });
+
+    extensions = [minimapExt];
+  }
+
+  this.editor.dispatch({
+    effects: this.minimapCompartment.reconfigure(extensions),
+  });
 }
 ```
 
-### 4. IPC System (Inter-Process Communication)
-**Intended Purpose:** Unix socket-based communication between framework and child apps
+This is exactly how the official example wires `showMinimap.compute`, just wrapped in a Compartment so you can reconfigure it on the fly. ([GitHub][1])
 
-**Design:**
-- Socket file: `/tmp/mrselect_ipc.sock`
-- Protocol: JSON messages over Unix socket
-- Message types:
-  - `register`: Child app announces itself (pid, type, label, port)
-  - `status`: Query process status
-  - `shutdown`: Request graceful shutdown
+**Key points:**
 
-**Intended Flow:**
-1. Framework creates IPC socket on startup
-2. Child app connects and sends register message
-3. Framework stores app metadata in running registry
-4. Framework can query/control apps via IPC
+* **Single extension**; three modes:
 
-### 5. Request Routing
-**Intended Purpose:** Proxy HTTP requests to correct child application
+  * `"desktop"` → sidebar-style minimap
+  * `"mobile"` → overlay-style minimap
+  * `"off"` → no minimap
+* Orientation-specific behavior is handled entirely via:
 
-**Design:**
-- URL pattern: `/app/<app_id>/<subpath>`
-- Framework looks up app_id in registry to get port
-- Proxies request to `http://localhost:<port>/<subpath>`
-- Streams response back to client
-- Preserves headers, query params, request body
+  * The mode string passed in
+  * CSS classes on the minimap container
 
-**Special Routes:**
-- `/_nicegui/*` → Framework serves NiceGUI static assets
-- `/shutdown` → Framework graceful shutdown endpoint
-- All other `/app/*` → Proxy to child apps
+No second “version” of the extension is needed.
 
-### 6. Process Lifecycle
-**Intended Purpose:** Manage child app processes cleanly
+---
 
-**Startup:**
-1. Parse command-line args for network allowlist
-2. Build IP/subnet allowlist from interfaces
-3. Register middleware for IP filtering
-4. Initialize IPC socket listener
-5. Load app configs from JSON files
-6. Launch enabled apps as subprocess.Popen
-7. Start background monitoring thread
-8. Run uvicorn server (blocking)
+## 3. Python wrapper in `codemirror.py`
 
-**Shutdown:**
-1. Receive SIGTERM/SIGINT or /shutdown request
-2. Stop accepting new connections
-3. Send shutdown signal to all child processes via IPC
-4. Wait for child processes to exit (with timeout)
-5. Close IPC socket
-6. Cleanup temporary files
-7. Exit framework process
+Same pattern as `set_zebra_stripes()` and `set_diff_decorations()`.
 
-### 7. NiceGUI Integration
-**Intended Purpose:** Provide modified NiceGUI library for child apps
+Edit: `app/static/vendor/nicegui/elements/codemirror/codemirror.py`
 
-**Design:**
-- Vendored NiceGUI in `app/static/vendor/nicegui/`
-- Modified to work with framework routing
-- Child apps import from vendored path
-- Framework serves NiceGUI assets at `/_nicegui/*`
-- Apps can use ui.run() and framework handles the rest
+Add:
 
-### 8. Background Monitoring
-**Intended Purpose:** Detect and restart crashed child apps
+```python
+class CodeMirror(Element):
+    # ... existing methods ...
 
-**Design:**
-- Background thread polls child process status
-- If process exits unexpectedly, restart it
-- Log crashes and restart attempts
-- Configurable retry limits and backoff
-
-## Network Security Model
-
-**Intended Behavior:**
-- Default: localhost only (127.0.0.1, ::1)
-- With `--broadcast wlan0`: Allow only from wlan0's subnet
-- With `--broadcast tailscale0`: Allow only from tailscale0's subnet  
-- With `--broadcast 192.168.1.0/24`: Allow only from that CIDR
-- With `--broadcast all`: No filtering (dangerous)
-
-**Critical:** Should NEVER allow connections from interfaces not explicitly listed
-
-## File Structure
-```
-/data/data/com.termux/files/home/mrselect/
-├── app/
-│   ├── main.py                    # Framework server
-│   ├── libs/
-│   │   ├── app_manager.py         # Process management
-│   │   └── app_lifecycle.py       # Startup/shutdown logic
-│   ├── ipc/
-│   │   ├── client.py              # IPC client (for child apps)
-│   │   └── server.py              # IPC server (in framework)
-│   ├── static/
-│   │   └── vendor/nicegui/        # Vendored NiceGUI library
-│   └── <various_apps>/            # Child application directories
-├── runtime_paths/                 # App config JSON files
-└── requirements.txt               # Python dependencies
+    def set_minimap_mode(self, mode: str) -> None:
+        """Set minimap mode: 'desktop', 'mobile', or 'off'."""
+        # Defensive normalize
+        if mode not in ('desktop', 'mobile', 'off'):
+            mode = 'off'
+        self.run_method('applyMinimapMode', mode)
 ```
 
-## Dependencies
-- Python 3.10+
-- FastAPI (web framework)
-- Uvicorn (ASGI server)
-- NiceGUI (UI framework for apps)
-- httpx (HTTP client for proxying)
-- Standard library: subprocess, socket, signal, threading
+Now the NiceGUI side has a clean API like your other editor features.
 
-## Intended Use Cases
-1. **Development:** Run multiple UI apps during development, each isolated
-2. **Multi-tenant:** Host several NiceGUI apps under one server
-3. **Android Deployment:** Run web apps on Android via Termux
-4. **Network Isolation:** Restrict access to specific network interfaces
+---
 
-## Security Assumptions
-- IP filtering is the ONLY access control mechanism
-- No authentication/authorization beyond IP allowlist
-- Child apps trust the framework (same user, no isolation)
-- IPC socket has filesystem permissions protection only
-- Intended for trusted networks (home, VPN, development)
+## 4. Backend endpoint to drive the mode
+
+Pattern: like your search panel example – endpoint in `editor_app.py` that calls the Python wrapper. 
+
+Edit: `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+
+Somewhere near the other `/editor/...` routes:
+
+```python
+from fastapi import Body, HTTPException
+
+# Assume you already have a way to get the current editor instance
+# (you use this for zebra stripes, diffs, etc.)
+# e.g. _editor_instance / get_editor_instance()
+
+@app.post('/editor/minimap/mode')
+async def editor_minimap_mode(data: dict = Body(...)):
+    """Set the minimap mode for the current editor."""
+    mode = data.get('mode', 'off')
+    editor = _editor_instance  # or get_editor_instance()
+    if not editor:
+        raise HTTPException(status_code=404, detail='Editor not initialized')
+    try:
+        editor.set_minimap_mode(mode)
+        return {'ok': True, 'mode': mode}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Failed to set minimap mode: {e}')
+```
+
+No disk persistence here – this is a **pure view concern**, unlike your preferences store. That keeps it consistent with your “backend as ground truth, frontend ephemeral” design.
+
+---
+
+## 5. Hook it to your breakpoints in `main.js`
+
+Your outer app shell already has breakpoint logic for “mobile” vs “desktop” layout. You just need to mirror that into a minimap mode call, using your existing `apiPost()` helper.
+
+Edit: `app/apps/file_editor_cm6/main.js`
+
+Add something like:
+
+```javascript
+let lastMinimapMode = null;
+
+function detectMinimapMode() {
+  // Use the same breakpoint you use for your mobile layout
+  const isMobile = window.matchMedia('(max-width: 900px)').matches;
+  return isMobile ? 'mobile' : 'desktop';
+}
+
+async function syncMinimapMode() {
+  const mode = detectMinimapMode();
+  if (mode === lastMinimapMode) return;
+  lastMinimapMode = mode;
+
+  try {
+    await apiPost('editor/minimap/mode', {
+      mode,
+      // optional, if you want path/project for logging or future use:
+      path: currentPath || null,
+      project: cachedProjectRoot || null,
+    });
+  } catch (err) {
+    console.warn('[Code CM6] Failed to set minimap mode:', err);
+  }
+}
+
+// On initial load
+window.addEventListener('load', () => {
+  syncMinimapMode();
+});
+
+// On resize / orientation change
+window.addEventListener('resize', debounce(syncMinimapMode, 250));
+window.matchMedia('(orientation: portrait)').addEventListener('change', syncMinimapMode);
+```
+
+This keeps the **decision** about “mobile vs desktop” in the outer app (where your breakpoints already live), and the **implementation** of the minimap entirely inside the vendored CM6 component.
+
+---
+
+## 6. CSS: make desktop vs mobile behave differently
+
+Last piece: mode-specific styling. You’ve already done this kind of thing for diff gutter and indentation guides by adding CSS in the NiceGUI editor template.
+
+Wherever you define CM6-specific CSS for Code CM6 (often in the `editor_app.py` template or a linked stylesheet), add:
+
+```css
+/* Base minimap container */
+.cm-editor .cm-minimap-container {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  pointer-events: auto;
+  z-index: 5;        /* Above code, below overlays */
+}
+
+/* Desktop: classic slim sidebar scrollbar */
+.cm-editor .cm-minimap-desktop {
+  width: 0.9rem;     /* Adjust to taste */
+  opacity: 0.9;
+}
+
+/* Mobile: semi-transparent overlay “preview” on the right */
+.cm-editor .cm-minimap-mobile {
+  width: 30%;        /* Take a chunk of the right side */
+  opacity: 0.35;
+  pointer-events: none;  /* Let touches go through to the main editor */
+}
+
+/* You can also hide desktop style when really narrow, if you ever send mode=desktop on a phone */
+@media (max-width: 600px) {
+  .cm-editor .cm-minimap-desktop {
+    display: none;
+  }
+}
+```
+
+Because the minimap DOM node gets both `cm-minimap-container` and `cm-minimap-${mode}`, swapping mode is just a class change via the extension reconfigure.
+
+---
+
+## 7. How this fits your architecture (and answers your question)
+
+* You **do not** need separate “mobile minimap” and “desktop minimap” extensions.
+* You **do** need:
+
+  * One vendored CM extension (`showMinimap`) wired via `src/index.mjs` → `CM.showMinimap`
+  * One Vue method `applyMinimapMode(mode)` using a Compartment
+  * One Python wrapper `set_minimap_mode(mode)`
+  * One endpoint `/editor/minimap/mode`
+  * A tiny bit of breakpoint wiring in `main.js` + some CSS
+
+That’s exactly the same pattern you already use for zebra stripes, diff decorations, indentation guides, and the search panel: new CM package → export through bundle → JS method on component → Python wrapper → endpoint → front-end call.
+
+So you weren’t overcomplicating it – you just don’t need to fork the extension; you only need a **mode switch** on top of the single minimap extension.
+
+[1]: https://github.com/replit/codemirror-minimap?utm_source=chatgpt.com "Minimap extension for Codemirror 6"
