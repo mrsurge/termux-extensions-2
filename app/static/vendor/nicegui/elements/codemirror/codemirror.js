@@ -151,6 +151,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
 
   const lineAddedDeco = Decoration.line({
     class: 'cm-diff-line-added',
+    diffKind: 'insert', // Add metadata for minimap
   });
 
   const lineContextDeco = Decoration.line({
@@ -218,6 +219,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
         side: -1,
         block: true,
         widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine),
+        diffKind: 'delete', // Add metadata for minimap
       }));
       widgetIndex++;
     }
@@ -228,6 +230,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
         side: -1,
         block: true,
         widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine),
+        diffKind: 'delete', // Add metadata for minimap
       }));
       widgetIndex++;
     }
@@ -254,6 +257,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       side: -1,
       block: true,
       widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine),
+      diffKind: 'delete', // Add metadata for minimap
     }));
     widgetIndex++;
   }
@@ -262,6 +266,42 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const gutter = gutterCount ? gutterBuilder.finish() : EMPTY_GUTTER_RANGESET;
   const gutterClasses = classCount ? gutterClassBuilder.finish() : EMPTY_GUTTER_RANGESET;
   return { decorations, gutter, gutterClasses };
+}
+
+// Helper to scan diff decorations and build minimap gutters
+function diffMinimapGuttersFromDecorations(state, diffField) {
+  if (!diffField) return [];
+  
+  // Get current decoration set from the state field
+  const decos = state.field(diffField, false);
+  if (!decos) return [];
+
+  const insertLines = {};
+  const deleteLines = {};
+
+  decos.between(0, state.doc.length, (from, to, deco) => {
+    const kind = deco.spec?.diffKind;
+    if (!kind) return;
+
+    // Map this decoration/widget to line numbers in the *current* doc
+    const lineFrom = state.doc.lineAt(from).number;
+    const lineTo = state.doc.lineAt(to).number;
+
+    for (let line = lineFrom; line <= lineTo; line++) {
+      if (kind === 'insert') {
+        // “decoration markers”
+        insertLines[line] = '#34d399'; // green-ish (match --diff-add-marker)
+      } else if (kind === 'delete') {
+        // “widget markers” for inline deletions
+        deleteLines[line] = '#f87171'; // red-ish (match --diff-del-marker)
+      }
+    }
+  });
+
+  const gutters = [];
+  if (Object.keys(insertLines).length) gutters.push(insertLines);
+  if (Object.keys(deleteLines).length) gutters.push(deleteLines);
+  return gutters;
 }
 
 function safeLine(doc, lineNumber) {
@@ -733,6 +773,11 @@ export default {
       }
       
       this.editor.dispatch({ effects });
+      
+      // Force minimap update to reflect new diff gutters
+      if (this.showMinimap) {
+        this.updateMinimapState();
+      }
     },
     setupExtensions() {
       const self = this;
@@ -969,7 +1014,10 @@ export default {
       let extensions = [];
 
       if (targetMode !== 'off') {
-        const minimapExt = showMinimap.compute(['doc'], (state) => {
+        // Include diffField in dependencies if it exists so minimap updates when diffs change
+        const deps = this.diffField ? ['doc', this.diffField] : ['doc'];
+        
+        const minimapExt = showMinimap.compute(deps, (state) => {
           // We just need to give it a container DOM node and config
           const create = (view) => {
             const dom = document.createElement('div');
@@ -980,6 +1028,12 @@ export default {
 
           // Desktop vs mobile are just different config knobs
           const isMobile = targetMode === 'mobile';
+          
+          // Collect diff gutters if diffField exists (diffs active)
+          // Pass 'this.diffField' which is the StateField created in applyDiffDecorations
+          const gutters = this.diffField 
+            ? diffMinimapGuttersFromDecorations(state, this.diffField) 
+            : [];
 
           return {
             create,
@@ -987,8 +1041,8 @@ export default {
             displayText: 'blocks',
             // For desktop you might prefer "mouse-over", for mobile always-on
             showOverlay: isMobile ? 'always' : 'mouse-over',
-            // Leave gutters empty for now
-            gutters: [],
+            // Inject the collected diff gutters
+            gutters: gutters,
           };
         });
 
