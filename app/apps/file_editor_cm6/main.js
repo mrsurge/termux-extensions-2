@@ -775,6 +775,36 @@ function handleCacheStateBridgeEvent(event) {
 
 window.addEventListener('message', handleCacheStateBridgeEvent);
 
+// Handle generic notifications from iframe (NiceGUI)
+window.addEventListener('message', (event) => {
+  if (!event || !event.data) return;
+  
+  // Validate source
+  if (editorFrame && editorFrame.contentWindow && event.source && event.source !== editorFrame.contentWindow) {
+    return;
+  }
+
+  if (event.data.type === 'notification') {
+    const payload = event.data.data;
+    if (payload && payload.message) {
+      const timeout = payload.timeout || 3000;
+      host.toast(payload.message, timeout); 
+    }
+  } else if (event.data.type === 'draft_state') {
+    const payload = event.data.data;
+    if (payload && payload.has_draft && payload.path === currentPath) {
+      // Force indicator to restored state
+      restoredSessionActive = true;
+      applyCacheIndicator({
+        state: 'mid_session',
+        reason: 'restore',
+        restoredActive: true,
+        unsaved: true
+      });
+    }
+  }
+});
+
 async function triggerExternalRefresh(path) {
   if (externalRefreshInProgress) return;
   externalRefreshInProgress = true;

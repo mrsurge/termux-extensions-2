@@ -487,6 +487,15 @@ class CodeMirror(ValueElement, DisableableElement,
         self.run_method('applyMinimapMode', mode)
     # ============================================================================
 
+    def notify_parent(self, type: str, data: dict) -> None:
+        """Send a message to the parent frame via postMessage.
+        
+        Args:
+            type: The message type (e.g., 'notification', 'draft_state')
+            data: The payload dictionary
+        """
+        self.run_method('notifyParent', type, data)
+
     def request_content(self) -> Awaitable[str]:
         """Request the current editor content from the frontend.
 

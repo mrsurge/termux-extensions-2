@@ -492,11 +492,18 @@ async def editor_page():
                     )
 
             if restored_state:
-                ui.notify(
-                    'Restored unsaved draft' if restored_state == 'mid_session' else 'Recovered changes from prior crash',
-                    color='orange',
-                    position='top',
-                )
+                msg = 'Restored unsaved draft' if restored_state == 'mid_session' else 'Recovered changes from prior crash'
+                editor.notify_parent('notification', {
+                    'message': msg,
+                    'type': 'warning',
+                    'timeout': 4000
+                })
+                
+                # Force indicator state on frontend
+                editor.notify_parent('draft_state', {
+                    'has_draft': True,
+                    'path': initial_path
+                })
             
             # 6. Load Diffs if Enabled
             if editor_prefs.get('showInlineDiffs', False) and initial_path and project_path:

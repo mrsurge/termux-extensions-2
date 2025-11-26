@@ -526,6 +526,17 @@ export default {
         console.warn('[CodeMirror] Failed to emit cache state event', err);
       }
     },
+    notifyParent(type, data) {
+      try {
+        const target = window.parent || window;
+        target.postMessage({
+          type: type,
+          data: data
+        }, '*');
+      } catch (err) {
+        console.warn('[CodeMirror] Failed to notify parent', err);
+      }
+    },
     setDisabled(disabled) {
       this.editor.dispatch({
         effects: this.editableConfig.reconfigure(this.editableStates[!disabled]),
