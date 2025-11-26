@@ -1216,21 +1216,68 @@ function applyCacheIndicator(info) {
   if (!info) {
     cacheStateBadge.textContent = '';
     cacheStateBadge.dataset.state = '';
+    cacheStateBadge.onclick = null;
+    cacheStateBadge.style.cursor = '';
+    cacheStateBadge.title = '';
     return;
   }
   const { state, unsaved, reason, restoredActive } = info;
+  
+  let hasDraft = false;
+  let badgeChar = '';
+  let badgeState = '';
+
   if (state === 'crashed') {
-    cacheStateBadge.textContent = '!';
-    cacheStateBadge.dataset.state = 'crashed';
+    hasDraft = true;
+    badgeChar = '!';
+    badgeState = 'crashed';
   } else if (state === 'mid_session' && (reason === 'restore' || restoredActive)) {
-    cacheStateBadge.textContent = '*';
-    cacheStateBadge.dataset.state = 'restored';
+    hasDraft = true;
+    badgeChar = '*';
+    badgeState = 'restored';
   } else if (state === 'mid_session' && unsaved) {
-    cacheStateBadge.textContent = '*';
-    cacheStateBadge.dataset.state = 'cached';
+    hasDraft = true;
+    badgeChar = '*';
+    badgeState = 'cached';
+  }
+
+  if (hasDraft) {
+    cacheStateBadge.textContent = badgeChar;
+    cacheStateBadge.dataset.state = badgeState;
+    cacheStateBadge.style.cursor = 'pointer';
+    cacheStateBadge.title = 'Unsaved draft available. Click to discard.';
+    
+    // Bind click to discard
+    cacheStateBadge.onclick = async (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      
+      const project = cachedProjectRoot || (await getCurrentProjectRoot());
+      if (!project) {
+        host.toast('Cannot discard: Project root unknown');
+        return;
+      }
+
+      if (confirm('Discard unsaved draft? This cannot be undone.')) {
+        try {
+          const url = `session_cache?project=${encodeURIComponent(project)}&path=${encodeURIComponent(currentPath)}`;
+          await api.delete(url);
+          
+          // Reload file to reset content to disk version
+          await openFile(currentPath, { forceRefresh: true });
+          host.toast('Draft discarded');
+        } catch (err) {
+          host.toast('Failed to discard draft');
+          console.error(err);
+        }
+      }
+    };
   } else {
     cacheStateBadge.textContent = '';
     cacheStateBadge.dataset.state = '';
+    cacheStateBadge.onclick = null;
+    cacheStateBadge.style.cursor = '';
+    cacheStateBadge.title = '';
   }
 }
 

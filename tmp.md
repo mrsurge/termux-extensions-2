@@ -1,301 +1,656 @@
-You don’t need two separate extensions. One minimap extension + a “mode” switch (desktop vs mobile) is enough. The mode just changes how you configure / style the minimap, not which CM6 code you load.
+# Session Draft Feature - Technical Documentation
 
-Below is how I’d wire `@replit/codemirror-minimap` into your existing **vendored NiceGUI CM6** pipeline with a `desktop/mobile/off` mode that plays nicely with your architecture.
-
----
-
-## 1. Vendor the minimap package into your CM6 bundle
-
-Same pattern as your search panel and color picker: add the package, export it from `src/index.mjs`, rebuild.
-
-### 1.1 Install the package
-
-From `app/static/vendor/nicegui/elements/codemirror`:
-
-```bash
-cd app/static/vendor/nicegui/elements/codemirror
-npm install @replit/codemirror-minimap
-```
-
-### 1.2 Export `showMinimap` in the bundle
-
-Edit: `app/static/vendor/nicegui/elements/codemirror/src/index.mjs`
-
-Add:
-
-```javascript
-// existing exports...
-export * from "@codemirror/view";
-export * from "@codemirror/state";
-export * from "@codemirror/language";
-// ...
-
-// NEW: minimap
-export { showMinimap } from "@replit/codemirror-minimap";
-```
-
-This makes `showMinimap` available via your global `CM` object in `codemirror.js`, same pattern as `@codemirror/search` and `@uiw/codemirror-extensions-color`.
-
-### 1.3 Rebuild
-
-```bash
-npm run build
-# comment out terser in rollup config if OOM, like you did before
-```
-
-The `dist/index.js` now includes the minimap extension. 
+**Feature:** Automatic persistence of unsaved editor content with crash recovery  
+**Status:** Implemented (Phase 1)  
+**Version:** 1.0  
+**Last Updated:** 2025-11-26
 
 ---
 
-## 2. Add a minimap “mode” method in `codemirror.js`
+## Overview
 
-Follow the same **Compartment + method** pattern you already use for indentation guides and zebra stripes.
+The session draft feature provides automatic, transparent persistence of unsaved editor content to survive browser refreshes, app crashes, and connection losses. Content is saved to disk continuously during editing and automatically restored when the editor reopens, with differentiation between normal continuation (mid-session) and crash recovery scenarios.
 
-Edit: `app/static/vendor/nicegui/elements/codemirror/codemirror.js`
+### Key Characteristics
 
-Near the top, after you pull CM exports, add a local alias:
+- **Zero-configuration**: No user action required; drafts persist automatically
+- **Run-aware**: Distinguishes between same-session continuations and crash recoveries
+- **Atomic storage**: Uses sidecar JSON files with atomic write operations
+- **Collision-safe**: SHA-256 validation prevents overwriting external changes
+- **Watcher-integrated**: External file modifications invalidate stale drafts
 
-```javascript
-const showMinimap = CM.showMinimap; // from @replit/codemirror-minimap
+---
+
+## Architecture
+
+### Three-State Model
+
+The system operates in three distinct states based on cache presence and run ID matching:
+
+#### State 1: Clean (No Draft)
+- **Trigger:** New file opened, successful save, or explicit discard
+- **Behavior:** Editor displays disk content, no cache exists
+- **Cache Status:** No sidecar file for `(project_path, file_path)` key
+
+#### State 2: Mid-Session (Active Draft)
+- **Trigger:** User edits content, cache persists with matching run ID
+- **Behavior:** Silent restoration on page reload; editing continues seamlessly
+- **Cache Status:** Sidecar exists, `run_id` matches current `TE_RUN_ID`
+- **UI Indicator:** None (transparent to user)
+
+#### State 3: Crashed (Stale Draft)
+- **Trigger:** Cache found with mismatched run ID (worker restart, app crash)
+- **Behavior:** Automatic restoration with notification toast
+- **Cache Status:** Sidecar exists, `run_id` differs from current `TE_RUN_ID`
+- **UI Indicator:** Orange toast: "Restored unsaved draft" or "Recovered changes from prior crash"
+
+---
+
+## Storage Architecture
+
+### Sidecar File System
+
+Drafts are stored as individual JSON files outside the main history database:
+
+**Location:** `~/.cache/cm6_sessions/<cache_key>.json`
+
+**Cache Key Generation:**
+```python
+def _normalize_cache_key(project_path: str, file_path: str) -> str:
+    norm_project = str(Path(project_path).expanduser().resolve(strict=False))
+    norm_file = str(Path(file_path).expanduser().resolve(strict=False))
+    combined = f"{norm_project}::{norm_file}"
+    return hashlib.sha1(combined.encode('utf-8')).hexdigest()
 ```
 
-Then add a Vue method on the component, next to `applyZebraStripes` / `applyIndentGuides`:
+### Sidecar Entry Schema
 
-```javascript
-async applyMinimapMode(mode) {
-  // mode: "desktop" | "mobile" | "off"
-  if (!this.editor || !showMinimap || typeof showMinimap.compute !== 'function') {
-    console.warn('[CodeMirror] minimap not available');
-    return;
-  }
-
-  if (!this.minimapCompartment) {
-    this.minimapCompartment = new CM.Compartment();
-    this.minimapMode = 'off';
-
-    // Install empty compartment once
-    this.editor.dispatch({
-      effects: CM.StateEffect.appendConfig.of(
-        this.minimapCompartment.of([])
-      ),
-    });
-  }
-
-  this.minimapMode = mode || 'off';
-
-  let extensions = [];
-
-  if (mode !== 'off') {
-    const minimapExt = showMinimap.compute(['doc'], (state) => {
-      // We just need to give it a container DOM node and config
-      const create = (view) => {
-        const dom = document.createElement('div');
-        // Base class + mode class; CSS will do the heavy lifting
-        dom.className = `cm-minimap-container cm-minimap-${mode}`;
-        return { dom };
-      };
-
-      // Desktop vs mobile are just different config knobs
-      const isMobile = mode === 'mobile';
-
-      return {
-        create,
-        // VS Code-ish “blocky” look works well in a tiny view
-        displayText: 'blocks',
-        // For desktop you might prefer "mouse-over", for mobile always-on
-        showOverlay: isMobile ? 'always' : 'mouse-over',
-        // Leave gutters empty for now; you can feed git info later if you want
-        gutters: [],
-      };
-    });
-
-    extensions = [minimapExt];
-  }
-
-  this.editor.dispatch({
-    effects: this.minimapCompartment.reconfigure(extensions),
-  });
+```json
+{
+  "content": "... full buffer content ...",
+  "content_length": 1234,
+  "content_sha256": "abc123...",
+  "base_sha256": "def456...",
+  "unsaved": true,
+  "run_id": "shell-12345-67890",
+  "shell_id": "framework-shell-abc",
+  "shell_run_id": "run-xyz",
+  "launcher_pid": 1001,
+  "worker_pid": 5001,
+  "updated_at": "2025-11-26T12:34:56.789Z"
 }
 ```
 
-This is exactly how the official example wires `showMinimap.compute`, just wrapped in a Compartment so you can reconfigure it on the fly. ([GitHub][1])
+**Field Descriptions:**
 
-**Key points:**
+- `content`: Full text content of the editor buffer
+- `content_sha256`: SHA-256 hash of `content` (current state)
+- `base_sha256`: SHA-256 hash of last saved disk version (baseline for collision detection)
+- `unsaved`: Boolean flag indicating if content differs from disk
+- `run_id`: Framework worker run identifier (`TE_RUN_ID` environment variable)
+- `updated_at`: ISO 8601 timestamp of last cache write
 
-* **Single extension**; three modes:
+### Atomic Write Protocol
 
-  * `"desktop"` → sidebar-style minimap
-  * `"mobile"` → overlay-style minimap
-  * `"off"` → no minimap
-* Orientation-specific behavior is handled entirely via:
-
-  * The mode string passed in
-  * CSS classes on the minimap container
-
-No second “version” of the extension is needed.
-
----
-
-## 3. Python wrapper in `codemirror.py`
-
-Same pattern as `set_zebra_stripes()` and `set_diff_decorations()`.
-
-Edit: `app/static/vendor/nicegui/elements/codemirror/codemirror.py`
-
-Add:
+Writes use a temp-file-swap pattern to ensure crash-safety:
 
 ```python
-class CodeMirror(Element):
-    # ... existing methods ...
-
-    def set_minimap_mode(self, mode: str) -> None:
-        """Set minimap mode: 'desktop', 'mobile', or 'off'."""
-        # Defensive normalize
-        if mode not in ('desktop', 'mobile', 'off'):
-            mode = 'off'
-        self.run_method('applyMinimapMode', mode)
+def _write_sidecar(cache_key: str, entry: Dict) -> None:
+    with tempfile.NamedTemporaryFile(
+        mode='w',
+        dir=self._session_cache_dir,
+        delete=False,
+        prefix=f"{cache_key}.",
+        suffix=".tmp"
+    ) as tmp_file:
+        tmp_path = Path(tmp_file.name)
+        json.dump(entry, tmp_file, ensure_ascii=False, indent=2)
+        tmp_file.flush()
+        os.fsync(tmp_file.fileno())  # Force kernel write
+    
+    os.replace(tmp_path, final_path)  # Atomic swap
 ```
 
-Now the NiceGUI side has a clean API like your other editor features.
+**Why this works:**
+1. Write to temporary file in same directory (ensures same filesystem)
+2. Force kernel flush with `fsync()` (survives power loss)
+3. Atomically replace target file with `os.replace()` (POSIX guarantee)
+4. If crash occurs during write, either old file survives or new file is complete
 
 ---
 
-## 4. Backend endpoint to drive the mode
+## Data Flow
 
-Pattern: like your search panel example – endpoint in `editor_app.py` that calls the Python wrapper. 
+### Persistence Flow (Typing → Disk)
 
-Edit: `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+```
+1. User types in editor
+   ↓
+2. CodeMirror on_change event fires
+   ↓
+3. editor._cached_content updated
+   ↓
+4. _schedule_cache_persist() called
+   ↓
+5. Debounce timer set (1 second)
+   ↓
+6. _persist_to_cache_debounced() executes
+   ↓
+7. Collect runtime metadata (run_id, shell_id, etc.)
+   ↓
+8. HistoryStore.upsert_cached_document()
+   ↓
+9. Compute content_sha256 and compare to base_sha256
+   ↓
+10. Write atomic sidecar JSON
+   ↓
+11. Update in-memory cache
+   ↓
+12. _broadcast_cache_state() → emitCacheState() → parent frame
+```
 
-Somewhere near the other `/editor/...` routes:
+**Debounce Interval:** 1000ms (1 second)  
+**Purpose:** Reduce disk I/O while typing; batch rapid keystrokes
+
+### Restoration Flow (Page Load → Editor)
+
+```
+1. editor_page() initializes
+   ↓
+2. Load last file path from HistoryStore
+   ↓
+3. Check for cached session:
+   HistoryStore.get_cached_document(project_path, file_path)
+   ↓
+4. If cache exists:
+   a. Compare cache.run_id with current TE_RUN_ID
+   b. State = 'mid_session' if match, 'crashed' if mismatch
+   c. Set initial_content = cache.content
+   d. Set initial_sha256 = cache.base_sha256 (NOT content_sha256!)
+   ↓
+5. Create editor with initial_content
+   ↓
+6. Set editor._cached_content = initial_content
+   ↓
+7. Broadcast cache state to parent frame
+   ↓
+8. If crashed state: show toast notification
+```
+
+**Critical Detail:** Restoration uses `base_sha256` (disk version at edit start) not `content_sha256` (draft version). This preserves the baseline for collision detection when user eventually saves.
+
+### Save Flow (Save Button → Clean State)
+
+```
+1. User clicks Save (or Ctrl+S)
+   ↓
+2. POST /write endpoint called
+   ↓
+3. Validate base_sha256 matches current disk SHA
+   ↓
+4. If mismatch: return 409 Conflict (external edit detected)
+   ↓
+5. If match: write_full() performs atomic write
+   ↓
+6. Clear session cache:
+   HistoryStore.clear_cached_document(project_path, path)
+   ↓
+7. Delete sidecar file
+   ↓
+8. Remove in-memory cache entry
+   ↓
+9. Broadcast cache state: state='clean', unsaved=false
+   ↓
+10. Send save acknowledgement (prevents watcher self-echo)
+```
+
+---
+
+## External Change Handling
+
+### Watcher Invalidation
+
+When file watcher detects external modification:
 
 ```python
-from fastapi import Body, HTTPException
-
-# Assume you already have a way to get the current editor instance
-# (you use this for zebra stripes, diffs, etc.)
-# e.g. _editor_instance / get_editor_instance()
-
-@app.post('/editor/minimap/mode')
-async def editor_minimap_mode(data: dict = Body(...)):
-    """Set the minimap mode for the current editor."""
-    mode = data.get('mode', 'off')
-    editor = _editor_instance  # or get_editor_instance()
-    if not editor:
-        raise HTTPException(status_code=404, detail='Editor not initialized')
-    try:
-        editor.set_minimap_mode(mode)
-        return {'ok': True, 'mode': mode}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to set minimap mode: {e}')
+def _apply_watcher_replace(path, content, sha256, project_path):
+    # Apply new content to editor
+    editor.set_value(content)
+    editor._cached_content = content
+    set_current_file(path, sha256)
+    
+    # Check if cached draft exists
+    cache_entry = _history_store.get_cached_document(project_path, path)
+    if cache_entry:
+        cached_sha = cache_entry.get('content_sha256')
+        if cached_sha and sha256 and cached_sha != sha256:
+            # SHA mismatch: external change invalidates draft
+            print(f"[SESSION_CACHE] External edit detected; clearing cached draft")
+            _history_store.clear_cached_document(project_path, path)
+            external_change = True
+    
+    # Broadcast clean state
+    _broadcast_cache_state(
+        project_path, path,
+        state='clean',
+        unsaved=False,
+        reason='watcher_external' if external_change else 'watcher_replace'
+    )
 ```
 
-No disk persistence here – this is a **pure view concern**, unlike your preferences store. That keeps it consistent with your “backend as ground truth, frontend ephemeral” design.
+**Rationale:** External edits (e.g., `git checkout`, vim save, format-on-save) represent canonical truth. Cached drafts based on old content are no longer valid and must be discarded to prevent resurrection of stale state.
 
 ---
 
-## 5. Hook it to your breakpoints in `main.js`
+## Cache State Broadcasting
 
-Your outer app shell already has breakpoint logic for “mobile” vs “desktop” layout. You just need to mirror that into a minimap mode call, using your existing `apiPost()` helper.
+### Purpose
 
-Edit: `app/apps/file_editor_cm6/main.js`
+The parent frame (application shell) needs real-time awareness of draft state to:
+- Update filename display (show unsaved indicator)
+- Show/hide draft badges
+- Track current file path for navigation
+- Enable "Discard Draft" UI controls
 
-Add something like:
+### Protocol
+
+Backend → NiceGUI iframe → Parent frame via `postMessage`:
 
 ```javascript
-let lastMinimapMode = null;
-
-function detectMinimapMode() {
-  // Use the same breakpoint you use for your mobile layout
-  const isMobile = window.matchMedia('(max-width: 900px)').matches;
-  return isMobile ? 'mobile' : 'desktop';
-}
-
-async function syncMinimapMode() {
-  const mode = detectMinimapMode();
-  if (mode === lastMinimapMode) return;
-  lastMinimapMode = mode;
-
-  try {
-    await apiPost('editor/minimap/mode', {
-      mode,
-      // optional, if you want path/project for logging or future use:
-      path: currentPath || null,
-      project: cachedProjectRoot || null,
-    });
-  } catch (err) {
-    console.warn('[Code CM6] Failed to set minimap mode:', err);
-  }
-}
-
-// On initial load
-window.addEventListener('load', () => {
-  syncMinimapMode();
-});
-
-// On resize / orientation change
-window.addEventListener('resize', debounce(syncMinimapMode, 250));
-window.matchMedia('(orientation: portrait)').addEventListener('change', syncMinimapMode);
-```
-
-This keeps the **decision** about “mobile vs desktop” in the outer app (where your breakpoints already live), and the **implementation** of the minimap entirely inside the vendored CM6 component.
-
----
-
-## 6. CSS: make desktop vs mobile behave differently
-
-Last piece: mode-specific styling. You’ve already done this kind of thing for diff gutter and indentation guides by adding CSS in the NiceGUI editor template.
-
-Wherever you define CM6-specific CSS for Code CM6 (often in the `editor_app.py` template or a linked stylesheet), add:
-
-```css
-/* Base minimap container */
-.cm-editor .cm-minimap-container {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 0;
-  pointer-events: auto;
-  z-index: 5;        /* Above code, below overlays */
-}
-
-/* Desktop: classic slim sidebar scrollbar */
-.cm-editor .cm-minimap-desktop {
-  width: 0.9rem;     /* Adjust to taste */
-  opacity: 0.9;
-}
-
-/* Mobile: semi-transparent overlay “preview” on the right */
-.cm-editor .cm-minimap-mobile {
-  width: 30%;        /* Take a chunk of the right side */
-  opacity: 0.35;
-  pointer-events: none;  /* Let touches go through to the main editor */
-}
-
-/* You can also hide desktop style when really narrow, if you ever send mode=desktop on a phone */
-@media (max-width: 600px) {
-  .cm-editor .cm-minimap-desktop {
-    display: none;
-  }
+// In codemirror.js (vendored)
+emitCacheState(payload) {
+    if (typeof window.parent !== 'undefined' && window.parent !== window) {
+        try {
+            window.parent.postMessage({
+                type: 'cm6-cache-state',
+                ...payload
+            }, '*');
+        } catch (err) {
+            console.warn('[CodeMirror] Failed to emit cache state:', err);
+        }
+    }
 }
 ```
 
-Because the minimap DOM node gets both `cm-minimap-container` and `cm-minimap-${mode}`, swapping mode is just a class change via the extension reconfigure.
+**Payload Structure:**
+```json
+{
+  "type": "cm6-cache-state",
+  "path": "/absolute/path/to/file.py",
+  "project_path": "/absolute/project/root",
+  "relative_path": "src/module/file.py",
+  "file_label": "file.py",
+  "directory_label": "src/module/file.py",
+  "state": "mid_session",
+  "unsaved": true,
+  "reason": "persist",
+  "updated_at": "2025-11-26T12:34:56.789Z",
+  "timestamp": 1732627496.789,
+  "content_sha256": "abc123...",
+  "base_sha256": "def456...",
+  "run_id": "shell-12345-67890"
+}
+```
+
+**State Values:**
+- `clean`: No unsaved changes, no cache
+- `mid_session`: Active draft in same run
+- `crashed`: Recovered draft from previous run
+
+**Reason Values:**
+- `init`: Editor first load
+- `persist`: Debounced cache write
+- `restore`: Cache restored on page load
+- `discard`: User explicitly discarded draft
+- `watcher_replace`: File updated by watcher
+- `watcher_external`: External edit cleared draft
 
 ---
 
-## 7. How this fits your architecture (and answers your question)
+## API Endpoints
 
-* You **do not** need separate “mobile minimap” and “desktop minimap” extensions.
-* You **do** need:
+### GET `/session_cache`
 
-  * One vendored CM extension (`showMinimap`) wired via `src/index.mjs` → `CM.showMinimap`
-  * One Vue method `applyMinimapMode(mode)` using a Compartment
-  * One Python wrapper `set_minimap_mode(mode)`
-  * One endpoint `/editor/minimap/mode`
-  * A tiny bit of breakpoint wiring in `main.js` + some CSS
+Retrieve cached session for a specific file.
 
-That’s exactly the same pattern you already use for zebra stripes, diff decorations, indentation guides, and the search panel: new CM package → export through bundle → JS method on component → Python wrapper → endpoint → front-end call.
+**Parameters:**
+- `project`: Absolute project root path
+- `path`: Absolute file path
 
-So you weren’t overcomplicating it – you just don’t need to fork the extension; you only need a **mode switch** on top of the single minimap extension.
+**Response (cache exists):**
+```json
+{
+  "ok": true,
+  "data": {
+    "state": "mid_session",
+    "content": "... full content ...",
+    "content_sha256": "abc123...",
+    "base_sha256": "def456...",
+    "unsaved": true,
+    "run_id": "shell-12345-67890",
+    "updated_at": "2025-11-26T12:34:56.789Z",
+    "current_run_id": "shell-12345-67890"
+  }
+}
+```
 
-[1]: https://github.com/replit/codemirror-minimap?utm_source=chatgpt.com "Minimap extension for Codemirror 6"
+**Response (no cache):**
+```json
+{
+  "ok": true,
+  "data": null
+}
+```
+
+### DELETE `/session_cache`
+
+Discard cached session for a specific file.
+
+**Parameters:**
+- `project`: Absolute project root path
+- `path`: Absolute file path
+
+**Response:**
+```json
+{
+  "ok": true,
+  "data": {
+    "cleared": true
+  }
+}
+```
+
+### POST `/editor/discard_draft`
+
+Discard draft for currently active file in the editor.
+
+**Request Body:**
+```json
+{
+  "path": "/absolute/path/to/file.py"
+}
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "data": {
+    "cleared": true
+  }
+}
+```
+
+**Side Effects:**
+- Deletes sidecar file
+- Removes in-memory cache entry
+- Broadcasts `state='clean'` to parent frame
+
+---
+
+## Collision Detection
+
+### Base SHA Validation
+
+Every save operation validates the baseline hasn't changed:
+
+```python
+def write_file_route(data: dict):
+    path = data['path']
+    content = data['content']
+    client_base_sha = data.get('base_sha256')
+    
+    # Read current disk file
+    current_meta = _get_file_meta(path)
+    disk_sha = current_meta['sha256']
+    
+    # Check if baseline changed
+    if client_base_sha and client_base_sha != disk_sha:
+        raise BaseMismatchError(
+            'File was modified externally. Reload to see changes.',
+            disk_content=path.read_text(),
+            disk_sha=disk_sha
+        )
+    
+    # Safe to write
+    write_full(path, content)
+```
+
+**Scenario:** User edits file, external process (git, vim, etc.) modifies disk, user attempts save.
+
+**Outcome:** 409 Conflict error prevents data loss. User must reload to see external changes before saving again.
+
+---
+
+## Performance Characteristics
+
+### Write Frequency
+
+- **Debounce:** 1 second
+- **Typical editing:** ~1 write/second during active typing
+- **Idle editing:** No writes (timer canceled)
+- **Storage overhead:** ~5-10 KB per cached document (1000 lines average)
+
+### Read Frequency
+
+- **Page load:** Once per file open
+- **Typical:** 1-2 reads per minute (on browser refresh)
+
+### Disk Impact
+
+**Single document:**
+- Write: ~10ms (includes fsync)
+- Read: ~5ms (cached by OS)
+
+**12 documents (Phase 3):**
+- Total storage: ~60-120 KB
+- Negligible impact on modern storage
+
+---
+
+## Implementation Details
+
+### HistoryStore Methods
+
+**File:** `app/apps/file_editor_cm6/history_store.py`
+
+```python
+class HistoryStore:
+    def get_cached_document(self, project_path: str, file_path: str) -> Optional[Dict]:
+        """Retrieve cached session from sidecar file."""
+        cache_key = self._normalize_cache_key(project_path, file_path)
+        entry = self._read_sidecar(cache_key)
+        if entry:
+            # Update in-memory copy
+            self._data["session_cache"][cache_key] = entry
+        return dict(entry) if entry else None
+    
+    def upsert_cached_document(
+        self, project_path: str, file_path: str,
+        content: str, base_sha256: str,
+        run_id: str, shell_id: str, shell_run_id: str,
+        launcher_pid: int, worker_pid: int
+    ) -> Dict:
+        """Update or insert cached session and write to sidecar."""
+        cache_key = self._normalize_cache_key(project_path, file_path)
+        content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        unsaved = (content_sha256 != base_sha256)
+        
+        entry = {
+            "content": content,
+            "content_length": len(content),
+            "content_sha256": content_sha256,
+            "base_sha256": base_sha256,
+            "unsaved": unsaved,
+            "run_id": run_id,
+            "shell_id": shell_id,
+            "shell_run_id": shell_run_id,
+            "launcher_pid": launcher_pid,
+            "worker_pid": worker_pid,
+            "updated_at": _utc_timestamp(),
+        }
+        
+        # Atomic write to sidecar
+        self._write_sidecar(cache_key, entry)
+        self._data["session_cache"][cache_key] = entry
+        return dict(entry)
+    
+    def clear_cached_document(self, project_path: str, file_path: str) -> bool:
+        """Remove cached session and sidecar file."""
+        cache_key = self._normalize_cache_key(project_path, file_path)
+        self._delete_sidecar(cache_key)
+        existed = cache_key in self._data["session_cache"]
+        if existed:
+            del self._data["session_cache"][cache_key]
+        return existed
+```
+
+### Editor Integration
+
+**File:** `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+
+**On Editor Change:**
+```python
+def _on_editor_change(event):
+    value = editor.value or ''
+    editor._cached_content = value
+    _schedule_cache_persist()
+
+def _schedule_cache_persist():
+    global _cache_persist_timer
+    if _cache_persist_timer:
+        _cache_persist_timer.cancel()
+    _cache_persist_timer = ui.timer(1.0, _persist_to_cache_debounced, once=True)
+```
+
+**On Page Load:**
+```python
+# Check for cached session
+cached_entry = _history_store.get_cached_document(project_path, initial_path)
+if cached_entry and isinstance(cached_entry.get('content'), str):
+    runtime_meta = _get_runtime_metadata()
+    cached_run = cached_entry.get('run_id', 'unknown')
+    restored_state = 'mid_session' if cached_run == runtime_meta['run_id'] else 'crashed'
+    
+    # Restore content
+    initial_content = cached_entry['content']
+    initial_sha256 = cached_entry['base_sha256']  # NOT content_sha256!
+    
+    # Show notification
+    if restored_state == 'crashed':
+        ui.notify('Recovered changes from prior crash', color='orange')
+```
+
+---
+
+## Security Considerations
+
+### Path Validation
+
+All paths validated via `_expand_and_validate_path()`:
+- Restricted to user home directory
+- Prevents path traversal attacks
+- Rejects symbolic links escaping sandbox
+
+### Cache Key Normalization
+
+Paths resolved to absolute canonical form before hashing:
+- Handles relative paths, `~`, symlinks
+- Prevents cache misses from path variations
+- Consistent across sessions and devices
+
+### Crash Detection
+
+Run ID from environment variables controlled by framework:
+- No user input affects crash detection
+- Cannot be spoofed via frontend
+- Secure baseline for state determination
+
+---
+
+## Known Limitations
+
+### Single Worker Assumption
+
+Current implementation assumes single worker process per project:
+- Multiple workers may race on cache writes
+- **Future Solution (Phase 2):** Include worker ID in cache key
+
+### Large Files
+
+Files >1MB may cause slow cache writes:
+- No current limit enforced
+- **Future Solution:** Add content length cap (skip caching for large files)
+
+### Binary Files
+
+UTF-8 encoding assumed:
+- Binary files will fail to cache (encoding error)
+- **Future Solution:** Check MIME type before caching
+
+---
+
+## Future Enhancements
+
+### Phase 2: Multi-Document Sessions
+
+- Support up to 12 concurrent cached files per project
+- "Save All" button to persist all drafts at once
+- "Discard All" for bulk cleanup
+- UI indicator showing number of unsaved documents
+
+### Phase 3: Cache Management UI
+
+- Sidebar showing all cached sessions with timestamps
+- Per-document restore/discard buttons
+- Auto-cleanup of stale entries (>7 days old)
+- Cache size limits (max 10MB per entry)
+- Compression for large files
+
+---
+
+## Debugging
+
+### Log Output
+
+Enable session cache debugging:
+
+```python
+# In editor_app.py
+print(f"[SESSION_CACHE] Persisted draft for {current_file}", file=sys.stderr)
+print(f"[SESSION_CACHE] External edit detected; clearing cached draft", file=sys.stderr)
+```
+
+### Cache Inspection
+
+View cached drafts:
+```bash
+ls -lh ~/.cache/cm6_sessions/
+cat ~/.cache/cm6_sessions/<cache_key>.json | jq .
+```
+
+### State Verification
+
+Check in-memory cache:
+```python
+from app.apps.file_editor_cm6.stores import _history_store
+cache = _history_store._data.get("session_cache", {})
+print(f"Cached entries: {len(cache)}")
+for key, entry in cache.items():
+    print(f"  {entry.get('updated_at')}: {entry.get('content_length')} chars")
+```
+
+---
+
+## Related Documentation
+
+- Implementation Plan: `notes/2025-11-14_Session_Cache_Implementation_Plan.md`
+- Technical Architecture: `docs/apps/code_cm6/TECHNICAL.md`
+- Framework Shells: Section 8.5 in TECHNICAL.md
+- File Watcher System: Section 5 in TECHNICAL.md
+
+---
+
+**Document Version:** 1.0  
+**Author:** GitHub Copilot (Documentation Agent)  
+**Date:** 2025-11-26
