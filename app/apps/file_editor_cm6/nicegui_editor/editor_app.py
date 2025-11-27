@@ -24,6 +24,7 @@ from app.apps.file_editor_cm6.core_write import write_full, BaseMismatchError
 from app.apps.file_editor_cm6.terminal_shell import create_editor_shell
 from app.libs.framework_shells import get_manager
 from app.apps.file_editor_cm6.diff_helper import invalidate_diff_cache, collect_diff
+from app.apps.file_editor_cm6.draft_diff_helper import compute_draft_diff
 
 
 # --- FastAPI Router ---
@@ -317,6 +318,34 @@ def _persist_to_cache_debounced():
         reason='persist',
     )
 
+    # Draft Diffs Logic (Autosave OFF)
+    editor_prefs = _preferences_store.get_preferences().get('editor', {})
+    auto_save = editor_prefs.get('autoSave', False)
+    show_diffs = editor_prefs.get('showInlineDiffs', False)
+
+    if show_diffs and not auto_save:
+        try:
+            # Ensure we are in 'draft' mode
+            editor.set_diff_mode('draft')
+            
+            # Read disk content (Ground Truth)
+            if Path(current_file).exists():
+                disk_content = Path(current_file).read_text(encoding='utf-8', errors='replace')
+                
+                # Compute diff
+                diff_payload = compute_draft_diff(current_file, current_content, disk_content)
+                
+                # Apply decorations
+                editor.set_diff_decorations(diff_payload.get('hunks', []))
+            else:
+                # New file (not on disk) -> Everything is added? Or no diffs?
+                # Usually distinct from draft diffs. Let's clear.
+                editor.set_diff_decorations([])
+            
+        except Exception as e:
+            print(f"[DRAFT_DIFF] Failed to compute: {e}", file=sys.stderr)
+            editor.set_diff_decorations([])
+
 def _schedule_cache_persist():
     """Schedule debounced cache persistence."""
     global _cache_persist_timer
@@ -508,10 +537,22 @@ async def editor_page():
             # 6. Load Diffs if Enabled
             if editor_prefs.get('showInlineDiffs', False) and initial_path and project_path:
                 try:
-                    project_root = Path(project_path).expanduser()
-                    rel = _normalize_rel_path(project_root, initial_path)
-                    diff_data = collect_diff(project_root, rel, base_ref=_current_diff_base(project_path))
-                    editor.set_diff_decorations(diff_data.get('hunks', []))
+                    auto_save = editor_prefs.get('autoSave', False)
+                    if auto_save:
+                        editor.set_diff_mode('git')
+                        project_root = Path(project_path).expanduser()
+                        rel = _normalize_rel_path(project_root, initial_path)
+                        diff_data = collect_diff(project_root, rel, base_ref=_current_diff_base(project_path))
+                        editor.set_diff_decorations(diff_data.get('hunks', []))
+                    else:
+                        editor.set_diff_mode('draft')
+                        if Path(initial_path).exists():
+                            disk_content = Path(initial_path).read_text(encoding='utf-8', errors='replace')
+                            diff_data = compute_draft_diff(initial_path, initial_content, disk_content)
+                            editor.set_diff_decorations(diff_data.get('hunks', []))
+                        else:
+                            editor.set_diff_decorations([])
+                            
                 except Exception as e:
                     print(f"[DIFF] Failed to auto-load diffs on init: {e}", file=sys.stderr)
 
@@ -566,6 +607,19 @@ async def editor_page():
       --diff-del-fg: rgba(248, 113, 113, 0.95);
       --diff-del-marker: rgba(248, 113, 113, 0.85);
     }
+    
+    /* Draft Diff Mode Overrides (Blue/Yellow) */
+    .cm-diff-mode-draft {
+      --diff-add-bg: rgba(59, 130, 246, 0.22);
+      --diff-add-border: rgba(59, 130, 246, 0.75);
+      --diff-add-marker: rgba(59, 130, 246, 0.9);
+      
+      --diff-del-bg: rgba(250, 204, 21, 0.18);
+      --diff-del-border: rgba(250, 204, 21, 0.7);
+      --diff-del-marker: rgba(250, 204, 21, 0.9);
+      --diff-del-fg: rgba(250, 204, 21, 0.95);
+    }
+
     /* Base minimap container */
     .cm-editor .cm-minimap-container {
       position: sticky; /* Changed from absolute to sticky to fix scrolling issue */
@@ -1083,17 +1137,62 @@ async def update_preference(data: dict = Body(...)):
             editor.show_minimap = bool(value)
         elif key == 'showInlineDiffs':
             if value and get_current_file():
-                # Load and apply diffs
+                # Determine mode based on autoSave
+                current_prefs = _preferences_store.get_preferences().get('editor', {})
+                auto_save = current_prefs.get('autoSave', False)
+                
                 project_path = _history_store.get_active_project() or str(get_project_root())
+                
                 if project_path:
                     try:
-                        rel = _normalize_rel_path(Path(project_path).expanduser(), get_current_file())
-                        diff_data = collect_diff(Path(project_path).expanduser(), rel, base_ref=_current_diff_base(project_path))
-                        editor.set_diff_decorations(diff_data.get('hunks', []))
+                        if auto_save:
+                            editor.set_diff_mode('git')
+                            rel = _normalize_rel_path(Path(project_path).expanduser(), get_current_file())
+                            diff_data = collect_diff(Path(project_path).expanduser(), rel, base_ref=_current_diff_base(project_path))
+                            editor.set_diff_decorations(diff_data.get('hunks', []))
+                        else:
+                            editor.set_diff_mode('draft')
+                            # Compute draft diff against disk
+                            content = editor.value or ''
+                            current_file = get_current_file()
+                            if Path(current_file).exists():
+                                disk_content = Path(current_file).read_text(encoding='utf-8', errors='replace')
+                                diff_data = compute_draft_diff(current_file, content, disk_content)
+                                editor.set_diff_decorations(diff_data.get('hunks', []))
+                            else:
+                                editor.set_diff_decorations([])
+                                
                     except Exception as e:
                         print(f"[PREFERENCE] Failed to load diffs: {e}", file=sys.stderr)
             else:
                 editor.set_diff_decorations([])
+        elif key == 'autoSave':
+            # Handle mode switch immediately
+            mode = 'git' if value else 'draft'
+            editor.set_diff_mode(mode)
+            
+            # Refresh diffs if they are enabled
+            current_prefs = _preferences_store.get_preferences().get('editor', {})
+            if current_prefs.get('showInlineDiffs', False):
+                project_path = _history_store.get_active_project() or str(get_project_root())
+                current_file = get_current_file()
+                if project_path and current_file:
+                    try:
+                        if value: # Git
+                            rel = _normalize_rel_path(Path(project_path).expanduser(), current_file)
+                            diff_data = collect_diff(Path(project_path).expanduser(), rel, base_ref=_current_diff_base(project_path))
+                            editor.set_diff_decorations(diff_data.get('hunks', []))
+                        else: # Draft
+                            content = editor.value or ''
+                            if Path(current_file).exists():
+                                disk_content = Path(current_file).read_text(encoding='utf-8', errors='replace')
+                                diff_data = compute_draft_diff(current_file, content, disk_content)
+                                editor.set_diff_decorations(diff_data.get('hunks', []))
+                            else:
+                                editor.set_diff_decorations([])
+                    except Exception as e:
+                        print(f"[PREFERENCE] Failed to refresh diffs on autoSave toggle: {e}", file=sys.stderr)
+
         elif key == 'trackAgentEdits':
             if value:
                 enable_edit_tracking()

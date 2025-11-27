@@ -537,6 +537,16 @@ export default {
         console.warn('[CodeMirror] Failed to notify parent', err);
       }
     },
+    setDiffMode(mode) {
+      if (!this.editor) return;
+      if (mode === 'draft') {
+        this.editor.dom.classList.add('cm-diff-mode-draft');
+        this.editor.dom.classList.remove('cm-diff-mode-git');
+      } else {
+        this.editor.dom.classList.remove('cm-diff-mode-draft');
+        this.editor.dom.classList.add('cm-diff-mode-git');
+      }
+    },
     setDisabled(disabled) {
       this.editor.dispatch({
         effects: this.editableConfig.reconfigure(this.editableStates[!disabled]),

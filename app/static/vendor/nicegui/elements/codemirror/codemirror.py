@@ -411,6 +411,14 @@ class CodeMirror(ValueElement, DisableableElement,
         """
         self.run_method('applyDiffDecorations', hunks)
 
+    def set_diff_mode(self, mode: str) -> None:
+        """Set the visual mode for diffs ('git' or 'draft').
+        
+        Args:
+            mode: 'git' (Green/Red) or 'draft' (Blue/Yellow)
+        """
+        self.run_method('setDiffMode', mode)
+
     def open_search_panel(self) -> None:
         """Open the CodeMirror search panel (find/replace)."""
         self.run_method('openSearchPanelFromServer')
