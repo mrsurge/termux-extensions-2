@@ -299,6 +299,7 @@ const miToggleIndentGuides = requireEl('#mi-toggle-indent-guides');
 const miToggleWrap    = requireEl('#mi-toggle-wrap');
 const miToggleAutosave = requireEl('#mi-toggle-autosave');
 const miToggleDiffs  = requireEl('#mi-toggle-diffs');
+const miToggleDraftDiffs = requireEl('#mi-toggle-draft-diffs');
 const miToggleColorPicker = requireEl('#mi-toggle-color-picker');
 const miToggleReadonly = requireEl('#mi-toggle-readonly');
 const miTrackEdits   = requireEl('#mi-track-edits');
@@ -980,6 +981,7 @@ function applyStateToMenus(state) {
   setMenuChecked(miToggleWrap, state.wordWrap);
   setMenuChecked(miToggleAutosave, state.autoSave);
   setMenuChecked(miToggleDiffs, state.showInlineDiffs);
+  setMenuChecked(miToggleDraftDiffs, state.showDraftDiffs);
   setMenuChecked(miToggleColorPicker, state.colorPicker);
   setMenuChecked(miToggleReadonly, state.readOnly);
   setMenuChecked(miToggleMinimap, state.showMinimap);
@@ -1829,6 +1831,11 @@ bindMenuToggle(miToggleAutosave, async () => {
 
 bindMenuToggle(miToggleDiffs, async () => {
   const success = await updatePreference('showInlineDiffs', !(editorViewState?.showInlineDiffs));
+  if (!success) host.toast('Failed to update preference');
+});
+
+bindMenuToggle(miToggleDraftDiffs, async () => {
+  const success = await updatePreference('showDraftDiffs', !(editorViewState?.showDraftDiffs));
   if (!success) host.toast('Failed to update preference');
 });
 

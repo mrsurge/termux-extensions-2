@@ -80,15 +80,19 @@ const EMPTY_GUTTER_RANGESET = (() => {
 
 // Deletion widget class (moved to outer scope for facet access)
 class RemovedLineWidget extends CM.WidgetType {
-  constructor(text, wordWrap, originalLine) {
+  constructor(text, wordWrap, originalLine, isDraft=false) {
     super();
     this.text = text;
     this.wordWrap = wordWrap;
     this.originalLine = originalLine;
+    this.isDraft = isDraft;
   }
   toDOM() {
     const lineEl = document.createElement('div');
     lineEl.className = 'cm-diff-line cm-diff-line-removed';
+    if (this.isDraft) {
+      lineEl.classList.add('cm-diff-line-removed-draft');
+    }
     if (this.wordWrap) {
       lineEl.classList.add('cm-diff-wrap');
     }
@@ -141,6 +145,15 @@ class AddedLineClassMarker extends CM.GutterMarker {
 }
 const addedLineClassMarker = new AddedLineClassMarker();
 
+class AddedDraftLineClassMarker extends CM.GutterMarker {
+  constructor() { 
+    super(); 
+    this.elementClass = 'cm-diff-added-lineno-draft';
+  }
+  eq(other) { return other instanceof AddedDraftLineClassMarker; }
+}
+const addedDraftLineClassMarker = new AddedDraftLineClassMarker();
+
 // Inline diff decorations helper (extracted from diff_decorations.js)
 function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const { Decoration, RangeSetBuilder } = CM;
@@ -151,7 +164,12 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
 
   const lineAddedDeco = Decoration.line({
     class: 'cm-diff-line-added',
-    diffKind: 'insert', // Add metadata for minimap
+    diffKind: 'insert',
+  });
+  
+  const lineAddedDraftDeco = Decoration.line({
+    class: 'cm-diff-line-added-draft',
+    diffKind: 'insert',
   });
 
   const lineContextDeco = Decoration.line({
@@ -161,12 +179,10 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const wordWrap = getWordWrap();
   const builder = new RangeSetBuilder();
   const gutterBuilder = new RangeSetBuilder();
-  const gutterClassBuilder = new RangeSetBuilder(); // For line number coloring
+  const gutterClassBuilder = new RangeSetBuilder();
   let gutterCount = 0;
   let classCount = 0;
   const doc = view.state.doc;
-  
-  console.log('[buildDiffDecorations] Doc has', doc.lines, 'lines');
   
   const lineDecorations = new Map();
   const deletionWidgets = [];
@@ -175,34 +191,29 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
     let newLine = Math.max(1, hunk.newStart || 1);
     let oldLine = Math.max(1, hunk.oldStart || 1);
     
-    console.log('[buildDiffDecorations] Processing hunk, newStart:', hunk.newStart, 'oldStart:', hunk.oldStart, 'lines:', hunk.lines?.length);
     for (const line of hunk.lines || []) {
       const kind = line.type;
-      console.log('[buildDiffDecorations]   Line type:', kind, 'newLine:', newLine, 'oldLine:', oldLine);
       if (kind === 'add') {
-        const deco = lineAddedDeco;
-        const markerKind = '+';
-        lineDecorations.set(newLine, { decoration: deco, markerKind, isAdd: true });
+        lineDecorations.set(newLine, { decoration: lineAddedDeco, markerKind: '+', isAdd: true });
+        newLine += 1;
+      } else if (kind === 'add-draft') {
+        lineDecorations.set(newLine, { decoration: lineAddedDraftDeco, markerKind: '+', isAddDraft: true });
         newLine += 1;
       } else if (kind === 'context') {
-        const deco = lineContextDeco;
-        const markerKind = '│';
-        lineDecorations.set(newLine, { decoration: deco, markerKind });
+        lineDecorations.set(newLine, { decoration: lineContextDeco, markerKind: '│' });
         newLine += 1;
         oldLine += 1;
-      } else if (kind === 'del') {
+      } else if (kind === 'del' || kind === 'del-draft') {
         deletionWidgets.push({
           line: newLine > 0 ? newLine : 1,
           text: line.text || '',
-          originalLine: oldLine
+          originalLine: oldLine,
+          isDraft: (kind === 'del-draft')
         });
         oldLine += 1;
       }
     }
   }
-  
-  console.log('[buildDiffDecorations] Line decorations:', Array.from(lineDecorations.keys()));
-  console.log('[buildDiffDecorations] Deletion widgets:', deletionWidgets.map(w => `line ${w.line} (orig ${w.originalLine}): ${w.text.substring(0, 20)}`));
   
   deletionWidgets.sort((a, b) => a.line - b.line);
   
@@ -211,6 +222,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
     const lineInfo = safeLine(doc, lineNum);
     if (!lineInfo) continue;
     
+    // Widgets before the line
     while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line < lineNum) {
       const widget = deletionWidgets[widgetIndex];
       const anchorLine = safeLine(doc, widget.line);
@@ -218,19 +230,20 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       builder.add(pos, pos, Decoration.widget({
         side: -1,
         block: true,
-        widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine),
-        diffKind: 'delete', // Add metadata for minimap
+        widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine, widget.isDraft),
+        diffKind: 'delete',
       }));
       widgetIndex++;
     }
     
+    // Widgets AT the line
     while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line === lineNum) {
       const widget = deletionWidgets[widgetIndex];
       builder.add(lineInfo.from, lineInfo.from, Decoration.widget({
         side: -1,
         block: true,
-        widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine),
-        diffKind: 'delete', // Add metadata for minimap
+        widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine, widget.isDraft),
+        diffKind: 'delete',
       }));
       widgetIndex++;
     }
@@ -245,10 +258,14 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       if (entry.isAdd) {
         gutterClassBuilder.add(lineInfo.from, lineInfo.from, addedLineClassMarker);
         classCount++;
+      } else if (entry.isAddDraft) {
+        gutterClassBuilder.add(lineInfo.from, lineInfo.from, addedDraftLineClassMarker);
+        classCount++;
       }
     }
   }
   
+  // Remaining widgets
   while (widgetIndex < deletionWidgets.length) {
     const widget = deletionWidgets[widgetIndex];
     const anchorLine = safeLine(doc, widget.line);
@@ -256,8 +273,8 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
     builder.add(pos, pos, Decoration.widget({
       side: -1,
       block: true,
-      widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine),
-      diffKind: 'delete', // Add metadata for minimap
+      widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine, widget.isDraft),
+      diffKind: 'delete',
     }));
     widgetIndex++;
   }

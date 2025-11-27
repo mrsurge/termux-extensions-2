@@ -89,18 +89,18 @@ def compute_draft_diff(file_path: str, draft_content: str, disk_content: str) ->
             elif tag == 'replace':
                 # Deletions then additions
                 for line in a[i1:i2]:
-                    current_hunk["lines"].append({"type": "del", "text": line})
+                    current_hunk["lines"].append({"type": "del-draft", "text": line})
                     deleted += 1
                 for line in b[j1:j2]:
-                    current_hunk["lines"].append({"type": "add", "text": line})
+                    current_hunk["lines"].append({"type": "add-draft", "text": line})
                     added += 1
             elif tag == 'delete':
                 for line in a[i1:i2]:
-                    current_hunk["lines"].append({"type": "del", "text": line})
+                    current_hunk["lines"].append({"type": "del-draft", "text": line})
                     deleted += 1
             elif tag == 'insert':
                 for line in b[j1:j2]:
-                    current_hunk["lines"].append({"type": "add", "text": line})
+                    current_hunk["lines"].append({"type": "add-draft", "text": line})
                     added += 1
                     
         hunks.append(current_hunk)
