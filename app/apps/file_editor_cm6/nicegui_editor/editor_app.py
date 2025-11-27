@@ -740,6 +740,45 @@ async def discard_draft(data: dict = Body(...)):
     
     return {"ok": True, "data": {"cleared": cleared}}
 
+@editor_router.post('/refresh_cache_state')
+async def refresh_cache_state():
+    """Force re-broadcast of the current cache state."""
+    project_path = _history_store.get_active_project()
+    current_file = get_current_file()
+    
+    if not project_path or not current_file:
+        return {"ok": True}
+
+    cached_entry = _history_store.get_cached_document(project_path, current_file)
+    if cached_entry:
+        runtime_meta = _get_runtime_metadata()
+        cached_run = cached_entry.get('run_id', 'unknown')
+        current_run = runtime_meta['run_id']
+        
+        state = 'mid_session' if cached_run == current_run else 'crashed'
+        unsaved = cached_entry.get('unsaved', False)
+        
+        # Broadcast standard telemetry
+        _broadcast_cache_state(
+            project_path,
+            current_file,
+            state=state,
+            unsaved=unsaved,
+            cache_entry=cached_entry,
+            reason='restore'
+        )
+        
+        # Explicitly signal draft state if active
+        if state == 'crashed' or (state == 'mid_session' and unsaved):
+             editor = get_active_editor()
+             if editor:
+                 editor.notify_parent('draft_state', {
+                    'has_draft': True,
+                    'path': current_file
+                })
+            
+    return {"ok": True}
+
 @editor_router.post('/set_content')
 async def set_editor_content(data: dict = Body(...)):
     editor = get_active_editor()

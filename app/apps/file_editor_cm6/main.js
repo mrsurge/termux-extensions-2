@@ -1224,10 +1224,10 @@ function updateRunButtonState() {
 }
 
 function updatePathDisplay() {
+  const badge = document.getElementById('fe-file-draft-badge');
   if (!currentPath) {
     setToolbarFileName('Untitled');
-    cacheStateBadge.textContent = '';
-    cacheStateBadge.dataset.state = '';
+    if (badge) setIndicatorInactive(badge);
     filePathEl.textContent = 'No file open';
     filePathEl.title = '';
     updateRunButtonState();
@@ -1235,79 +1235,85 @@ function updatePathDisplay() {
   }
   const abs = toAbsolute(currentPath, null, HOME_DIR);
   setToolbarFileName(basename(abs));
-  cacheStateBadge.textContent = '';
-  cacheStateBadge.dataset.state = '';
+  if (badge) setIndicatorInactive(badge); // Reset to grey default
   filePathEl.textContent = formatFilePathDisplay(formatDisplayDirectory(abs));
   filePathEl.title = abs;
   updateRunButtonState();
 }
 
-function applyCacheIndicator(info) {
-  if (!info) {
-    cacheStateBadge.textContent = '';
-    cacheStateBadge.dataset.state = '';
-    cacheStateBadge.onclick = null;
-    cacheStateBadge.style.cursor = '';
-    cacheStateBadge.title = '';
+async function handleDiscardClick(e) {
+  e.stopPropagation();
+  e.preventDefault();
+  
+  const project = cachedProjectRoot || (await getCurrentProjectRoot());
+  if (!project) {
+    host.toast('Cannot discard: Project root unknown');
     return;
   }
-  const { state, unsaved, reason, restoredActive } = info;
-  
-  let hasDraft = false;
-  let badgeChar = '';
-  let badgeState = '';
 
-  if (state === 'crashed') {
-    hasDraft = true;
-    badgeChar = '!';
-    badgeState = 'crashed';
-  } else if (state === 'mid_session' && (reason === 'restore' || restoredActive)) {
-    hasDraft = true;
-    badgeChar = '*';
-    badgeState = 'restored';
-  } else if (state === 'mid_session' && unsaved) {
-    hasDraft = true;
-    badgeChar = '*';
-    badgeState = 'cached';
+  // Instant discard - no confirmation
+  try {
+    const url = `session_cache?project=${encodeURIComponent(project)}&path=${encodeURIComponent(currentPath)}`;
+    await api.delete(url);
+    
+    // Reload file to reset content to disk version
+    await openFile(currentPath, { forceRefresh: true });
+    host.toast('Draft discarded');
+  } catch (err) {
+    host.toast('Failed to discard draft');
+    console.error(err);
+  }
+}
+
+function setIndicatorActive(badge, char) {
+  badge.textContent = char;
+  badge.style.color = '#ff4444'; // Red
+  badge.style.cursor = 'pointer';
+  badge.title = 'Unsaved draft available. Click to discard.';
+  badge.onclick = handleDiscardClick;
+  badge.style.display = 'inline-block';
+}
+
+function setIndicatorInactive(badge) {
+  // Respect global restored flag - do not clear if we are holding a draft
+  if (restoredSessionActive) return;
+
+  badge.textContent = '*';
+  badge.style.color = '#666'; // Grey
+  badge.style.cursor = 'default';
+  badge.title = 'No unsaved draft';
+  badge.onclick = null;
+  badge.style.display = 'inline-block';
+}
+
+function applyCacheIndicator(info) {
+  const badge = document.getElementById('fe-file-draft-badge');
+  if (!badge) return;
+
+  if (!info) {
+    setIndicatorInactive(badge);
+    return;
   }
 
-  if (hasDraft) {
-    cacheStateBadge.textContent = badgeChar;
-    cacheStateBadge.dataset.state = badgeState;
-    cacheStateBadge.style.cursor = 'pointer';
-    cacheStateBadge.title = 'Unsaved draft available. Click to discard.';
-    
-    // Bind click to discard
-    cacheStateBadge.onclick = async (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      
-      const project = cachedProjectRoot || (await getCurrentProjectRoot());
-      if (!project) {
-        host.toast('Cannot discard: Project root unknown');
-        return;
-      }
+  const { state, unsaved, reason, restoredActive } = info;
+  
+  // Logic to determine if we should show RED (Active)
+  const isCrashed = (state === 'crashed');
+  const isRestored = (state === 'mid_session' && (reason === 'restore' || restoredActive));
+  const isActiveDraft = (state === 'mid_session' && unsaved);
 
-      if (confirm('Discard unsaved draft? This cannot be undone.')) {
-        try {
-          const url = `session_cache?project=${encodeURIComponent(project)}&path=${encodeURIComponent(currentPath)}`;
-          await api.delete(url);
-          
-          // Reload file to reset content to disk version
-          await openFile(currentPath, { forceRefresh: true });
-          host.toast('Draft discarded');
-        } catch (err) {
-          host.toast('Failed to discard draft');
-          console.error(err);
-        }
-      }
-    };
+  if (isCrashed || isRestored || isActiveDraft) {
+    setIndicatorActive(badge, isCrashed ? '!' : '*');
+    badge.dataset.state = isCrashed ? 'crashed' : (isRestored ? 'restored' : 'cached');
+    markUnsaved(true);
   } else {
-    cacheStateBadge.textContent = '';
-    cacheStateBadge.dataset.state = '';
-    cacheStateBadge.onclick = null;
-    cacheStateBadge.style.cursor = '';
-    cacheStateBadge.title = '';
+    // Only turn inactive if we are NOT holding a restored session
+    // This protects against race conditions where 'clean' arrives after 'restore'
+    if (!restoredSessionActive) {
+      setIndicatorInactive(badge);
+      badge.dataset.state = '';
+      markUnsaved(false);
+    }
   }
 }
 
@@ -1315,8 +1321,7 @@ async function openFile(path, options = {}) {
   const { allowOverwrite = true, forceRefresh = false } = options;
   if (!path) throw new Error('Path is empty');
   statusEl.textContent = 'Opening...';
-  cacheStateBadge.textContent = '';
-  cacheStateBadge.dataset.state = '';
+  
   const projectState = await ensureProjectContext();
   if (!projectState || !projectState.activeProject || !projectState.activeProjectExists) {
     statusEl.textContent = '';
@@ -1331,6 +1336,11 @@ async function openFile(path, options = {}) {
       statusEl.textContent = '';
       return;
     }
+    
+    // Reset indicator for new file load
+    restoredSessionActive = false;
+    setIndicatorInactive(cacheStateBadge);
+
     const payload = await apiGet(`read?path=${encodeURIComponent(path)}`);
     const resolved = toAbsolute(payload.path || path, null, HOME_DIR);
     currentPath = resolved;
@@ -2076,6 +2086,14 @@ async function main() {
   // Load menu state from backend (backend already configured editor at page render)
   await refreshMenuState();
   bindThemeMenu();
+
+  // Handshake: Ask backend to resend cache state now that we are listening
+  // This fixes the "Missed Message" race condition on page load
+  try {
+    await apiPost('editor/refresh_cache_state', {});
+  } catch (e) {
+    console.warn('Failed to refresh cache state on boot:', e);
+  }
   
   await fetchPersistedSessionState();
   initSessionStateContext(serverState);
