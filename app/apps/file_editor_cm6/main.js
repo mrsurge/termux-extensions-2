@@ -305,12 +305,6 @@ const miTrackEdits   = requireEl('#mi-track-edits');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
 
-const confirmModal = requireEl('#fe-confirm');
-const confirmClose = requireEl('#fe-confirm-close');
-const btnDiscard   = requireEl('#fe-discard');
-const btnSaveConfirm = requireEl('#fe-save-confirm');
-const btnCancel    = requireEl('#fe-cancel');
-
 initVirtualKeyboardAdjustments({
   root,
   agentDrawer: agentDrawerEl,
@@ -1737,7 +1731,6 @@ runActiveBtn.addEventListener('click', (e) => {
 document.addEventListener('click', () => closeAllMenus());
 
 bindMenuToggle(miNew, () => {
-  if (unsaved) { showConfirm(); return; }
   closeWebSocket();
   if (currentPath) {
     diffController.invalidateCacheForPath(currentPath);
@@ -1958,7 +1951,6 @@ document.addEventListener('keydown', (e) => {
   // Ctrl/Cmd+N: New
   if (cmdOrCtrl && e.key === 'n') {
     e.preventDefault();
-    if (unsaved) { showConfirm(); return; }
     closeWebSocket();
     if (currentPath) {
       diffController.invalidateCacheForPath(currentPath);
@@ -2003,19 +1995,6 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ---------- Confirm modal ----------
-function showConfirm() {
-  confirmModal.classList.add('show');
-  confirmModal.setAttribute('aria-hidden', 'false');
-}
-function hideConfirm() {
-  confirmModal.classList.remove('show');
-  confirmModal.setAttribute('aria-hidden', 'true');
-}
-confirmClose.addEventListener('click', hideConfirm);
-btnCancel.addEventListener('click', hideConfirm);
-btnDiscard.addEventListener('click', () => { hideConfirm(); markUnsaved(false); host.requestExit(); });
-btnSaveConfirm.addEventListener('click', async () => { await saveFile(); hideConfirm(); host.requestExit(); });
 
 // ---------- State load/init ----------
 host.setTitle('Code Viewer (CM6)');
