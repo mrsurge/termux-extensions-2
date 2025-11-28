@@ -442,6 +442,8 @@ class HistoryStore:
         unsaved = (content_sha256 != base_sha256)
 
         entry = {
+            "project_path": self._normalize_project_path(project_path),
+            "file_path": self._normalize_file_path(file_path),
             "content": content,
             "content_length": len(content),
             "content_sha256": content_sha256,
@@ -473,6 +475,26 @@ class HistoryStore:
                 del cache[cache_key]
                 self._save_locked()
             return existed
+
+    def list_project_drafts(self, project_path: str) -> List[Dict[str, object]]:
+        """List all cached drafts for the given project from disk sidecars."""
+        normalized_project = self._normalize_project_path(project_path)
+        disk_results = []
+        
+        # Scan disk sidecars
+        try:
+            for sidecar in self._session_cache_dir.glob("*.json"):
+                try:
+                    content = sidecar.read_text(encoding='utf-8')
+                    data = json.loads(content)
+                    if data.get("project_path") == normalized_project and data.get("unsaved"):
+                        disk_results.append(data)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+            
+        return disk_results
 
     def list_cached_documents(self, project_path: Optional[str] = None) -> List[Dict[str, object]]:
         """List all cached sessions, optionally filtered by project."""

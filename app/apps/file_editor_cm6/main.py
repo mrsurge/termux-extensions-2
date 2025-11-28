@@ -45,6 +45,7 @@ from .git_helper import (
 )
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
+from .draft_diff_helper import compute_draft_diff
 from .core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
 from .core_write import write_full, BaseMismatchError, _get_file_meta
 
@@ -1314,6 +1315,142 @@ async def explorer_search(data: dict = Body(...)):
         raise HTTPException(status_code=504, detail="Search timed out")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@file_editor_cm6_bp.get('/review/list')
+async def review_list(lightweight: bool = Query(False)):
+    """
+    Get list of files with unsaved drafts.
+    If lightweight=True, skips diff computation and returns only metadata.
+    """
+    project_root = _history_store.get_active_project()
+    if not project_root or not Path(project_root).exists():
+        return {"ok": True, "data": []}
+    
+    root_path = Path(project_root)
+    results = []
+    
+    try:
+        drafts = _history_store.list_project_drafts(project_root)
+        for draft in drafts:
+            # draft entry contains 'file_path' (abs)
+            abs_path = Path(draft['file_path'])
+            try:
+                rel_path = str(abs_path.relative_to(root_path))
+            except ValueError:
+                continue # Skip files outside project
+            
+            hunks = []
+            if not lightweight:
+                # Compute diff
+                try:
+                    draft_content = draft.get('content', '')
+                    if abs_path.exists():
+                        disk_content = abs_path.read_text(encoding='utf-8', errors='replace')
+                    else:
+                        disk_content = ''
+                    
+                    diff_data = compute_draft_diff(str(abs_path), draft_content, disk_content)
+                    hunks = diff_data.get('hunks', [])
+                except Exception as e:
+                    print(f"[REVIEW] Diff computation failed for {rel_path}: {e}", file=sys.stderr)
+
+            results.append({
+                "path": str(abs_path),
+                "rel": rel_path,
+                "has_draft": True,
+                "timestamp": draft.get('updated_at'),
+                "hunks": hunks
+            })
+            
+    except Exception as e:
+        print(f"[REVIEW] Draft list failed: {e}", file=sys.stderr)
+        
+    return {"ok": True, "data": results}
+
+@file_editor_cm6_bp.post('/review/save')
+async def review_save(data: dict = Body(...)):
+    """Save selected files from drafts to disk with full lifecycle notifications."""
+    files = data.get('files', [])
+    if not files:
+        return {"ok": True, "saved_count": 0}
+        
+    project_root = _history_store.get_active_project()
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project")
+    
+    root_path = Path(project_root)
+    saved_count = 0
+    errors = []
+    
+    # Init watcher once
+    init_watcher(root_path)
+    
+    import time # Ensure time is available
+    
+    for rel_path in files:
+        try:
+            abs_path = root_path / rel_path
+            # Get draft content
+            cached = _history_store.get_cached_document(project_root, str(abs_path))
+            if not cached:
+                continue
+                
+            content = cached.get('content', '')
+            base_sha = cached.get('base_sha256')
+            
+            # Check original mode
+            orig_mode = None
+            if abs_path.exists():
+                try:
+                    orig_mode = abs_path.stat().st_mode & 0o777
+                except OSError:
+                    pass
+            
+            # Write to disk
+            await anyio.to_thread.run_sync(
+                lambda: write_full(root_path, rel_path, content, 
+                                 base_sha256=base_sha, mode=orig_mode)
+            )
+            
+            # Lifecycle notifications
+            file_meta = _get_file_meta(abs_path)
+            op_id = f"review_save_{int(time.time())}"
+            push_save_ack(str(rel_path), op_id, "review_panel", file_meta)
+            emit_diff_changed(str(rel_path), file_meta["sha256"])
+            invalidate_diff_cache(root_path, str(rel_path))
+            
+            # Clear draft
+            _history_store.clear_cached_document(project_root, str(abs_path))
+            saved_count += 1
+            
+        except Exception as e:
+            errors.append(f"{rel_path}: {str(e)}")
+            
+    # Refresh git status cache
+    mark_git_cache_dirty(root_path)
+    
+    return {"ok": True, "saved_count": saved_count, "errors": errors}
+
+@file_editor_cm6_bp.post('/review/discard')
+async def review_discard(data: dict = Body(...)):
+    """Discard drafts for selected files."""
+    files = data.get('files', [])
+    if not files:
+        return {"ok": True, "discarded_count": 0}
+        
+    project_root = _history_store.get_active_project()
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project")
+        
+    root_path = Path(project_root)
+    discarded_count = 0
+    
+    for rel_path in files:
+        abs_path = root_path / rel_path
+        if _history_store.clear_cached_document(project_root, str(abs_path)):
+            discarded_count += 1
+            
+    return {"ok": True, "discarded_count": discarded_count}
 
 @file_editor_cm6_bp.post('/explorer/mkdir')
 async def explorer_mkdir(data: dict = Body(...)):

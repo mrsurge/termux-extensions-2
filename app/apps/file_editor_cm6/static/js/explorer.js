@@ -21,6 +21,7 @@ let gitBaseBtn = null;
 let gitBaseDropdown = null;
 let searchBaseBtn = null;
 let searchBaseDropdown = null;
+let selectedReviewFiles = new Set();
 
 // Search overlay state
 let searchOverlayVisible = false;
@@ -173,6 +174,7 @@ export async function initExplorerUI() {
     syncExpandedDirsFromTree(treeEl);
   }
   await refreshGitStatus(false);
+  await updateExplorerDraftStatus();
 
   window.addEventListener('cm6:recents-updated', (ev) => {
     const detailState = ev?.detail;
@@ -1915,6 +1917,8 @@ function openSearchOverlay() {
   setTimeout(() => {
     if (searchMode === 'changes') {
       fetchChangesResults(true);
+    } else if (searchMode === 'review') {
+      fetchReviewResults(true);
     } else {
       const input = document.getElementById('fe-search-input');
       if (input) input.focus();
@@ -1943,7 +1947,7 @@ function clearSearchResults(preserveQuery = false) {
 }
 
 function scheduleSearch(query) {
-  if (searchMode === 'changes') {
+  if (searchMode === 'changes' || searchMode === 'review') {
     return;
   }
   searchQuery = query;
@@ -1967,7 +1971,7 @@ function scheduleSearch(query) {
 }
 
 async function performSearch(query) {
-  if (searchMode === 'changes') {
+  if (searchMode === 'changes' || searchMode === 'review') {
     return;
   }
   // Check for project change
@@ -2070,6 +2074,13 @@ function setSearchMode(mode) {
     return;
   }
 
+  if (mode === 'review') {
+    searchLoading = true;
+    renderSearchOverlay();
+    fetchReviewResults(true);
+    return;
+  }
+
   searchLoading = false;
   searchError = null;
   renderSearchOverlay();
@@ -2096,51 +2107,43 @@ function renderSearchOverlay() {
   const overlay = document.getElementById('fe-search-overlay');
   if (!overlay) return;
   
-  if (!searchOverlayVisible) {
-    overlay.style.display = 'none';
-    return;
-  }
+  overlay.style.display = searchOverlayVisible ? 'flex' : 'none';
+  if (!searchOverlayVisible) return;
   
-  overlay.style.display = 'flex';
-  
-  // First render - create structure
-  if (!overlay.querySelector('.fe-search-header')) {
-    // Build header
+  // First render - build structure if empty
+  if (!overlay.hasChildNodes()) {
     const header = document.createElement('div');
     header.className = 'fe-search-header';
     
-    const title = document.createElement('h3');
-    title.textContent = 'Search';
-    header.appendChild(title);
-    
     const closeBtn = document.createElement('button');
-    closeBtn.textContent = '✕';
     closeBtn.className = 'fe-search-close';
+    closeBtn.textContent = '✕';
     closeBtn.onclick = closeSearchOverlay;
     header.appendChild(closeBtn);
     
-    // Mode toggle
-    const modeToggle = document.createElement('div');
-    modeToggle.className = 'fe-search-mode';
+    // Mode switcher
+    const modeContainer = document.createElement('div');
+    modeContainer.className = 'fe-search-mode';
     
-    const nameBtn = document.createElement('button');
-    nameBtn.textContent = 'By Name';
-    nameBtn.dataset.mode = 'name';
-    modeToggle.appendChild(nameBtn);
+    const modes = [
+      { id: 'name', label: 'Name' },
+      { id: 'content', label: 'Content' },
+      { id: 'changes', label: 'Changes' },
+      { id: 'review', label: 'Review' }
+    ];
     
-    const contentBtn = document.createElement('button');
-    contentBtn.textContent = 'By Contents';
-    contentBtn.dataset.mode = 'content';
-    modeToggle.appendChild(contentBtn);
+    modes.forEach(m => {
+      const btn = document.createElement('button');
+      btn.textContent = m.label;
+      btn.dataset.mode = m.id;
+      btn.onclick = () => setSearchMode(m.id);
+      if (m.id === searchMode) btn.classList.add('active');
+      modeContainer.appendChild(btn);
+    });
     
-    const changesBtn = document.createElement('button');
-    changesBtn.textContent = 'By Changes';
-    changesBtn.dataset.mode = 'changes';
-    modeToggle.appendChild(changesBtn);
+    header.appendChild(modeContainer);
     
-    header.appendChild(modeToggle);
-    
-    // Search input
+    // Input area
     const inputContainer = document.createElement('div');
     inputContainer.className = 'fe-search-input-container';
     
@@ -2292,7 +2295,7 @@ function renderSearchOverlay() {
     if (input.value !== searchQuery) {
       input.value = searchQuery;
     }
-    input.parentElement.style.display = searchMode === 'changes' ? 'none' : 'flex';
+    input.parentElement.style.display = (searchMode === 'changes' || searchMode === 'review') ? 'none' : 'flex';
   }
 
   const changesToolbar = overlay.querySelector('.fe-search-changes-toolbar');
@@ -2340,6 +2343,10 @@ function renderSearchResults(container) {
       renderChangesResults(container, searchResults);
       return;
     }
+    if (searchMode === 'review') {
+      renderReviewResults(container, searchResults || {results: []});
+      return;
+    }
     container.innerHTML = '<div class="fe-search-empty">No results found</div>';
     return;
   }
@@ -2348,6 +2355,8 @@ function renderSearchResults(container) {
     renderNameResults(container, searchResults);
   } else if (searchMode === 'content') {
     renderContentResults(container, searchResults);
+  } else if (searchMode === 'review') {
+    renderReviewResults(container, searchResults);
   } else {
     renderChangesResults(container, searchResults);
   }
@@ -2846,3 +2855,300 @@ function statusClassFor(status) {
 
 // Note: File opening from search uses window.appOpenFile (main.js)
 // and window.jumpToCurrentFileLine (main.js) for unified flow
+
+
+// --- Review Mode ---
+
+async function fetchReviewResults(force = false) {
+  if (searchMode !== "review") return;
+  if (searchLoading && !force) return;
+
+  searchLoading = true;
+  searchError = null;
+  renderSearchOverlay();
+
+  try {
+    const resp = await fetch("/api/app/file_editor_cm6/review/list");
+    const json = await resp.json();
+    if (!resp.ok) throw new Error(json.detail || resp.statusText);
+
+    searchResults = { mode: "review", results: json.data || [] };
+    searchLoading = false;
+    renderSearchOverlay();
+  } catch (err) {
+    searchLoading = false;
+    searchError = err.message || "Failed to load review list";
+    searchResults = null;
+    renderSearchOverlay();
+  }
+}
+
+function renderReviewResults(container, data) {
+  const entries = data.results || [];
+  
+  // Toolbar
+  const toolbar = document.createElement("div");
+  toolbar.className = "fe-review-toolbar";
+  
+  const refreshBtn = document.createElement("button");
+  refreshBtn.textContent = "Refresh";
+  refreshBtn.className = "fe-btn fe-btn-sm";
+  refreshBtn.onclick = () => fetchReviewResults(true);
+  toolbar.appendChild(refreshBtn);
+  
+  const saveBtn = document.createElement("button");
+  saveBtn.textContent = "Save Selected";
+  saveBtn.className = "fe-btn fe-btn-sm fe-btn-primary";
+  saveBtn.style.marginLeft = "8px";
+  saveBtn.onclick = async () => {
+    const selected = Array.from(selectedReviewFiles);
+    if (!selected.length) return toast("No files selected");
+    
+    try {
+        const resp = await fetch("/api/app/file_editor_cm6/review/save", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({files: selected})
+        });
+        const res = await resp.json();
+        if (res.ok) {
+            toast(`Saved ${res.saved_count} files`);
+            if (res.errors && res.errors.length) res.errors.forEach(e => toast(e));
+            selected.forEach(f => selectedReviewFiles.delete(f));
+            fetchReviewResults(true);
+            updateExplorerDraftStatus();
+        } else {
+            toast("Save failed");
+        }
+    } catch(e) { toast(e.message); }
+  };
+  toolbar.appendChild(saveBtn);
+  
+  const discardBtn = document.createElement("button");
+  discardBtn.textContent = "Discard Selected";
+  discardBtn.className = "fe-btn fe-btn-sm fe-btn-danger";
+  discardBtn.style.marginLeft = "8px";
+  discardBtn.onclick = async () => {
+    const selected = Array.from(selectedReviewFiles);
+    if (!selected.length) return toast("No files selected");
+    if (!confirm(`Discard drafts for ${selected.length} files?`)) return;
+    
+    try {
+        const resp = await fetch("/api/app/file_editor_cm6/review/discard", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({files: selected})
+        });
+        const res = await resp.json();
+        if (res.ok) {
+            toast(`Discarded ${res.discarded_count} drafts`);
+            selected.forEach(f => selectedReviewFiles.delete(f));
+            fetchReviewResults(true);
+            updateExplorerDraftStatus();
+        } else {
+            toast("Discard failed");
+        }
+    } catch(e) { toast(e.message); }
+  };
+  toolbar.appendChild(discardBtn);
+  
+  container.appendChild(toolbar);
+  
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "fe-search-empty";
+    empty.textContent = "No pending edits (Git or Draft).";
+    container.appendChild(empty);
+    return;
+  }
+  
+  const list = document.createElement("div");
+  list.className = "fe-review-list";
+  
+  entries.forEach(entry => {
+    const group = document.createElement("div");
+    group.className = "fe-search-file-group fe-search-change-group fe-review-group";
+    
+    const header = document.createElement("div");
+    header.className = "fe-search-file-header fe-search-change-header";
+    header.style.cursor = "default";
+    
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.className = "fe-review-checkbox";
+    check.value = entry.rel;
+    if (!entry.has_draft) check.disabled = true;
+    check.checked = selectedReviewFiles.has(entry.rel);
+    check.onchange = (e) => {
+        if (e.target.checked) selectedReviewFiles.add(entry.rel);
+        else selectedReviewFiles.delete(entry.rel);
+    };
+    check.style.marginRight = "8px";
+    header.appendChild(check);
+    
+    const title = document.createElement("span");
+    title.className = "fe-search-change-path";
+    title.textContent = entry.rel;
+    title.style.cursor = "pointer";
+    title.onclick = async () => {
+        if (typeof window.__cm6EnsureInlineDiffs === "function") {
+            try { await window.__cm6EnsureInlineDiffs(true); } catch(e){}
+        }
+        await openFileAndMaybeJump(entry.rel, firstDiffLine(entry));
+    };
+    header.appendChild(title);
+    
+    const meta = document.createElement("div");
+    meta.className = "fe-search-change-meta";
+    
+    if (entry.has_draft) {
+        const badge = document.createElement("span");
+        badge.className = "fe-badge fe-badge-draft";
+        badge.textContent = "Draft";
+        badge.style.background = "#facc15";
+        badge.style.color = "#000";
+        badge.style.padding = "2px 6px";
+        badge.style.borderRadius = "4px";
+        badge.style.fontSize = "0.75rem";
+        meta.appendChild(badge);
+    }
+    
+    header.appendChild(meta);
+    group.appendChild(header);
+    
+    if (entry.hunks && entry.hunks.length) {
+        const hunksContainer = document.createElement("div");
+        hunksContainer.className = "fe-search-change-hunks";
+        
+        entry.hunks.forEach(hunk => {
+            const hunkBlock = document.createElement("div");
+            hunkBlock.className = "fe-search-hunk";
+            
+            const hunkHeader = document.createElement("div");
+            hunkHeader.className = "fe-search-hunk-header";
+            hunkHeader.textContent = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
+            hunkBlock.appendChild(hunkHeader);
+            
+            const diffRows = document.createElement("div");
+            diffRows.className = "fe-search-diff-rows";
+            
+            let oldLine = hunk.oldStart;
+            let newLine = hunk.newStart;
+            
+            hunk.lines.forEach(line => {
+                const row = document.createElement("div");
+                row.className = "fe-search-diff-row";
+                
+                const lineNum = document.createElement("span");
+                lineNum.className = "fe-search-diff-line-num";
+                
+                const sign = document.createElement("span");
+                sign.className = "fe-search-diff-sign";
+                
+                const text = document.createElement("pre");
+                text.className = "fe-search-diff-text";
+                text.textContent = line.text;
+                
+                if (line.type === "add-draft") {
+                    row.classList.add("is-add-draft");
+                    lineNum.textContent = newLine;
+                    sign.textContent = "+";
+                    newLine++;
+                } else if (line.type === "del-draft") {
+                    row.classList.add("is-del-draft");
+                    lineNum.textContent = oldLine;
+                    sign.textContent = "-";
+                    oldLine++;
+                } else {
+                    row.classList.add("is-context");
+                    lineNum.textContent = newLine || oldLine;
+                    sign.textContent = "";
+                    newLine++; oldLine++;
+                }
+                
+                row.appendChild(lineNum);
+                row.appendChild(sign);
+                row.appendChild(text);
+                diffRows.appendChild(row);
+            });
+            
+            hunkBlock.appendChild(diffRows);
+            hunksContainer.appendChild(hunkBlock);
+        });
+        
+        group.appendChild(hunksContainer);
+    }
+    
+    list.appendChild(group);
+  });
+  
+  container.appendChild(list);
+}
+
+async function updateExplorerDraftStatus() {
+    if (!treeElement) return;
+    try {
+        const resp = await fetch("/api/app/file_editor_cm6/review/list?lightweight=true");
+        const json = await resp.json();
+        const drafts = json.data || [];
+        const draftPaths = new Set(drafts.filter(d => d.has_draft).map(d => d.rel));
+        
+        // Clear existing
+        treeElement.querySelectorAll(".fe-draft, .fe-draft-parent").forEach(el => {
+            el.classList.remove("fe-draft", "fe-draft-parent");
+        });
+        
+        // Apply new
+        draftPaths.forEach(rel => {
+            const fileNode = treeElement.querySelector(`li[data-rel="${rel}"]`);
+            if (fileNode) {
+                fileNode.classList.add("fe-draft");
+                let parent = fileNode.parentElement.closest("li[data-kind=\"dir\"]");
+                while (parent) {
+                    parent.classList.add("fe-draft-parent");
+                    parent = parent.parentElement.closest("li[data-kind=\"dir\"]");
+                }
+            }
+        });
+    } catch(e) { console.warn("Failed to update draft status:", e); }
+}
+
+
+window.addEventListener("cm6:draft-updated", (ev) => {
+    if (ev.detail) applyDraftClass(ev.detail.path, ev.detail.unsaved);
+});
+
+function applyDraftClass(absPath, unsaved) {
+    if (!treeElement || !currentProjectPath) return;
+    
+    if (!absPath.startsWith(currentProjectPath)) return;
+    
+    let rel = absPath.substring(currentProjectPath.length);
+    if (rel.startsWith("/")) rel = rel.substring(1);
+    
+    const fileNode = treeElement.querySelector(`li[data-rel="${rel}"]`);
+    if (fileNode) {
+        if (unsaved) {
+            fileNode.classList.add("fe-draft");
+            updateParentDraftStatus(fileNode, true);
+        } else {
+            fileNode.classList.remove("fe-draft");
+            updateParentDraftStatus(fileNode, false);
+        }
+    }
+}
+
+function updateParentDraftStatus(node, adding) {
+    let parent = node.parentElement.closest("li[data-kind=\"dir\"]");
+    while (parent) {
+        if (adding) {
+            parent.classList.add("fe-draft-parent");
+        } else {
+            const hasDraftChild = parent.querySelector(".fe-draft");
+            if (!hasDraftChild) {
+                parent.classList.remove("fe-draft-parent");
+            }
+        }
+        parent = parent.parentElement.closest("li[data-kind=\"dir\"]");
+    }
+}

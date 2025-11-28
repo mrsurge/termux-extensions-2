@@ -717,6 +717,7 @@ let lastSaveTime = 0;
 const SELF_ECHO_GRACE = 300; // 300ms grace period after save
 let bootAutoOpenTimer = null;
 let bootAutoOpenPath = null;
+let restoredSessionPath = null;
 
 function cancelBootAutoOpen(reason) {
   if (!bootAutoOpenTimer) return;
@@ -767,10 +768,28 @@ function handleCacheStateBridgeEvent(event) {
     reason: data.reason,
     restoredActive: restoredSessionActive,
   });
+  
+  if (data.path) {
+      window.dispatchEvent(new CustomEvent('cm6:draft-updated', {
+          detail: {
+              path: data.path,
+              unsaved: !!data.unsaved
+          }
+      }));
+  }
   window.__cm6CacheState = data;
 }
 
 window.addEventListener('message', handleCacheStateBridgeEvent);
+
+// Handle draft state restoration signal
+window.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'draft_state' && event.data.data && event.data.data.has_draft) {
+    restoredSessionActive = true;
+    restoredSessionPath = event.data.data.path;
+    console.log('[Main] Detected restored draft:', restoredSessionPath);
+  }
+});
 
 // Handle generic notifications from iframe (NiceGUI)
 window.addEventListener('message', (event) => {
@@ -1359,21 +1378,21 @@ async function adoptIframeRestoredDocument(path, sha) {
 
 async function openFile(path, options = {}) {
   const { allowOverwrite = true, forceRefresh = false } = options;
-  if (!path) throw new Error('Path is empty');
-  statusEl.textContent = 'Opening...';
+  if (!path) throw new Error("Path is empty");
+  statusEl.textContent = "Opening...";
   
   const projectState = await ensureProjectContext();
   if (!projectState || !projectState.activeProject || !projectState.activeProjectExists) {
-    statusEl.textContent = '';
-    host.toast(projectState?.activeProjectMessage || 'Select a project before opening files.');
+    statusEl.textContent = "";
+    host.toast(projectState?.activeProjectMessage || "Select a project before opening files.");
     return;
   }
 
   try {
     const resolvedTarget = toAbsolute(path, null, HOME_DIR);
     if (!forceRefresh && !allowOverwrite && restoredSessionActive && currentPath && resolvedTarget === currentPath) {
-      console.log('[Editor] Skipping host-side open; restored session buffer already loaded');
-      statusEl.textContent = '';
+      console.log("[Editor] Skipping host-side open; restored session buffer already loaded");
+      statusEl.textContent = "";
       return;
     }
     
@@ -1381,7 +1400,27 @@ async function openFile(path, options = {}) {
     restoredSessionActive = false;
     setIndicatorInactive(cacheStateBadge);
 
-    const payload = await apiGet(`read?path=${encodeURIComponent(path)}`);
+    let contentPayload;
+    let hasDraft = false;
+    
+    try {
+        const check = await apiPost("editor/check_cache", { path: resolvedTarget });
+        if (check && check.ok && check.has_draft) {
+            contentPayload = {
+                path: resolvedTarget,
+                content: check.content,
+                sha256: check.base_sha256
+            };
+            hasDraft = true;
+            console.log("[Editor] Opening cached draft for", resolvedTarget);
+        }
+    } catch (e) { console.warn("Cache check failed", e); }
+    
+    if (!contentPayload) {
+        contentPayload = await apiGet(`read?path=${encodeURIComponent(path)}`);
+    }
+    const payload = contentPayload;
+
     const resolved = toAbsolute(payload.path || path, null, HOME_DIR);
     currentPath = resolved;
     currentPathExists = true;
@@ -1392,24 +1431,26 @@ async function openFile(path, options = {}) {
     lastSha256 = payload.sha256 || null;
 
     // Send content to NiceGUI editor backend (fire and forget)
-    apiPost('editor/set_content', {
-      content: payload.content || '',
+    apiPost("editor/set_content", {
+      content: payload.content || "",
       path: resolved,
-      language: currentModeLanguage || 'text'
+      language: currentModeLanguage || "text",
+      has_draft: hasDraft,
+      sha256: payload.sha256 || null
     }).then(result => {
       if (result && result.sha256) {
         lastSha256 = result.sha256;
-        console.log('[Editor] SHA256 initialized:', result.sha256);
+        console.log("[Editor] SHA256 initialized:", result.sha256);
         syncSessionPath();
       }
-    }).catch(e => console.warn('[Editor] Failed to sync content to NiceGUI:', e));
+    }).catch(e => console.warn("[Editor] Failed to sync content to NiceGUI:", e));
 
-    setText(payload.content || '');
+    setText(payload.content || "");
     lastSavedContent = getText();
     markUnsaved(false);
     updatePathDisplay();
     syncSessionPath();
-    statusEl.textContent = '';
+    statusEl.textContent = "";
 
     // Open WebSocket for this file
     openWebSocket(resolved);
@@ -1420,7 +1461,7 @@ async function openFile(path, options = {}) {
 
     // Update persisted editor state (last file + recents)
     try {
-      const activity = await apiPost('state/file_activity', {
+      const activity = await apiPost("state/file_activity", {
         path: resolved,
         project: cachedProjectRoot || projectState.activeProject,
       });
@@ -1439,10 +1480,10 @@ async function openFile(path, options = {}) {
         }
       }
     } catch (err) {
-      console.error('Failed to record file activity:', err);
+      console.error("Failed to record file activity:", err);
     }
   } catch (e) {
-    statusEl.textContent = '';
+    statusEl.textContent = "";
     host.toast(`Failed to open: ${e.message}`);
     throw e;
   }
@@ -2242,6 +2283,9 @@ async function main() {
   } catch (e) {
     console.warn('Failed to refresh cache state on boot:', e);
   }
+  
+  // Wait a tick for iframe to signal restored state
+  await new Promise(resolve => setTimeout(resolve, 150));
   
   await fetchPersistedSessionState();
   initSessionStateContext(serverState);

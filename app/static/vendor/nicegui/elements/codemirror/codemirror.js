@@ -351,6 +351,24 @@ class MinusGutterMarker extends CM.GutterMarker {
 
 const minusMarker = new MinusGutterMarker();
 
+// Deletion widget gutter marker for drafts
+class MinusDraftGutterMarker extends CM.GutterMarker {
+  constructor() {
+    super();
+    this.elementClass = 'cm-diff-deleted-lineno-draft';
+  }
+  toDOM() {
+    const span = document.createElement('span');
+    span.textContent = '−';
+    span.className = 'cm-diff-minus-marker-draft';
+    return span;
+  }
+  eq(other) {
+    return other instanceof MinusDraftGutterMarker;
+  }
+}
+const minusDraftMarker = new MinusDraftGutterMarker();
+
 class DiffGutterMarker extends CM.GutterMarker {
   constructor(marker) {
     super();
@@ -761,7 +779,7 @@ export default {
             ...(CM.gutterWidgetClass ? { 
               widgetMarker: (view, widget, block) => {
                 if (widget instanceof RemovedLineWidget) {
-                  return minusMarker;
+                  return widget.isDraft ? minusDraftMarker : minusMarker;
                 }
                 return null;
               }

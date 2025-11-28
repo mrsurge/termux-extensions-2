@@ -235,20 +235,33 @@ def _apply_watcher_replace(
     if not editor or not path:
         return False
 
+    cache_entry = None
+    external_change = False
+
+    if project_path:
+        cache_entry = _history_store.get_cached_document(project_path, path)
+
+        # If we have a valid draft, check if the disk event is actually a conflict
+        if cache_entry and cache_entry.get('unsaved'):
+            base_sha = cache_entry.get('base_sha256')
+
+            # 1. Disk matches the draft's base -> Ignore event (safe echo or init)
+            if base_sha and sha256 and base_sha == sha256:
+                print(f"[SESSION_CACHE] Ignoring watcher event for {path}; disk matches draft base", file=sys.stderr)
+                return False
+
+            # 2. Disk does NOT match base -> Genuine external edit
+            if base_sha and sha256 and base_sha != sha256:
+                print(f"[SESSION_CACHE] External edit detected for {path} (base={base_sha} disk={sha256}); clearing cached draft", file=sys.stderr)
+                _history_store.clear_cached_document(project_path, path)
+                cache_entry = None
+                external_change = True
+
+    # If we reach here, we either had no draft, or we had a conflict and cleared it.
+    # In both cases, the editor should accept the disk content.
     editor.set_value(content)
     editor._cached_content = content
     set_current_file(path, sha256)
-
-    cache_entry = None
-    external_change = False
-    if project_path:
-        cache_entry = _history_store.get_cached_document(project_path, path)
-        cached_sha = cache_entry.get('content_sha256') if cache_entry else None
-        if cache_entry and cached_sha and sha256 and cached_sha != sha256:
-            print(f"[SESSION_CACHE] External edit detected for {path}; clearing cached draft", file=sys.stderr)
-            _history_store.clear_cached_document(project_path, path)
-            cache_entry = None
-            external_change = True
 
     _broadcast_cache_state(
         project_path,
@@ -401,6 +414,61 @@ def _schedule_cache_persist():
         _persist_to_cache_debounced,
         once=True
     )
+
+
+def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
+    """
+    Flush the currently active draft to disk immediately.
+    Used when switching files so unsaved buffers are not lost before the timer fires.
+    """
+    editor = get_active_editor()
+    current_file = get_current_file()
+    current_sha = get_current_file_sha256()
+    if not editor or not current_file:
+        return False
+    project_path = _history_store.get_active_project()
+    if not project_path:
+        return False
+
+    editor_prefs = _preferences_store.get_preferences().get('editor', {})
+    if editor_prefs.get('autoSave', False):
+        return False
+
+    current_content = _get_cached_editor_content(editor)
+    current_hash = hashlib.sha256(current_content.encode('utf-8')).hexdigest() if current_content else ''
+    unsaved_flag = (current_hash != (current_sha or '')) or (not current_sha and bool(current_content))
+    if not unsaved_flag:
+        return False
+
+    runtime_meta = _get_runtime_metadata()
+    cache_entry = _history_store.upsert_cached_document(
+        project_path=project_path,
+        file_path=current_file,
+        content=current_content,
+        base_sha256=current_sha or '',
+        run_id=runtime_meta["run_id"],
+        shell_id=runtime_meta["shell_id"],
+        shell_run_id=runtime_meta["shell_run_id"],
+        launcher_pid=runtime_meta["launcher_pid"],
+        worker_pid=runtime_meta["worker_pid"],
+    )
+
+    _broadcast_cache_state(
+        project_path,
+        current_file,
+        state='mid_session',
+        unsaved=cache_entry.get('unsaved', False),
+        cache_entry=cache_entry,
+        reason=reason,
+    )
+
+    try:
+        project_root = get_project_root()
+        hunks = _get_combined_diffs(project_root, current_file, current_content)
+        editor.set_diff_decorations(hunks)
+    except Exception as exc:
+        print(f"[PERSIST][{reason}] Failed to refresh diffs: {exc}", file=sys.stderr)
+    return True
 
 # --- Edit Tracking ---
 def enable_edit_tracking():
@@ -597,6 +665,15 @@ async def editor_page():
                     # On init, if file exists, we check diffs.
                     # _get_combined_diffs uses preferences store, which is loaded.
                     project_root = Path(project_path).expanduser() if project_path else get_project_root()
+                    
+                    print(f"[EDITOR_APP][DEBUG_DIFF] initial_path={initial_path}", file=sys.stderr)
+                    print(f"[EDITOR_APP][DEBUG_DIFF] cached_was_restored={cached_was_restored}", file=sys.stderr)
+                    print(f"[EDITOR_APP][DEBUG_DIFF] editor_prefs[showInlineDiffs]={editor_prefs.get('showInlineDiffs', False)}", file=sys.stderr)
+                    print(f"[EDITOR_APP][DEBUG_DIFF] editor_prefs[showDraftDiffs]={editor_prefs.get('showDraftDiffs', False)}", file=sys.stderr)
+                    print(f"[EDITOR_APP][DEBUG_DIFF] editor_prefs[autoSave]={editor_prefs.get('autoSave', False)}", file=sys.stderr)
+                    if cached_was_restored and initial_content:
+                        print(f"[EDITOR_APP][DEBUG_DIFF] initial_content_len={len(initial_content)} initial_content_snippet={initial_content[:50]!r}", file=sys.stderr)
+
                     hunks = _get_combined_diffs(project_root, initial_path, initial_content)
                     editor.set_diff_decorations(hunks)
                             
@@ -824,6 +901,14 @@ async def editor_page():
       background: rgba(250, 204, 21, 0.7) !important;
     }
     
+        .cm-diff-deleted-lineno-draft {
+      color: rgba(250, 204, 21, 0.85);
+      background-color: rgba(250, 204, 21, 0.18);
+      display: block;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    
     .cm-foldGutter .cm-gutterElement.cm-diff-added-lineno-draft {
        background-color: rgba(59, 130, 246, 0.22);
     }
@@ -917,6 +1002,27 @@ async def refresh_cache_state():
             
     return {"ok": True}
 
+@editor_router.post('/check_cache')
+async def check_cache(data: dict = Body(...)):
+    """Check if a file has a cached draft."""
+    path = data.get('path')
+    if not path:
+        return {"ok": False, "error": "No path provided"}
+    
+    project_path = _history_store.get_active_project()
+    if not project_path:
+        return {"ok": True, "has_draft": False}
+        
+    cache_entry = _history_store.get_cached_document(project_path, path)
+    if cache_entry and cache_entry.get('unsaved'):
+        return {
+            "ok": True,
+            "has_draft": True,
+            "content": cache_entry.get('content', ''),
+            "base_sha256": cache_entry.get('base_sha256')
+        }
+    return {"ok": True, "has_draft": False}
+
 @editor_router.post('/set_content')
 async def set_editor_content(data: dict = Body(...)):
     editor = get_active_editor()
@@ -925,17 +1031,33 @@ async def set_editor_content(data: dict = Body(...)):
     new_path = data.get('path', '')
     old_path = get_current_file()
     project_path = _history_store.get_active_project()
+    has_draft = data.get('has_draft', False)
     
     print(f"[SET_CONTENT] path={new_path!r} old={old_path!r}", file=sys.stderr)
 
     # Cache clearing removed to allow multi-file drafts / persistence
+    if old_path and old_path != new_path:
+        _persist_active_draft_immediately(reason='switch')
+    _cancel_cache_persist_timer()
     
     content = data.get('content')
     if content is None:
         content = ''
     language = data.get('language', 'python')
     content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
-    set_current_file(new_path, content_sha256)
+
+    # Check for actual cached draft (needed both for broadcast + fallback SHA)
+    cache_entry = None
+    if project_path and new_path:
+        cache_entry = _history_store.get_cached_document(project_path, new_path)
+
+    provided_base_sha = data.get('sha256')
+    base_sha256 = (
+        provided_base_sha
+        or (cache_entry and cache_entry.get('base_sha256'))
+        or content_sha256
+    )
+    set_current_file(new_path, base_sha256)
     
     editor.set_value(content)
     editor._cached_content = content
@@ -945,9 +1067,10 @@ async def set_editor_content(data: dict = Body(...)):
     _broadcast_cache_state(
         project_path,
         new_path,
-        state='clean',
-        unsaved=False,
-        reason='set_content',
+        state='mid_session' if (cache_entry and cache_entry.get('unsaved')) else 'clean',
+        unsaved=bool(cache_entry and cache_entry.get('unsaved')),
+        cache_entry=cache_entry,
+        reason='restore' if has_draft else 'set_content',
     )
     
     project_root = get_project_root()
