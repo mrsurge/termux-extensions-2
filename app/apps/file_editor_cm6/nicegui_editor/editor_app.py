@@ -803,6 +803,9 @@ async def editor_page():
     .cm-foldGutter .cm-gutterElement.cm-diff-deleted-lineno {
        background-color: var(--diff-del-bg);
     }
+    .cm-foldGutter .cm-gutterElement.cm-diff-deleted-lineno-draft {
+       background-color: rgba(250, 204, 21, 0.18);
+    }
 
     .cm-diff-marker-add { color: var(--diff-add-marker); }
     .cm-diff-marker-del { color: var(--diff-del-marker); }

@@ -2976,6 +2976,17 @@ function renderReviewResults(container, data) {
   entries.forEach(entry => {
     const group = document.createElement("div");
     group.className = "fe-search-file-group fe-search-change-group fe-review-group";
+    group.dataset.line = firstDiffLine(entry) || 1;
+    group.onclick = async (event) => {
+        // Avoid double-handling when clicking the checkbox
+        if (event?.target?.closest('.fe-review-checkbox')) return;
+        const lineEl = event?.target?.closest('[data-line]');
+        const line = lineEl ? Number(lineEl.dataset.line || 0) : Number(event?.currentTarget?.dataset?.line || 0);
+        if (typeof window.__cm6EnsureInlineDiffs === "function") {
+            try { await window.__cm6EnsureInlineDiffs(true); } catch (e) {}
+        }
+        await openFileAndMaybeJump(entry.rel, line || firstDiffLine(entry));
+    };
     
     const header = document.createElement("div");
     header.className = "fe-search-file-header fe-search-change-header";
@@ -3035,6 +3046,7 @@ function renderReviewResults(container, data) {
             const hunkHeader = document.createElement("div");
             hunkHeader.className = "fe-search-hunk-header";
             hunkHeader.textContent = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
+            hunkHeader.dataset.line = Number(hunk.newStart || hunk.oldStart || 1);
             hunkBlock.appendChild(hunkHeader);
             
             const diffRows = document.createElement("div");
@@ -3046,6 +3058,11 @@ function renderReviewResults(container, data) {
             hunk.lines.forEach(line => {
                 const row = document.createElement("div");
                 row.className = "fe-search-diff-row";
+                row.dataset.line = line.type === "add-draft"
+                    ? newLine
+                    : line.type === "del-draft"
+                        ? oldLine
+                        : (newLine || oldLine || 1);
                 
                 const lineNum = document.createElement("span");
                 lineNum.className = "fe-search-diff-line-num";
