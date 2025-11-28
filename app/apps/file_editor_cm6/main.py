@@ -592,12 +592,16 @@ def get_session_cache(
     if not cached:
         return {"ok": True, "data": None}
     
-    # Determine state: crashed vs mid-session
+    # Determine state: crashed vs mid-session vs clean
     runtime_meta = _get_runtime_metadata()
     current_run_id = runtime_meta["run_id"]
     cached_run_id = cached.get("run_id", "unknown")
+    unsaved = cached.get("unsaved", False)
     
-    state = "mid_session" if current_run_id == cached_run_id else "crashed"
+    if not unsaved:
+        state = "clean"
+    else:
+        state = "mid_session" if current_run_id == cached_run_id else "crashed"
     
     return {
         "ok": True,
@@ -606,7 +610,7 @@ def get_session_cache(
             "content": cached["content"],
             "content_sha256": cached["content_sha256"],
             "base_sha256": cached["base_sha256"],
-            "unsaved": cached["unsaved"],
+            "unsaved": unsaved,
             "run_id": cached_run_id,
             "updated_at": cached["updated_at"],
             "current_run_id": current_run_id,

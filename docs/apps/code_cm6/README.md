@@ -29,6 +29,7 @@ Real-time visual comparison against any Git ref, powered by a sophisticated diff
 - **WebSocket Sync:** Instant diff updates on external file changes via watchdog/polling watcher
 - **Smart Caching:** Three-tier cache (root, path, base) with automatic invalidation on writes
 - **Zero-Context Diffs:** Uses `git diff --unified=0` to minimize payload size and maximize performance
+- **Draft Overlay:** Optional blue/yellow decorations compare the live buffer against disk so you see unsaved work beside Git hunks without changing modes.
 
 ### 3. **Intelligent File Watcher**
 Detects external changes and notifies the editor in real-time without polling overhead.
@@ -102,12 +103,12 @@ Disk-backed preferences with instant application and persistence across sessions
 - **Line Shading:** Zebra striping (logical-line aware) for improved readability in long files
 - **Word Wrap:** Toggle soft wrap with preserved indentation
 - **Inline Diffs:** Show/hide live diff decorations without switching views
-- **Auto-save:** Optional automatic session cache persistence (configurable intervals)
+- **Autosave Toggle:** Modal-protected switch that enables the accelerated autosave loop (≈450 ms debounce) and pauses draft caching while it is active.
 
 ### 9. **Session Cache**
 Preserves unsaved work across reloads and crashes with automatic cleanup.
 
-- **Auto-Caching:** Snapshots editor state on every change (debounced)
+- **Auto-Caching:** Snapshots editor state on every change (debounced) while autosave is OFF; autosave suppresses sidecars to avoid phantom restores.
 - **Collision Guards:** Base SHA validation prevents overwriting newer disk content
 - **Manual Discard:** UI affordance to delete cached drafts and reload from disk
 - **Watcher Integration:** Cache invalidation on external file modifications

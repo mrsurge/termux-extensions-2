@@ -32,6 +32,8 @@ An integrated developement environment & complete with
    - Code completions
    - Syntax Highlighting
    - **Inline Diff Engine**
+   - Draft diff overlays (blue/yellow) that track unsaved changes alongside Git diffs
+   - Fast autosave loop (≈450 ms debounce) with crash-safe session cache fallback
 
 <img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/user-attachments/assets/5e6aef7c-2c11-4ce3-9783-5db505ad66c4" />
 <img width="225" height="500" alt="Screenshot_20251124-223352 Termux Extensions" src="https://github.com/user-attachments/assets/8f3ce5fb-7923-46df-9732-73a06d1c7971" />
@@ -514,4 +516,3 @@ Built with: FastAPI, Flask, CodeMirror 6, xterm.js, NiceGUI (vendored), and many
 More screens:
 <img width="1913" height="1014" alt="Screenshot From 2025-11-25 17-20-52" src="https://github.com/user-attachments/assets/d3f40310-6a13-4bd5-8032-a21c240675fc" />
 <img width="1913" height="1014" alt="Screenshot From 2025-11-25 17-17-25" src="https://github.com/user-attachments/assets/acbcea7e-4663-48d2-b7a9-b84173b26ae1" />
-

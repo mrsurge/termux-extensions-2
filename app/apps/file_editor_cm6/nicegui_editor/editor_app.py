@@ -301,6 +301,7 @@ def _get_combined_diffs(project_root: Path, file_path: str, current_content: str
 def _persist_to_cache_debounced():
     """Debounced cache persistence called on editor change."""
     global _cache_persist_timer
+    _cache_persist_timer = None
     
     editor = get_active_editor()
     current_file = get_current_file()
@@ -313,10 +314,33 @@ def _persist_to_cache_debounced():
     if not project_path:
         return
     
-    current_content = _get_cached_editor_content(editor)
-    print(f"[SESSION_CACHE] snapshot path={current_file} len={len(current_content)} sha256={hashlib.sha256(current_content.encode('utf-8')).hexdigest() if current_content else '0'*64}", file=sys.stderr)
+    editor_prefs = _preferences_store.get_preferences().get('editor', {})
+    auto_save_enabled = editor_prefs.get('autoSave', False)
     
-    # Collect runtime metadata
+    current_content = _get_cached_editor_content(editor)
+    current_hash = hashlib.sha256(current_content.encode('utf-8')).hexdigest() if current_content else ''
+    unsaved_flag = (current_hash != (current_sha or '')) or (not current_sha and bool(current_content))
+    print(f"[SESSION_CACHE] snapshot path={current_file} len={len(current_content)} sha256={current_hash or '0'*64}", file=sys.stderr)
+    
+    if auto_save_enabled:
+        # When autosave is enabled, do not write session cache sidecars.
+        _broadcast_cache_state(
+            project_path,
+            current_file,
+            state='mid_session' if unsaved_flag else 'clean',
+            unsaved=unsaved_flag,
+            cache_entry=None,
+            reason='autosave_pending' if unsaved_flag else 'autosave_clean',
+        )
+        try:
+            project_root = get_project_root()
+            hunks = _get_combined_diffs(project_root, current_file, current_content)
+            editor.set_diff_decorations(hunks)
+        except Exception as e:
+            print(f"[PERSIST] Failed to refresh diffs (autosave mode): {e}", file=sys.stderr)
+        return
+    
+    # Collect runtime metadata for session cache persistence
     runtime_meta = {
         "run_id": os.getenv("TE_RUN_ID", "unknown"),
         "shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
@@ -356,13 +380,22 @@ def _persist_to_cache_debounced():
     except Exception as e:
         print(f"[PERSIST] Failed to refresh diffs: {e}", file=sys.stderr)
 
+def _cancel_cache_persist_timer():
+    """Cancel any pending cache persist timer."""
+    global _cache_persist_timer
+    if _cache_persist_timer:
+        try:
+            _cache_persist_timer.cancel()
+        except Exception:
+            pass
+        _cache_persist_timer = None
+
+
 def _schedule_cache_persist():
     """Schedule debounced cache persistence."""
     global _cache_persist_timer
     
-    if _cache_persist_timer:
-        _cache_persist_timer.cancel()
-    
+    _cancel_cache_persist_timer()
     _cache_persist_timer = ui.timer(
         _cache_persist_debounce_ms / 1000,
         _persist_to_cache_debounced,
@@ -446,7 +479,8 @@ async def editor_page():
     cached_entry = None
     if project_path and initial_path:
         cached_entry = _history_store.get_cached_document(project_path, initial_path)
-        if cached_entry and isinstance(cached_entry.get('content'), str):
+        # Only restore if entry exists AND is marked unsaved
+        if cached_entry and isinstance(cached_entry.get('content'), str) and cached_entry.get('unsaved', False):
             runtime_meta = _get_runtime_metadata()
             cached_run = cached_entry.get('run_id', 'unknown')
             restored_state = 'mid_session' if cached_run == runtime_meta.get('run_id') else 'crashed'
@@ -472,7 +506,20 @@ async def editor_page():
                 value = editor.value or ''
                 print(f"[ON_CHANGE] len={len(value)} sha={hashlib.sha256(value.encode('utf-8')).hexdigest() if value else '0'*64}", file=sys.stderr)
                 editor._cached_content = value
-                _schedule_cache_persist()
+                current_path = get_current_file()
+                try:
+                    editor.notify_parent('cm6-dirty-state', {
+                        'path': current_path,
+                        'timestamp': time.time(),
+                    })
+                except Exception as notify_err:
+                    print(f"[ON_CHANGE] Failed to signal dirty state: {notify_err}", file=sys.stderr)
+                auto_save_enabled = _preferences_store.get_preferences().get('editor', {}).get('autoSave', False)
+                if auto_save_enabled:
+                    _cancel_cache_persist_timer()
+                    _persist_to_cache_debounced()
+                else:
+                    _schedule_cache_persist()
             
             # Debug: What are we passing to the editor?
             theme_from_prefs = editor_prefs.get('theme')
@@ -828,25 +875,39 @@ async def refresh_cache_state():
 
     cached_entry = _history_store.get_cached_document(project_path, current_file)
     if cached_entry:
+        unsaved = cached_entry.get('unsaved', False)
+        
+        if not unsaved:
+             # If cached but clean, broadcast as clean (no draft indicator)
+             _broadcast_cache_state(
+                project_path,
+                current_file,
+                state='clean',
+                unsaved=False,
+                cache_entry=cached_entry,
+                reason='restore_clean'
+             )
+             return {"ok": True}
+
+        # Handle actual unsaved draft
         runtime_meta = _get_runtime_metadata()
         cached_run = cached_entry.get('run_id', 'unknown')
         current_run = runtime_meta['run_id']
         
         state = 'mid_session' if cached_run == current_run else 'crashed'
-        unsaved = cached_entry.get('unsaved', False)
         
         # Broadcast standard telemetry
         _broadcast_cache_state(
             project_path,
             current_file,
             state=state,
-            unsaved=unsaved,
+            unsaved=True,
             cache_entry=cached_entry,
             reason='restore'
         )
         
         # Explicitly signal draft state if active
-        if state == 'crashed' or (state == 'mid_session' and unsaved):
+        if state == 'crashed' or (state == 'mid_session'):
              editor = get_active_editor()
              if editor:
                  editor.notify_parent('draft_state', {
@@ -1165,43 +1226,28 @@ async def update_preference(data: dict = Body(...)):
             # Use prop setter to trigger client-side auto-detect logic
             editor.show_minimap = bool(value)
         elif key == 'showInlineDiffs':
-            # Git Diffs Toggle
-            if value and get_current_file():
-                project_path = _history_store.get_active_project() or str(get_project_root())
-                if project_path:
-                    try:
-                        content = editor.value or ''
-                        hunks = _get_combined_diffs(Path(project_path).expanduser(), get_current_file(), content)
-                        editor.set_diff_decorations(hunks)
-                    except Exception as e:
-                        print(f"[PREFERENCE] Failed to refresh diffs: {e}", file=sys.stderr)
-            else:
-                # If disabling git diffs, we still need to check if draft diffs are active
-                # So we recalculate combined diffs (which will naturally exclude git diffs if pref is now False)
-                project_path = _history_store.get_active_project() or str(get_project_root())
-                content = editor.value or ''
-                hunks = _get_combined_diffs(Path(project_path).expanduser(), get_current_file(), content)
-                editor.set_diff_decorations(hunks)
-                    
+            pass  # handled after preference persistence via _refresh_active_diffs
         elif key == 'showDraftDiffs':
-            # Draft Diffs Toggle
-            project_path = _history_store.get_active_project() or str(get_project_root())
-            content = editor.value or ''
-            try:
-                hunks = _get_combined_diffs(Path(project_path).expanduser(), get_current_file(), content)
-                editor.set_diff_decorations(hunks)
-            except Exception as e:
-                print(f"[PREFERENCE] Failed to refresh diffs: {e}", file=sys.stderr)
-                
+            pass
         elif key == 'autoSave':
-            # Refresh diffs (mode switch implied by pref change)
             project_path = _history_store.get_active_project() or str(get_project_root())
+            current_file = get_current_file()
             content = editor.value or ''
-            try:
-                hunks = _get_combined_diffs(Path(project_path).expanduser(), get_current_file(), content)
-                editor.set_diff_decorations(hunks)
-            except Exception as e:
-                print(f"[PREFERENCE] Failed to refresh diffs on autoSave toggle: {e}", file=sys.stderr)
+            # When enabling autosave, drop any cached drafts for the active document
+            if value and project_path and current_file:
+                try:
+                    _history_store.clear_cached_document(project_path, current_file)
+                except Exception as exc:
+                    print(f"[PREFERENCE] Failed to clear cache on autosave enable: {exc}", file=sys.stderr)
+                _broadcast_cache_state(
+                    project_path,
+                    current_file,
+                    state='clean',
+                    unsaved=False,
+                    cache_entry=None,
+                    reason='autosave_on',
+                )
+            # Refresh handled below after persistence
 
         elif key == 'trackAgentEdits':
             if value:
@@ -1215,6 +1261,9 @@ async def update_preference(data: dict = Body(...)):
         
         editor.update()
         _preferences_store.update_preferences(editor={key: value})
+        
+        if key in ('showInlineDiffs', 'showDraftDiffs', 'autoSave'):
+            _refresh_active_diffs()
         
         print(f"[PREFERENCE] Updated {key}={value}", file=sys.stderr)
         
@@ -1328,9 +1377,12 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: Optional[str]) 
             reason='save',
         )
 
-    if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
-        diff_data = collect_diff(project_root, str(rel_path), base_ref=_current_diff_base(project_path))
-        editor.set_diff_decorations(diff_data.get('hunks', []))
+    # Refresh Diffs (Combined)
+    try:
+        hunks = _get_combined_diffs(project_root, current_file, content)
+        editor.set_diff_decorations(hunks)
+    except Exception as e:
+        print(f"[SAVE] Failed to refresh diffs: {e}", file=sys.stderr)
 
     print(f"[SAVE] Success path={current_file!r} sha={file_meta['sha256']}", file=sys.stderr)
     return file_meta
@@ -1499,3 +1551,16 @@ async def set_font_scale_endpoint(data: dict = Body(...)):
         print(f"[EDITOR] Unexpected error in set_font_scale: {e}", file=sys.stderr)
         print(traceback.format_exc(), file=sys.stderr)
         raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+def _refresh_active_diffs():
+    """Recalculate combined diffs for the current file based on latest preferences."""
+    editor = get_active_editor()
+    current_file = get_current_file()
+    project_path = _history_store.get_active_project() or str(get_project_root())
+    if not editor or not current_file or not project_path:
+        return
+    content = editor.value or ''
+    try:
+        hunks = _get_combined_diffs(Path(project_path).expanduser(), current_file, content)
+        editor.set_diff_decorations(hunks)
+    except Exception as exc:
+        print(f"[PREFERENCE] Failed to refresh combined diffs: {exc}", file=sys.stderr)

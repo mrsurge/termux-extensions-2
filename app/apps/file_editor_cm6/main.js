@@ -679,6 +679,7 @@ let currentPath = '';
 let currentPathExists = false;
 let lastSavedContent = '';
 let unsaved = false;
+let nativeSelectionActive = false; // No NiceGUI native selection tracking; keep flag for legacy guards
 
 // Preferences are managed by backend; frontend displays state only (no caching)
 let editorViewState = null; // Loaded from backend at startup via /editor/view_state
@@ -710,7 +711,8 @@ let explorerRefreshTimer = null;
 let lastSha256 = null;
 let inflightOpId = null;
 let saveDebounceTimer = null;
-const AUTOSAVE_DELAY = 1200; // 1200ms debounce
+const AUTOSAVE_IDLE_DELAY = 1200; // manual saves / disabled autosave
+const AUTOSAVE_ACTIVE_DELAY = 450; // faster loop while autosave is ON
 let lastSaveTime = 0;
 const SELF_ECHO_GRACE = 300; // 300ms grace period after save
 let bootAutoOpenTimer = null;
@@ -796,6 +798,12 @@ window.addEventListener('message', (event) => {
         restoredActive: true,
         unsaved: true
       });
+    }
+  } else if (event.data.type === 'cm6-dirty-state') {
+    const payload = event.data.data || {};
+    const incomingPath = payload.path ? toAbsolute(payload.path, null, HOME_DIR) : currentPath;
+    if (!incomingPath || incomingPath === currentPath) {
+      markUnsaved(true);
     }
   }
 });
@@ -886,12 +894,16 @@ function setText(t) { console.log('[CM6] setText() disabled'); }
 function markUnsaved(flag) {
   const next = !!flag;
   cacheStateBadge.dataset.state = next ? (cacheStateBadge.dataset.state || '') : '';
-  if (unsaved === next) {
-    return;
-  }
   unsaved = next;
   fileNameEl.classList.toggle('fe-unsaved', unsaved);
   syncSessionPath();
+  if (!unsaved && saveDebounceTimer) {
+    clearTimeout(saveDebounceTimer);
+    saveDebounceTimer = null;
+  }
+  if (unsaved && editorViewState?.autoSave) {
+    scheduleAutosave();
+  }
 }
 
 // ---------- API helpers ----------
@@ -1313,6 +1325,38 @@ function applyCacheIndicator(info) {
   }
 }
 
+async function adoptIframeRestoredDocument(path, sha) {
+  if (!path) return;
+  const resolved = toAbsolute(path, null, HOME_DIR);
+  currentPath = resolved;
+  currentPathExists = true;
+  lastPickerPath = parentDir(resolved);
+  currentModeLanguage = detectLanguageFromFilename(resolved);
+  if (sha) {
+    lastSha256 = sha;
+  }
+  markUnsaved(false);
+  updatePathDisplay();
+  syncSessionPath();
+
+  diffController.invalidateCacheForPath(resolved);
+  diffController.setContext({ path: resolved, sha: lastSha256 });
+  if (editorViewState?.showInlineDiffs) {
+    diffController.refresh(true);
+  }
+  openWebSocket(resolved);
+
+  try {
+    const project = cachedProjectRoot || sessionState.activeProject || undefined;
+    await apiPost('state/file_activity', {
+      path: resolved,
+      project,
+    });
+  } catch (err) {
+    console.warn('[BOOT] Failed to record activity for restored file', err);
+  }
+}
+
 async function openFile(path, options = {}) {
   const { allowOverwrite = true, forceRefresh = false } = options;
   if (!path) throw new Error('Path is empty');
@@ -1489,10 +1533,12 @@ async function saveFile() {
       markUnsaved(false);
       statusEl.textContent = 'Saved';
       setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
+      return true;
     } else {
       console.error('[SAVE] Failed:', result.error);
-      host.toast(`Save failed: ${result.error}`);
+      if (result.error) host.toast(`Save failed: ${result.error}`);
       statusEl.textContent = '';
+      return false;
     }
   } catch (e) {
     console.error('[SAVE] Exception:', e);
@@ -1512,21 +1558,26 @@ async function saveFile() {
             markUnsaved(false);
             statusEl.textContent = 'Saved';
             setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
+            return true;
           } else {
-            host.toast(`Save failed: ${retryResult.error}`);
+            if (retryResult.error) host.toast(`Save failed: ${retryResult.error}`);
             statusEl.textContent = '';
+            return false;
           }
         } catch (retryErr) {
           host.toast(`Save failed: ${retryErr.message || 'Unknown error'}`);
           statusEl.textContent = '';
+          return false;
         }
       } else {
         statusEl.textContent = '';
+        return false;
       }
     } else {
       const errMsg = e.message || e.error || JSON.stringify(e);
       host.toast(`Save failed: ${errMsg}`);
       statusEl.textContent = '';
+      return false;
     }
   }
 }
@@ -1623,13 +1674,87 @@ function scheduleAutosave() {
     return;
   }
 
+  const delay = editorViewState?.autoSave ? AUTOSAVE_ACTIVE_DELAY : AUTOSAVE_IDLE_DELAY;
   saveDebounceTimer = setTimeout(() => {
     if (unsaved && currentPath && currentPathExists && !nativeSelectionActive) {
-      saveFile().catch(err => {
+      saveFile().then((ok) => {
+        if (ok === false) {
+          console.warn('Autosave attempt failed; leaving changes unsaved');
+        }
+      }).catch(err => {
         console.error('Autosave failed:', err);
       });
     }
-  }, AUTOSAVE_DELAY);
+  }, delay);
+}
+
+// Autosave confirmation modal (constructed lazily)
+let autosaveModalController = null;
+function ensureAutosaveModal() {
+  if (autosaveModalController) return autosaveModalController;
+  const modal = document.createElement('div');
+  modal.id = 'fe-autosave-modal';
+  modal.className = 'fe-modal';
+  modal.setAttribute('aria-hidden', 'true');
+  modal.innerHTML = `
+    <div class="fe-modal-card" style="max-width: 460px;">
+      <div class="fe-modal-header">
+        <strong>Enable Autosave?</strong>
+        <span style="flex:1"></span>
+        <button class="fe-btn" id="fe-autosave-close" aria-label="Close">✕</button>
+      </div>
+      <div class="fe-modal-body">
+        <p id="fe-autosave-message" style="margin:0; line-height:1.5;"></p>
+      </div>
+      <div class="fe-modal-actions">
+        <button class="fe-btn" id="fe-autosave-cancel">Cancel</button>
+        <button class="fe-btn fe-btn-primary" id="fe-autosave-confirm">Enable Autosave</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  autosaveModalController = {
+    root: modal,
+    messageEl: modal.querySelector('#fe-autosave-message'),
+    confirmBtn: modal.querySelector('#fe-autosave-confirm'),
+    cancelBtn: modal.querySelector('#fe-autosave-cancel'),
+    closeBtn: modal.querySelector('#fe-autosave-close'),
+  };
+  autosaveModalController.closeBtn.addEventListener('click', () => hideAutosaveModal(false));
+  autosaveModalController.root.addEventListener('click', (evt) => {
+    if (evt.target === autosaveModalController.root) {
+      hideAutosaveModal(false);
+    }
+  });
+  return autosaveModalController;
+}
+
+let autosaveModalResolve = null;
+function hideAutosaveModal(result) {
+  if (!autosaveModalController) return;
+  autosaveModalController.root.classList.remove('show');
+  autosaveModalController.root.setAttribute('aria-hidden', 'true');
+  const resolver = autosaveModalResolve;
+  autosaveModalResolve = null;
+  if (resolver) resolver(result);
+}
+
+function showAutosaveModal(fileLabel, hasOtherDrafts) {
+  const modal = ensureAutosaveModal();
+  const safeLabel = fileLabel ? `“${fileLabel}”` : 'this document';
+  const tail = hasOtherDrafts
+    ? 'Any other unsaved drafts in different files will be discarded when autosave is on.'
+    : 'Autosave will overwrite the current document and discard draft caches for other files.';
+  modal.messageEl.textContent = `Enabling autosave will immediately save ${safeLabel}. ${tail} Continue?`;
+  modal.root.classList.add('show');
+  modal.root.setAttribute('aria-hidden', 'false');
+  return new Promise((resolve) => {
+    autosaveModalResolve = resolve;
+    const onConfirm = () => hideAutosaveModal(true);
+    const onCancel = () => hideAutosaveModal(false);
+    modal.confirmBtn.onclick = onConfirm;
+    modal.cancelBtn.onclick = onCancel;
+  });
 }
 
 // ---------- Picker helpers (shared modal provided by framework) ----------
@@ -1821,12 +1946,54 @@ bindMenuToggle(miToggleWrap, async () => {
 });
 
 bindMenuToggle(miToggleAutosave, async () => {
-  const success = await updatePreference('autoSave', !(editorViewState?.autoSave));
-  if (!success) host.toast('Failed to update preference');
-  // Trigger autosave immediately if there are unsaved changes and autosave was enabled
-  if (success && editorViewState?.autoSave && unsaved && currentPath && currentPathExists) {
-    scheduleAutosave();
+  const currentlyEnabled = !!(editorViewState?.autoSave);
+  if (currentlyEnabled) {
+    const success = await updatePreference('autoSave', false);
+    if (!success) {
+      host.toast('Failed to update preference');
+      setMenuChecked(miToggleAutosave, true);
+    }
+    return;
   }
+
+  if (!currentPath || !currentPathExists) {
+    host.toast('Open a file before enabling autosave');
+    setMenuChecked(miToggleAutosave, false);
+    return;
+  }
+
+  const fileLabel = basename(currentPath);
+  const confirmed = await showAutosaveModal(fileLabel, unsaved);
+  if (!confirmed) {
+    setMenuChecked(miToggleAutosave, false);
+    return;
+  }
+
+  if (unsaved && currentPath && currentPathExists) {
+    const saved = await saveFile();
+    if (!saved) {
+      host.toast('Autosave not enabled: saving failed');
+      setMenuChecked(miToggleAutosave, false);
+      return;
+    }
+  }
+
+  // Clear any cached draft for the active document (best-effort)
+  try {
+    await apiPost('editor/discard_draft', { path: currentPath });
+  } catch (err) {
+    console.warn('[Autosave] Failed to discard existing draft', err);
+  }
+
+  const success = await updatePreference('autoSave', true);
+  if (!success) {
+    host.toast('Failed to update preference');
+    setMenuChecked(miToggleAutosave, false);
+    return;
+  }
+
+  editorViewState.autoSave = true;
+  markUnsaved(false);
 });
 
 bindMenuToggle(miToggleDiffs, async () => {
@@ -1917,11 +2084,6 @@ function onAnyChange() {
   const now = getText();
   const hasChanges = now !== lastSavedContent;
   markUnsaved(hasChanges);
-
-  // Schedule autosave if there are changes
-  if (hasChanges) {
-    scheduleAutosave();
-  }
 }
 const changeObserver = new MutationObserver(onAnyChange);
 const observeEditor = () => {
@@ -2123,21 +2285,22 @@ async function main() {
     });
   } else if (serverState.lastFile && serverState.lastFileExists) {
     if (currentPath && restoredPath && currentPath === restoredPath) {
-      console.log('[BOOT] Skipping host-side open; NiceGUI already loaded restored path');
+      console.log('[BOOT] Adopting NiceGUI-restored session');
       bootOpened = true;
+      await adoptIframeRestoredDocument(restoredPath, restoredSha);
     } else {
-    bootOpened = true;
-    // Use a timeout to ensure the iframe is ready
-    bootAutoOpenPath = toAbsolute(serverState.lastFile, null, HOME_DIR);
-    bootAutoOpenTimer = setTimeout(async () => {
-      bootAutoOpenTimer = null;
-      bootAutoOpenPath = null;
-      await openFile(serverState.lastFile, { allowOverwrite: false }).catch((e) => {
-        console.error('Failed to reopen last file:', e);
-        statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
-      });
-    }, 400);
-  }
+      bootOpened = true;
+      // Use a timeout to ensure the iframe is ready
+      bootAutoOpenPath = toAbsolute(serverState.lastFile, null, HOME_DIR);
+      bootAutoOpenTimer = setTimeout(async () => {
+        bootAutoOpenTimer = null;
+        bootAutoOpenPath = null;
+        await openFile(serverState.lastFile, { allowOverwrite: false }).catch((e) => {
+          console.error('Failed to reopen last file:', e);
+          statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
+        });
+      }, 400);
+    }
   } else if (serverState.lastFile && !serverState.lastFileExists) {
     statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
   } else if (!bootOpened) {

@@ -420,6 +420,19 @@ term.onData((data) => {
 });
 ```
 
+### 3.4 Iframe Message Bus
+
+The iframe cannot access the host DOM directly, so real-time features use a `window.postMessage` bridge exposed by the vendored `codemirror.py::notify_parent()` helper. Core events:
+
+| Message | Direction | Purpose |
+| --- | --- | --- |
+| `cm6-cache-state` | iframe → host | Session cache telemetry (state, unsaved flag, SHA). Drives the draft badge and host-side `markUnsaved()` bookkeeping. |
+| `draft_state` | iframe → host | Force-enables the draft badge after crash restores so late “clean” events cannot clear it accidentally. |
+| `cm6-dirty-state` | iframe → host | Fires immediately on each text mutation; lets the host start the autosave debounce without waiting for the cache snapshot. |
+| `notification` | iframe → host | Reroutes NiceGUI toasts to the shared host toast stack for consistent styling. |
+
+Adding a new message only requires calling `editor.notify_parent(type, data)` inside `editor_app.py`; the host listens once via `window.addEventListener('message', …)` in `main.js`.
+
 ---
 
 ## 4. CodeMirror 6 Integration
@@ -777,6 +790,17 @@ def invalidate_diff_cache(project_root: Path, file_path: Path):
     for key in keys_to_remove:
         _DIFF_CACHE.pop(key, None)
 ```
+
+### 6.4 Draft Diff Overlay
+
+Alongside Git diffs, the editor renders **draft** overlays that compare the iframe buffer against the on-disk file. The Python helper `_get_combined_diffs(project_root, file_path, current_content)` stitches both sources:
+
+1. Git hunks (respecting the selected base reference) with `type: 'add' | 'del'`.
+2. Draft hunks computed by `draft_diff_helper.compute_draft_diff()` with `type: 'add-draft' | 'del-draft'`.
+
+The combined list is sent via `editor.set_diff_decorations(hunks)`. Vendored `codemirror.js` inspects the `type` flag so draft additions render as blue blocks and draft deletions as yellow “removed line” widgets. Because everything flows through the same decoration pipeline, Git and draft overlays coexist on the same buffer without mode switches.
+
+Draft hunks are only generated when autosave is OFF. Enabling autosave clears session caches, suppresses draft diff computation, and falls back to pure Git decorations (the disk now matches the buffer on every autosave tick).
 
 ### 6.4 CM6 Decoration Application
 
@@ -1457,7 +1481,7 @@ Stores per-file crash recovery data:
 }
 ```
 
-**Purpose:** Automatic recovery of unsaved work after crashes, browser refreshes, or unexpected termination.
+**Purpose:** Crash recovery when autosave is OFF. When the user enables autosave the iframe stops writing sidecars altogether (the buffer hits disk every ~450 ms), so the cache directory stays empty until autosave is disabled again.
 
 ### 11.2 Store Lifecycle & Convergence
 
@@ -1716,7 +1740,7 @@ class ReconnectingWebSocket {
 
 ### 13.1 Architecture
 
-Session cache provides **auto-save** functionality without file writes:
+Session cache captures **drafts** when autosave is disabled:
 
 ```
 User types in editor
@@ -1729,6 +1753,8 @@ Backend writes to ~/.cache/cm6_sessions/<hash>.json
        ↓
 Draft badge appears in explorer
 ```
+
+When autosave is ON the debounce path short-circuits (no sidecars are written, only cache-state telemetry is broadcast). This keeps the cache directory clean while still providing the draft badge/diff overlays whenever autosave is OFF.
 
 ### 13.2 Collision Detection
 
