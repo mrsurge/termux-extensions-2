@@ -34,6 +34,7 @@ editor_router = APIRouter(prefix="/editor")
 _active_editor = None
 _current_file_path = None
 _current_file_sha256 = None
+_current_watcher_token = None # Track active watcher subscription
 _edit_tracker_subscription = None
 _cache_persist_timer = None
 _cache_persist_debounce_ms = 1000  # 1 second debounce
@@ -374,7 +375,7 @@ def _persist_to_cache_debounced():
         worker_pid=runtime_meta["worker_pid"],
     )
     
-    print(f"[SESSION_CACHE] Persisted draft for {current_file}", file=sys.stderr)
+    print(f"[SESSION_CACHE] Persisted draft for {current_file} (Unsaved: {cache_entry.get('unsaved', False)})", file=sys.stderr)
 
     _broadcast_cache_state(
         project_path,
@@ -452,6 +453,8 @@ def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
         launcher_pid=runtime_meta["launcher_pid"],
         worker_pid=runtime_meta["worker_pid"],
     )
+
+    print(f"[SESSION_CACHE][IMMEDIATE] Persisted draft for {current_file} (Unsaved: {cache_entry.get('unsaved', False)})", file=sys.stderr)
 
     _broadcast_cache_state(
         project_path,
@@ -665,15 +668,6 @@ async def editor_page():
                     # On init, if file exists, we check diffs.
                     # _get_combined_diffs uses preferences store, which is loaded.
                     project_root = Path(project_path).expanduser() if project_path else get_project_root()
-                    
-                    print(f"[EDITOR_APP][DEBUG_DIFF] initial_path={initial_path}", file=sys.stderr)
-                    print(f"[EDITOR_APP][DEBUG_DIFF] cached_was_restored={cached_was_restored}", file=sys.stderr)
-                    print(f"[EDITOR_APP][DEBUG_DIFF] editor_prefs[showInlineDiffs]={editor_prefs.get('showInlineDiffs', False)}", file=sys.stderr)
-                    print(f"[EDITOR_APP][DEBUG_DIFF] editor_prefs[showDraftDiffs]={editor_prefs.get('showDraftDiffs', False)}", file=sys.stderr)
-                    print(f"[EDITOR_APP][DEBUG_DIFF] editor_prefs[autoSave]={editor_prefs.get('autoSave', False)}", file=sys.stderr)
-                    if cached_was_restored and initial_content:
-                        print(f"[EDITOR_APP][DEBUG_DIFF] initial_content_len={len(initial_content)} initial_content_snippet={initial_content[:50]!r}", file=sys.stderr)
-
                     hunks = _get_combined_diffs(project_root, initial_path, initial_content)
                     editor.set_diff_decorations(hunks)
                             
@@ -1014,6 +1008,8 @@ async def check_cache(data: dict = Body(...)):
         return {"ok": True, "has_draft": False}
         
     cache_entry = _history_store.get_cached_document(project_path, path)
+    print(f"[CHECK_CACHE] Checking {path} -> Found: {bool(cache_entry)}, Unsaved: {cache_entry.get('unsaved') if cache_entry else 'N/A'}", file=sys.stderr)
+    
     if cache_entry and cache_entry.get('unsaved'):
         return {
             "ok": True,
@@ -1025,6 +1021,7 @@ async def check_cache(data: dict = Body(...)):
 
 @editor_router.post('/set_content')
 async def set_editor_content(data: dict = Body(...)):
+    global _current_watcher_token
     editor = get_active_editor()
     if not editor: return {"ok": False, "error": "Editor not ready"}
     
@@ -1051,10 +1048,23 @@ async def set_editor_content(data: dict = Body(...)):
     if project_path and new_path:
         cache_entry = _history_store.get_cached_document(project_path, new_path)
 
+    # Backend Safeguard: If frontend sends disk content but we have a draft, force the draft.
+    if cache_entry and cache_entry.get('unsaved'):
+        cached_base = cache_entry.get('base_sha256')
+        if cached_base and content_sha256 == cached_base:
+            print(f"[SET_CONTENT] SAFEGUARD: Overriding disk content with cached draft for {new_path}", file=sys.stderr)
+            content = cache_entry.get('content', '')
+            content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
+            has_draft = True # Ensure we treat this as a restore
+
     provided_base_sha = data.get('sha256')
+    
+    cached_base = cache_entry.get('base_sha256') if cache_entry else None
+    print(f"[SET_CONTENT] SHAs: provided={provided_base_sha} cached_base={cached_base} content_sha={content_sha256}", file=sys.stderr)
+
     base_sha256 = (
         provided_base_sha
-        or (cache_entry and cache_entry.get('base_sha256'))
+        or cached_base
         or content_sha256
     )
     set_current_file(new_path, base_sha256)
@@ -1095,7 +1105,15 @@ async def set_editor_content(data: dict = Body(...)):
             except Exception as e:
                 print(f"[FILE_WATCH] Failed to recalculate diffs: {e}", file=sys.stderr)
 
-    subscribe(new_path, 'nicegui_backend_set_content', on_file_change)
+    # Cleanup old subscription
+    if _current_watcher_token:
+        try:
+            from app.apps.file_editor_cm6.core_read import unsubscribe
+            unsubscribe(_current_watcher_token)
+        except Exception as e:
+            print(f"[SET_CONTENT] Failed to unsubscribe old token: {e}", file=sys.stderr)
+            
+    _current_watcher_token = subscribe(new_path, 'nicegui_backend_set_content', on_file_change)
     
     # Apply ALL preferences from disk to ensure consistency (Single Source of Truth)
     # These are applied every time content changes to maintain consistent editor state

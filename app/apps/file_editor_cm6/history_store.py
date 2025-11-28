@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import os
+import sys
 import hashlib
 import tempfile
 from datetime import datetime
@@ -440,6 +441,8 @@ class HistoryStore:
         cache_key = self._normalize_cache_key(project_path, file_path)
         content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
         unsaved = (content_sha256 != base_sha256)
+        
+        print(f"[HISTORY_STORE] upsert {file_path}: base={base_sha256} content={content_sha256} unsaved={unsaved}", file=sys.stderr)
 
         entry = {
             "project_path": self._normalize_project_path(project_path),
