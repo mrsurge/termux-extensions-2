@@ -368,7 +368,7 @@ file_editor_cm6_bp.include_router(terminal_router)
 file_editor_cm6_bp.add_api_websocket_route("/ws/agent", agent_websocket)
 
 # Include the self-contained editor routes
-from .nicegui_editor.editor_app import editor_router
+from .nicegui_editor.editor_app import editor_router, handle_external_discard
 file_editor_cm6_bp.include_router(editor_router)
 
 # Mount NiceGUI editor as sub-application (picked up by app_worker.py)
@@ -1449,6 +1449,7 @@ async def review_discard(data: dict = Body(...)):
         abs_path = root_path / rel_path
         if _history_store.clear_cached_document(project_root, str(abs_path)):
             discarded_count += 1
+            handle_external_discard(project_root, str(abs_path))
             
     return {"ok": True, "discarded_count": discarded_count}
 

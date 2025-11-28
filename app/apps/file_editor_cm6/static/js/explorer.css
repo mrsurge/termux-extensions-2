@@ -1018,16 +1018,11 @@
 
 /* Tree Highlights */
 .fe-tree-node.fe-draft[data-kind="file"] {
-  border-left-color: #facc15;
-  background: rgba(250, 204, 21, 0.15);
-}
-
-.fe-tree-node.fe-draft[data-kind="file"]:hover {
-  background: rgba(250, 204, 21, 0.22);
+  border-right: 3px solid #facc15;
 }
 
 .fe-tree-node.fe-draft-parent {
-  border-left-color: rgba(250, 204, 21, 0.6);
+  border-right: 2px solid rgba(250, 204, 21, 0.4);
 }
 
 /* Review Diff Styles */

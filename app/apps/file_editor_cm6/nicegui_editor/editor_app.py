@@ -1692,6 +1692,54 @@ async def set_font_scale_endpoint(data: dict = Body(...)):
         print(f"[EDITOR] Unexpected error in set_font_scale: {e}", file=sys.stderr)
         print(traceback.format_exc(), file=sys.stderr)
         raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+def handle_external_discard(project_path: str, file_path: str):
+    """
+    Handle a discard event triggered externally (e.g. from Review panel).
+    If the discarded file is currently open, revert the editor content to disk.
+    """
+    editor = get_active_editor()
+    current = get_current_file()
+    
+    # Check if the discarded file is the one currently open
+    if editor and current and os.path.abspath(file_path) == os.path.abspath(current):
+        print(f"[EDITOR] External discard detected for active file: {file_path}", file=sys.stderr)
+        
+        # Read from disk
+        try:
+            if os.path.exists(file_path):
+                content = Path(file_path).read_text(encoding='utf-8', errors='replace')
+                # Calculate disk SHA
+                sha = hashlib.sha256(content.encode('utf-8')).hexdigest()
+            else:
+                content = ''
+                sha = None
+                
+            # Update editor (revert)
+            editor.set_value(content)
+            editor._cached_content = content
+            set_current_file(file_path, sha)
+            
+            # Broadcast clean state
+            _broadcast_cache_state(
+                project_path,
+                file_path,
+                state='clean',
+                unsaved=False,
+                reason='discard_external'
+            )
+            
+            # Notify user
+            editor.notify_parent('notification', {
+                'message': 'Draft discarded from Review panel',
+                'type': 'info'
+            })
+            
+            # Refresh diffs (now clean)
+            editor.set_diff_decorations([])
+            
+        except Exception as e:
+            print(f"[EDITOR] Failed to revert active file: {e}", file=sys.stderr)
+
 def _refresh_active_diffs():
     """Recalculate combined diffs for the current file based on latest preferences."""
     editor = get_active_editor()
