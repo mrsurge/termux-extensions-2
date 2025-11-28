@@ -1809,6 +1809,25 @@ def _notify_subscribers(path: str, event: dict):
         callback(event)
 ```
 
+### 13.4 Multi-File Draft Restoration Pipeline
+
+1. **Host Probe (`main.js:1405-1416`):** `openFile()` POSTs `/editor/check_cache` before touching disk. If it returns `has_draft`, the response supplies both the cached content and the original `base_sha256`.
+2. **NiceGUI Safeguard (`editor_app.py:1008-1044`):** `set_editor_content()` persists the previous buffer, then uses the provided `sha256` (or sidecar’s `base_sha256`) when it calls `set_current_file`. If the host accidentally sent disk content while a draft exists, the backend replaces it with the cached version.
+3. **Cache Broadcast:** After every load or persist, `_broadcast_cache_state()` emits `cm6-cache-state` events so the host can mark the file badge + explorer card immediately.
+
+### 13.5 Explorer + Review UI
+
+* **Server Metadata (`explorer_helper.list_dir`):** Directory listings now include `hasDraft` by reading `HistoryStore.list_project_drafts`. Tree nodes receive `.fe-draft` classes during render—no polling required.
+* **Review Overlay (`static/js/explorer.js:2894-3109`):** The “Review” search tab scans `/review/list`, renders inline draft hunks, and attaches `data-line` attributes to headers/rows. Clicking a hunk calls `openFileAndMaybeJump(rel, line)`, mirroring the existing “Search by Changes” UX.
+* **Bulk Ops:** `/review/save` reuses `_write_editor_buffer_to_disk` and emits save acks/diff invalidations so git status, diff cache, and explorer badges stay consistent after batch writes.
+
+### 13.6 Draft Diff Rendering + Minimap
+
+* **Diff Tags:** Draft hunks are tagged as `add-draft` / `del-draft`; CodeMirror decorations emit `diffKind: 'insert-draft' | 'delete-draft'`.
+* **Gutters:** `DeletedLineNumberMarker` and `MinusDraftGutterMarker` switch to yellow classes when `isDraft` is true, while git deletions keep the legacy red palette.
+* **Minimap (`codemirror.js:300-344`, `applyMinimapMode`):** The minimap scans the diff field and builds color buckets per diffKind—green/red for git, blue/yellow for drafts—so the tiny view mirrors the main gutter.
+* **Autosave Behavior:** When autosave is ON, `_persist_to_cache_debounced()` skips sidecar writes but still emits a `mid_session` cache state until the disk write succeeds. Draft diffs are suppressed during autosave to prevent duplicate highlights.
+
 ---
 
 ## 14. IPC Protocol

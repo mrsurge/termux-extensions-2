@@ -109,13 +109,16 @@ class RemovedLineWidget extends CM.WidgetType {
 
 // Deleted line number marker for the standard line-number gutter
 class DeletedLineNumberMarker extends CM.GutterMarker {
-  constructor(num) {
+  constructor(num, isDraft = false) {
     super();
     this.num = num;
-    // Apply class to the gutter element itself
-    this.elementClass = 'cm-diff-deleted-lineno';
+    this.isDraft = !!isDraft;
+    // Apply classes to the gutter element itself
+    this.elementClass = isDraft
+      ? 'cm-diff-deleted-lineno cm-diff-deleted-lineno-draft'
+      : 'cm-diff-deleted-lineno';
   }
-  eq(other) { return other instanceof DeletedLineNumberMarker && other.num === this.num; }
+  eq(other) { return other instanceof DeletedLineNumberMarker && other.num === this.num && other.isDraft === this.isDraft; }
   toDOM() {
     const span = document.createElement('span');
     span.textContent = this.num;
@@ -169,7 +172,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   
   const lineAddedDraftDeco = Decoration.line({
     class: 'cm-diff-line-added-draft',
-    diffKind: 'insert',
+    diffKind: 'insert-draft',
   });
 
   const lineContextDeco = Decoration.line({
@@ -231,7 +234,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
         side: -1,
         block: true,
         widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine, widget.isDraft),
-        diffKind: 'delete',
+        diffKind: widget.isDraft ? 'delete-draft' : 'delete',
       }));
       widgetIndex++;
     }
@@ -274,7 +277,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       side: -1,
       block: true,
       widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine, widget.isDraft),
-      diffKind: 'delete',
+      diffKind: widget.isDraft ? 'delete-draft' : 'delete',
     }));
     widgetIndex++;
   }
@@ -293,32 +296,45 @@ function diffMinimapGuttersFromDecorations(state, diffField) {
   const decos = state.field(diffField, false);
   if (!decos) return [];
 
-  const insertLines = {};
-  const deleteLines = {};
+  const colorBuckets = new Map();
+  const ensureBucket = (color) => {
+    if (!colorBuckets.has(color)) {
+      colorBuckets.set(color, {});
+    }
+    return colorBuckets.get(color);
+  };
+
+  const colorForKind = (kind) => {
+    switch (kind) {
+      case 'insert':
+        return '#34d399'; // git added
+      case 'delete':
+        return '#f87171'; // git deleted
+      case 'insert-draft':
+        return '#60a5fa'; // draft added (blue)
+      case 'delete-draft':
+        return '#facc15'; // draft deleted (yellow)
+      default:
+        return null;
+    }
+  };
 
   decos.between(0, state.doc.length, (from, to, deco) => {
     const kind = deco.spec?.diffKind;
-    if (!kind) return;
+    const bucketColor = colorForKind(kind);
+    if (!bucketColor) return;
 
     // Map this decoration/widget to line numbers in the *current* doc
     const lineFrom = state.doc.lineAt(from).number;
     const lineTo = state.doc.lineAt(to).number;
+    const bucket = ensureBucket(bucketColor);
 
     for (let line = lineFrom; line <= lineTo; line++) {
-      if (kind === 'insert') {
-        // “decoration markers”
-        insertLines[line] = '#34d399'; // green-ish (match --diff-add-marker)
-      } else if (kind === 'delete') {
-        // “widget markers” for inline deletions
-        deleteLines[line] = '#f87171'; // red-ish (match --diff-del-marker)
-      }
+      bucket[line] = bucketColor;
     }
   });
 
-  const gutters = [];
-  if (Object.keys(insertLines).length) gutters.push(insertLines);
-  if (Object.keys(deleteLines).length) gutters.push(deleteLines);
-  return gutters;
+  return Array.from(colorBuckets.values());
 }
 
 function safeLine(doc, lineNumber) {
@@ -788,7 +804,7 @@ export default {
           // Facet to inject markers into the standard line-number gutter
           CM.lineNumberWidgetMarker.of((view, widget, block) => {
             if (widget instanceof RemovedLineWidget) {
-              return new DeletedLineNumberMarker(widget.originalLine);
+              return new DeletedLineNumberMarker(widget.originalLine, widget.isDraft);
             }
             return null;
           }),

@@ -70,7 +70,16 @@ Hierarchical file tree with search, git status badges, and extensive file operat
 - **Git Actions:** Init repo, stage/unstage, restore file, branch operations directly from explorer
 - **New Project Creation:** Create new projects with optional Git initialization
 
-### 6. **Embedded Terminal**
+### 6. **Draft Session Workflow**
+Persistent, disk-backed drafts bring code-server resilience to a single-document UX.
+
+- **Sidecar Persistence:** Unsaved buffers are mirrored to `~/.cache/cm6_sessions/…` with base/content hashes so drafts survive reloads, crashes, or worker restarts.
+- **Explorer Accents:** Tree nodes receive yellow right-edge accents the moment a draft exists; the metadata is streamed from the same sidecars so badges survive tree refreshes.
+- **Review Tab:** The explorer search overlay now includes a “Review” mode that lists every draft, renders blue/yellow hunks, and lets you jump to any change—or save/discard files in bulk—without leaving the drawer.
+- **Autosave Interop:** Enabling autosave flushes the current draft, performs an immediate disk write, and suppresses new sidecars until autosave is disabled again.
+- **Unified Diff Colors:** Git (green/red) and draft (blue/yellow) decorations coexist across gutters, minimap, and inline widgets so you can distinguish disk vs. unsaved changes at a glance.
+
+### 7. **Embedded Terminal**
 Full xterm.js terminal with PTY streaming, persistent sessions, and project-aware CWD.
 
 - **Framework Shells Integration:** Terminal runs as a framework shell (type="shell", uses_pty=True)
@@ -82,7 +91,7 @@ Full xterm.js terminal with PTY streaming, persistent sessions, and project-awar
 - **Shell Selection:** Configurable shell (bash, zsh, fish) via framework preferences
 - **Shared Resource:** Multiple apps can connect to same terminal via label-based discovery
 
-### 7. **AI Agent Drawer**
+### 8. **AI Agent Drawer**
 Integrated AI assistant for code editing, debugging, and file operations.
 
 - **MCP Server Integration:** Runs Codex MCP server as framework shell (type="shell", uses_pty=False)
