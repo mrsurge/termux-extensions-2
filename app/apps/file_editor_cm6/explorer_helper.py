@@ -9,6 +9,8 @@ import time
 import shutil
 from typing import Dict, Iterable, Optional
 
+from app.apps.file_editor_cm6.stores import _history_store
+
 # Global project root for this app (default: HOME)
 _PROJECT_ROOT = Path.home()
 _GIT_STATUS_CACHE: Dict[str, dict] = {}
@@ -26,6 +28,25 @@ _STATUS_PRIORITY = (
     "ignored",
     "clean",
 )
+
+
+def _collect_project_draft_rel_paths(project_root: Path) -> set[str]:
+    """Return set of relative file paths that currently have drafts."""
+    try:
+        drafts = _history_store.list_project_drafts(str(project_root))
+    except Exception:
+        return set()
+    rel_paths: set[str] = set()
+    for draft in drafts:
+        file_path = draft.get("file_path")
+        if not file_path:
+            continue
+        try:
+            abs_path = Path(file_path).expanduser().resolve()
+            rel_paths.add(str(abs_path.relative_to(project_root)))
+        except Exception:
+            continue
+    return rel_paths
 
 
 def set_project_root(path: str) -> Path:
@@ -53,6 +74,7 @@ def list_dir(rel: str = '.') -> dict:
     - entries: list of file/dir entries with metadata
     """
     root = get_project_root()
+    draft_rel_paths = _collect_project_draft_rel_paths(root)
     base = (root / rel).resolve()
 
     # Security check: ensure path is within project root
@@ -79,6 +101,8 @@ def list_dir(rel: str = '.') -> dict:
                 kind = 'dir' if e.is_dir(follow_symlinks=False) else 'file'
                 git_status = _derive_git_status(rel_path, kind, status_map)
 
+                has_draft = rel_path in draft_rel_paths
+
                 entries.append({
                     'name': e.name,
                     'rel': rel_path,
@@ -90,6 +114,7 @@ def list_dir(rel: str = '.') -> dict:
                     'gitStatus': git_status,
                     'isExecutable': bool(mode & stat.S_IXUSR),
                     'isSymlink': e.is_symlink(),
+                    'hasDraft': has_draft,
                 })
             except Exception:
                 # Skip files we can't access

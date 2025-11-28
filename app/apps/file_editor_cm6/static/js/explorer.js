@@ -970,6 +970,11 @@ async function addTreeChildren(parentEl, rel) {
       li.dataset.rel = e.rel;
       li.dataset.name = e.name;
       li.dataset.open = 'false';
+      const entryHasDraft = !!e.hasDraft;
+      li.dataset.hasDraft = entryHasDraft ? '1' : '0';
+      if (entryHasDraft && e.kind === 'file') {
+        li.classList.add('fe-draft');
+      }
       if (e.gitStatus) {
         li.dataset.gitStatus = e.gitStatus;
         const statusClass = GIT_STATUS_CLASS_MAP[e.gitStatus];
@@ -1024,6 +1029,9 @@ async function addTreeChildren(parentEl, rel) {
       li.appendChild(text);
       li.appendChild(menuBtn);
       parentEl.appendChild(li);
+      if (entryHasDraft && e.kind === 'file') {
+        updateParentDraftStatus(li, true);
+      }
     });
   } catch (e) {
     console.error('Failed to add tree children:', e);
@@ -3096,6 +3104,9 @@ async function updateExplorerDraftStatus() {
         // Clear existing
         treeElement.querySelectorAll(".fe-draft, .fe-draft-parent").forEach(el => {
             el.classList.remove("fe-draft", "fe-draft-parent");
+            if (el.dataset && el.dataset.kind === "file") {
+                el.dataset.hasDraft = '0';
+            }
         });
         
         // Apply new
@@ -3103,6 +3114,7 @@ async function updateExplorerDraftStatus() {
             const fileNode = treeElement.querySelector(`li[data-rel="${rel}"]`);
             if (fileNode) {
                 fileNode.classList.add("fe-draft");
+                fileNode.dataset.hasDraft = '1';
                 let parent = fileNode.parentElement.closest("li[data-kind=\"dir\"]");
                 while (parent) {
                     parent.classList.add("fe-draft-parent");
@@ -3128,6 +3140,7 @@ function applyDraftClass(absPath, unsaved) {
     
     const fileNode = treeElement.querySelector(`li[data-rel="${rel}"]`);
     if (fileNode) {
+        fileNode.dataset.hasDraft = unsaved ? '1' : '0';
         if (unsaved) {
             fileNode.classList.add("fe-draft");
             updateParentDraftStatus(fileNode, true);
