@@ -2965,7 +2965,7 @@ function renderReviewResults(container, data) {
   if (!entries.length) {
     const empty = document.createElement("div");
     empty.className = "fe-search-empty";
-    empty.textContent = "No pending edits (Git or Draft).";
+    empty.textContent = "No pending draft edits.";
     container.appendChild(empty);
     return;
   }
