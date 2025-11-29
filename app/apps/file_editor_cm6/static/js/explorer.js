@@ -2626,7 +2626,9 @@ function renderChangesList(container, data, wasOriginallyEmpty, query) {
   entries.forEach((change) => {
     const group = document.createElement('div');
     group.className = 'fe-search-file-group fe-search-change-group';
-    group.onclick = async () => {
+    // Default fallback line for file-level clicks
+    group.dataset.line = firstDiffLine(change) || 1;
+    group.onclick = async (event) => {
       if (typeof window.__cm6EnsureInlineDiffs === 'function') {
         try {
           await window.__cm6EnsureInlineDiffs(true);
@@ -2634,7 +2636,12 @@ function renderChangesList(container, data, wasOriginallyEmpty, query) {
           console.warn('Failed to auto-enable inline diffs:', err);
         }
       }
-      await openFileAndMaybeJump(change.rel, firstDiffLine(change), { focus: false });
+      // Prefer the nearest element with an explicit data-line (hunk header or diff row)
+      const lineEl = event?.target?.closest('[data-line]');
+      const lineFromTarget = lineEl ? Number(lineEl.dataset.line || 0) : 0;
+      const fallback = Number(event?.currentTarget?.dataset?.line || 0) || firstDiffLine(change);
+      const line = lineFromTarget || fallback;
+      await openFileAndMaybeJump(change.rel, line, { focus: false });
     };
 
     const header = document.createElement('div');
@@ -2691,6 +2698,8 @@ function renderChangesList(container, data, wasOriginallyEmpty, query) {
         const hunkHeader = document.createElement('div');
         hunkHeader.className = 'fe-search-hunk-header';
         hunkHeader.textContent = describeHunkRange(hunk);
+        // Attach an approximate jump target for this hunk
+        hunkHeader.dataset.line = Number(hunk.newStart || hunk.oldStart || 1);
         hunkBlock.appendChild(hunkHeader);
 
         const diffRows = document.createElement('div');
@@ -2728,23 +2737,31 @@ function renderChangesList(container, data, wasOriginallyEmpty, query) {
             text.textContent = line.text || ' ';
           }
 
+          // Compute the logical target line for this diff row BEFORE we mutate counters
+          let rowLine;
           if (line.type === 'add') {
+            rowLine = newLine || 1;
             row.classList.add('is-add');
             lineNum.textContent = newLine || '';
             sign.textContent = '+';
             newLine += 1;
           } else if (line.type === 'del') {
+            rowLine = oldLine || 1;
             row.classList.add('is-del');
             lineNum.textContent = oldLine || '';
             sign.textContent = '-';
             oldLine += 1;
           } else {
+            rowLine = newLine || oldLine || 1;
             row.classList.add('is-context');
             lineNum.textContent = newLine || oldLine || '';
             sign.textContent = '';
             newLine += 1;
             oldLine += 1;
           }
+
+          // Attach the target line to the row so clicks can jump precisely
+          row.dataset.line = rowLine;
 
           row.appendChild(lineNum);
           row.appendChild(sign);
