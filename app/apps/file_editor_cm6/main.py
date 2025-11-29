@@ -1125,30 +1125,10 @@ async def get_editor_state_deprecated():
     Now also returns 'projectOrigin'.
     """
     history = _history_store
-    
-    # Get Diff Base info
-    diff_base_info = {"ref": "HEAD", "mode": "none"}
-    active_project = history.get_active_project()
-    if active_project and os.path.isdir(active_project):
-        try:
-            from . import git_helper
-            if git_helper.is_git_repository(Path(active_project)):
-                base = history.get_diff_base(active_project)
-                commit_info = git_helper.get_commit_info(Path(active_project), base)
-                diff_base_info = {
-                    "ref": base,
-                    "mode": "commit" if base != "HEAD" else "head",
-                    "commit": {
-                        "hash": commit_info.hash,
-                        "short": commit_info.short_hash,
-                        "subject": commit_info.summary
-                    } if commit_info else None
-                }
-        except Exception:
-            pass
+    payload = _build_state_payload()
 
-    state = history.get_session_state()
-    
+    active_project = history.get_active_project()
+
     # If we have an active project, check/refresh its origin cache
     project_origin = None
     if active_project and os.path.isdir(active_project):
@@ -1164,20 +1144,15 @@ async def get_editor_state_deprecated():
     else:
         project_origin = history.get_project_origin(active_project)
 
-    return {
-        "ok": True,
-        "data": {
-            "activeProject": active_project,
-            "activeProjectExists": bool(active_project and os.path.isdir(active_project)),
-            "activeProjectLabel": HistoryStore.format_label(active_project),
-            "projectOrigin": project_origin,
-            "currentPath": state.get("currentPath"),
-            "unsaved": state.get("unsaved"),
-            "recents": history.list_files(active_project) if active_project else [],
-            "gitDiffBase": diff_base_info,
-            "editorState": state,
-        }
-    }
+    session_state = history.get_session_state()
+    payload.update({
+        "projectOrigin": project_origin,
+        "currentPath": session_state.get("currentPath"),
+        "unsaved": session_state.get("unsaved"),
+        "editorState": session_state,
+    })
+
+    return {"ok": True, "data": payload}
 
 @file_editor_cm6_bp.get('/session_state')
 def get_session_state():
