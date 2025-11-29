@@ -2999,6 +2999,9 @@ function renderReviewResults(container, data) {
         if (event?.target?.closest('.fe-review-checkbox')) return;
         const lineEl = event?.target?.closest('[data-line]');
         const line = lineEl ? Number(lineEl.dataset.line || 0) : Number(event?.currentTarget?.dataset?.line || 0);
+        if (typeof window.__cm6EnsureDraftDiffs === "function") {
+            try { await window.__cm6EnsureDraftDiffs(true); } catch (e) {}
+        }
         if (typeof window.__cm6EnsureInlineDiffs === "function") {
             try { await window.__cm6EnsureInlineDiffs(true); } catch (e) {}
         }
@@ -3027,6 +3030,9 @@ function renderReviewResults(container, data) {
     title.textContent = entry.rel;
     title.style.cursor = "pointer";
     title.onclick = async () => {
+        if (typeof window.__cm6EnsureDraftDiffs === "function") {
+            try { await window.__cm6EnsureDraftDiffs(true); } catch(e){}
+        }
         if (typeof window.__cm6EnsureInlineDiffs === "function") {
             try { await window.__cm6EnsureInlineDiffs(true); } catch(e){}
         }

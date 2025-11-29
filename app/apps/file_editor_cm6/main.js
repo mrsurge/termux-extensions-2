@@ -857,6 +857,13 @@ window.addEventListener('message', (event) => {
         console.warn('Failed to enqueue scroll state update:', err);
       }
     }, CURSOR_STATE_DEBOUNCE);
+  } else if (event.data.type === 'cm6-editor-focus') {
+    // Any interaction inside the iframe editor should close open chrome menus
+    try {
+      closeAllMenus();
+    } catch (err) {
+      console.warn('Failed to close menus on editor focus:', err);
+    }
   }
 });
 
@@ -1117,6 +1124,21 @@ window.__cm6EnsureInlineDiffs = async function ensureInlineDiffsEnabled(forceOn 
     return await updatePreference('showInlineDiffs', true);
   } catch (err) {
     console.warn('Auto-enable inline diffs failed:', err);
+    return false;
+  }
+};
+
+window.__cm6EnsureDraftDiffs = async function ensureDraftDiffsEnabled(forceOn = true) {
+  if (!forceOn) {
+    return true;
+  }
+  if (editorViewState?.showDraftDiffs) {
+    return true;
+  }
+  try {
+    return await updatePreference('showDraftDiffs', true);
+  } catch (err) {
+    console.warn('Auto-enable draft diffs failed:', err);
     return false;
   }
 };

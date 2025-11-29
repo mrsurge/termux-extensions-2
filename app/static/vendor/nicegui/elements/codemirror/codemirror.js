@@ -1227,6 +1227,24 @@ export default {
       this.setFontScale(this.pendingFontScale);
     }
 
+    // Notify parent when the editor surface is interacted with (focus/click inside iframe)
+    try {
+      const focusHandler = () => {
+        try {
+          this.notifyParent('cm6-editor-focus', { focused: true });
+        } catch (err) {
+          console.warn('[CodeMirror] Failed to notify parent of editor focus:', err);
+        }
+      };
+      // Track both keyboard focus and pointer interaction
+      this.editor.dom.addEventListener('focusin', focusHandler);
+      this.editor.dom.addEventListener('mousedown', focusHandler);
+      // Stash for potential future cleanup
+      this._focusHandler = focusHandler;
+    } catch (err) {
+      console.warn('[CodeMirror] Failed to attach editor focus handlers:', err);
+    }
+
     // Apply initial scroll position from backend, if provided
     if (typeof this.initialScrollLine === 'number' && this.initialScrollLine > 1) {
       try {
