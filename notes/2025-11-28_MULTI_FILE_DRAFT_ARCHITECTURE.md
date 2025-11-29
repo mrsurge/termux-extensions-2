@@ -117,3 +117,39 @@ While the backend architecture is robust, the frontend visual representation is 
 *   **Symptom:** Highlight accents (yellow borders) might be missing, or conflicting with Git status styling (modified/untracked). The visual hierarchy between "Git Modified" (Orange/Left) and "Draft Modified" (Yellow/Right) is not fully stabilized in the CSS.
 
 ---
+
+## 7. Explorer Integration (Server-Driven Draft Awareness)
+
+**Goal:** Keep the explorer tree, review overlay, and inline editor in sync without relying on polling.
+
+1. **`list_dir()` Augmentation**
+   * Reads the active project's sidecars via `HistoryStore.list_project_drafts`.
+   * Adds `hasDraft: true/false` to every entry before the host renders the card.
+   * Result: Draft accents render deterministically during tree builds and survive refreshes.
+
+2. **Tree Rendering**
+   * `addTreeChildren()` stamps each `<li>` with `data-has-draft` and applies `.fe-draft` / `.fe-draft-parent` immediately.
+   * `cm6:draft-updated` events still work, but now they only update the affected nodes.
+
+3. **Review Overlay Hooks**
+   * Clicking either the file header or an individual hunk invokes `openFileAndMaybeJump(rel, line)`.
+   * `data-line` attributes on hunk headers / rows preserve the exact line offsets so navigation mirrors “Search by Changes”.
+
+---
+
+## 8. Combined Diff & Minimap Styling
+
+* Draft hunks now propagate explicit `diffKind` tags (`insert-draft`, `delete-draft`).
+* Gutters and line numbers emit draft-specific markers (`cm-diff-*-draft`) to keep yellow accents everywhere the git pipeline used red.
+* The minimap scans both git and draft decorations and collapses them into color buckets:
+  * Git add/delete → green/red (unchanged).
+  * Draft add/delete → blue/yellow.
+* Result: Users can visually distinguish autosaved-on-disk changes (git) from unsaved drafts in both the editor gutter and the minimap.
+
+---
+
+## 9. Autosave & Draft Diff Interop
+
+* Autosave mode suppresses sidecar writes and streams changes straight to disk, but it still emits draft diff decorations until the save completes (so the user sees yellow indicators during the write).
+* When autosave is toggled on, the backend clears any active draft cache for the current file and broadcasts a `state='clean'` signal; toggling off resumes sidecar persistence immediately.
+* The combined diff builder hides draft hunks while autosave is enabled, preventing duplicate highlights once the disk write succeeds.
