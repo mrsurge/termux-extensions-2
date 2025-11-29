@@ -263,6 +263,7 @@ class CodeMirror(ValueElement, DisableableElement,
         font_scale: float = 1.0,
         highlight_whitespace: bool = False,
         show_minimap: bool = False,
+        initial_scroll_line: Optional[int] = None,
     ) -> None:
         """CodeMirror
 
@@ -285,6 +286,8 @@ class CodeMirror(ValueElement, DisableableElement,
         :param font_scale: initial font scale multiplier (default: 1.0)
         :param highlight_whitespace: whether to highlight whitespace (default: `False`)
         :param show_minimap: whether to show the minimap (default: `False`)
+        :param initial_scroll_line: optional 1-based line number to center the initial viewport around (default: `None`).
+            This is used by the host application to restore scroll position on reconnect using disk-backed session state.
         """
         super().__init__(value=value, on_value_change=on_change)
         # Prevent ValueElement from pushing model-value updates back to the client; we only
@@ -301,6 +304,14 @@ class CodeMirror(ValueElement, DisableableElement,
         self._props['fontScale'] = font_scale
         self._props['highlightWhitespace'] = highlight_whitespace
         self._props['showMinimap'] = show_minimap
+        # Optional initial scroll anchor; used to build the editor around a persisted line
+        if initial_scroll_line is not None:
+            try:
+                line_val = int(initial_scroll_line)
+            except (TypeError, ValueError):
+                line_val = None
+            if line_val is not None and line_val > 0:
+                self._props['initialScrollLine'] = line_val
         self._update_method = 'setEditorValueFromProps'
 
         self.on('change', self._handle_change)

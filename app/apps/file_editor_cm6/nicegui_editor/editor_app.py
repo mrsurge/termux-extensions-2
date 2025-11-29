@@ -642,6 +642,26 @@ async def editor_page():
                 file=sys.stderr,
             )
             
+            # Determine initial scroll line (if any) from disk-backed session state.
+            initial_scroll_line = None
+            try:
+                session_state = _history_store.get_session_state()
+                session_path = session_state.get("currentPath")
+                # Prefer scrollLine (viewport-based); fall back to legacy cursorLine if present.
+                scroll_line = session_state.get("scrollLine") or session_state.get("cursorLine")
+                if (
+                    session_path
+                    and scroll_line
+                    and isinstance(scroll_line, (int, float))
+                    and initial_path
+                    and str(session_path) == str(initial_path)
+                    and int(scroll_line) > 1
+                ):
+                    initial_scroll_line = int(scroll_line)
+                    print(f"[EDITOR_APP] Using initial_scroll_line={initial_scroll_line} for {initial_path}", file=sys.stderr)
+            except Exception as exc:
+                print(f"[EDITOR_APP] Failed to resolve initial_scroll_line: {exc}", file=sys.stderr)
+
             editor = ui.codemirror(
                 value=initial_content,
                 language=initial_language,
@@ -650,6 +670,7 @@ async def editor_page():
                 font_scale=font_scale_pref,
                 highlight_whitespace=False,
                 show_minimap=editor_prefs.get('showMinimap', False),
+                initial_scroll_line=initial_scroll_line,
                 on_change=_on_editor_change,
             ).style('flex: 1; border: none;').classes('editor-content w-full h-full').props('flat borderless')
             editor._cached_content = initial_content
@@ -1376,6 +1397,7 @@ async def update_preference(data: dict = Body(...)):
     
     # Apply to editor immediately based on key; persist only after success
     try:
+        print(f"[PREFERENCE] Incoming update key={key} value={value}", file=sys.stderr)
         if key == 'wordWrap':
             editor.set_line_wrapping(bool(value))
             # If turning word wrap ON and diffs are showing, refresh them

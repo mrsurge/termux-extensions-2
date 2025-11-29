@@ -139,6 +139,7 @@ class PreferencesStore:
         """Write preferences directly to disk - atomic replace."""
         tmp_path = self._path.with_suffix(".tmp")
         try:
+            print(f"[PREFS] Writing preferences to {self._path}", file=sys.stderr)
             payload = json.dumps(data, ensure_ascii=False, indent=2)
             tmp_path.write_text(payload, encoding="utf-8")
             tmp_path.replace(self._path)

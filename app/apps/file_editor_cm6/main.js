@@ -719,6 +719,10 @@ let bootAutoOpenTimer = null;
 let bootAutoOpenPath = null;
 let restoredSessionPath = null;
 
+let lastScrollState = null;
+let scrollStateTimer = null;
+const CURSOR_STATE_DEBOUNCE = 1000; // ms
+
 function cancelBootAutoOpen(reason) {
   if (!bootAutoOpenTimer) return;
   clearTimeout(bootAutoOpenTimer);
@@ -824,6 +828,35 @@ window.addEventListener('message', (event) => {
     if (!incomingPath || incomingPath === currentPath) {
       markUnsaved(true);
     }
+  } else if (event.data.type === 'cm6-scroll-state') {
+    const payload = event.data.data || {};
+    if (typeof payload.line !== 'number' || payload.line < 1) return;
+
+    lastScrollState = {
+      path: currentPath || null,
+      line: payload.line,
+      column: (typeof payload.column === 'number' && payload.column >= 0) ? payload.column : null,
+      top: (typeof payload.top === 'number' && payload.top >= 0) ? payload.top : null,
+    };
+
+    console.log('[ScrollState] received', lastScrollState);
+
+    if (scrollStateTimer) {
+      clearTimeout(scrollStateTimer);
+    }
+    scrollStateTimer = setTimeout(() => {
+      scrollStateTimer = null;
+      if (!lastScrollState || !lastScrollState.path) return;
+      console.log('[ScrollState] queueSessionStateUpdate', lastScrollState);
+      try {
+        queueSessionStateUpdate({
+          scrollLine: lastScrollState.line,
+          scrollTop: lastScrollState.top != null ? lastScrollState.top : null,
+        });
+      } catch (err) {
+        console.warn('Failed to enqueue scroll state update:', err);
+      }
+    }, CURSOR_STATE_DEBOUNCE);
   }
 });
 
@@ -972,6 +1005,7 @@ async function updatePreference(key, value) {
   // Send preference change to backend; backend handles persistence + application
   // Returns full state in single round trip (Jimmy's optimization)
   try {
+    console.log('[Preference] updatePreference request', key, value);
     const resp = await apiPost('editor/update_preference', { key, value });
     
     // apiPost already unwraps the response (returns res.data)
@@ -980,6 +1014,7 @@ async function updatePreference(key, value) {
       // resp is the state object (not wrapped in {ok, data})
       editorViewState = resp; // Update state BEFORE applying (fixes minimap toggle inversion)
       applyStateToMenus(resp);
+      console.log('[Preference] updatePreference applied', key, value);
       return true;
     }
     

@@ -1189,6 +1189,7 @@ async def update_preferences(payload: dict = Body(...)):
         project['path'] = active_project
 
     try:
+        print(f"[PREFERENCES] Incoming preferences payload={payload}", file=sys.stderr)
         updated = _preferences_store.update_preferences(
             editor=editor,
             ui=ui,

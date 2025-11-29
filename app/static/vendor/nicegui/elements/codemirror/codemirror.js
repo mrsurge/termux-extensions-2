@@ -424,6 +424,8 @@ export default {
     indent: String,
     highlightWhitespace: Boolean,
     showMinimap: Boolean,
+    // Optional 1-based line number for initial scroll anchoring (backend-driven)
+    initialScrollLine: { type: Number, default: null },
   },
   watch: {
     language(newLanguage) {
@@ -965,7 +967,54 @@ export default {
         extensions.push(CM.keymap.of(searchKeymap));
       }
 
+      // Scroll tracking via ViewPlugin (viewport-based; no focus assumptions)
+      try {
+        const self = this;
+        const scrollTracker = CM.ViewPlugin.fromClass(class {
+          constructor(view) {
+            this.view = view;
+            self.reportScrollPosition(view);
+          }
+          update(update) {
+            if (update.viewportChanged || update.docChanged) {
+              self.reportScrollPosition(update.view);
+            }
+          }
+          destroy() {
+            this.view = null;
+          }
+        });
+        console.log('[CodeMirror] Installing scroll tracker plugin');
+        extensions.push(scrollTracker);
+      } catch (err) {
+        console.warn('[CodeMirror] Failed to initialize scroll tracker plugin:', err);
+      }
+
       return extensions;
+    },
+    reportScrollPosition(viewArg) {
+      try {
+        const view = viewArg || this.editor;
+        if (!view) return;
+        const state = view.state;
+        if (!state) return;
+        const ranges = view.visibleRanges;
+        if (!ranges || !ranges.length) return;
+        const from = ranges[0].from;
+        const lineInfo = state.doc.lineAt(from);
+        const line = lineInfo.number;
+        const column = from - lineInfo.from;
+
+        console.log('[CodeMirror] reportScrollPosition', { line, column, from });
+        this.notifyParent('cm6-scroll-state', {
+          line,
+          column,
+          top: from,
+          timestamp: Date.now(),
+        });
+      } catch (err) {
+        console.warn('[CodeMirror] Failed to report scroll position:', err);
+      }
     },
     // ============================================================================
     // CUSTOM METHOD: jumpToLine
@@ -1176,6 +1225,23 @@ export default {
     this.setLineWrapping(this.lineWrapping);
     if (typeof this.pendingFontScale === 'number') {
       this.setFontScale(this.pendingFontScale);
+    }
+
+    // Apply initial scroll position from backend, if provided
+    if (typeof this.initialScrollLine === 'number' && this.initialScrollLine > 1) {
+      try {
+        const doc = this.editor.state.doc;
+        const maxLine = doc.lines;
+        const targetLine = Math.max(1, Math.min(this.initialScrollLine, maxLine));
+        const line = doc.line(targetLine);
+        this.editor.dispatch({
+          selection: { anchor: line.from },
+          scrollIntoView: true,
+        });
+        console.log('[CodeMirror] Initial scroll to line', targetLine);
+      } catch (err) {
+        console.warn('[CodeMirror] Failed to apply initial scroll line:', err);
+      }
     }
     
     // Initialize layout detection for minimap

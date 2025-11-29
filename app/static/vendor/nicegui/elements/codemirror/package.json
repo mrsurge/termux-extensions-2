@@ -16,6 +16,7 @@
     "@replit/codemirror-indentation-markers": "^6.5.3",
     "@replit/codemirror-minimap": "^0.5.2",
     "@uiw/codemirror-extensions-color": "^4.25.3",
+    "@uiw/codemirror-extensions-events": "^4.25.3",
     "@uiw/codemirror-themes-all": "^4.25.2",
     "codemirror": "^6.0.2"
   },
