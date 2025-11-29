@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, FileResponse
 import asyncio
 import anyio
 from .agent_ws import agent_websocket
+from .explorer_ws import explorer_websocket
 from .history_store import HistoryStore
 from .preferences_store import PreferencesStore
 from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
@@ -366,6 +367,7 @@ async def serve_static(file_path: str):
 from .terminal_backend import terminal_router
 file_editor_cm6_bp.include_router(terminal_router)
 file_editor_cm6_bp.add_api_websocket_route("/ws/agent", agent_websocket)
+file_editor_cm6_bp.add_api_websocket_route("/ws/explorer", explorer_websocket)
 
 # Include the self-contained editor routes
 from .nicegui_editor.editor_app import editor_router, handle_external_discard

@@ -13,6 +13,58 @@ import { initAgentDrawer } from './static/js/agent_drawer.js';
 import ReconnectingWebSocket from './static/js/reconnecting_websocket.js';
 import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
 
+let explorerSocket = null;
+
+function connectExplorerSocket() {
+  if (explorerSocket) {
+    return;
+  }
+  try {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // WebSocket proxy path: /ws/app/{app_id}/{route}
+    // -> worker sees /ws/{route} (here: /ws/explorer)
+    const wsUrl = `${protocol}//${window.location.host}/ws/app/file_editor_cm6/explorer`;
+    explorerSocket = new ReconnectingWebSocket(wsUrl);
+
+    explorerSocket.onopen = () => {
+      console.log('[ExplorerWS] Connected to', wsUrl);
+    };
+    explorerSocket.onclose = () => {
+      console.log('[ExplorerWS] Disconnected from', wsUrl);
+    };
+    explorerSocket.onerror = (ev) => {
+      console.warn('[ExplorerWS] Error', ev);
+    };
+
+    explorerSocket.onmessage = (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      const type = msg.type;
+      const payload = msg.payload || {};
+      if (!type) return;
+      if (typeof window.__explorerBusDispatch === 'function') {
+        window.__explorerBusDispatch(type, payload);
+      }
+    };
+
+    window.__explorerBusSend = (type, payload) => {
+      if (!explorerSocket || explorerSocket.readyState !== WebSocket.OPEN) return;
+      const msg = { type, payload: payload || {} };
+      try {
+        explorerSocket.send(JSON.stringify(msg));
+      } catch (err) {
+        console.warn('[ExplorerWS] Failed to send message', err);
+      }
+    };
+  } catch (err) {
+    console.warn('[ExplorerWS] Failed to open explorer WebSocket:', err);
+  }
+}
+
 // === CM6 Code Disabled - Using NiceGUI iframe ===
 // All CM6 initialization, themes, languages, and editor setup moved to NiceGUI
 /*
@@ -2332,6 +2384,13 @@ async function main() {
   await initExplorerUI().catch(e => {
     console.error('Failed to initialize explorer UI:', e);
   });
+
+  // Connect Socket.IO-based explorer UI bus (v2)
+  try {
+    connectExplorerSocket();
+  } catch (e) {
+    console.warn('Failed to connect explorer Socket.IO bus:', e);
+  }
 
   branchMenuHandle = initBranchMenu();
   agentDrawerHandle = initAgentDrawer();
