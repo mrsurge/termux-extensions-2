@@ -565,6 +565,48 @@ async def editor_page():
     <style>
       html, body, #q-app, .q-page-container, .q-page, .nicegui-content { margin:0 !important; padding:0 !important; height:100%; }
       body { overflow: hidden; }
+
+      /* JetBrains Mono – editor-only mono font (served from /static) */
+      @font-face {
+        font-family: "EditorMono";
+        src: url("/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2") format("woff2");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "EditorMono";
+        src: url("/static/fonts/jetbrains/webfonts/JetBrainsMono-Bold.woff2") format("woff2");
+        font-weight: 700;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "EditorMono";
+        src: url("/static/fonts/jetbrains/webfonts/JetBrainsMono-Italic.woff2") format("woff2");
+        font-weight: 400;
+        font-style: italic;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "EditorMono";
+        src: url("/static/fonts/jetbrains/webfonts/JetBrainsMono-BoldItalic.woff2") format("woff2");
+        font-weight: 700;
+        font-style: italic;
+        font-display: swap;
+      }
+
+      /* Force CodeMirror + gutters to use the vendored mono, and disable faux bold */
+      .cm-editor,
+      .cm-content,
+      .cm-gutters,
+      .cm-tooltip,
+      .cm-tooltip * {
+        font-family: "EditorMono", "JetBrains Mono", monospace;
+        font-synthesis: none;
+        font-synthesis-weight: none;
+        font-synthesis-style: none;
+      }
     </style>
     ''')
     
@@ -1182,17 +1224,24 @@ async def toggle_edit_tracking(data: dict = Body(...)):
 @editor_router.post('/jump_to_line')
 async def jump_to_line(data: dict = Body(...)):
     """Jump to a line in the currently loaded file. Does NOT load new files."""
-    target_line = data.get('line', 1)
     editor = get_active_editor()
-    if not editor: 
+    if not editor:
         return {"ok": False, "error": "Editor not ready"}
-    
+
+    try:
+        target_line = int(data.get('line', 1))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "Invalid line number"}
+
+    focus_flag = data.get('focus')
+    should_focus = True if focus_flag is None else bool(focus_flag)
+
     print(f"[JUMP_TO_LINE] Scrolling to line {target_line}", file=sys.stderr)
-    
+
     # Use the vendored CodeMirror jump_to_line method
-    editor.jump_to_line(target_line)
-    
-    return {"ok": True, "line": target_line}
+    editor.jump_to_line(target_line, focus=should_focus)
+
+    return {"ok": True, "line": target_line, "focus": should_focus}
 
 @editor_router.post('/search/open')
 async def editor_search_open(data: dict = Body(...)):

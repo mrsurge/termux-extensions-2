@@ -430,16 +430,17 @@ class CodeMirror(ValueElement, DisableableElement,
     # Used by: Explorer search feature, Go To Line menu
     # Note: Calls vendored JavaScript jumpToLine() method via run_method()
     # ============================================================================
-    def jump_to_line(self, line: int) -> None:
+    def jump_to_line(self, line: int, *, focus: bool = True) -> None:
         """Jump to a specific line in the editor.
         
         Args:
             line: The line number to jump to (1-based indexing)
+            focus: Whether to focus the editor after scrolling (default: True)
             
         Example:
-            editor.jump_to_line(42)  # Jumps to line 42
+            editor.jump_to_line(42, focus=False)  # Scroll without triggering focus
         """
-        self.run_method('jumpToLine', line)
+        self.run_method('jumpToLine', {"line": line, "focus": focus})
     # ============================================================================
 
     # ============================================================================

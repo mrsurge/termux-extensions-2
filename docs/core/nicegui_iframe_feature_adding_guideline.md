@@ -553,27 +553,65 @@ If vendored:
 - ✅ **Do** use `run_method()` for Python → JavaScript calls
 - ✅ **Do** document custom methods with date/team/purpose
 
-**Example:**
+**Example (jump-to-line, focus-aware):**
 ```python
 # In codemirror.py
-def jump_to_line(self, line: int) -> None:
-    """Jump to a specific line in the editor."""
-    self.run_method('jumpToLine', line)
+def jump_to_line(self, line: int, *, focus: bool = True) -> None:
+    """Jump to a specific line in the editor.
+    
+    Args:
+        line: 1-based line number
+        focus: Whether to focus the editor after scrolling
+    """
+    self.run_method('jumpToLine', {"line": line, "focus": focus})
 ```
 
 ```javascript
 // In codemirror.js - methods section
-jumpToLine(lineNumber) {
+jumpToLine(payload) {
+  if (!this.editor) {
+    console.warn('[CodeMirror] jumpToLine: editor not ready');
+    return;
+  }
+
+  let shouldFocus = true;
+  let input = payload;
+  if (payload && typeof payload === 'object') {
+    input = payload.line;
+    if (Object.prototype.hasOwnProperty.call(payload, 'focus')) {
+      shouldFocus = !!payload.focus;
+    }
+  }
+
+  const line = parseInt(input, 10);
+  if (isNaN(line) || line < 1) {
+    console.warn('[CodeMirror] jumpToLine: invalid line number', input);
+    return;
+  }
+
   const doc = this.editor.state.doc;
-  const pos = doc.line(lineNumber).from;
+  const maxLine = doc.lines;
+  const targetLine = Math.max(1, Math.min(line, maxLine));
+  const pos = doc.line(targetLine).from;
+
   this.editor.dispatch({
     selection: { anchor: pos },
-    scrollIntoView: true
+    scrollIntoView: true,
   });
+
+  if (shouldFocus) {
+    this.editor.focus();
+  }
 }
 ```
 
 **Why:** Vendored components have their own API surface. Direct DOM access bypasses the vendor's architecture and breaks reliability.
+
+> **Pattern to copy for new features:**  
+> For any feature X that needs to “do something in the iframe” (e.g., jump, toggle, highlight):
+> 1. Add a `run_method` wrapper in the Python vendor (`.py`) with a clear signature and docstring.
+> 2. Implement the corresponding method in the JS vendor (`.js`) and accept a structured payload (object) so you can evolve it (e.g., `{ line, focus }`).
+> 3. Keep all low-level DOM/editor logic inside the JS vendor; never reach into iframe DOM from the app backend directly.
 
 #### **4. Verify Backend Response Contracts** 📋
 

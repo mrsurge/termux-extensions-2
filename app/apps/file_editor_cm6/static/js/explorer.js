@@ -1888,7 +1888,7 @@ function openFileRel(rel, projectRoot) {
   }
 }
 
-async function openFileAndMaybeJump(rel, lineNumber = null) {
+async function openFileAndMaybeJump(rel, lineNumber = null, jumpOptions = {}) {
   if (!window.appOpenFileRel) {
     toast('File opener not available');
     return;
@@ -1904,7 +1904,7 @@ async function openFileAndMaybeJump(rel, lineNumber = null) {
 
     if (typeof lineNumber === 'number' && window.jumpToCurrentFileLine) {
       await new Promise((resolve) => setTimeout(resolve, 120));
-      await window.jumpToCurrentFileLine(lineNumber);
+      await window.jumpToCurrentFileLine(lineNumber, jumpOptions);
     }
   } catch (err) {
     toast('Failed to open file: ' + (err?.message || 'unknown error'));
@@ -2634,7 +2634,7 @@ function renderChangesList(container, data, wasOriginallyEmpty, query) {
           console.warn('Failed to auto-enable inline diffs:', err);
         }
       }
-      await openFileAndMaybeJump(change.rel, firstDiffLine(change));
+      await openFileAndMaybeJump(change.rel, firstDiffLine(change), { focus: false });
     };
 
     const header = document.createElement('div');
@@ -2985,7 +2985,7 @@ function renderReviewResults(container, data) {
         if (typeof window.__cm6EnsureInlineDiffs === "function") {
             try { await window.__cm6EnsureInlineDiffs(true); } catch (e) {}
         }
-        await openFileAndMaybeJump(entry.rel, line || firstDiffLine(entry));
+        await openFileAndMaybeJump(entry.rel, line || firstDiffLine(entry), { focus: false });
     };
     
     const header = document.createElement("div");
@@ -3013,7 +3013,7 @@ function renderReviewResults(container, data) {
         if (typeof window.__cm6EnsureInlineDiffs === "function") {
             try { await window.__cm6EnsureInlineDiffs(true); } catch(e){}
         }
-        await openFileAndMaybeJump(entry.rel, firstDiffLine(entry));
+        await openFileAndMaybeJump(entry.rel, firstDiffLine(entry), { focus: false });
     };
     header.appendChild(title);
     

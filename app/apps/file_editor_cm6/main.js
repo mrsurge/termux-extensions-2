@@ -1833,7 +1833,7 @@ async function pickSaveTarget() {
 }
 
 // Helper: Jump to line in current file
-async function jumpToCurrentFileLine(line) {
+async function jumpToCurrentFileLine(line, options = {}) {
   const path = window.currentPath;
   if (!path) {
     host.toast('No file currently open');
@@ -1841,7 +1841,16 @@ async function jumpToCurrentFileLine(line) {
   }
   
   try {
-    await apiPost('editor/jump_to_line', { line: parseInt(line, 10) });
+    const targetLine = parseInt(line, 10);
+    if (!Number.isFinite(targetLine) || targetLine < 1) {
+      host.toast('Invalid line number');
+      return;
+    }
+    const payload = { line: targetLine };
+    if (options && Object.prototype.hasOwnProperty.call(options, 'focus')) {
+      payload.focus = Boolean(options.focus);
+    }
+    await apiPost('editor/jump_to_line', payload);
   } catch (e) {
     host.toast('Failed to jump: ' + (e?.message || 'unknown error'));
   }

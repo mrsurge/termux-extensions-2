@@ -974,15 +974,24 @@ export default {
     // Used by: Explorer search feature, Go To Line menu
     // Note: Uses proper CM6 API via editor.dispatch() for reliable scrolling
     // ============================================================================
-    jumpToLine(lineNumber) {
+    jumpToLine(payload) {
       if (!this.editor) {
         console.warn('[CodeMirror] jumpToLine: editor not ready');
         return;
       }
-      
-      const line = parseInt(lineNumber, 10);
+
+      let shouldFocus = true;
+      let input = payload;
+      if (payload && typeof payload === 'object') {
+        input = payload.line;
+        if (Object.prototype.hasOwnProperty.call(payload, 'focus')) {
+          shouldFocus = !!payload.focus;
+        }
+      }
+
+      const line = parseInt(input, 10);
       if (isNaN(line) || line < 1) {
-        console.warn('[CodeMirror] jumpToLine: invalid line number', lineNumber);
+        console.warn('[CodeMirror] jumpToLine: invalid line number', input);
         return;
       }
       
@@ -996,9 +1005,12 @@ export default {
           selection: { anchor: pos },
           scrollIntoView: true
         });
-        this.editor.focus();
-        
-        console.log('[CodeMirror] jumpToLine: jumped to line', targetLine);
+
+        if (shouldFocus) {
+          this.editor.focus();
+        }
+
+        console.log('[CodeMirror] jumpToLine: jumped to line', targetLine, 'focus=', shouldFocus);
       } catch (err) {
         console.error('[CodeMirror] jumpToLine failed:', err);
       }

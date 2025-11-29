@@ -32,6 +32,7 @@ This document provides a comprehensive technical overview of Code CM6's internal
 13. [Session Cache](#13-session-cache)
 14. [IPC Protocol](#14-ipc-protocol)
 15. [Performance Optimizations](#15-performance-optimizations)
+16. [Jump-To-Line Pipeline](#16-jump-to-line-pipeline)
 
 ---
 
@@ -1955,6 +1956,150 @@ await websocket.send_json({
     'events': [{'path': p, ...} for p in changed_paths]
 })
 ```
+
+---
+
+## 16. Jump-To-Line Pipeline
+
+The jump-to-line mechanism is used by multiple features:
+
+- Explorer search overlay:
+  - **By Contents** (content search)
+  - **By Changes** (git diffs)
+  - **Review Edits** (draft diff review)
+- Editor menu:
+  - **Go To Line…**
+
+The pipeline is structured to respect the three-layer architecture (app backend → host → NiceGUI iframe) and to give callers explicit control over whether the editor should grab focus (important for mobile keyboard behavior).
+
+### 16.1 Host-Side Entry Point (`jumpToCurrentFileLine`)
+
+- **File:** `app/apps/file_editor_cm6/main.js`
+- **Function:** `jumpToCurrentFileLine(line, options)`
+
+Responsibilities:
+
+- Validate:
+  - Ensure `window.currentPath` is set (a file is open).
+  - Parse and validate the target `line` (must be ≥ 1).
+- Build payload:
+  - `{ line: <int>, focus?: <bool> }`
+- Call:
+  - `POST /api/app/file_editor_cm6/editor/jump_to_line`
+
+Focus control:
+
+- `options.focus` is optional; if provided, it is forwarded as `focus` in the payload.
+- If omitted, the backend treats `focus` as `True` (backwards compatible).
+
+Usage patterns:
+
+- Editor menu “Go To Line…” calls `jumpToCurrentFileLine(line)` with no options:
+  - Expected to **focus** the editor and show the virtual keyboard.
+- Search/Review actions use `jumpToCurrentFileLine(line, { focus: false })` via `openFileAndMaybeJump`:
+  - Expected to **scroll only** without forcing focus.
+
+### 16.2 Explorer Integration (`openFileAndMaybeJump`)
+
+- **File:** `app/apps/file_editor_cm6/static/js/explorer.js`
+- **Function:** `openFileAndMaybeJump(rel, lineNumber, jumpOptions)`
+
+Responsibilities:
+
+1. Open the file using the unified project-aware path:
+   - `window.appOpenFileRel(rel, currentProjectPath)`
+2. On mobile, close the drawer after opening:
+   - `closeDrawerIfMobile()`
+3. Expand the explorer tree to reveal the file:
+   - `expandDirectory(treeElement, dirPath)`
+4. If a target `lineNumber` is provided:
+   - Wait a short delay (to allow the iframe/editor to render).
+   - Call `window.jumpToCurrentFileLine(lineNumber, jumpOptions)`.
+
+Key call sites:
+
+- Search by Changes:
+  - `openFileAndMaybeJump(change.rel, firstDiffLine(change), { focus: false })`
+- Review Edits:
+  - Group click and file title click both use `{ focus: false }`.
+
+### 16.3 NiceGUI Iframe Backend (`/editor/jump_to_line`)
+
+- **File:** `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+- **Endpoint:** `POST /editor/jump_to_line`
+
+Responsibilities:
+
+- Resolve the active editor instance.
+- Validate `line` (coerce to `int`, reject invalid values).
+- Interpret `focus`:
+  - `focus is None` → `should_focus = True`.
+  - Otherwise, `should_focus = bool(focus)`.
+- Call the vendored CodeMirror wrapper:
+
+```python
+editor.jump_to_line(target_line, focus=should_focus)
+```
+
+Return payload (for debugging / tooling):
+
+- `{ "ok": True, "line": <int>, "focus": <bool> }`
+
+### 16.4 Vendored CodeMirror Wrapper (Python)
+
+- **File:** `app/static/vendor/nicegui/elements/codemirror/codemirror.py`
+- **Method:** `CodeMirrorEditor.jump_to_line`
+
+Responsibilities:
+
+- Provide a stable Python API over the vendored JS method.
+- Bridge `line` and `focus` arguments into a JS payload:
+
+```python
+def jump_to_line(self, line: int, *, focus: bool = True) -> None:
+    self.run_method('jumpToLine', {"line": line, "focus": focus})
+```
+
+### 16.5 Vendored CodeMirror Implementation (JS)
+
+- **File:** `app/static/vendor/nicegui/elements/codemirror/codemirror.js`
+- **Method:** `jumpToLine(payload)`
+
+Responsibilities:
+
+- Accept either:
+  - A raw line number, or
+  - An object `{ line, focus }`.
+- Compute the target position:
+  - Clamp line to `[1, doc.lines]`.
+  - Resolve `doc.line(targetLine).from`.
+- Dispatch a CM6 update:
+
+```js
+this.editor.dispatch({
+  selection: { anchor: pos },
+  scrollIntoView: true
+});
+```
+
+- Decide focus:
+  - Default `shouldFocus = true`.
+  - If `payload.focus` is present, use that boolean.
+  - Only call `this.editor.focus()` when `shouldFocus` is true.
+
+### 16.6 Design Notes & Guidelines
+
+- **Respect the state hierarchy:**
+  - The host (main.js) remains responsible for current file context and path tracking.
+  - The NiceGUI iframe backend only scrolls within the currently loaded document.
+- **Focus is an explicit concern:**
+  - Features must decide whether they intend to grab focus and show the keyboard.
+  - The focus flag is the single point of truth; avoid ad-hoc `focus()` calls.
+- **Extending to new features:**
+  - New “jump-like” features (e.g., “Jump to Definition”) should:
+    - Use `openFileAndMaybeJump` if they need to switch files.
+    - Call `jumpToCurrentFileLine(line, { focus: true/false })` based on UX needs.
+    - Avoid direct DOM manipulation in the iframe; always go through `/editor/jump_to_line`.
 
 ---
 
