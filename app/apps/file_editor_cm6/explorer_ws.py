@@ -315,8 +315,11 @@ class ExplorerDispatcher:
 
     async def handle_git_setDiffBase(self, payload: dict, msg_id: str):
         ref = payload.get("ref", "HEAD")
-        get_commit_info(self.project_root, ref) # Validate
+        # Validate and persist via HistoryStore (SSOT)
+        get_commit_info(self.project_root, ref)  # Validate
         _history_store.set_diff_base(str(self.project_root), ref)
+        # Inform all clients that the diff base ref changed; full payload
+        # (including commit metadata) is fetched on demand via /git/diff_base
         await self.broadcast("git:diffBaseSet", {"ref": ref})
         # Changing base affects status calculation often
         mark_git_cache_dirty(self.project_root)

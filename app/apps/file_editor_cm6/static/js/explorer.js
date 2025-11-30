@@ -36,6 +36,24 @@ let gitDiffBase = { ref: 'HEAD', mode: 'none', commit: null };
 let searchBaseBtn = null;
 let searchBaseDropdown = null;
 
+function formatDiffBaseLabel(info, withPrefix = true) {
+  if (!info || info.mode === 'none') {
+    return withPrefix ? 'Status: (no git)' : 'No Git';
+  }
+  const commit = info.commit || null;
+  const short = (commit && commit.short) || info.ref || 'HEAD';
+  const summary =
+    commit && commit.subject ? truncateText(commit.subject, 36) : '';
+  const prefix = withPrefix ? 'Status: ' : '';
+  return summary ? `${prefix}${short} · ${summary}` : `${prefix}${short}`;
+}
+
+function truncateText(text, limit = 40) {
+  if (!text) return '';
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit - 1)}…`;
+}
+
 // Search by Changes – raw data cache for client-side filtering
 let lastChangesData = null;
 let lastChangesContainer = null;
@@ -269,6 +287,16 @@ function handleExplorerEvent(type, payload) {
       renderGitSummary();
       break;
     }
+    case 'git:diffBaseSet': {
+      if (payload && payload.ref) {
+        gitDiffBase.ref = payload.ref;
+        // Mode/commit will be refreshed on next /git/diff_base or search:run(changes)
+        if (searchOverlayVisible) {
+          renderSearchOverlay();
+        }
+      }
+      break;
+    }
     case 'search:setResults': {
       searchResults = payload || null;
       searchLoading = false;
@@ -316,6 +344,21 @@ export async function initExplorerUI() {
   projectLabelEl = document.getElementById('fe-project-label');
   gitSummaryEl = document.getElementById('fe-git-summary');
   const searchBtn = document.getElementById('fe-search-btn');
+
+  // Hydrate diff base from global editor state (HistoryStore-backed)
+  try {
+    const state = window.__cm6EditorState || null;
+    const base = state && state.gitDiffBase;
+    if (base) {
+      gitDiffBase = {
+        ref: base.ref || 'HEAD',
+        mode: base.mode || 'none',
+        commit: base.commit || null,
+      };
+    }
+  } catch {
+    // Non-fatal; overlay can still hydrate from search results.
+  }
 
   function toggleDrawer(open) {
     if (!root) return;
@@ -832,6 +875,30 @@ function renderSearchOverlay() {
     const changesToolbar = document.createElement('div');
     changesToolbar.className = 'fe-search-changes-toolbar';
 
+    // Diff base selector (mirrors Git footer, backed by HistoryStore)
+    const headLabel = document.createElement('span');
+    headLabel.className = 'fe-search-changes-label';
+    headLabel.textContent = 'Diff vs';
+    changesToolbar.appendChild(headLabel);
+
+    const headBtn = document.createElement('button');
+    headBtn.type = 'button';
+    headBtn.id = 'fe-search-base-btn';
+    headBtn.className = 'fe-search-head-btn';
+    headBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, false)} ▾`;
+    headBtn.disabled = gitDiffBase.mode === 'none';
+    headBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (!searchBaseDropdown) return;
+      // For now, this is a simple cycle between HEAD and current ref via WS.
+      const nextRef = gitDiffBase.ref === 'HEAD' ? gitDiffBase.ref : 'HEAD';
+      if (typeof window.__explorerBusSend === 'function') {
+        window.__explorerBusSend('git:setDiffBase', { ref: nextRef });
+      }
+    });
+    changesToolbar.appendChild(headBtn);
+    searchBaseBtn = headBtn;
+
     // Filter Controls
     const filterContainer = document.createElement('div');
     filterContainer.className = 'fe-changes-filter-container';
@@ -938,6 +1005,12 @@ function renderSearchOverlay() {
   const changesToolbar = overlay.querySelector('.fe-search-changes-toolbar');
   if (changesToolbar) {
     changesToolbar.style.display = searchMode === 'changes' ? 'flex' : 'none';
+  }
+
+  const headBtn = overlay.querySelector('#fe-search-base-btn');
+  if (headBtn) {
+    headBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, false)} ▾`;
+    headBtn.disabled = gitDiffBase.mode === 'none';
   }
 
   if (!resultsContainer) return;
