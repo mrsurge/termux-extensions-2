@@ -814,3 +814,44 @@ Captured after the first functional WS explorer v2, to guide the remaining passe
    - The goal is a small, predictable protocol surface that’s easy to reason about and robust under reconnects and future feature additions.
 
 — _FugueTask_
+---
+
+### Footer Functionality Restoration – Plan Summary
+
+**Timestamp:** 2025-12-01T00:15:00Z  
+**Author:** _VectorArc_
+
+Restored the drawer footer functionality in explorer.js v2 to match the old explorer's capabilities:
+
+1. **Status Bar** – Now displays full git summary: `<branch> [↑N] [↓N] · staged N · changes N · untracked N`
+2. **Action Buttons Row 1** – Stage All, Unstage All, Commit…, Push, Pull (all wired to WS protocol)
+3. **Action Buttons Row 2** – Reset (hard)… (left-aligned), Status Selector (right-aligned, already implemented)
+
+All intents sent via `window.__explorerBusSend()` to existing backend handlers in `explorer_ws.py`. No backend changes required.
+
+---
+
+### Footer Implementation – Review & Verification
+
+**Timestamp:** 2025-12-01T00:20:00Z  
+**Author:** _VectorArc_
+
+**Code Review Complete** – Implementation verified as correct:
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| `renderGitSummary()` expanded | ✅ | explorer.js:236-255 |
+| `gitButtons` refs added | ✅ | explorer.js:17, 480-488 |
+| `setGitControlsEnabled()` added | ✅ | explorer.js:257-277 |
+| Button click handlers | ✅ | explorer.js:501-572 |
+| `git:status` enables controls | ✅ | explorer.js:406-410 |
+| Two-row footer layout | ✅ | template.html:1297-1314 |
+| Non-git project shows Init | ✅ | explorer.js:67-97 |
+
+**Protocol messages verified:**
+- Outbound: `git:stageAll`, `git:unstageAll`, `git:commit`, `git:push`, `git:pull`, `git:reset`, `git:init`
+- Inbound: `git:status` triggers control state update and summary render
+
+**No issues found.** Implementation matches plan specification.
+
+— _VectorArc_

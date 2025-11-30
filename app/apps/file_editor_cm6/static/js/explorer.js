@@ -15,6 +15,7 @@ let projectLabelEl = null;
 let gitSummaryEl = null;
 let gitBaseBtn = null;
 let gitBaseDropdown = null;
+let gitButtons = null;
 
 const uiState = {
   projectPath: null,
@@ -82,6 +83,20 @@ async function initDiffBaseFromBackend() {
       commit: data.commit || null,
     };
     updateDiffBaseButtons();
+    // If we have a project and diff base says "no git", show only Init.
+    try {
+      const state = window.__cm6EditorState || null;
+      const projectExists =
+        !!(state && state.activeProject && state.activeProjectExists);
+      if (!projectExists) {
+        setGitControlsEnabled(false, false);
+      } else if (gitDiffBase.mode === 'none') {
+        // Non-git project: only "Initialize Git" should be visible.
+        setGitControlsEnabled(true, true);
+      }
+    } catch {
+      // Non-fatal; controls will be updated on git:status if/when it arrives.
+    }
   } catch (err) {
     console.warn('Failed to initialize diff base from backend:', err);
   }
@@ -269,12 +284,43 @@ function renderGitSummary() {
     return;
   }
   const branch = s.branch || '(no branch)';
+  const detached = !!s.detached;
   const ahead = s.ahead || 0;
   const behind = s.behind || 0;
-  const parts = [`${branch}`];
-  if (ahead) parts.push(`↑${ahead}`);
-  if (behind) parts.push(`↓${behind}`);
-  gitSummaryEl.textContent = parts.join(' ');
+  const stagedCount = Array.isArray(s.staged) ? s.staged.length : 0;
+  const unstagedCount = Array.isArray(s.unstaged) ? s.unstaged.length : 0;
+  const untrackedCount = Array.isArray(s.untracked)
+    ? s.untracked.length
+    : 0;
+
+  const bits = [];
+  bits.push(detached ? 'DETACHED HEAD' : branch);
+  if (ahead) bits.push(`↑${ahead}`);
+  if (behind) bits.push(`↓${behind}`);
+
+  const counts = `staged ${stagedCount} · changes ${unstagedCount} · untracked ${untrackedCount}`;
+  gitSummaryEl.textContent = `${bits.join(' ')} · ${counts}`;
+}
+
+function setGitControlsEnabled(enabled, showInit = false) {
+  if (!gitButtons) return;
+  Object.entries(gitButtons).forEach(([key, btn]) => {
+    if (!btn) return;
+    if (key === 'init') {
+      // Init is only visible when we are in a non-git project.
+      btn.style.display = showInit ? 'inline-block' : 'none';
+      btn.disabled = !enabled;
+    } else if (key === 'reset') {
+      // Reset is only meaningful when regular git controls are active.
+      const visible = enabled && !showInit;
+      btn.style.display = visible ? 'inline-block' : 'none';
+      btn.disabled = !visible;
+    } else {
+      // Regular git controls (stage/unstage/commit/push/pull)
+      btn.style.display = showInit ? 'none' : 'inline-block';
+      btn.disabled = !enabled || showInit;
+    }
+  });
 }
 
 function renderExplorerTree() {
@@ -444,6 +490,8 @@ function handleExplorerEvent(type, payload) {
     case 'git:status': {
       uiState.gitStatus = payload || null;
       renderGitSummary();
+      // Any git status means we are in a real git repo: enable controls and hide Init.
+      setGitControlsEnabled(true, false);
       break;
     }
     case 'git:diffBaseSet': {
@@ -507,6 +555,16 @@ export async function initExplorerUI() {
   gitBaseBtn = document.getElementById('fe-git-base-btn');
   gitBaseDropdown = document.getElementById('fe-git-base-dd');
 
+  gitButtons = {
+    init: document.getElementById('fe-git-init'),
+    stage: document.getElementById('fe-git-stage'),
+    unstage: document.getElementById('fe-git-unstage'),
+    commit: document.getElementById('fe-git-commit'),
+    push: document.getElementById('fe-git-push'),
+    pull: document.getElementById('fe-git-pull'),
+    reset: document.getElementById('fe-git-reset'),
+  };
+
   // Hydrate diff base from global editor state (HistoryStore-backed)
   try {
     const state = window.__cm6EditorState || null;
@@ -517,6 +575,15 @@ export async function initExplorerUI() {
         mode: base.mode || 'none',
         commit: base.commit || null,
       };
+      const projectExists =
+        !!(state && state.activeProject && state.activeProjectExists);
+      if (!projectExists) {
+        setGitControlsEnabled(false, false);
+      } else if (gitDiffBase.mode === 'none') {
+        setGitControlsEnabled(true, true);
+      } else {
+        setGitControlsEnabled(false, false);
+      }
     }
   } catch {
     // Non-fatal; overlay can still hydrate from search results.
@@ -551,6 +618,117 @@ export async function initExplorerUI() {
     gitBaseBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       toggleDiffBaseMenu(gitBaseBtn, gitBaseDropdown);
+    });
+  }
+
+  // Close diff-base dropdowns when clicking outside either button/dropdown.
+  document.addEventListener(
+    'click',
+    (ev) => {
+      const inBaseButton =
+        ev.target.closest('#fe-git-base-btn') ||
+        ev.target.closest('#fe-search-base-btn');
+      const inBaseDropdown =
+        ev.target.closest('#fe-git-base-dd') ||
+        ev.target.closest('#fe-search-base-dd');
+      if (!inBaseButton && !inBaseDropdown) {
+        closeDiffBaseMenus();
+      }
+    },
+    false,
+  );
+
+  if (gitButtons) {
+    const safeSend = (type, payload) => {
+      if (typeof window.__explorerBusSend !== 'function') {
+        toast('Explorer connection unavailable.');
+        return false;
+      }
+      try {
+        window.__explorerBusSend(type, payload || {});
+      } catch (err) {
+        toast(err?.message || 'Explorer command failed.');
+        return false;
+      }
+      return true;
+    };
+
+    gitButtons.stage?.addEventListener('click', () => {
+      safeSend('git:stageAll', {});
+    });
+
+    gitButtons.unstage?.addEventListener('click', () => {
+      safeSend('git:unstageAll', {});
+    });
+
+    gitButtons.commit?.addEventListener('click', () => {
+      const status = uiState.gitStatus;
+      const stagedCount = Array.isArray(status?.staged)
+        ? status.staged.length
+        : 0;
+      if (!stagedCount) {
+        toast('No staged changes to commit.');
+        return;
+      }
+      const message = window.prompt('Commit message');
+      if (!message) return;
+      const trimmed = message.trim();
+      if (!trimmed) {
+        toast('Commit message cannot be empty.');
+        return;
+      }
+      safeSend('git:commit', { message: trimmed });
+    });
+
+    gitButtons.push?.addEventListener('click', () => {
+      if (
+        !window.confirm(
+          'Are you sure you want to push changes to remote?',
+        )
+      ) {
+        return;
+      }
+      safeSend('git:push', {});
+    });
+
+    gitButtons.pull?.addEventListener('click', () => {
+      if (
+        !window.confirm(
+          'Are you sure you want to pull changes from remote?',
+        )
+      ) {
+        return;
+      }
+      safeSend('git:pull', {});
+    });
+
+    gitButtons.reset?.addEventListener('click', () => {
+      if (
+        !window.confirm(
+          '⚠️ Hard reset will discard ALL uncommitted changes!\n\nReset to HEAD?',
+        )
+      ) {
+        return;
+      }
+      if (!safeSend('git:reset', { commit: 'HEAD' })) return;
+      if (typeof window.__cm6ReloadCurrentFile === 'function') {
+        try {
+          window.__cm6ReloadCurrentFile();
+        } catch (err) {
+          console.warn('Failed to reload current file after reset:', err);
+        }
+      }
+    });
+
+    gitButtons.init?.addEventListener('click', () => {
+      if (
+        !window.confirm(
+          'Initialize a Git repository in this project?',
+        )
+      ) {
+        return;
+      }
+      safeSend('git:init', {});
     });
   }
 
