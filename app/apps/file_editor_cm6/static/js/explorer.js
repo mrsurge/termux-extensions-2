@@ -13,6 +13,8 @@
 let treeElement = null;
 let projectLabelEl = null;
 let gitSummaryEl = null;
+let gitBaseBtn = null;
+let gitBaseDropdown = null;
 
 const uiState = {
   projectPath: null,
@@ -52,6 +54,160 @@ function truncateText(text, limit = 40) {
   if (!text) return '';
   if (text.length <= limit) return text;
   return `${text.slice(0, limit - 1)}…`;
+}
+
+function updateDiffBaseButtons() {
+  if (gitBaseBtn) {
+    gitBaseBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, true)} ▾`;
+    gitBaseBtn.disabled = gitDiffBase.mode === 'none';
+  }
+  if (searchBaseBtn) {
+    searchBaseBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, false)} ▾`;
+    searchBaseBtn.disabled = gitDiffBase.mode === 'none';
+  }
+}
+
+async function initDiffBaseFromBackend() {
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/git/diff_base', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const json = await resp.json().catch(() => null);
+    const data = json && json.data;
+    if (!data) return;
+    gitDiffBase = {
+      ref: data.ref || 'HEAD',
+      mode: data.mode || 'none',
+      commit: data.commit || null,
+    };
+    updateDiffBaseButtons();
+  } catch (err) {
+    console.warn('Failed to initialize diff base from backend:', err);
+  }
+}
+
+function closeDiffBaseMenus(except) {
+  const dropdowns = document.querySelectorAll(
+    '#fe-search-base-dd, #fe-git-base-dd',
+  );
+  dropdowns.forEach((dd) => {
+    if (!dd) return;
+    if (dd !== except) {
+      dd.classList.remove('show');
+    }
+  });
+}
+
+async function changeDiffBase(ref) {
+  if (!ref || typeof window.__explorerBusSend !== 'function') return;
+  try {
+    // Persist diff base via WS (HistoryStore is the SSOT), then refresh changes.
+    window.__explorerBusSend('git:setDiffBase', { ref });
+    if (searchMode === 'changes') {
+      fetchChangesResults(true);
+    }
+    if (typeof window.__cm6ReloadCurrentFile === 'function') {
+      window.__cm6ReloadCurrentFile();
+    }
+  } catch (err) {
+    toast(err?.message || 'Failed to update diff base');
+  }
+}
+
+function renderDiffBaseDropdown(dropdown, commits) {
+  dropdown.innerHTML = '';
+  const mode = gitDiffBase.mode;
+  if (mode === 'none') {
+    const empty = document.createElement('div');
+    empty.className = 'fe-dd-item';
+    empty.style.opacity = '0.65';
+    empty.textContent = 'Not a git repository';
+    dropdown.appendChild(empty);
+    return;
+  }
+
+  const options = [];
+  options.push({
+    ref: 'HEAD',
+    short: 'HEAD',
+    summary: 'Working tree',
+  });
+  (commits || []).forEach((c) => {
+    options.push({
+      ref: c.hash,
+      short: c.short_hash,
+      summary: c.summary,
+    });
+  });
+
+  const currentHash = gitDiffBase.commit && gitDiffBase.commit.hash;
+  const currentRef = gitDiffBase.ref || 'HEAD';
+  const hasCurrent = options.some(
+    (opt) => opt.ref === currentHash || opt.ref === currentRef,
+  );
+  if (!hasCurrent && gitDiffBase.commit) {
+    options.unshift({
+      ref: gitDiffBase.commit.hash,
+      short: gitDiffBase.commit.short,
+      summary: gitDiffBase.commit.subject,
+    });
+  }
+
+  options.forEach((opt) => {
+    const item = document.createElement('div');
+    item.className = 'fe-dd-item';
+    const isCurrent =
+      (opt.ref === 'HEAD' && currentRef === 'HEAD') ||
+      (opt.ref !== 'HEAD' &&
+        (opt.ref === currentRef || opt.ref === currentHash));
+    if (isCurrent) {
+      item.classList.add('fe-menu-item-checked');
+    }
+    item.textContent = `${opt.short || opt.ref} · ${truncateText(
+      opt.summary || '',
+      40,
+    )}`;
+    item.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      closeDiffBaseMenus();
+      if (!isCurrent) {
+        changeDiffBase(opt.ref);
+      }
+    });
+    dropdown.appendChild(item);
+  });
+}
+
+async function toggleDiffBaseMenu(button, dropdown) {
+  if (!button || !dropdown || button.disabled) return;
+  const isOpen = dropdown.classList.contains('show');
+  closeDiffBaseMenus(dropdown);
+  if (isOpen) {
+    dropdown.classList.remove('show');
+    return;
+  }
+  dropdown.innerHTML =
+    '<div class=\"fe-dd-item\" style=\"opacity:0.6\">Loading…</div>';
+  dropdown.classList.add('show');
+  if (gitDiffBase.mode === 'none') {
+    renderDiffBaseDropdown(dropdown, []);
+    return;
+  }
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/git/commits', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const json = await resp.json().catch(() => null);
+    if (!json || json.ok === false) {
+      throw new Error(json?.error || resp.statusText || 'Failed to load commits');
+    }
+    const commits = json.data || [];
+    renderDiffBaseDropdown(dropdown, commits);
+  } catch (err) {
+    dropdown.innerHTML = `<div class=\"fe-dd-item\" style=\"opacity:0.7\">${err?.message || 'Failed to load commits'}</div>`;
+  }
 }
 
 // Search by Changes – raw data cache for client-side filtering
@@ -198,6 +354,9 @@ function handleExplorerEvent(type, payload) {
     case 'project:setActive': {
       uiState.projectPath = payload.path || payload.projectPath || uiState.projectPath;
       renderProjectLabel();
+      // When the active project changes, refresh diff base from backend
+      // so both footer and overlay selectors stay in sync with HistoryStore.
+      initDiffBaseFromBackend();
       break;
     }
     case 'explorer:setList': {
@@ -290,7 +449,7 @@ function handleExplorerEvent(type, payload) {
     case 'git:diffBaseSet': {
       if (payload && payload.ref) {
         gitDiffBase.ref = payload.ref;
-        // Mode/commit will be refreshed on next /git/diff_base or search:run(changes)
+        updateDiffBaseButtons();
         if (searchOverlayVisible) {
           renderSearchOverlay();
         }
@@ -311,6 +470,7 @@ function handleExplorerEvent(type, payload) {
           mode: payload.base.mode || 'none',
           commit: payload.base.commit || null,
         };
+        updateDiffBaseButtons();
       }
       if (searchOverlayVisible) {
         renderSearchOverlay();
@@ -344,6 +504,8 @@ export async function initExplorerUI() {
   projectLabelEl = document.getElementById('fe-project-label');
   gitSummaryEl = document.getElementById('fe-git-summary');
   const searchBtn = document.getElementById('fe-search-btn');
+  gitBaseBtn = document.getElementById('fe-git-base-btn');
+  gitBaseDropdown = document.getElementById('fe-git-base-dd');
 
   // Hydrate diff base from global editor state (HistoryStore-backed)
   try {
@@ -359,6 +521,12 @@ export async function initExplorerUI() {
   } catch {
     // Non-fatal; overlay can still hydrate from search results.
   }
+
+  // Sync initial button labels with hydrated diff base; then ask backend
+  // for the authoritative diff base snapshot to handle timing issues
+  // with __cm6EditorState.
+  updateDiffBaseButtons();
+  initDiffBaseFromBackend();
 
   function toggleDrawer(open) {
     if (!root) return;
@@ -377,6 +545,13 @@ export async function initExplorerUI() {
 
   if (searchBtn) {
     searchBtn.addEventListener('click', openSearchOverlay);
+  }
+
+  if (gitBaseBtn && gitBaseDropdown) {
+    gitBaseBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      toggleDiffBaseMenu(gitBaseBtn, gitBaseDropdown);
+    });
   }
 
   // Context menu element (reused)
@@ -890,14 +1065,16 @@ function renderSearchOverlay() {
     headBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       if (!searchBaseDropdown) return;
-      // For now, this is a simple cycle between HEAD and current ref via WS.
-      const nextRef = gitDiffBase.ref === 'HEAD' ? gitDiffBase.ref : 'HEAD';
-      if (typeof window.__explorerBusSend === 'function') {
-        window.__explorerBusSend('git:setDiffBase', { ref: nextRef });
-      }
+      toggleDiffBaseMenu(headBtn, searchBaseDropdown);
     });
     changesToolbar.appendChild(headBtn);
     searchBaseBtn = headBtn;
+
+    const headDropdown = document.createElement('div');
+    headDropdown.id = 'fe-search-base-dd';
+    headDropdown.className = 'fe-dropdown';
+    changesToolbar.appendChild(headDropdown);
+    searchBaseDropdown = headDropdown;
 
     // Filter Controls
     const filterContainer = document.createElement('div');

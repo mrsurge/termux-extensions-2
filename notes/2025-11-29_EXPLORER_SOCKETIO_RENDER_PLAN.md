@@ -617,4 +617,200 @@ That’s the plan written down; next concrete move is Step 3: build `explorer_v2
 
 ---
 
-_Log timestamp: 2025-11-29T00:00:00Z (approximate – same working session as the multi-draft + recents work and initial explorer v2 wiring)._
+_Log timestamp: 2025-11-29T00:00:00Z (approximate – same working session as the multi-draft + recents work and initial explorer v2 wiring)._ 
+
+---
+
+### Log: Explorer v2 Socket/WS Refactor – Editor-Integrated Phase
+
+**Timestamp:** 2025-11-30T23:45:00Z  
+**Author:** _FugueTask (cm6/ws cartographer)_
+
+**What’s now working**
+- **Explorer v2 is live and WS-driven**
+  - `app/apps/file_editor_cm6/explorer_ws.py` exposes a project-scoped WebSocket endpoint (`/ws/explorer`) and dispatches typed messages (`explorer:list`, `git:status`, `search:run`, `review:*`, etc.).
+  - `app/apps/file_editor_cm6/main.js` connects via the framework proxy (`/ws/app/file_editor_cm6/explorer`) using `ReconnectingWebSocket`, and forwards messages into the UI bus via `window.__explorerBusDispatch(type, payload)`.
+  - `app/apps/file_editor_cm6/static/js/explorer.js` is the new explorer implementation:
+    - Owns a small `uiState` (projectPath, gitStatus, reviewEntries).
+    - Renders the tree, project label, git summary, draft decorations.
+    - Handles all explorer actions through the WS bus (`__explorerBusSend`).
+
+- **Tree + cards**
+  - Drawer chrome and tree root render from WS snapshots:
+    - `project:setActive` → project label.
+    - `explorer:setList` (cwd `"."`) → root card (`.`) + immediate children.
+    - `explorer:setList` (cwd `<dir>`) → lazy expansion for directories.
+  - File clicks call `window.appOpenFileRel(rel, projectPath)` to reuse the unified editor-opening pipeline in `main.js`.
+  - Context menu on each node (⋮) is wired to WS operations:
+    - `explorer:createFile`, `explorer:createDir`, `explorer:rename`, `explorer:delete`.
+
+- **Draft decorations**
+  - Draft state is SSOT in `HistoryStore` sidecars.
+  - `explorer_helper.list_dir()` annotates entries with `hasDraft`.
+  - `ExplorerDispatcher.broadcast_review_state()`:
+    - Emits `review:setEntries` with lightweight review entries.
+    - Emits `explorer:updateDecorations` with `{ drafts: { rel: { hasDraft: True } } }`.
+  - `explorer.js` listens to `explorer:updateDecorations` and marks `li[data-kind="file"][data-rel="…"]` with `.fe-draft` and `data-hasDraft="1"` to light up the right edge accents.
+
+- **Search overlay over WS**
+  - Overlay is rebuilt in v2 inside `explorer.js` using the existing DOM targets in `template.html` (`#fe-search-overlay`).
+  - Tabs:
+    - **By name**: `searchMode = 'name'`, sends `search:run` with `{mode:'name', query}`.
+    - **By contents**: `mode:'content'`.
+    - **By changes**: `mode:'changes'`.
+    - **Review edits**: uses `review:list` + `review:setEntries`.
+  - `ExplorerDispatcher.handle_search_run`:
+    - For `name`: `search.search_by_name`.
+    - For `content`: ripgrep/python fallback.
+    - For `changes`: `search.search_by_changes` with git hunks.
+    - Emits `search:setResults` to the requesting client.
+  - `explorer.js` implements:
+    - `renderNameResults` and `renderContentResults` (mirrors v1).
+    - `renderChangesResults` + `applyChangesFilter` with:
+      - Filter ON/OFF.
+      - Filename-only.
+      - Hunks-only.
+    - Draft-aware per-hunk click → `openFileAndMaybeJump(rel, line, {focus:false})`.
+
+- **Unified diff base (“Status / Diff vs …”)**
+  - Single in-memory `gitDiffBase` in `explorer.js`:
+    - Hydrated initially from `window.__cm6EditorState.gitDiffBase` (via `/state`).
+    - Re-synced from the backend via `GET /api/app/file_editor_cm6/git/diff_base` on:
+      - Explorer init.
+      - `project:setActive` (project change).
+    - Updated from `search:setResults` when `mode:'changes'` and `payload.base` is present.
+    - Updated from `git:diffBaseSet` after WS `git:setDiffBase` calls.
+  - Two UI surfaces share this state:
+    - Footer button: `#fe-git-base-btn` (Status selector).
+    - Search overlay button: `#fe-search-base-btn` (“Diff vs” selector).
+  - Both buttons share:
+    - Label formatting via `formatDiffBaseLabel(gitDiffBase, withPrefix)`.
+    - Dropdown implementation via:
+      - `toggleDiffBaseMenu(button, dropdown)`
+      - `renderDiffBaseDropdown(dropdown, commits)`
+      - `changeDiffBase(ref)` → WS `git:setDiffBase` → `HistoryStore.set_diff_base` → `git:diffBaseSet`.
+    - Commits loaded from `/api/app/file_editor_cm6/git/commits`.
+    - Inline diffs and “Search by changes” hunks recompute after base change (`__cm6ReloadCurrentFile` + `fetchChangesResults(true)`).
+
+- **Review edits over WS**
+  - Backend:
+    - `ExplorerDispatcher.handle_review_list` → `review:setEntries`.
+    - `handle_review_save` / `handle_review_discard` write via the normal editor save path, mark git cache dirty, and rebroadcast:
+      - `git:status`
+      - `review:setEntries`
+      - `explorer:updateDecorations`.
+  - Frontend:
+    - “Review edits” tab renders draft hunks, per-hunk `data-line`, and uses:
+      - `__cm6EnsureDraftDiffs(true)` + `__cm6EnsureInlineDiffs(true)`.
+      - `openFileAndMaybeJump(rel, line, {focus:false})`.
+    - Bulk Save/Discard:
+      - Sends `review:save` / `review:discard` with `{files:[...]}` via WS.
+      - Relies on backend broadcast to keep explorer tree and overlay in sync.
+
+- **Jump-to-line & scroll integration**
+  - All search/review clicks are now funneled through the documented jump pipeline:
+    - `explorer.js` → `openFileAndMaybeJump(rel, line, {focus:false})`.
+    - `main.js` → `apiPost('editor/jump_to_line', { line, focus })`.
+    - `editor_app.py` / `codemirror.py` / `codemirror.js` handle scroll-only jumps when `focus:false`, which avoids popping the mobile keyboard.
+  - Scroll position is tracked in the iframe via a `ViewPlugin` and sent to host as `cm6-scroll-state` messages, which are persisted in `HistoryStore.session_state` and fed back into the iframe on load.
+
+**Minor quirks / known issues**
+- **Explorer “wake-up click”**
+  - After a long idle period or Android app switch, the explorer WS sometimes needs one extra user action (tree click or search toggle) before it visually “wakes up”.
+  - This appears to be timing around WS reconnect vs. DOM-ready state; the WS reconnect logic itself is solid (ReconnectingWebSocket), but a future pass should:
+    - Log `explorerWS` connect/disconnect at higher verbosity.
+    - Consider a small “stale state” banner or automatic `explorer:refresh` on reconnect.
+
+- **Diff base UX**
+  - Footer used to show “(no git)” until the Search overlay was opened; this is now mitigated by:
+    - Early hydration from `/git/diff_base` in `initExplorerUI`.
+    - Rehydration on `project:setActive`.
+  - Still worth keeping an eye on this: if `/state` and `/git/diff_base` ever diverge, we should treat `/git/diff_base` as canonical for the explorer.
+
+**Onboarding notes for future agents**
+- **Core files**
+  - `app/apps/file_editor_cm6/main.js` – host shell; owns:
+    - WS proxy client (`connectExplorerSocket`).
+    - Editor opening (`openFile`, `appOpenFileRel`).
+    - Jump-to-line pipeline (`jumpToCurrentFileLine`).
+    - Autosave, recents, and editor state sync (`/state`, `/session_state`).
+  - `app/apps/file_editor_cm6/explorer_ws.py` – explorer WS dispatcher:
+    - `handle_explorer_*`, `handle_git_*`, `handle_search_run`, `handle_review_*`.
+    - `broadcast_git_status`, `broadcast_review_state`.
+  - `app/apps/file_editor_cm6/explorer_helper.py` – directory listings + git status + draft flags.
+  - `app/apps/file_editor_cm6/explorer/search.py` – by-name/content/changes backend logic.
+  - `app/apps/file_editor_cm6/explorer/review.py` – draft reviews and bulk save/discard.
+  - `app/apps/file_editor_cm6/static/js/explorer.js` – explorer v2 (this file).
+  - `app/apps/file_editor_cm6/template.html` – layout, DOM anchors for explorer/search/toolbar.
+  - `app/apps/file_editor_cm6/history_store.py` – SSOT for:
+    - `diff_base`, project origins, recents, session_state, session cache sidecars.
+
+- **Patterns & tools**
+  - Use the provided `bash -lc` shell via the harness for commands; prefer:
+    - `rg` for search.
+    - `sed -n 'X, Yp'` for file slices (avoid huge dumps).
+  - Always patch code with `apply_patch` rather than overwriting files.
+  - Treat `HistoryStore` as the **only** source of truth for:
+    - Active project.
+    - Diff base (`set_diff_base` / `get_diff_base`).
+    - Project origin.
+    - Session state (`update_session_state`).
+  - When in doubt about editor/iframe communication, consult:
+    - `docs/core/nicegui_iframe_feature_adding_guideline.md`
+    - `notes/2025-11-29_JUMP_TO_LINE_FOCUS_PIPELINE.md`
+    - `notes/2025-11-26_MESSAGE_BUS_ARCHITECTURE.md`.
+
+- **Guiding principles**
+  - Disk is SSOT: no in-memory tab state, no localStorage, no browser-only caches for anything that matters.
+  - Backend owns state; frontend is a thin, replaceable view (even for complex pieces like explorer).
+  - WS bus events should be small, typed envelopes:
+    - `type: "domain:verb"`, `payload: {…}`.
+    - Avoid “RPC over WS”; think state snapshots and intents.
+
+If you’re picking this up later, the shortest route to “mental compile” is:
+1. Skim this file.
+2. Read `explorer_ws.py` and `static/js/explorer.js` side by side.
+3. Cross-check the jump-to-line pipeline in `docs/apps/code_cm6/TECHNICAL.md` and `notes/2025-11-29_JUMP_TO_LINE_FOCUS_PIPELINE.md`.
+
+— _FugueTask_
+
+---
+
+### Next Focus Areas (Remaining Work) – 2025‑11‑30
+
+Captured after the first functional WS explorer v2, to guide the remaining passes:
+
+1. **Drawer footer reattachment**
+   - Restore and wire up the drawer footer behaviors that the old explorer owned:
+     - Git status / diff‑base summary (“Diff vs …”) must stay in sync with `HistoryStore.diff_base` and the search overlay selector.
+     - Footer actions (stage/unstage all, commit, reset, etc.) should all go through the WS bus (`git:*` events), not ad‑hoc REST calls.
+   - Ensure footer state hydrates eagerly (on project activation / initial `/state` + `/git/diff_base`), without requiring the search overlay to be opened first.
+
+2. **Remaining card “…” menu actions**
+   - The new context menu already covers create/rename/delete; we still need to:
+     - Audit all legacy “…” actions in the original `explorer.js` (in the main branch repo) and re‑implement them as WS intents where they still make sense.
+     - Make sure each action has:
+       - A single WS command (`explorer:*` or `git:*`).
+       - A clear backend implementation in `explorer_ws.py` (or a helper module).
+       - A state push (`explorer:setList`, `git:status`, `explorer:updateDecorations`, etc.) so the UI stays purely derived from backend state.
+
+3. **Drawer open/close and behavior quirks**
+   - Clarify and normalize when the drawer should:
+     - Open (first meaningful explorer action, search overlay activation, git activity, etc.).
+     - Close (explicit user gesture, certain navigation patterns).
+   - Tighten tree behavior around:
+     - Which parts of the tree auto‑expand when opening a file, navigating via search/review, or changing projects.
+     - Avoiding “sleepy” behavior after mobile app switches by coupling WS reconnect with a minimal `explorer:refresh` and/or a small amount of state rehydration.
+   - Document these rules in this plan and (later) in `docs/apps/code_cm6/TECHNICAL.md` so future changes are intentional.
+
+4. **Protocol and communication‑layer polish**
+   - Take a dedicated pass over the WS protocol now that more functionality is live:
+     - Normalize event names to a small, consistent vocabulary (`explorer:*`, `git:*`, `search:*`, `review:*`).
+     - Remove any redundant or legacy message types left over from the first iterations.
+     - Ensure every outbound snapshot (`explorer:setList`, `search:setResults`, `review:setEntries`, `git:status`) has a well‑defined shape that’s documented here and in the technical docs.
+   - Look for opportunities to:
+     - Reduce chattiness (batch related updates where reasonable).
+     - Centralize cross‑cutting updates (e.g., a single helper to rebroadcast git status + diff base + decorations after git/diff operations).
+   - The goal is a small, predictable protocol surface that’s easy to reason about and robust under reconnects and future feature additions.
+
+— _FugueTask_
