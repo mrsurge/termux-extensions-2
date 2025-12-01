@@ -222,10 +222,12 @@ async def _broadcast_draft_decorations(project_path: str):
     """Broadcasts explorer:updateDecorations with current draft state."""
     try:
         from pathlib import Path
+        # Normalize to absolute path to match how connections are registered
+        normalized_path = str(Path(project_path).resolve())
         reviews = await review.list_reviews(Path(project_path), lightweight=True)
         draft_decorations = {r["rel"]: {"hasDraft": True} for r in reviews if r.get("has_draft")}
         msg = {"type": "explorer:updateDecorations", "payload": {"drafts": draft_decorations}}
-        await manager.broadcast(project_path, msg)
+        await manager.broadcast(normalized_path, msg)
     except Exception as e:
         logger.warning(f"Failed to broadcast draft decorations: {e}")
 
@@ -239,14 +241,21 @@ def notify_draft_state_changed(project_path: str):
     from .explorer_helper import mark_draft_cache_dirty
     from pathlib import Path
     
-    if not _explorer_event_loop or not manager.active_connections:
+    if not _explorer_event_loop:
+        return
+    
+    # Normalize to absolute path to match how connections are registered
+    normalized_path = str(Path(project_path).resolve())
+    
+    # Check if there are any connections for this project
+    if not manager.has_connections(normalized_path):
         return
     
     # Invalidate the draft cache so next list_dir picks up fresh data
     mark_draft_cache_dirty(Path(project_path))
     
     # Debounce draft decoration broadcasts
-    debounce_key = f"drafts:{project_path}"
+    debounce_key = f"drafts:{normalized_path}"
     with _explorer_refresh_lock:
         existing_timer = _explorer_refresh_timers.get(debounce_key)
         if existing_timer:
@@ -256,7 +265,7 @@ def notify_draft_state_changed(project_path: str):
             with _explorer_refresh_lock:
                 _explorer_refresh_timers.pop(debounce_key, None)
             asyncio.run_coroutine_threadsafe(
-                _broadcast_draft_decorations(project_path),
+                _broadcast_draft_decorations(normalized_path),
                 _explorer_event_loop
             )
         
@@ -594,6 +603,8 @@ class ExplorerDispatcher:
         mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
         await self.broadcast_git_decorations()
+        # After commit, HEAD has moved - notify clients to refresh their diff base display
+        await self.broadcast("git:diffBaseSet", {"ref": "HEAD", "refresh": True})
 
     async def handle_git_push(self, payload: dict, msg_id: str):
         push_changes(self.project_root, payload.get("remote"), payload.get("branch"), payload.get("force", False))

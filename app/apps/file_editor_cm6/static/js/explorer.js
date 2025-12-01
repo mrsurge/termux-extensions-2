@@ -1039,7 +1039,12 @@ function handleExplorerEvent(type, payload) {
     case 'git:diffBaseSet': {
       if (payload && payload.ref) {
         gitDiffBase.ref = payload.ref;
-        updateDiffBaseButtons();
+        // If refresh flag is set (e.g., after commit), re-fetch full diff base info
+        if (payload.refresh) {
+          initDiffBaseFromBackend().catch(() => {});
+        } else {
+          updateDiffBaseButtons();
+        }
         if (searchOverlayVisible) {
           renderSearchOverlay();
         }
