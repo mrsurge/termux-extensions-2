@@ -56,19 +56,23 @@ First-class Git support with branch management, staging, committing, and diff vi
 - **Minimap:** VS Code-style minimap with responsive desktop (sidebar) and mobile (overlay) modes, including git diff markers.
 
 ### 5. **Project Explorer**
-Hierarchical file tree with search, git status badges, and extensive file operations.
+WebSocket-driven file tree with real-time updates, search, git status badges, and extensive file operations.
 
+- **WebSocket Architecture:** Real-time bidirectional communication via Socket.IO protocol
+- **Live Status Updates:** Git and draft status propagate instantly to all ancestor directories
 - **Card-Based Layout:** Modern card design with icons, labels, and inline menus
 - **Lazy Loading:** Efficient rendering of large directory trees
 - **Search Modes:** Search by filename, file content (ripgrep/fallback), or git changes
 - **Search by Changes:** Filter files by git status with inline diff viewing and live highlighting
 - **Git Status Badges:** Visual indicators for modified, added, untracked files
+- **Draft Indicators:** Yellow accent on files/directories with unsaved drafts
 - **Context Menus:** File/folder operations (rename, delete, copy, move, create, make executable)
 - **Select Mode:** Batch operations on multiple files (copy, move, delete, stage/unstage)
 - **Recent Files:** Quick access to recently opened files with project-scoped history
 - **Responsive Layout:** Mobile-friendly drawer with swipe gestures and keyboard navigation
 - **Git Actions:** Init repo, stage/unstage, restore file, branch operations directly from explorer
 - **New Project Creation:** Create new projects with optional Git initialization
+- **File Watcher Integration:** External filesystem changes automatically notify connected clients
 
 ### 6. **Draft Session Workflow**
 Persistent, disk-backed drafts bring code-server resilience to a single-document UX.

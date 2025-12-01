@@ -381,7 +381,7 @@
 
 /* Modified files: orange background (keeps the old motif). */
 .fe-tree-node.fe-git-modified[data-kind="file"] {
-  background: rgba(249, 115, 22, 0.15);
+  background: rgba(155, 90, 22, 0.75);
 }
 
 /* Untracked files: blue background. */

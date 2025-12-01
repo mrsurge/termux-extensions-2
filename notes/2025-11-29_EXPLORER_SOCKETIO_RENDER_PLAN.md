@@ -1406,3 +1406,110 @@ The git status inheritance works because `gitFlags` is computed by the backend f
    - Lazy load `.gitignore`'d directories
 
 — _Claude (Anthropic) & VectorArc, 2025-12-01 07:33 UTC_
+
+---
+
+## Session Update: 2025-12-01 11:20 UTC
+
+### Completed This Session
+
+#### 1. Draft Inheritance Fix (Parent Directories)
+
+**Problem:** Draft status (yellow accent) wasn't propagating to ancestor directories when subdirectories were collapsed.
+
+**Root Cause:** `applyAggregatedGitStatusFlags()` was clearing ALL `fe-dir-has-draft` classes, including those set by the backend via `data-hasDraft`.
+
+**Fix (`explorer.js`):**
+- Modified clearing logic to preserve `fe-dir-has-draft` on directories with `data-hasDraft="1"` (backend-derived)
+- Only clears propagated flags, not backend-computed ones
+
+#### 2. Live Draft Status Updates
+
+**Problem:** Explorer didn't update when drafts were created or cleared.
+
+**Solution:**
+- Added `notify_draft_state_changed(project_path)` in `explorer_ws.py`
+- Debounced (500ms) broadcast of `explorer:updateDecorations`
+- Called from `editor_app.py` after `upsert_cached_document()` and `clear_cached_document()`
+- Called from REST endpoints (`/session_cache`, `/review/save`, `/review/discard`)
+- Called from WS handlers (`handle_review_save`, `handle_review_discard`)
+
+**`explorer:updateDecorations` handler enhanced:**
+- Step 1: Clear ALL draft flags from all nodes
+- Step 2: Apply draft flags to files in DOM
+- Step 3: Compute ancestor directories from draft paths (path string)
+- Step 4: Apply `fe-dir-has-draft` to ancestors
+- Step 5: Mark root if any drafts exist
+
+#### 3. Git Status Propagation via File Watcher
+
+**Problem:** Git status didn't propagate to collapsed parent directories when files changed.
+
+**Solution (`explorer_ws.py`):**
+- Enhanced `notify_explorer_of_change()` to also trigger git status broadcast
+- Added `_schedule_git_status_broadcast()` - debounced (500ms)
+- Added `_broadcast_git_status_update()` - invalidates cache, broadcasts `explorer:updateGitStatus`
+
+**`explorer:updateGitStatus` handler fixed:**
+- Now preserves draft flags when clearing git classes (`!cls.includes('draft')`)
+
+#### 4. Git Status Selector Refresh After Commit
+
+**Problem:** Footer's "Status selector" didn't update after committing via the commit button.
+
+**Solution:**
+- `handle_git_commit()` now broadcasts `git:diffBaseSet` with `refresh: true`
+- Frontend handler calls `initDiffBaseFromBackend()` when refresh flag is set
+- This re-fetches full diff base info including new HEAD commit
+
+#### 5. Draft Status Path Normalization
+
+**Problem:** Draft broadcasts weren't reaching clients due to path mismatch.
+
+**Fix (`explorer_ws.py`):**
+- `notify_draft_state_changed()` now normalizes path via `Path().resolve()`
+- `_broadcast_draft_decorations()` also normalizes before broadcasting
+- Changed from `manager.active_connections` check to `manager.has_connections(normalized_path)`
+
+#### 6. Hunk Header Formatting
+
+**Problem:** "Search by Changes" and "Review Edits" overlays showed `@@ -x,y +a,b @@` notation.
+
+**Solution (`explorer.js`):**
+- Added `formatHunkHeader(hunk)` helper function
+- Returns human-readable format:
+  - Single line: `"Line 42"`
+  - Multiple lines: `"Lines 42–50"`
+- Updated both overlay renderers to use this helper
+
+### Files Modified
+
+- `app/apps/file_editor_cm6/static/js/explorer.js`
+- `app/apps/file_editor_cm6/explorer_ws.py`
+- `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+- `app/apps/file_editor_cm6/main.py`
+
+### Architecture Notes
+
+**Unified Status Update Flow:**
+1. File watcher detects change → `notify_explorer_of_change()`
+2. Triggers both:
+   - `explorer:setList` for parent directory (if open)
+   - `explorer:updateGitStatus` for whole project (debounced)
+3. Frontend computes ancestors from file paths
+4. All directories in path get status flags even when collapsed
+
+**Draft Update Flow:**
+1. Editor saves/clears draft → `notify_draft_state_changed()`
+2. Invalidates draft cache
+3. Broadcasts `explorer:updateDecorations` (debounced)
+4. Frontend clears all draft flags, re-applies from payload
+5. Computes and applies ancestor flags
+
+### Outstanding Future Work
+
+1. **Watcher Lifecycle** - Start/stop based on client connections
+2. **Sidecar Cleanup** - Remove stale `unsaved: false` sidecars
+3. **Performance** - Cache `list_dir` for large directories
+
+— _VectorArc, 2025-12-01 11:20 UTC_
