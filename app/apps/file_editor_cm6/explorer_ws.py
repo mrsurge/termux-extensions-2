@@ -330,6 +330,7 @@ class ExplorerDispatcher:
         self._job_queue: Optional[Queue] = None
         self._job_listener = None
         self._job_pump_task: Optional[asyncio.Task] = None
+        self._tracked_job_ids: set = set()  # Jobs we started from this dispatcher
         
     async def initialize(self):
         # Set the event loop for watcher -> explorer bridge
@@ -376,25 +377,17 @@ class ExplorerDispatcher:
                 payload = await asyncio.to_thread(self._job_queue.get, timeout=0.5)
                 
                 for job_data in payload.get("jobs", []):
-                    # Filter: only jobs for this project (git jobs have repo_path in params)
+                    job_id = job_data.get("id", "")
                     job_type = job_data.get("type", "")
-                    job_params = job_data.get("params", {})
+                    job_status = job_data.get("status", "")
                     
-                    # Check if this is a git job for our project
-                    repo_path = job_params.get("repo_path")
-                    target_path = job_params.get("target_path")  # for clone
-                    
-                    is_relevant = False
-                    if repo_path and str(self.project_root) == repo_path:
-                        is_relevant = True
-                    elif target_path and str(self.project_root) == target_path:
-                        is_relevant = True
-                    elif job_type.startswith("git_"):
-                        # If no specific path, show all git jobs (edge case)
-                        is_relevant = True
-                    
-                    if is_relevant:
+                    # Only forward jobs we're tracking (ones we started)
+                    if job_id in self._tracked_job_ids:
                         await self.emit_personal("job:progress", job_data)
+                        
+                        # Clean up tracking when job completes
+                        if job_status in ("succeeded", "failed", "cancelled"):
+                            self._tracked_job_ids.discard(job_id)
                         
             except Empty:
                 continue
@@ -702,6 +695,8 @@ class ExplorerDispatcher:
                 "branch": payload.get("branch"),
                 "force": payload.get("force", False),
             })
+            # Track this job so we forward its progress events
+            self._tracked_job_ids.add(job.id)
             # Acknowledge job creation - progress will come via job:progress events
             await self.emit_personal("git:pushStarted", {"job_id": job.id}, msg_id)
         except Exception as e:
@@ -717,6 +712,8 @@ class ExplorerDispatcher:
                 "branch": payload.get("branch"),
                 "rebase": payload.get("rebase", False),
             })
+            # Track this job so we forward its progress events
+            self._tracked_job_ids.add(job.id)
             # Acknowledge job creation - progress will come via job:progress events
             await self.emit_personal("git:pullStarted", {"job_id": job.id}, msg_id)
         except Exception as e:
@@ -807,6 +804,8 @@ class ExplorerDispatcher:
                 "branch": payload.get("branch"),
                 "depth": payload.get("depth"),
             })
+            # Track this job so we forward its progress events
+            self._tracked_job_ids.add(job.id)
             # Acknowledge job creation - progress will come via job:progress events
             await self.emit_personal("git:cloneStarted", {"job_id": job.id, "target_path": target_path}, msg_id)
         except Exception as e:

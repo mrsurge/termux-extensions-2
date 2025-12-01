@@ -1140,6 +1140,7 @@ function handleExplorerEvent(type, payload) {
     // --- Job Progress Events (git push/pull/clone with progress) ---
     case 'job:progress': {
       const { id, type, status, progress, message, error } = payload;
+      console.log('[JOB_PROGRESS]', { id, type, status, progress, message });
       
       // Only handle git-related jobs
       if (!type || !type.startsWith('git_')) break;
@@ -1172,6 +1173,7 @@ function handleExplorerEvent(type, payload) {
     case 'git:pullStarted':
     case 'git:cloneStarted': {
       // Job started acknowledgement - show initial progress state
+      console.log('[GIT_JOB_STARTED]', type, payload);
       showGitProgressBar(0, 'Starting...');
       break;
     }
