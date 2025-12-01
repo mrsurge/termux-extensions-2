@@ -175,7 +175,7 @@ Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another dev
     │ :5001    │    │ :5002    │    │ :5003    │
     └──────────┘    └──────────┘    └──────────┘
 
-|```
+```
 ### Key Components
 
 **Supervisor** (`scripts/run_framework.sh` → `app/supervisor.py`)
