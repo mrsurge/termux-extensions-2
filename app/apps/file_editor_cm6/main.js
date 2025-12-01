@@ -1318,8 +1318,6 @@ function handleWSMessage(msg) {
       if (editorViewState?.showInlineDiffs) {
         diffController.refresh(true);
       }
-      // Refresh explorer on file changes (debounced)
-      scheduleExplorerRefresh();
     }
   } else if (type === 'save_ack') {
     if (msg.op_id === inflightOpId) {
@@ -1333,8 +1331,6 @@ function handleWSMessage(msg) {
       diffController.invalidateCacheForPath(currentPath);
       diffController.refresh(true);
     }
-    // Refresh explorer on file changes (debounced)
-    scheduleExplorerRefresh();
   }
 }
 
