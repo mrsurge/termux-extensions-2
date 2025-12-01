@@ -607,9 +607,11 @@ function handleExplorerEvent(type, payload) {
       });
 
       // Step 3: Compute all ancestor directories that need 'modified' outline
-      // by walking up path segments from ALL dirty files (not just DOM nodes)
+      // by walking up path segments from dirty files (excluding ignored/clean)
       const dirtyDirs = new Set();
-      Object.keys(statuses).forEach((rel) => {
+      Object.entries(statuses).forEach(([rel, status]) => {
+        // Only propagate outline for "real" dirty statuses, not ignored
+        if (!status || status === 'clean' || status === 'ignored') return;
         const parts = rel.split('/');
         // Walk up: a/b/c.txt -> mark 'a' and 'a/b' as dirty
         for (let i = 1; i < parts.length; i++) {
@@ -628,8 +630,8 @@ function handleExplorerEvent(type, payload) {
         }
       });
 
-      // Also mark root if there are any dirty files
-      if (Object.keys(statuses).length > 0) {
+      // Also mark root if there are any dirty files (excluding ignored)
+      if (dirtyDirs.size > 0) {
         const rootLi = root.querySelector('li.fe-tree-node.fe-tree-root');
         if (rootLi && !rootLi.classList.contains('fe-git-modified')) {
           rootLi.classList.add('fe-git-modified');
