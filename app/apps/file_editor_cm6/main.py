@@ -1404,8 +1404,10 @@ async def review_save(data: dict = Body(...)):
         except Exception as e:
             errors.append(f"{rel_path}: {str(e)}")
             
-    # Refresh git status cache
+    # Refresh git status cache and draft cache
     mark_git_cache_dirty(root_path)
+    from .explorer_helper import mark_draft_cache_dirty
+    mark_draft_cache_dirty(root_path)
     
     return {"ok": True, "saved_count": saved_count, "errors": errors}
 
@@ -1428,6 +1430,10 @@ async def review_discard(data: dict = Body(...)):
         if _history_store.clear_cached_document(project_root, str(abs_path)):
             discarded_count += 1
             handle_external_discard(project_root, str(abs_path))
+    
+    # Invalidate draft cache
+    from .explorer_helper import mark_draft_cache_dirty
+    mark_draft_cache_dirty(root_path)
             
     return {"ok": True, "discarded_count": discarded_count}
 

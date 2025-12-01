@@ -16,6 +16,10 @@ _PROJECT_ROOT = Path.home()
 _GIT_STATUS_CACHE: Dict[str, dict] = {}
 GIT_CACHE_TTL_SECONDS = 6.0
 
+# Draft paths cache - avoids expensive list_project_drafts() on every list_dir()
+_DRAFT_PATHS_CACHE: Dict[str, dict] = {}  # project_path -> {paths: set, timestamp: float}
+DRAFT_CACHE_TTL_SECONDS = 5.0
+
 _STATUS_PRIORITY = (
     "conflict",
     "staged_modified",
@@ -31,11 +35,21 @@ _STATUS_PRIORITY = (
 
 
 def _collect_project_draft_rel_paths(project_root: Path) -> set[str]:
-    """Return set of relative file paths that currently have drafts."""
+    """Return set of relative file paths that currently have drafts (cached)."""
+    key = str(project_root.resolve())
+    now = time.time()
+    
+    # Check cache
+    cached = _DRAFT_PATHS_CACHE.get(key)
+    if cached and now - cached.get('timestamp', 0) < DRAFT_CACHE_TTL_SECONDS:
+        return cached.get('paths', set())
+    
+    # Refresh cache
     try:
         drafts = _history_store.list_project_drafts(str(project_root))
     except Exception:
         return set()
+    
     rel_paths: set[str] = set()
     for draft in drafts:
         file_path = draft.get("file_path")
@@ -46,7 +60,19 @@ def _collect_project_draft_rel_paths(project_root: Path) -> set[str]:
             rel_paths.add(str(abs_path.relative_to(project_root)))
         except Exception:
             continue
+    
+    _DRAFT_PATHS_CACHE[key] = {'paths': rel_paths, 'timestamp': now}
     return rel_paths
+
+
+def mark_draft_cache_dirty(project_root: Path = None):
+    """Mark draft cache as dirty so it refreshes on next access."""
+    if project_root:
+        key = str(project_root.resolve())
+        if key in _DRAFT_PATHS_CACHE:
+            del _DRAFT_PATHS_CACHE[key]
+    else:
+        _DRAFT_PATHS_CACHE.clear()
 
 
 def set_project_root(path: str) -> Path:
@@ -73,8 +99,15 @@ def list_dir(rel: str = '.') -> dict:
     - cwd: current working directory relative to project root
     - entries: list of file/dir entries with metadata
     """
+    import time as _time
+    _t0 = _time.perf_counter()
+    
     root = get_project_root()
+    
+    _t1 = _time.perf_counter()
     draft_rel_paths = _collect_project_draft_rel_paths(root)
+    _t2 = _time.perf_counter()
+    
     base = (root / rel).resolve()
 
     # Security check: ensure path is within project root
@@ -85,7 +118,9 @@ def list_dir(rel: str = '.') -> dict:
         raise ValueError("not a directory")
 
     entries = []
+    _t3 = _time.perf_counter()
     status_map = _get_git_status_snapshot(root)
+    _t4 = _time.perf_counter()
 
     with os.scandir(base) as it:
         for e in it:
@@ -102,7 +137,13 @@ def list_dir(rel: str = '.') -> dict:
                 git_status = _derive_git_status(rel_path, kind, status_map)
                 git_flags = _derive_git_flags(rel_path, kind, status_map)
 
-                has_draft = rel_path in draft_rel_paths
+                # For files: check if this exact file has a draft
+                # For dirs: check if any draft path starts with this dir
+                if kind == 'file':
+                    has_draft = rel_path in draft_rel_paths
+                else:
+                    prefix = rel_path + '/'
+                    has_draft = any(d.startswith(prefix) for d in draft_rel_paths)
 
                 entries.append({
                     'name': e.name,
@@ -122,8 +163,17 @@ def list_dir(rel: str = '.') -> dict:
                 # Skip files we can't access
                 continue
 
+    _t5 = _time.perf_counter()
+    
     # Sort: directories first, then files, case-insensitive
     entries.sort(key=lambda x: (x['kind'] != 'dir', x['name'].lower()))
+    
+    _t6 = _time.perf_counter()
+    
+    # Log timing if it took more than 50ms
+    total = (_t6 - _t0) * 1000
+    if total > 50:
+        print(f"[list_dir] {rel}: total={total:.1f}ms, drafts={(_t2-_t1)*1000:.1f}ms, git={(_t4-_t3)*1000:.1f}ms, scan={(_t5-_t4)*1000:.1f}ms, sort={(_t6-_t5)*1000:.1f}ms, entries={len(entries)}")
 
     return {
         'cwd': str(base.relative_to(root)) if base != root else '.',

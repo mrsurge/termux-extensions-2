@@ -138,6 +138,7 @@
   background: var(--explorer-card-bg);
   margin-left: 0;
   align-items: center;
+  position: relative;  /* For ::after pseudo-element positioning */
 }
 
 /* Make nested ul span the full width */
@@ -1080,13 +1081,28 @@
 }
 
 
-/* Tree Highlights */
-.fe-tree-node.fe-draft[data-kind="file"] {
-  border-right: 3px solid #facc15;
+/* Tree Highlights - Draft styling */
+/* Use ::after pseudo-element so draft indicator layers ON TOP of git status border */
+.fe-tree-node.fe-draft[data-kind="file"]::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 3px;
+  background: #facc15;
+  pointer-events: none;
 }
 
-.fe-tree-node.fe-draft-parent {
-  border-right: 2px solid rgba(250, 204, 21, 0.4);
+.fe-tree-node.fe-dir-has-draft::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(250, 204, 21, 0.5);
+  pointer-events: none;
 }
 
 /* Review Diff Styles */

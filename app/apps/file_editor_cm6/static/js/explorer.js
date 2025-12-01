@@ -326,6 +326,129 @@ function checkAutoDisableSelectMode(collapsedRel) {
   }
 }
 
+// --- Expand to file/directory ---
+
+// Pending directory list requests - maps rel -> { resolve, reject, timeout }
+const _pendingDirListRequests = new Map();
+
+function _notifyDirListComplete(rel) {
+  /**
+   * Called when explorer:setList is received for a directory.
+   * Resolves any pending expand request waiting for this directory.
+   */
+  const pending = _pendingDirListRequests.get(rel);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    _pendingDirListRequests.delete(rel);
+    pending.resolve();
+  }
+}
+
+async function _requestDirListAndWait(rel, timeoutMs = 2000) {
+  /**
+   * Requests a directory listing and waits for the response.
+   * Returns a promise that resolves when the listing is received.
+   */
+  return new Promise((resolve, reject) => {
+    // Set up timeout
+    const timeout = setTimeout(() => {
+      _pendingDirListRequests.delete(rel);
+      resolve(); // Resolve anyway to continue, don't block forever
+    }, timeoutMs);
+    
+    _pendingDirListRequests.set(rel, { resolve, reject, timeout });
+    
+    // Send request
+    if (typeof window.__explorerBusSend === 'function') {
+      window.__explorerBusSend('explorer:list', { rel });
+    } else {
+      clearTimeout(timeout);
+      _pendingDirListRequests.delete(rel);
+      resolve();
+    }
+  });
+}
+
+async function expandToPath(rel) {
+  /**
+   * Expands the tree to reveal a file or directory at the given relative path.
+   * Walks through each path segment, expanding directories as needed.
+   */
+  if (!rel || rel === '.') return;
+  if (!treeElement) {
+    treeElement = document.getElementById('fe-file-tree');
+  }
+  if (!treeElement) return;
+
+  const segments = rel.split('/').filter(Boolean);
+  if (!segments.length) return;
+
+  let currentRel = '.';
+
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    const nextRel = currentRel === '.' ? segment : `${currentRel}/${segment}`;
+    const isLastSegment = i === segments.length - 1;
+
+    // Find the node at nextRel
+    let targetLi = treeElement.querySelector(
+      `li.fe-tree-node[data-rel="${nextRel}"]`
+    );
+
+    if (!targetLi) {
+      // Node not in DOM - need to expand parent first
+      const parentLi = treeElement.querySelector(
+        `li.fe-tree-node[data-kind="dir"][data-rel="${currentRel}"]`
+      );
+      
+      if (parentLi && parentLi.dataset.open !== 'true') {
+        parentLi.dataset.open = 'true';
+        await _requestDirListAndWait(currentRel);
+      } else if (!parentLi && currentRel === '.') {
+        // Root should already be open, just wait a bit
+        await _requestDirListAndWait('.');
+      }
+      
+      // Try again after parent expanded
+      targetLi = treeElement.querySelector(
+        `li.fe-tree-node[data-rel="${nextRel}"]`
+      );
+      
+      if (!targetLi) {
+        // Still not found - if this is the last segment, it might be a file
+        // that just doesn't exist yet in DOM
+        if (isLastSegment) return;
+        // Otherwise can't proceed
+        return;
+      }
+    }
+
+    // If target is a directory and not the last segment, expand it
+    if (targetLi.dataset.kind === 'dir' && targetLi.dataset.open !== 'true') {
+      targetLi.dataset.open = 'true';
+      await _requestDirListAndWait(nextRel);
+    }
+
+    currentRel = nextRel;
+  }
+}
+
+function getParentRel(rel) {
+  if (!rel || rel === '.') return '.';
+  const parts = rel.split('/').filter(Boolean);
+  if (parts.length <= 1) return '.';
+  return parts.slice(0, -1).join('/');
+}
+
+async function expandToFile(fileRel) {
+  /**
+   * Expands the tree to reveal a file, expanding its parent directories.
+   */
+  if (!fileRel || fileRel === '.') return;
+  const parentRel = getParentRel(fileRel);
+  await expandToPath(parentRel);
+}
+
 function renderProjectLabel() {
   if (!projectLabelEl) return;
   const root = uiState.projectPath;
@@ -462,6 +585,17 @@ function renderEntriesInto(containerUl, entries, parentRel = null) {
       });
     }
 
+    // Apply draft styling
+    if (entry.hasDraft) {
+      li.dataset.hasDraft = '1';
+      if (entry.kind === 'file') {
+        li.classList.add('fe-draft');
+      } else {
+        // Directory contains drafts
+        li.classList.add('fe-dir-has-draft');
+      }
+    }
+
     // In select mode: show checkbox instead of menu button
     if (inSelectMode) {
       const checkbox = document.createElement('input');
@@ -526,6 +660,7 @@ function applyAggregatedGitStatusFlags() {
         'fe-dir-has-staged',
         'fe-dir-has-untracked',
         'fe-dir-has-conflict',
+        'fe-dir-has-draft',
       );
     });
 
@@ -577,6 +712,17 @@ function applyAggregatedGitStatusFlags() {
         }
       });
       
+      current = current.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
+    }
+  });
+
+  // Propagate draft status up to parent directories
+  // Walk up from both files with drafts AND directories that contain drafts
+  const nodesWithDraft = root.querySelectorAll('li.fe-tree-node.fe-draft, li.fe-tree-node.fe-dir-has-draft');
+  nodesWithDraft.forEach((node) => {
+    let current = node.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
+    while (current) {
+      current.classList.add('fe-dir-has-draft');
       current = current.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
     }
   });
@@ -656,6 +802,9 @@ function handleExplorerEvent(type, payload) {
         // If directory was closed and has no childList, ignore the update
         // (it will be fetched when user opens it)
       }
+      
+      // Notify any pending expandToPath requests that this directory is ready
+      _notifyDirListComplete(cwd);
       break;
     }
     case 'explorer:setTree': {
@@ -1920,6 +2069,9 @@ async function openFileAndMaybeJump(rel, lineNumber = null, jumpOptions = {}) {
     return;
   }
   try {
+    // Expand tree to reveal the file in the background
+    expandToFile(rel);
+    
     await window.appOpenFileRel(rel, uiState.projectPath || null);
     closeDrawerIfMobile();
 
@@ -2396,6 +2548,8 @@ function renderNameResults(container, data) {
       if (item.type === 'file') {
         if (window.appOpenFileRel) {
           try {
+            // Expand tree to reveal the file
+            expandToFile(item.rel);
             await window.appOpenFileRel(item.rel, uiState.projectPath || null);
             closeDrawerIfMobile();
           } catch (e) {
@@ -2406,8 +2560,8 @@ function renderNameResults(container, data) {
         }
       } else if (item.type === 'dir') {
         closeSearchOverlay();
-        // Tree expansion is handled by clicking directories in the tree;
-        // we keep this simple in v2 and rely on the user to expand.
+        // Expand tree to reveal the directory
+        expandToPath(item.rel);
       }
     };
 
@@ -2455,6 +2609,8 @@ function renderContentResults(container, data) {
       matchRow.onclick = async () => {
         if (window.appOpenFileRel && window.jumpToCurrentFileLine) {
           try {
+            // Expand tree to reveal the file
+            expandToFile(fileResult.rel);
             await window.appOpenFileRel(fileResult.rel, uiState.projectPath || null);
 
             closeDrawerIfMobile();

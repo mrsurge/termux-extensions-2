@@ -1328,3 +1328,81 @@ Added handler in `explorer.js`:
 - [x] Tree expansion state preserved during git operations
 
 — _VectorArc_
+
+
+---
+
+## Session Update: 2025-12-01 07:33 UTC
+
+### Completed This Session
+
+#### 1. Batch Select Mode
+- Implemented full batch select mode with checkboxes replacing `⋮` menu buttons
+- Added batch actions: Copy To, Move To, Stage, Unstage, Delete
+- Auto-disable select mode when directory is collapsed
+- Collapse subdirectories when entering select mode
+
+#### 2. Copy/Move DOM Refresh Fix
+- Fixed issue where copy/move operations caused full tree re-render
+- Backend now broadcasts `explorer:setList` only for affected directories
+- Added `_get_parent_rel()` and `_get_rel_from_abs()` helper functions
+- Frontend only updates directories that are already open (preserves expansion state)
+
+#### 3. File Watcher → Explorer Integration
+- Watcher now notifies explorer of external filesystem changes
+- Added debouncing (250ms) to prevent flooding
+- Explorer tree updates automatically for external file creates/deletes
+- Lifecycle hooks stubbed for future: stop watcher when no clients connected
+
+#### 4. Git Status Directory Inheritance for Staged Files
+- Added `fe-dir-has-staged` propagation to parent directories
+- Updated `explorer:updateGitStatus` handler to track staged directories
+
+#### 5. Expand-to-File from Search
+- Implemented `expandToPath()` and `expandToFile()` functions
+- Uses promise-based waiting for `explorer:setList` responses
+- Files opened from search (name, content, changes, review) now expand tree
+
+#### 6. Major Performance Fix: Draft Path Caching
+- **Root cause found**: `list_project_drafts()` was scanning 70+ JSON sidecar files on EVERY `list_dir()` call
+- Added 5-second TTL cache for draft paths (`_DRAFT_PATHS_CACHE`)
+- Initial load went from ~15+ seconds to under 2 seconds
+- Added timing instrumentation (logs when `list_dir` > 50ms)
+
+#### 7. Draft Styling
+- Added yellow right-accent for files with drafts (`fe-draft` class)
+- Uses `::after` pseudo-element so it layers ON TOP of git status borders
+- Added `fe-dir-has-draft` for directories containing drafts
+- Backend computes `hasDraft` for directories using prefix matching
+
+### Outstanding Issue
+
+**Draft parent directory inheritance not fully working**
+
+The yellow draft accent appears on:
+- ✅ Files with unsaved drafts
+- ✅ Direct parent directory when subdirectory is opened
+
+But does NOT appear on:
+- ❌ Ancestor directories when the subdirectory containing the draft is collapsed
+
+The git status inheritance works because `gitFlags` is computed by the backend for ALL descendants (via `_derive_git_flags` checking `status_map`). The draft inheritance uses the same pattern but something is not propagating correctly up the chain when directories are collapsed.
+
+**Likely fix**: Need to ensure the backend's prefix-matching for `hasDraft` on directories is working correctly, OR add a similar `draftFlags` array pattern like we did for git.
+
+### Future Plans (Stubbed)
+
+1. **Watcher Lifecycle Management**
+   - Start watcher when first explorer WS client connects
+   - Stop watcher when last client disconnects
+   - Save battery/CPU when editor not in use
+
+2. **Sidecar Cleanup**
+   - Clean up empty/stale JSON sidecar files in `~/.cache/cm6_sessions/`
+   - Many files have `unsaved: false` and just take up space
+
+3. **Further Performance**
+   - Consider caching `list_dir` results for very large directories
+   - Lazy load `.gitignore`'d directories
+
+— _Claude (Anthropic) & VectorArc, 2025-12-01 07:33 UTC_
