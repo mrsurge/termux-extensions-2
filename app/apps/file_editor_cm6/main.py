@@ -637,6 +637,14 @@ def delete_session_cache(
     
     existed = _history_store.clear_cached_document(expanded_project, expanded_path)
     
+    # Notify explorer of draft state change
+    if existed:
+        try:
+            from .explorer_ws import notify_draft_state_changed
+            notify_draft_state_changed(expanded_project)
+        except Exception:
+            pass
+    
     return {
         "ok": True,
         "data": {
@@ -1409,6 +1417,13 @@ async def review_save(data: dict = Body(...)):
     from .explorer_helper import mark_draft_cache_dirty
     mark_draft_cache_dirty(root_path)
     
+    # Notify explorer of draft state change
+    try:
+        from .explorer_ws import notify_draft_state_changed
+        notify_draft_state_changed(project_root)
+    except Exception:
+        pass
+    
     return {"ok": True, "saved_count": saved_count, "errors": errors}
 
 @file_editor_cm6_bp.post('/review/discard')
@@ -1434,6 +1449,13 @@ async def review_discard(data: dict = Body(...)):
     # Invalidate draft cache
     from .explorer_helper import mark_draft_cache_dirty
     mark_draft_cache_dirty(root_path)
+    
+    # Notify explorer of draft state change
+    try:
+        from .explorer_ws import notify_draft_state_changed
+        notify_draft_state_changed(project_root)
+    except Exception:
+        pass
             
     return {"ok": True, "discarded_count": discarded_count}
 

@@ -79,35 +79,35 @@ mrselect/  (directory name - kept as-is)
 ```
 ┌─────────────────────────────────────────────┐
 │  GeckoView Android App (Native)             │
-│  "Termux Extensions"                         │
+│  "Termux Extensions"                        │
 │  ┌────────────────────────────────────┐     │
 │  │ WebView: http://127.0.0.1:8088     │     │
-│  │ (Your existing framework UI)        │     │
+│  │ (Your existing framework UI)       │     │
 │  └─────────────┬──────────────────────┘     │
-│                │                              │
+│                │                            │
 │  ┌─────────────▼──────────────────────┐     │
-│  │ window.Android (JavaScript Bridge)  │     │
-│  │ - openFile(), shareText(), etc.     │     │
+│  │ window.Android (JavaScript Bridge) │     │
+│  │ - openFile(), shareText(), etc.    │     │
 │  └─────────────┬──────────────────────┘     │
-│                │                              │
+│                │                            │
 │  ┌─────────────▼──────────────────────┐     │
-│  │ NativeBridge.kt (Kotlin)            │     │
-│  │ - Handles Android OS calls          │     │
-│  │ - Makes HTTP/WS to localhost:8088   │     │
+│  │ NativeBridge.kt (Kotlin)           │     │
+│  │ - Handles Android OS calls         │     │
+│  │ - Makes HTTP/WS to localhost:8088  │     │
 │  └─────────────┬──────────────────────┘     │
-└────────────────┼──────────────────────────────┘
+└────────────────┼────────────────────────────┘
                  │ HTTP/WebSocket
                  ▼
 ┌─────────────────────────────────────────────┐
 │  Termux - FastAPI Framework (8088)          │
 │  ┌────────────────────────────────────┐     │
-│  │ native_bridge app                   │     │
-│  │ - /api/native/* endpoints           │     │
-│  │ - WebSocket /ws/native              │     │
+│  │ native_bridge app                  │     │
+│  │ - /api/native/* endpoints          │     │
+│  │ - WebSocket /ws/native             │     │
 │  └────────────┬───────────────────────┘     │
-│               │                              │
+│               │                             │
 │  ┌────────────▼───────────────────────┐     │
-│  │ File operations, services, etc.     │     │
+│  │ File operations, services, etc.    │     │
 │  └────────────────────────────────────┘     │
 └─────────────────────────────────────────────┘
 ```

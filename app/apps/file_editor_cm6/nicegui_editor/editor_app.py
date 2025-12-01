@@ -257,6 +257,12 @@ def _apply_watcher_replace(
                 _history_store.clear_cached_document(project_path, path)
                 cache_entry = None
                 external_change = True
+                # Notify explorer of draft state change
+                try:
+                    from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
+                    notify_draft_state_changed(project_path)
+                except Exception as e:
+                    print(f"[WATCHER] Failed to notify explorer of draft change: {e}", file=sys.stderr)
 
     # If we reach here, we either had no draft, or we had a conflict and cleared it.
     # In both cases, the editor should accept the disk content.
@@ -376,6 +382,13 @@ def _persist_to_cache_debounced():
     )
     
     print(f"[SESSION_CACHE] Persisted draft for {current_file} (Unsaved: {cache_entry.get('unsaved', False)})", file=sys.stderr)
+
+    # Notify explorer of draft state change (debounced)
+    try:
+        from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
+        notify_draft_state_changed(project_path)
+    except Exception as e:
+        print(f"[SESSION_CACHE] Failed to notify explorer of draft change: {e}", file=sys.stderr)
 
     _broadcast_cache_state(
         project_path,
@@ -998,6 +1011,14 @@ async def discard_draft(data: dict = Body(...)):
     
     cleared = _history_store.clear_cached_document(project_path, path)
 
+    # Notify explorer of draft state change
+    if cleared:
+        try:
+            from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
+            notify_draft_state_changed(project_path)
+        except Exception as e:
+            print(f"[DISCARD] Failed to notify explorer of draft change: {e}", file=sys.stderr)
+
     if cleared and path == get_current_file():
         _broadcast_cache_state(
             project_path,
@@ -1452,6 +1473,9 @@ async def update_preference(data: dict = Body(...)):
             if value and project_path and current_file:
                 try:
                     _history_store.clear_cached_document(project_path, current_file)
+                    # Notify explorer of draft state change
+                    from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
+                    notify_draft_state_changed(project_path)
                 except Exception as exc:
                     print(f"[PREFERENCE] Failed to clear cache on autosave enable: {exc}", file=sys.stderr)
                 _broadcast_cache_state(

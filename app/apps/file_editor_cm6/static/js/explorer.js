@@ -660,8 +660,13 @@ function applyAggregatedGitStatusFlags() {
         'fe-dir-has-staged',
         'fe-dir-has-untracked',
         'fe-dir-has-conflict',
-        'fe-dir-has-draft',
       );
+      // Only clear fe-dir-has-draft if NOT set by backend (data-hasDraft).
+      // Backend computes hasDraft via prefix matching, so collapsed dirs
+      // retain their draft status even when children aren't in the DOM.
+      if (!li.dataset.hasDraft) {
+        li.classList.remove('fe-dir-has-draft');
+      }
     });
 
   // For each node (file OR directory) with a gitStatus or gitFlags, walk up
@@ -830,26 +835,56 @@ function handleExplorerEvent(type, payload) {
       const root = treeElement || document.getElementById('fe-file-tree');
       if (!root) break;
 
-      // Clear existing draft flags
-      root
-        .querySelectorAll('li.fe-tree-node[data-kind="file"]')
-        .forEach((li) => {
-          li.classList.remove('fe-draft');
-          if (li.dataset.hasDraft) {
-            delete li.dataset.hasDraft;
-          }
-        });
+      // Step 1: Clear existing draft flags from ALL nodes (files and directories)
+      root.querySelectorAll('li.fe-tree-node').forEach((li) => {
+        li.classList.remove('fe-draft', 'fe-dir-has-draft');
+        if (li.dataset.hasDraft) {
+          delete li.dataset.hasDraft;
+        }
+      });
 
-      // Apply new ones
+      // Step 2: Apply draft flags to files that exist in DOM
       Object.entries(drafts).forEach(([rel, info]) => {
         if (!info || !info.hasDraft) return;
         const li = root.querySelector(
           `li.fe-tree-node[data-kind="file"][data-rel="${rel}"]`
         );
-        if (!li) return;
-        li.dataset.hasDraft = '1';
-        li.classList.add('fe-draft');
+        if (li) {
+          li.dataset.hasDraft = '1';
+          li.classList.add('fe-draft');
+        }
       });
+
+      // Step 3: Compute ancestor directories from draft paths (path string manipulation)
+      // This ensures parents show draft indicator even when children are collapsed
+      const draftDirs = new Set();
+      Object.entries(drafts).forEach(([rel, info]) => {
+        if (!info || !info.hasDraft) return;
+        const parts = rel.split('/');
+        for (let i = 1; i < parts.length; i++) {
+          draftDirs.add(parts.slice(0, i).join('/'));
+        }
+      });
+
+      // Step 4: Apply fe-dir-has-draft to ancestor directories
+      draftDirs.forEach((dirRel) => {
+        const li = root.querySelector(
+          `li.fe-tree-node[data-kind="dir"][data-rel="${dirRel}"]`
+        );
+        if (li) {
+          li.dataset.hasDraft = '1';
+          li.classList.add('fe-dir-has-draft');
+        }
+      });
+
+      // Step 5: Mark root if there are any drafts
+      if (draftDirs.size > 0 || Object.keys(drafts).length > 0) {
+        const rootLi = root.querySelector('li.fe-tree-node.fe-tree-root');
+        if (rootLi) {
+          rootLi.dataset.hasDraft = '1';
+          rootLi.classList.add('fe-dir-has-draft');
+        }
+      }
       break;
     }
     case 'explorer:updateGitStatus': {

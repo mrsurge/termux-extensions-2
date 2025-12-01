@@ -178,6 +178,55 @@ async def _refresh_explorer_directory(project_path: str, rel_dir: str):
     except Exception as e:
         logger.warning(f"Failed to refresh explorer directory {rel_dir}: {e}")
 
+
+async def _broadcast_draft_decorations(project_path: str):
+    """Broadcasts explorer:updateDecorations with current draft state."""
+    try:
+        from pathlib import Path
+        reviews = await review.list_reviews(Path(project_path), lightweight=True)
+        draft_decorations = {r["rel"]: {"hasDraft": True} for r in reviews if r.get("has_draft")}
+        msg = {"type": "explorer:updateDecorations", "payload": {"drafts": draft_decorations}}
+        await manager.broadcast(project_path, msg)
+    except Exception as e:
+        logger.warning(f"Failed to broadcast draft decorations: {e}")
+
+
+def notify_draft_state_changed(project_path: str):
+    """
+    Called when draft state changes (file edited, saved, or discarded).
+    Schedules a broadcast of updated draft decorations to all explorer clients.
+    Debounced to avoid flooding during rapid edits.
+    """
+    from .explorer_helper import mark_draft_cache_dirty
+    from pathlib import Path
+    
+    if not _explorer_event_loop or not manager.active_connections:
+        return
+    
+    # Invalidate the draft cache so next list_dir picks up fresh data
+    mark_draft_cache_dirty(Path(project_path))
+    
+    # Debounce draft decoration broadcasts
+    debounce_key = f"drafts:{project_path}"
+    with _explorer_refresh_lock:
+        existing_timer = _explorer_refresh_timers.get(debounce_key)
+        if existing_timer:
+            existing_timer.cancel()
+        
+        def do_broadcast():
+            with _explorer_refresh_lock:
+                _explorer_refresh_timers.pop(debounce_key, None)
+            asyncio.run_coroutine_threadsafe(
+                _broadcast_draft_decorations(project_path),
+                _explorer_event_loop
+            )
+        
+        # Use a slightly longer debounce for drafts (500ms) since autosave is frequent
+        timer = Timer(0.5, do_broadcast)
+        _explorer_refresh_timers[debounce_key] = timer
+        timer.start()
+
+
 # --- Helpers ---
 
 def _get_parent_rel(rel_path: str) -> str:
@@ -616,6 +665,8 @@ class ExplorerDispatcher:
         # Save changes disk -> affects git status and draft state
         await self.emit_personal("review:saved", res, msg_id) # Ack to sender
         mark_git_cache_dirty(self.project_root)
+        from .explorer_helper import mark_draft_cache_dirty
+        mark_draft_cache_dirty(self.project_root)
         await self.broadcast_git_status()
         await self.broadcast_review_state()
 
@@ -623,6 +674,8 @@ class ExplorerDispatcher:
         files = payload.get("files", [])
         res = await review.discard_reviews(self.project_root, files)
         await self.emit_personal("review:discarded", res, msg_id)
+        from .explorer_helper import mark_draft_cache_dirty
+        mark_draft_cache_dirty(self.project_root)
         await self.broadcast_review_state()
 
 
