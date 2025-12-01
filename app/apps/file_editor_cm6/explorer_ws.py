@@ -134,6 +134,7 @@ def notify_explorer_of_change(abs_path: str, event_type: str):
     """
     Called by the file watcher when a file/directory is created, deleted, or modified.
     Schedules an explorer refresh for the affected directory (debounced).
+    Also triggers git status update for the whole project.
     """
     if not _explorer_event_loop or not manager.active_connections:
         return
@@ -146,7 +147,7 @@ def notify_explorer_of_change(abs_path: str, event_type: str):
                 rel_path = _get_rel_from_abs(abs_path, project_path)
                 parent_rel = _get_parent_rel(rel_path)
                 
-                # Debounce: cancel existing timer and set a new one
+                # Debounce directory refresh
                 debounce_key = f"{project_path}:{parent_rel}"
                 with _explorer_refresh_lock:
                     existing_timer = _explorer_refresh_timers.get(debounce_key)
@@ -164,10 +165,48 @@ def notify_explorer_of_change(abs_path: str, event_type: str):
                     timer = Timer(EXPLORER_REFRESH_DEBOUNCE, do_refresh)
                     _explorer_refresh_timers[debounce_key] = timer
                     timer.start()
+                
+                # Also trigger git status update (debounced separately)
+                # This ensures parent directories get updated even when collapsed
+                _schedule_git_status_broadcast(project_path)
                     
             except Exception as e:
                 logger.warning(f"Failed to notify explorer of change: {e}")
             break
+
+
+def _schedule_git_status_broadcast(project_path: str):
+    """Schedule a debounced git status broadcast for the project."""
+    debounce_key = f"git:{project_path}"
+    with _explorer_refresh_lock:
+        existing_timer = _explorer_refresh_timers.get(debounce_key)
+        if existing_timer:
+            existing_timer.cancel()
+        
+        def do_broadcast():
+            with _explorer_refresh_lock:
+                _explorer_refresh_timers.pop(debounce_key, None)
+            asyncio.run_coroutine_threadsafe(
+                _broadcast_git_status_update(project_path),
+                _explorer_event_loop
+            )
+        
+        # Use slightly longer debounce for git status (500ms)
+        timer = Timer(0.5, do_broadcast)
+        _explorer_refresh_timers[debounce_key] = timer
+        timer.start()
+
+
+async def _broadcast_git_status_update(project_path: str):
+    """Broadcast git status decorations for a project."""
+    try:
+        from pathlib import Path
+        mark_git_cache_dirty(Path(project_path))
+        statuses = get_all_git_statuses()
+        msg = {"type": "explorer:updateGitStatus", "payload": {"statuses": statuses}}
+        await manager.broadcast(project_path, msg)
+    except Exception as e:
+        logger.warning(f"Failed to broadcast git status update: {e}")
 
 async def _refresh_explorer_directory(project_path: str, rel_dir: str):
     """Broadcasts an explorer:setList for the given directory."""

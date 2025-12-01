@@ -45,6 +45,24 @@ let gitDiffBase = { ref: 'HEAD', mode: 'none', commit: null };
 let searchBaseBtn = null;
 let searchBaseDropdown = null;
 
+/**
+ * Format a hunk header in human-readable form.
+ * @param {object} hunk - Hunk object with oldStart, oldLines, newStart, newLines
+ * @returns {string} Human-readable line range description
+ */
+function formatHunkHeader(hunk) {
+  const oldEnd = hunk.oldStart + hunk.oldLines - 1;
+  const newEnd = hunk.newStart + hunk.newLines - 1;
+  
+  // For single-line changes
+  if (hunk.newLines === 1) {
+    return `Line ${hunk.newStart}`;
+  }
+  
+  // For multi-line changes
+  return `Lines ${hunk.newStart}–${newEnd}`;
+}
+
 function formatDiffBaseLabel(info, withPrefix = true) {
   if (!info || info.mode === 'none') {
     return withPrefix ? 'Status: (no git)' : 'No Git';
@@ -899,11 +917,13 @@ function handleExplorerEvent(type, payload) {
       const OUTLINE_STATUSES = new Set(['modified', 'staged', 'staged_modified', 'added', 'deleted', 'renamed', 'conflict']);
       const STAGED_STATUSES = new Set(['staged', 'staged_modified', 'added']);
 
-      // Step 1: Clear all git status classes and aggregated flags from all nodes
+      // Step 1: Clear git status classes (but preserve draft flags)
       root.querySelectorAll('li.fe-tree-node').forEach((li) => {
         const classesToRemove = [];
         li.classList.forEach((cls) => {
-          if (cls.startsWith('fe-git-') || cls.startsWith('fe-dir-has-')) {
+          // Remove git-related classes but NOT draft-related ones
+          if (cls.startsWith('fe-git-') || 
+              (cls.startsWith('fe-dir-has-') && !cls.includes('draft'))) {
             classesToRemove.push(cls);
           }
         });
@@ -2864,7 +2884,7 @@ function renderChangesList(container, data, wasOriginallyEmpty, query) {
 
         const hunkHeader = document.createElement('div');
         hunkHeader.className = 'fe-search-hunk-header';
-        hunkHeader.textContent = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
+        hunkHeader.textContent = formatHunkHeader(hunk);
         hunkHeader.dataset.line = Number(hunk.newStart || hunk.oldStart || 1);
         hunkBlock.appendChild(hunkHeader);
 
@@ -3101,7 +3121,7 @@ function renderReviewResults(container, data) {
 
         const hunkHeader = document.createElement('div');
         hunkHeader.className = 'fe-search-hunk-header';
-        hunkHeader.textContent = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
+        hunkHeader.textContent = formatHunkHeader(hunk);
         hunkHeader.dataset.line = Number(hunk.newStart || hunk.oldStart || 1);
         hunkBlock.appendChild(hunkHeader);
 
