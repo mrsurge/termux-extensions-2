@@ -2,8 +2,8 @@
 
 **Architecture Philosophy:** Code CM6 implements the code-server pattern - disk-backed state with ephemeral UI clients. Multiple devices (desktop, mobile, vim) converge on the same backend without sync logic.
 
-**Document Version:** 1.0  
-**Last Updated:** 2025-11-21  
+**Document Version:** 1.1  
+**Last Updated:** 2025-12-01  
 **Target Audience:** Framework contributors, extension developers, and technical users
 
 This document provides a comprehensive technical overview of Code CM6's internal architecture, focusing on the frameworks, patterns, and implementation details that make the editor function.
@@ -943,101 +943,238 @@ def _normalize_project_path(self, project: Path) -> str:
 
 ## 8. Explorer System
 
-### 8.1 Tree Generation
+The explorer underwent a major architectural refactor from REST/fetch to WebSocket-driven communication (December 2025). The previous REST-based approach required polling for updates; the new architecture enables real-time bidirectional communication.
 
-**File:** `app/apps/file_editor_cm6/explorer_helper.py` (500+ lines)
+### 8.0 Architecture Overview
 
-Generates hierarchical file tree with Git status enrichment:
+**Previous Architecture (Deprecated):**
+- REST endpoints for all explorer operations (`GET /explorer/tree`, `POST /explorer/create`, etc.)
+- Frontend polled for git status updates
+- No live notification of external file changes
+- Draft status computed only on tree render
 
-```python
-def list_dir(
-    path: Path,
-    project_root: Path,
-    git_status: Optional[dict] = None,
-    max_depth: int = 3
-) -> list:
-    entries = []
-    
-    for item in sorted(path.iterdir()):
-        if _should_ignore(item):
-            continue
-        
-        rel_path = item.relative_to(project_root)
-        entry = {
-            'name': item.name,
-            'rel': str(rel_path),
-            'type': 'dir' if item.is_dir() else 'file',
-            'git_status': git_status.get(str(rel_path), '') if git_status else '',
-        }
-        
-        # Recurse for directories (up to max_depth)
-        if item.is_dir() and max_depth > 0:
-            entry['children'] = list_dir(item, project_root, git_status, max_depth - 1)
-        
-        entries.append(entry)
-    
-    return entries
+**Current Architecture (WebSocket-Driven):**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Browser (Client)                          │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │              explorer.js (2800+ lines)                │   │
+│  │  - WebSocket message handlers                         │   │
+│  │  - Path-based status propagation                      │   │
+│  │  - DOM-efficient updates (no full tree rebuild)       │   │
+│  └──────────────────────┬───────────────────────────────┘   │
+└─────────────────────────┼───────────────────────────────────┘
+                          │ WebSocket (explorer_ws)
+┌─────────────────────────▼───────────────────────────────────┐
+│             FastAPI Backend (Python)                         │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │           explorer_ws.py (700+ lines)                  │  │
+│  │  - ConnectionManager (project-based tracking)          │  │
+│  │  - Message dispatcher (explorer:*, git:*, search:*)    │  │
+│  │  - Broadcast helpers (git status, draft decorations)   │  │
+│  │  - File watcher integration                            │  │
+│  └───────────────────────┬───────────────────────────────┘  │
+│                          │                                   │
+│  ┌───────────────────────▼───────────────────────────────┐  │
+│  │        explorer_helper.py / git_helper.py              │  │
+│  │  - list_dir() with git flags + draft status            │  │
+│  │  - Draft cache (5s TTL)                                │  │
+│  │  - Git status cache (6s TTL)                           │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 8.2 Search by Changes
+### 8.1 WebSocket Protocol
 
-**Endpoint:** `GET /explorer/search?mode=changes`
+**Connection Lifecycle:**
+1. Client connects to `/ws/explorer`
+2. Server registers connection with `ConnectionManager` keyed by project path
+3. Server sends initial state: `project:setActive`, `explorer:setList`, `git:status`
+4. Bidirectional messages flow until disconnect
 
-**Backend** (`main.py`):
+**Message Types:**
+
+| Direction | Event | Purpose |
+|-----------|-------|---------|
+| **Client → Server** | `explorer:list` | Request directory listing |
+| | `explorer:createFile` | Create new file |
+| | `explorer:createDir` | Create new directory |
+| | `explorer:rename` | Rename file/directory |
+| | `explorer:delete` | Delete file/directory |
+| | `git:stage` | Stage files |
+| | `git:unstage` | Unstage files |
+| | `git:commit` | Commit with message |
+| | `search:run` | Execute search |
+| | `review:save` | Save draft files |
+| | `review:discard` | Discard drafts |
+| **Server → Client** | `explorer:setList` | Directory contents |
+| | `explorer:updateDecorations` | Draft status update |
+| | `explorer:updateGitStatus` | Git status update |
+| | `git:status` | Full git status |
+| | `git:diffBaseSet` | Diff base changed |
+| | `search:setResults` | Search results |
+| | `review:setEntries` | Draft file list |
+
+### 8.2 ConnectionManager
+
+**File:** `app/apps/file_editor_cm6/explorer_ws.py`
 
 ```python
-def _search_by_changes(project_root: Path) -> dict:
-    base_ref = _history_store.get_diff_base(project_root)
-    changes = get_worktree_changes(project_root, base_ref)
+class ConnectionManager:
+    def __init__(self):
+        # Map: project_path -> List[WebSocket]
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+        # Map: websocket -> project_path (for cleanup)
+        self.ws_project_map: Dict[WebSocket, str] = {}
+
+    async def broadcast(self, project_path: str, message: Dict[str, Any]):
+        """Send message to all clients connected to a specific project."""
+        if project_path in self.active_connections:
+            text = json.dumps(message)
+            for connection in self.active_connections[project_path]:
+                await connection.send_text(text)
+
+    def has_connections(self, project_path: str) -> bool:
+        return len(self.active_connections.get(project_path, [])) > 0
+```
+
+### 8.3 File Watcher Integration
+
+The file watcher (`core_read.py`) notifies the explorer of external changes:
+
+```python
+def notify_explorer_of_change(abs_path: str, event_type: str):
+    """Called by file watcher on create/modify/delete."""
+    # 1. Refresh parent directory listing (debounced 250ms)
+    _schedule_directory_refresh(project_path, parent_rel)
     
-    results = []
-    for change in changes[:CHANGE_RESULT_LIMIT]:
-        file_path = project_root / change.path
-        if not file_path.exists() and change.status != 'D':
-            continue
-        
-        # Collect diff hunks
-        diff_data = collect_diff(project_root, file_path, base_ref)
-        
-        results.append({
-            'rel': change.path,
-            'status': change.status,
-            'statusText': STATUS_TEXT_MAP.get(change.status, 'Unknown'),
-            'hunks': diff_data['hunks']
-        })
-    
-    return {
-        'mode': 'changes',
-        'base_ref': base_ref,
-        'changes': results,
-        'truncated': len(changes) > CHANGE_RESULT_LIMIT
+    # 2. Broadcast git status update (debounced 500ms)
+    _schedule_git_status_broadcast(project_path)
+```
+
+This ensures:
+- Directory listings update when files are created/deleted externally
+- Git status propagates to all ancestor directories even when collapsed
+
+### 8.4 Status Propagation
+
+**Problem:** Collapsed directories don't have children in DOM, so status can't propagate via DOM traversal.
+
+**Solution:** Path-based computation in both backend and frontend.
+
+**Backend (`explorer_helper.py`):**
+```python
+# For directories: compute gitFlags from all descendants
+git_flags = _derive_git_flags(rel_path, kind, status_map)
+# Returns: ['modified', 'staged', 'untracked'] etc.
+
+# For directories: check if any draft path starts with this dir
+has_draft = any(d.startswith(prefix) for d in draft_rel_paths)
+```
+
+**Frontend (`explorer.js`):**
+```javascript
+// Compute ancestor directories from file paths
+Object.entries(statuses).forEach(([rel, status]) => {
+  const parts = rel.split('/');
+  for (let i = 1; i < parts.length; i++) {
+    const dirRel = parts.slice(0, i).join('/');
+    if (OUTLINE_STATUSES.has(status)) {
+      modifiedDirs.add(dirRel);
     }
+  }
+});
+
+// Apply to DOM nodes that exist
+modifiedDirs.forEach((dirRel) => {
+  const li = root.querySelector(`li[data-rel="${dirRel}"]`);
+  if (li) li.classList.add('fe-dir-has-modified');
+});
 ```
 
-**Frontend filtering** (`explorer.js`):
+### 8.5 Draft State Notifications
+
+When draft state changes (file edited/saved/discarded), the explorer updates live:
+
+```python
+def notify_draft_state_changed(project_path: str):
+    """Called after upsert_cached_document or clear_cached_document."""
+    # Normalize path to match connection registration
+    normalized_path = str(Path(project_path).resolve())
+    
+    # Invalidate cache
+    mark_draft_cache_dirty(Path(project_path))
+    
+    # Schedule debounced broadcast (500ms)
+    # Broadcasts explorer:updateDecorations with current draft state
+```
+
+**Frontend handler:**
+```javascript
+case 'explorer:updateDecorations': {
+  // Step 1: Clear ALL draft flags
+  root.querySelectorAll('li.fe-tree-node').forEach((li) => {
+    li.classList.remove('fe-draft', 'fe-dir-has-draft');
+  });
+  
+  // Step 2: Apply to files in DOM
+  // Step 3: Compute ancestors from paths
+  // Step 4: Apply fe-dir-has-draft to ancestors
+  // Step 5: Mark root if any drafts exist
+}
+```
+
+### 8.6 Tree Generation
+
+**File:** `app/apps/file_editor_cm6/explorer_helper.py`
+
+```python
+def list_dir(rel: str = '.') -> dict:
+    root = get_project_root()
+    draft_rel_paths = _collect_project_draft_rel_paths(root)  # Cached 5s
+    status_map = _get_git_status_snapshot(root)  # Cached 6s
+    
+    entries = []
+    with os.scandir(base) as it:
+        for e in it:
+            rel_path = str((base / e.name).relative_to(root))
+            kind = 'dir' if e.is_dir() else 'file'
+            
+            entries.append({
+                'name': e.name,
+                'rel': rel_path,
+                'kind': kind,
+                'gitStatus': _derive_git_status(rel_path, kind, status_map),
+                'gitFlags': _derive_git_flags(rel_path, kind, status_map),
+                'hasDraft': has_draft,  # For files or dirs with draft descendants
+                # ... other metadata
+            })
+    
+    return {'cwd': cwd, 'entries': entries}
+```
+
+### 8.7 Search Implementation
+
+**Search Modes:**
+1. **By Name:** Filename pattern matching
+2. **By Content:** ripgrep or Python fallback
+3. **By Changes:** Git diff with inline hunks
+4. **Review:** Draft files with diff preview
+
+**Search by Changes** fetches full diff data once, then filters client-side:
 
 ```javascript
 function applyChangesFilter(query) {
-  if (!query) {
-    renderChangesList(lastChangesData.changes);
-    return;
-  }
-  
   const regex = new RegExp(query, 'i');
   const filtered = lastChangesData.changes.map(change => {
-    // Match filename
     const filenameMatch = regex.test(change.rel);
-    
-    // Match hunk content
-    const matchingHunks = change.hunks.filter(hunk => 
+    const matchingHunks = change.hunks.filter(hunk =>
       hunk.lines.some(line => regex.test(line.text))
     );
     
     if (filenameMatch || matchingHunks.length > 0) {
-      return {
-        ...change,
-        hunks: matchingHunks.length > 0 ? matchingHunks : change.hunks
-      };
+      return { ...change, hunks: matchingHunks.length > 0 ? matchingHunks : change.hunks };
     }
     return null;
   }).filter(Boolean);
@@ -1046,23 +1183,18 @@ function applyChangesFilter(query) {
 }
 ```
 
-### 8.3 Highlighting Implementation
+### 8.8 Hunk Header Formatting
+
+Diff hunks display human-readable line ranges instead of git notation:
 
 ```javascript
-function highlightText(text, query, className) {
-  if (!query) return text;
-  
-  const parts = text.split(new RegExp(`(${query})`, 'gi'));
-  return parts.map(part => 
-    part.toLowerCase() === query.toLowerCase()
-      ? `<span class="${className}">${part}</span>`
-      : part
-  ).join('');
+function formatHunkHeader(hunk) {
+  if (hunk.newLines === 1) {
+    return `Line ${hunk.newStart}`;
+  }
+  return `Lines ${hunk.newStart}–${hunk.newStart + hunk.newLines - 1}`;
 }
-
-// Usage
-const highlightedFilename = highlightText(change.rel, query, 'fe-highlight-file');
-const highlightedContent = highlightText(line.text, query, 'fe-highlight-text');
+// "Lines 42–50" instead of "@@ -40,5 +42,9 @@"
 ```
 
 ---
@@ -2535,6 +2667,22 @@ function showCardMenu(button, entry) {
 ---
 
 **Document Complete**  
-**Version:** 1.1  
-**Last Updated:** 2025-11-21  
+**Version:** 1.2  
+**Last Updated:** 2025-12-01  
 **Next Review:** When major features added or architecture changes
+
+---
+
+## Changelog
+
+### v1.2 (2025-12-01)
+- **Section 8 rewritten:** Complete explorer architecture documentation reflecting WebSocket refactor
+- Added ConnectionManager, message protocol, status propagation, and file watcher integration
+- Documented draft notification flow and hunk header formatting
+
+### v1.1 (2025-11-24)
+- Added minimap extension documentation (Section 17)
+- Added color picker extension details (Section 16)
+
+### v1.0 (2025-11-21)
+- Initial technical documentation

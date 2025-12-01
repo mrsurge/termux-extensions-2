@@ -1510,6 +1510,7 @@ export async function initExplorerUI() {
       // Clipboard + move/copy actions for both files and dirs
       items.push({ label: 'Copy Name', type: 'copyName' });
       items.push({ label: 'Copy Path', type: 'copyPath' });
+      items.push({ label: 'Copy Relative Path', type: 'copyRelPath' });
       items.push({ divider: true });
       items.push({ label: 'Copy to…', type: 'copyTo' });
       items.push({ label: 'Move to…', type: 'moveTo' });
@@ -1538,6 +1539,26 @@ export async function initExplorerUI() {
       }
       if (isFile && gitStatus && gitStatus !== 'clean') {
         items.push({ label: 'Restore…', type: 'restore' });
+      }
+
+      // Git actions for directories with dirty descendants
+      if (isDir) {
+        const dirLi = treeElement?.querySelector(
+          `li.fe-tree-node[data-kind="dir"][data-rel="${entry.rel}"]`
+        );
+        const hasDirtyDescendants = dirLi && (
+          dirLi.classList.contains('fe-dir-has-modified') ||
+          dirLi.classList.contains('fe-dir-has-untracked')
+        );
+        const hasStagedDescendants = dirLi && 
+          dirLi.classList.contains('fe-dir-has-staged');
+        
+        if (hasDirtyDescendants) {
+          items.push({ label: 'Stage All in Folder…', type: 'stageDir' });
+        }
+        if (hasStagedDescendants) {
+          items.push({ label: 'Unstage All in Folder…', type: 'unstageDir' });
+        }
       }
 
       items.push({ divider: true });
@@ -1697,6 +1718,24 @@ export async function initExplorerUI() {
             }
             break;
           }
+          case 'copyRelPath': {
+            try {
+              if (
+                !navigator ||
+                !navigator.clipboard ||
+                !navigator.clipboard.writeText
+              ) {
+                toast('Clipboard not available');
+                break;
+              }
+              const relPath = rel || '.';
+              await navigator.clipboard.writeText(relPath);
+              toast('Copied relative path to clipboard');
+            } catch {
+              toast('Failed to copy relative path');
+            }
+            break;
+          }
           case 'copyTo': {
             if (!window.teFilePicker) {
               toast('File picker not available');
@@ -1843,6 +1882,40 @@ export async function initExplorerUI() {
             try {
               window.__explorerBusSend('git:unstage', { paths: [rel] });
               toast(`Unstaged ${entry.name}`);
+            } catch (err) {
+              toast(err?.message || 'Unstage failed');
+            }
+            break;
+          }
+          case 'stageDir': {
+            if (typeof window.__explorerBusSend !== 'function') {
+              toast('Explorer connection unavailable.');
+              break;
+            }
+            const stageConfirmed = window.confirm(
+              `Stage all changes in "${entry.name}"?\n\nThis will stage all modified and untracked files in this directory.`,
+            );
+            if (!stageConfirmed) break;
+            try {
+              window.__explorerBusSend('git:stage', { paths: [rel] });
+              toast(`Staged all in ${entry.name}`);
+            } catch (err) {
+              toast(err?.message || 'Stage failed');
+            }
+            break;
+          }
+          case 'unstageDir': {
+            if (typeof window.__explorerBusSend !== 'function') {
+              toast('Explorer connection unavailable.');
+              break;
+            }
+            const unstageConfirmed = window.confirm(
+              `Unstage all changes in "${entry.name}"?\n\nThis will unstage all staged files in this directory.`,
+            );
+            if (!unstageConfirmed) break;
+            try {
+              window.__explorerBusSend('git:unstage', { paths: [rel] });
+              toast(`Unstaged all in ${entry.name}`);
             } catch (err) {
               toast(err?.message || 'Unstage failed');
             }
