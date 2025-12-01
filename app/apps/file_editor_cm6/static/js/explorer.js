@@ -713,6 +713,7 @@ function handleExplorerEvent(type, payload) {
       // Statuses that warrant the orange "modified" outline on parent directories
       // (actual changes to tracked content)
       const OUTLINE_STATUSES = new Set(['modified', 'staged', 'staged_modified', 'added', 'deleted', 'renamed', 'conflict']);
+      const STAGED_STATUSES = new Set(['staged', 'staged_modified', 'added']);
 
       // Step 1: Clear all git status classes and aggregated flags from all nodes
       root.querySelectorAll('li.fe-tree-node').forEach((li) => {
@@ -724,6 +725,7 @@ function handleExplorerEvent(type, payload) {
         });
         classesToRemove.forEach((cls) => li.classList.remove(cls));
         delete li.dataset.gitStatus;
+        delete li.dataset.gitFlags;
       });
 
       // Step 2: Apply file statuses to nodes that exist in DOM
@@ -738,46 +740,46 @@ function handleExplorerEvent(type, payload) {
         }
       });
 
-      // Step 3: Compute ancestor directories for orange outline (modified)
-      // Only for statuses that represent changes to tracked content
+      // Step 3: Compute ancestor directories for each flag type
       const modifiedDirs = new Set();
-      Object.entries(statuses).forEach(([rel, status]) => {
-        if (!OUTLINE_STATUSES.has(status)) return;
-        const parts = rel.split('/');
-        for (let i = 1; i < parts.length; i++) {
-          modifiedDirs.add(parts.slice(0, i).join('/'));
-        }
-      });
-
-      // Step 4: Compute ancestor directories for blue background (untracked)
+      const stagedDirs = new Set();
       const untrackedDirs = new Set();
+      
       Object.entries(statuses).forEach(([rel, status]) => {
-        if (status !== 'untracked') return;
+        if (!status || status === 'clean') return;
         const parts = rel.split('/');
         for (let i = 1; i < parts.length; i++) {
-          untrackedDirs.add(parts.slice(0, i).join('/'));
+          const dirRel = parts.slice(0, i).join('/');
+          
+          if (OUTLINE_STATUSES.has(status)) {
+            modifiedDirs.add(dirRel);
+          }
+          if (STAGED_STATUSES.has(status)) {
+            stagedDirs.add(dirRel);
+          }
+          if (status === 'untracked') {
+            untrackedDirs.add(dirRel);
+          }
         }
       });
 
-      // Step 5: Apply 'modified' to directories with tracked changes
-      modifiedDirs.forEach((dirRel) => {
+      // Step 4: Apply directory flags
+      const allDirRels = new Set([...modifiedDirs, ...stagedDirs, ...untrackedDirs]);
+      allDirRels.forEach((dirRel) => {
         const li = root.querySelector(
           `li.fe-tree-node[data-kind="dir"][data-rel="${dirRel}"]`
         );
-        if (li) {
-          li.classList.add('fe-git-modified');
+        if (!li) return;
+        
+        if (modifiedDirs.has(dirRel)) {
           li.classList.add('fe-dir-has-modified');
+          li.classList.add('fe-git-modified');
           li.dataset.gitStatus = 'modified';
         }
-      });
-
-      // Step 6: Apply 'untracked' to directories with only untracked files
-      // (but not if they already have 'modified' from tracked changes)
-      untrackedDirs.forEach((dirRel) => {
-        const li = root.querySelector(
-          `li.fe-tree-node[data-kind="dir"][data-rel="${dirRel}"]`
-        );
-        if (li) {
+        if (stagedDirs.has(dirRel)) {
+          li.classList.add('fe-dir-has-staged');
+        }
+        if (untrackedDirs.has(dirRel)) {
           li.classList.add('fe-dir-has-untracked');
           if (!modifiedDirs.has(dirRel)) {
             li.classList.add('fe-git-untracked');
@@ -786,17 +788,17 @@ function handleExplorerEvent(type, payload) {
         }
       });
 
-      // Step 7: Mark root if there are any dirty files
-      if (modifiedDirs.size > 0) {
-        const rootLi = root.querySelector('li.fe-tree-node.fe-tree-root');
-        if (rootLi) {
+      // Step 5: Mark root if there are any dirty files
+      const rootLi = root.querySelector('li.fe-tree-node.fe-tree-root');
+      if (rootLi) {
+        if (modifiedDirs.size > 0) {
           rootLi.classList.add('fe-git-modified');
           rootLi.classList.add('fe-dir-has-modified');
         }
-      }
-      if (untrackedDirs.size > 0) {
-        const rootLi = root.querySelector('li.fe-tree-node.fe-tree-root');
-        if (rootLi) {
+        if (stagedDirs.size > 0) {
+          rootLi.classList.add('fe-dir-has-staged');
+        }
+        if (untrackedDirs.size > 0) {
           rootLi.classList.add('fe-dir-has-untracked');
           if (modifiedDirs.size === 0) {
             rootLi.classList.add('fe-git-untracked');
