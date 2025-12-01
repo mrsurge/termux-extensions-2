@@ -295,12 +295,12 @@
   border-left-color: #34d399;
 }
 
-.fe-tree-node.fe-git-staged-modified {
+.fe-tree-node.fe-git-staged_modified {
   border-left-color: #22d3ee;
 }
 
 .fe-tree-node.fe-git-added {
-  border-left-color: #8b5cf6;
+  border-left-color: #34d399;
 }
 
 .fe-tree-node.fe-git-deleted {
@@ -367,13 +367,13 @@
   background: rgba(52, 211, 153, 0.15);
 }
 
-/* Both untracked + staged descendants: blue→green gradient. */
+/* Both untracked + staged descendants: smooth diagonal blue→green gradient. */
 .fe-tree-node[data-kind="dir"].fe-dir-has-untracked.fe-dir-has-staged {
   background: linear-gradient(
-    90deg,
+    135deg,
     rgba(59, 130, 246, 0.18) 0%,
-    rgba(59, 130, 246, 0.18) 50%,
-    rgba(52, 211, 153, 0.18) 50%,
+    rgba(59, 130, 246, 0.12) 40%,
+    rgba(52, 211, 153, 0.12) 60%,
     rgba(52, 211, 153, 0.18) 100%
   );
 }
@@ -385,7 +385,18 @@
 
 /* Untracked files: blue background. */
 .fe-tree-node.fe-git-untracked[data-kind="file"] {
-  background: rgba(59, 130, 246, 0.15);
+  background: rgba(49, 80, 129, 0.7);
+}
+
+/* Staged files: green background. */
+.fe-tree-node.fe-git-staged[data-kind="file"],
+.fe-tree-node.fe-git-added[data-kind="file"] {
+  background: rgba(32, 111, 82, 0.7);
+}
+
+/* Staged+modified files: keep orange (modified takes priority visually). */
+.fe-tree-node.fe-git-staged_modified[data-kind="file"] {
+  background: rgba(249, 115, 22, 0.15);
 }
 
 .fe-tree-node.fe-git-modified[data-kind="file"]:hover {
@@ -394,6 +405,15 @@
 
 .fe-tree-node.fe-git-untracked[data-kind="file"]:hover {
   background: rgba(59, 130, 246, 0.22);
+}
+
+.fe-tree-node.fe-git-staged[data-kind="file"]:hover,
+.fe-tree-node.fe-git-added[data-kind="file"]:hover {
+  background: rgba(52, 211, 153, 0.22);
+}
+
+.fe-tree-node.fe-git-staged_modified[data-kind="file"]:hover {
+  background: rgba(249, 115, 22, 0.22);
 }
 
 .fe-git-footer {

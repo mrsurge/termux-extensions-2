@@ -100,6 +100,7 @@ def list_dir(rel: str = '.') -> dict:
                 rel_path = str((base / e.name).relative_to(root))
                 kind = 'dir' if e.is_dir(follow_symlinks=False) else 'file'
                 git_status = _derive_git_status(rel_path, kind, status_map)
+                git_flags = _derive_git_flags(rel_path, kind, status_map)
 
                 has_draft = rel_path in draft_rel_paths
 
@@ -112,6 +113,7 @@ def list_dir(rel: str = '.') -> dict:
                     'mode': oct(mode),
                     'ext': ext,
                     'gitStatus': git_status,
+                    'gitFlags': git_flags,
                     'isExecutable': bool(mode & stat.S_IXUSR),
                     'isSymlink': e.is_symlink(),
                     'hasDraft': has_draft,
@@ -248,29 +250,82 @@ def _map_git_code(code: str) -> str:
 
 
 def _derive_git_status(rel_path: str, kind: str, status_map: Dict[str, str]) -> str:
+    """Returns the primary git status for display. For directories, use
+    _derive_git_flags() to get all applicable flags."""
     if not rel_path:
         return status_map.get(rel_path, 'clean')
 
     if kind == 'file':
         return status_map.get(rel_path, 'clean')
 
-    # For directories: if ANY child has a "dirty" status, return 'modified'
-    # This ensures the orange outline breadcrumb appears regardless of whether
-    # children are staged, modified, untracked, etc.
-    # Excluded: 'clean' and 'ignored' (ignored files shouldn't trigger the outline)
+    # For directories: check for children that warrant the orange "modified" outline
+    # These are statuses representing actual changes to tracked content:
+    # modified, staged, staged_modified, added, deleted, renamed, conflict
+    # Excluded: clean, ignored, untracked (untracked gets blue background, not orange outline)
+    OUTLINE_STATUSES = ('modified', 'staged', 'staged_modified', 'added', 'deleted', 'renamed', 'conflict')
+    
     dir_status = status_map.get(rel_path)
-    if dir_status and dir_status not in ('clean', 'ignored'):
+    if dir_status and dir_status in OUTLINE_STATUSES:
         return 'modified'
 
     child_statuses = list(_statuses_for_prefix(rel_path, status_map))
     if not child_statuses:
         return 'clean'
     
-    # If any child is dirty (not clean/ignored), directory gets 'modified' (orange outline)
+    # If any child warrants the orange outline, directory gets 'modified'
     for status in child_statuses:
-        if status and status not in ('clean', 'ignored'):
+        if status in OUTLINE_STATUSES:
             return 'modified'
+    
+    # Check for untracked - directory gets 'untracked' for blue background
+    for status in child_statuses:
+        if status == 'untracked':
+            return 'untracked'
+    
     return 'clean'
+
+
+def _derive_git_flags(rel_path: str, kind: str, status_map: Dict[str, str]) -> list:
+    """Returns a list of git flags for a directory entry.
+    
+    For files, returns a single-element list with the file's status.
+    For directories, returns all applicable flags based on descendants:
+    - 'modified': has modified/staged/added/deleted/renamed/conflict descendants
+    - 'untracked': has untracked descendants
+    - 'staged': has staged descendants
+    - 'conflict': has conflict descendants
+    """
+    if kind == 'file':
+        status = status_map.get(rel_path, 'clean')
+        return [status] if status and status != 'clean' else []
+
+    # For directories, collect all flags based on child statuses
+    OUTLINE_STATUSES = frozenset(('modified', 'staged', 'staged_modified', 'added', 'deleted', 'renamed', 'conflict'))
+    STAGED_STATUSES = frozenset(('staged', 'staged_modified', 'added'))
+    
+    child_statuses = set(_statuses_for_prefix(rel_path, status_map))
+    if not child_statuses:
+        return []
+    
+    flags = []
+    
+    # Check for modified (orange outline)
+    if child_statuses & OUTLINE_STATUSES:
+        flags.append('modified')
+    
+    # Check for untracked (blue background)
+    if 'untracked' in child_statuses:
+        flags.append('untracked')
+    
+    # Check for staged (green background)
+    if child_statuses & STAGED_STATUSES:
+        flags.append('staged')
+    
+    # Check for conflict (red indicator)
+    if 'conflict' in child_statuses:
+        flags.append('conflict')
+    
+    return flags
 
 
 def _statuses_for_prefix(rel_path: str, status_map: Dict[str, str]) -> Iterable[str]:

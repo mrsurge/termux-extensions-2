@@ -379,6 +379,15 @@ function renderEntriesInto(containerUl, entries) {
       li.classList.add(`fe-git-${entry.gitStatus}`);
     }
 
+    // Apply gitFlags for directories - these represent all descendant statuses
+    const flags = entry.gitFlags || [];
+    if (flags.length > 0) {
+      li.dataset.gitFlags = flags.join(',');
+      flags.forEach((flag) => {
+        li.classList.add(`fe-dir-has-${flag}`);
+      });
+    }
+
     const iconSpan = document.createElement('span');
     iconSpan.className = `fe-entry-icon fe-entry-icon-${entry.kind || 'file'}`;
 
@@ -409,14 +418,10 @@ function applyAggregatedGitStatusFlags() {
   const root = treeElement;
   if (!root) return;
 
-  // Clear previous aggregated flags on all directories.
+  // Clear previous aggregated flags on all directories (except those from gitFlags).
+  // We'll re-apply them below.
   root
-    .querySelectorAll(
-      'li.fe-tree-node[data-kind="dir"].fe-dir-has-modified,' +
-        'li.fe-tree-node[data-kind="dir"].fe-dir-has-staged,' +
-        'li.fe-tree-node[data-kind="dir"].fe-dir-has-untracked,' +
-        'li.fe-tree-node[data-kind="dir"].fe-dir-has-conflict',
-    )
+    .querySelectorAll('li.fe-tree-node[data-kind="dir"]')
     .forEach((li) => {
       li.classList.remove(
         'fe-dir-has-modified',
@@ -426,39 +431,55 @@ function applyAggregatedGitStatusFlags() {
       );
     });
 
-  // For each file node with a gitStatus, walk up its directory ancestors
-  // in the DOM and attach aggregated flags. This mirrors the draft-parent
-  // behavior and gives a breadcrumb-style highlight up to the project root.
-  const fileNodes = root.querySelectorAll(
-    'li.fe-tree-node[data-kind="file"][data-gitStatus]',
+  // For each node (file OR directory) with a gitStatus or gitFlags, walk up
+  // its directory ancestors in the DOM and attach aggregated flags.
+  // This handles:
+  // 1. Files with gitStatus -> propagate that status up
+  // 2. Directories with gitFlags -> propagate ALL flags up (handles collapsed dirs)
+  const nodesWithStatus = root.querySelectorAll(
+    'li.fe-tree-node[data-git-status], li.fe-tree-node[data-git-flags]',
   );
-  fileNodes.forEach((fileLi) => {
-    const status = fileLi.dataset.gitStatus || '';
-    let parent = fileLi.parentElement?.closest(
-      'li.fe-tree-node[data-kind="dir"]',
-    );
-    while (parent) {
-      // Treat staged_modified as both staged + modified (modified wins
-      // visually via the orange outline).
-      if (status === 'modified' || status === 'staged_modified') {
-        parent.classList.add('fe-dir-has-modified');
-      }
-      if (status === 'untracked') {
-        parent.classList.add('fe-dir-has-untracked');
-      }
-      if (
-        status === 'staged' ||
-        status === 'staged_modified' ||
-        status === 'added'
-      ) {
-        parent.classList.add('fe-dir-has-staged');
-      }
-      if (status === 'conflict') {
-        parent.classList.add('fe-dir-has-conflict');
-      }
-      parent = parent.parentElement?.closest(
-        'li.fe-tree-node[data-kind="dir"]',
-      );
+  
+  nodesWithStatus.forEach((node) => {
+    // Collect all statuses to propagate: from gitStatus and gitFlags
+    const statusesToPropagate = new Set();
+    
+    const status = node.dataset.gitStatus || '';
+    if (status && status !== 'clean') {
+      statusesToPropagate.add(status);
+    }
+    
+    // For directories, also include all gitFlags (these represent descendant statuses)
+    const flagsStr = node.dataset.gitFlags || '';
+    if (flagsStr) {
+      flagsStr.split(',').forEach((f) => {
+        if (f) statusesToPropagate.add(f);
+      });
+    }
+    
+    if (statusesToPropagate.size === 0) return;
+    
+    // Start from the node's parent (for files) or the node itself (for dirs)
+    let current = node.dataset.kind === 'dir' ? node : node.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
+    
+    while (current) {
+      statusesToPropagate.forEach((s) => {
+        // Map statuses to aggregated flag classes
+        if (s === 'modified' || s === 'staged_modified' || s === 'deleted' || s === 'renamed') {
+          current.classList.add('fe-dir-has-modified');
+        }
+        if (s === 'untracked') {
+          current.classList.add('fe-dir-has-untracked');
+        }
+        if (s === 'staged' || s === 'staged_modified' || s === 'added') {
+          current.classList.add('fe-dir-has-staged');
+        }
+        if (s === 'conflict') {
+          current.classList.add('fe-dir-has-conflict');
+        }
+      });
+      
+      current = current.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
     }
   });
 }
@@ -582,11 +603,15 @@ function handleExplorerEvent(type, payload) {
       const root = treeElement || document.getElementById('fe-file-tree');
       if (!root) break;
 
-      // Step 1: Clear all git status classes from all nodes
+      // Statuses that warrant the orange "modified" outline on parent directories
+      // (actual changes to tracked content)
+      const OUTLINE_STATUSES = new Set(['modified', 'staged', 'staged_modified', 'added', 'deleted', 'renamed', 'conflict']);
+
+      // Step 1: Clear all git status classes and aggregated flags from all nodes
       root.querySelectorAll('li.fe-tree-node').forEach((li) => {
         const classesToRemove = [];
         li.classList.forEach((cls) => {
-          if (cls.startsWith('fe-git-')) {
+          if (cls.startsWith('fe-git-') || cls.startsWith('fe-dir-has-')) {
             classesToRemove.push(cls);
           }
         });
@@ -606,35 +631,69 @@ function handleExplorerEvent(type, payload) {
         }
       });
 
-      // Step 3: Compute all ancestor directories that need 'modified' outline
-      // by walking up path segments from dirty files (excluding ignored/clean)
-      const dirtyDirs = new Set();
+      // Step 3: Compute ancestor directories for orange outline (modified)
+      // Only for statuses that represent changes to tracked content
+      const modifiedDirs = new Set();
       Object.entries(statuses).forEach(([rel, status]) => {
-        // Only propagate outline for "real" dirty statuses, not ignored
-        if (!status || status === 'clean' || status === 'ignored') return;
+        if (!OUTLINE_STATUSES.has(status)) return;
         const parts = rel.split('/');
-        // Walk up: a/b/c.txt -> mark 'a' and 'a/b' as dirty
         for (let i = 1; i < parts.length; i++) {
-          dirtyDirs.add(parts.slice(0, i).join('/'));
+          modifiedDirs.add(parts.slice(0, i).join('/'));
         }
       });
 
-      // Step 4: Apply 'modified' to all dirty ancestor directories in DOM
-      dirtyDirs.forEach((dirRel) => {
+      // Step 4: Compute ancestor directories for blue background (untracked)
+      const untrackedDirs = new Set();
+      Object.entries(statuses).forEach(([rel, status]) => {
+        if (status !== 'untracked') return;
+        const parts = rel.split('/');
+        for (let i = 1; i < parts.length; i++) {
+          untrackedDirs.add(parts.slice(0, i).join('/'));
+        }
+      });
+
+      // Step 5: Apply 'modified' to directories with tracked changes
+      modifiedDirs.forEach((dirRel) => {
         const li = root.querySelector(
           `li.fe-tree-node[data-kind="dir"][data-rel="${dirRel}"]`
         );
-        if (li && !li.classList.contains('fe-git-modified')) {
+        if (li) {
           li.classList.add('fe-git-modified');
-          li.dataset.gitStatus = li.dataset.gitStatus || 'modified';
+          li.classList.add('fe-dir-has-modified');
+          li.dataset.gitStatus = 'modified';
         }
       });
 
-      // Also mark root if there are any dirty files (excluding ignored)
-      if (dirtyDirs.size > 0) {
+      // Step 6: Apply 'untracked' to directories with only untracked files
+      // (but not if they already have 'modified' from tracked changes)
+      untrackedDirs.forEach((dirRel) => {
+        const li = root.querySelector(
+          `li.fe-tree-node[data-kind="dir"][data-rel="${dirRel}"]`
+        );
+        if (li) {
+          li.classList.add('fe-dir-has-untracked');
+          if (!modifiedDirs.has(dirRel)) {
+            li.classList.add('fe-git-untracked');
+            li.dataset.gitStatus = li.dataset.gitStatus || 'untracked';
+          }
+        }
+      });
+
+      // Step 7: Mark root if there are any dirty files
+      if (modifiedDirs.size > 0) {
         const rootLi = root.querySelector('li.fe-tree-node.fe-tree-root');
-        if (rootLi && !rootLi.classList.contains('fe-git-modified')) {
+        if (rootLi) {
           rootLi.classList.add('fe-git-modified');
+          rootLi.classList.add('fe-dir-has-modified');
+        }
+      }
+      if (untrackedDirs.size > 0) {
+        const rootLi = root.querySelector('li.fe-tree-node.fe-tree-root');
+        if (rootLi) {
+          rootLi.classList.add('fe-dir-has-untracked');
+          if (modifiedDirs.size === 0) {
+            rootLi.classList.add('fe-git-untracked');
+          }
         }
       }
       break;

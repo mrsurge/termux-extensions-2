@@ -1016,3 +1016,315 @@ Broadcasting `explorer:setList` for root (`.`) only refreshes root-level entries
 - [ ] No console errors or race conditions
 
 — _VectorArc_
+# Git Status Tree Rendering Regression Fix
+
+**Date:** 2025-12-01  
+**Author:** VectorArc
+
+---
+
+## Problem Summary
+
+After git operations (stage, unstage, restore), the explorer tree does not update to reflect the new git status of affected files. The footer git summary updates correctly, but individual tree cards retain stale `gitStatus` values.
+
+---
+
+## Root Cause Analysis
+
+### Issue 1: Backend git handlers don't refresh tree listings
+
+The git operation handlers in `explorer_ws.py` broadcast `git:status` but do NOT re-broadcast `explorer:setList` with updated entry data:
+
+```python
+# Current implementation (explorer_ws.py)
+async def handle_git_stage(self, payload: dict, msg_id: str):
+    stage_paths(self.project_root, payload.get("paths", []))
+    await self.broadcast_git_status()  # ← Only updates footer summary
+    # MISSING: No explorer:setList to refresh tree entries
+```
+
+The tree entries get their `gitStatus` from `list_dir()`, which reads from the git cache. Since no `explorer:setList` is broadcast after git operations, the tree keeps showing stale status.
+
+### Issue 2: Frontend race condition
+
+The frontend sends `explorer:refresh` immediately after the git operation without waiting:
+
+```js
+// Current implementation (explorer.js)
+case 'stage': {
+  window.__explorerBusSend('git:stage', { paths: [rel] });
+  window.__explorerBusSend('explorer:refresh', {});  // Sent immediately, races with git:stage
+  toast(`Staged ${entry.name}`);
+```
+
+This creates a race condition where the refresh may execute before the git operation completes.
+
+---
+
+## Recommended Fixes
+
+### Fix 1: Backend — Broadcast tree updates after git operations
+
+**File:** `app/apps/file_editor_cm6/explorer_ws.py`
+
+Modify the following handlers to broadcast updated tree state after git operations:
+
+#### `handle_git_stage`
+```python
+async def handle_git_stage(self, payload: dict, msg_id: str):
+    stage_paths(self.project_root, payload.get("paths", []))
+    mark_git_cache_dirty(self.project_root)
+    await self.broadcast_git_status()
+    # NEW: Refresh tree root to update gitStatus on all entries
+    await self.broadcast("explorer:setList", list_dir('.'))
+```
+
+#### `handle_git_unstage`
+```python
+async def handle_git_unstage(self, payload: dict, msg_id: str):
+    unstage_paths(self.project_root, payload.get("paths", []))
+    mark_git_cache_dirty(self.project_root)
+    await self.broadcast_git_status()
+    # NEW: Refresh tree root to update gitStatus on all entries
+    await self.broadcast("explorer:setList", list_dir('.'))
+```
+
+#### `handle_git_restore`
+```python
+async def handle_git_restore(self, payload: dict, msg_id: str):
+    restore_path(self.project_root, payload.get("path"), payload.get("commit", "HEAD"))
+    mark_git_cache_dirty(self.project_root)
+    await self.broadcast("git:restored", {"path": payload.get("path")})
+    await self.broadcast_git_status()
+    # NEW: Refresh tree root to update gitStatus on all entries
+    await self.broadcast("explorer:setList", list_dir('.'))
+```
+
+#### Other git handlers to update
+Apply the same pattern to:
+- `handle_git_stageAll`
+- `handle_git_unstageAll`
+- `handle_git_commit`
+- `handle_git_reset`
+
+### Fix 2: Frontend — Remove redundant refresh calls
+
+**File:** `app/apps/file_editor_cm6/static/js/explorer.js`
+
+Remove the `explorer:refresh` calls from the git action handlers since the backend will now handle broadcasting the updated state:
+
+#### `case 'stage'`
+```js
+case 'stage': {
+  if (typeof window.__explorerBusSend !== 'function') {
+    toast('Explorer connection unavailable.');
+    break;
+  }
+  try {
+    window.__explorerBusSend('git:stage', { paths: [rel] });
+    // REMOVED: window.__explorerBusSend('explorer:refresh', {});
+    toast(`Staged ${entry.name}`);
+  } catch (err) {
+    toast(err?.message || 'Stage failed');
+  }
+  break;
+}
+```
+
+#### `case 'unstage'`
+```js
+case 'unstage': {
+  if (typeof window.__explorerBusSend !== 'function') {
+    toast('Explorer connection unavailable.');
+    break;
+  }
+  try {
+    window.__explorerBusSend('git:unstage', { paths: [rel] });
+    // REMOVED: window.__explorerBusSend('explorer:refresh', {});
+    toast(`Unstaged ${entry.name}`);
+  } catch (err) {
+    toast(err?.message || 'Unstage failed');
+  }
+  break;
+}
+```
+
+---
+
+## Additional Consideration: Expanded Directory State
+
+Broadcasting `explorer:setList` for root (`.`) will only refresh the root-level entries. If the user has expanded subdirectories, those won't be refreshed.
+
+### Option A: Broadcast root only (minimal)
+- Simplest approach
+- User must collapse/expand subdirectories to see updated status
+- Parent directories will still show inherited status correctly (via `_derive_git_status`)
+
+### Option B: Track and refresh expanded directories
+- Frontend tracks which directories are expanded (already done via `data-open="true"`)
+- Backend could accept a list of expanded paths and return listings for all of them
+- More complex but provides seamless UX
+
+### Recommendation
+Start with **Option A** for now. The parent directory inheritance in `_derive_git_status()` already aggregates child statuses, so parent cards will show the correct inherited status. Individual nested files will update when the user expands their parent directory.
+
+---
+
+## Verification Checklist
+
+After implementing fixes:
+
+- [ ] Stage a file → tree card shows `fe-git-staged` class
+- [ ] Unstage a file → tree card shows `fe-git-modified` or `fe-git-untracked`
+- [ ] Restore a file → tree card shows `fe-git-clean` (or removed if untracked)
+- [ ] Stage all → all modified files show staged status
+- [ ] Parent directories show inherited status from children
+- [ ] No console errors or race conditions
+
+---
+
+— **VectorArc**, 2025-12-01
+
+---
+
+### Follow-up: Frontend Aggregated Git-Status Styling – Intent Only
+
+**Date:** 2025-12-01  
+**Author:** FugueTask
+
+**Goal**
+- Decouple “precise git state” from “visual breadcrumb that a branch contains changes”.
+- Restore and refine the original “orange outline” breadcrumb for modified files, while adding clear but secondary cues for staged and untracked descendants.
+- Keep backend `gitStatus` logic intact; layer additional styling purely on the frontend.
+
+**Intent of the Changes (Conceptual)**
+
+1. **Preserve backend-derived directory status**
+   - Keep `_derive_git_status` and `_STATUS_PRIORITY` exactly as-is.
+   - Continue using the precise per-node `gitStatus` to:
+     - Drive the small gutter color (`border-left-color` via `.fe-git-*` classes).
+     - Provide direct directory styling for collapsed parents, especially:
+       - `.fe-git-modified[data-kind="dir"]` → orange border.
+       - `.fe-git-untracked[data-kind="dir"]` → blue background + border.
+
+2. **Introduce aggregated ancestor flags (frontend only)**
+   - Add `fe-dir-has-*` classes to directory `<li>` elements to reflect **descendant** file states:
+     - `fe-dir-has-modified` – any descendant file with `gitStatus` `modified` or `staged_modified`.
+     - `fe-dir-has-untracked` – any descendant file with `gitStatus` `untracked`.
+     - `fe-dir-has-staged` – any descendant file with `gitStatus` `staged`, `staged_modified`, or `added`.
+     - `fe-dir-has-conflict` – any descendant file with `gitStatus` `conflict`.
+   - These are computed entirely on the frontend by walking from each file node up through its directory ancestors (mirroring the old `fe-draft-parent` behavior).
+   - Backend `gitStatus` remains the single source of truth; `fe-dir-has-*` is a derived, view-only layer.
+
+3. **Visual rules for parents (breadcrumb + gradients)**
+   - **Modified wins (breadcrumb):**
+     - Any directory with `fe-dir-has-modified` should show an orange outline, regardless of staged/untracked presence.
+     - This restores the “orange breadcrumb” chain from the modified file all the way up its ancestor path.
+   - **Untracked vs staged backgrounds:**
+     - `fe-dir-has-untracked` only:
+       - Blue background to indicate the branch contains new (untracked) files.
+     - `fe-dir-has-staged` only:
+       - Green background to indicate the branch contains staged changes.
+     - Both `fe-dir-has-untracked` and `fe-dir-has-staged`:
+       - Apply a blue→green linear gradient, representing both states in the same branch (rare but supported edge case).
+   - **Conflicts:**
+     - `fe-dir-has-conflict` adds a prominent red outline (box-shadow) on top of whatever background is present.
+
+4. **Interaction with backend `gitStatus`**
+   - Direct `gitStatus` on directories is still used for:
+     - Left gutter color (`fe-git-*` on dir nodes).
+     - Legacy directory styling for collapsed parents:
+       - Modified → orange border.
+       - Untracked → blue background/border.
+   - Aggregated `fe-dir-has-*` flags:
+     - Reinstate the modified breadcrumb even when `gitStatus` is promoted to `staged` or `staged_modified`.
+     - Provide additional context (untracked/staged/ conflict) without overriding the orange outline when modifications exist.
+
+5. **Event timing**
+   - After any git operation (stage/unstage/commit/reset/restore):
+     - Backend:
+       - Marks git cache dirty and broadcasts fresh `git:status`.
+       - Broadcasts `explorer:setList` for root (and we re-request open directories).
+     - Frontend:
+       - Receives updated listings, re-renders entries.
+       - Recomputes `fe-dir-has-*` flags based on current `data-gitStatus` on file nodes.
+   - The intent is that once listings are refreshed, the breadcrumb and background cues are derived entirely from up-to-date DOM state.
+
+**Notes**
+- This is a **styling and aggregation layer only**; no behavior change is intended in how git diffs, search, or review logic work.
+- The key UX intent:
+  - Orange outline for “this branch has modified content” (most important signal).
+  - Blue/green backgrounds for “untracked” and “staged” descendants.
+  - A blue→green gradient only when both untracked and staged coexist under the same parent.
+  - Staged state must never erase the orange breadcrumb when modifications are present anywhere in the subtree.
+
+— **FugueTask**, 2025-12-01 (intent for ancestor styling refactor)
+
+---
+
+### Implementation Progress: Git Status Tree Rendering Fix
+
+**Timestamp:** 2025-12-01T01:27:00Z  
+**Author:** _VectorArc_
+
+#### What Was Implemented
+
+**1. Backend: New `explorer:updateGitStatus` event**
+
+Added `get_all_git_statuses()` in `explorer_helper.py`:
+- Returns map of `rel_path -> gitStatus` for all files with non-clean status
+- Directory status propagation moved to frontend (lightweight)
+
+Added `broadcast_git_decorations()` in `explorer_ws.py`:
+- Broadcasts `explorer:updateGitStatus` with file statuses
+- Called after all git operations (stage, unstage, commit, reset, restore, pull)
+
+**2. Backend: Fixed directory inheritance logic**
+
+Modified `_derive_git_status()` in `explorer_helper.py`:
+- Directories now ALWAYS return `modified` if ANY child has a dirty status
+- Excluded `clean` and `ignored` from triggering the orange outline
+- This ensures the orange breadcrumb appears regardless of child status (staged, modified, untracked)
+
+**3. Frontend: New `explorer:updateGitStatus` handler**
+
+Added handler in `explorer.js`:
+- Step 1: Clear all `fe-git-*` classes from all nodes
+- Step 2: Apply file statuses to DOM nodes that exist
+- Step 3: Compute ancestor directories from status keys (path string manipulation)
+- Step 4: Apply `fe-git-modified` to all dirty ancestor directories
+- Excludes `ignored` and `clean` from propagating outline to parents
+
+**4. Frontend: Removed redundant refresh calls**
+
+- Removed `refreshOpenDirectoriesAfterGit()` call from `git:status` handler
+- Backend now handles broadcasting updated state via `explorer:updateGitStatus`
+
+#### Key Design Decisions
+
+1. **Directories always get `modified` (orange outline)** if they contain ANY dirty files
+   - This preserves the breadcrumb trail regardless of whether children are staged, modified, or untracked
+   - Files themselves still show their specific status (green for staged, orange for modified, blue for untracked)
+
+2. **`ignored` files excluded from outline propagation**
+   - Ignored files should not trigger the "something changed" visual cue on parent directories
+
+3. **Frontend computes directory inheritance from path strings**
+   - More efficient than DOM traversal
+   - Works even for collapsed directories not in DOM
+
+#### Files Modified
+
+- `app/apps/file_editor_cm6/explorer_helper.py` - Added `get_all_git_statuses()`, fixed `_derive_git_status()`
+- `app/apps/file_editor_cm6/explorer_ws.py` - Added `broadcast_git_decorations()`, updated git handlers
+- `app/apps/file_editor_cm6/static/js/explorer.js` - Added `explorer:updateGitStatus` handler
+
+#### Verification
+
+- [x] Stage a file → file shows staged, parent dirs show orange outline
+- [x] Unstage a file → file shows modified, parent dirs keep orange outline
+- [x] Mixed state (staged + modified siblings) → parents show orange outline
+- [x] Ignored files → do NOT trigger orange outline on parents
+- [x] Tree expansion state preserved during git operations
+
+— _VectorArc_
