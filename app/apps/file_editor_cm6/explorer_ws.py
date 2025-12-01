@@ -7,6 +7,9 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from queue import Queue, Empty
 
+# Import git_service to register job handlers in worker process
+import app.libs.git_service  # noqa: F401 - registers git_push, git_pull, git_clone handlers
+
 from .explorer_helper import (
     list_dir,
     create_directory,
@@ -371,6 +374,7 @@ class ExplorerDispatcher:
     
     async def _pump_job_events(self):
         """Background task to forward job updates to this client."""
+        logger.info("[JOB_PUMP] Started job pump task")
         while True:
             try:
                 # Non-blocking check with short timeout
@@ -381,8 +385,11 @@ class ExplorerDispatcher:
                     job_type = job_data.get("type", "")
                     job_status = job_data.get("status", "")
                     
+                    logger.debug(f"[JOB_PUMP] Got event: {job_id} ({job_type}) status={job_status}, tracked={job_id in self._tracked_job_ids}")
+                    
                     # Only forward jobs we're tracking (ones we started)
                     if job_id in self._tracked_job_ids:
+                        logger.info(f"[JOB_PUMP] Forwarding job:progress for {job_id}")
                         await self.emit_personal("job:progress", job_data)
                         
                         # Clean up tracking when job completes
@@ -392,6 +399,7 @@ class ExplorerDispatcher:
             except Empty:
                 continue
             except asyncio.CancelledError:
+                logger.info("[JOB_PUMP] Task cancelled")
                 break
             except Exception as e:
                 logger.warning(f"Error in job pump: {e}")
@@ -687,6 +695,7 @@ class ExplorerDispatcher:
 
     async def handle_git_push(self, payload: dict, msg_id: str):
         """Create a git_push job for progress tracking."""
+        logger.info(f"[GIT_PUSH] Starting push job for {self.project_root}")
         try:
             from app.libs.jobs import manager as job_manager
             job = job_manager.create_job("git_push", {
@@ -695,11 +704,13 @@ class ExplorerDispatcher:
                 "branch": payload.get("branch"),
                 "force": payload.get("force", False),
             })
+            logger.info(f"[GIT_PUSH] Created job {job.id}, tracking it")
             # Track this job so we forward its progress events
             self._tracked_job_ids.add(job.id)
             # Acknowledge job creation - progress will come via job:progress events
             await self.emit_personal("git:pushStarted", {"job_id": job.id}, msg_id)
         except Exception as e:
+            logger.exception(f"[GIT_PUSH] Failed to create job: {e}")
             await self.send_error(f"Failed to start push: {e}", msg_id)
 
     async def handle_git_pull(self, payload: dict, msg_id: str):

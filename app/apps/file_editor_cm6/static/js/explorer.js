@@ -482,6 +482,9 @@ function renderProjectLabel() {
   projectLabelEl.classList.remove('fe-label-missing');
 }
 
+// Track previous git status values for change detection
+let prevGitStatus = { staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 };
+
 function renderGitSummary() {
   if (!gitSummaryEl) return;
   const s = uiState.gitStatus;
@@ -499,6 +502,15 @@ function renderGitSummary() {
     ? s.untracked.length
     : 0;
 
+  // Check if any counts changed
+  const changed = (
+    stagedCount !== prevGitStatus.staged ||
+    unstagedCount !== prevGitStatus.unstaged ||
+    untrackedCount !== prevGitStatus.untracked ||
+    ahead !== prevGitStatus.ahead ||
+    behind !== prevGitStatus.behind
+  );
+
   const bits = [];
   bits.push(detached ? 'DETACHED HEAD' : branch);
   if (ahead) bits.push(`↑${ahead}`);
@@ -506,6 +518,20 @@ function renderGitSummary() {
 
   const counts = `staged ${stagedCount} · changes ${unstagedCount} · untracked ${untrackedCount}`;
   gitSummaryEl.textContent = `${bits.join(' ')} · ${counts}`;
+
+  // Flash blue if values changed
+  if (changed && (prevGitStatus.staged !== 0 || prevGitStatus.unstaged !== 0 || prevGitStatus.untracked !== 0)) {
+    gitSummaryEl.style.transition = 'color 0.15s ease';
+    gitSummaryEl.style.color = '#60a5fa';
+    setTimeout(() => {
+      if (gitSummaryEl) {
+        gitSummaryEl.style.color = '';
+      }
+    }, 400);
+  }
+
+  // Update previous values
+  prevGitStatus = { staged: stagedCount, unstaged: unstagedCount, untracked: untrackedCount, ahead, behind };
 }
 
 function setGitControlsEnabled(enabled, showInit = false) {
@@ -546,11 +572,13 @@ function ensureProgressBarElements() {
         position: absolute;
         top: 0;
         left: 0;
+        width: 0;
         height: 0;
         background: linear-gradient(90deg, #3b82f6, #60a5fa);
-        transition: width 0.2s ease, height 0.15s ease;
+        transition: width 0.2s ease, opacity 0.3s ease;
         z-index: 10;
         pointer-events: none;
+        opacity: 1;
       `;
       footer.style.position = 'relative';
       footer.insertBefore(gitProgressBarEl, footer.firstChild);
@@ -568,7 +596,8 @@ function ensureProgressBarElements() {
         font-size: 0.8em;
         color: #60a5fa;
         white-space: nowrap;
-        display: none;
+        opacity: 0;
+        transition: opacity 0.3s ease;
       `;
       summaryRow.appendChild(gitProgressTextEl);
     }
@@ -579,25 +608,36 @@ function showGitProgressBar(pct, detail) {
   ensureProgressBarElements();
   
   if (gitProgressBarEl) {
-    gitProgressBarEl.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+    gitProgressBarEl.style.opacity = '1';
     gitProgressBarEl.style.height = '3px';
+    gitProgressBarEl.style.width = `${Math.min(100, Math.max(0, pct))}%`;
   }
   
   if (gitProgressTextEl) {
-    gitProgressTextEl.style.display = 'inline';
+    gitProgressTextEl.style.opacity = '1';
     gitProgressTextEl.textContent = detail || `${pct}%`;
   }
 }
 
 function hideGitProgressBar() {
+  // Fade out, then reset dimensions after transition
   if (gitProgressBarEl) {
-    gitProgressBarEl.style.width = '0%';
-    gitProgressBarEl.style.height = '0';
+    gitProgressBarEl.style.opacity = '0';
+    setTimeout(() => {
+      if (gitProgressBarEl && gitProgressBarEl.style.opacity === '0') {
+        gitProgressBarEl.style.width = '0';
+        gitProgressBarEl.style.height = '0';
+      }
+    }, 300);
   }
   
   if (gitProgressTextEl) {
-    gitProgressTextEl.style.display = 'none';
-    gitProgressTextEl.textContent = '';
+    gitProgressTextEl.style.opacity = '0';
+    setTimeout(() => {
+      if (gitProgressTextEl && gitProgressTextEl.style.opacity === '0') {
+        gitProgressTextEl.textContent = '';
+      }
+    }, 300);
   }
 }
 
