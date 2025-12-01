@@ -16,6 +16,10 @@ _PROJECT_ROOT = Path.home()
 _GIT_STATUS_CACHE: Dict[str, dict] = {}
 GIT_CACHE_TTL_SECONDS = 6.0
 
+# Draft paths cache - avoids expensive list_project_drafts() on every list_dir()
+_DRAFT_PATHS_CACHE: Dict[str, dict] = {}  # project_path -> {paths: set, timestamp: float}
+DRAFT_CACHE_TTL_SECONDS = 5.0
+
 _STATUS_PRIORITY = (
     "conflict",
     "staged_modified",
@@ -31,11 +35,21 @@ _STATUS_PRIORITY = (
 
 
 def _collect_project_draft_rel_paths(project_root: Path) -> set[str]:
-    """Return set of relative file paths that currently have drafts."""
+    """Return set of relative file paths that currently have drafts (cached)."""
+    key = str(project_root.resolve())
+    now = time.time()
+    
+    # Check cache
+    cached = _DRAFT_PATHS_CACHE.get(key)
+    if cached and now - cached.get('timestamp', 0) < DRAFT_CACHE_TTL_SECONDS:
+        return cached.get('paths', set())
+    
+    # Refresh cache
     try:
         drafts = _history_store.list_project_drafts(str(project_root))
     except Exception:
         return set()
+    
     rel_paths: set[str] = set()
     for draft in drafts:
         file_path = draft.get("file_path")
@@ -46,7 +60,19 @@ def _collect_project_draft_rel_paths(project_root: Path) -> set[str]:
             rel_paths.add(str(abs_path.relative_to(project_root)))
         except Exception:
             continue
+    
+    _DRAFT_PATHS_CACHE[key] = {'paths': rel_paths, 'timestamp': now}
     return rel_paths
+
+
+def mark_draft_cache_dirty(project_root: Path = None):
+    """Mark draft cache as dirty so it refreshes on next access."""
+    if project_root:
+        key = str(project_root.resolve())
+        if key in _DRAFT_PATHS_CACHE:
+            del _DRAFT_PATHS_CACHE[key]
+    else:
+        _DRAFT_PATHS_CACHE.clear()
 
 
 def set_project_root(path: str) -> Path:
@@ -73,8 +99,15 @@ def list_dir(rel: str = '.') -> dict:
     - cwd: current working directory relative to project root
     - entries: list of file/dir entries with metadata
     """
+    import time as _time
+    _t0 = _time.perf_counter()
+    
     root = get_project_root()
+    
+    _t1 = _time.perf_counter()
     draft_rel_paths = _collect_project_draft_rel_paths(root)
+    _t2 = _time.perf_counter()
+    
     base = (root / rel).resolve()
 
     # Security check: ensure path is within project root
@@ -85,7 +118,9 @@ def list_dir(rel: str = '.') -> dict:
         raise ValueError("not a directory")
 
     entries = []
+    _t3 = _time.perf_counter()
     status_map = _get_git_status_snapshot(root)
+    _t4 = _time.perf_counter()
 
     with os.scandir(base) as it:
         for e in it:
@@ -100,8 +135,15 @@ def list_dir(rel: str = '.') -> dict:
                 rel_path = str((base / e.name).relative_to(root))
                 kind = 'dir' if e.is_dir(follow_symlinks=False) else 'file'
                 git_status = _derive_git_status(rel_path, kind, status_map)
+                git_flags = _derive_git_flags(rel_path, kind, status_map)
 
-                has_draft = rel_path in draft_rel_paths
+                # For files: check if this exact file has a draft
+                # For dirs: check if any draft path starts with this dir
+                if kind == 'file':
+                    has_draft = rel_path in draft_rel_paths
+                else:
+                    prefix = rel_path + '/'
+                    has_draft = any(d.startswith(prefix) for d in draft_rel_paths)
 
                 entries.append({
                     'name': e.name,
@@ -112,6 +154,7 @@ def list_dir(rel: str = '.') -> dict:
                     'mode': oct(mode),
                     'ext': ext,
                     'gitStatus': git_status,
+                    'gitFlags': git_flags,
                     'isExecutable': bool(mode & stat.S_IXUSR),
                     'isSymlink': e.is_symlink(),
                     'hasDraft': has_draft,
@@ -120,8 +163,17 @@ def list_dir(rel: str = '.') -> dict:
                 # Skip files we can't access
                 continue
 
+    _t5 = _time.perf_counter()
+    
     # Sort: directories first, then files, case-insensitive
     entries.sort(key=lambda x: (x['kind'] != 'dir', x['name'].lower()))
+    
+    _t6 = _time.perf_counter()
+    
+    # Log timing if it took more than 50ms
+    total = (_t6 - _t0) * 1000
+    if total > 50:
+        print(f"[list_dir] {rel}: total={total:.1f}ms, drafts={(_t2-_t1)*1000:.1f}ms, git={(_t4-_t3)*1000:.1f}ms, scan={(_t5-_t4)*1000:.1f}ms, sort={(_t6-_t5)*1000:.1f}ms, entries={len(entries)}")
 
     return {
         'cwd': str(base.relative_to(root)) if base != root else '.',
@@ -248,20 +300,82 @@ def _map_git_code(code: str) -> str:
 
 
 def _derive_git_status(rel_path: str, kind: str, status_map: Dict[str, str]) -> str:
+    """Returns the primary git status for display. For directories, use
+    _derive_git_flags() to get all applicable flags."""
     if not rel_path:
         return status_map.get(rel_path, 'clean')
 
     if kind == 'file':
         return status_map.get(rel_path, 'clean')
 
+    # For directories: check for children that warrant the orange "modified" outline
+    # These are statuses representing actual changes to tracked content:
+    # modified, staged, staged_modified, added, deleted, renamed, conflict
+    # Excluded: clean, ignored, untracked (untracked gets blue background, not orange outline)
+    OUTLINE_STATUSES = ('modified', 'staged', 'staged_modified', 'added', 'deleted', 'renamed', 'conflict')
+    
     dir_status = status_map.get(rel_path)
-    if dir_status and dir_status != 'clean':
-        return dir_status
+    if dir_status and dir_status in OUTLINE_STATUSES:
+        return 'modified'
 
-    child_statuses = _statuses_for_prefix(rel_path, status_map)
+    child_statuses = list(_statuses_for_prefix(rel_path, status_map))
     if not child_statuses:
         return 'clean'
-    return _select_highest_priority(child_statuses)
+    
+    # If any child warrants the orange outline, directory gets 'modified'
+    for status in child_statuses:
+        if status in OUTLINE_STATUSES:
+            return 'modified'
+    
+    # Check for untracked - directory gets 'untracked' for blue background
+    for status in child_statuses:
+        if status == 'untracked':
+            return 'untracked'
+    
+    return 'clean'
+
+
+def _derive_git_flags(rel_path: str, kind: str, status_map: Dict[str, str]) -> list:
+    """Returns a list of git flags for a directory entry.
+    
+    For files, returns a single-element list with the file's status.
+    For directories, returns all applicable flags based on descendants:
+    - 'modified': has modified/staged/added/deleted/renamed/conflict descendants
+    - 'untracked': has untracked descendants
+    - 'staged': has staged descendants
+    - 'conflict': has conflict descendants
+    """
+    if kind == 'file':
+        status = status_map.get(rel_path, 'clean')
+        return [status] if status and status != 'clean' else []
+
+    # For directories, collect all flags based on child statuses
+    OUTLINE_STATUSES = frozenset(('modified', 'staged', 'staged_modified', 'added', 'deleted', 'renamed', 'conflict'))
+    STAGED_STATUSES = frozenset(('staged', 'staged_modified', 'added'))
+    
+    child_statuses = set(_statuses_for_prefix(rel_path, status_map))
+    if not child_statuses:
+        return []
+    
+    flags = []
+    
+    # Check for modified (orange outline)
+    if child_statuses & OUTLINE_STATUSES:
+        flags.append('modified')
+    
+    # Check for untracked (blue background)
+    if 'untracked' in child_statuses:
+        flags.append('untracked')
+    
+    # Check for staged (green background)
+    if child_statuses & STAGED_STATUSES:
+        flags.append('staged')
+    
+    # Check for conflict (red indicator)
+    if 'conflict' in child_statuses:
+        flags.append('conflict')
+    
+    return flags
 
 
 def _statuses_for_prefix(rel_path: str, status_map: Dict[str, str]) -> Iterable[str]:
@@ -277,6 +391,31 @@ def _select_highest_priority(statuses: Iterable[str]) -> str:
         if status in seen:
             return status
     return 'clean'
+
+
+def get_all_git_statuses() -> Dict[str, str]:
+    """
+    Return a map of rel_path -> gitStatus for all files with non-clean status.
+    
+    Directory status propagation is handled by the frontend - it walks up from
+    dirty files and applies 'modified' outline to ancestor directories.
+    
+    Used to broadcast git status updates to the frontend without replacing the tree.
+    """
+    root = get_project_root()
+    status_map = _get_git_status_snapshot(root)
+    
+    if not status_map:
+        return {}
+    
+    result: Dict[str, str] = {}
+    
+    # Only include files with non-clean status
+    for rel_path, status in status_map.items():
+        if status and status != 'clean':
+            result[rel_path] = status
+    
+    return result
 
 
 def _is_git_repo(root: Path) -> bool:

@@ -1,0 +1,324 @@
+
+import asyncio
+import json
+import shutil
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+
+from ..git_helper import (
+    GitError,
+    get_worktree_changes,
+    is_git_repository,
+    get_commit_info,
+)
+from ..diff_helper import collect_diff
+from ..stores import _history_store
+
+# Constants duplicated from main.py to avoid circular deps
+IGNORE_PATTERNS = [
+    '.git', '__pycache__', 'node_modules', '.venv', 'venv',
+    '.pytest_cache', '.mypy_cache', '.tox', 'dist', 'build',
+    '*.egg-info', '.DS_Store'
+]
+CHANGE_RESULT_LIMIT = 40
+STATUS_TEXT_MAP = {
+    'M': 'Modified',
+    'A': 'Added',
+    'D': 'Deleted',
+    'R': 'Renamed',
+    'C': 'Copied',
+    'U': 'Conflict',
+    '?': 'Untracked',
+    '!': 'Ignored',
+}
+
+def _resolve_diff_base(project_path: Optional[str]) -> str:
+    base = _history_store.get_diff_base(project_path)
+    return base.strip() if base else 'HEAD'
+
+def _diff_base_payload(project_path: Optional[str]) -> dict:
+    base_ref = _resolve_diff_base(project_path)
+    mode = 'none'
+    commit_info = None
+    
+    if project_path:
+        root_path = Path(project_path)
+        if root_path.exists() and is_git_repository(root_path):
+            mode = 'head' if base_ref == 'HEAD' else 'detached'
+            try:
+                commit = get_commit_info(root_path, base_ref)
+            except GitError:
+                commit = None
+            if commit:
+                commit_info = {
+                    "hash": commit.hash,
+                    "short": commit.short_hash,
+                    "subject": commit.summary,
+                    "author": commit.author,
+                    "date": commit.date,
+                }
+        else:
+            mode = 'none'
+
+    return {
+        "ref": base_ref,
+        "mode": mode,
+        "commit": commit_info,
+    }
+
+def _status_meta_from_code(code: str) -> tuple[str, str]:
+    if not code:
+        return '', STATUS_TEXT_MAP['?']
+    if code in ('??', '!!'):
+        key = '?' if code == '??' else '!'
+        short = '?' if code == '??' else '!'
+        return short, STATUS_TEXT_MAP[key]
+    compact = code.replace(' ', '')
+    primary = compact[0] if compact else '?'
+    key = primary if primary in STATUS_TEXT_MAP else '?'
+    return primary, STATUS_TEXT_MAP[key]
+
+async def search_by_name(root: Path, query: str) -> dict:
+    """Search files/folders by name."""
+    results = []
+    query_lower = query.lower()
+    count = 0
+    max_results = 500
+    
+    def should_ignore(path: Path) -> bool:
+        for part in path.parts:
+            if part in IGNORE_PATTERNS or part.startswith('.'):
+                return True
+        return False
+    
+    for item in root.rglob('*'):
+        if count >= max_results:
+            break
+        if should_ignore(item.relative_to(root)):
+            continue
+        if query_lower in item.name.lower():
+            results.append({
+                "path": str(item),
+                "rel": str(item.relative_to(root)),
+                "type": "dir" if item.is_dir() else "file",
+                "name": item.name
+            })
+            count += 1
+    
+    return {
+        "mode": "name",
+        "query": query,
+        "results": results,
+        "truncated": count >= max_results,
+        "count": count
+    }
+
+async def search_by_content(root: Path, query: str) -> dict:
+    """Search file contents using ripgrep or fallback."""
+    rg_path = shutil.which('rg')
+    if rg_path:
+        return await _search_with_ripgrep(root, query, rg_path)
+    else:
+        return await _search_with_python(root, query)
+
+async def _search_with_ripgrep(root: Path, query: str, rg_path: str) -> dict:
+    cmd = [
+        rg_path,
+        '--json',
+        '--line-number',
+        '--column',
+        '--max-count', '5',
+        '--max-filesize', '1M',
+        '--',
+        query,
+        str(root)
+    ]
+    
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        
+        results_by_file = {}
+        for line in stdout.decode('utf-8').splitlines():
+            if not line.strip(): continue
+            try:
+                obj = json.loads(line)
+                if obj.get('type') == 'match':
+                    data = obj['data']
+                    path_str = data['path']['text']
+                    path = Path(path_str)
+                    rel = str(path.relative_to(root))
+                    
+                    if rel not in results_by_file:
+                        results_by_file[rel] = {
+                            "path": path_str,
+                            "rel": rel,
+                            "matches": []
+                        }
+                    
+                    line_num = data['line_number']
+                    line_text = data['lines']['text'].rstrip('\n')
+                    submatch = data['submatches'][0] if data['submatches'] else {}
+                    col = submatch.get('start', 0)
+                    match_text = submatch.get('match', {}).get('text', query)
+                    
+                    start = max(0, col - 75)
+                    end = min(len(line_text), col + len(match_text) + 75)
+                    snippet = line_text[start:end]
+                    
+                    results_by_file[rel]["matches"].append({
+                        "line": line_num,
+                        "column": col,
+                        "text": line_text,
+                        "snippet": snippet
+                    })
+            except (json.JSONDecodeError, KeyError):
+                continue
+        
+        results = list(results_by_file.values())[:50]
+        match_count = sum(len(r["matches"]) for r in results)
+        
+        return {
+            "mode": "content",
+            "query": query,
+            "results": results,
+            "truncated": len(results_by_file) > 50,
+            "file_count": len(results),
+            "match_count": match_count
+        }
+    except asyncio.TimeoutError:
+        raise TimeoutError("Ripgrep search timed out")
+
+async def _search_with_python(root: Path, query: str) -> dict:
+    results_by_file = {}
+    query_lower = query.lower()
+    file_count = 0
+    max_files = 50
+    
+    def is_binary(path: Path) -> bool:
+        try:
+            with path.open('rb') as f:
+                return b'\x00' in f.read(8192)
+        except:
+            return True
+    
+    def should_ignore(path: Path) -> bool:
+        for part in path.parts:
+            if part in IGNORE_PATTERNS or part.startswith('.'):
+                return True
+        return False
+    
+    for item in root.rglob('*'):
+        if not item.is_file() or file_count >= max_files: break
+        if should_ignore(item.relative_to(root)) or is_binary(item): continue
+        
+        try:
+            content = item.read_text(encoding='utf-8', errors='ignore')
+            lines = content.splitlines()
+            matches = []
+            
+            for line_num, line_text in enumerate(lines, 1):
+                if query_lower in line_text.lower():
+                    col = line_text.lower().find(query_lower)
+                    start = max(0, col - 75)
+                    end = min(len(line_text), col + len(query) + 75)
+                    matches.append({
+                        "line": line_num,
+                        "column": col,
+                        "text": line_text,
+                        "snippet": line_text[start:end]
+                    })
+                    if len(matches) >= 5: break
+            
+            if matches:
+                rel = str(item.relative_to(root))
+                results_by_file[rel] = {
+                    "path": str(item),
+                    "rel": rel,
+                    "matches": matches
+                }
+                file_count += 1
+        except Exception:
+            continue
+    
+    results = list(results_by_file.values())
+    match_count = sum(len(r["matches"]) for r in results)
+    
+    return {
+        "mode": "content",
+        "query": query,
+        "results": results,
+        "truncated": file_count >= max_files,
+        "file_count": len(results),
+        "match_count": match_count
+    }
+
+def search_by_changes(project_root: Path) -> dict:
+    project_path = str(project_root) # _history_store keys are strings
+    
+    if not is_git_repository(project_root):
+        return {
+            "mode": "changes",
+            "git": False,
+            "base": _diff_base_payload(project_path),
+            "changes": [],
+            "truncated": False,
+            "count": 0,
+        }
+
+    try:
+        base_ref = _resolve_diff_base(project_path)
+        entries = get_worktree_changes(project_root, base_ref)
+    except GitError:
+        # If git fails (e.g. bad ref), return empty
+        return {
+            "mode": "changes",
+            "git": True,
+            "base": _diff_base_payload(project_path),
+            "changes": [],
+            "truncated": False,
+            "count": 0,
+        }
+
+    truncated = len(entries) > CHANGE_RESULT_LIMIT
+    selected = entries[:CHANGE_RESULT_LIMIT]
+    changes = []
+
+    for entry in selected:
+        rel_path = entry.path.replace('\\', '/')
+        diff_payload = collect_diff(project_root, rel_path, base_ref=base_ref)
+        status_short, status_text = _status_meta_from_code(entry.code)
+        summary = diff_payload.get("summary", {"added": 0, "deleted": 0, "tracked": False})
+
+        change = {
+            "rel": rel_path,
+            "path": str((project_root / rel_path).resolve()),
+            "label": Path(rel_path).name,
+            "status": status_short,
+            "statusCode": entry.code,
+            "statusText": status_text,
+            "summary": summary,
+            "hunks": diff_payload.get("hunks", []),
+            "isTracked": summary.get("tracked", True),
+        }
+        if entry.original_path:
+            change["renamedFrom"] = entry.original_path
+        if "error" in diff_payload:
+            change["error"] = diff_payload["error"]
+        changes.append(change)
+
+    base_info = _diff_base_payload(project_path)
+
+    return {
+        "mode": "changes",
+        "git": True,
+        "base": base_info,
+        "changes": changes,
+        "truncated": truncated,
+        "count": len(changes),
+        "total": len(entries),
+    }

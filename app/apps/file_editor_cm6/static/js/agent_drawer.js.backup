@@ -1,6 +1,6 @@
 // app/apps/file_editor_cm6/static/js/agent_drawer.js
 // Agent drawer with shared shell architecture - ONE MCP server for all sessions
-
+//comment
 import ReconnectingWebSocket from './reconnecting_websocket.js';
 
 function notify(message) {

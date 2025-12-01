@@ -92,14 +92,25 @@ class PollingWatcher:
                         if str(filepath) not in self._known_files:
                             self._known_files[str(filepath)] = mtime
                             self._on_event({"type": "modified", "path": str(filepath)})
+                            self._notify_explorer(str(filepath), "created")
                         elif self._known_files[str(filepath)] < mtime:
                             self._known_files[str(filepath)] = mtime
                             self._on_event({"type": "modified", "path": str(filepath)})
+                            self._notify_explorer(str(filepath), "modified")
                     except FileNotFoundError:
                         if str(filepath) in self._known_files:
                             del self._known_files[str(filepath)]
                             self._on_event({"type": "deleted", "path": str(filepath)})
+                            self._notify_explorer(str(filepath), "deleted")
             time.sleep(0.3)
+
+    def _notify_explorer(self, path: str, event_type: str):
+        """Notify explorer of filesystem changes."""
+        try:
+            from .explorer_ws import notify_explorer_of_change
+            notify_explorer_of_change(path, event_type)
+        except Exception:
+            pass  # Explorer module may not be loaded yet
 
 class WatchdogHandler(FileSystemEventHandler):
     def __init__(self, on_event):
@@ -107,10 +118,20 @@ class WatchdogHandler(FileSystemEventHandler):
         self.on_event = on_event
 
     def on_any_event(self, event):
-        if event.is_directory:
-            return
         # Apply noise filters
         if any(p in event.src_path for p in EXCLUDE_PATTERNS):
+            return
+        
+        # Notify explorer of filesystem changes (files AND directories)
+        # This runs in the watcher thread, so it schedules async work
+        try:
+            from .explorer_ws import notify_explorer_of_change
+            notify_explorer_of_change(event.src_path, event.event_type)
+        except Exception:
+            pass  # Explorer module may not be loaded yet
+        
+        # For file content updates, continue with existing logic
+        if event.is_directory:
             return
         self.on_event({"type": event.event_type, "path": event.src_path})
 
@@ -250,7 +271,17 @@ def _do_handle_fs_event(raw_event):
         pass # File might have been deleted
 
 def init_watcher(project_root: Path):
-    """Initializes and starts the file system watcher if not already running."""
+    """Initializes and starts the file system watcher if not already running.
+    
+    --- WATCHER LIFECYCLE (future implementation) ---
+    Currently, the watcher runs indefinitely once started. In the future,
+    the explorer_ws ConnectionManager could control the watcher lifecycle:
+    - Start watcher when first client connects
+    - Stop watcher when last client disconnects
+    This would save CPU/battery when no one is using the editor.
+    See explorer_ws.py for the connection tracking infrastructure.
+    ------------------------------------------------
+    """
     global _watcher_thread, _project_root
 
     desired_root = project_root.resolve()

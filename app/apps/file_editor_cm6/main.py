@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, FileResponse
 import asyncio
 import anyio
 from .agent_ws import agent_websocket
+from .explorer_ws import explorer_websocket
 from .history_store import HistoryStore
 from .preferences_store import PreferencesStore
 from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
@@ -366,6 +367,7 @@ async def serve_static(file_path: str):
 from .terminal_backend import terminal_router
 file_editor_cm6_bp.include_router(terminal_router)
 file_editor_cm6_bp.add_api_websocket_route("/ws/agent", agent_websocket)
+file_editor_cm6_bp.add_api_websocket_route("/ws/explorer", explorer_websocket)
 
 # Include the self-contained editor routes
 from .nicegui_editor.editor_app import editor_router, handle_external_discard
@@ -634,6 +636,14 @@ def delete_session_cache(
         raise HTTPException(status_code=403, detail=err)
     
     existed = _history_store.clear_cached_document(expanded_project, expanded_path)
+    
+    # Notify explorer of draft state change
+    if existed:
+        try:
+            from .explorer_ws import notify_draft_state_changed
+            notify_draft_state_changed(expanded_project)
+        except Exception:
+            pass
     
     return {
         "ok": True,
@@ -1402,8 +1412,17 @@ async def review_save(data: dict = Body(...)):
         except Exception as e:
             errors.append(f"{rel_path}: {str(e)}")
             
-    # Refresh git status cache
+    # Refresh git status cache and draft cache
     mark_git_cache_dirty(root_path)
+    from .explorer_helper import mark_draft_cache_dirty
+    mark_draft_cache_dirty(root_path)
+    
+    # Notify explorer of draft state change
+    try:
+        from .explorer_ws import notify_draft_state_changed
+        notify_draft_state_changed(project_root)
+    except Exception:
+        pass
     
     return {"ok": True, "saved_count": saved_count, "errors": errors}
 
@@ -1426,6 +1445,17 @@ async def review_discard(data: dict = Body(...)):
         if _history_store.clear_cached_document(project_root, str(abs_path)):
             discarded_count += 1
             handle_external_discard(project_root, str(abs_path))
+    
+    # Invalidate draft cache
+    from .explorer_helper import mark_draft_cache_dirty
+    mark_draft_cache_dirty(root_path)
+    
+    # Notify explorer of draft state change
+    try:
+        from .explorer_ws import notify_draft_state_changed
+        notify_draft_state_changed(project_root)
+    except Exception:
+        pass
             
     return {"ok": True, "discarded_count": discarded_count}
 

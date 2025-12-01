@@ -21,7 +21,6 @@ from typing import Any, Dict, Iterable, Optional, Set
 
 import requests
 from flask import Flask, Response, jsonify, request
-from flask_socketio import SocketIO
 from flask_socketio import Namespace, SocketIO, emit
 
 from .control import FrameworkError, spawn_agent

@@ -138,7 +138,6 @@
   background: var(--explorer-card-bg);
   margin-left: 0;
   align-items: center;
-  position: relative;  /* For ::after pseudo-element positioning */
 }
 
 /* Make nested ul span the full width */
@@ -296,12 +295,12 @@
   border-left-color: #34d399;
 }
 
-.fe-tree-node.fe-git-staged_modified {
+.fe-tree-node.fe-git-staged-modified {
   border-left-color: #22d3ee;
 }
 
 .fe-tree-node.fe-git-added {
-  border-left-color: #34d399;
+  border-left-color: #8b5cf6;
 }
 
 .fe-tree-node.fe-git-deleted {
@@ -332,89 +331,35 @@
   border-color: rgba(96, 165, 250, 0.6);
 }
 
-/* Preserve legacy directory styling based directly on gitStatus so
-   collapsed parents still show the orange/blue cues from the backend. */
+     /* Modified directories: orange border */
+     .fe-tree-node.fe-git-modified[data-kind="dir"] {
+       border-color: rgba(249, 115, 22, 0.8);  /* orange border */
+     }
 
-/* Modified directories: orange border */
-.fe-tree-node.fe-git-modified[data-kind="dir"] {
-  border-color: rgba(249, 115, 22, 0.8);
-}
+     /* Untracked directories: blue background */
+     .fe-tree-node.fe-git-untracked[data-kind="dir"] {
+       background: rgba(59, 130, 246, 0.15);  /* blue background */
+       border-color: rgba(59, 130, 246, 0.4); /* optional: blue border too
+   */
+     }
 
-/* Untracked directories: blue background and border */
-.fe-tree-node.fe-git-untracked[data-kind="dir"] {
-  background: rgba(59, 130, 246, 0.15);
-  border-color: rgba(59, 130, 246, 0.4);
-}
+     /* Modified files: orange background */
+     .fe-tree-node.fe-git-modified[data-kind="file"] {
+       background: rgba(249, 115, 22, 0.15);  /* orange background */
+     }
 
-/* Directory-level aggregated flags (has descendants with these states).
-   These are purely frontend classes (fe-dir-has-*) layered on top of the
-   precise per-node fe-git-* classes. */
+     /* Untracked files: blue background */
+     .fe-tree-node.fe-git-untracked[data-kind="file"] {
+       background: rgba(59, 130, 246, 0.15);  /* blue background */
+     }
 
-.fe-tree-node[data-kind="dir"].fe-dir-has-modified {
-  border-color: rgba(249, 115, 22, 0.85);        /* strong orange border */
-}
-
-.fe-tree-node[data-kind="dir"].fe-dir-has-conflict {
-  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.8);
-}
-
-/* Untracked descendants: solid blue background (when no staged). */
-.fe-tree-node[data-kind="dir"].fe-dir-has-untracked:not(.fe-dir-has-staged) {
-  background: rgba(59, 130, 246, 0.15);
-}
-
-/* Staged descendants: solid green background (when no untracked). */
-.fe-tree-node[data-kind="dir"].fe-dir-has-staged:not(.fe-dir-has-untracked) {
-  background: rgba(52, 211, 153, 0.15);
-}
-
-/* Both untracked + staged descendants: smooth diagonal blue→green gradient. */
-.fe-tree-node[data-kind="dir"].fe-dir-has-untracked.fe-dir-has-staged {
-  background: linear-gradient(
-    135deg,
-    rgba(59, 130, 246, 0.18) 0%,
-    rgba(59, 130, 246, 0.12) 40%,
-    rgba(52, 211, 153, 0.12) 60%,
-    rgba(52, 211, 153, 0.18) 100%
-  );
-}
-
-/* Modified files: orange background (keeps the old motif). */
-.fe-tree-node.fe-git-modified[data-kind="file"] {
-  background: rgba(249, 115, 22, 0.15);
-}
-
-/* Untracked files: blue background. */
-.fe-tree-node.fe-git-untracked[data-kind="file"] {
-  background: rgba(49, 80, 129, 0.7);
-}
-
-/* Staged files: green background. */
-.fe-tree-node.fe-git-staged[data-kind="file"],
-.fe-tree-node.fe-git-added[data-kind="file"] {
-  background: rgba(32, 111, 82, 0.7);
-}
-
-/* Staged+modified files: keep orange (modified takes priority visually). */
-.fe-tree-node.fe-git-staged_modified[data-kind="file"] {
-  background: rgba(249, 115, 22, 0.15);
-}
-
-.fe-tree-node.fe-git-modified[data-kind="file"]:hover {
-  background: rgba(249, 115, 22, 0.22);
-}
+     /* Hover states */
+     .fe-tree-node.fe-git-modified[data-kind="file"]:hover {
+       background: rgba(249, 115, 22, 0.22);
+     }
 
 .fe-tree-node.fe-git-untracked[data-kind="file"]:hover {
   background: rgba(59, 130, 246, 0.22);
-}
-
-.fe-tree-node.fe-git-staged[data-kind="file"]:hover,
-.fe-tree-node.fe-git-added[data-kind="file"]:hover {
-  background: rgba(52, 211, 153, 0.22);
-}
-
-.fe-tree-node.fe-git-staged_modified[data-kind="file"]:hover {
-  background: rgba(249, 115, 22, 0.22);
 }
 
 .fe-git-footer {
@@ -516,20 +461,10 @@
   height: 16px;
   accent-color: var(--primary);
   justify-self: center;
-  flex-shrink: 0;
 }
 
-.fe-tree.fe-tree-select-mode > li.fe-tree-node {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Disabled menu items */
-.fe-dd-item-disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  pointer-events: none;
+.fe-tree.fe-tree-select-mode > li {
+  grid-template-columns: 24px 20px 1fr;
 }
 
 /* --- Mobile Tap Behavior --- */
@@ -1081,28 +1016,13 @@
 }
 
 
-/* Tree Highlights - Draft styling */
-/* Use ::after pseudo-element so draft indicator layers ON TOP of git status border */
-.fe-tree-node.fe-draft[data-kind="file"]::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 3px;
-  background: #facc15;
-  pointer-events: none;
+/* Tree Highlights */
+.fe-tree-node.fe-draft[data-kind="file"] {
+  border-right: 3px solid #facc15;
 }
 
-.fe-tree-node.fe-dir-has-draft::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 2px;
-  background: rgba(250, 204, 21, 0.5);
-  pointer-events: none;
+.fe-tree-node.fe-draft-parent {
+  border-right: 2px solid rgba(250, 204, 21, 0.4);
 }
 
 /* Review Diff Styles */
