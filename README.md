@@ -149,7 +149,7 @@ Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another dev
 
 ### Three-Layer System
 
-
+```dsnt_rndr_rt_on_github_4_sum_reason
 ┌─────────────────────────────────────────┐
 │  Supervisor (bash)                      │
 │  - Signal handling (SIGTERM/SIGINT)     │
@@ -175,7 +175,7 @@ Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another dev
     │ :5001    │    │ :5002    │    │ :5003    │
     └──────────┘    └──────────┘    └──────────┘
 
-
+|```
 ### Key Components
 
 **Supervisor** (`scripts/run_framework.sh` → `app/supervisor.py`)
