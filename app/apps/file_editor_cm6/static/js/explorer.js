@@ -25,6 +25,10 @@ const uiState = {
   reviewEntries: [],
 };
 
+// --- Batch Select Mode state ---
+let selectModeDir = null;           // rel of directory in select mode, or null
+const selectedEntries = new Set();  // rel paths of checked items
+
 // --- Search / Review overlay state ---
 let searchOverlayVisible = false;
 let searchMode = 'name'; // 'name' | 'content' | 'changes' | 'review'
@@ -263,6 +267,65 @@ function closeDrawerIfMobile() {
   }
 }
 
+// --- Batch Select Mode helpers ---
+
+function isInSelectMode(parentRel) {
+  return selectModeDir === parentRel;
+}
+
+function enableSelectMode(dirRel) {
+  if (!dirRel) return;
+  selectModeDir = dirRel;
+  selectedEntries.clear();
+  
+  // Collapse any open subdirectories within this dir to keep UX clean
+  collapseSubdirsOf(dirRel);
+  
+  // Re-render this directory's children to show checkboxes
+  if (typeof window.__explorerBusSend === 'function') {
+    window.__explorerBusSend('explorer:list', { rel: dirRel });
+  }
+}
+
+function disableSelectMode() {
+  const wasDir = selectModeDir;
+  selectModeDir = null;
+  selectedEntries.clear();
+  
+  // Re-render to remove checkboxes
+  if (wasDir && typeof window.__explorerBusSend === 'function') {
+    window.__explorerBusSend('explorer:list', { rel: wasDir });
+  }
+}
+
+function collapseSubdirsOf(parentRel) {
+  if (!treeElement) return;
+  
+  // Find the parent directory node
+  const parentLi = treeElement.querySelector(
+    `li.fe-tree-node[data-kind="dir"][data-rel="${parentRel}"]`
+  );
+  if (!parentLi) return;
+  
+  // Find all open subdirectories within it and collapse them
+  const openSubdirs = parentLi.querySelectorAll(
+    'li.fe-tree-node[data-kind="dir"][data-open="true"]'
+  );
+  openSubdirs.forEach((li) => {
+    li.dataset.open = 'false';
+    const childList = li.querySelector(':scope > ul.fe-tree');
+    if (childList) childList.remove();
+  });
+}
+
+function checkAutoDisableSelectMode(collapsedRel) {
+  // If user collapses the directory that's in select mode, auto-disable
+  if (selectModeDir && selectModeDir === collapsedRel) {
+    selectModeDir = null;
+    selectedEntries.clear();
+  }
+}
+
 function renderProjectLabel() {
   if (!projectLabelEl) return;
   const root = uiState.projectPath;
@@ -362,9 +425,20 @@ function renderExplorerTree() {
   el.appendChild(rootLi);
 }
 
-function renderEntriesInto(containerUl, entries) {
+function renderEntriesInto(containerUl, entries, parentRel = null) {
   if (!containerUl) return;
   clearElement(containerUl);
+
+  // Determine parent rel from container if not provided
+  if (parentRel === null) {
+    const parentLi = containerUl.closest('li.fe-tree-node[data-kind="dir"]');
+    parentRel = parentLi?.dataset?.rel || '.';
+  }
+
+  const inSelectMode = isInSelectMode(parentRel);
+  
+  // Toggle select mode class on the container
+  containerUl.classList.toggle('fe-tree-select-mode', inSelectMode);
 
   const list = Array.isArray(entries) ? entries : [];
   for (const entry of list) {
@@ -388,6 +462,24 @@ function renderEntriesInto(containerUl, entries) {
       });
     }
 
+    // In select mode: show checkbox instead of menu button
+    if (inSelectMode) {
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'fe-entry-checkbox';
+      checkbox.dataset.rel = entry.rel || '';
+      checkbox.checked = selectedEntries.has(entry.rel);
+      checkbox.addEventListener('change', (ev) => {
+        ev.stopPropagation();
+        if (ev.target.checked) {
+          selectedEntries.add(entry.rel);
+        } else {
+          selectedEntries.delete(entry.rel);
+        }
+      });
+      li.appendChild(checkbox);
+    }
+
     const iconSpan = document.createElement('span');
     iconSpan.className = `fe-entry-icon fe-entry-icon-${entry.kind || 'file'}`;
 
@@ -395,13 +487,19 @@ function renderEntriesInto(containerUl, entries) {
     textSpan.className = 'fe-tree-text';
     textSpan.textContent = entry.name || '';
 
-    const menuButton = document.createElement('button');
-    menuButton.className = 'fe-card-menu-btn';
-    menuButton.textContent = '⋮';
+    // Only show menu button when NOT in select mode
+    if (!inSelectMode) {
+      const menuButton = document.createElement('button');
+      menuButton.className = 'fe-card-menu-btn';
+      menuButton.textContent = '⋮';
+      li.appendChild(iconSpan);
+      li.appendChild(textSpan);
+      li.appendChild(menuButton);
+    } else {
+      li.appendChild(iconSpan);
+      li.appendChild(textSpan);
+    }
 
-    li.appendChild(iconSpan);
-    li.appendChild(textSpan);
-    li.appendChild(menuButton);
     containerUl.appendChild(li);
   }
 
@@ -540,14 +638,23 @@ function handleExplorerEvent(type, payload) {
           `li.fe-tree-node[data-kind="dir"][data-rel="${cwd}"]`
         );
         if (!dirLi) break;
+        
+        // Only update if directory is already open (or being opened)
+        const wasOpen = dirLi.dataset.open === 'true';
         let childList = dirLi.querySelector(':scope > ul.fe-tree');
-        if (!childList) {
-          childList = document.createElement('ul');
-          childList.className = 'fe-tree';
-          dirLi.appendChild(childList);
+        
+        if (wasOpen || childList) {
+          // Directory is open - update its contents
+          if (!childList) {
+            childList = document.createElement('ul');
+            childList.className = 'fe-tree';
+            dirLi.appendChild(childList);
+          }
+          dirLi.dataset.open = 'true';
+          renderEntriesInto(childList, payload.entries);
         }
-        dirLi.dataset.open = 'true';
-        renderEntriesInto(childList, payload.entries);
+        // If directory was closed and has no childList, ignore the update
+        // (it will be fetched when user opens it)
       }
       break;
     }
@@ -1164,50 +1271,68 @@ export async function initExplorerUI() {
     const isFile = entry.kind === 'file';
     const gitStatus = entry.gitStatus || '';
 
-    if (isDir) {
-      items.push({ label: 'New File…', type: 'createFile' });
-      items.push({ label: 'New Folder…', type: 'createDir' });
+    // Check if this directory is in select mode (menu clicked on the select-mode dir itself)
+    if (isInSelectMode(entry.rel)) {
+      // Select mode menu: batch actions
+      items.push({ label: 'Disable select mode', type: 'disableSelectMode' });
       items.push({ divider: true });
-      items.push({ label: 'Open in File Explorer', type: 'openExternal' });
+      const count = selectedEntries.size;
+      items.push({ label: `Copy selected (${count})`, type: 'batchCopy', disabled: count === 0 });
+      items.push({ label: `Move selected (${count})`, type: 'batchMove', disabled: count === 0 });
       items.push({ divider: true });
-    }
+      items.push({ label: `Stage selected (${count})`, type: 'batchStage', disabled: count === 0 });
+      items.push({ label: `Unstage selected (${count})`, type: 'batchUnstage', disabled: count === 0 });
+      items.push({ divider: true });
+      items.push({ label: `Delete selected (${count})`, type: 'batchDelete', destructive: true, disabled: count === 0 });
+    } else {
+      // Normal menu
+      if (isDir) {
+        items.push({ label: 'Enable select mode', type: 'enableSelectMode' });
+        items.push({ divider: true });
+        items.push({ label: 'New File…', type: 'createFile' });
+        items.push({ label: 'New Folder…', type: 'createDir' });
+        items.push({ divider: true });
+        items.push({ label: 'Open in File Explorer', type: 'openExternal' });
+        items.push({ divider: true });
+      }
 
-    // Clipboard + move/copy actions for both files and dirs
-    items.push({ label: 'Copy Name', type: 'copyName' });
-    items.push({ label: 'Copy Path', type: 'copyPath' });
-    items.push({ divider: true });
-    items.push({ label: 'Copy to…', type: 'copyTo' });
-    items.push({ label: 'Move to…', type: 'moveTo' });
+      // Clipboard + move/copy actions for both files and dirs
+      items.push({ label: 'Copy Name', type: 'copyName' });
+      items.push({ label: 'Copy Path', type: 'copyPath' });
+      items.push({ divider: true });
+      items.push({ label: 'Copy to…', type: 'copyTo' });
+      items.push({ label: 'Move to…', type: 'moveTo' });
 
-    if (isDir) {
-      items.push({ label: 'Copy from…', type: 'copyFrom' });
-      items.push({ label: 'Move from…', type: 'moveFrom' });
-    }
+      if (isDir) {
+        items.push({ label: 'Copy from…', type: 'copyFrom' });
+        items.push({ label: 'Move from…', type: 'moveFrom' });
+      }
 
-    // Git actions for files with status
-    if (
-      isFile &&
-      gitStatus &&
-      (gitStatus === 'modified' ||
-        gitStatus === 'untracked' ||
-        gitStatus === 'added')
-    ) {
-      items.push({ label: 'Stage', type: 'stage' });
-    }
-    if (
-      isFile &&
-      gitStatus &&
-      (gitStatus === 'staged' || gitStatus === 'staged_modified')
-    ) {
-      items.push({ label: 'Unstage', type: 'unstage' });
-    }
-    if (isFile && gitStatus && gitStatus !== 'clean') {
-      items.push({ label: 'Restore…', type: 'restore' });
-    }
+      // Git actions for files with status
+      if (
+        isFile &&
+        gitStatus &&
+        (gitStatus === 'modified' ||
+          gitStatus === 'untracked' ||
+          gitStatus === 'added')
+      ) {
+        items.push({ label: 'Stage', type: 'stage' });
+      }
+      if (
+        isFile &&
+        gitStatus &&
+        (gitStatus === 'staged' || gitStatus === 'staged_modified')
+      ) {
+        items.push({ label: 'Unstage', type: 'unstage' });
+      }
+      if (isFile && gitStatus && gitStatus !== 'clean') {
+        items.push({ label: 'Restore…', type: 'restore' });
+      }
 
-    items.push({ divider: true });
-    items.push({ label: 'Rename…', type: 'rename' });
-    items.push({ label: 'Delete', type: 'delete', destructive: true });
+      items.push({ divider: true });
+      items.push({ label: 'Rename…', type: 'rename' });
+      items.push({ label: 'Delete', type: 'delete', destructive: true });
+    }
 
     items.forEach((item) => {
       if (item.divider) {
@@ -1222,11 +1347,46 @@ export async function initExplorerUI() {
       if (item.destructive) {
         div.dataset.destructive = 'true';
       }
+      if (item.disabled) {
+        div.classList.add('fe-dd-item-disabled');
+        cardMenu.appendChild(div);
+        return; // Don't add click handler for disabled items
+      }
       div.addEventListener('click', async () => {
         closeCardMenu();
         if (!entry.rel) return;
         const rel = entry.rel;
         switch (item.type) {
+          // --- Select Mode actions ---
+          case 'enableSelectMode': {
+            enableSelectMode(rel);
+            break;
+          }
+          case 'disableSelectMode': {
+            disableSelectMode();
+            break;
+          }
+          case 'batchCopy': {
+            await batchCopyTo();
+            break;
+          }
+          case 'batchMove': {
+            await batchMoveTo();
+            break;
+          }
+          case 'batchStage': {
+            await batchStage();
+            break;
+          }
+          case 'batchUnstage': {
+            await batchUnstage();
+            break;
+          }
+          case 'batchDelete': {
+            await batchDelete();
+            break;
+          }
+          // --- Normal actions ---
           case 'createFile': {
             const name = window.prompt('New file name:');
             if (!name) return;
@@ -1524,6 +1684,123 @@ export async function initExplorerUI() {
     cardMenu.style.top = `${top}px`;
   }
 
+  // --- Batch action functions ---
+  
+  async function batchCopyTo() {
+    const paths = Array.from(selectedEntries);
+    if (!paths.length) {
+      toast('No items selected');
+      return;
+    }
+    if (!window.teFilePicker) {
+      toast('File picker not available');
+      return;
+    }
+    try {
+      const dest = await window.teFilePicker.openDirectory({
+        title: `Copy ${paths.length} items to…`,
+        startPath: uiState.projectPath || '',
+      });
+      if (!dest || !dest.path) return;
+      if (typeof window.__explorerBusSend !== 'function') {
+        toast('Explorer connection unavailable');
+        return;
+      }
+      window.__explorerBusSend('explorer:batchCopy', {
+        rels: paths,
+        dest_path: dest.path,
+      });
+      toast(`Copying ${paths.length} items…`);
+      disableSelectMode();
+    } catch (err) {
+      if (err && err.message !== 'cancelled') {
+        toast(err?.message || 'Batch copy failed');
+      }
+    }
+  }
+
+  async function batchMoveTo() {
+    const paths = Array.from(selectedEntries);
+    if (!paths.length) {
+      toast('No items selected');
+      return;
+    }
+    if (!window.teFilePicker) {
+      toast('File picker not available');
+      return;
+    }
+    try {
+      const dest = await window.teFilePicker.openDirectory({
+        title: `Move ${paths.length} items to…`,
+        startPath: uiState.projectPath || '',
+      });
+      if (!dest || !dest.path) return;
+      if (typeof window.__explorerBusSend !== 'function') {
+        toast('Explorer connection unavailable');
+        return;
+      }
+      window.__explorerBusSend('explorer:batchMove', {
+        rels: paths,
+        dest_path: dest.path,
+      });
+      toast(`Moving ${paths.length} items…`);
+      disableSelectMode();
+    } catch (err) {
+      if (err && err.message !== 'cancelled') {
+        toast(err?.message || 'Batch move failed');
+      }
+    }
+  }
+
+  async function batchStage() {
+    const paths = Array.from(selectedEntries);
+    if (!paths.length) {
+      toast('No items selected');
+      return;
+    }
+    if (typeof window.__explorerBusSend !== 'function') {
+      toast('Explorer connection unavailable');
+      return;
+    }
+    window.__explorerBusSend('git:stage', { paths });
+    toast(`Staged ${paths.length} items`);
+    disableSelectMode();
+  }
+
+  async function batchUnstage() {
+    const paths = Array.from(selectedEntries);
+    if (!paths.length) {
+      toast('No items selected');
+      return;
+    }
+    if (typeof window.__explorerBusSend !== 'function') {
+      toast('Explorer connection unavailable');
+      return;
+    }
+    window.__explorerBusSend('git:unstage', { paths });
+    toast(`Unstaged ${paths.length} items`);
+    disableSelectMode();
+  }
+
+  async function batchDelete() {
+    const paths = Array.from(selectedEntries);
+    if (!paths.length) {
+      toast('No items selected');
+      return;
+    }
+    const confirmed = window.confirm(
+      `⚠️ WARNING: Delete ${paths.length} items?\n\nThis action cannot be undone.`
+    );
+    if (!confirmed) return;
+    if (typeof window.__explorerBusSend !== 'function') {
+      toast('Explorer connection unavailable');
+      return;
+    }
+    window.__explorerBusSend('explorer:batchDelete', { rels: paths });
+    toast(`Deleting ${paths.length} items…`);
+    disableSelectMode();
+  }
+
   document.addEventListener(
     'click',
     (ev) => {
@@ -1544,6 +1821,11 @@ export async function initExplorerUI() {
       const rel = li.dataset.rel;
       const kind = li.dataset.kind;
       if (!rel) return;
+
+      // Checkbox click in select mode - let it bubble to the checkbox handler
+      if (ev.target.closest('.fe-entry-checkbox')) {
+        return;
+      }
 
       // Card menu open
       const menuBtn = ev.target.closest('.fe-card-menu-btn');
@@ -1567,6 +1849,9 @@ export async function initExplorerUI() {
           li.dataset.open = 'false';
           const childList = li.querySelector(':scope > ul.fe-tree');
           if (childList) childList.remove();
+          
+          // Auto-disable select mode if collapsing the select-mode directory
+          checkAutoDisableSelectMode(rel);
         } else {
           // Expand: ask backend for this directory listing
           li.dataset.open = 'true';
@@ -1577,6 +1862,20 @@ export async function initExplorerUI() {
         return;
       }
       if (kind === 'file') {
+        // In select mode, clicking a file toggles its checkbox
+        if (selectModeDir) {
+          const checkbox = li.querySelector('.fe-entry-checkbox');
+          if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            if (checkbox.checked) {
+              selectedEntries.add(rel);
+            } else {
+              selectedEntries.delete(rel);
+            }
+          }
+          return;
+        }
+        
         if (typeof window.appOpenFileRel === 'function') {
           window.appOpenFileRel(rel, uiState.projectPath || null);
           closeDrawerIfMobile();

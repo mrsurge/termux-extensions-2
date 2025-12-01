@@ -73,9 +73,23 @@ class ConnectionManager:
                 self.active_connections[project_path].remove(websocket)
             if not self.active_connections[project_path]:
                 del self.active_connections[project_path]
+                # --- WATCHER LIFECYCLE (future implementation) ---
+                # When last client disconnects from a project, we could stop the
+                # file watcher to save resources:
+                # from .core_read import stop_watcher
+                # stop_watcher()
+                # ------------------------------------------------
         if websocket in self.ws_project_map:
             del self.ws_project_map[websocket]
         logger.info(f"Client disconnected from project: {project_path}")
+    
+    def get_connection_count(self, project_path: str) -> int:
+        """Returns the number of active connections for a project."""
+        return len(self.active_connections.get(project_path, []))
+    
+    def has_connections(self, project_path: str) -> bool:
+        """Returns True if there are any active connections for a project."""
+        return self.get_connection_count(project_path) > 0
 
     async def broadcast(self, project_path: str, message: Dict[str, Any]):
         """Send message to all clients connected to a specific project."""
@@ -97,6 +111,97 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# --- Watcher -> Explorer Bridge ---
+# This allows the file watcher (running in a background thread) to trigger
+# explorer tree refreshes when files are created/deleted/moved externally.
+
+import asyncio
+from threading import Timer
+
+_explorer_event_loop: Optional[asyncio.AbstractEventLoop] = None
+
+# Debounce explorer refreshes to avoid flooding
+_explorer_refresh_timers: Dict[str, Timer] = {}
+_explorer_refresh_lock = __import__('threading').Lock()
+EXPLORER_REFRESH_DEBOUNCE = 0.25  # 250ms
+
+def set_explorer_event_loop(loop: asyncio.AbstractEventLoop):
+    """Called during app startup to set the event loop for watcher callbacks."""
+    global _explorer_event_loop
+    _explorer_event_loop = loop
+
+def notify_explorer_of_change(abs_path: str, event_type: str):
+    """
+    Called by the file watcher when a file/directory is created, deleted, or modified.
+    Schedules an explorer refresh for the affected directory (debounced).
+    """
+    if not _explorer_event_loop or not manager.active_connections:
+        return
+    
+    # Find which project this path belongs to
+    for project_path in manager.active_connections.keys():
+        if abs_path.startswith(project_path):
+            try:
+                # Get the parent directory relative to project
+                rel_path = _get_rel_from_abs(abs_path, project_path)
+                parent_rel = _get_parent_rel(rel_path)
+                
+                # Debounce: cancel existing timer and set a new one
+                debounce_key = f"{project_path}:{parent_rel}"
+                with _explorer_refresh_lock:
+                    existing_timer = _explorer_refresh_timers.get(debounce_key)
+                    if existing_timer:
+                        existing_timer.cancel()
+                    
+                    def do_refresh():
+                        with _explorer_refresh_lock:
+                            _explorer_refresh_timers.pop(debounce_key, None)
+                        asyncio.run_coroutine_threadsafe(
+                            _refresh_explorer_directory(project_path, parent_rel),
+                            _explorer_event_loop
+                        )
+                    
+                    timer = Timer(EXPLORER_REFRESH_DEBOUNCE, do_refresh)
+                    _explorer_refresh_timers[debounce_key] = timer
+                    timer.start()
+                    
+            except Exception as e:
+                logger.warning(f"Failed to notify explorer of change: {e}")
+            break
+
+async def _refresh_explorer_directory(project_path: str, rel_dir: str):
+    """Broadcasts an explorer:setList for the given directory."""
+    try:
+        dir_listing = list_dir(rel_dir)
+        msg = {"type": "explorer:setList", "payload": dir_listing}
+        await manager.broadcast(project_path, msg)
+    except Exception as e:
+        logger.warning(f"Failed to refresh explorer directory {rel_dir}: {e}")
+
+# --- Helpers ---
+
+def _get_parent_rel(rel_path: str) -> str:
+    """Get the parent directory rel path. Returns '.' for root-level items."""
+    if not rel_path or rel_path == '.':
+        return '.'
+    parts = rel_path.replace('\\', '/').split('/')
+    if len(parts) <= 1:
+        return '.'
+    return '/'.join(parts[:-1])
+
+def _get_rel_from_abs(abs_path: str, project_root) -> str:
+    """Convert absolute path to project-relative path, or '.' if outside project."""
+    from pathlib import Path
+    try:
+        abs_p = Path(abs_path).resolve()
+        root_p = Path(project_root).resolve()
+        if str(abs_p).startswith(str(root_p)):
+            rel = abs_p.relative_to(root_p)
+            return str(rel) if str(rel) != '.' else '.'
+    except Exception:
+        pass
+    return '.'
+
 # --- Dispatcher ---
 
 class ExplorerDispatcher:
@@ -105,6 +210,19 @@ class ExplorerDispatcher:
         self.project_root = get_project_root()
         
     async def initialize(self):
+        # Set the event loop for watcher -> explorer bridge
+        # This allows the file watcher thread to schedule async refreshes
+        global _explorer_event_loop
+        if _explorer_event_loop is None:
+            _explorer_event_loop = asyncio.get_event_loop()
+        
+        # --- WATCHER LIFECYCLE (future implementation) ---
+        # When first client connects, we could start the file watcher:
+        # if not manager.has_connections(str(self.project_root)):
+        #     from .core_read import init_watcher
+        #     init_watcher(self.project_root)
+        # ------------------------------------------------
+        
         # Register connection with current project
         await manager.accept_and_register(self.websocket, str(self.project_root))
         
@@ -247,37 +365,105 @@ class ExplorerDispatcher:
         await self.broadcast("explorer:setList", parent_list)
 
     async def handle_explorer_rename(self, payload: dict, msg_id: str):
-        res = rename_entry(payload.get("rel"), payload.get("new_name"))
+        rel = payload.get("rel")
+        parent_rel = _get_parent_rel(rel)
+        res = rename_entry(rel, payload.get("new_name"))
         await self.broadcast("explorer:renamed", res)
-        # Refresh parent
-        # We need parent path. Simple string split for now.
-        parent = str(res['old_rel']).rsplit('/', 1)[0] if '/' in str(res['old_rel']) else '.'
-        await self.broadcast("explorer:setList", list_dir(parent))
+        # Refresh parent directory
+        await self.broadcast("explorer:setList", list_dir(parent_rel))
 
     async def handle_explorer_delete(self, payload: dict, msg_id: str):
-        res = delete_entry(payload.get("rel"))
+        rel = payload.get("rel")
+        parent_rel = _get_parent_rel(rel)
+        res = delete_entry(rel)
         await self.broadcast("explorer:deleted", res)
-        # Client handles UI removal or we refresh parent.
+        # Refresh the parent directory to reflect deletion
+        await self.broadcast("explorer:setList", list_dir(parent_rel))
 
     async def handle_explorer_batchDelete(self, payload: dict, msg_id: str):
-        res = batch_delete(payload.get("rels", []))
+        rels = payload.get("rels", [])
+        res = batch_delete(rels)
         await self.broadcast("explorer:batchDeleted", res)
+        # Collect unique parent directories and refresh each
+        parent_rels = set(_get_parent_rel(r) for r in rels)
+        for parent_rel in parent_rels:
+            try:
+                await self.broadcast("explorer:setList", list_dir(parent_rel))
+            except Exception:
+                pass  # Directory may no longer exist
+
+    async def handle_explorer_batchCopy(self, payload: dict, msg_id: str):
+        rels = payload.get("rels", [])
+        dest_path = payload.get("dest_path")
+        res = batch_copy(rels, dest_path)
+        await self.broadcast("explorer:batchCopied", res)
+        # Refresh destination directory (source unchanged for copy)
+        dest_rel = _get_rel_from_abs(dest_path, self.project_root)
+        try:
+            await self.broadcast("explorer:setList", list_dir(dest_rel))
+        except Exception:
+            pass
+
+    async def handle_explorer_batchMove(self, payload: dict, msg_id: str):
+        rels = payload.get("rels", [])
+        dest_path = payload.get("dest_path")
+        res = batch_move(rels, dest_path)
+        await self.broadcast("explorer:batchMoved", res)
+        # Refresh source parent directories and destination
+        parent_rels = set(_get_parent_rel(r) for r in rels)
+        dest_rel = _get_rel_from_abs(dest_path, self.project_root)
+        parent_rels.add(dest_rel)
+        for parent_rel in parent_rels:
+            try:
+                await self.broadcast("explorer:setList", list_dir(parent_rel))
+            except Exception:
+                pass
 
     async def handle_explorer_move(self, payload: dict, msg_id: str):
-        res = move_entry(payload.get("rel"), payload.get("dest_path"))
+        rel = payload.get("rel")
+        dest_path = payload.get("dest_path")
+        source_parent = _get_parent_rel(rel)
+        res = move_entry(rel, dest_path)
         await self.broadcast("explorer:moved", res)
+        # Refresh source parent and destination
+        dest_rel = _get_rel_from_abs(dest_path, self.project_root)
+        for parent_rel in set([source_parent, dest_rel]):
+            try:
+                await self.broadcast("explorer:setList", list_dir(parent_rel))
+            except Exception:
+                pass
 
     async def handle_explorer_copy(self, payload: dict, msg_id: str):
-        res = copy_entry(payload.get("rel"), payload.get("dest_path"))
+        rel = payload.get("rel")
+        dest_path = payload.get("dest_path")
+        res = copy_entry(rel, dest_path)
         await self.broadcast("explorer:copied", res)
+        # Refresh destination directory only (source unchanged)
+        dest_rel = _get_rel_from_abs(dest_path, self.project_root)
+        try:
+            await self.broadcast("explorer:setList", list_dir(dest_rel))
+        except Exception:
+            pass
 
     async def handle_explorer_copyFrom(self, payload: dict, msg_id: str):
-        res = copy_entry_inbound(payload.get("source_path"), payload.get("dest_rel"))
+        dest_rel = payload.get("dest_rel")
+        res = copy_entry_inbound(payload.get("source_path"), dest_rel)
         await self.broadcast("explorer:copied", res)
+        # Refresh destination directory
+        try:
+            await self.broadcast("explorer:setList", list_dir(dest_rel))
+        except Exception:
+            pass
 
     async def handle_explorer_moveFrom(self, payload: dict, msg_id: str):
-        res = move_entry_inbound(payload.get("source_path"), payload.get("dest_rel"))
+        dest_rel = payload.get("dest_rel")
+        res = move_entry_inbound(payload.get("source_path"), dest_rel)
         await self.broadcast("explorer:moved", res)
+        # Refresh destination directory
+        try:
+            await self.broadcast("explorer:setList", list_dir(dest_rel))
+        except Exception:
+            pass
 
     # --- Git Operations (Broadcasts Status) ---
 
