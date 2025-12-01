@@ -1520,6 +1520,7 @@ export async function initExplorerUI() {
       if (kind === 'file') {
         if (typeof window.appOpenFileRel === 'function') {
           window.appOpenFileRel(rel, uiState.projectPath || null);
+          closeDrawerIfMobile();
         }
       }
     });
