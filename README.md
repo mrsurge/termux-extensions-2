@@ -149,7 +149,7 @@ Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another dev
 
 ### Three-Layer System
 
-```
+
 ┌─────────────────────────────────────────┐
 │  Supervisor (bash)                      │
 │  - Signal handling (SIGTERM/SIGINT)     │
@@ -174,7 +174,7 @@ Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another dev
     │ Code CM6 │    │ File Exp │    │ Terminal │
     │ :5001    │    │ :5002    │    │ :5003    │
     └──────────┘    └──────────┘    └──────────┘
-```
+
 
 ### Key Components
 
