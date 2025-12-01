@@ -529,6 +529,78 @@ function setGitControlsEnabled(enabled, showInit = false) {
   });
 }
 
+// --- Git Progress Bar ---
+// Ephemeral progress bar at top of git footer + progress text in status row
+
+let gitProgressBarEl = null;
+let gitProgressTextEl = null;
+
+function ensureProgressBarElements() {
+  // Progress bar: thin line at top of footer
+  if (!gitProgressBarEl) {
+    const footer = document.querySelector('.fe-git-footer');
+    if (footer) {
+      gitProgressBarEl = document.createElement('div');
+      gitProgressBarEl.className = 'fe-git-progress-bar';
+      gitProgressBarEl.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 0;
+        background: linear-gradient(90deg, #3b82f6, #60a5fa);
+        transition: width 0.2s ease, height 0.15s ease;
+        z-index: 10;
+        pointer-events: none;
+      `;
+      footer.style.position = 'relative';
+      footer.insertBefore(gitProgressBarEl, footer.firstChild);
+    }
+  }
+  
+  // Progress text: right-aligned in git summary row
+  if (!gitProgressTextEl) {
+    const summaryRow = document.querySelector('.fe-git-row.fe-git-meta');
+    if (summaryRow) {
+      gitProgressTextEl = document.createElement('span');
+      gitProgressTextEl.className = 'fe-git-progress-text';
+      gitProgressTextEl.style.cssText = `
+        margin-left: auto;
+        font-size: 0.8em;
+        color: #60a5fa;
+        white-space: nowrap;
+        display: none;
+      `;
+      summaryRow.appendChild(gitProgressTextEl);
+    }
+  }
+}
+
+function showGitProgressBar(pct, detail) {
+  ensureProgressBarElements();
+  
+  if (gitProgressBarEl) {
+    gitProgressBarEl.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+    gitProgressBarEl.style.height = '3px';
+  }
+  
+  if (gitProgressTextEl) {
+    gitProgressTextEl.style.display = 'inline';
+    gitProgressTextEl.textContent = detail || `${pct}%`;
+  }
+}
+
+function hideGitProgressBar() {
+  if (gitProgressBarEl) {
+    gitProgressBarEl.style.width = '0%';
+    gitProgressBarEl.style.height = '0';
+  }
+  
+  if (gitProgressTextEl) {
+    gitProgressTextEl.style.display = 'none';
+    gitProgressTextEl.textContent = '';
+  }
+}
+
 function renderExplorerTree() {
   if (!treeElement) {
     treeElement = document.getElementById('fe-file-tree');
@@ -1064,6 +1136,46 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
+    
+    // --- Job Progress Events (git push/pull/clone with progress) ---
+    case 'job:progress': {
+      const { id, type, status, progress, message, error } = payload;
+      
+      // Only handle git-related jobs
+      if (!type || !type.startsWith('git_')) break;
+      
+      if (status === 'running') {
+        // Show/update progress bar
+        const pct = progress?.completed ?? 0;
+        const detail = progress?.detail || message || '';
+        showGitProgressBar(pct, detail);
+      } else if (status === 'succeeded') {
+        hideGitProgressBar();
+        toast(message || `${type.replace('_', ' ')} completed`);
+        // Refresh git status after push/pull completes
+        if (type === 'git_pull' || type === 'git_push') {
+          if (typeof window.__explorerBusSend === 'function') {
+            window.__explorerBusSend('git:status', {});
+            window.__explorerBusSend('explorer:refresh', {});
+          }
+        }
+      } else if (status === 'failed') {
+        hideGitProgressBar();
+        toast(error || message || `${type.replace('_', ' ')} failed`);
+      } else if (status === 'cancelled') {
+        hideGitProgressBar();
+        toast(`${type.replace('_', ' ')} cancelled`);
+      }
+      break;
+    }
+    case 'git:pushStarted':
+    case 'git:pullStarted':
+    case 'git:cloneStarted': {
+      // Job started acknowledgement - show initial progress state
+      showGitProgressBar(0, 'Starting...');
+      break;
+    }
+    
     case 'search:setResults': {
       searchResults = payload || null;
       searchLoading = false;

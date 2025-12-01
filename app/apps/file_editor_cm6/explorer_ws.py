@@ -1,8 +1,11 @@
 import asyncio
 import json
 import logging
+from contextlib import suppress
 from typing import Dict, Any, List, Optional
 from fastapi import WebSocket, WebSocketDisconnect
+
+from queue import Queue, Empty
 
 from .explorer_helper import (
     list_dir,
@@ -324,6 +327,9 @@ class ExplorerDispatcher:
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
         self.project_root = get_project_root()
+        self._job_queue: Optional[Queue] = None
+        self._job_listener = None
+        self._job_pump_task: Optional[asyncio.Task] = None
         
     async def initialize(self):
         # Set the event loop for watcher -> explorer bridge
@@ -342,6 +348,16 @@ class ExplorerDispatcher:
         # Register connection with current project
         await manager.accept_and_register(self.websocket, str(self.project_root))
         
+        # --- Job Registry Listener ---
+        # Subscribe to job updates and forward relevant ones to this client
+        try:
+            from app.libs.jobs import manager as job_manager
+            self._job_queue = Queue()
+            self._job_listener = job_manager.add_listener(self._job_queue, job_ids=None)
+            self._job_pump_task = asyncio.create_task(self._pump_job_events())
+        except Exception as e:
+            logger.warning(f"Failed to register job listener: {e}")
+        
         # Send initial state snapshots
         # 1. Project Info
         await self.emit_personal("project:setActive", {"path": str(self.project_root)})
@@ -351,8 +367,58 @@ class ExplorerDispatcher:
         await self.emit_personal("explorer:setList", list_dir('.'))
         # 4. Review List (if any)
         await self.broadcast_review_state()
+    
+    async def _pump_job_events(self):
+        """Background task to forward job updates to this client."""
+        while True:
+            try:
+                # Non-blocking check with short timeout
+                payload = await asyncio.to_thread(self._job_queue.get, timeout=0.5)
+                
+                for job_data in payload.get("jobs", []):
+                    # Filter: only jobs for this project (git jobs have repo_path in params)
+                    job_type = job_data.get("type", "")
+                    job_params = job_data.get("params", {})
+                    
+                    # Check if this is a git job for our project
+                    repo_path = job_params.get("repo_path")
+                    target_path = job_params.get("target_path")  # for clone
+                    
+                    is_relevant = False
+                    if repo_path and str(self.project_root) == repo_path:
+                        is_relevant = True
+                    elif target_path and str(self.project_root) == target_path:
+                        is_relevant = True
+                    elif job_type.startswith("git_"):
+                        # If no specific path, show all git jobs (edge case)
+                        is_relevant = True
+                    
+                    if is_relevant:
+                        await self.emit_personal("job:progress", job_data)
+                        
+            except Empty:
+                continue
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"Error in job pump: {e}")
+                await asyncio.sleep(0.5)
 
     async def cleanup(self):
+        # Stop job pump task
+        if self._job_pump_task:
+            self._job_pump_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._job_pump_task
+        
+        # Unregister job listener
+        if self._job_listener:
+            try:
+                from app.libs.jobs import manager as job_manager
+                job_manager.remove_listener(self._job_listener)
+            except Exception:
+                pass
+        
         manager.disconnect(self.websocket)
 
     # --- Helpers ---
@@ -627,14 +693,34 @@ class ExplorerDispatcher:
         await self.broadcast("git:diffBaseSet", {"ref": "HEAD", "refresh": True})
 
     async def handle_git_push(self, payload: dict, msg_id: str):
-        push_changes(self.project_root, payload.get("remote"), payload.get("branch"), payload.get("force", False))
-        await self.broadcast_git_status()
+        """Create a git_push job for progress tracking."""
+        try:
+            from app.libs.jobs import manager as job_manager
+            job = job_manager.create_job("git_push", {
+                "repo_path": str(self.project_root),
+                "remote": payload.get("remote", "origin"),
+                "branch": payload.get("branch"),
+                "force": payload.get("force", False),
+            })
+            # Acknowledge job creation - progress will come via job:progress events
+            await self.emit_personal("git:pushStarted", {"job_id": job.id}, msg_id)
+        except Exception as e:
+            await self.send_error(f"Failed to start push: {e}", msg_id)
 
     async def handle_git_pull(self, payload: dict, msg_id: str):
-        pull_changes(self.project_root, payload.get("remote"), payload.get("branch"), payload.get("rebase", False))
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
-        await self.broadcast_git_decorations()
+        """Create a git_pull job for progress tracking."""
+        try:
+            from app.libs.jobs import manager as job_manager
+            job = job_manager.create_job("git_pull", {
+                "repo_path": str(self.project_root),
+                "remote": payload.get("remote", "origin"),
+                "branch": payload.get("branch"),
+                "rebase": payload.get("rebase", False),
+            })
+            # Acknowledge job creation - progress will come via job:progress events
+            await self.emit_personal("git:pullStarted", {"job_id": job.id}, msg_id)
+        except Exception as e:
+            await self.send_error(f"Failed to start pull: {e}", msg_id)
 
     async def handle_git_reset(self, payload: dict, msg_id: str):
         reset_hard(self.project_root, payload.get("commit", "HEAD"))
@@ -702,6 +788,29 @@ class ExplorerDispatcher:
     async def handle_project_list(self, payload: dict, msg_id: str):
         projects = _history_store.list_projects()
         await self.emit_personal("project:list", {"projects": projects}, msg_id)
+
+    async def handle_git_clone(self, payload: dict, msg_id: str):
+        """Create a git_clone job for progress tracking."""
+        url = payload.get("url")
+        target_path = payload.get("target_path")
+        
+        if not url:
+            return await self.send_error("URL is required", msg_id)
+        if not target_path:
+            return await self.send_error("target_path is required", msg_id)
+        
+        try:
+            from app.libs.jobs import manager as job_manager
+            job = job_manager.create_job("git_clone", {
+                "url": url,
+                "target_path": target_path,
+                "branch": payload.get("branch"),
+                "depth": payload.get("depth"),
+            })
+            # Acknowledge job creation - progress will come via job:progress events
+            await self.emit_personal("git:cloneStarted", {"job_id": job.id, "target_path": target_path}, msg_id)
+        except Exception as e:
+            await self.send_error(f"Failed to start clone: {e}", msg_id)
 
     # --- Search & Review (State Events) ---
 
