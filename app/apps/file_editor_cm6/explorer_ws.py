@@ -198,13 +198,31 @@ def _schedule_git_status_broadcast(project_path: str):
 
 
 async def _broadcast_git_status_update(project_path: str):
-    """Broadcast git status decorations for a project."""
+    """Broadcast git status decorations and summary for a project."""
     try:
         from pathlib import Path
         mark_git_cache_dirty(Path(project_path))
+        
+        # 1. Broadcast tree decorations (explorer:updateGitStatus)
         statuses = get_all_git_statuses()
         msg = {"type": "explorer:updateGitStatus", "payload": {"statuses": statuses}}
         await manager.broadcast(project_path, msg)
+        
+        # 2. Broadcast summary bar (git:status)
+        status = git_get_status(Path(project_path))
+        summary_msg = {
+            "type": "git:status",
+            "payload": {
+                "branch": status.branch,
+                "detached": status.detached,
+                "ahead": status.ahead,
+                "behind": status.behind,
+                "staged": status.staged,
+                "unstaged": status.unstaged,
+                "untracked": status.untracked,
+            }
+        }
+        await manager.broadcast(project_path, summary_msg)
     except Exception as e:
         logger.warning(f"Failed to broadcast git status update: {e}")
 
