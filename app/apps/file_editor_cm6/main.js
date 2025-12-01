@@ -767,23 +767,11 @@ const AUTOSAVE_IDLE_DELAY = 1200; // manual saves / disabled autosave
 const AUTOSAVE_ACTIVE_DELAY = 450; // faster loop while autosave is ON
 let lastSaveTime = 0;
 const SELF_ECHO_GRACE = 300; // 300ms grace period after save
-let bootAutoOpenTimer = null;
-let bootAutoOpenPath = null;
 let restoredSessionPath = null;
 
 let lastScrollState = null;
 let scrollStateTimer = null;
 const CURSOR_STATE_DEBOUNCE = 1000; // ms
-
-function cancelBootAutoOpen(reason) {
-  if (!bootAutoOpenTimer) return;
-  clearTimeout(bootAutoOpenTimer);
-  bootAutoOpenTimer = null;
-  bootAutoOpenPath = null;
-  if (reason) {
-    console.log(`[BOOT] Cancelled deferred open: ${reason}`);
-  }
-}
 
 function handleCacheStateBridgeEvent(event) {
   if (!event || !event.data || event.data.type !== 'cm6-cache-state') {
@@ -808,12 +796,8 @@ function handleCacheStateBridgeEvent(event) {
   }
   if (data.reason === 'restore') {
     restoredSessionActive = true;
-    if (bootAutoOpenPath && normalizedPath && bootAutoOpenPath === normalizedPath) {
-      cancelBootAutoOpen('NiceGUI restored cached session');
-    }
   } else if (data.state === 'clean') {
     restoredSessionActive = false;
-    bootAutoOpenPath = null;
   }
   if (data.reason === 'watcher_external' && normalizedPath) {
     triggerExternalRefresh(normalizedPath);
@@ -1446,38 +1430,6 @@ function applyCacheIndicator(info) {
       badge.dataset.state = '';
       markUnsaved(false);
     }
-  }
-}
-
-async function adoptIframeRestoredDocument(path, sha) {
-  if (!path) return;
-  const resolved = toAbsolute(path, null, HOME_DIR);
-  currentPath = resolved;
-  currentPathExists = true;
-  lastPickerPath = parentDir(resolved);
-  currentModeLanguage = detectLanguageFromFilename(resolved);
-  if (sha) {
-    lastSha256 = sha;
-  }
-  markUnsaved(false);
-  updatePathDisplay();
-  syncSessionPath();
-
-  diffController.invalidateCacheForPath(resolved);
-  diffController.setContext({ path: resolved, sha: lastSha256 });
-  if (editorViewState?.showInlineDiffs) {
-    diffController.refresh(true);
-  }
-  openWebSocket(resolved);
-
-  try {
-    const project = cachedProjectRoot || sessionState.activeProject || undefined;
-    await apiPost('state/file_activity', {
-      path: resolved,
-      project,
-    });
-  } catch (err) {
-    console.warn('[BOOT] Failed to record activity for restored file', err);
   }
 }
 
@@ -2397,16 +2349,12 @@ async function main() {
   await refreshMenuState();
   bindThemeMenu();
 
-  // Handshake: Ask backend to resend cache state now that we are listening
-  // This fixes the "Missed Message" race condition on page load
+  // Ask backend to resend cache state so draft indicator is accurate
   try {
     await apiPost('editor/refresh_cache_state', {});
   } catch (e) {
     console.warn('Failed to refresh cache state on boot:', e);
   }
-  
-  // Wait a tick for iframe to signal restored state
-  await new Promise(resolve => setTimeout(resolve, 150));
   
   await fetchPersistedSessionState();
   initSessionStateContext(serverState);
@@ -2429,48 +2377,46 @@ async function main() {
   // Open file via URL param or saved state
   const params = new URLSearchParams(window.location.search);
   const fileFromUrl = params.get('file');
-  let bootOpened = false;
   const restoredPath = serverState.lastFile;
   const restoredSha = serverState.lastFileSha256 || null;
-  if (restoredPath && !currentPath) {
+  
+  // Sync host bookkeeping with backend SSOT - the iframe already loaded the file
+  if (restoredPath) {
     currentPath = restoredPath;
     currentPathExists = !!serverState.lastFileExists;
     lastPickerPath = parentDir(restoredPath);
     lastSha256 = restoredSha;
+    currentModeLanguage = detectLanguageFromFilename(restoredPath);
     setText(''); // NiceGUI iframe owns the real buffer
+    updatePathDisplay();
+    syncSessionPath();
+    
+    // Open WebSocket for file watching
+    openWebSocket(restoredPath);
+    
+    console.log('[BOOT] Synced with backend SSOT:', restoredPath);
   }
 
+  // Only call openFile() for explicit URL parameter - user wants a specific file
   if (fileFromUrl) {
     const abs = toAbsolute(fileFromUrl, null, HOME_DIR);
-    lastPickerPath = parentDir(abs);
-    bootOpened = true;
-    await openFile(abs).catch((e) => {
-      host.toast(`Failed to open file: ${e.message}`);
-      currentPath = ''; currentPathExists = false; setText(''); markUnsaved(false); updatePathDisplay();
-    });
-  } else if (serverState.lastFile && serverState.lastFileExists) {
-    if (currentPath && restoredPath && currentPath === restoredPath) {
-      console.log('[BOOT] Adopting NiceGUI-restored session');
-      bootOpened = true;
-      await adoptIframeRestoredDocument(restoredPath, restoredSha);
-    } else {
-      bootOpened = true;
-      // Use a timeout to ensure the iframe is ready
-      bootAutoOpenPath = toAbsolute(serverState.lastFile, null, HOME_DIR);
-      bootAutoOpenTimer = setTimeout(async () => {
-        bootAutoOpenTimer = null;
-        bootAutoOpenPath = null;
-        await openFile(serverState.lastFile, { allowOverwrite: false }).catch((e) => {
-          console.error('Failed to reopen last file:', e);
-          statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
-        });
-      }, 400);
+    if (abs !== restoredPath) {
+      // URL requests a DIFFERENT file than what backend loaded - honor the URL
+      lastPickerPath = parentDir(abs);
+      await openFile(abs).catch((e) => {
+        host.toast(`Failed to open file: ${e.message}`);
+        currentPath = ''; currentPathExists = false; setText(''); markUnsaved(false); updatePathDisplay();
+      });
     }
-  } else if (serverState.lastFile && !serverState.lastFileExists) {
-    statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
-  } else if (!bootOpened) {
-    statusEl.textContent = 'Select a file to begin.';
+  } else if (!restoredPath) {
+    // No file to restore
+    if (serverState.lastFile && !serverState.lastFileExists) {
+      statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
+    } else {
+      statusEl.textContent = 'Select a file to begin.';
+    }
   }
+  // else: restoredPath exists, iframe already loaded it, we just synced - done!
 
 }
 

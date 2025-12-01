@@ -1030,6 +1030,7 @@ function handleExplorerEvent(type, payload) {
       break;
     }
     case 'git:status': {
+      console.log('[GIT_STATUS_DEBUG] Received:', payload);
       uiState.gitStatus = payload || null;
       renderGitSummary();
       // Any git status means we are in a real git repo: enable controls and hide Init.

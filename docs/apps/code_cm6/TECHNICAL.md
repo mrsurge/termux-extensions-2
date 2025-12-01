@@ -1942,19 +1942,51 @@ def _notify_subscribers(path: str, event: dict):
         callback(event)
 ```
 
-### 13.4 Multi-File Draft Restoration Pipeline
+### 13.4 Cold Start / Page Load Flow
 
-1. **Host Probe (`main.js:1405-1416`):** `openFile()` POSTs `/editor/check_cache` before touching disk. If it returns `has_draft`, the response supplies both the cached content and the original `base_sha256`.
-2. **NiceGUI Safeguard (`editor_app.py:1008-1044`):** `set_editor_content()` persists the previous buffer, then uses the provided `sha256` (or sidecar’s `base_sha256`) when it calls `set_current_file`. If the host accidentally sent disk content while a draft exists, the backend replaces it with the cached version.
-3. **Cache Broadcast:** After every load or persist, `_broadcast_cache_state()` emits `cm6-cache-state` events so the host can mark the file badge + explorer card immediately.
+On page load, the editor restores state from the SSOT without redundant file operations:
 
-### 13.5 Explorer + Review UI
+1. **Backend Initialization (`editor_app.py:editor_page`):**
+   - Reads `lastFile` from `_history_store.get_last_file()`
+   - Checks for cached draft via `_history_store.get_cached_document()`
+   - Creates NiceGUI editor with content already loaded (draft or disk)
+   - Applies diff decorations immediately
+   - Subscribes to file watcher
+
+2. **Host Sync (`main.js:main`):**
+   - Fetches `/state` endpoint which returns `lastFile`, `lastFileSha256`, etc.
+   - **Does NOT call `openFile()`** - just syncs bookkeeping variables
+   - Updates `currentPath`, `lastSha256`, `currentModeLanguage`
+   - Opens WebSocket for file watching
+   - Only calls `openFile()` if URL parameter requests a DIFFERENT file
+
+3. **Cache State Broadcast:**
+   - Backend broadcasts `cm6-cache-state` with `reason: 'restore'` for drafts
+   - Host receives and updates draft indicator accordingly
+
+**Key Insight:** Both host and iframe read from the same SSOT, so they arrive at the same answer without synchronization. The host trusts the backend's state and doesn't re-issue commands.
+
+### 13.5 File Watcher Integration
+
+The file watcher (`core_read.py`) monitors open files and broadcasts changes:
+
+- **Ignored Events:** If a watcher event's SHA matches the draft's `base_sha256`, the event is ignored (prevents self-echo)
+- **Content Replacement:** Only applied when external changes are detected
+- **Diff Recalculation:** Only triggered if `_apply_watcher_replace()` actually applied content
+
+```python
+was_applied = _apply_watcher_replace(path, content, sha256, project_path)
+if was_applied and showInlineDiffs:
+    editor.set_diff_decorations(hunks)  # Only if content changed
+```
+
+### 13.6 Explorer + Review UI
 
 * **Server Metadata (`explorer_helper.list_dir`):** Directory listings now include `hasDraft` by reading `HistoryStore.list_project_drafts`. Tree nodes receive `.fe-draft` classes during render—no polling required.
 * **Review Overlay (`static/js/explorer.js:2894-3109`):** The “Review” search tab scans `/review/list`, renders inline draft hunks, and attaches `data-line` attributes to headers/rows. Clicking a hunk calls `openFileAndMaybeJump(rel, line)`, mirroring the existing “Search by Changes” UX.
 * **Bulk Ops:** `/review/save` reuses `_write_editor_buffer_to_disk` and emits save acks/diff invalidations so git status, diff cache, and explorer badges stay consistent after batch writes.
 
-### 13.6 Draft Diff Rendering + Minimap
+### 13.7 Draft Diff Rendering + Minimap
 
 * **Diff Tags:** Draft hunks are tagged as `add-draft` / `del-draft`; CodeMirror decorations emit `diffKind: 'insert-draft' | 'delete-draft'`.
 * **Gutters:** `DeletedLineNumberMarker` and `MinusDraftGutterMarker` switch to yellow classes when `isDraft` is true, while git deletions keep the legacy red palette.

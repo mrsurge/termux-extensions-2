@@ -78,7 +78,8 @@ def _run_git_optional(project_root: Path, *args: str) -> Optional[str]:
         raise GitError(f"git {' '.join(args)} timed out") from exc
     if completed.returncode != 0:
         return None
-    return completed.stdout.strip()
+    # Use rstrip() to preserve leading whitespace (important for git status --short)
+    return completed.stdout.rstrip()
 
 
 def _ensure_repo(project_root: Path) -> None:

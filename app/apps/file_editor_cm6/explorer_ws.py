@@ -210,6 +210,7 @@ async def _broadcast_git_status_update(project_path: str):
         
         # 2. Broadcast summary bar (git:status)
         status = git_get_status(Path(project_path))
+        logger.info(f"[GIT_STATUS_DEBUG] staged={status.staged}, unstaged={status.unstaged}, untracked={status.untracked}")
         summary_msg = {
             "type": "git:status",
             "payload": {
@@ -373,6 +374,7 @@ class ExplorerDispatcher:
     async def broadcast_git_status(self):
         try:
             status = git_get_status(self.project_root)
+            logger.info(f"[GIT_STATUS_DEBUG] broadcast_git_status: staged={status.staged}, unstaged={status.unstaged}, untracked={status.untracked}")
             data = {
                 "branch": status.branch,
                 "detached": status.detached,

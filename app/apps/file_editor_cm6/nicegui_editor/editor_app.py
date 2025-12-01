@@ -230,7 +230,8 @@ def _apply_watcher_replace(
 ):
     """Apply content delivered by the file watcher and invalidate stale cache entries.
 
-    Returns True when an external change forced the cached draft to be cleared.
+    Returns True if content was actually applied to the editor.
+    Returns False if the event was ignored (e.g., disk matches draft base).
     """
     editor = get_active_editor()
     if not editor or not path:
@@ -285,7 +286,7 @@ def _apply_watcher_replace(
         except Exception as err:
             print(f"[DIFF] Failed to clear decorations after external edit: {err}", file=sys.stderr)
 
-    return external_change
+    return True  # Content was applied to editor
 
 
 def _get_combined_diffs(project_root: Path, file_path: str, current_content: str) -> list:
@@ -769,13 +770,14 @@ async def editor_page():
                         
                         first_snapshot_seen = True
                         new_content, new_sha256 = event.get('content', ''), event.get('sha256')
-                        _apply_watcher_replace(
+                        was_applied = _apply_watcher_replace(
                             path=initial_path,
                             content=new_content,
                             sha256=new_sha256,
                             project_path=project_path,
                         )
-                        if _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
+                        # Only recalculate diffs if content was actually replaced
+                        if was_applied and _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
                             try:
                                 rel_path = _normalize_rel_path(project_root, initial_path)
                                 diff_data = collect_diff(project_root, rel_path, base_ref=_current_diff_base(project_path))

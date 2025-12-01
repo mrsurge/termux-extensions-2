@@ -719,101 +719,107 @@ export default {
         effects: this.zebraCompartment.reconfigure(extensions)
       });
     },
+    
+    // Initialize diff compartments early so minimap can reference diffField
+    initDiffCompartments() {
+      if (this.diffCompartment) return; // Already initialized
+      
+      const { StateEffect, StateField, Compartment } = CM;
+      
+      this.diffCompartment = new Compartment();
+      this.setDiffEffect = StateEffect.define();
+      this.clearDiffEffect = StateEffect.define();
+      
+      const setDiffEffect = this.setDiffEffect;
+      const clearDiffEffect = this.clearDiffEffect;
+      
+      const diffField = StateField.define({
+        create() {
+          return CM.Decoration.none;
+        },
+        update(value, tr) {
+          if (tr.docChanged && value !== CM.Decoration.none) {
+            value = value.map(tr.changes);
+          }
+          for (const effect of tr.effects) {
+            if (effect.is(setDiffEffect)) {
+              value = effect.value;
+            } else if (effect.is(clearDiffEffect)) {
+              value = CM.Decoration.none;
+            }
+          }
+          return value;
+        },
+        provide: field => CM.EditorView.decorations.from(field)
+      });
+      
+      this.diffField = diffField;
+      
+      this.editor.dispatch({
+        effects: StateEffect.appendConfig.of(this.diffCompartment.of([diffField]))
+      });
+      
+      // Also initialize gutter compartment
+      this.diffGutterCompartment = new Compartment();
+      this.setDiffGutterEffect = StateEffect.define();
+      this.clearDiffGutterEffect = StateEffect.define();
+      const setDiffGutterEffect = this.setDiffGutterEffect;
+      const clearDiffGutterEffect = this.clearDiffGutterEffect;
+      const diffGutterField = StateField.define({
+        create() {
+          return EMPTY_GUTTER_RANGESET;
+        },
+        update(value, tr) {
+          if (tr.docChanged && value && typeof value.map === 'function') {
+            value = value.map(tr.changes);
+          }
+          for (const effect of tr.effects) {
+            if (effect.is(setDiffGutterEffect)) {
+              value = effect.value;
+            } else if (effect.is(clearDiffGutterEffect)) {
+              value = EMPTY_GUTTER_RANGESET;
+            }
+          }
+          return value;
+        },
+      });
+      this.diffGutterField = diffGutterField;
+      this.diffGutterExtension = [
+        diffGutterField,
+        CM.gutter({
+          class: 'cm-diff-gutter',
+          markers: view => view.state.field(diffGutterField),
+          initialSpacer: () => new DiffGutterMarker(''),
+          ...(CM.gutterWidgetClass ? { 
+            widgetMarker: (view, widget, block) => {
+              if (widget instanceof RemovedLineWidget) {
+                return widget.isDraft ? minusDraftMarker : minusMarker;
+              }
+              return null;
+            }
+          } : {}),
+        }),
+        CM.lineNumberWidgetMarker.of((view, widget, block) => {
+          if (widget instanceof RemovedLineWidget) {
+            return new DeletedLineNumberMarker(widget.originalLine, widget.isDraft);
+          }
+          return null;
+        }),
+      ];
+      this.editor.dispatch({
+        effects: CM.StateEffect.appendConfig.of(this.diffGutterCompartment.of([]))
+      });
+      
+      console.log('[CodeMirror] Diff compartments initialized early');
+    },
+    
     async applyDiffDecorations(hunks) {
       console.log('[applyDiffDecorations] Called with hunks:', JSON.stringify(hunks, null, 2));
       console.log('[applyDiffDecorations] Doc has', this.editor?.state?.doc?.lines, 'lines');
       
-      // Initialize diff compartment on first call
+      // Initialize diff compartment if not already done (fallback for direct calls)
       if (!this.diffCompartment) {
-        const { StateEffect, StateField, Compartment } = CM;
-        
-        this.diffCompartment = new Compartment();
-        this.setDiffEffect = StateEffect.define();
-        this.clearDiffEffect = StateEffect.define();
-        
-        const setDiffEffect = this.setDiffEffect;
-        const clearDiffEffect = this.clearDiffEffect;
-        
-        const diffField = StateField.define({
-          create() {
-            return CM.Decoration.none;
-          },
-          update(value, tr) {
-            if (tr.docChanged && value !== CM.Decoration.none) {
-              value = value.map(tr.changes);
-            }
-            for (const effect of tr.effects) {
-              if (effect.is(setDiffEffect)) {
-                value = effect.value;
-              } else if (effect.is(clearDiffEffect)) {
-                value = CM.Decoration.none;
-              }
-            }
-            return value;
-          },
-          provide: field => CM.EditorView.decorations.from(field)
-        });
-        
-        this.diffField = diffField;
-        
-        this.editor.dispatch({
-          effects: StateEffect.appendConfig.of(this.diffCompartment.of([diffField]))
-        });
-      }
-
-      if (!this.diffGutterCompartment) {
-        const { StateEffect, StateField, Compartment } = CM;
-        this.diffGutterCompartment = new Compartment();
-        this.setDiffGutterEffect = StateEffect.define();
-        this.clearDiffGutterEffect = StateEffect.define();
-        const setDiffGutterEffect = this.setDiffGutterEffect;
-        const clearDiffGutterEffect = this.clearDiffGutterEffect;
-        const diffGutterField = StateField.define({
-          create() {
-            return EMPTY_GUTTER_RANGESET;
-          },
-          update(value, tr) {
-            if (tr.docChanged && value && typeof value.map === 'function') {
-              value = value.map(tr.changes);
-            }
-            for (const effect of tr.effects) {
-              if (effect.is(setDiffGutterEffect)) {
-                value = effect.value;
-              } else if (effect.is(clearDiffGutterEffect)) {
-                value = EMPTY_GUTTER_RANGESET;
-              }
-            }
-            return value;
-          },
-        });
-        this.diffGutterField = diffGutterField;
-        this.diffGutterExtension = [
-          diffGutterField,
-          CM.gutter({
-            class: 'cm-diff-gutter',
-            markers: view => view.state.field(diffGutterField),
-            initialSpacer: () => new DiffGutterMarker(''),
-            // Add widget marker support to THIS gutter (not line numbers)
-            ...(CM.gutterWidgetClass ? { 
-              widgetMarker: (view, widget, block) => {
-                if (widget instanceof RemovedLineWidget) {
-                  return widget.isDraft ? minusDraftMarker : minusMarker;
-                }
-                return null;
-              }
-            } : {}),
-          }),
-          // Facet to inject markers into the standard line-number gutter
-          CM.lineNumberWidgetMarker.of((view, widget, block) => {
-            if (widget instanceof RemovedLineWidget) {
-              return new DeletedLineNumberMarker(widget.originalLine, widget.isDraft);
-            }
-            return null;
-          }),
-        ];
-        this.editor.dispatch({
-          effects: CM.StateEffect.appendConfig.of(this.diffGutterCompartment.of([]))
-        });
+        this.initDiffCompartments();
       }
 
       const normalizedHunks = Array.isArray(hunks) ? hunks : [];
@@ -1267,7 +1273,11 @@ export default {
     this.isMobileLayout = mql.matches;
     mql.addEventListener('change', this.handleLayoutChange);
     
-    // Apply initial minimap state
+    // Initialize diff compartments BEFORE minimap so minimap can reference diffField
+    // This ensures proper dependency order - minimap needs diffField to exist
+    this.initDiffCompartments();
+    
+    // Apply initial minimap state (now diffField exists for minimap to reference)
     this.updateMinimapState();
   },
 };
