@@ -855,3 +855,164 @@ All intents sent via `window.__explorerBusSend()` to existing backend handlers i
 **No issues found.** Implementation matches plan specification.
 
 — _VectorArc_
+
+---
+
+### Log – Header Project Actions WS Integration – 2025-11-30T23:59:00Z
+
+**Scope**
+- Migrate the “New Project…” and “Open Project…” header buttons to use the explorer WebSocket bus instead of REST, while keeping the existing picker + modal UX.
+
+**Changes**
+- `app/apps/file_editor_cm6/static/js/explorer.js`:
+  - Imports the existing modal helper:
+    - `import { showNewProjectModal } from './new_project_modal.js';`
+  - Captures header buttons in `initExplorerUI()`:
+    - `fe-new-project` → `btnNewProject`
+    - `fe-open-project` → `btnOpenProject`
+
+  - **Open Project… (`btnOpenProject`)**
+    - Confirms potential unsaved changes with a native `confirm`.
+    - Uses `window.teFilePicker.openDirectory({ title, selectLabel })` to choose a directory.
+    - On success, sends a WS command (no REST):
+      - `window.__explorerBusSend('project:open', { path: choice.path });`
+
+  - **New Project… (`btnNewProject`)**
+    - Confirms potential unsaved changes.
+    - Verifies `window.teFilePicker`.
+    - Calls `showNewProjectModal(toast)` to choose between:
+      - Local project (`type: 'local'`)
+      - Clone repo (`type: 'clone', url`).
+
+    - Clone flow:
+      - Derives a default folder name from the Git URL.
+      - Uses `teFilePicker.saveFile` to pick/create a destination.
+      - Optionally confirms reuse if the directory already exists.
+      - Calls existing REST clone endpoint:
+        - `POST /api/git/clone { url, target_path }`
+      - On success, sends:
+        - `window.__explorerBusSend('project:open', { path: result.path });`
+
+    - Local project flow:
+      - Uses `teFilePicker.saveFile` to pick parent + project name.
+      - Confirms reuse when the directory already exists.
+      - Sends a WS command only (no REST):
+        - `window.__explorerBusSend('project:create', { parent_path: result.directory, name: result.name });`
+      - Backend `handle_project_create` creates the directory and auto-opens it by calling `handle_project_open`.
+
+  - **Project open acknowledgement**
+    - `handleExplorerEvent` now handles `project:opened`:
+      - Updates `uiState.projectPath` and calls `renderProjectLabel()`.
+      - Attempts `window.location.reload()` so the editor worker, HistoryStore state, and NiceGUI iframe are cleanly rebuilt for the new project.
+      - If reload fails for any reason, falls back to:
+        - `window.__explorerBusSend('explorer:refresh', {});`
+
+**Protocol impact**
+- New / clarified WS commands:
+  - Outbound:
+    - `project:open` → `{ path }`
+    - `project:create` → `{ parent_path, name }`
+  - Inbound:
+    - `project:opened` → `{ path }` (triggers reload + label update)
+
+**Notes**
+- This keeps project selection logic thin on the frontend:
+  - Pickers + modal are purely UI.
+  - Backend is authoritative for:
+    - Setting active project (`set_project_root`, HistoryStore).
+    - Broadcasting git status, explorer tree, and review/draft state.
+  - The full-page reload after `project:opened` mimics the original behavior and keeps the editor iframe lifecycle simple.
+
+— _FugueTask_
+
+---
+
+### Git Status Tree Rendering Regression Analysis
+
+**Timestamp:** 2025-12-01T07:30:00Z  
+**Author:** _VectorArc_
+
+#### Problem Summary
+
+After git operations (stage, unstage, restore), the explorer tree does not update to reflect the new git status of affected files. The footer git summary updates correctly, but individual tree cards retain stale `gitStatus` values.
+
+#### Root Cause Analysis
+
+**Issue 1: Backend git handlers don't refresh tree listings**
+
+The git operation handlers in `explorer_ws.py` broadcast `git:status` but do NOT re-broadcast `explorer:setList` with updated entry data:
+
+```python
+# Current implementation (explorer_ws.py)
+async def handle_git_stage(self, payload: dict, msg_id: str):
+    stage_paths(self.project_root, payload.get("paths", []))
+    await self.broadcast_git_status()  # ← Only updates footer summary
+    # MISSING: No explorer:setList to refresh tree entries
+```
+
+The tree entries get their `gitStatus` from `list_dir()`, which reads from the git cache. Since no `explorer:setList` is broadcast after git operations, the tree keeps showing stale status.
+
+**Issue 2: Frontend race condition**
+
+The frontend sends `explorer:refresh` immediately after the git operation without waiting:
+
+```js
+// Current implementation (explorer.js)
+case 'stage': {
+  window.__explorerBusSend('git:stage', { paths: [rel] });
+  window.__explorerBusSend('explorer:refresh', {});  // Sent immediately, races with git:stage
+  toast(`Staged ${entry.name}`);
+```
+
+This creates a race condition where the refresh may execute before the git operation completes.
+
+#### Recommended Fixes
+
+**Fix 1: Backend — Broadcast tree updates after git operations**
+
+File: `app/apps/file_editor_cm6/explorer_ws.py`
+
+Modify the following handlers to broadcast updated tree state after git operations:
+
+- `handle_git_stage`
+- `handle_git_unstage`
+- `handle_git_restore`
+- `handle_git_stageAll`
+- `handle_git_unstageAll`
+- `handle_git_commit`
+- `handle_git_reset`
+
+Pattern:
+```python
+async def handle_git_stage(self, payload: dict, msg_id: str):
+    stage_paths(self.project_root, payload.get("paths", []))
+    mark_git_cache_dirty(self.project_root)
+    await self.broadcast_git_status()
+    # NEW: Refresh tree root to update gitStatus on all entries
+    await self.broadcast("explorer:setList", list_dir('.'))
+```
+
+**Fix 2: Frontend — Remove redundant refresh calls**
+
+File: `app/apps/file_editor_cm6/static/js/explorer.js`
+
+Remove `explorer:refresh` calls from `case 'stage'` and `case 'unstage'` handlers since the backend will now handle broadcasting the updated state.
+
+#### Additional Consideration: Expanded Directory State
+
+Broadcasting `explorer:setList` for root (`.`) only refreshes root-level entries. If the user has expanded subdirectories, those won't be refreshed.
+
+**Option A (Recommended):** Broadcast root only — simplest approach; parent directories still show inherited status via `_derive_git_status()`. Individual nested files update when user expands their parent.
+
+**Option B:** Track and refresh expanded directories — more complex but seamless UX.
+
+#### Verification Checklist
+
+- [ ] Stage a file → tree card shows `fe-git-staged` class
+- [ ] Unstage a file → tree card shows `fe-git-modified` or `fe-git-untracked`
+- [ ] Restore a file → tree card shows `fe-git-clean`
+- [ ] Stage all → all modified files show staged status
+- [ ] Parent directories show inherited status from children
+- [ ] No console errors or race conditions
+
+— _VectorArc_

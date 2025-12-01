@@ -331,32 +331,66 @@
   border-color: rgba(96, 165, 250, 0.6);
 }
 
-     /* Modified directories: orange border */
-     .fe-tree-node.fe-git-modified[data-kind="dir"] {
-       border-color: rgba(249, 115, 22, 0.8);  /* orange border */
-     }
+/* Preserve legacy directory styling based directly on gitStatus so
+   collapsed parents still show the orange/blue cues from the backend. */
 
-     /* Untracked directories: blue background */
-     .fe-tree-node.fe-git-untracked[data-kind="dir"] {
-       background: rgba(59, 130, 246, 0.15);  /* blue background */
-       border-color: rgba(59, 130, 246, 0.4); /* optional: blue border too
-   */
-     }
+/* Modified directories: orange border */
+.fe-tree-node.fe-git-modified[data-kind="dir"] {
+  border-color: rgba(249, 115, 22, 0.8);
+}
 
-     /* Modified files: orange background */
-     .fe-tree-node.fe-git-modified[data-kind="file"] {
-       background: rgba(249, 115, 22, 0.15);  /* orange background */
-     }
+/* Untracked directories: blue background and border */
+.fe-tree-node.fe-git-untracked[data-kind="dir"] {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
 
-     /* Untracked files: blue background */
-     .fe-tree-node.fe-git-untracked[data-kind="file"] {
-       background: rgba(59, 130, 246, 0.15);  /* blue background */
-     }
+/* Directory-level aggregated flags (has descendants with these states).
+   These are purely frontend classes (fe-dir-has-*) layered on top of the
+   precise per-node fe-git-* classes. */
 
-     /* Hover states */
-     .fe-tree-node.fe-git-modified[data-kind="file"]:hover {
-       background: rgba(249, 115, 22, 0.22);
-     }
+.fe-tree-node[data-kind="dir"].fe-dir-has-modified {
+  border-color: rgba(249, 115, 22, 0.85);        /* strong orange border */
+}
+
+.fe-tree-node[data-kind="dir"].fe-dir-has-conflict {
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.8);
+}
+
+/* Untracked descendants: solid blue background (when no staged). */
+.fe-tree-node[data-kind="dir"].fe-dir-has-untracked:not(.fe-dir-has-staged) {
+  background: rgba(59, 130, 246, 0.15);
+}
+
+/* Staged descendants: solid green background (when no untracked). */
+.fe-tree-node[data-kind="dir"].fe-dir-has-staged:not(.fe-dir-has-untracked) {
+  background: rgba(52, 211, 153, 0.15);
+}
+
+/* Both untracked + staged descendants: blue→green gradient. */
+.fe-tree-node[data-kind="dir"].fe-dir-has-untracked.fe-dir-has-staged {
+  background: linear-gradient(
+    90deg,
+    rgba(59, 130, 246, 0.18) 0%,
+    rgba(59, 130, 246, 0.18) 50%,
+    rgba(52, 211, 153, 0.18) 50%,
+    rgba(52, 211, 153, 0.18) 100%
+  );
+}
+
+/* Modified files: orange background (keeps the old motif). */
+.fe-tree-node.fe-git-modified[data-kind="file"] {
+  background: rgba(249, 115, 22, 0.15);
+}
+
+/* Untracked files: blue background. */
+.fe-tree-node.fe-git-untracked[data-kind="file"] {
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.fe-tree-node.fe-git-modified[data-kind="file"]:hover {
+  background: rgba(249, 115, 22, 0.22);
+}
 
 .fe-tree-node.fe-git-untracked[data-kind="file"]:hover {
   background: rgba(59, 130, 246, 0.22);

@@ -4,11 +4,13 @@
 // Responsibilities:
 // - Render the explorer tree/cards from backend snapshots (`explorer:setTree`).
 // - Reflect git status and draft flags on entries.
-// - Wire basic chrome (drawer open/close, project label, git summary).
+// - Wire basic chrome (drawer open/close, project label, git summary, header actions).
 // - Expose `initExplorerUI` and `window.__cm6RefreshExplorer` for host integration.
 //
 // All state that matters lives on the backend; this module treats incoming
 // messages as the source of truth and only keeps enough transient state to draw.
+
+import { showNewProjectModal } from './new_project_modal.js';
 
 let treeElement = null;
 let projectLabelEl = null;
@@ -393,6 +395,92 @@ function renderEntriesInto(containerUl, entries) {
     li.appendChild(menuButton);
     containerUl.appendChild(li);
   }
+
+  // After entries are rendered, recompute aggregated git-status flags
+  // (fe-dir-has-*) so parent directories can visually reflect dirty
+  // descendants independently of the single gitStatus value.
+  applyAggregatedGitStatusFlags();
+}
+
+function applyAggregatedGitStatusFlags() {
+  if (!treeElement) {
+    treeElement = document.getElementById('fe-file-tree');
+  }
+  const root = treeElement;
+  if (!root) return;
+
+  // Clear previous aggregated flags on all directories.
+  root
+    .querySelectorAll(
+      'li.fe-tree-node[data-kind="dir"].fe-dir-has-modified,' +
+        'li.fe-tree-node[data-kind="dir"].fe-dir-has-staged,' +
+        'li.fe-tree-node[data-kind="dir"].fe-dir-has-untracked,' +
+        'li.fe-tree-node[data-kind="dir"].fe-dir-has-conflict',
+    )
+    .forEach((li) => {
+      li.classList.remove(
+        'fe-dir-has-modified',
+        'fe-dir-has-staged',
+        'fe-dir-has-untracked',
+        'fe-dir-has-conflict',
+      );
+    });
+
+  // For each file node with a gitStatus, walk up its directory ancestors
+  // in the DOM and attach aggregated flags. This mirrors the draft-parent
+  // behavior and gives a breadcrumb-style highlight up to the project root.
+  const fileNodes = root.querySelectorAll(
+    'li.fe-tree-node[data-kind="file"][data-gitStatus]',
+  );
+  fileNodes.forEach((fileLi) => {
+    const status = fileLi.dataset.gitStatus || '';
+    let parent = fileLi.parentElement?.closest(
+      'li.fe-tree-node[data-kind="dir"]',
+    );
+    while (parent) {
+      // Treat staged_modified as both staged + modified (modified wins
+      // visually via the orange outline).
+      if (status === 'modified' || status === 'staged_modified') {
+        parent.classList.add('fe-dir-has-modified');
+      }
+      if (status === 'untracked') {
+        parent.classList.add('fe-dir-has-untracked');
+      }
+      if (
+        status === 'staged' ||
+        status === 'staged_modified' ||
+        status === 'added'
+      ) {
+        parent.classList.add('fe-dir-has-staged');
+      }
+      if (status === 'conflict') {
+        parent.classList.add('fe-dir-has-conflict');
+      }
+      parent = parent.parentElement?.closest(
+        'li.fe-tree-node[data-kind="dir"]',
+      );
+    }
+  });
+}
+
+function refreshOpenDirectoriesAfterGit() {
+  if (!treeElement) {
+    treeElement = document.getElementById('fe-file-tree');
+  }
+  if (!treeElement) return;
+  if (typeof window.__explorerBusSend !== 'function') return;
+
+  const openDirs = treeElement.querySelectorAll(
+    'li.fe-tree-node[data-kind="dir"][data-open="true"]',
+  );
+  openDirs.forEach((li) => {
+    const rel = li.dataset.rel || '.';
+    // Root (.) is already refreshed via broadcast explorer:setList.
+    if (!rel || rel === '.') return;
+    window.__explorerBusSend('explorer:list', { rel });
+  });
+  // After any git change + refreshed listings, recompute aggregated flags
+  applyAggregatedGitStatusFlags();
 }
 
 function handleExplorerEvent(type, payload) {
@@ -487,6 +575,86 @@ function handleExplorerEvent(type, payload) {
       });
       break;
     }
+    case 'explorer:updateGitStatus': {
+      // Patch git status classes on existing DOM nodes without replacing the tree.
+      // payload: { statuses: { rel: status, ... } }
+      const statuses = (payload && payload.statuses) || {};
+      const root = treeElement || document.getElementById('fe-file-tree');
+      if (!root) break;
+
+      // Step 1: Clear all git status classes from all nodes
+      root.querySelectorAll('li.fe-tree-node').forEach((li) => {
+        const classesToRemove = [];
+        li.classList.forEach((cls) => {
+          if (cls.startsWith('fe-git-')) {
+            classesToRemove.push(cls);
+          }
+        });
+        classesToRemove.forEach((cls) => li.classList.remove(cls));
+        delete li.dataset.gitStatus;
+      });
+
+      // Step 2: Apply file statuses to nodes that exist in DOM
+      Object.entries(statuses).forEach(([rel, status]) => {
+        if (!status || status === 'clean') return;
+        const li = root.querySelector(
+          `li.fe-tree-node[data-rel="${rel}"]`
+        );
+        if (li) {
+          li.dataset.gitStatus = status;
+          li.classList.add(`fe-git-${status}`);
+        }
+      });
+
+      // Step 3: Compute all ancestor directories that need 'modified' outline
+      // by walking up path segments from ALL dirty files (not just DOM nodes)
+      const dirtyDirs = new Set();
+      Object.keys(statuses).forEach((rel) => {
+        const parts = rel.split('/');
+        // Walk up: a/b/c.txt -> mark 'a' and 'a/b' as dirty
+        for (let i = 1; i < parts.length; i++) {
+          dirtyDirs.add(parts.slice(0, i).join('/'));
+        }
+      });
+
+      // Step 4: Apply 'modified' to all dirty ancestor directories in DOM
+      dirtyDirs.forEach((dirRel) => {
+        const li = root.querySelector(
+          `li.fe-tree-node[data-kind="dir"][data-rel="${dirRel}"]`
+        );
+        if (li && !li.classList.contains('fe-git-modified')) {
+          li.classList.add('fe-git-modified');
+          li.dataset.gitStatus = li.dataset.gitStatus || 'modified';
+        }
+      });
+
+      // Also mark root if there are any dirty files
+      if (Object.keys(statuses).length > 0) {
+        const rootLi = root.querySelector('li.fe-tree-node.fe-tree-root');
+        if (rootLi && !rootLi.classList.contains('fe-git-modified')) {
+          rootLi.classList.add('fe-git-modified');
+        }
+      }
+      break;
+    }
+    case 'project:opened': {
+      // Backend confirms a project switch (open/create). Treat this as
+      // authoritative and reload the page so the editor worker, history
+      // store, and NiceGUI iframe all start from the new project.
+      if (payload && payload.path) {
+        uiState.projectPath = payload.path;
+        renderProjectLabel();
+      }
+      try {
+        window.location.reload();
+      } catch {
+        // If reload fails for some reason, at least request a full refresh.
+        if (typeof window.__explorerBusSend === 'function') {
+          window.__explorerBusSend('explorer:refresh', {});
+        }
+      }
+      break;
+    }
     case 'git:status': {
       uiState.gitStatus = payload || null;
       renderGitSummary();
@@ -500,6 +668,18 @@ function handleExplorerEvent(type, payload) {
         updateDiffBaseButtons();
         if (searchOverlayVisible) {
           renderSearchOverlay();
+        }
+      }
+      break;
+    }
+    case 'git:restored': {
+      // After a file is restored from git, the backend broadcasts git:status
+      // and this event. Reload the current file so restored content is shown.
+      if (typeof window.__cm6ReloadCurrentFile === 'function') {
+        try {
+          window.__cm6ReloadCurrentFile();
+        } catch (err) {
+          console.warn('Failed to reload current file after restore:', err);
         }
       }
       break;
@@ -548,6 +728,8 @@ export async function initExplorerUI() {
   const drawerClose = document.getElementById('fe-drawer-close');
   const drawerOpenBtn = document.getElementById('fe-drawer-open');
   const drawerBackdrop = document.getElementById('fe-drawer-backdrop');
+  const btnNewProject = document.getElementById('fe-new-project');
+  const btnOpenProject = document.getElementById('fe-open-project');
   treeElement = document.getElementById('fe-file-tree');
   projectLabelEl = document.getElementById('fe-project-label');
   gitSummaryEl = document.getElementById('fe-git-summary');
@@ -637,6 +819,160 @@ export async function initExplorerUI() {
     },
     false,
   );
+
+  if (btnOpenProject) {
+    btnOpenProject.addEventListener('click', async () => {
+      // Safety check: switching projects can drop unsaved work.
+      if (
+        !window.confirm(
+          'Any unsaved changes in the current project will be lost. Continue?',
+        )
+      ) {
+        return;
+      }
+
+      if (!window.teFilePicker) {
+        toast('File picker not available.');
+        return;
+      }
+
+      try {
+        const choice = await window.teFilePicker.openDirectory({
+          title: 'Open Project Directory',
+          selectLabel: 'Set as Project',
+        });
+        if (!choice || !choice.path) return;
+        if (typeof window.__explorerBusSend !== 'function') {
+          toast('Explorer connection unavailable.');
+          return;
+        }
+        // Delegate project switching to the WS dispatcher; it will emit
+        // project:opened + refreshed tree/git status. We handle the event
+        // below (handleExplorerEvent) and can reload if needed.
+        window.__explorerBusSend('project:open', { path: choice.path });
+      } catch (e) {
+        if (e && e.message !== 'cancelled') {
+          toast(`An error occurred: ${e.message || e}`);
+        }
+      }
+    });
+  }
+
+  if (btnNewProject) {
+    btnNewProject.addEventListener('click', async () => {
+      if (
+        !window.confirm(
+          'Any unsaved changes in the current project will be lost. Continue?',
+        )
+      ) {
+        return;
+      }
+
+      if (!window.teFilePicker) {
+        toast('File picker not available.');
+        return;
+      }
+
+      let choice;
+      try {
+        choice = await showNewProjectModal(toast);
+      } catch (e) {
+        if (e !== 'cancelled') {
+          toast(`An error occurred: ${e?.message || e}`);
+        }
+        return;
+      }
+
+      if (!choice) return;
+
+      if (choice.type === 'clone') {
+        // Clone repository then open as project via WS.
+        let name = 'repo';
+        try {
+          const parts = String(choice.url || '').split('/');
+          let last = parts[parts.length - 1] || '';
+          if (last.endsWith('.git')) last = last.slice(0, -4);
+          if (last.trim()) name = last.trim();
+        } catch {
+          // keep default name
+        }
+
+        try {
+          const result = await window.teFilePicker.saveFile({
+            title: 'Clone Repository Destination',
+            filename: name,
+            selectLabel: 'Clone Here',
+          });
+
+          if (result && result.existed) {
+            const ok = window.confirm(
+              `Directory "${result.path}" already exists. Clone might fail if not empty. Continue?`,
+            );
+            if (!ok) return;
+          }
+
+          toast('Cloning repository...');
+          const resp = await fetch('/api/git/clone', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: choice.url,
+              target_path: result.path,
+            }),
+          });
+          const json = await resp.json();
+          if (!json || json.ok === false) {
+            throw new Error(json?.detail || json?.error || 'Clone failed');
+          }
+          toast('Repository cloned successfully.');
+
+          if (typeof window.__explorerBusSend !== 'function') {
+            toast('Explorer connection unavailable.');
+            return;
+          }
+          window.__explorerBusSend('project:open', { path: result.path });
+        } catch (e) {
+          if (e && e.message !== 'cancelled') {
+            toast(`An error occurred: ${e?.message || e}`);
+          }
+        }
+      } else {
+        // Local empty project: create directory then open via WS.
+        try {
+          const result = await window.teFilePicker.saveFile({
+            title: 'Create New Project',
+            filename: 'my-project',
+            selectLabel: 'Create Project',
+          });
+
+          if (!result) return;
+
+          if (result.existed) {
+            const ok = window.confirm(
+              `Directory "${result.path}" already exists. Use it anyway?`,
+            );
+            if (!ok) return;
+          }
+
+          if (typeof window.__explorerBusSend !== 'function') {
+            toast('Explorer connection unavailable.');
+            return;
+          }
+
+          // Let the backend validate and create the project directory, then
+          // auto-open it (handle_project_create calls handle_project_open).
+          window.__explorerBusSend('project:create', {
+            parent_path: result.directory,
+            name: result.name,
+          });
+        } catch (e) {
+          if (e && e.message !== 'cancelled') {
+            toast(`An error occurred: ${e?.message || e}`);
+          }
+        }
+      }
+    });
+  }
 
   if (gitButtons) {
     const safeSend = (type, payload) => {
@@ -764,13 +1100,51 @@ export async function initExplorerUI() {
 
     const items = [];
     const isDir = entry.kind === 'dir';
+    const isFile = entry.kind === 'file';
+    const gitStatus = entry.gitStatus || '';
 
     if (isDir) {
       items.push({ label: 'New File…', type: 'createFile' });
       items.push({ label: 'New Folder…', type: 'createDir' });
       items.push({ divider: true });
+      items.push({ label: 'Open in File Explorer', type: 'openExternal' });
+      items.push({ divider: true });
     }
 
+    // Clipboard + move/copy actions for both files and dirs
+    items.push({ label: 'Copy Name', type: 'copyName' });
+    items.push({ label: 'Copy Path', type: 'copyPath' });
+    items.push({ divider: true });
+    items.push({ label: 'Copy to…', type: 'copyTo' });
+    items.push({ label: 'Move to…', type: 'moveTo' });
+
+    if (isDir) {
+      items.push({ label: 'Copy from…', type: 'copyFrom' });
+      items.push({ label: 'Move from…', type: 'moveFrom' });
+    }
+
+    // Git actions for files with status
+    if (
+      isFile &&
+      gitStatus &&
+      (gitStatus === 'modified' ||
+        gitStatus === 'untracked' ||
+        gitStatus === 'added')
+    ) {
+      items.push({ label: 'Stage', type: 'stage' });
+    }
+    if (
+      isFile &&
+      gitStatus &&
+      (gitStatus === 'staged' || gitStatus === 'staged_modified')
+    ) {
+      items.push({ label: 'Unstage', type: 'unstage' });
+    }
+    if (isFile && gitStatus && gitStatus !== 'clean') {
+      items.push({ label: 'Restore…', type: 'restore' });
+    }
+
+    items.push({ divider: true });
     items.push({ label: 'Rename…', type: 'rename' });
     items.push({ label: 'Delete', type: 'delete', destructive: true });
 
@@ -787,7 +1161,7 @@ export async function initExplorerUI() {
       if (item.destructive) {
         div.dataset.destructive = 'true';
       }
-      div.addEventListener('click', () => {
+      div.addEventListener('click', async () => {
         closeCardMenu();
         if (!entry.rel) return;
         const rel = entry.rel;
@@ -814,6 +1188,187 @@ export async function initExplorerUI() {
             }
             break;
           }
+          case 'openExternal': {
+            if (!uiState.projectPath) {
+              toast('No project open');
+              break;
+            }
+            let fullPath = uiState.projectPath;
+            if (rel && rel !== '.') {
+              fullPath =
+                uiState.projectPath.replace(/\/+$/, '') +
+                '/' +
+                rel.replace(/^\/+/, '');
+            }
+            try {
+              const resp = await fetch('/api/apps/file_explorer/open', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ params: { path: fullPath } }),
+              });
+              const json = await resp.json();
+              if (json && json.ok && json.data && json.data.url) {
+                window.location.href = json.data.url;
+              } else {
+                console.error('Launch failed', json);
+                toast('Failed to open File Explorer');
+              }
+            } catch (err) {
+              console.error(err);
+              toast('Failed to open File Explorer');
+            }
+            break;
+          }
+          case 'copyName': {
+            try {
+              if (
+                !navigator ||
+                !navigator.clipboard ||
+                !navigator.clipboard.writeText
+              ) {
+                toast('Clipboard not available');
+                break;
+              }
+              const name = entry.name || '';
+              await navigator.clipboard.writeText(name);
+              toast(`Copied "${name}" to clipboard`);
+            } catch {
+              toast('Failed to copy name');
+            }
+            break;
+          }
+          case 'copyPath': {
+            try {
+              if (
+                !navigator ||
+                !navigator.clipboard ||
+                !navigator.clipboard.writeText
+              ) {
+                toast('Clipboard not available');
+                break;
+              }
+              if (!uiState.projectPath) {
+                toast('No project open');
+                break;
+              }
+              let fullPath = uiState.projectPath;
+              if (rel && rel !== '.') {
+                fullPath =
+                  uiState.projectPath.replace(/\/+$/, '') +
+                  '/' +
+                  rel.replace(/^\/+/, '');
+              }
+              await navigator.clipboard.writeText(fullPath);
+              toast('Copied path to clipboard');
+            } catch {
+              toast('Failed to copy path');
+            }
+            break;
+          }
+          case 'copyTo': {
+            if (!window.teFilePicker) {
+              toast('File picker not available');
+              break;
+            }
+            try {
+              const dest = await window.teFilePicker.openDirectory({
+                title: `Copy "${entry.name}" to…`,
+                startPath: uiState.projectPath || '',
+              });
+              if (!dest || !dest.path) break;
+              if (typeof window.__explorerBusSend !== 'function') {
+                toast('Explorer connection unavailable.');
+                break;
+              }
+              window.__explorerBusSend('explorer:copy', {
+                rel,
+                dest_path: dest.path,
+              });
+            } catch (err) {
+              if (err && err.message === 'cancelled') break;
+              toast(err?.message || 'Copy failed');
+            }
+            break;
+          }
+          case 'moveTo': {
+            if (!window.teFilePicker) {
+              toast('File picker not available');
+              break;
+            }
+            try {
+              const dest = await window.teFilePicker.openDirectory({
+                title: `Move "${entry.name}" to…`,
+                startPath: uiState.projectPath || '',
+              });
+              if (!dest || !dest.path) break;
+              if (typeof window.__explorerBusSend !== 'function') {
+                toast('Explorer connection unavailable.');
+                break;
+              }
+              window.__explorerBusSend('explorer:move', {
+                rel,
+                dest_path: dest.path,
+              });
+            } catch (err) {
+              if (err && err.message === 'cancelled') break;
+              toast(err?.message || 'Move failed');
+            }
+            break;
+          }
+          case 'copyFrom': {
+            if (!window.teFilePicker) {
+              toast('File picker not available');
+              break;
+            }
+            try {
+              const source = await window.teFilePicker.open({
+                title: `Copy into "${entry.name}"`,
+                startPath: uiState.projectPath || '',
+                mode: 'any',
+                selectLabel: 'Copy Here',
+              });
+              if (!source || !source.path) break;
+              if (typeof window.__explorerBusSend !== 'function') {
+                toast('Explorer connection unavailable.');
+                break;
+              }
+              window.__explorerBusSend('explorer:copyFrom', {
+                source_path: source.path,
+                dest_rel: rel,
+              });
+            } catch (err) {
+              if (err && err.message === 'cancelled') break;
+              toast(err?.message || 'Copy failed');
+            }
+            break;
+          }
+          case 'moveFrom': {
+            if (!window.teFilePicker) {
+              toast('File picker not available');
+              break;
+            }
+            try {
+              const source = await window.teFilePicker.open({
+                title: `Move into "${entry.name}"`,
+                startPath: uiState.projectPath || '',
+                mode: 'any',
+                selectLabel: 'Move Here',
+              });
+              if (!source || !source.path) break;
+              if (typeof window.__explorerBusSend !== 'function') {
+                toast('Explorer connection unavailable.');
+                break;
+              }
+              window.__explorerBusSend('explorer:moveFrom', {
+                source_path: source.path,
+                dest_rel: rel,
+              });
+            } catch (err) {
+              if (err && err.message === 'cancelled') break;
+              toast(err?.message || 'Move failed');
+            }
+            break;
+          }
           case 'rename': {
             const newName = window.prompt('New name:', entry.name || '');
             if (!newName || newName === entry.name) return;
@@ -832,6 +1387,51 @@ export async function initExplorerUI() {
             if (!confirmed) return;
             if (typeof window.__explorerBusSend === 'function') {
               window.__explorerBusSend('explorer:delete', { rel });
+            }
+            break;
+          }
+          case 'stage': {
+            if (typeof window.__explorerBusSend !== 'function') {
+              toast('Explorer connection unavailable.');
+              break;
+            }
+            try {
+              window.__explorerBusSend('git:stage', { paths: [rel] });
+              toast(`Staged ${entry.name}`);
+            } catch (err) {
+              toast(err?.message || 'Stage failed');
+            }
+            break;
+          }
+          case 'unstage': {
+            if (typeof window.__explorerBusSend !== 'function') {
+              toast('Explorer connection unavailable.');
+              break;
+            }
+            try {
+              window.__explorerBusSend('git:unstage', { paths: [rel] });
+              toast(`Unstaged ${entry.name}`);
+            } catch (err) {
+              toast(err?.message || 'Unstage failed');
+            }
+            break;
+          }
+          case 'restore': {
+            if (typeof window.__explorerBusSend !== 'function') {
+              toast('Explorer connection unavailable.');
+              break;
+            }
+            const confirmed = window.confirm(
+              `⚠️ WARNING: This will discard changes to ${entry.name}\n\nRestore from HEAD?`,
+            );
+            if (!confirmed) break;
+            try {
+              window.__explorerBusSend('git:restore', {
+                path: rel,
+                commit: 'HEAD',
+              });
+            } catch (err) {
+              toast(err?.message || 'Restore failed');
             }
             break;
           }
@@ -891,6 +1491,7 @@ export async function initExplorerUI() {
           rel,
           name: li.dataset.name || li.querySelector('.fe-tree-text')?.textContent || '',
           kind: kind || 'file',
+          gitStatus: li.dataset.gitStatus || '',
         };
         openCardMenuForEntry(entry, menuBtn);
         return;

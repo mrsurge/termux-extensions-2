@@ -21,6 +21,7 @@ from .explorer_helper import (
     get_project_root,
     set_project_root,
     mark_git_cache_dirty,
+    get_all_git_statuses,
 )
 from .git_helper import (
     get_status as git_get_status,
@@ -153,6 +154,18 @@ class ExplorerDispatcher:
             # Not a git repo or error, maybe broadcast null or empty status?
             pass
 
+    async def broadcast_git_decorations(self):
+        """Broadcast git status decorations for all files and directories.
+        
+        This allows the frontend to update gitStatus classes on existing DOM nodes
+        without replacing the tree structure (preserves expanded state).
+        """
+        try:
+            statuses = get_all_git_statuses()
+            await self.broadcast("explorer:updateGitStatus", {"statuses": statuses})
+        except Exception:
+            pass
+
     async def broadcast_review_state(self):
         """Broadcast updated review entries and decoration updates."""
         # 1. Review List
@@ -273,29 +286,40 @@ class ExplorerDispatcher:
 
     async def handle_git_stage(self, payload: dict, msg_id: str):
         stage_paths(self.project_root, payload.get("paths", []))
+        mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
+        await self.broadcast_git_decorations()
 
     async def handle_git_unstage(self, payload: dict, msg_id: str):
         unstage_paths(self.project_root, payload.get("paths", []))
+        mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
+        await self.broadcast_git_decorations()
 
     async def handle_git_stageAll(self, payload: dict, msg_id: str):
         git_stage_all(self.project_root)
+        mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
+        await self.broadcast_git_decorations()
 
     async def handle_git_unstageAll(self, payload: dict, msg_id: str):
         git_unstage_all(self.project_root)
+        mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
+        await self.broadcast_git_decorations()
 
     async def handle_git_restore(self, payload: dict, msg_id: str):
         restore_path(self.project_root, payload.get("path"), payload.get("commit", "HEAD"))
+        mark_git_cache_dirty(self.project_root)
         await self.broadcast("git:restored", {"path": payload.get("path")})
-        # Restore affects content and status
         await self.broadcast_git_status()
+        await self.broadcast_git_decorations()
 
     async def handle_git_commit(self, payload: dict, msg_id: str):
         commit_changes(self.project_root, payload.get("message"), payload.get("amend", False))
+        mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
+        await self.broadcast_git_decorations()
 
     async def handle_git_push(self, payload: dict, msg_id: str):
         push_changes(self.project_root, payload.get("remote"), payload.get("branch"), payload.get("force", False))
@@ -303,11 +327,15 @@ class ExplorerDispatcher:
 
     async def handle_git_pull(self, payload: dict, msg_id: str):
         pull_changes(self.project_root, payload.get("remote"), payload.get("branch"), payload.get("rebase", False))
+        mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
+        await self.broadcast_git_decorations()
 
     async def handle_git_reset(self, payload: dict, msg_id: str):
         reset_hard(self.project_root, payload.get("commit", "HEAD"))
+        mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
+        await self.broadcast_git_decorations()
 
     async def handle_git_init(self, payload: dict, msg_id: str):
         init_repository(self.project_root)

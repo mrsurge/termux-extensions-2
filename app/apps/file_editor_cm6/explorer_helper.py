@@ -254,14 +254,23 @@ def _derive_git_status(rel_path: str, kind: str, status_map: Dict[str, str]) -> 
     if kind == 'file':
         return status_map.get(rel_path, 'clean')
 
+    # For directories: if ANY child has a "dirty" status, return 'modified'
+    # This ensures the orange outline breadcrumb appears regardless of whether
+    # children are staged, modified, untracked, etc.
+    # Excluded: 'clean' and 'ignored' (ignored files shouldn't trigger the outline)
     dir_status = status_map.get(rel_path)
-    if dir_status and dir_status != 'clean':
-        return dir_status
+    if dir_status and dir_status not in ('clean', 'ignored'):
+        return 'modified'
 
-    child_statuses = _statuses_for_prefix(rel_path, status_map)
+    child_statuses = list(_statuses_for_prefix(rel_path, status_map))
     if not child_statuses:
         return 'clean'
-    return _select_highest_priority(child_statuses)
+    
+    # If any child is dirty (not clean/ignored), directory gets 'modified' (orange outline)
+    for status in child_statuses:
+        if status and status not in ('clean', 'ignored'):
+            return 'modified'
+    return 'clean'
 
 
 def _statuses_for_prefix(rel_path: str, status_map: Dict[str, str]) -> Iterable[str]:
@@ -277,6 +286,31 @@ def _select_highest_priority(statuses: Iterable[str]) -> str:
         if status in seen:
             return status
     return 'clean'
+
+
+def get_all_git_statuses() -> Dict[str, str]:
+    """
+    Return a map of rel_path -> gitStatus for all files with non-clean status.
+    
+    Directory status propagation is handled by the frontend - it walks up from
+    dirty files and applies 'modified' outline to ancestor directories.
+    
+    Used to broadcast git status updates to the frontend without replacing the tree.
+    """
+    root = get_project_root()
+    status_map = _get_git_status_snapshot(root)
+    
+    if not status_map:
+        return {}
+    
+    result: Dict[str, str] = {}
+    
+    # Only include files with non-clean status
+    for rel_path, status in status_map.items():
+        if status and status != 'clean':
+            result[rel_path] = status
+    
+    return result
 
 
 def _is_git_repo(root: Path) -> bool:
