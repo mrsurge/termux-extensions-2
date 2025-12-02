@@ -415,10 +415,11 @@ from .stores import _history_store, _preferences_store
 def initialize_project_session() -> Optional[ProjectSidecar]:
     """Called once at editor worker boot to bump the project session counter.
 
-    The session counter allows us to detect a fresh project switch or a
-    delete+reclone scenario. When a project is seen for the first time
-    after a switch (session_count == 1), we clear any stale per-project
-    caches that might have been left behind by a previous incarnation.
+    IMPORTANT:
+    - This function must NOT clear session_cache or tracked_jobs.
+      Clearing per-project state happens only on explicit project switches
+      in reset_project_session() (explorer_ws.py), so that a plain worker
+      restart for the same project never wipes drafts.
     """
     project_path = _history_store.get_active_project()
     if not project_path or not Path(project_path).exists():
@@ -426,11 +427,6 @@ def initialize_project_session() -> Optional[ProjectSidecar]:
 
     sidecar = ProjectSidecar.load_or_create(project_path)
     sidecar.increment_session()
-
-    if sidecar.session_count == 1:
-        # Fresh project switch — clear stale state for this project.
-        sidecar.clear_session_cache()
-        sidecar.clear_tracked_jobs()
 
     sidecar.save()
     return sidecar

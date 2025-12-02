@@ -1134,6 +1134,15 @@ function handleExplorerEvent(type, payload) {
           window.__explorerBusSend('explorer:list', { rel: '.' });
           window.__explorerBusSend('git:status', {});
         }
+        // Also notify the host/editor runtime so the iframe detaches from the
+        // old project and reloads into the new one.
+        if (typeof window.__cm6HandleProjectOpened === 'function') {
+          try {
+            window.__cm6HandleProjectOpened(payload.path);
+          } catch (err) {
+            console.warn('[Explorer] Failed to synchronize editor on project:opened:', err);
+          }
+        }
       }
       break;
     }

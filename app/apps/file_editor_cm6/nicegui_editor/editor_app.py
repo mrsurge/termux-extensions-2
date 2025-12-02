@@ -529,6 +529,14 @@ async def editor_page():
     font_scale_pref = _resolve_font_scale(editor_prefs.get('fontScale'))
     
     # 2. Determine and Load Initial File
+    # NOTE (Null Document Semantics):
+    # - If there is no last_file for the active project, or it no longer
+    #   exists on disk, the editor is created with an empty buffer and
+    #   initial_path=None. In that mode:
+    #     * No watcher subscription is created
+    #     * No session sidecar entries are written
+    #     * No MRU updates happen
+    #   This acts as the "null document" / blank state for a project.
     project_path = _history_store.get_active_project()
     last_file = _history_store.get_last_file(project_path) if project_path else None
     

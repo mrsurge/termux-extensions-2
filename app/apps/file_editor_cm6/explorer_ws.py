@@ -132,9 +132,14 @@ def reset_project_session(new_project_path: str) -> None:
     """Reset per-project session metadata on explicit project switch.
 
     This is called from explorer flows (open/create/clone) whenever the user
-    selects a new project root. It resets the sidecar's session counter and
-    clears ephemeral state so that the next editor worker boot will treat the
-    project as a fresh start.
+    selects a new project root. It clears ephemeral per-project state so that
+    the next incarnation of this project (including delete+reclone to the same
+    path) starts from a clean slate.
+
+    NOTE:
+    - We intentionally do NOT manipulate session_count here. The counter is
+      strictly informational (number of boots), and initialize_project_session()
+      must never clear state based on its value. All clearing is done here.
     """
     from pathlib import Path
 
@@ -144,7 +149,6 @@ def reset_project_session(new_project_path: str) -> None:
 
     # Reset per-project sidecar state
     sidecar = ProjectSidecar.load_or_create(normalized_path)
-    sidecar.session_count = 0
     sidecar.clear_session_cache()
     sidecar.clear_tracked_jobs()
     # Reset diff base to HEAD for the new project incarnation.

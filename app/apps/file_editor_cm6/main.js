@@ -1121,6 +1121,45 @@ function broadcastRecentsUpdate(state) {
   window.dispatchEvent(new CustomEvent('cm6:recents-updated', { detail: state }));
 }
 
+// Synchronize host + iframe when a project is opened in the explorer.
+// Called from explorer.js via window.__cm6HandleProjectOpened(path).
+async function handleProjectOpened(newProjectPath) {
+  // Reset host-side editor/file state so we don't keep editing a file
+  // from the previous project while the backend has already switched.
+  closeWebSocket();
+  if (currentPath) {
+    diffController.invalidateCacheForPath(currentPath);
+  }
+  diffController.setContext(null);
+  currentPath = '';
+  currentPathExists = false;
+  lastSha256 = null;
+  lastSavedContent = '';
+  setText('');
+  markUnsaved(false);
+  updatePathDisplay();
+  syncSessionPath();
+
+  // Refresh state snapshot so cachedProjectRoot, recents, and git base reflect
+  // the new active project.
+  await syncEditorState(true);
+
+  // Reload the NiceGUI iframe so editor_page() re-runs under the new project.
+  try {
+    if (editorFrame && editorFrame.contentWindow && editorFrame.contentWindow.location) {
+      editorFrame.contentWindow.location.reload();
+    } else if (editorFrame) {
+      // Fallback: bump src to force a reload.
+      editorFrame.src = editorFrame.src;
+    }
+  } catch (err) {
+    console.warn('[ProjectSwitch] Failed to reload editor iframe:', err);
+  }
+}
+
+// Expose for explorer.js (project:opened handler)
+window.__cm6HandleProjectOpened = handleProjectOpened;
+
 async function syncEditorState(forceRefresh = false) {
   if (!forceRefresh && editorState) {
     return editorState;
