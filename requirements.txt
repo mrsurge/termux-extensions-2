@@ -12,3 +12,4 @@ libarchive-c>=5.1
 requests
 libarchive
 aiofiles>=23.0.0
+watchdog

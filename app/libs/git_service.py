@@ -62,13 +62,17 @@ class CallbackProgress(RemoteProgress):
         # Only emit if percentage changed (reduces noise)
         if pct != self._last_pct or message:
             self._last_pct = pct
-            self.callback({
-                "phase": phase,
-                "cur": cur_count,
-                "max": max_count,
-                "pct": pct,
-                "message": message or "",
-            })
+            try:
+                self.callback({
+                    "phase": phase,
+                    "cur": cur_count,
+                    "max": max_count,
+                    "pct": pct,
+                    "message": message or "",
+                })
+            except Exception as e:
+                # Don't let callback errors kill the git operation
+                logger.warning(f"[CallbackProgress] Callback error (ignored): {e}")
 
 
 def git_push_with_progress(
@@ -158,34 +162,46 @@ def git_pull_with_progress(
     Returns:
         Dict with success status and any error message
     """
+    logger.info(f"[GIT_PULL] Starting pull: {repo_path} from {remote}")
     try:
         repo = Repo(repo_path)
+        logger.debug(f"[GIT_PULL] Repo opened: {repo.working_dir}")
+        
         origin = repo.remote(remote)
+        logger.debug(f"[GIT_PULL] Remote: {origin.name} -> {list(origin.urls)}")
+        
         progress = CallbackProgress(on_event)
         
         # Execute pull
         pull_kwargs = {"progress": progress}
         if rebase:
             pull_kwargs["rebase"] = True
+            logger.debug(f"[GIT_PULL] Using rebase")
         
         if branch:
+            logger.info(f"[GIT_PULL] Pulling branch: {branch}")
             result = origin.pull(branch, **pull_kwargs)
         else:
+            logger.info(f"[GIT_PULL] Pulling default branch")
             result = origin.pull(**pull_kwargs)
         
+        logger.info(f"[GIT_PULL] Pull completed")
         on_event({"done": True, "pct": 100})
         return {"success": True}
         
     except InvalidGitRepositoryError:
         error = f"Not a git repository: {repo_path}"
+        logger.error(f"[GIT_PULL] {error}")
         on_event({"error": error})
         return {"success": False, "error": error}
     except GitCommandError as e:
         error = str(e.stderr or e.stdout or str(e))
+        logger.error(f"[GIT_PULL] GitCommandError: {error}")
         on_event({"error": error})
         return {"success": False, "error": error}
     except Exception as e:
         error = str(e)
+        logger.exception(f"[GIT_PULL] Exception: {error}")
         on_event({"error": error})
         return {"success": False, "error": error}
 
@@ -210,15 +226,18 @@ def git_clone_with_progress(
     Returns:
         Dict with success status, cloned path, and any error message
     """
+    logger.info(f"[GIT_CLONE] Starting clone: {url} -> {target_path}")
     try:
-        target = Path(target_path)
+        target = Path(target_path).expanduser().resolve()
+        logger.debug(f"[GIT_CLONE] Resolved target: {target}")
         
         # Ensure parent exists
         target.parent.mkdir(parents=True, exist_ok=True)
         
         # Check if target exists and is not empty
         if target.exists() and any(target.iterdir()):
-            error = f"Target directory '{target_path}' already exists and is not empty"
+            error = f"Target directory '{target}' already exists and is not empty"
+            logger.warning(f"[GIT_CLONE] {error}")
             on_event({"error": error})
             return {"success": False, "error": error}
         
@@ -232,17 +251,21 @@ def git_clone_with_progress(
             clone_kwargs["depth"] = depth
         
         # Execute clone
-        Repo.clone_from(url, str(target), **clone_kwargs)
+        logger.info(f"[GIT_CLONE] Calling Repo.clone_from...")
+        repo = Repo.clone_from(url, str(target), **clone_kwargs)
+        logger.info(f"[GIT_CLONE] Clone completed: {repo.working_dir}")
         
         on_event({"done": True, "pct": 100})
         return {"success": True, "path": str(target)}
         
     except GitCommandError as e:
         error = str(e.stderr or e.stdout or str(e))
+        logger.error(f"[GIT_CLONE] GitCommandError: {error}")
         on_event({"error": error})
         return {"success": False, "error": error}
     except Exception as e:
         error = str(e)
+        logger.exception(f"[GIT_CLONE] Exception: {error}")
         on_event({"error": error})
         return {"success": False, "error": error}
 
@@ -275,10 +298,10 @@ def job_git_push(ctx: JobContext, params: Dict[str, Any]) -> None:
     ctx.set_progress(completed=0, total=100, detail="Starting push")
     
     def on_event(ev: Dict[str, Any]):
-        ctx.check_cancelled()
+        # Note: Don't call ctx.check_cancelled() here - it would kill the push mid-operation
         
         if "error" in ev:
-            raise RuntimeError(ev["error"])
+            return  # Let git_push_with_progress return the error
         
         if ev.get("done"):
             return
@@ -323,6 +346,9 @@ def job_git_pull(ctx: JobContext, params: Dict[str, Any]) -> None:
         rebase: Use rebase (default: False)
     """
     repo_path = params.get("repo_path")
+    
+    logger.info(f"[JOB_GIT_PULL] Starting job: repo={repo_path}")
+    
     if not repo_path:
         raise ValueError("repo_path is required")
     
@@ -334,12 +360,15 @@ def job_git_pull(ctx: JobContext, params: Dict[str, Any]) -> None:
     ctx.set_progress(completed=0, total=100, detail="Starting pull")
     
     def on_event(ev: Dict[str, Any]):
-        ctx.check_cancelled()
+        logger.debug(f"[JOB_GIT_PULL] Event: {ev}")
+        # Note: Don't call ctx.check_cancelled() here - it would kill the pull mid-operation
         
         if "error" in ev:
-            raise RuntimeError(ev["error"])
+            logger.error(f"[JOB_GIT_PULL] Error event: {ev['error']}")
+            return  # Let git_pull_with_progress return the error
         
         if ev.get("done"):
+            logger.info(f"[JOB_GIT_PULL] Done event received")
             return
         
         pct = ev.get("pct", 0)
@@ -360,6 +389,8 @@ def job_git_pull(ctx: JobContext, params: Dict[str, Any]) -> None:
         branch=branch,
         rebase=rebase,
     )
+    
+    logger.info(f"[JOB_GIT_PULL] Result: {result}")
     
     if not result.get("success"):
         raise RuntimeError(result.get("error", "Pull failed"))
@@ -384,6 +415,8 @@ def job_git_clone(ctx: JobContext, params: Dict[str, Any]) -> None:
     url = params.get("url")
     target_path = params.get("target_path")
     
+    logger.info(f"[JOB_GIT_CLONE] Starting job: url={url}, target={target_path}")
+    
     if not url:
         raise ValueError("url is required")
     if not target_path:
@@ -401,12 +434,17 @@ def job_git_clone(ctx: JobContext, params: Dict[str, Any]) -> None:
     ctx.set_progress(completed=0, total=100, detail="Starting clone")
     
     def on_event(ev: Dict[str, Any]):
-        ctx.check_cancelled()
+        logger.debug(f"[JOB_GIT_CLONE] Event: {ev}")
+        # Note: Don't call ctx.check_cancelled() here - it would kill the clone mid-operation
+        # The clone should complete or fail on its own; cancellation is checked after
         
         if "error" in ev:
-            raise RuntimeError(ev["error"])
+            logger.error(f"[JOB_GIT_CLONE] Error event: {ev['error']}")
+            # Don't raise here - let git_clone_with_progress return the error
+            return
         
         if ev.get("done"):
+            logger.info(f"[JOB_GIT_CLONE] Done event received")
             return
         
         pct = ev.get("pct", 0)
@@ -427,6 +465,8 @@ def job_git_clone(ctx: JobContext, params: Dict[str, Any]) -> None:
         branch=branch,
         depth=depth,
     )
+    
+    logger.info(f"[JOB_GIT_CLONE] Result: {result}")
     
     if not result.get("success"):
         raise RuntimeError(result.get("error", "Clone failed"))

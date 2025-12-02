@@ -374,7 +374,7 @@ class ExplorerDispatcher:
     
     async def _pump_job_events(self):
         """Background task to forward job updates to this client."""
-        logger.info("[JOB_PUMP] Started job pump task")
+        logger.debug("[JOB_PUMP] Started job pump task")
         while True:
             try:
                 # Non-blocking check with short timeout
@@ -385,24 +385,30 @@ class ExplorerDispatcher:
                     job_type = job_data.get("type", "")
                     job_status = job_data.get("status", "")
                     
-                    logger.debug(f"[JOB_PUMP] Got event: {job_id} ({job_type}) status={job_status}, tracked={job_id in self._tracked_job_ids}")
-                    
                     # Only forward jobs we're tracking (ones we started)
                     if job_id in self._tracked_job_ids:
-                        logger.info(f"[JOB_PUMP] Forwarding job:progress for {job_id}")
                         await self.emit_personal("job:progress", job_data)
                         
                         # Clean up tracking when job completes
                         if job_status in ("succeeded", "failed", "cancelled"):
                             self._tracked_job_ids.discard(job_id)
+                            
+                            # On clone success, refresh to pick up git status
+                            if job_type == "git_clone" and job_status == "succeeded":
+                                logger.info(f"[JOB_PUMP] Clone succeeded, refreshing explorer")
+                                await self.broadcast_git_status()
+                                await self.handle_explorer_refresh({}, None)
+                    else:
+                        # Race condition: job emitted before we tracked it
+                        logger.warning(f"[JOB_PUMP] Missed event for untracked job {job_id} ({job_type})")
                         
             except Empty:
                 continue
             except asyncio.CancelledError:
-                logger.info("[JOB_PUMP] Task cancelled")
+                logger.debug("[JOB_PUMP] Task cancelled")
                 break
             except Exception as e:
-                logger.warning(f"Error in job pump: {e}")
+                logger.warning(f"[JOB_PUMP] Error: {e}")
                 await asyncio.sleep(0.5)
 
     async def cleanup(self):
@@ -563,6 +569,10 @@ class ExplorerDispatcher:
         await self.broadcast("explorer:deleted", res)
         # Refresh the parent directory to reflect deletion
         await self.broadcast("explorer:setList", list_dir(parent_rel))
+        # Update git status
+        mark_git_cache_dirty(self.project_root)
+        await self.broadcast_git_status()
+        await self.broadcast_git_decorations()
 
     async def handle_explorer_batchDelete(self, payload: dict, msg_id: str):
         rels = payload.get("rels", [])
@@ -575,6 +585,10 @@ class ExplorerDispatcher:
                 await self.broadcast("explorer:setList", list_dir(parent_rel))
             except Exception:
                 pass  # Directory may no longer exist
+        # Update git status
+        mark_git_cache_dirty(self.project_root)
+        await self.broadcast_git_status()
+        await self.broadcast_git_decorations()
 
     async def handle_explorer_batchCopy(self, payload: dict, msg_id: str):
         rels = payload.get("rels", [])
@@ -798,7 +812,15 @@ class ExplorerDispatcher:
         await self.emit_personal("project:list", {"projects": projects}, msg_id)
 
     async def handle_git_clone(self, payload: dict, msg_id: str):
-        """Create a git_clone job for progress tracking."""
+        """
+        Clone a repository into a new directory.
+        
+        Flow:
+        1. Create empty target directory
+        2. Switch project root to that directory (watcher starts)
+        3. Start clone job (clones into the now-current directory)
+        4. Files appear live as checkout happens
+        """
         url = payload.get("url")
         target_path = payload.get("target_path")
         
@@ -808,18 +830,57 @@ class ExplorerDispatcher:
             return await self.send_error("target_path is required", msg_id)
         
         try:
+            from pathlib import Path
             from app.libs.jobs import manager as job_manager
-            job = job_manager.create_job("git_clone", {
+            
+            # Expand ~ and resolve to absolute path
+            target = Path(target_path).expanduser().resolve()
+            logger.info(f"[GIT_CLONE] Target: {target}")
+            
+            # Step 1: Create the empty directory
+            if target.exists():
+                if any(target.iterdir()):
+                    return await self.send_error(f"Directory '{target}' already exists and is not empty", msg_id)
+                # Empty dir exists, that's fine
+            else:
+                target.mkdir(parents=True, exist_ok=True)
+            
+            # Step 2: Switch project root directly (without full project_open which emits)
+            from .explorer_helper import set_project_root
+            from .core_read import init_watcher
+            
+            manager.disconnect(self.websocket)  # Disconnect from old project
+            
+            new_root = set_project_root(str(target))
+            init_watcher(new_root)  # Start watching the new directory
+            _history_store.touch_project(str(new_root))
+            _history_store.set_active_project(str(new_root))
+            self.project_root = new_root
+            
+            manager.register_existing(self.websocket, str(new_root))
+            
+            # Emit project opened so frontend knows
+            await self.emit_personal("project:opened", {"path": str(new_root)}, None)
+            
+            # Step 3: Start the clone job
+            job_params = {
                 "url": url,
-                "target_path": target_path,
+                "target_path": str(target),
                 "branch": payload.get("branch"),
                 "depth": payload.get("depth"),
-            })
+            }
+            
+            job = job_manager.create_job("git_clone", job_params)
+            
             # Track this job so we forward its progress events
+            # NOTE: Race condition possible - job may emit before we track
             self._tracked_job_ids.add(job.id)
+            
             # Acknowledge job creation - progress will come via job:progress events
-            await self.emit_personal("git:cloneStarted", {"job_id": job.id, "target_path": target_path}, msg_id)
+            await self.emit_personal("git:cloneStarted", {"job_id": job.id, "target_path": str(target)}, msg_id)
+            
         except Exception as e:
+            logger.exception(f"[GIT_CLONE] Failed to start clone: {e}")
             await self.send_error(f"Failed to start clone: {e}", msg_id)
 
     # --- Search & Review (State Events) ---

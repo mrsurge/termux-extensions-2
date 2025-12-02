@@ -1124,19 +1124,15 @@ function handleExplorerEvent(type, payload) {
       break;
     }
     case 'project:opened': {
-      // Backend confirms a project switch (open/create). Treat this as
-      // authoritative and reload the page so the editor worker, history
-      // store, and NiceGUI iframe all start from the new project.
+      // Backend confirms a project switch (open/create).
+      // Update UI state - no page reload needed, WebSocket stays connected
       if (payload && payload.path) {
         uiState.projectPath = payload.path;
         renderProjectLabel();
-      }
-      try {
-        window.location.reload();
-      } catch {
-        // If reload fails for some reason, at least request a full refresh.
+        // Request fresh tree and git status for the new project
         if (typeof window.__explorerBusSend === 'function') {
-          window.__explorerBusSend('explorer:refresh', {});
+          window.__explorerBusSend('explorer:list', { rel: '.' });
+          window.__explorerBusSend('git:status', {});
         }
       }
       break;
@@ -1180,21 +1176,21 @@ function handleExplorerEvent(type, payload) {
     // --- Job Progress Events (git push/pull/clone with progress) ---
     case 'job:progress': {
       const { id, type, status, progress, message, error } = payload;
-      console.log('[JOB_PROGRESS]', { id, type, status, progress, message });
       
       // Only handle git-related jobs
-      if (!type || !type.startsWith('git_')) break;
+      if (!type || !type.startsWith('git_')) {
+        break;
+      }
       
       if (status === 'running') {
-        // Show/update progress bar
         const pct = progress?.completed ?? 0;
         const detail = progress?.detail || message || '';
         showGitProgressBar(pct, detail);
       } else if (status === 'succeeded') {
         hideGitProgressBar();
         toast(message || `${type.replace('_', ' ')} completed`);
-        // Refresh git status after push/pull completes
-        if (type === 'git_pull' || type === 'git_push') {
+        // Refresh git status after push/pull/clone completes
+        if (type === 'git_pull' || type === 'git_push' || type === 'git_clone') {
           if (typeof window.__explorerBusSend === 'function') {
             window.__explorerBusSend('git:status', {});
             window.__explorerBusSend('explorer:refresh', {});
@@ -1212,8 +1208,6 @@ function handleExplorerEvent(type, payload) {
     case 'git:pushStarted':
     case 'git:pullStarted':
     case 'git:cloneStarted': {
-      // Job started acknowledgement - show initial progress state
-      console.log('[GIT_JOB_STARTED]', type, payload);
       showGitProgressBar(0, 'Starting...');
       break;
     }
@@ -1420,7 +1414,7 @@ export async function initExplorerUI() {
       if (!choice) return;
 
       if (choice.type === 'clone') {
-        // Clone repository then open as project via WS.
+        // Clone repository via job system with progress.
         let name = 'repo';
         try {
           const parts = String(choice.url || '').split('/');
@@ -1445,26 +1439,19 @@ export async function initExplorerUI() {
             if (!ok) return;
           }
 
-          toast('Cloning repository...');
-          const resp = await fetch('/api/git/clone', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              url: choice.url,
-              target_path: result.path,
-            }),
-          });
-          const json = await resp.json();
-          if (!json || json.ok === false) {
-            throw new Error(json?.detail || json?.error || 'Clone failed');
-          }
-          toast('Repository cloned successfully.');
-
           if (typeof window.__explorerBusSend !== 'function') {
             toast('Explorer connection unavailable.');
             return;
           }
-          window.__explorerBusSend('project:open', { path: result.path });
+
+          // Use job-based clone with progress via WebSocket
+          window.__explorerBusSend('git:clone', {
+            url: choice.url,
+            target_path: result.path,
+          });
+          // Progress bar shows via job:progress events
+          // Backend auto-switches project when target dir is created
+          
         } catch (e) {
           if (e && e.message !== 'cancelled') {
             toast(`An error occurred: ${e?.message || e}`);

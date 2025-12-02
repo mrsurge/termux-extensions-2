@@ -1,6 +1,7 @@
 # app/apps/file_editor_cm6/core_read.py
 
 from __future__ import annotations
+import logging
 import os
 import time
 import uuid
@@ -11,6 +12,8 @@ from typing import Callable, Dict, Optional
 
 from .core_write import _get_file_meta
 from . import edit_tracker
+
+logger = logging.getLogger(__name__)
 
 try:
     from watchdog.observers import Observer
@@ -118,22 +121,37 @@ class WatchdogHandler(FileSystemEventHandler):
         self.on_event = on_event
 
     def on_any_event(self, event):
-        # Apply noise filters
-        if any(p in event.src_path for p in EXCLUDE_PATTERNS):
+        # Only handle meaningful events - skip opened/closed noise
+        if event.event_type not in ('created', 'modified', 'deleted', 'moved'):
             return
+        
+        # Determine the "interesting" path:
+        # - For moved/renamed events, use dest_path (final name)
+        # - Otherwise, use src_path
+        # Git often does temp-file → rename, so we need dest_path to see real files
+        if event.event_type == "moved" and hasattr(event, "dest_path"):
+            path = event.dest_path
+        else:
+            path = event.src_path
+
+        # Apply noise filters on the final path
+        if any(p in path for p in EXCLUDE_PATTERNS):
+            return
+        
+        logger.debug(f"[WATCHER] event_type={event.event_type}, path={path}")
         
         # Notify explorer of filesystem changes (files AND directories)
         # This runs in the watcher thread, so it schedules async work
         try:
             from .explorer_ws import notify_explorer_of_change
-            notify_explorer_of_change(event.src_path, event.event_type)
+            notify_explorer_of_change(path, event.event_type)
         except Exception:
             pass  # Explorer module may not be loaded yet
         
         # For file content updates, continue with existing logic
         if event.is_directory:
             return
-        self.on_event({"type": event.event_type, "path": event.src_path})
+        self.on_event({"type": event.event_type, "path": path})
 
 def _get_client_id_for_token(token: str) -> Optional[str]:
     """Returns the client_id associated with a token."""
@@ -270,20 +288,23 @@ def _do_handle_fs_event(raw_event):
     except (FileNotFoundError, IsADirectoryError):
         pass # File might have been deleted
 
-def init_watcher(project_root: Path):
-    """Initializes and starts the file system watcher if not already running.
+def init_watcher(project_root: Path = None):
+    """Initializes and starts the file system watcher.
     
-    --- WATCHER LIFECYCLE (future implementation) ---
-    Currently, the watcher runs indefinitely once started. In the future,
-    the explorer_ws ConnectionManager could control the watcher lifecycle:
-    - Start watcher when first client connects
-    - Stop watcher when last client disconnects
-    This would save CPU/battery when no one is using the editor.
-    See explorer_ws.py for the connection tracking infrastructure.
-    ------------------------------------------------
+    If project_root is None, reads from the history store SSOT.
+    This ensures the watcher always watches whatever the active project is.
     """
     global _watcher_thread, _project_root
 
+    # Read from SSOT if no path provided
+    if project_root is None:
+        from .stores import get_history_store
+        history = get_history_store()
+        active = history.get_active_project()
+        if not active:
+            return  # No active project
+        project_root = Path(active)
+    
     desired_root = project_root.resolve()
     
     # Check if watcher needs to be restarted due to project change

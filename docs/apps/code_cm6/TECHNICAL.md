@@ -255,13 +255,13 @@ POST /git/diff_base       # Set comparison baseline
 POST /git/stage_all       # Stage all changes
 POST /git/unstage_all     # Unstage all changes
 POST /git/commit          # Commit with message
-POST /git/push            # Push to remote
-POST /git/pull            # Pull from remote
+# Note: push/pull/clone now use Job Registry via WebSocket (see Section 8.7)
 
 # WebSocket
 WS   /ws/read             # File change notifications
 WS   /ws/agent            # AI agent communication
 WS   /ws/terminal         # PTY streaming
+WS   /ws/explorer         # Explorer tree + git operations
 ```
 
 ### 2.2 Dependency Injection Pattern
@@ -1334,6 +1334,161 @@ aria2 = find_shell_by_label('aria2-rpc')  # Finds existing shell
 - Writes JSON-RPC requests to shell.stdin
 - Reads JSON-RPC responses from shell.stdout
 - All conversations share single MCP server instance
+
+---
+
+### 8.9 Git Push/Pull/Clone with Progress
+
+Git push, pull, and clone operations use the **Job Registry** for background execution with real-time progress reporting via WebSocket.
+
+**Why Job Registry instead of direct CLI:**
+- GitPython provides structured progress callbacks (phase, percentage, message)
+- No parsing of command-line progress output (escape sequences, etc.)
+- Jobs are cancelable and recoverable across reconnects
+- Progress UI is decoupled from the operation itself
+
+**Architecture:**
+
+```
+Frontend                    Backend (Worker)                  Job System
+─────────────────────────────────────────────────────────────────────────
+Click Push
+    │
+    ▼
+__explorerBusSend('git:push')
+    │
+    ▼
+              handle_git_push()
+                    │
+                    ▼
+              job_manager.create_job("git_push", {...})
+              _tracked_job_ids.add(job.id)
+                    │
+                    ▼
+              emit "git:pushStarted"  ─────────────▶  showGitProgressBar(0)
+                    │
+                    │                 job_git_push() runs in thread
+                    │                       │
+                    │                       ▼
+                    │                 GitPython RemoteProgress
+                    │                       │
+                    │                       ▼
+                    │                 ctx.set_progress(pct, detail)
+                    │                       │
+                    │                       ▼
+                    │                 job_manager.notify_job_update()
+                    │                       │
+                    ◀───────────────────────┘
+              _pump_job_events()
+                    │
+                    ▼
+              emit "job:progress"  ─────────────▶  showGitProgressBar(pct)
+                    │
+                    │                 (on completion)
+                    │                       │
+                    ▼                       ▼
+              emit "job:progress"  ─────────────▶  hideGitProgressBar()
+              status="succeeded"                   toast("Pushed to origin")
+                                                   refresh git:status
+```
+
+**Files Involved:**
+
+| File | Purpose |
+|------|---------|
+| `app/libs/git_service.py` | GitPython wrappers + `@register_job_handler` |
+| `app/libs/jobs.py` | Job Registry (shared framework service) |
+| `explorer_ws.py` | WS handlers + job event bridge |
+| `explorer.js` | Progress bar UI + event handlers |
+
+**Job Handlers:**
+
+```python
+# app/libs/git_service.py
+
+@register_job_handler("git_push")
+def job_git_push(ctx: JobContext, params: Dict[str, Any]) -> None:
+    repo_path = params.get("repo_path")
+    remote = params.get("remote", "origin")
+    
+    def on_event(ev):
+        ctx.check_cancelled()
+        if "error" in ev:
+            raise RuntimeError(ev["error"])
+        pct = ev.get("pct", 0)
+        phase = ev.get("phase", "working")
+        ctx.set_progress(completed=pct, total=100, detail=phase)
+    
+    result = git_push_with_progress(repo_path, on_event, remote)
+    if not result.get("success"):
+        raise RuntimeError(result.get("error", "Push failed"))
+    ctx.finish(message=f"Pushed to {remote}")
+
+# Similar handlers: git_pull, git_clone
+```
+
+**Job Event Bridge:**
+
+The `ExplorerDispatcher` tracks job IDs it creates and forwards only those events:
+
+```python
+class ExplorerDispatcher:
+    def __init__(self, websocket):
+        self._tracked_job_ids: set = set()  # Jobs we started
+        self._job_queue: Queue = None
+        self._job_pump_task: Task = None
+    
+    async def handle_git_push(self, payload, msg_id):
+        job = job_manager.create_job("git_push", {...})
+        self._tracked_job_ids.add(job.id)  # Track it
+        await self.emit_personal("git:pushStarted", {"job_id": job.id})
+    
+    async def _pump_job_events(self):
+        while True:
+            payload = await asyncio.to_thread(self._job_queue.get, timeout=0.5)
+            for job_data in payload.get("jobs", []):
+                if job_data["id"] in self._tracked_job_ids:
+                    await self.emit_personal("job:progress", job_data)
+                    if job_data["status"] in ("succeeded", "failed", "cancelled"):
+                        self._tracked_job_ids.discard(job_data["id"])
+```
+
+**Frontend Progress UI:**
+
+```javascript
+// Ephemeral progress bar at top of git footer
+function showGitProgressBar(pct, detail) {
+  progressBarEl.style.opacity = '1';
+  progressBarEl.style.height = '3px';
+  progressBarEl.style.width = `${pct}%`;
+  progressTextEl.textContent = detail;
+}
+
+function hideGitProgressBar() {
+  // Fade out, then reset dimensions
+  progressBarEl.style.opacity = '0';
+  setTimeout(() => {
+    progressBarEl.style.width = '0';
+    progressBarEl.style.height = '0';
+  }, 300);
+}
+
+// Git status flash on change
+function renderGitSummary() {
+  // ... compute counts ...
+  if (countsChanged) {
+    gitSummaryEl.style.color = '#60a5fa';  // Flash blue
+    setTimeout(() => gitSummaryEl.style.color = '', 400);
+  }
+}
+```
+
+**Important:** The `git_service.py` module must be imported in the **worker process** to register the job handlers. This is done via:
+
+```python
+# explorer_ws.py
+import app.libs.git_service  # noqa: F401 - registers handlers
+```
 
 ---
 
