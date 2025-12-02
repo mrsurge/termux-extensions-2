@@ -1907,7 +1907,7 @@ function ensureProjectsDebugModal() {
   modal.innerHTML = `
     <div class="fe-modal-card" style="max-width: 640px;">
       <div class="fe-modal-header">
-        <strong>Recent Projects &amp; Sidecars (Debug)</strong>
+        <strong>Projects</strong>
         <span style="flex:1"></span>
         <button class="fe-btn" id="fe-projects-debug-close" aria-label="Close">✕</button>
       </div>
@@ -1946,16 +1946,33 @@ async function loadProjectsDebugContent() {
     if (!resp.ok || json?.ok === false) {
       throw new Error(json?.error || resp.statusText || 'Request failed');
     }
-    const items = Array.isArray(json.data) ? json.data : [];
+    const items = Array.isArray(json.data) ? json.data.slice() : [];
     if (!items.length) {
       modal.contentEl.innerHTML = '<p>No recent projects recorded.</p>';
       return;
     }
 
+    // Sort so that the active project (if any) appears first, then by
+    // most recently opened.
+    items.sort((a, b) => {
+      const aActive = !!a.is_active;
+      const bActive = !!b.is_active;
+      if (aActive && !bActive) return -1;
+      if (!aActive && bActive) return 1;
+      const ao = a.opened_at || '';
+      const bo = b.opened_at || '';
+      if (ao > bo) return -1;
+      if (ao < bo) return 1;
+      return 0;
+    });
+
     const frag = document.createDocumentFragment();
     items.forEach((entry) => {
       const row = document.createElement('div');
       row.className = 'fe-projects-debug-row';
+      if (entry.is_active) {
+        row.classList.add('fe-projects-debug-row--active');
+      }
 
       const info = document.createElement('div');
       info.className = 'fe-projects-debug-info';
@@ -1977,7 +1994,10 @@ async function loadProjectsDebugContent() {
       const lastBoot = entry.last_boot_at
         ? `, last_boot_at=${entry.last_boot_at}`
         : '';
-      meta.textContent = `Sidecar: ${scPath} (${exists}${session}${lastBoot})`;
+      const drafts = typeof entry.draft_count === 'number' && entry.draft_count > 0
+        ? `, drafts=${entry.draft_count}`
+        : '';
+      meta.textContent = `State: ${scPath} (${exists}${session}${lastBoot}${drafts})`;
 
       info.appendChild(title);
       info.appendChild(meta);
@@ -1989,12 +2009,27 @@ async function loadProjectsDebugContent() {
       const trashBtn = document.createElement('button');
       trashBtn.className = 'fe-btn';
       trashBtn.textContent = '🗑';
-      trashBtn.title = 'Remove project entry and sidecar';
+      trashBtn.title = entry.is_active ? 'Reset project state' : 'Remove project entry and sidecar';
       trashBtn.addEventListener('click', async (evt) => {
         evt.stopPropagation();
         const p = entry.path;
         if (!p) return;
-        const confirmText = `Remove project entry and sidecar for:\n${p}?\n\nThis does not delete the project folder itself.`;
+        const confirmText = entry.is_active
+          ? [
+              'Reset history and draft cache for the CURRENT project:',
+              p,
+              '',
+              'This does not delete the project folder itself, and the project',
+              'will remain in the list. All recents, diff base, and drafts for',
+              'this project will be cleared.',
+            ].join('\n')
+          : [
+              'Remove project entry and sidecar for:',
+              p,
+              '',
+              'This does not delete the project folder itself, but it will be',
+              'removed from the recent projects list and its drafts will be lost.',
+            ].join('\n');
         if (!window.confirm(confirmText)) return;
         try {
           const respDel = await fetch('/api/app/file_editor_cm6/debug/projects', {
@@ -2007,6 +2042,18 @@ async function loadProjectsDebugContent() {
             throw new Error(jsonDel?.error || respDel.statusText || 'Delete failed');
           }
           await loadProjectsDebugContent();
+
+          // If we just soft-reset the CURRENT project, treat this as the user
+          // having just opened a \"fresh\" project: clear host editor state and
+          // let the iframe reload into its null-document state for this project.
+          if (entry.is_active && typeof window.__cm6HandleProjectOpened === 'function') {
+            try {
+              window.__cm6HandleProjectOpened(p);
+              hideProjectsDebugModal();
+            } catch (err) {
+              console.warn('[ProjectsDebug] Failed to resync editor after reset:', err);
+            }
+          }
         } catch (e) {
           window.alert(
             `Failed to delete project entry: ${
@@ -2019,6 +2066,29 @@ async function loadProjectsDebugContent() {
       actions.appendChild(trashBtn);
       row.appendChild(actions);
       frag.appendChild(row);
+
+      // Clicking the info area (not the trash) can act as a quick
+      // "open project" shortcut for non-active projects.
+      if (!entry.is_active) {
+        info.style.cursor = 'pointer';
+        info.addEventListener('click', () => {
+          const p = entry.path;
+          if (!p) return;
+          if (
+            !window.confirm(
+              'Any unsaved changes in the current project will be lost. Continue?',
+            )
+          ) {
+            return;
+          }
+          if (typeof window.__explorerBusSend !== 'function') {
+            window.alert('Explorer connection unavailable.');
+            return;
+          }
+          window.__explorerBusSend('project:open', { path: p });
+          hideProjectsDebugModal();
+        });
+      }
     });
 
     modal.contentEl.innerHTML = '';

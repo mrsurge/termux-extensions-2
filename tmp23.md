@@ -269,13 +269,110 @@
   - Session counters:
     - Increment on every worker boot for the active project; used for telemetry/debugging only.
 
-- **Remaining / future work (not yet implemented):**
+  - **Remaining / future work (not yet implemented):**
   - UI “Clear Project State” action in the menus (manual nuclear option).
   - Optional migration of per-project MRU (`recent_files`) into `ProjectSidecar.recent_files`.
   - Additional debug views (e.g., per-project draft listing via the sidecar instead of scanning disk).
 
 ---
 
+## 8. Progress Update — Explorer/Editor Sync & Soft Reset (2025-12-02, later)
+
+### 8.1. Project-Opened Sync Between Explorer, Host, and Iframe
+
+**Files:**
+- `app/apps/file_editor_cm6/static/js/explorer.js`
+- `app/apps/file_editor_cm6/main.js`
+- `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+
+- **Explorer → Host hook:**
+  - `explorer.js` handles `project:opened` (from `explorer_ws`):
+    - Updates `uiState.projectPath`.
+    - Refreshes tree and git status.
+    - Calls `window.__cm6HandleProjectOpened(payload.path)` if present.
+
+- **Host handler (`__cm6HandleProjectOpened`):**
+  - Implemented in `main.js`:
+    - Clears host-side editor state (currentPath, diff controller context, WebSocket, unsaved flag, toolbar labels).
+    - Calls `syncEditorState(true)` to pull a fresh `/state` snapshot for the new active project.
+    - Reloads the NiceGUI iframe (`editor_frame`) so `editor_page()` runs in the context of the new project.
+
+- **Iframe reload semantics (null document):**
+  - `editor_app.editor_page()` reads:
+    - `project_path = _history_store.get_active_project()`
+    - `last_file = _history_store.get_last_file(project_path)`
+  - If `last_file` is missing or invalid:
+    - `initial_path = None`, `initial_content = ''`.
+    - No watcher subscription is created.
+    - No session cache writes happen.
+    - No MRU updates happen.
+    - This is explicitly documented as the **“null document”** / blank state for a project.
+
+**Result:**  
+Switching projects via explorer now reliably:
+1. Clears per-project sidecar state (`reset_project_session`).
+2. Emits `project:opened`.
+3. Causes the host to clear its editor state and reload the iframe.
+4. Leads `editor_page()` to open either the last real file for that project or a clean null document when there is none.
+
+### 8.2. Active Project Highlighting and Soft Reset in Debug Modal
+
+**Files:**
+- `app/apps/file_editor_cm6/main.py`
+- `app/apps/file_editor_cm6/history_store.py`
+- `app/apps/file_editor_cm6/template.html`
+- `app/apps/file_editor_cm6/main.js`
+
+- **Active project flag in `/debug/projects`:**
+  - `debug_projects()` now adds `is_active` per entry:
+    - `path == _history_store.get_active_project()`.
+  - Frontend sorts projects so the active project is listed first.
+  - Active row gets `.fe-projects-debug-row--active` styling (blue-tinted highlight).
+
+- **Soft reset vs hard delete in `DELETE /debug/projects`:**
+  - New helper `HistoryStore.reset_project_history(project_path)`:
+    - Clears `files[]`, `last_file`, sets `diff_base = "HEAD"`, removes `origin`.
+    - Keeps `recent_projects` and `active_project` intact.
+  - `debug_delete_project` semantics:
+    - If project is **active**:
+      - Calls `reset_project_history(path)`.
+      - Loads its sidecar, then:
+        - `clear_session_cache()`
+        - `clear_tracked_jobs()`
+        - `set_diff_base("HEAD")`
+        - `save()`
+      - Returns `history_reset=True`, `removed=False`, `sidecar_deleted=False`, `is_active=True`.
+      - I.e., **soft nuke**: wipes MRU + drafts + diff base, but keeps project known and sidecar file intact.
+    - If project is **not active**:
+      - Calls `_history_store.remove_project(path)` (removes from `projects` + `recent_projects`, clears `active_project` if needed).
+      - Deletes the project’s sidecar file if it exists.
+      - Returns `removed=True`, `sidecar_deleted=True`, `history_reset=False`, `is_active=False` (hard delete).
+
+- **Debug modal interactions:**
+  - Each row:
+    - Left cell (info): project label/path + sidecar info.
+    - Right cell: red trash button.
+  - For non-active projects:
+    - Clicking the left cell acts as a “quick open project”:
+      - Confirms unsaved-change warning.
+      - Sends `project:open` via `window.__explorerBusSend`, then hides the modal.
+      - Reuses the standard project switch pipeline.
+  - For the active project:
+    - Info cell is inert (no click handler).
+    - Trash button triggers the **soft reset** described above.
+    - After a successful soft reset:
+      - Frontend calls `window.__cm6HandleProjectOpened(path)` directly:
+        - Clears host editor state.
+        - Reloads the iframe.
+      - `editor_page()` reloads into the **null document** state for the same active project (no `last_file`, no drafts).
+
+**Result:**  
+Soft-resetting the currently active project via the debug modal now behaves like “just opened a new project”:
+- Per-project drafts, MRU, and diff base are wiped.
+- The project remains selected and in recents.
+- The host + iframe editor re-synchronize into a clean blank buffer tied to that project.
+
+---
+
 **Summary:**  
 The Code CM6 editor now uses per-project sidecars as the SSOT for project-scoped state (drafts, diff base, tracked jobs), with explicit clearing on project switches and a read-only debug UI to introspect and surgically reset history + sidecars. Session counters remain in place for diagnostics but no longer trigger state clearing, preventing accidental draft loss on worker restarts. 
-

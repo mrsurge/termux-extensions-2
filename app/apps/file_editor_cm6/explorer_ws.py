@@ -129,17 +129,23 @@ _explorer_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 def reset_project_session(new_project_path: str) -> None:
-    """Reset per-project session metadata on explicit project switch.
+    """Set the active project on explicit project switch.
 
     This is called from explorer flows (open/create/clone) whenever the user
-    selects a new project root. It clears ephemeral per-project state so that
-    the next incarnation of this project (including delete+reclone to the same
-    path) starts from a clean slate.
+    selects a new project root.
+
+    IMPORTANT (Phase 6 change):
+    - We NO LONGER clear session_cache (drafts) or tracked_jobs here.
+    - Drafts persist per-project and are only cleared via explicit user actions:
+      - Review tab "Discard"
+      - Projects modal soft reset (for active project)
+      - Projects modal hard delete (for non-active projects)
+    - This allows multi-project draft retention: switching away from a project
+      and back again preserves any unsaved changes in that project's sidecar.
 
     NOTE:
     - We intentionally do NOT manipulate session_count here. The counter is
-      strictly informational (number of boots), and initialize_project_session()
-      must never clear state based on its value. All clearing is done here.
+      strictly informational (number of boots).
     """
     from pathlib import Path
 
@@ -147,12 +153,10 @@ def reset_project_session(new_project_path: str) -> None:
     # Update active project in the history store (SSOT for active project)
     _history_store.set_active_project(normalized_path)
 
-    # Reset per-project sidecar state
+    # Ensure sidecar exists for the project (lazy create)
     sidecar = ProjectSidecar.load_or_create(normalized_path)
-    sidecar.clear_session_cache()
-    sidecar.clear_tracked_jobs()
-    # Reset diff base to HEAD for the new project incarnation.
-    sidecar.set_diff_base("HEAD")
+    # NOTE: We intentionally do NOT clear session_cache or tracked_jobs here.
+    # Drafts and jobs persist across project switches.
     sidecar.save()
 
 # Debounce explorer refreshes to avoid flooding

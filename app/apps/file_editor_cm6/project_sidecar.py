@@ -114,9 +114,10 @@ class ProjectSidecar:
             "session_cache": {},
             # Background job IDs associated with this project
             "tracked_jobs": [],
-            # Optional per-project MRU list (string paths). The authoritative
-            # MRU list currently still lives in HistoryStore.projects[*].files.
+            # Per-project MRU list. This is now the SSOT for recent files.
             "recent_files": [],
+            # Last opened file for this project (SSOT).
+            "last_file": None,
         }
 
     # --------------------------------------------------------------------- #
@@ -297,6 +298,70 @@ class ProjectSidecar:
     @property
     def last_boot_at(self) -> Optional[str]:
         return self._data.get("last_boot_at")
+
+    # --------------------------------------------------------------------- #
+    # Recent files / MRU API (Phase 5 migration)
+    # --------------------------------------------------------------------- #
+
+    def _file_label(self, file_path: str) -> str:
+        """Extract basename as label for a file path."""
+        try:
+            return Path(file_path).name or file_path
+        except Exception:
+            return file_path
+
+    def record_file_activity(self, file_path: str) -> Dict[str, Any]:
+        """Record file open, updating last_file and recent_files list (LRU)."""
+        normalized = _normalize_file_path(file_path)
+        timestamp = _utc_timestamp()
+        
+        # Update last_file
+        self._data["last_file"] = normalized
+        
+        # Update recent_files (LRU, capped at 12)
+        recent: List[Dict[str, Any]] = self._data.setdefault("recent_files", [])
+        # Remove existing entry for this file
+        recent = [e for e in recent if e.get("path") != normalized]
+        # Insert at front
+        entry = {
+            "path": normalized,
+            "label": self._file_label(normalized),
+            "opened_at": timestamp,
+        }
+        recent.insert(0, entry)
+        # Cap at 12 entries
+        self._data["recent_files"] = recent[:12]
+        
+        return entry
+
+    def get_last_file(self) -> Optional[str]:
+        """Return the last opened file path for this project."""
+        return self._data.get("last_file")
+
+    def set_last_file(self, file_path: Optional[str]) -> Optional[str]:
+        """Set the last opened file path for this project."""
+        if file_path:
+            normalized = _normalize_file_path(file_path)
+            self._data["last_file"] = normalized
+            return normalized
+        else:
+            self._data["last_file"] = None
+            return None
+
+    def list_recent_files(self) -> List[Dict[str, Any]]:
+        """Return list of recent files for this project."""
+        recent: List[Dict[str, Any]] = self._data.get("recent_files") or []
+        return [dict(e) for e in recent]
+
+    def clear_recent_files(self) -> None:
+        """Clear the recent files list and last_file."""
+        self._data["recent_files"] = []
+        self._data["last_file"] = None
+
+    def get_draft_count(self) -> int:
+        """Return count of unsaved drafts for this project."""
+        cache: Dict[str, Dict[str, Any]] = self._data.get("session_cache") or {}
+        return sum(1 for e in cache.values() if e.get("unsaved"))
 
 
 def clear_project_state(project_path: str) -> bool:

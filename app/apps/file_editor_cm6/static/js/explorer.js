@@ -593,7 +593,7 @@ function ensureProgressBarElements() {
       gitProgressTextEl.className = 'fe-git-progress-text';
       gitProgressTextEl.style.cssText = `
         margin-left: auto;
-        font-size: 0.8em;
+        font-size: 0.3em;
         color: #60a5fa;
         white-space: nowrap;
         opacity: 0;
@@ -3192,6 +3192,32 @@ function renderReviewResults(container, data) {
   refreshBtn.onclick = () => fetchReviewResults(true);
   toolbar.appendChild(refreshBtn);
 
+  // Select All / Clear Selection toggle button
+  const selectAllBtn = document.createElement('button');
+  selectAllBtn.className = 'fe-btn fe-btn-sm';
+  selectAllBtn.style.marginLeft = '8px';
+  const updateSelectAllLabel = () => {
+    const allSelected = entries.length > 0 && entries.every(e => selectedReviewFiles.has(e.rel));
+    selectAllBtn.textContent = allSelected ? 'Clear Selection' : 'Select All';
+  };
+  updateSelectAllLabel();
+  selectAllBtn.onclick = () => {
+    const allSelected = entries.length > 0 && entries.every(e => selectedReviewFiles.has(e.rel));
+    if (allSelected) {
+      // Clear all
+      entries.forEach(e => selectedReviewFiles.delete(e.rel));
+    } else {
+      // Select all
+      entries.forEach(e => selectedReviewFiles.add(e.rel));
+    }
+    // Update checkboxes
+    container.querySelectorAll('.fe-review-checkbox input').forEach(cb => {
+      cb.checked = selectedReviewFiles.has(cb.dataset.rel);
+    });
+    updateSelectAllLabel();
+  };
+  toolbar.appendChild(selectAllBtn);
+
   const saveBtn = document.createElement('button');
   saveBtn.textContent = 'Save Selected';
   saveBtn.className = 'fe-btn fe-btn-sm fe-btn-primary';
@@ -3220,7 +3246,7 @@ function renderReviewResults(container, data) {
   discardBtn.onclick = async () => {
     const selected = Array.from(selectedReviewFiles);
     if (!selected.length) return toast('No files selected');
-    if (!window.confirm(`Discard drafts for ${selected.length} files?`)) return;
+    if (!window.confirm(`Discard drafts for ${selected.length} file(s)?`)) return;
 
     if (typeof window.__explorerBusSend !== 'function') {
       toast('Review bus unavailable');
@@ -3288,6 +3314,7 @@ function renderReviewResults(container, data) {
     check.type = 'checkbox';
     check.className = 'fe-review-checkbox';
     check.value = entry.rel;
+    check.dataset.rel = entry.rel;  // For Select All to update checkboxes
     if (!entry.has_draft) check.disabled = true;
     check.checked = selectedReviewFiles.has(entry.rel);
     check.onchange = (e) => {

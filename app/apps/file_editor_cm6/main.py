@@ -1009,6 +1009,8 @@ def debug_projects():
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to read recent projects: {exc}")
 
+    active_project = _history_store.get_active_project()
+
     results = []
     for entry in projects:
         project_path = entry.get("path")
@@ -1019,6 +1021,7 @@ def debug_projects():
         sidecar_exists = False
         session_count = None
         last_boot_at = None
+        draft_count = 0
 
         if project_path:
             try:
@@ -1029,9 +1032,16 @@ def debug_projects():
                     sc = ProjectSidecar.load_or_create(project_path)
                     session_count = sc.session_count
                     last_boot_at = sc.last_boot_at
+                    draft_count = sc.get_draft_count()
             except Exception:
                 # Sidecar issues should not block listing history.
                 pass
+
+        is_active = bool(
+            project_path
+            and active_project
+            and str(project_path) == str(active_project)
+        )
 
         results.append(
             {
@@ -1042,6 +1052,8 @@ def debug_projects():
                 "sidecar_exists": sidecar_exists,
                 "session_count": session_count,
                 "last_boot_at": last_boot_at,
+                "draft_count": draft_count,
+                "is_active": is_active,
             }
         )
 
@@ -1050,28 +1062,73 @@ def debug_projects():
 
 @file_editor_cm6_bp.delete('/debug/projects')
 def debug_delete_project(payload: dict = Body(...)):
-    """Delete a project entry from history and its sidecar (debugging helper)."""
+    """Delete or reset a project entry from history and its sidecar (debugging helper).
+
+    Semantics:
+    - If the project is NOT the active project:
+        * Remove it from HistoryStore (projects + recent_projects).
+        * Delete its sidecar file entirely.
+    - If the project IS the active project:
+        * Reset its per-project history (files, last_file, diff_base, origin).
+        * Clear its session_cache and tracked_jobs in the sidecar and reset diff_base.
+        * Keep the sidecar file and the project entry so the app still \"knows\" about it.
+    """
     project_path = (payload or {}).get("path")
     if not project_path:
         raise HTTPException(status_code=400, detail="path is required")
 
+    active_project = _history_store.get_active_project()
+    is_active = bool(
+        project_path
+        and active_project
+        and str(project_path) == str(active_project)
+    )
+
     removed = False
     sidecar_deleted = False
-    try:
-        removed = _history_store.remove_project(project_path)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to remove project: {exc}")
+    history_reset = False
 
-    try:
-        sc_path = ProjectSidecar.get_sidecar_path(project_path)
-        if sc_path.exists():
-            sc_path.unlink()
-            sidecar_deleted = True
-    except Exception:
-        # Sidecar deletion failures are non-fatal for a debug endpoint.
-        sidecar_deleted = False
+    if is_active:
+        # Do not remove the active project; instead reset its history + sidecar
+        try:
+            history_reset = _history_store.reset_project_history(project_path)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to reset project history: {exc}")
 
-    return {"ok": True, "data": {"removed": removed, "sidecar_deleted": sidecar_deleted}}
+        try:
+            sidecar = ProjectSidecar.load_or_create(project_path)
+            sidecar.clear_session_cache()
+            sidecar.clear_tracked_jobs()
+            sidecar.set_diff_base("HEAD")
+            sidecar.save()
+        except Exception:
+            # Sidecar failures are non-fatal for debug tooling.
+            pass
+    else:
+        # Non-active projects are fully removed along with their sidecars.
+        try:
+            removed = _history_store.remove_project(project_path)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to remove project: {exc}")
+
+        try:
+            sc_path = ProjectSidecar.get_sidecar_path(project_path)
+            if sc_path.exists():
+                sc_path.unlink()
+                sidecar_deleted = True
+        except Exception:
+            # Sidecar deletion failures are non-fatal for a debug endpoint.
+            sidecar_deleted = False
+
+    return {
+        "ok": True,
+        "data": {
+            "removed": removed,
+            "sidecar_deleted": sidecar_deleted,
+            "history_reset": history_reset,
+            "is_active": is_active,
+        },
+    }
 
 @file_editor_cm6_bp.post('/git/stage')
 async def git_stage_route(data: dict = Body(...)):
