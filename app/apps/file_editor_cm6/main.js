@@ -881,17 +881,26 @@ window.addEventListener('message', (event) => {
     if (scrollStateTimer) {
       clearTimeout(scrollStateTimer);
     }
-    scrollStateTimer = setTimeout(() => {
+    scrollStateTimer = setTimeout(async () => {
       scrollStateTimer = null;
       if (!lastScrollState || !lastScrollState.path) return;
       console.log('[ScrollState] queueSessionStateUpdate', lastScrollState);
       try {
+        // Update global session state (legacy)
         queueSessionStateUpdate({
           scrollLine: lastScrollState.line,
           scrollTop: lastScrollState.top != null ? lastScrollState.top : null,
         });
+        
+        // Also persist per-file scroll line to sidecar
+        if (lastScrollState.line && lastScrollState.line > 0) {
+          await apiPost('state/file_scroll', {
+            path: lastScrollState.path,
+            scroll_line: lastScrollState.line,
+          });
+        }
       } catch (err) {
-        console.warn('Failed to enqueue scroll state update:', err);
+        console.warn('Failed to persist scroll state:', err);
       }
     }, CURSOR_STATE_DEBOUNCE);
   } else if (event.data.type === 'cm6-editor-focus') {
@@ -1120,6 +1129,69 @@ function broadcastRecentsUpdate(state) {
   }
   window.dispatchEvent(new CustomEvent('cm6:recents-updated', { detail: state }));
 }
+
+/**
+ * Populate the recents dropdown from state.recents.
+ * Called by broadcastRecentsUpdate whenever editor state changes.
+ */
+window.__cm6RefreshRecents = function(state) {
+  const recents = state?.recents || [];
+  
+  // Clear existing dropdown content
+  recentFilesDD.innerHTML = '';
+  
+  if (!recents.length) {
+    recentFilesBtn.disabled = true;
+    const emptyItem = document.createElement('div');
+    emptyItem.className = 'fe-dd-item fe-dd-item--disabled';
+    emptyItem.textContent = 'No recent files';
+    recentFilesDD.appendChild(emptyItem);
+    return;
+  }
+  
+  recentFilesBtn.disabled = false;
+  
+  recents.forEach((entry) => {
+    const item = document.createElement('div');
+    item.className = 'fe-dd-item';
+    if (!entry.exists) {
+      item.classList.add('fe-dd-item--missing');
+    }
+    
+    const label = entry.label || entry.path || '(unknown)';
+    const path = entry.path || '';
+    
+    // Show label, with path as tooltip
+    item.textContent = formatFileNameDisplay(label);
+    item.title = path;
+    
+    // Store scroll position if available (for per-file scroll restore)
+    const scrollLine = entry.scroll_line || entry.scrollLine || null;
+    
+    item.addEventListener('click', async () => {
+      recentFilesDD.classList.remove('show');
+      if (!entry.exists) {
+        console.warn('[Recents] File does not exist:', path);
+        return;
+      }
+      try {
+        // Open the file
+        await openFile(path);
+        // Jump to stored scroll line if available
+        if (scrollLine && scrollLine > 1) {
+          // Small delay to let the editor initialize
+          setTimeout(() => {
+            jumpToCurrentFileLine(scrollLine, { flash: false });
+          }, 100);
+        }
+      } catch (err) {
+        console.error('[Recents] Failed to open file:', err);
+      }
+    });
+    
+    recentFilesDD.appendChild(item);
+  });
+};
 
 // Synchronize host + iframe when a project is opened in the explorer.
 // Called from explorer.js via window.__cm6HandleProjectOpened(path).

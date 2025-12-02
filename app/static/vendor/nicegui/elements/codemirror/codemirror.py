@@ -307,7 +307,7 @@ class CodeMirror(ValueElement, DisableableElement,
         # Optional initial scroll anchor; used to build the editor around a persisted line
         if initial_scroll_line is not None:
             try:
-                line_val = int(initial_scroll_line)
+                line_val = float(initial_scroll_line)
             except (TypeError, ValueError):
                 line_val = None
             if line_val is not None and line_val > 0:

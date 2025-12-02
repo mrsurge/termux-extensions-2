@@ -536,8 +536,14 @@ class HistoryStore:
             entry = projects.get(normalized_project)
             return entry.get("origin") if entry else None
 
-    def record_file_activity(self, project_path: str, file_path: str) -> Dict[str, object]:
-        """Record file open — delegates to sidecar as SSOT, mirrors to history.json."""
+    def record_file_activity(self, project_path: str, file_path: str, scroll_line: Optional[float] = None) -> Dict[str, object]:
+        """Record file open — delegates to sidecar as SSOT, mirrors to history.json.
+        
+        Args:
+            project_path: The project containing the file.
+            file_path: The file being opened/accessed.
+            scroll_line: Optional scroll position (line number) to persist for this file.
+        """
         normalized_project = self._normalize_project_path(project_path)
         normalized_file = self._normalize_file_path(file_path)
         
@@ -545,7 +551,7 @@ class HistoryStore:
         entry = None
         try:
             sidecar = ProjectSidecar.load_or_create(normalized_project)
-            entry = sidecar.record_file_activity(normalized_file)
+            entry = sidecar.record_file_activity(normalized_file, scroll_line=scroll_line)
             sidecar.save()
         except Exception:
             pass
@@ -567,6 +573,30 @@ class HistoryStore:
             project_entry["files"] = files[:MAX_RECENT_FILES]
             self._save_locked()
             return entry
+
+    def update_file_scroll_line(self, project_path: str, file_path: str, scroll_line: float) -> bool:
+        """Update just the scroll_line for a file in the project's recent files.
+        
+        Returns True if the file was found and updated.
+        """
+        normalized_project = self._normalize_project_path(project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            updated = sidecar.update_file_scroll_line(file_path, scroll_line)
+            if updated:
+                sidecar.save()
+            return updated
+        except Exception:
+            return False
+
+    def get_file_scroll_line(self, project_path: str, file_path: str) -> Optional[float]:
+        """Get the stored scroll_line for a specific file in a project."""
+        normalized_project = self._normalize_project_path(project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            return sidecar.get_file_scroll_line(file_path)
+        except Exception:
+            return None
 
     @staticmethod
     def format_label(path: Optional[str]) -> str:

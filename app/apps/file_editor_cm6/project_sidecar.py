@@ -310,8 +310,13 @@ class ProjectSidecar:
         except Exception:
             return file_path
 
-    def record_file_activity(self, file_path: str) -> Dict[str, Any]:
-        """Record file open, updating last_file and recent_files list (LRU)."""
+    def record_file_activity(self, file_path: str, scroll_line: Optional[float] = None) -> Dict[str, Any]:
+        """Record file open, updating last_file and recent_files list (LRU).
+        
+        Args:
+            file_path: The file being opened/accessed.
+            scroll_line: Optional scroll position (line number) to persist for this file.
+        """
         normalized = _normalize_file_path(file_path)
         timestamp = _utc_timestamp()
         
@@ -320,19 +325,60 @@ class ProjectSidecar:
         
         # Update recent_files (LRU, capped at 12)
         recent: List[Dict[str, Any]] = self._data.setdefault("recent_files", [])
+        
+        # Find existing entry to preserve its scroll_line if not provided
+        existing_scroll = None
+        for e in recent:
+            if e.get("path") == normalized:
+                existing_scroll = e.get("scroll_line")
+                break
+        
         # Remove existing entry for this file
         recent = [e for e in recent if e.get("path") != normalized]
-        # Insert at front
+        
+        # Build new entry, preserving scroll_line if not explicitly provided
         entry = {
             "path": normalized,
             "label": self._file_label(normalized),
             "opened_at": timestamp,
         }
+        # Use provided scroll_line, or preserve existing, or omit
+        effective_scroll = scroll_line if scroll_line is not None else existing_scroll
+        if effective_scroll is not None:
+            entry["scroll_line"] = effective_scroll
+        
         recent.insert(0, entry)
         # Cap at 12 entries
         self._data["recent_files"] = recent[:12]
         
         return entry
+
+    def update_file_scroll_line(self, file_path: str, scroll_line: float) -> bool:
+        """Update the scroll_line for a specific file in recent_files.
+        
+        Returns True if the file was found and updated.
+        """
+        normalized = _normalize_file_path(file_path)
+        recent: List[Dict[str, Any]] = self._data.get("recent_files") or []
+        
+        for entry in recent:
+            if entry.get("path") == normalized:
+                entry["scroll_line"] = scroll_line
+                return True
+        return False
+
+    def get_file_scroll_line(self, file_path: str) -> Optional[float]:
+        """Get the stored scroll_line for a specific file.
+        
+        Returns None if file not found or no scroll_line stored.
+        """
+        normalized = _normalize_file_path(file_path)
+        recent: List[Dict[str, Any]] = self._data.get("recent_files") or []
+        
+        for entry in recent:
+            if entry.get("path") == normalized:
+                return entry.get("scroll_line")
+        return None
 
     def get_last_file(self) -> Optional[str]:
         """Return the last opened file path for this project."""

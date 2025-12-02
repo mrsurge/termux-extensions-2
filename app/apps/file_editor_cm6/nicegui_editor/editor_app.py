@@ -664,23 +664,32 @@ async def editor_page():
                 file=sys.stderr,
             )
             
-            # Determine initial scroll line (if any) from disk-backed session state.
+            # Determine initial scroll line from per-file storage in sidecar.
+            # Falls back to global session state for legacy compatibility.
             initial_scroll_line = None
             try:
-                session_state = _history_store.get_session_state()
-                session_path = session_state.get("currentPath")
-                # Prefer scrollLine (viewport-based); fall back to legacy cursorLine if present.
-                scroll_line = session_state.get("scrollLine") or session_state.get("cursorLine")
-                if (
-                    session_path
-                    and scroll_line
-                    and isinstance(scroll_line, (int, float))
-                    and initial_path
-                    and str(session_path) == str(initial_path)
-                    and int(scroll_line) > 1
-                ):
-                    initial_scroll_line = int(scroll_line)
-                    print(f"[EDITOR_APP] Using initial_scroll_line={initial_scroll_line} for {initial_path}", file=sys.stderr)
+                if initial_path and project_path:
+                    # Try per-file scroll line from sidecar (preferred)
+                    scroll_line = _history_store.get_file_scroll_line(project_path, initial_path)
+                    if scroll_line and isinstance(scroll_line, (int, float)) and float(scroll_line) > 1:
+                        initial_scroll_line = float(scroll_line)
+                        print(f"[EDITOR_APP] Using initial_scroll_line={initial_scroll_line} (from sidecar) for {initial_path}", file=sys.stderr)
+                
+                # Fallback to global session state for legacy/compat
+                if initial_scroll_line is None:
+                    session_state = _history_store.get_session_state()
+                    session_path = session_state.get("currentPath")
+                    scroll_line = session_state.get("scrollLine") or session_state.get("cursorLine")
+                    if (
+                        session_path
+                        and scroll_line
+                        and isinstance(scroll_line, (int, float))
+                        and initial_path
+                        and str(session_path) == str(initial_path)
+                        and float(scroll_line) > 1
+                    ):
+                        initial_scroll_line = float(scroll_line)
+                        print(f"[EDITOR_APP] Using initial_scroll_line={initial_scroll_line} (from session state) for {initial_path}", file=sys.stderr)
             except Exception as exc:
                 print(f"[EDITOR_APP] Failed to resolve initial_scroll_line: {exc}", file=sys.stderr)
 

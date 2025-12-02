@@ -593,7 +593,7 @@ function ensureProgressBarElements() {
       gitProgressTextEl.className = 'fe-git-progress-text';
       gitProgressTextEl.style.cssText = `
         margin-left: auto;
-        font-size: 0.3em;
+        font-size: 0.5em;
         color: #60a5fa;
         white-space: nowrap;
         opacity: 0;
