@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .project_sidecar import ProjectSidecar
+
 MAX_RECENT_PROJECTS = 12
 MAX_RECENT_FILES = 12
 
@@ -263,6 +265,31 @@ class HistoryStore:
                 return []
             return list(entry.get("files") or [])
 
+    def remove_project(self, project_path: str) -> bool:
+        """Remove a project from history (recent list + project metadata)."""
+        normalized = self._normalize_project_path(project_path)
+        with self._lock:
+            changed = False
+
+            projects: Dict[str, Dict[str, object]] = self._data.setdefault("projects", {})
+            if normalized in projects:
+                del projects[normalized]
+                changed = True
+
+            recent: List[Dict[str, object]] = self._data.get("recent_projects", [])
+            new_recent = [entry for entry in recent if entry.get("path") != normalized]
+            if len(new_recent) != len(recent):
+                self._data["recent_projects"] = new_recent
+                changed = True
+
+            if self._data.get("active_project") == normalized:
+                self._data["active_project"] = None
+                changed = True
+
+            if changed:
+                self._save_locked()
+            return changed
+
     # ----- state helpers -------------------------------------------------------
 
     def set_active_project(self, project_path: Optional[str]) -> Optional[str]:
@@ -328,6 +355,16 @@ class HistoryStore:
         value = (ref or 'HEAD').strip() or 'HEAD'
         timestamp = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
         print(f"[{timestamp}] [HistoryStore] set_diff_base project={normalized_project!r} ref={value!r}", flush=True)
+
+        # Persist diff base in the per-project sidecar first.
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            sidecar.set_diff_base(value)
+            sidecar.save()
+        except Exception:
+            # Sidecar failures should not prevent history_store.json from updating.
+            pass
+
         with self._lock:
             project_entry = self._touch_project_locked(normalized_project)
             project_entry["diff_base"] = value
@@ -339,15 +376,33 @@ class HistoryStore:
             return 'HEAD'
         normalized_project = self._normalize_project_path(project_path)
         timestamp = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
-        # print(f"[{timestamp}] [HistoryStore] get_diff_base project={normalized_project!r}", flush=True)
+        # Prefer sidecar as the SSOT for diff base when available.
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            val = (sidecar.get_diff_base() or 'HEAD').strip() or 'HEAD'
+            print(
+                f"[{timestamp}] [HistoryStore] get_diff_base (sidecar) found {val!r} for {normalized_project!r}",
+                flush=True,
+            )
+            return val
+        except Exception:
+            pass
+
+        # Fallback to historical data if sidecar is unavailable.
         with self._lock:
             projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
             entry = projects.get(normalized_project)
             if not entry:
-                print(f"[{timestamp}] [HistoryStore] get_diff_base entry NOT FOUND for {normalized_project!r}", flush=True)
+                print(
+                    f"[{timestamp}] [HistoryStore] get_diff_base entry NOT FOUND for {normalized_project!r}",
+                    flush=True,
+                )
                 return 'HEAD'
             val = (entry.get("diff_base") or 'HEAD').strip() or 'HEAD'
-            print(f"[{timestamp}] [HistoryStore] get_diff_base found {val!r} for {normalized_project!r}", flush=True)
+            print(
+                f"[{timestamp}] [HistoryStore] get_diff_base (history) found {val!r} for {normalized_project!r}",
+                flush=True,
+            )
             return val
 
     def set_project_origin(self, project_path: str, origin: Optional[str]) -> None:
@@ -407,23 +462,16 @@ class HistoryStore:
             self._save_locked()
             return dict(state)
 
-    # ----- session cache public API (new) ------------------------------------
+    # ----- session cache public API (delegates to ProjectSidecar) -----------
 
     def get_cached_document(self, project_path: str, file_path: str) -> Optional[Dict[str, object]]:
-        """Retrieve cached session for a document from its sidecar file."""
-        cache_key = self._normalize_cache_key(project_path, file_path)
-        with self._lock:
-            cache: Dict[str, Dict] = self._data.setdefault("session_cache", {})
-            # Read from sidecar, which is the source of truth
-            entry = self._read_sidecar(cache_key)
-            if entry:
-                cache[cache_key] = entry  # Update in-memory copy
-                return dict(entry)
-            elif cache_key in cache:
-                # Entry is in memory but not on disk; must have been deleted. Clean up.
-                del cache[cache_key]
-                self._save_locked()
-        return None
+        """Retrieve cached session for a document from the per-project sidecar."""
+        normalized_project = self._normalize_project_path(project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            return sidecar.get_cached_document(file_path)
+        except Exception:
+            return None
 
     def upsert_cached_document(
         self,
@@ -437,77 +485,73 @@ class HistoryStore:
         launcher_pid: int,
         worker_pid: int,
     ) -> Dict[str, object]:
-        """Update or insert cached session entry and write to sidecar."""
-        cache_key = self._normalize_cache_key(project_path, file_path)
-        content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
-        unsaved = (content_sha256 != base_sha256)
-        
-        print(f"[HISTORY_STORE] upsert {file_path}: base={base_sha256} content={content_sha256} unsaved={unsaved}", file=sys.stderr)
+        """Update or insert cached session entry via the per-project sidecar."""
+        normalized_project = self._normalize_project_path(project_path)
+        content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        unsaved = content_sha256 != base_sha256
 
-        entry = {
-            "project_path": self._normalize_project_path(project_path),
-            "file_path": self._normalize_file_path(file_path),
-            "content": content,
-            "content_length": len(content),
-            "content_sha256": content_sha256,
-            "base_sha256": base_sha256,
-            "unsaved": unsaved,
-            "run_id": run_id,
-            "shell_id": shell_id,
-            "shell_run_id": shell_run_id,
-            "launcher_pid": launcher_pid,
-            "worker_pid": worker_pid,
-            "updated_at": _utc_timestamp(),
-        }
+        print(
+            f"[HISTORY_STORE] upsert {file_path}: base={base_sha256} "
+            f"content={content_sha256} unsaved={unsaved}",
+            file=sys.stderr,
+        )
 
-        with self._lock:
-            self._write_sidecar(cache_key, entry)
-            cache: Dict[str, Dict] = self._data.setdefault("session_cache", {})
-            cache[cache_key] = entry
-            self._save_locked()
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            entry = sidecar.upsert_cached_document(
+                file_path=file_path,
+                content=content,
+                base_sha256=base_sha256,
+                run_id=run_id,
+                shell_id=shell_id,
+                shell_run_id=shell_run_id,
+                launcher_pid=launcher_pid,
+                worker_pid=worker_pid,
+            )
+            sidecar.save()
+            return dict(entry)
+        except Exception:
+            # Fall back to returning an in-memory representation only.
+            entry = {
+                "project_path": normalized_project,
+                "file_path": self._normalize_file_path(file_path),
+                "content": content,
+                "content_length": len(content),
+                "content_sha256": content_sha256,
+                "base_sha256": base_sha256,
+                "unsaved": unsaved,
+                "run_id": run_id,
+                "shell_id": shell_id,
+                "shell_run_id": shell_run_id,
+                "launcher_pid": launcher_pid,
+                "worker_pid": worker_pid,
+                "updated_at": _utc_timestamp(),
+            }
             return dict(entry)
 
     def clear_cached_document(self, project_path: str, file_path: str) -> bool:
-        """Remove cached session entry and its sidecar file."""
-        cache_key = self._normalize_cache_key(project_path, file_path)
-        with self._lock:
-            self._delete_sidecar(cache_key)
-            cache: Dict[str, Dict] = self._data.setdefault("session_cache", {})
-            existed = cache_key in cache
+        """Remove cached session entry for a document from the per-project sidecar."""
+        normalized_project = self._normalize_project_path(project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            existed = sidecar.clear_cached_document(file_path)
             if existed:
-                del cache[cache_key]
-                self._save_locked()
+                sidecar.save()
             return existed
+        except Exception:
+            return False
 
     def list_project_drafts(self, project_path: str) -> List[Dict[str, object]]:
-        """List all cached drafts for the given project from disk sidecars."""
+        """List all cached drafts for the given project from its sidecar."""
         normalized_project = self._normalize_project_path(project_path)
-        disk_results = []
-        
-        # Scan disk sidecars
         try:
-            for sidecar in self._session_cache_dir.glob("*.json"):
-                try:
-                    content = sidecar.read_text(encoding='utf-8')
-                    data = json.loads(content)
-                    if data.get("project_path") == normalized_project and data.get("unsaved"):
-                        disk_results.append(data)
-                except Exception:
-                    continue
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            return sidecar.list_project_drafts()
         except Exception:
-            pass
-            
-        return disk_results
+            return []
 
     def list_cached_documents(self, project_path: Optional[str] = None) -> List[Dict[str, object]]:
-        """List all cached sessions, optionally filtered by project."""
-        # This is a stub for future phases. For now, it lists what's in memory.
-        with self._lock:
-            cache: Dict[str, Dict] = self._data.get("session_cache", {})
-            results = []
-            for cache_key, entry in cache.items():
-                # In a real implementation, we'd need to store project/file path with the entry
-                # For now, this is non-functional as we only have the key.
-                # This is acceptable for Phase 1.
-                pass
-            return results
+        """List cached sessions (currently returns drafts for the given project)."""
+        if not project_path:
+            return []
+        return self.list_project_drafts(project_path)

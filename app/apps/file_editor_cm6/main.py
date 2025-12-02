@@ -49,6 +49,7 @@ from .diff_helper import invalidate_diff_cache, collect_diff
 from .draft_diff_helper import compute_draft_diff
 from .core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
 from .core_write import write_full, BaseMismatchError, _get_file_meta
+from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
 
 IGNORE_PATTERNS = [
     '.git', '__pycache__', 'node_modules', '.venv', 'venv',
@@ -410,6 +411,30 @@ NICEGUI_INIT_HOOK = init_nicegui_with_app
 # Import singleton store instances
 from .stores import _history_store, _preferences_store
 
+
+def initialize_project_session() -> Optional[ProjectSidecar]:
+    """Called once at editor worker boot to bump the project session counter.
+
+    The session counter allows us to detect a fresh project switch or a
+    delete+reclone scenario. When a project is seen for the first time
+    after a switch (session_count == 1), we clear any stale per-project
+    caches that might have been left behind by a previous incarnation.
+    """
+    project_path = _history_store.get_active_project()
+    if not project_path or not Path(project_path).exists():
+        return None
+
+    sidecar = ProjectSidecar.load_or_create(project_path)
+    sidecar.increment_session()
+
+    if sidecar.session_count == 1:
+        # Fresh project switch — clear stale state for this project.
+        sidecar.clear_session_cache()
+        sidecar.clear_tracked_jobs()
+
+    sidecar.save()
+    return sidecar
+
 def _ensure_project_root_synced() -> Path:
     """Ensure the in-memory project root matches the persisted active project."""
     stored = _history_store.get_active_project()
@@ -432,7 +457,19 @@ try:
     project_root = _ensure_project_root_synced()
     edit_tracker.set_project_root(project_root)
 except Exception:
+    project_root = get_project_root()
+
+# Housekeeping for per-project sidecars and session counters.
+try:
+    cleanup_orphaned_sidecars()
+except Exception:
+    # Sidecar cleanup is best-effort; failures should not block editor startup.
     pass
+
+try:
+    _active_project_sidecar = initialize_project_session()
+except Exception:
+    _active_project_sidecar = None
 
 def _get_active_project_root() -> Path:
     project_path = _history_store.get_active_project()
@@ -966,6 +1003,79 @@ async def git_pull_route(data: dict = Body(...)):
         return {"ok": True, "data": _status_to_payload(status)}
     except GitError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@file_editor_cm6_bp.get('/debug/projects')
+def debug_projects():
+    """Return recent projects plus associated sidecar metadata (debugging helper)."""
+    try:
+        projects = _history_store.list_projects()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read recent projects: {exc}")
+
+    results = []
+    for entry in projects:
+        project_path = entry.get("path")
+        label = entry.get("label") or HistoryStore.format_label(project_path)
+        opened_at = entry.get("opened_at")
+
+        sidecar_path = None
+        sidecar_exists = False
+        session_count = None
+        last_boot_at = None
+
+        if project_path:
+            try:
+                sc_path = ProjectSidecar.get_sidecar_path(project_path)
+                sidecar_path = str(sc_path)
+                sidecar_exists = sc_path.exists()
+                if sidecar_exists:
+                    sc = ProjectSidecar.load_or_create(project_path)
+                    session_count = sc.session_count
+                    last_boot_at = sc.last_boot_at
+            except Exception:
+                # Sidecar issues should not block listing history.
+                pass
+
+        results.append(
+            {
+                "path": project_path,
+                "label": label,
+                "opened_at": opened_at,
+                "sidecar_path": sidecar_path,
+                "sidecar_exists": sidecar_exists,
+                "session_count": session_count,
+                "last_boot_at": last_boot_at,
+            }
+        )
+
+    return {"ok": True, "data": results}
+
+
+@file_editor_cm6_bp.delete('/debug/projects')
+def debug_delete_project(payload: dict = Body(...)):
+    """Delete a project entry from history and its sidecar (debugging helper)."""
+    project_path = (payload or {}).get("path")
+    if not project_path:
+        raise HTTPException(status_code=400, detail="path is required")
+
+    removed = False
+    sidecar_deleted = False
+    try:
+        removed = _history_store.remove_project(project_path)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to remove project: {exc}")
+
+    try:
+        sc_path = ProjectSidecar.get_sidecar_path(project_path)
+        if sc_path.exists():
+            sc_path.unlink()
+            sidecar_deleted = True
+    except Exception:
+        # Sidecar deletion failures are non-fatal for a debug endpoint.
+        sidecar_deleted = False
+
+    return {"ok": True, "data": {"removed": removed, "sidecar_deleted": sidecar_deleted}}
 
 @file_editor_cm6_bp.post('/git/stage')
 async def git_stage_route(data: dict = Body(...)):
