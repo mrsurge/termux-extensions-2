@@ -2,8 +2,8 @@
 
 **Architecture Philosophy:** Code CM6 implements the code-server pattern - disk-backed state with ephemeral UI clients. Multiple devices (desktop, mobile, vim) converge on the same backend without sync logic.
 
-**Document Version:** 1.1  
-**Last Updated:** 2025-12-01  
+**Document Version:** 1.2  
+**Last Updated:** 2025-12-03  
 **Target Audience:** Framework contributors, extension developers, and technical users
 
 This document provides a comprehensive technical overview of Code CM6's internal architecture, focusing on the frameworks, patterns, and implementation details that make the editor function.
@@ -1684,39 +1684,147 @@ class ConversationStore:
 
 ## 11. State Management
 
-### 11.1 Persistence Stores
+### 11.1 Two-Tier Architecture (HistoryStore + ProjectSidecar)
 
-Code CM6 uses three JSON-based stores for durable state:
+**Updated:** 2025-12-03
 
-#### 11.1.1 HistoryStore
+Code CM6 uses a **two-tier state management system**:
+
+1. **HistoryStore** — Global ledger and facade for all state access
+2. **ProjectSidecar** — Per-project JSON files with isolated project state
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  HistoryStore (Facade + Global Ledger)                  │
+│  ~/.local/share/termux-extensions-2/code_oss_history.json│
+│                                                          │
+│  Owns directly:                                          │
+│    • active_project (currently open project path)        │
+│    • recent_projects (LRU list of opened projects)       │
+│    • session_state (global telemetry)                    │
+│    • terminal_shell_id                                   │
+│                                                          │
+│  Delegates to ProjectSidecar:                            │
+│    • recent_files, last_file, scroll_line per file       │
+│    • diff_base (git comparison ref)                      │
+│    • session_cache (unsaved drafts)                      │
+│    • tracked_jobs (background job IDs)                   │
+└────────────────────┬────────────────────────────────────┘
+                     │ load_or_create(project_path)
+                     ▼
+┌─────────────────────────────────────────────────────────┐
+│  ProjectSidecar (Per-Project Storage)                   │
+│  ~/.cache/cm6_editor/projects/<sha1(project_path)>.json │
+│                                                          │
+│  Schema:                                                 │
+│  {                                                       │
+│    "version": 1,                                         │
+│    "project_path": "/path/to/project",                   │
+│    "session_count": 5,                                   │
+│    "created_at": "2025-12-01T00:00:00Z",                │
+│    "last_boot_at": "2025-12-03T00:00:00Z",              │
+│    "last_file": "/path/to/project/src/main.py",         │
+│    "recent_files": [                                     │
+│      {                                                   │
+│        "path": "/path/to/project/src/main.py",          │
+│        "label": "main.py",                               │
+│        "opened_at": "2025-12-03T00:00:00Z",             │
+│        "scroll_line": 142.5                              │
+│      }                                                   │
+│    ],                                                    │
+│    "diff_base": {"ref": "HEAD", "commit_sha": null},    │
+│    "session_cache": { "<hash>": {...draft...} },        │
+│    "tracked_jobs": []                                    │
+│  }                                                       │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 11.2 Key Design Principles
+
+1. **Backend is SSOT:** All state lives in HistoryStore/ProjectSidecar on disk. Frontend components are stateless views that read from backend on every request.
+
+2. **HistoryStore as Facade:** Frontend only calls HistoryStore APIs (via REST endpoints). HistoryStore internally routes per-project queries to the appropriate ProjectSidecar.
+
+3. **Atomic Writes:** Both stores use temp file + `os.replace()` for crash-safe persistence.
+
+4. **In-Memory Caching:** `ProjectSidecar._instances` dict caches loaded sidecars per session to avoid redundant disk reads.
+
+5. **Lazy Migration:** Legacy per-project data in history.json (e.g., `projects[path].files`) migrates to sidecars on first access.
+
+6. **Multi-Project Draft Retention:** Drafts persist per-project across project switches. Only cleared via explicit user action (Review discard, Projects modal).
+
+### 11.3 API Flow Examples
+
+**Recording file activity (opens a file):**
+```python
+# Frontend calls POST /state/file_activity
+# main.py:
+_history_store.record_file_activity(project_path, file_path, scroll_line=142.5)
+
+# history_store.py:
+def record_file_activity(self, project_path, file_path, scroll_line=None):
+    sidecar = ProjectSidecar.load_or_create(project_path)
+    entry = sidecar.record_file_activity(file_path, scroll_line=scroll_line)
+    sidecar.save()
+    # Also mirror to history.json for compatibility (temporary)
+    ...
+```
+
+**Getting last file for a project:**
+```python
+# editor_app.py (on page load):
+last_file = _history_store.get_last_file(project_path)
+
+# history_store.py:
+def get_last_file(self, project_path):
+    sidecar = ProjectSidecar.load_or_create(project_path)
+    return sidecar.get_last_file()  # Falls back to history.json if sidecar empty
+```
+
+**Getting scroll position for file restore:**
+```python
+# editor_app.py:
+scroll_line = _history_store.get_file_scroll_line(project_path, file_path)
+# Pass to ui.codemirror(initial_scroll_line=scroll_line)
+```
+
+### 11.4 Project Switch Lifecycle
+
+When user switches projects (via explorer or Projects modal):
+
+1. **Backend:** `reset_project_session(new_path)` sets `active_project` in HistoryStore
+2. **Frontend (explorer.js):** `project:opened` handler triggers:
+   - `git:status` request (updates git footer)
+   - `initDiffBaseFromBackend()` (updates diff base selector)
+   - `window.__cm6HandleProjectOpened(path)` (notifies host)
+3. **Frontend (main.js):** `handleProjectOpened()` triggers:
+   - `syncEditorState(true)` → fetch fresh `/state`
+   - `broadcastRecentsUpdate(newState)` → update recents dropdown
+   - `branchMenuHandle.refresh()` → update branch menu
+   - Iframe reload → editor reinitializes with new project context
+
+**Key:** Drafts are NOT cleared on project switch. They persist in each project's sidecar until explicitly discarded.
+
+### 11.5 Persistence Stores (Legacy Reference)
+
+#### 11.5.1 HistoryStore (Global)
 
 **File:** `~/.local/share/termux-extensions-2/code_oss_history.json`  
 **Class:** `app/apps/file_editor_cm6/history_store.py`
 
-Stores:
-- Active project path
-- Recent files per project (LRU list)
-- Terminal shell ID per project
-- Diff base ref per project
-
-**Schema:**
+Global schema (per-project data now delegates to sidecars):
 ```json
 {
   "active_project": "/path/to/project",
-  "recent_projects": ["/path/to/project1", "/path/to/project2"],
-  "projects": {
-    "/path/to/project": {
-      "recent_files": ["file1.py", "file2.js"],
-      "diff_base": "HEAD",
-      "terminal_shell_id": "abc123"
-    }
-  },
-  "session_state": {},
-  "session_cache": {}
+  "recent_projects": [
+    {"path": "/path/to/project", "label": "project", "opened_at": "..."}
+  ],
+  "terminal_shell_id": "abc123",
+  "session_state": {"scrollLine": 100, "currentPath": "/path/to/file"}
 }
 ```
 
-#### 11.1.2 PreferencesStore
+#### 11.5.2 PreferencesStore
 
 **File:** `~/.local/share/termux-extensions-2/code_oss_prefs.json`  
 **Class:** `app/apps/file_editor_cm6/preferences_store.py`

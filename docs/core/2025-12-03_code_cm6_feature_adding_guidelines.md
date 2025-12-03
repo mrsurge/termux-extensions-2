@@ -1,14 +1,85 @@
-# NiceGUI Iframe Feature Adding Guideline
+# Code CM6 Feature Adding Guidelines
 
 **Created:** 2025-11-15 19:06 UTC  
-**Sthhgatus:** Living Document  
-**Audience:** Developers extending the vendored NiceGUI CodeMirror 6 editor
+**Updated:** 2025-12-03 03:18 UTC  
+**Status:** Living Document  
+**Audience:** Developers extending the Code CM6 editor
 
 ---
 
 ## Overview
 
-This document provides guidelines for adding features to the NiceGUI CodeMirror 6 editor used in the File Editor CM6 app. The editor runs in an **iframe** (`/nc` endpoint), which creates architectural constraints around state management and communication.
+This document provides guidelines for adding features to the Code CM6 editor (internally `file_editor_cm6`). The editor uses a **NiceGUI iframe** (`/nc` endpoint) for the CodeMirror 6 surface, which creates architectural constraints around state management and communication.
+
+---
+
+## State Management Architecture
+
+### Overview
+
+Code CM6 uses a **two-tier state management system** with HistoryStore as the facade and ProjectSidecar as per-project storage:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  HistoryStore (Facade + Global Ledger)                  │
+│  ~/.local/share/termux-extensions-2/code_oss_history.json│
+│                                                          │
+│  Owns:                                                   │
+│    • active_project (currently open project path)        │
+│    • recent_projects (LRU list of opened projects)       │
+│    • session_state (global telemetry like scroll pos)    │
+│                                                          │
+│  Delegates per-project data to ProjectSidecar:           │
+└────────────────────┬────────────────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────┐
+│  ProjectSidecar (Per-Project Storage)                   │
+│  ~/.cache/cm6_editor/projects/<sha1>.json               │
+│                                                          │
+│  Stores:                                                 │
+│    • recent_files (LRU list with scroll_line per file)   │
+│    • last_file (last opened file in this project)        │
+│    • diff_base (git diff base ref, e.g., "HEAD")         │
+│    • session_cache (unsaved drafts per file)             │
+│    • tracked_jobs (background job IDs)                   │
+│    • session_count (boot counter, telemetry only)        │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Key Principles
+
+1. **Backend is SSOT:** All state lives in HistoryStore/ProjectSidecar. Frontend components are stateless views.
+
+2. **HistoryStore as Facade:** Frontend calls HistoryStore APIs (via endpoints). HistoryStore internally routes to the appropriate ProjectSidecar.
+
+3. **Atomic Writes:** Both stores use temp file + rename for crash-safe persistence.
+
+4. **In-Memory Caching:** ProjectSidecar instances are cached per session to avoid redundant disk reads.
+
+5. **Lazy Migration:** Legacy data in history.json migrates to sidecars on first access.
+
+### Refresh on Project Switch
+
+**CRITICAL:** When the user switches projects, all UI components must refresh from the backend. The following must be called in `handleProjectOpened()`:
+
+```javascript
+// main.js - handleProjectOpened()
+const newState = await syncEditorState(true);
+
+// 1. Update recents dropdown
+broadcastRecentsUpdate(newState);
+
+// 2. Refresh branch menu  
+if (branchMenuHandle?.refresh) branchMenuHandle.refresh();
+
+// 3. Diff base selector (in explorer.js project:opened handler)
+initDiffBaseFromBackend();
+
+// 4. Git status (already wired via git:status WS request)
+```
+
+**Rule:** Any new UI component that displays project-scoped data MUST be refreshed on project switch. Add it to the `handleProjectOpened()` chain.
 
 ---
 
