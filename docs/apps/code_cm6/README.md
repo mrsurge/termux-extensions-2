@@ -74,16 +74,27 @@ WebSocket-driven file tree with real-time updates, search, git status badges, an
 - **New Project Creation:** Create new projects with optional Git initialization
 - **File Watcher Integration:** External filesystem changes automatically notify connected clients
 
-### 6. **Draft Session Workflow**
+### 6. **Multi-Project Session Management**
+Two-tier state architecture ensures complete project isolation with seamless multi-device convergence.
+
+- **HistoryStore + ProjectSidecar:** Global ledger (HistoryStore) delegates per-project data to isolated JSON sidecars (`~/.cache/cm6_editor/projects/<sha1>.json`).
+- **Per-Project Isolation:** Each project maintains its own recent files, scroll positions, diff base, and unsaved drafts—completely independent from other projects.
+- **Draft Retention on Switch:** Switching projects does NOT clear drafts. Each project's unsaved work persists in its sidecar until explicitly discarded.
+- **Scroll Position Persistence:** Per-file scroll positions are stored in the sidecar's `recent_files` entries and restored when reopening files.
+- **Projects Modal:** File menu "Projects..." option provides project management with soft reset (clear drafts/MRU) and hard delete (remove from history) actions.
+- **Lazy Migration:** Legacy per-project data in history.json seamlessly migrates to sidecars on first access.
+
+### 7. **Draft Session Workflow**
 Persistent, disk-backed drafts bring code-server resilience to a single-document UX.
 
-- **Sidecar Persistence:** Unsaved buffers are mirrored to `~/.cache/cm6_sessions/…` with base/content hashes so drafts survive reloads, crashes, or worker restarts.
+- **Sidecar Persistence:** Unsaved buffers are stored in `ProjectSidecar.session_cache` (per-project) with base/content hashes so drafts survive reloads, crashes, or worker restarts.
 - **Explorer Accents:** Tree nodes receive yellow right-edge accents the moment a draft exists; the metadata is streamed from the same sidecars so badges survive tree refreshes.
-- **Review Tab:** The explorer search overlay now includes a “Review” mode that lists every draft, renders blue/yellow hunks, and lets you jump to any change—or save/discard files in bulk—without leaving the drawer.
+- **Review Tab:** The explorer search overlay now includes a "Review" mode that lists every draft, renders blue/yellow hunks, and lets you jump to any change - or save/discard files in bulk - without leaving the drawer.
 - **Autosave Interop:** Enabling autosave flushes the current draft, performs an immediate disk write, and suppresses new sidecars until autosave is disabled again.
 - **Unified Diff Colors:** Git (green/red) and draft (blue/yellow) decorations coexist across gutters, minimap, and inline widgets so you can distinguish disk vs. unsaved changes at a glance.
 
-### 7. **Embedded Terminal**
+### 8. **Embedded Terminal**
+Full xterm.js terminal with PTY streaming, persistent sessions, and project-aware CWD.
 Full xterm.js terminal with PTY streaming, persistent sessions, and project-aware CWD.
 
 - **Framework Shells Integration:** Terminal runs as a framework shell (type="shell", uses_pty=True)

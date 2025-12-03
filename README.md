@@ -512,7 +512,10 @@ Built with: FastAPI, Flask, CodeMirror 6, xterm.js, NiceGUI (vendored), and many
 
 ---
 
-**Last Updated:** November 21, 2025
+**Last Updated:** December 3, 2025
+
+**2025-12-03:** Multi-project session management with per-project sidecar storage, draft retention across project switches, per-file scroll position persistence. — *Atlas, TE2 Team*
+
 More screens:
 <img width="1913" height="1014" alt="Screenshot From 2025-11-25 17-20-52" src="https://github.com/user-attachments/assets/d3f40310-6a13-4bd5-8032-a21c240675fc" />
 <img width="1913" height="1014" alt="Screenshot From 2025-11-25 17-17-25" src="https://github.com/user-attachments/assets/acbcea7e-4663-48d2-b7a9-b84173b26ae1" />
