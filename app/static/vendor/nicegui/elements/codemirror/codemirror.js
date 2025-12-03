@@ -1030,9 +1030,12 @@ export default {
           return;
         }
 
-        // Use lineBlockAtHeight for stable line detection (no update cycle issues)
-        const topLineBlock = view.lineBlockAtHeight(scrollTop);
-        const pos = topLineBlock.from;
+        // Use visibleRanges / viewport.from to avoid layout reads during update
+        let pos = view.viewport.from;
+        const ranges = view.visibleRanges;
+        if (ranges && ranges.length > 0) {
+          pos = ranges[0].from;
+        }
 
         const lineInfo = state.doc.lineAt(pos);
         const line = lineInfo.number;
@@ -1235,7 +1238,7 @@ export default {
     // Added: 2025-12-03 by vectorArc - TE2 Team
     // Purpose: Enable Monaco-style sticky scroll showing current function/class scope
     // Uses: CM6 ViewPlugin with absolute-positioned overlay + Lezer syntax tree
-    // Updated: Converted from showPanel to overlay to eliminate layout thrash
+    // Fixed: 2025-12-03 - Converted to Monaco pixel-geometry approach for proper triggering
     // ============================================================================
     applyStickyScroll(enabled) {
       if (!this.editor) return;
@@ -1278,7 +1281,6 @@ export default {
       };
 
       // Sticky scroll theme - ABSOLUTE overlay beside gutter
-      // Changed: 2025-12-03 by vectorArc - TE2 Team
       const stickyScrollTheme = CM.EditorView.baseTheme({
         ".cm-stickyHeader": {
           position: "absolute",
@@ -1313,17 +1315,16 @@ export default {
       });
 
       // ============================================================================
-      // Create ViewPlugin with FIXED overlay aligned to content area
-      // Changed from showPanel to ViewPlugin - 2025-12-03 by vectorArc - TE2 Team
+      // ViewPlugin using Monaco's pixel-geometry approach
+      // Fixed: 2025-12-03 - Uses scrollTop-relative pixel positions instead of line numbers
       // ============================================================================
       const stickyScrollPlugin = CM.ViewPlugin.fromClass(class {
         constructor(view) {
           this.view = view;
           this.dom = document.createElement("div");
           this.dom.className = "cm-stickyHeader";
-          this.lastPos = -1;
-          this.lastDocLength = -1;
           this.currentScopes = [];
+          this.lastScrollTop = -1;
           
           // Append to editor DOM (works inside iframe)
           view.dom.appendChild(this.dom);
@@ -1344,14 +1345,14 @@ export default {
           });
           
           // Direct scroll listener for immediate response
-          this.scrollHandler = () => this.updateStickyHeader(false);
+          this.scrollHandler = () => this.updateStickyHeader();
           view.scrollDOM.addEventListener('scroll', this.scrollHandler, { passive: true });
           
           // Initial render
-          this.updateStickyHeader(true);
+          this.updateStickyHeader();
         }
         
-        updateStickyHeader(forceUpdate = false) {
+        updateStickyHeader() {
           const view = this.view;
           const state = view.state;
           const scrollTop = view.scrollDOM.scrollTop;
@@ -1364,51 +1365,45 @@ export default {
           this.dom.style.top = '0';
           this.dom.style.left = gutterWidth + 'px';
           this.dom.style.right = '0';
+
+          const lineHeight = view.defaultLineHeight;
           
           // ============================================================================
-          // Detection point: sample position BELOW the overlay so we detect nested scopes
-          // Fixed: 2025-12-03 by vectorArc - TE2 Team
-          // As overlay grows, detection point moves down with it
+          // KEY INSIGHT: We need to detect scopes BELOW the current overlay
+          // 
+          // When the overlay has N lines, the "visible top" is actually at:
+          //   scrollTop + (N * lineHeight)
+          // 
+          // So we sample the document position at that adjusted height to find
+          // what scopes are "about to be covered" by the overlay.
           // ============================================================================
-          const overlayHeight = this.dom.offsetHeight || 0;
           
+          // Get current overlay height (from previous render)
+          const currentOverlayHeight = this.dom.offsetHeight || 0;
+          
+          // The effective "top of visible content" is below the overlay
+          const effectiveScrollTop = scrollTop + currentOverlayHeight;
+          
+          // Find the document position at the effective top
           let pos;
           try {
-            const editorRect = view.dom.getBoundingClientRect();
-            const coords = { 
-              x: editorRect.left + gutterWidth + 10,
-              y: editorRect.top + overlayHeight + 5  // Detection below overlay
-            };
-            const result = view.posAtCoords(coords);
-            pos = result !== null ? result : view.viewport.from;
-          } catch {
+            const topBlock = view.lineBlockAtHeight(effectiveScrollTop);
+            pos = topBlock.from;
+          } catch (e) {
             pos = view.viewport.from;
           }
 
-          const docLength = state.doc.length;
-
-          // Cache check
-          if (!forceUpdate && pos === this.lastPos && docLength === this.lastDocLength) {
-            return;
-          }
-          this.lastPos = pos;
-          this.lastDocLength = docLength;
-
-          // Check syntax tree
-          const syntaxTreeAvailable = typeof CM.syntaxTreeAvailable === 'function' 
-            ? CM.syntaxTreeAvailable(state, pos) 
-            : true;
-          
-          if (!syntaxTreeAvailable) return;
-
+          // Get syntax tree
           const tree = CM.syntaxTree(state);
-          if (!tree) {
+          if (!tree || !tree.topNode) {
             this.dom.innerHTML = '';
             this.currentScopes = [];
             return;
           }
 
-          // Find enclosing scopes
+          // ============================================================================
+          // SCOPE COLLECTION: Walk up from the effective viewport position
+          // ============================================================================
           const scopeTypes = getScopeTypes();
           const scopes = [];
           
@@ -1418,69 +1413,70 @@ export default {
               scopes.push(node);
             }
           }
+          // Reverse so outermost scope is first
           scopes.reverse();
 
           // ============================================================================
-          // Trigger offset: (i + 1) * lineHeight for each scope level
-          // Fixed: 2025-12-03 by vectorArc - TE2 Team (Atlas's approach)
-          // - Level 0 (outermost): triggers at 1 * lineHeight
-          // - Level 1: triggers at 2 * lineHeight
-          // - Level 2: triggers at 3 * lineHeight, etc.
+          // FILTERING: For each scope, check if its definition is above its "slot"
+          // 
+          // The slot for depth N is at: scrollTop + (N * lineHeight)
+          // A scope should appear when its definition line's TOP is above its slot
           // ============================================================================
-          const lineHeight = view.defaultLineHeight;
-
-          // DEBUG: Log values to understand what's happening
-          if (scopes.length > 0) {
-            console.log('[StickyScroll] scrollTop:', scrollTop, 'lineHeight:', lineHeight);
-            scopes.forEach((scopeNode, i) => {
-              try {
-                const defBlock = view.lineBlockAt(scopeNode.from);
-                const triggerOffset = (i + 1) * lineHeight;
-                const threshold = scrollTop + triggerOffset;
-                console.log(`[StickyScroll] Scope ${i}: defBlock.bottom=${defBlock.bottom}, threshold=${threshold}, passes=${defBlock.bottom <= threshold}`);
-              } catch {}
-            });
-          }
-
           const filteredScopes = [];
-          for (let i = 0; i < scopes.length; i++) {
-            const scopeNode = scopes[i];
+          const MAX_STICKY_LINES = 5;
+
+          for (let depth = 0; depth < scopes.length && filteredScopes.length < MAX_STICKY_LINES; depth++) {
+            const scopeNode = scopes[depth];
             try {
               const defBlock = view.lineBlockAt(scopeNode.from);
-              const triggerOffset = (i + 1) * lineHeight;
-
-              if (defBlock.bottom <= scrollTop + triggerOffset) {
+              const endBlock = view.lineBlockAt(scopeNode.to);
+              
+              // The slot position for this depth (absolute, not relative)
+              const slotY = scrollTop + (depth * lineHeight);
+              
+              // Check if:
+              // 1. The definition line's top is ABOVE (or at) the slot position
+              // 2. The scope's end is BELOW the slot position (we're still inside)
+              const defTopAboveSlot = defBlock.top <= slotY;
+              const endBelowSlot = endBlock.bottom > slotY;
+              
+              if (defTopAboveSlot && endBelowSlot) {
                 const defLine = state.doc.lineAt(scopeNode.from);
                 filteredScopes.push({
                   node: scopeNode,
                   lineText: defLine.text
                 });
               }
-            } catch {}
+            } catch (e) {
+              // lineBlockAt can throw for positions outside rendered range
+            }
           }
 
           this.currentScopes = filteredScopes;
 
-          // DEBUG: Log what we're about to render
-          console.log('[StickyScroll] filteredScopes count:', filteredScopes.length, 'rendering:', filteredScopes.map(s => s.lineText.trim().substring(0, 50)));
-
-          // Render (max 5 lines)
-          const displayScopes = filteredScopes.slice(0, 5);
+          // ============================================================================
+          // RENDER
+          // ============================================================================
+          const displayScopes = filteredScopes.slice(0, MAX_STICKY_LINES);
           if (displayScopes.length === 0) {
-            this.dom.innerHTML = '';
+            if (this.dom.innerHTML !== '') {
+              this.dom.innerHTML = '';
+            }
           } else {
-            this.dom.innerHTML = displayScopes.map((scope, idx) => 
+            const newHtml = displayScopes.map((scope, idx) => 
               `<div class="cm-sticky-line" data-index="${idx}">${escapeHtml(scope.lineText)}</div>`
             ).join('');
+            
+            if (this.dom.innerHTML !== newHtml) {
+              this.dom.innerHTML = newHtml;
+            }
           }
-          
-          // DEBUG: Log actual DOM content
-          console.log('[StickyScroll] DOM children count:', this.dom.children.length, 'innerHTML length:', this.dom.innerHTML.length);
         }
         
         update(update) {
+          // Re-render on document changes (syntax tree may have changed)
           if (update.docChanged) {
-            this.updateStickyHeader(true);
+            this.updateStickyHeader();
           }
         }
         
@@ -1490,7 +1486,7 @@ export default {
         }
       });
 
-      // Extension array - theme + plugin (no showPanel)
+      // Extension array - theme + plugin
       const stickyScrollExtension = [
         stickyScrollTheme,
         stickyScrollPlugin,
