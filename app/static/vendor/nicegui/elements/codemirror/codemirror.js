@@ -1292,7 +1292,6 @@ export default {
           fontFamily: "inherit",
           fontSize: "inherit",
           lineHeight: "1.4",
-          overflow: "hidden",
           zIndex: "10",
           pointerEvents: "auto",
         },
@@ -1371,13 +1370,19 @@ export default {
           this.dom.style.left = gutterWidth + 'px';
           this.dom.style.right = '0';
           
-          // Use posAtCoords for accurate position detection
+          // ============================================================================
+          // Detection point: sample position BELOW the overlay so we detect nested scopes
+          // Fixed: 2025-12-03 by vectorArc - TE2 Team
+          // As overlay grows, detection point moves down with it
+          // ============================================================================
+          const overlayHeight = this.dom.offsetHeight || 0;
+          
           let pos;
           try {
             const editorRect = view.dom.getBoundingClientRect();
             const coords = { 
               x: editorRect.left + gutterWidth + 10,
-              y: editorRect.top + 5
+              y: editorRect.top + overlayHeight + 5  // Detection below overlay
             };
             const result = view.posAtCoords(coords);
             pos = result !== null ? result : view.viewport.from;
@@ -1421,45 +1426,48 @@ export default {
           scopes.reverse();
 
           // ============================================================================
-          // Trigger offset: n+1 formula where n = scopes already showing in THIS render
-          // Fixed: 2025-12-03 by vectorArc - TE2 Team (Dex's approach)
-          // - visibleCount tracks how many scopes we're adding THIS pass
-          // - Each scope triggers at (visibleCount + 1) * lineHeight
-          // - break ensures children don't appear without parents
+          // Trigger offset: (i + 1) * lineHeight for each scope level
+          // Fixed: 2025-12-03 by vectorArc - TE2 Team (Atlas's approach)
+          // - Level 0 (outermost): triggers at 1 * lineHeight
+          // - Level 1: triggers at 2 * lineHeight
+          // - Level 2: triggers at 3 * lineHeight, etc.
           // ============================================================================
           const lineHeight = view.defaultLineHeight;
 
-          // Filter: only show scopes whose definition line is above viewport (with n+1 offset)
-          // n = how many sticky lines we are already planning to show in THIS render
-          const filteredScopes = [];
-          let visibleCount = 0;  // this is "n"
+          // DEBUG: Log values to understand what's happening
+          if (scopes.length > 0) {
+            console.log('[StickyScroll] scrollTop:', scrollTop, 'lineHeight:', lineHeight);
+            scopes.forEach((scopeNode, i) => {
+              try {
+                const defBlock = view.lineBlockAt(scopeNode.from);
+                const triggerOffset = (i + 1) * lineHeight;
+                const threshold = scrollTop + triggerOffset;
+                console.log(`[StickyScroll] Scope ${i}: defBlock.bottom=${defBlock.bottom}, threshold=${threshold}, passes=${defBlock.bottom <= threshold}`);
+              } catch {}
+            });
+          }
 
+          const filteredScopes = [];
           for (let i = 0; i < scopes.length; i++) {
             const scopeNode = scopes[i];
             try {
               const defBlock = view.lineBlockAt(scopeNode.from);
-
-              // n+1: early trigger for the next scope based on current overlay height
-              const triggerOffset = (visibleCount + 1) * lineHeight;
+              const triggerOffset = (i + 1) * lineHeight;
 
               if (defBlock.bottom <= scrollTop + triggerOffset) {
                 const defLine = state.doc.lineAt(scopeNode.from);
                 filteredScopes.push({
                   node: scopeNode,
-                  lineText: defLine.text  // Preserve original indentation
+                  lineText: defLine.text
                 });
-                visibleCount += 1;  // overlay grows by one sticky line
-              } else {
-                // Once an outer scope hasn't reached its threshold,
-                // don't allow deeper scopes without their parent.
-                break;
               }
-            } catch {
-              // ignore bad lineBlockAt cases
-            }
+            } catch {}
           }
 
           this.currentScopes = filteredScopes;
+
+          // DEBUG: Log what we're about to render
+          console.log('[StickyScroll] filteredScopes count:', filteredScopes.length, 'rendering:', filteredScopes.map(s => s.lineText.trim().substring(0, 50)));
 
           // Render (max 5 lines)
           const displayScopes = filteredScopes.slice(0, 5);
@@ -1470,6 +1478,9 @@ export default {
               `<div class="cm-sticky-line" data-index="${idx}">${escapeHtml(scope.lineText)}</div>`
             ).join('');
           }
+          
+          // DEBUG: Log actual DOM content
+          console.log('[StickyScroll] DOM children count:', this.dom.children.length, 'innerHTML length:', this.dom.innerHTML.length);
         }
         
         update(update) {
