@@ -980,11 +980,13 @@ export default {
         const scrollTracker = CM.ViewPlugin.fromClass(class {
           constructor(view) {
             this.view = view;
-            self.reportScrollPosition(view);
+            // Defer to avoid calling during initial setup
+            setTimeout(() => self.reportScrollPosition(view), 0);
           }
           update(update) {
             if (update.viewportChanged || update.docChanged) {
-              self.reportScrollPosition(update.view);
+              // Defer to next frame to avoid "layout read during update" error
+              setTimeout(() => self.reportScrollPosition(update.view), 0);
             }
           }
           destroy() {
