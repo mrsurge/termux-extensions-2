@@ -980,13 +980,11 @@ export default {
         const scrollTracker = CM.ViewPlugin.fromClass(class {
           constructor(view) {
             this.view = view;
-            // Defer to avoid calling during initial setup
-            setTimeout(() => self.reportScrollPosition(view), 0);
+            self.reportScrollPosition(view);
           }
           update(update) {
             if (update.viewportChanged || update.docChanged) {
-              // Defer to next frame to avoid "layout read during update" error
-              setTimeout(() => self.reportScrollPosition(update.view), 0);
+              self.reportScrollPosition(update.view);
             }
           }
           destroy() {
@@ -1004,7 +1002,7 @@ export default {
     // ============================================================================
     // CUSTOM METHOD: reportScrollPosition
     // Updated: 2025-12-03 by vectorArc - TE2 Team
-    // Fix: Use posAtCoords instead of visibleRanges for accurate line detection
+    // Fix: Use lineBlockAtHeight instead of posAtCoords - stable during updates
     // Added: Bottom-of-document detection
     // ============================================================================
     reportScrollPosition(viewArg) {
@@ -1032,14 +1030,9 @@ export default {
           return;
         }
 
-        // Use posAtCoords for accurate top-of-viewport line
-        const editorRect = view.dom.getBoundingClientRect();
-        const coords = { 
-          x: editorRect.left + 50,  // Offset past gutter
-          y: editorRect.top + 5     // Just inside top edge
-        };
-        const pos = view.posAtCoords(coords);
-        if (pos === null) return;
+        // Use lineBlockAtHeight for stable line detection (no update cycle issues)
+        const topLineBlock = view.lineBlockAtHeight(scrollTop);
+        const pos = topLineBlock.from;
 
         const lineInfo = state.doc.lineAt(pos);
         const line = lineInfo.number;
