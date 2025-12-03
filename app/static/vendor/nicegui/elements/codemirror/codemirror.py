@@ -507,6 +507,26 @@ class CodeMirror(ValueElement, DisableableElement,
         self.run_method('applyMinimapMode', mode)
     # ============================================================================
 
+    # ============================================================================
+    # CUSTOM METHOD: set_sticky_scroll
+    # Added: 2025-12-03 by vectorArc - TE2 Team
+    # Purpose: Enable/disable Monaco-style sticky scroll showing current scope
+    # ============================================================================
+    def set_sticky_scroll(self, enabled: bool) -> None:
+        """Enable or disable sticky scroll header showing current scope.
+        
+        When enabled, displays the enclosing function/class signature at the
+        top of the editor viewport, similar to VS Code's sticky scroll feature.
+        
+        Args:
+            enabled: True to enable sticky scroll, False to disable
+            
+        Example:
+            editor.set_sticky_scroll(True)  # Enable sticky scroll
+        """
+        self.run_method('applyStickyScroll', enabled)
+    # ============================================================================
+
     def notify_parent(self, type: str, data: dict) -> None:
         """Send a message to the parent frame via postMessage.
         

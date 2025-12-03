@@ -26,6 +26,7 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "colorPicker": True,
     "readOnly": False,
     "showMinimap": False,
+    "stickyScroll": False,  # Added: 2025-12-03 by vectorArc - TE2 Team
 }
 
 DEFAULT_UI_PREFS: Dict[str, Any] = {

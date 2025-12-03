@@ -720,8 +720,9 @@ async def editor_page():
             # Theme and line wrapping already applied in constructor - don't re-apply
             editor.toggle_color_picker(editor_prefs.get('colorPicker', True))
             editor.set_read_only(editor_prefs.get('readOnly', False))
+            editor.set_sticky_scroll(editor_prefs.get('stickyScroll', False))  # Added: 2025-12-03 by vectorArc - TE2 Team
             
-            print(f"[EDITOR_APP] Applied runtime preferences: shading={editor_prefs.get('showShading')}, guides={editor_prefs.get('showIndentGuides')}, fontScale={editor_prefs.get('fontScale')}, colorPicker={editor_prefs.get('colorPicker')}, readOnly={editor_prefs.get('readOnly')}", file=sys.stderr)
+            print(f"[EDITOR_APP] Applied runtime preferences: shading={editor_prefs.get('showShading')}, guides={editor_prefs.get('showIndentGuides')}, fontScale={editor_prefs.get('fontScale')}, colorPicker={editor_prefs.get('colorPicker')}, readOnly={editor_prefs.get('readOnly')}, stickyScroll={editor_prefs.get('stickyScroll')}", file=sys.stderr)
 
             if initial_path:
                 if cached_was_restored:
@@ -1232,6 +1233,7 @@ async def set_editor_content(data: dict = Body(...)):
     editor.set_indent_guides(editor_prefs.get('showIndentGuides'))
     editor.toggle_color_picker(editor_prefs.get('colorPicker'))
     editor.set_read_only(editor_prefs.get('readOnly', False))
+    editor.set_sticky_scroll(editor_prefs.get('stickyScroll', False))  # Added: 2025-12-03 by vectorArc - TE2 Team
     # Single update() call after all preferences applied
     editor.update()
     
@@ -1404,6 +1406,7 @@ def _get_view_state_dict() -> dict:
         "readOnly": editor_prefs.get('readOnly'),
         "showMinimap": editor_prefs.get('showMinimap'),
         "showDraftDiffs": editor_prefs.get('showDraftDiffs'),
+        "stickyScroll": editor_prefs.get('stickyScroll'),  # Added: 2025-12-03 by vectorArc - TE2 Team
     }
 
 
@@ -1480,6 +1483,9 @@ async def update_preference(data: dict = Body(...)):
         elif key == 'showMinimap':
             # Use prop setter to trigger client-side auto-detect logic
             editor.show_minimap = bool(value)
+        elif key == 'stickyScroll':
+            # Added: 2025-12-03 by vectorArc - TE2 Team
+            editor.set_sticky_scroll(bool(value))
         elif key == 'showInlineDiffs':
             pass  # handled after preference persistence via _refresh_active_diffs
         elif key == 'showDraftDiffs':

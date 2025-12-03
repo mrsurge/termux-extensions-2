@@ -355,6 +355,7 @@ const miToggleDiffs  = requireEl('#mi-toggle-diffs');
 const miToggleDraftDiffs = requireEl('#mi-toggle-draft-diffs');
 const miToggleColorPicker = requireEl('#mi-toggle-color-picker');
 const miToggleReadonly = requireEl('#mi-toggle-readonly');
+const miToggleStickyScroll = requireEl('#mi-toggle-sticky-scroll');  // Added: 2025-12-03 by vectorArc - TE2 Team
 const miTrackEdits   = requireEl('#mi-track-edits');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
@@ -1104,6 +1105,7 @@ function applyStateToMenus(state) {
   setMenuChecked(miToggleColorPicker, state.colorPicker);
   setMenuChecked(miToggleReadonly, state.readOnly);
   setMenuChecked(miToggleMinimap, state.showMinimap);
+  setMenuChecked(miToggleStickyScroll, state.stickyScroll);  // Added: 2025-12-03 by vectorArc - TE2 Team
   setMenuChecked(miTrackEdits, state.trackAgentEdits);
   
   // Update theme menu checkmarks
@@ -2471,6 +2473,15 @@ const miToggleMinimap = requireEl('#mi-toggle-minimap');
 bindMenuToggle(miToggleMinimap, async () => {
   const success = await updatePreference('showMinimap', !(editorViewState?.showMinimap));
   if (!success) host.toast('Failed to update preference');
+});
+
+// ============================================================================
+// Sticky Scroll Toggle
+// Added: 2025-12-03 by vectorArc - TE2 Team
+// ============================================================================
+bindMenuToggle(miToggleStickyScroll, async () => {
+  const success = await updatePreference('stickyScroll', !(editorViewState?.stickyScroll));
+  if (!success) host.toast('Failed to update sticky scroll preference');
 });
 
 bindMenuToggle(miTrackEdits, async () => {

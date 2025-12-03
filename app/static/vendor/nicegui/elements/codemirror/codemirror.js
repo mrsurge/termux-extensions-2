@@ -454,6 +454,7 @@ export default {
       pendingFontScale: clampFontScale(this.fontScale),
       colorPickerCompartment: null, // Color picker toggle compartment
       readOnlyCompartment: null,     // Read-only mode compartment
+      stickyScrollCompartment: null, // Sticky scroll toggle compartment - Added: 2025-12-03 by vectorArc - TE2 Team
       isMobileLayout: false,
     };
   },
@@ -998,24 +999,56 @@ export default {
 
       return extensions;
     },
+    // ============================================================================
+    // CUSTOM METHOD: reportScrollPosition
+    // Updated: 2025-12-03 by vectorArc - TE2 Team
+    // Fix: Use posAtCoords instead of visibleRanges for accurate line detection
+    // Added: Bottom-of-document detection
+    // ============================================================================
     reportScrollPosition(viewArg) {
       try {
         const view = viewArg || this.editor;
         if (!view) return;
         const state = view.state;
         if (!state) return;
-        const ranges = view.visibleRanges;
-        if (!ranges || !ranges.length) return;
-        const from = ranges[0].from;
-        const lineInfo = state.doc.lineAt(from);
-        const line = lineInfo.number;
-        const column = from - lineInfo.from;
 
-        console.log('[CodeMirror] reportScrollPosition', { line, column, from });
+        // Detect if at bottom of document first
+        const { scrollTop, scrollHeight, clientHeight } = view.scrollDOM;
+        const atBottom = Math.abs(scrollTop + clientHeight - scrollHeight) < 2;
+
+        if (atBottom) {
+          // Report last line when at bottom
+          const lastLine = state.doc.lines;
+          console.log('[CodeMirror] reportScrollPosition (at bottom)', { line: lastLine, atBottom: true });
+          this.notifyParent('cm6-scroll-state', {
+            line: lastLine,
+            column: 0,
+            top: state.doc.length,
+            atBottom: true,
+            timestamp: Date.now(),
+          });
+          return;
+        }
+
+        // Use posAtCoords for accurate top-of-viewport line
+        const editorRect = view.dom.getBoundingClientRect();
+        const coords = { 
+          x: editorRect.left + 50,  // Offset past gutter
+          y: editorRect.top + 5     // Just inside top edge
+        };
+        const pos = view.posAtCoords(coords);
+        if (pos === null) return;
+
+        const lineInfo = state.doc.lineAt(pos);
+        const line = lineInfo.number;
+        const column = pos - lineInfo.from;
+
+        console.log('[CodeMirror] reportScrollPosition', { line, column, pos });
         this.notifyParent('cm6-scroll-state', {
           line,
           column,
-          top: from,
+          top: pos,
+          atBottom: false,
           timestamp: Date.now(),
         });
       } catch (err) {
@@ -1199,6 +1232,259 @@ export default {
       } else {
         this.editor.dom.classList.remove('cm-has-minimap-desktop');
       }
+    },
+    // ============================================================================
+
+    // ============================================================================
+    // CUSTOM METHOD: applyStickyScroll
+    // Added: 2025-12-03 by vectorArc - TE2 Team
+    // Purpose: Enable Monaco-style sticky scroll showing current function/class scope
+    // Uses: CM6 ViewPlugin with absolute-positioned overlay + Lezer syntax tree
+    // Updated: Converted from showPanel to overlay to eliminate layout thrash
+    // ============================================================================
+    applyStickyScroll(enabled) {
+      if (!this.editor) return;
+
+      // Language-aware scope node types
+      const SCOPE_NODE_TYPES = {
+        javascript: new Set([
+          "FunctionDeclaration", "FunctionExpression", "ArrowFunction",
+          "MethodDeclaration", "MethodDefinition", 
+          "ClassDeclaration", "ClassExpression"
+        ]),
+        typescript: new Set([
+          "FunctionDeclaration", "FunctionExpression", "ArrowFunction",
+          "MethodDeclaration", "MethodDefinition",
+          "ClassDeclaration", "ClassExpression",
+          "InterfaceDeclaration", "TypeAliasDeclaration", "EnumDeclaration"
+        ]),
+        python: new Set([
+          "FunctionDefinition", "ClassDefinition"
+        ]),
+        // Fallback for other languages
+        default: new Set([
+          "FunctionDeclaration", "FunctionDefinition", "FunctionExpression",
+          "ArrowFunction", "MethodDeclaration", "MethodDefinition",
+          "ClassDeclaration", "ClassDefinition", "ClassExpression"
+        ])
+      };
+
+      // Get scope types for current language
+      const getScopeTypes = () => {
+        const lang = (this.language || 'default').toLowerCase();
+        return SCOPE_NODE_TYPES[lang] || SCOPE_NODE_TYPES.default;
+      };
+
+      // Escape HTML for safe rendering
+      const escapeHtml = (str) => {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      };
+
+      // Sticky scroll theme - ABSOLUTE overlay beside gutter
+      // Changed: 2025-12-03 by vectorArc - TE2 Team
+      const stickyScrollTheme = CM.EditorView.baseTheme({
+        ".cm-stickyHeader": {
+          position: "absolute",
+          backgroundColor: "var(--cm-editor-bg, #1e1e1e)",
+          borderBottom: "1px solid rgba(255,255,255,0.1)",
+          fontFamily: "inherit",
+          fontSize: "inherit",
+          lineHeight: "1.4",
+          overflow: "hidden",
+          zIndex: "10",
+          pointerEvents: "auto",
+        },
+        ".cm-stickyHeader:empty": {
+          display: "none",
+        },
+        ".cm-sticky-line": {
+          padding: "1px 8px 1px 4px",
+          whiteSpace: "pre",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          cursor: "pointer",
+          borderLeft: "2px solid transparent",
+        },
+        ".cm-sticky-line:hover": {
+          backgroundColor: "rgba(255,255,255,0.05)",
+          borderLeftColor: "#007acc",
+        },
+        // Indent nested scopes slightly
+        ".cm-sticky-line:not(:first-child)": {
+          paddingLeft: "12px",
+          opacity: "0.85",
+        },
+      });
+
+      // ============================================================================
+      // Create ViewPlugin with FIXED overlay aligned to content area
+      // Changed from showPanel to ViewPlugin - 2025-12-03 by vectorArc - TE2 Team
+      // ============================================================================
+      const stickyScrollPlugin = CM.ViewPlugin.fromClass(class {
+        constructor(view) {
+          this.view = view;
+          this.dom = document.createElement("div");
+          this.dom.className = "cm-stickyHeader";
+          this.lastPos = -1;
+          this.lastDocLength = -1;
+          this.currentScopes = [];
+          
+          // Append to editor DOM (works inside iframe)
+          view.dom.appendChild(this.dom);
+          
+          // Click handler for jump-to-definition
+          this.dom.addEventListener('click', (e) => {
+            const target = e.target.closest('.cm-sticky-line');
+            if (target && this.currentScopes.length > 0) {
+              const index = parseInt(target.dataset.index, 10);
+              if (!isNaN(index) && this.currentScopes[index]) {
+                view.dispatch({
+                  selection: { anchor: this.currentScopes[index].node.from },
+                  scrollIntoView: true,
+                });
+                view.focus();
+              }
+            }
+          });
+          
+          // Direct scroll listener for immediate response
+          this.scrollHandler = () => this.updateStickyHeader(false);
+          view.scrollDOM.addEventListener('scroll', this.scrollHandler, { passive: true });
+          
+          // Initial render
+          this.updateStickyHeader(true);
+        }
+        
+        updateStickyHeader(forceUpdate = false) {
+          const view = this.view;
+          const state = view.state;
+          const scrollTop = view.scrollDOM.scrollTop;
+          
+          // Get gutter width to position overlay beside it
+          const gutterEl = view.dom.querySelector('.cm-gutters');
+          const gutterWidth = gutterEl ? gutterEl.offsetWidth : 0;
+          
+          // Position absolute overlay to the right of gutter
+          this.dom.style.top = '0';
+          this.dom.style.left = gutterWidth + 'px';
+          this.dom.style.right = '0';
+          
+          // Use posAtCoords for accurate position detection
+          let pos;
+          try {
+            const editorRect = view.dom.getBoundingClientRect();
+            const coords = { 
+              x: editorRect.left + gutterWidth + 10,
+              y: editorRect.top + 5
+            };
+            const result = view.posAtCoords(coords);
+            pos = result !== null ? result : view.viewport.from;
+          } catch {
+            pos = view.viewport.from;
+          }
+
+          const docLength = state.doc.length;
+
+          // Cache check
+          if (!forceUpdate && pos === this.lastPos && docLength === this.lastDocLength) {
+            return;
+          }
+          this.lastPos = pos;
+          this.lastDocLength = docLength;
+
+          // Check syntax tree
+          const syntaxTreeAvailable = typeof CM.syntaxTreeAvailable === 'function' 
+            ? CM.syntaxTreeAvailable(state, pos) 
+            : true;
+          
+          if (!syntaxTreeAvailable) return;
+
+          const tree = CM.syntaxTree(state);
+          if (!tree) {
+            this.dom.innerHTML = '';
+            this.currentScopes = [];
+            return;
+          }
+
+          // Find enclosing scopes
+          const scopeTypes = getScopeTypes();
+          const scopes = [];
+          
+          let node = tree.resolveInner(pos);
+          for (; node; node = node.parent) {
+            if (scopeTypes.has(node.name)) {
+              scopes.push(node);
+            }
+          }
+          scopes.reverse();
+
+          // Filter: only show scopes whose definition line is above viewport
+          const filteredScopes = [];
+          for (const scopeNode of scopes) {
+            try {
+              const defBlock = view.lineBlockAt(scopeNode.from);
+              if (defBlock.bottom <= scrollTop) {
+                const defLine = state.doc.lineAt(scopeNode.from);
+                filteredScopes.push({
+                  node: scopeNode,
+                  lineText: defLine.text.trim()
+                });
+              }
+            } catch {}
+          }
+
+          this.currentScopes = filteredScopes;
+
+          // Render (max 5 lines)
+          const displayScopes = filteredScopes.slice(0, 5);
+          if (displayScopes.length === 0) {
+            this.dom.innerHTML = '';
+          } else {
+            this.dom.innerHTML = displayScopes.map((scope, idx) => 
+              `<div class="cm-sticky-line" data-index="${idx}">${escapeHtml(scope.lineText)}</div>`
+            ).join('');
+          }
+        }
+        
+        update(update) {
+          if (update.docChanged) {
+            this.updateStickyHeader(true);
+          }
+        }
+        
+        destroy() {
+          this.view.scrollDOM.removeEventListener('scroll', this.scrollHandler);
+          this.dom.remove();
+        }
+      });
+
+      // Extension array - theme + plugin (no showPanel)
+      const stickyScrollExtension = [
+        stickyScrollTheme,
+        stickyScrollPlugin,
+      ];
+
+      // Compartment management
+      if (!this.stickyScrollCompartment) {
+        this.stickyScrollCompartment = new CM.Compartment();
+        // Install compartment (initially empty)
+        this.editor.dispatch({
+          effects: CM.StateEffect.appendConfig.of(
+            this.stickyScrollCompartment.of([])
+          )
+        });
+      }
+
+      // Reconfigure based on enabled state
+      this.editor.dispatch({
+        effects: this.stickyScrollCompartment.reconfigure(
+          enabled ? stickyScrollExtension : []
+        )
+      });
+      
+      console.log('[CodeMirror] Sticky scroll set to:', enabled);
     },
     // ============================================================================
   },
