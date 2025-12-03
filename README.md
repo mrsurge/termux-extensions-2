@@ -40,8 +40,13 @@ An integrated developement environment & complete with
 <img width="225" height="500" alt="Screenshot_20251123-221530 Termux Extensions" src="https://github.com/user-attachments/assets/14752214-3ffd-4a66-a290-7bf36ccc3774" />
 <img width="225" height="500" alt="Screenshot_20251124-095030 Termux Extensions" src="https://github.com/user-attachments/assets/9c0f64f6-5cd5-44ee-8d7b-5828293526ce" />
 
+5. Drafting system
+   -
+<img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/mrsurge/termux-extensions-2/blob/main/docs/pngs/Screenshot_20251203-003428.Termux%20Extensions.png?raw=true" /> <img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/mrsurge/termux-extensions-2/blob/main/docs/pngs/Screenshot_20251203-004535.Termux%20Extensions.png?raw=true" /> <img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/mrsurge/termux-extensions-2/blob/main/docs/pngs/Screenshot_20251203-004043.Termux%20Extensions.png?raw=true" />
 
-5. Room to grow
+
+
+7. Room to grow
    -
    - help me please i have no idea what im doing
 
