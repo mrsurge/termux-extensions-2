@@ -1214,7 +1214,19 @@ async function handleProjectOpened(newProjectPath) {
 
   // Refresh state snapshot so cachedProjectRoot, recents, and git base reflect
   // the new active project.
-  await syncEditorState(true);
+  const newState = await syncEditorState(true);
+  
+  // Update recents dropdown with new project's recents
+  broadcastRecentsUpdate(newState);
+  
+  // Refresh branch menu to show new project's branches
+  if (branchMenuHandle && typeof branchMenuHandle.refresh === 'function') {
+    try {
+      branchMenuHandle.refresh();
+    } catch (err) {
+      console.warn('[ProjectSwitch] Failed to refresh branch menu:', err);
+    }
+  }
 
   // Reload the NiceGUI iframe so editor_page() re-runs under the new project.
   try {
@@ -2672,6 +2684,9 @@ async function main() {
   agentDrawerHandle = initAgentDrawer();
 
   const serverState = await syncEditorState(true);
+  
+  // Populate recents dropdown on initial load
+  broadcastRecentsUpdate(serverState);
 
   // Load menu state from backend (backend already configured editor at page render)
   await refreshMenuState();

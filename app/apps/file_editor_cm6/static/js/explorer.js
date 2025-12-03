@@ -593,7 +593,7 @@ function ensureProgressBarElements() {
       gitProgressTextEl.className = 'fe-git-progress-text';
       gitProgressTextEl.style.cssText = `
         margin-left: auto;
-        font-size: 0.5em;
+        font-size: 0.6em;
         color: #60a5fa;
         white-space: nowrap;
         opacity: 0;
@@ -1134,6 +1134,8 @@ function handleExplorerEvent(type, payload) {
           window.__explorerBusSend('explorer:list', { rel: '.' });
           window.__explorerBusSend('git:status', {});
         }
+        // Refresh diff base selector for the new project
+        initDiffBaseFromBackend();
         // Also notify the host/editor runtime so the iframe detaches from the
         // old project and reloads into the new one.
         if (typeof window.__cm6HandleProjectOpened === 'function') {
