@@ -334,6 +334,7 @@ const miSave      = requireEl('#mi-save');
 const miSaveAs    = requireEl('#mi-saveas');
 const miClose     = requireEl('#mi-close');
 const miQuit      = requireEl('#mi-quit');
+const miDebugProjects = requireEl('#mi-debug-projects');
 
 const miUndo      = requireEl('#mi-undo');
 const miRedo      = requireEl('#mi-redo');
@@ -880,17 +881,26 @@ window.addEventListener('message', (event) => {
     if (scrollStateTimer) {
       clearTimeout(scrollStateTimer);
     }
-    scrollStateTimer = setTimeout(() => {
+    scrollStateTimer = setTimeout(async () => {
       scrollStateTimer = null;
       if (!lastScrollState || !lastScrollState.path) return;
       console.log('[ScrollState] queueSessionStateUpdate', lastScrollState);
       try {
+        // Update global session state (legacy)
         queueSessionStateUpdate({
           scrollLine: lastScrollState.line,
           scrollTop: lastScrollState.top != null ? lastScrollState.top : null,
         });
+        
+        // Also persist per-file scroll line to sidecar
+        if (lastScrollState.line && lastScrollState.line > 0) {
+          await apiPost('state/file_scroll', {
+            path: lastScrollState.path,
+            scroll_line: lastScrollState.line,
+          });
+        }
       } catch (err) {
-        console.warn('Failed to enqueue scroll state update:', err);
+        console.warn('Failed to persist scroll state:', err);
       }
     }, CURSOR_STATE_DEBOUNCE);
   } else if (event.data.type === 'cm6-editor-focus') {
@@ -1119,6 +1129,120 @@ function broadcastRecentsUpdate(state) {
   }
   window.dispatchEvent(new CustomEvent('cm6:recents-updated', { detail: state }));
 }
+
+/**
+ * Populate the recents dropdown from state.recents.
+ * Called by broadcastRecentsUpdate whenever editor state changes.
+ */
+window.__cm6RefreshRecents = function(state) {
+  const recents = state?.recents || [];
+  
+  // Clear existing dropdown content
+  recentFilesDD.innerHTML = '';
+  
+  if (!recents.length) {
+    recentFilesBtn.disabled = true;
+    const emptyItem = document.createElement('div');
+    emptyItem.className = 'fe-dd-item fe-dd-item--disabled';
+    emptyItem.textContent = 'No recent files';
+    recentFilesDD.appendChild(emptyItem);
+    return;
+  }
+  
+  recentFilesBtn.disabled = false;
+  
+  recents.forEach((entry) => {
+    const item = document.createElement('div');
+    item.className = 'fe-dd-item';
+    if (!entry.exists) {
+      item.classList.add('fe-dd-item--missing');
+    }
+    
+    const label = entry.label || entry.path || '(unknown)';
+    const path = entry.path || '';
+    
+    // Show label, with path as tooltip
+    item.textContent = formatFileNameDisplay(label);
+    item.title = path;
+    
+    // Store scroll position if available (for per-file scroll restore)
+    const scrollLine = entry.scroll_line || entry.scrollLine || null;
+    
+    item.addEventListener('click', async () => {
+      recentFilesDD.classList.remove('show');
+      if (!entry.exists) {
+        console.warn('[Recents] File does not exist:', path);
+        return;
+      }
+      try {
+        // Open the file
+        await openFile(path);
+        // Jump to stored scroll line if available
+        if (scrollLine && scrollLine > 1) {
+          // Small delay to let the editor initialize
+          setTimeout(() => {
+            jumpToCurrentFileLine(scrollLine, { flash: false });
+          }, 100);
+        }
+      } catch (err) {
+        console.error('[Recents] Failed to open file:', err);
+      }
+    });
+    
+    recentFilesDD.appendChild(item);
+  });
+};
+
+// Synchronize host + iframe when a project is opened in the explorer.
+// Called from explorer.js via window.__cm6HandleProjectOpened(path).
+async function handleProjectOpened(newProjectPath) {
+  // Reset host-side editor/file state so we don't keep editing a file
+  // from the previous project while the backend has already switched.
+  closeWebSocket();
+  if (currentPath) {
+    diffController.invalidateCacheForPath(currentPath);
+  }
+  diffController.setContext(null);
+  currentPath = '';
+  currentPathExists = false;
+  lastSha256 = null;
+  lastSavedContent = '';
+  setText('');
+  markUnsaved(false);
+  updatePathDisplay();
+  syncSessionPath();
+
+  // Refresh state snapshot so cachedProjectRoot, recents, and git base reflect
+  // the new active project.
+  const newState = await syncEditorState(true);
+  
+  // Update recents dropdown with new project's recents
+  broadcastRecentsUpdate(newState);
+  
+  // Refresh branch menu to show new project's branches
+  if (branchMenuHandle && typeof branchMenuHandle.refresh === 'function') {
+    try {
+      branchMenuHandle.refresh();
+    } catch (err) {
+      console.warn('[ProjectSwitch] Failed to refresh branch menu:', err);
+    }
+  }
+
+  // Reload the NiceGUI iframe so editor_page() re-runs under the new project.
+  try {
+    if (editorFrame && editorFrame.contentWindow && editorFrame.contentWindow.location) {
+      editorFrame.contentWindow.location.reload();
+    } else if (editorFrame) {
+      // Fallback: bump src to force a reload.
+      editorFrame.src = editorFrame.src;
+    }
+  } catch (err) {
+    console.warn('[ProjectSwitch] Failed to reload editor iframe:', err);
+  }
+}
+
+// Expose for explorer.js (project:opened handler)
+window.__cm6HandleProjectOpened = handleProjectOpened;
 
 async function syncEditorState(forceRefresh = false) {
   if (!forceRefresh && editorState) {
@@ -1855,6 +1979,218 @@ function showAutosaveModal(fileLabel, hasOtherDrafts) {
   });
 }
 
+// ---------- Projects & Sidecars debug modal ----------
+let projectsDebugModal = null;
+
+function ensureProjectsDebugModal() {
+  if (projectsDebugModal) return projectsDebugModal;
+  const modal = document.createElement('div');
+  modal.id = 'fe-projects-debug-modal';
+  modal.className = 'fe-modal';
+  modal.setAttribute('aria-hidden', 'true');
+  modal.innerHTML = `
+    <div class="fe-modal-card" style="max-width: 640px;">
+      <div class="fe-modal-header">
+        <strong>Projects</strong>
+        <span style="flex:1"></span>
+        <button class="fe-btn" id="fe-projects-debug-close" aria-label="Close">✕</button>
+      </div>
+      <div class="fe-modal-body">
+        <div id="fe-projects-debug-content" style="font-size:0.85rem; line-height:1.5;"></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  projectsDebugModal = {
+    root: modal,
+    contentEl: modal.querySelector('#fe-projects-debug-content'),
+    closeBtn: modal.querySelector('#fe-projects-debug-close'),
+  };
+  projectsDebugModal.closeBtn.addEventListener('click', () => hideProjectsDebugModal());
+  projectsDebugModal.root.addEventListener('click', (evt) => {
+    if (evt.target === projectsDebugModal.root) {
+      hideProjectsDebugModal();
+    }
+  });
+  return projectsDebugModal;
+}
+
+function hideProjectsDebugModal() {
+  if (!projectsDebugModal) return;
+  projectsDebugModal.root.classList.remove('show');
+  projectsDebugModal.root.setAttribute('aria-hidden', 'true');
+}
+
+async function loadProjectsDebugContent() {
+  const modal = ensureProjectsDebugModal();
+  modal.contentEl.textContent = 'Loading recent projects…';
+  try {
+    const resp = await fetch('/api/app/file_editor_cm6/debug/projects', { cache: 'no-store' });
+    const json = await resp.json();
+    if (!resp.ok || json?.ok === false) {
+      throw new Error(json?.error || resp.statusText || 'Request failed');
+    }
+    const items = Array.isArray(json.data) ? json.data.slice() : [];
+    if (!items.length) {
+      modal.contentEl.innerHTML = '<p>No recent projects recorded.</p>';
+      return;
+    }
+
+    // Sort so that the active project (if any) appears first, then by
+    // most recently opened.
+    items.sort((a, b) => {
+      const aActive = !!a.is_active;
+      const bActive = !!b.is_active;
+      if (aActive && !bActive) return -1;
+      if (!aActive && bActive) return 1;
+      const ao = a.opened_at || '';
+      const bo = b.opened_at || '';
+      if (ao > bo) return -1;
+      if (ao < bo) return 1;
+      return 0;
+    });
+
+    const frag = document.createDocumentFragment();
+    items.forEach((entry) => {
+      const row = document.createElement('div');
+      row.className = 'fe-projects-debug-row';
+      if (entry.is_active) {
+        row.classList.add('fe-projects-debug-row--active');
+      }
+
+      const info = document.createElement('div');
+      info.className = 'fe-projects-debug-info';
+
+      const title = document.createElement('div');
+      title.className = 'fe-projects-debug-title';
+      const label = entry.label || '(no label)';
+      const path = entry.path || '(no path)';
+      title.textContent = `${label} — ${path}`;
+
+      const meta = document.createElement('div');
+      meta.className = 'fe-projects-debug-meta';
+      const scPath = entry.sidecar_path || '(no sidecar path)';
+      const exists = entry.sidecar_exists ? 'exists' : 'missing';
+      const session =
+        typeof entry.session_count === 'number'
+          ? `, session_count=${entry.session_count}`
+          : '';
+      const lastBoot = entry.last_boot_at
+        ? `, last_boot_at=${entry.last_boot_at}`
+        : '';
+      const drafts = typeof entry.draft_count === 'number' && entry.draft_count > 0
+        ? `, drafts=${entry.draft_count}`
+        : '';
+      meta.textContent = `State: ${scPath} (${exists}${session}${lastBoot}${drafts})`;
+
+      info.appendChild(title);
+      info.appendChild(meta);
+      row.appendChild(info);
+
+      const actions = document.createElement('div');
+      actions.className = 'fe-projects-debug-trash';
+
+      const trashBtn = document.createElement('button');
+      trashBtn.className = 'fe-btn';
+      trashBtn.textContent = '🗑';
+      trashBtn.title = entry.is_active ? 'Reset project state' : 'Remove project entry and sidecar';
+      trashBtn.addEventListener('click', async (evt) => {
+        evt.stopPropagation();
+        const p = entry.path;
+        if (!p) return;
+        const confirmText = entry.is_active
+          ? [
+              'Reset history and draft cache for the CURRENT project:',
+              p,
+              '',
+              'This does not delete the project folder itself, and the project',
+              'will remain in the list. All recents, diff base, and drafts for',
+              'this project will be cleared.',
+            ].join('\n')
+          : [
+              'Remove project entry and sidecar for:',
+              p,
+              '',
+              'This does not delete the project folder itself, but it will be',
+              'removed from the recent projects list and its drafts will be lost.',
+            ].join('\n');
+        if (!window.confirm(confirmText)) return;
+        try {
+          const respDel = await fetch('/api/app/file_editor_cm6/debug/projects', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: p }),
+          });
+          const jsonDel = await respDel.json().catch(() => ({}));
+          if (!respDel.ok || jsonDel?.ok === false) {
+            throw new Error(jsonDel?.error || respDel.statusText || 'Delete failed');
+          }
+          await loadProjectsDebugContent();
+
+          // If we just soft-reset the CURRENT project, treat this as the user
+          // having just opened a \"fresh\" project: clear host editor state and
+          // let the iframe reload into its null-document state for this project.
+          if (entry.is_active && typeof window.__cm6HandleProjectOpened === 'function') {
+            try {
+              window.__cm6HandleProjectOpened(p);
+              hideProjectsDebugModal();
+            } catch (err) {
+              console.warn('[ProjectsDebug] Failed to resync editor after reset:', err);
+            }
+          }
+        } catch (e) {
+          window.alert(
+            `Failed to delete project entry: ${
+              e && e.message ? e.message : String(e || 'unknown error')
+            }`,
+          );
+        }
+      });
+
+      actions.appendChild(trashBtn);
+      row.appendChild(actions);
+      frag.appendChild(row);
+
+      // Clicking the info area (not the trash) can act as a quick
+      // "open project" shortcut for non-active projects.
+      if (!entry.is_active) {
+        info.style.cursor = 'pointer';
+        info.addEventListener('click', () => {
+          const p = entry.path;
+          if (!p) return;
+          if (
+            !window.confirm(
+              'Any unsaved changes in the current project will be lost. Continue?',
+            )
+          ) {
+            return;
+          }
+          if (typeof window.__explorerBusSend !== 'function') {
+            window.alert('Explorer connection unavailable.');
+            return;
+          }
+          window.__explorerBusSend('project:open', { path: p });
+          hideProjectsDebugModal();
+        });
+      }
+    });
+
+    modal.contentEl.innerHTML = '';
+    modal.contentEl.appendChild(frag);
+  } catch (err) {
+    modal.contentEl.textContent = `Failed to load debug info: ${
+      err && err.message ? err.message : String(err || 'unknown error')
+    }`;
+  }
+}
+
+async function showProjectsDebugModal() {
+  const modal = ensureProjectsDebugModal();
+  modal.root.classList.add('show');
+  modal.root.setAttribute('aria-hidden', 'false');
+  await loadProjectsDebugContent();
+}
+
 // ---------- Picker helpers (shared modal provided by framework) ----------
 function pickerAvailable() {
   return window.teFilePicker && typeof window.teFilePicker.openFile === 'function';
@@ -1995,6 +2331,10 @@ bindMenuToggle(miQuit, () => {
   diffController.setContext(null);
   currentPath=''; currentPathExists=false; lastSha256 = null;
   setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
+});
+
+bindMenuToggle(miDebugProjects, () => {
+  showProjectsDebugModal();
 });
 
 bindMenuToggle(miUndo, () => { if (view && undo) undo(view); });
@@ -2344,6 +2684,9 @@ async function main() {
   agentDrawerHandle = initAgentDrawer();
 
   const serverState = await syncEditorState(true);
+  
+  // Populate recents dropdown on initial load
+  broadcastRecentsUpdate(serverState);
 
   // Load menu state from backend (backend already configured editor at page render)
   await refreshMenuState();

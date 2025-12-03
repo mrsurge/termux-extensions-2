@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .project_sidecar import ProjectSidecar
+
 MAX_RECENT_PROJECTS = 12
 MAX_RECENT_FILES = 12
 
@@ -238,8 +240,18 @@ class HistoryStore:
             return True
 
     def clear_all_files(self, project_path: str) -> bool:
-        """Clear all recent files for a project."""
+        """Clear all recent files for a project — delegates to sidecar."""
         normalized_project = self._normalize_project_path(project_path)
+        
+        # Clear in sidecar (SSOT)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            sidecar.clear_recent_files()
+            sidecar.save()
+        except Exception:
+            pass
+        
+        # Mirror to history.json
         with self._lock:
             projects: Dict[str, Dict[str, object]] = self._data.setdefault("projects", {})
             project_entry = projects.get(normalized_project)
@@ -255,13 +267,100 @@ class HistoryStore:
             return list(self._data.get("recent_projects", []))
 
     def list_files(self, project_path: str) -> List[Dict[str, object]]:
+        """List recent files for a project — sidecar is SSOT with lazy migration."""
         normalized_project = self._normalize_project_path(project_path)
+        
+        # Try sidecar first (SSOT)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            sidecar_files = sidecar.list_recent_files()
+            
+            # Lazy migration: if sidecar has no files but history does, seed it
+            if not sidecar_files:
+                with self._lock:
+                    projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
+                    entry = projects.get(normalized_project)
+                    if entry:
+                        legacy_files = entry.get("files") or []
+                        legacy_last = entry.get("last_file")
+                        if legacy_files:
+                            # Migrate recent_files
+                            for f in reversed(legacy_files):
+                                if f.get("path"):
+                                    sidecar.record_file_activity(f["path"])
+                            # Ensure last_file is set
+                            if legacy_last:
+                                sidecar.set_last_file(legacy_last)
+                            sidecar.save()
+                            return sidecar.list_recent_files()
+            return sidecar_files
+        except Exception:
+            pass
+        
+        # Fallback to history.json
         with self._lock:
             projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
             entry = projects.get(normalized_project)
             if not entry:
                 return []
             return list(entry.get("files") or [])
+
+    def reset_project_history(self, project_path: str) -> bool:
+        """Reset per-project history (files, last_file, diff_base, origin) without
+        removing the project from the global recent list.
+
+        This is used by debug tooling and future \"Clear Project State\" flows
+        to treat an existing project as a fresh one while keeping it visible
+        in the project picker. Also clears the sidecar's recent_files and last_file.
+        """
+        normalized = self._normalize_project_path(project_path)
+        
+        # Clear sidecar's recent files (SSOT)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized)
+            sidecar.clear_recent_files()
+            sidecar.set_diff_base("HEAD")
+            sidecar.save()
+        except Exception:
+            pass
+        
+        with self._lock:
+            projects: Dict[str, Dict[str, object]] = self._data.setdefault("projects", {})
+            entry = projects.get(normalized)
+            if not entry:
+                return False
+
+            entry["files"] = []
+            entry["last_file"] = None
+            entry["diff_base"] = "HEAD"
+            entry.pop("origin", None)
+            self._save_locked()
+            return True
+
+    def remove_project(self, project_path: str) -> bool:
+        """Remove a project from history (recent list + project metadata)."""
+        normalized = self._normalize_project_path(project_path)
+        with self._lock:
+            changed = False
+
+            projects: Dict[str, Dict[str, object]] = self._data.setdefault("projects", {})
+            if normalized in projects:
+                del projects[normalized]
+                changed = True
+
+            recent: List[Dict[str, object]] = self._data.get("recent_projects", [])
+            new_recent = [entry for entry in recent if entry.get("path") != normalized]
+            if len(new_recent) != len(recent):
+                self._data["recent_projects"] = new_recent
+                changed = True
+
+            if self._data.get("active_project") == normalized:
+                self._data["active_project"] = None
+                changed = True
+
+            if changed:
+                self._save_locked()
+            return changed
 
     # ----- state helpers -------------------------------------------------------
 
@@ -291,8 +390,21 @@ class HistoryStore:
             return self._data.get("terminal_shell_id")
 
     def set_last_file(self, project_path: str, file_path: Optional[str]) -> Optional[str]:
+        """Set last opened file — delegates to sidecar as SSOT."""
         normalized_project = self._normalize_project_path(project_path)
         normalized_file = self._normalize_file_path(file_path) if file_path else None
+        
+        # Sidecar is SSOT
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            result = sidecar.set_last_file(normalized_file)
+            if normalized_file:
+                sidecar.record_file_activity(normalized_file)
+            sidecar.save()
+        except Exception:
+            result = normalized_file
+        
+        # Mirror to history.json for compatibility
         with self._lock:
             project_entry = self._touch_project_locked(normalized_project)
             project_entry["last_file"] = normalized_file
@@ -310,12 +422,42 @@ class HistoryStore:
                 )
                 project_entry["files"] = files[:MAX_RECENT_FILES]
             self._save_locked()
-            return normalized_file
+            return result
 
     def get_last_file(self, project_path: Optional[str]) -> Optional[str]:
+        """Get last opened file — sidecar is SSOT with lazy migration from history."""
         if not project_path:
             return None
         normalized_project = self._normalize_project_path(project_path)
+        
+        # Try sidecar first (SSOT)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            sidecar_last = sidecar.get_last_file()
+            
+            # Lazy migration: if sidecar has no last_file but history does, seed it
+            if sidecar_last is None:
+                with self._lock:
+                    projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
+                    entry = projects.get(normalized_project)
+                    if entry:
+                        legacy_last = entry.get("last_file")
+                        legacy_files = entry.get("files") or []
+                        if legacy_last or legacy_files:
+                            # Migrate last_file
+                            if legacy_last:
+                                sidecar.set_last_file(legacy_last)
+                            # Migrate recent_files
+                            for f in reversed(legacy_files):
+                                if f.get("path"):
+                                    sidecar.record_file_activity(f["path"])
+                            sidecar.save()
+                            return sidecar.get_last_file()
+            return sidecar_last
+        except Exception:
+            pass
+        
+        # Fallback to history.json
         with self._lock:
             projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
             entry = projects.get(normalized_project)
@@ -328,6 +470,16 @@ class HistoryStore:
         value = (ref or 'HEAD').strip() or 'HEAD'
         timestamp = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
         print(f"[{timestamp}] [HistoryStore] set_diff_base project={normalized_project!r} ref={value!r}", flush=True)
+
+        # Persist diff base in the per-project sidecar first.
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            sidecar.set_diff_base(value)
+            sidecar.save()
+        except Exception:
+            # Sidecar failures should not prevent history_store.json from updating.
+            pass
+
         with self._lock:
             project_entry = self._touch_project_locked(normalized_project)
             project_entry["diff_base"] = value
@@ -339,15 +491,33 @@ class HistoryStore:
             return 'HEAD'
         normalized_project = self._normalize_project_path(project_path)
         timestamp = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
-        # print(f"[{timestamp}] [HistoryStore] get_diff_base project={normalized_project!r}", flush=True)
+        # Prefer sidecar as the SSOT for diff base when available.
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            val = (sidecar.get_diff_base() or 'HEAD').strip() or 'HEAD'
+            print(
+                f"[{timestamp}] [HistoryStore] get_diff_base (sidecar) found {val!r} for {normalized_project!r}",
+                flush=True,
+            )
+            return val
+        except Exception:
+            pass
+
+        # Fallback to historical data if sidecar is unavailable.
         with self._lock:
             projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
             entry = projects.get(normalized_project)
             if not entry:
-                print(f"[{timestamp}] [HistoryStore] get_diff_base entry NOT FOUND for {normalized_project!r}", flush=True)
+                print(
+                    f"[{timestamp}] [HistoryStore] get_diff_base entry NOT FOUND for {normalized_project!r}",
+                    flush=True,
+                )
                 return 'HEAD'
             val = (entry.get("diff_base") or 'HEAD').strip() or 'HEAD'
-            print(f"[{timestamp}] [HistoryStore] get_diff_base found {val!r} for {normalized_project!r}", flush=True)
+            print(
+                f"[{timestamp}] [HistoryStore] get_diff_base (history) found {val!r} for {normalized_project!r}",
+                flush=True,
+            )
             return val
 
     def set_project_origin(self, project_path: str, origin: Optional[str]) -> None:
@@ -366,24 +536,67 @@ class HistoryStore:
             entry = projects.get(normalized_project)
             return entry.get("origin") if entry else None
 
-    def record_file_activity(self, project_path: str, file_path: str) -> Dict[str, object]:
+    def record_file_activity(self, project_path: str, file_path: str, scroll_line: Optional[float] = None) -> Dict[str, object]:
+        """Record file open — delegates to sidecar as SSOT, mirrors to history.json.
+        
+        Args:
+            project_path: The project containing the file.
+            file_path: The file being opened/accessed.
+            scroll_line: Optional scroll position (line number) to persist for this file.
+        """
         normalized_project = self._normalize_project_path(project_path)
         normalized_file = self._normalize_file_path(file_path)
+        
+        # Sidecar is SSOT
+        entry = None
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            entry = sidecar.record_file_activity(normalized_file, scroll_line=scroll_line)
+            sidecar.save()
+        except Exception:
+            pass
+        
+        # Mirror to history.json for compatibility
         with self._lock:
             project_entry = self._touch_project_locked(normalized_project)
             project_entry["last_file"] = normalized_file
             files: List[Dict[str, object]] = project_entry.setdefault("files", [])
-            files = [entry for entry in files if entry.get("path") != normalized_file]
+            files = [e for e in files if e.get("path") != normalized_file]
             timestamp = _utc_timestamp()
-            entry = {
-                "path": normalized_file,
-                "label": _project_label(normalized_file),
-                "opened_at": timestamp,
-            }
+            if entry is None:
+                entry = {
+                    "path": normalized_file,
+                    "label": _project_label(normalized_file),
+                    "opened_at": timestamp,
+                }
             files.insert(0, entry)
             project_entry["files"] = files[:MAX_RECENT_FILES]
             self._save_locked()
             return entry
+
+    def update_file_scroll_line(self, project_path: str, file_path: str, scroll_line: float) -> bool:
+        """Update just the scroll_line for a file in the project's recent files.
+        
+        Returns True if the file was found and updated.
+        """
+        normalized_project = self._normalize_project_path(project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            updated = sidecar.update_file_scroll_line(file_path, scroll_line)
+            if updated:
+                sidecar.save()
+            return updated
+        except Exception:
+            return False
+
+    def get_file_scroll_line(self, project_path: str, file_path: str) -> Optional[float]:
+        """Get the stored scroll_line for a specific file in a project."""
+        normalized_project = self._normalize_project_path(project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            return sidecar.get_file_scroll_line(file_path)
+        except Exception:
+            return None
 
     @staticmethod
     def format_label(path: Optional[str]) -> str:
@@ -407,23 +620,16 @@ class HistoryStore:
             self._save_locked()
             return dict(state)
 
-    # ----- session cache public API (new) ------------------------------------
+    # ----- session cache public API (delegates to ProjectSidecar) -----------
 
     def get_cached_document(self, project_path: str, file_path: str) -> Optional[Dict[str, object]]:
-        """Retrieve cached session for a document from its sidecar file."""
-        cache_key = self._normalize_cache_key(project_path, file_path)
-        with self._lock:
-            cache: Dict[str, Dict] = self._data.setdefault("session_cache", {})
-            # Read from sidecar, which is the source of truth
-            entry = self._read_sidecar(cache_key)
-            if entry:
-                cache[cache_key] = entry  # Update in-memory copy
-                return dict(entry)
-            elif cache_key in cache:
-                # Entry is in memory but not on disk; must have been deleted. Clean up.
-                del cache[cache_key]
-                self._save_locked()
-        return None
+        """Retrieve cached session for a document from the per-project sidecar."""
+        normalized_project = self._normalize_project_path(project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            return sidecar.get_cached_document(file_path)
+        except Exception:
+            return None
 
     def upsert_cached_document(
         self,
@@ -437,77 +643,73 @@ class HistoryStore:
         launcher_pid: int,
         worker_pid: int,
     ) -> Dict[str, object]:
-        """Update or insert cached session entry and write to sidecar."""
-        cache_key = self._normalize_cache_key(project_path, file_path)
-        content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
-        unsaved = (content_sha256 != base_sha256)
-        
-        print(f"[HISTORY_STORE] upsert {file_path}: base={base_sha256} content={content_sha256} unsaved={unsaved}", file=sys.stderr)
+        """Update or insert cached session entry via the per-project sidecar."""
+        normalized_project = self._normalize_project_path(project_path)
+        content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        unsaved = content_sha256 != base_sha256
 
-        entry = {
-            "project_path": self._normalize_project_path(project_path),
-            "file_path": self._normalize_file_path(file_path),
-            "content": content,
-            "content_length": len(content),
-            "content_sha256": content_sha256,
-            "base_sha256": base_sha256,
-            "unsaved": unsaved,
-            "run_id": run_id,
-            "shell_id": shell_id,
-            "shell_run_id": shell_run_id,
-            "launcher_pid": launcher_pid,
-            "worker_pid": worker_pid,
-            "updated_at": _utc_timestamp(),
-        }
+        print(
+            f"[HISTORY_STORE] upsert {file_path}: base={base_sha256} "
+            f"content={content_sha256} unsaved={unsaved}",
+            file=sys.stderr,
+        )
 
-        with self._lock:
-            self._write_sidecar(cache_key, entry)
-            cache: Dict[str, Dict] = self._data.setdefault("session_cache", {})
-            cache[cache_key] = entry
-            self._save_locked()
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            entry = sidecar.upsert_cached_document(
+                file_path=file_path,
+                content=content,
+                base_sha256=base_sha256,
+                run_id=run_id,
+                shell_id=shell_id,
+                shell_run_id=shell_run_id,
+                launcher_pid=launcher_pid,
+                worker_pid=worker_pid,
+            )
+            sidecar.save()
+            return dict(entry)
+        except Exception:
+            # Fall back to returning an in-memory representation only.
+            entry = {
+                "project_path": normalized_project,
+                "file_path": self._normalize_file_path(file_path),
+                "content": content,
+                "content_length": len(content),
+                "content_sha256": content_sha256,
+                "base_sha256": base_sha256,
+                "unsaved": unsaved,
+                "run_id": run_id,
+                "shell_id": shell_id,
+                "shell_run_id": shell_run_id,
+                "launcher_pid": launcher_pid,
+                "worker_pid": worker_pid,
+                "updated_at": _utc_timestamp(),
+            }
             return dict(entry)
 
     def clear_cached_document(self, project_path: str, file_path: str) -> bool:
-        """Remove cached session entry and its sidecar file."""
-        cache_key = self._normalize_cache_key(project_path, file_path)
-        with self._lock:
-            self._delete_sidecar(cache_key)
-            cache: Dict[str, Dict] = self._data.setdefault("session_cache", {})
-            existed = cache_key in cache
+        """Remove cached session entry for a document from the per-project sidecar."""
+        normalized_project = self._normalize_project_path(project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            existed = sidecar.clear_cached_document(file_path)
             if existed:
-                del cache[cache_key]
-                self._save_locked()
+                sidecar.save()
             return existed
+        except Exception:
+            return False
 
     def list_project_drafts(self, project_path: str) -> List[Dict[str, object]]:
-        """List all cached drafts for the given project from disk sidecars."""
+        """List all cached drafts for the given project from its sidecar."""
         normalized_project = self._normalize_project_path(project_path)
-        disk_results = []
-        
-        # Scan disk sidecars
         try:
-            for sidecar in self._session_cache_dir.glob("*.json"):
-                try:
-                    content = sidecar.read_text(encoding='utf-8')
-                    data = json.loads(content)
-                    if data.get("project_path") == normalized_project and data.get("unsaved"):
-                        disk_results.append(data)
-                except Exception:
-                    continue
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            return sidecar.list_project_drafts()
         except Exception:
-            pass
-            
-        return disk_results
+            return []
 
     def list_cached_documents(self, project_path: Optional[str] = None) -> List[Dict[str, object]]:
-        """List all cached sessions, optionally filtered by project."""
-        # This is a stub for future phases. For now, it lists what's in memory.
-        with self._lock:
-            cache: Dict[str, Dict] = self._data.get("session_cache", {})
-            results = []
-            for cache_key, entry in cache.items():
-                # In a real implementation, we'd need to store project/file path with the entry
-                # For now, this is non-functional as we only have the key.
-                # This is acceptable for Phase 1.
-                pass
-            return results
+        """List cached sessions (currently returns drafts for the given project)."""
+        if not project_path:
+            return []
+        return self.list_project_drafts(project_path)

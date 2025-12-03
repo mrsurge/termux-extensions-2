@@ -47,6 +47,7 @@ from .git_helper import (
     GitError,
 )
 from .stores import _history_store
+from .project_sidecar import ProjectSidecar
 from .explorer import search, review
 
 # Logger setup
@@ -125,6 +126,38 @@ import asyncio
 from threading import Timer
 
 _explorer_event_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def reset_project_session(new_project_path: str) -> None:
+    """Set the active project on explicit project switch.
+
+    This is called from explorer flows (open/create/clone) whenever the user
+    selects a new project root.
+
+    IMPORTANT (Phase 6 change):
+    - We NO LONGER clear session_cache (drafts) or tracked_jobs here.
+    - Drafts persist per-project and are only cleared via explicit user actions:
+      - Review tab "Discard"
+      - Projects modal soft reset (for active project)
+      - Projects modal hard delete (for non-active projects)
+    - This allows multi-project draft retention: switching away from a project
+      and back again preserves any unsaved changes in that project's sidecar.
+
+    NOTE:
+    - We intentionally do NOT manipulate session_count here. The counter is
+      strictly informational (number of boots).
+    """
+    from pathlib import Path
+
+    normalized_path = str(Path(new_project_path).expanduser().resolve())
+    # Update active project in the history store (SSOT for active project)
+    _history_store.set_active_project(normalized_path)
+
+    # Ensure sidecar exists for the project (lazy create)
+    sidecar = ProjectSidecar.load_or_create(normalized_path)
+    # NOTE: We intentionally do NOT clear session_cache or tracked_jobs here.
+    # Drafts and jobs persist across project switches.
+    sidecar.save()
 
 # Debounce explorer refreshes to avoid flooding
 _explorer_refresh_timers: Dict[str, Timer] = {}
@@ -392,6 +425,12 @@ class ExplorerDispatcher:
                         # Clean up tracking when job completes
                         if job_status in ("succeeded", "failed", "cancelled"):
                             self._tracked_job_ids.discard(job_id)
+                            try:
+                                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
+                                sidecar.remove_tracked_job(job_id)
+                                sidecar.save()
+                            except Exception:
+                                pass
                             
                             # On clone success, refresh to pick up git status
                             if job_type == "git_clone" and job_status == "succeeded":
@@ -721,6 +760,12 @@ class ExplorerDispatcher:
             logger.info(f"[GIT_PUSH] Created job {job.id}, tracking it")
             # Track this job so we forward its progress events
             self._tracked_job_ids.add(job.id)
+            try:
+                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
+                sidecar.add_tracked_job(job.id)
+                sidecar.save()
+            except Exception:
+                pass
             # Acknowledge job creation - progress will come via job:progress events
             await self.emit_personal("git:pushStarted", {"job_id": job.id}, msg_id)
         except Exception as e:
@@ -739,6 +784,12 @@ class ExplorerDispatcher:
             })
             # Track this job so we forward its progress events
             self._tracked_job_ids.add(job.id)
+            try:
+                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
+                sidecar.add_tracked_job(job.id)
+                sidecar.save()
+            except Exception:
+                pass
             # Acknowledge job creation - progress will come via job:progress events
             await self.emit_personal("git:pullStarted", {"job_id": job.id}, msg_id)
         except Exception as e:
@@ -788,11 +839,11 @@ class ExplorerDispatcher:
         # We need to unregister from old project and register to new one.
         
         old_project = str(self.project_root)
-        manager.disconnect(self.websocket) # Disconnect from old
-        
+        manager.disconnect(self.websocket)  # Disconnect from old
+
         new_root = set_project_root(path)
-        _history_store.touch_project(str(new_root))
-        _history_store.set_active_project(str(new_root))
+        # Persist active project + reset per-project session state
+        reset_project_session(str(new_root))
         self.project_root = new_root
         
         # Register to new
@@ -853,8 +904,8 @@ class ExplorerDispatcher:
             
             new_root = set_project_root(str(target))
             init_watcher(new_root)  # Start watching the new directory
-            _history_store.touch_project(str(new_root))
-            _history_store.set_active_project(str(new_root))
+            # Persist active project + reset per-project session state
+            reset_project_session(str(new_root))
             self.project_root = new_root
             
             manager.register_existing(self.websocket, str(new_root))
@@ -875,6 +926,12 @@ class ExplorerDispatcher:
             # Track this job so we forward its progress events
             # NOTE: Race condition possible - job may emit before we track
             self._tracked_job_ids.add(job.id)
+            try:
+                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
+                sidecar.add_tracked_job(job.id)
+                sidecar.save()
+            except Exception:
+                pass
             
             # Acknowledge job creation - progress will come via job:progress events
             await self.emit_personal("git:cloneStarted", {"job_id": job.id, "target_path": str(target)}, msg_id)
