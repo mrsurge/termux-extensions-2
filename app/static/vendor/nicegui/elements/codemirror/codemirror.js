@@ -1324,7 +1324,6 @@ export default {
           this.dom = document.createElement("div");
           this.dom.className = "cm-stickyHeader";
           this.currentScopes = [];
-          this.lastScrollTop = -1;
           
           // Append to editor DOM (works inside iframe)
           view.dom.appendChild(this.dom);
@@ -1334,9 +1333,10 @@ export default {
             const target = e.target.closest('.cm-sticky-line');
             if (target && this.currentScopes.length > 0) {
               const index = parseInt(target.dataset.index, 10);
-              if (!isNaN(index) && this.currentScopes[index]) {
+              const scope = this.currentScopes[index];
+              if (!isNaN(index) && scope && scope.node) {
                 view.dispatch({
-                  selection: { anchor: this.currentScopes[index].node.from },
+                  selection: { anchor: scope.node.from },
                   scrollIntoView: true,
                 });
                 view.focus();
@@ -1367,106 +1367,83 @@ export default {
           this.dom.style.right = '0';
 
           const lineHeight = view.defaultLineHeight;
-          
-          // ============================================================================
-          // KEY INSIGHT: We need to detect scopes BELOW the current overlay
-          // 
-          // When the overlay has N lines, the "visible top" is actually at:
-          //   scrollTop + (N * lineHeight)
-          // 
-          // So we sample the document position at that adjusted height to find
-          // what scopes are "about to be covered" by the overlay.
-          // ============================================================================
-          
-          // Get current overlay height (from previous render)
-          const currentOverlayHeight = this.dom.offsetHeight || 0;
-          
-          // The effective "top of visible content" is below the overlay
-          const effectiveScrollTop = scrollTop + currentOverlayHeight;
-          
-          // Find the document position at the effective top
-          let pos;
-          try {
-            const topBlock = view.lineBlockAtHeight(effectiveScrollTop);
-            pos = topBlock.from;
-          } catch (e) {
-            pos = view.viewport.from;
-          }
 
-          // Get syntax tree
+          // ---------------------------------------------------------------------------
+          // 1) Compute reference line below the current overlay
+          //    Note: add a full lineHeight to bias slightly earlier capture.
+          // ---------------------------------------------------------------------------
+          const overlayHeight = this.dom.offsetHeight || 0;
+          const effectiveTop = scrollTop + overlayHeight + lineHeight;
+          let refPos;
+          try {
+            const block = view.lineBlockAtHeight(effectiveTop);
+            refPos = block.from;
+          } catch {
+            refPos = view.viewport.from;
+          }
+          const refLine = state.doc.lineAt(refPos).number;
+
+          // ---------------------------------------------------------------------------
+          // 2) Build scope hierarchy at refPos (outer → inner)
+          // ---------------------------------------------------------------------------
           const tree = CM.syntaxTree(state);
           if (!tree || !tree.topNode) {
-            this.dom.innerHTML = '';
+            if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
             this.currentScopes = [];
             return;
           }
 
-          // ============================================================================
-          // SCOPE COLLECTION: Walk up from the effective viewport position
-          // ============================================================================
           const scopeTypes = getScopeTypes();
-          const scopes = [];
-          
-          let node = tree.resolveInner(pos);
+          const ancestorNodes = [];
+          let node = tree.resolveInner(refPos);
           for (; node; node = node.parent) {
             if (scopeTypes.has(node.name)) {
-              scopes.push(node);
+              ancestorNodes.push(node);
             }
           }
-          // Reverse so outermost scope is first
-          scopes.reverse();
+          ancestorNodes.reverse(); // depth 0 = outermost
 
-          // ============================================================================
-          // FILTERING: For each scope, check if its definition is above its "slot"
-          // 
-          // The slot for depth N is at: scrollTop + (N * lineHeight)
-          // A scope should appear when its definition line's TOP is above its slot
-          // ============================================================================
-          const filteredScopes = [];
+          const scopes = ancestorNodes.map((n, depth) => {
+            const startLine = state.doc.lineAt(n.from).number;
+            const endLine = state.doc.lineAt(n.to).number;
+            const text = state.doc.lineAt(n.from).text;
+            // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
+            const offset = -(depth + 2);
+            const triggerLine = startLine + offset;
+            return { node: n, depth, startLine, endLine, text, triggerLine };
+          });
+
+          // ---------------------------------------------------------------------------
+          // 3) Decide active scopes based on refLine and per-depth triggerLine
+          //    Condition: triggerLine < refLine <= endLine
+          // ---------------------------------------------------------------------------
           const MAX_STICKY_LINES = 5;
+          const activeScopes = [];
+          for (const scope of scopes) {
+            if (activeScopes.length >= MAX_STICKY_LINES) break;
 
-          for (let depth = 0; depth < scopes.length && filteredScopes.length < MAX_STICKY_LINES; depth++) {
-            const scopeNode = scopes[depth];
-            try {
-              const defBlock = view.lineBlockAt(scopeNode.from);
-              const endBlock = view.lineBlockAt(scopeNode.to);
-              
-              // The slot position for this depth (absolute, not relative)
-              const slotY = scrollTop + (depth * lineHeight);
-              
-              // Check if:
-              // 1. The definition line's top is ABOVE (or at) the slot position
-              // 2. The scope's end is BELOW the slot position (we're still inside)
-              const defTopAboveSlot = defBlock.top <= slotY;
-              const endBelowSlot = endBlock.bottom > slotY;
-              
-              if (defTopAboveSlot && endBelowSlot) {
-                const defLine = state.doc.lineAt(scopeNode.from);
-                filteredScopes.push({
-                  node: scopeNode,
-                  lineText: defLine.text
-                });
-              }
-            } catch (e) {
-              // lineBlockAt can throw for positions outside rendered range
+            // If we haven't reached this scope's trigger yet, no deeper scopes should be active.
+            if (refLine <= scope.triggerLine) {
+              break;
+            }
+
+            // Once past trigger, keep it active until refLine moves beyond scope end.
+            if (refLine <= scope.endLine) {
+              activeScopes.push(scope);
             }
           }
 
-          this.currentScopes = filteredScopes;
+          this.currentScopes = activeScopes;
 
-          // ============================================================================
-          // RENDER
-          // ============================================================================
-          const displayScopes = filteredScopes.slice(0, MAX_STICKY_LINES);
-          if (displayScopes.length === 0) {
-            if (this.dom.innerHTML !== '') {
-              this.dom.innerHTML = '';
-            }
+          // ---------------------------------------------------------------------------
+          // 4) Render overlay from activeScopes
+          // ---------------------------------------------------------------------------
+          if (activeScopes.length === 0) {
+            if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
           } else {
-            const newHtml = displayScopes.map((scope, idx) => 
-              `<div class="cm-sticky-line" data-index="${idx}">${escapeHtml(scope.lineText)}</div>`
+            const newHtml = activeScopes.map((scope, idx) =>
+              `<div class="cm-sticky-line" data-index="${idx}">${escapeHtml(scope.text)}</div>`
             ).join('');
-            
             if (this.dom.innerHTML !== newHtml) {
               this.dom.innerHTML = newHtml;
             }
