@@ -1359,6 +1359,7 @@ export default {
           const view = this.view;
           const state = view.state;
           const scrollTop = view.scrollDOM.scrollTop;
+          const previousScopes = this.currentScopes || [];
           
           // Get gutter width to position overlay beside it
           const gutterEl = view.dom.querySelector('.cm-gutters');
@@ -1416,7 +1417,9 @@ export default {
             // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
             const offset = -(depth + 2);
             const triggerLine = startLine + offset;
-            return { node: n, depth, startLine, endLine, text, triggerLine };
+            // Apply the same offset to the effective end so scopes hand off cleanly
+            const endTriggerLine = Math.max(startLine, endLine + offset);
+            return { node: n, depth, startLine, endLine, text, triggerLine, endTriggerLine };
           });
 
           // ---------------------------------------------------------------------------
@@ -1433,9 +1436,31 @@ export default {
               break;
             }
 
-            // Once past trigger, keep it active until refLine moves beyond scope end.
-            if (refLine <= scope.endLine) {
+            // Active between triggerLine and endTriggerLine (early capture and early release).
+            if (refLine > scope.triggerLine && refLine <= scope.endTriggerLine) {
               activeScopes.push(scope);
+            }
+          }
+
+          // ---------------------------------------------------------------------------
+          // 3b) Persistence for nested scopes:
+          //     Keep deeper sticky lines from the previous state until a new
+          //     scope at that depth (or a changed top-level owner) replaces them.
+          //     This mimics Monaco's behavior where inner scopes don't jitter
+          //     off as soon as their own window closes; they stay until consumed.
+          // ---------------------------------------------------------------------------
+          if (activeScopes.length > 0 && previousScopes.length > activeScopes.length) {
+            const currentTop = activeScopes[0];
+            const previousTop = previousScopes[0];
+            const sameTopOwner = currentTop && previousTop && currentTop.node === previousTop.node;
+
+            if (sameTopOwner) {
+              for (let depth = activeScopes.length; depth < Math.min(previousScopes.length, MAX_STICKY_LINES); depth++) {
+                const prevScope = previousScopes[depth];
+                if (prevScope) {
+                  activeScopes.push(prevScope);
+                }
+              }
             }
           }
 
@@ -1446,18 +1471,46 @@ export default {
           // ---------------------------------------------------------------------------
           if (activeScopes.length === 0) {
             if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
-          } else {
-            const newHtml = activeScopes.map((scope, idx) =>
-              `<div class="cm-sticky-line" data-index="${idx}">${escapeHtml(scope.text)}</div>`
-            ).join('');
-            if (this.dom.innerHTML !== newHtml) {
-              this.dom.innerHTML = newHtml;
-            }
+            // When there is no overlay, pin it at the top and reset height memory.
+            this.dom.style.top = '0px';
+            this.lastOverlayHeight = 0;
+            return;
           }
+
+          const newHtml = activeScopes.map((scope, idx) =>
+            `<div class="cm-sticky-line" data-index="${idx}">${escapeHtml(scope.text)}</div>`
+          ).join('');
+          if (this.dom.innerHTML !== newHtml) {
+            this.dom.innerHTML = newHtml;
+          }
+
+          // ---------------------------------------------------------------------------
+          // 5) Push-up effect (Monaco-style): as the innermost scope's end approaches
+          //    the bottom of the sticky stack, slide the whole overlay up so it
+          //    appears attached to the end of that scope instead of overlapping it.
+          // ---------------------------------------------------------------------------
+          const innermost = activeScopes[activeScopes.length - 1];
+          const measuredHeight = this.dom.offsetHeight || 0;
+          const headerHeight = measuredHeight || (activeScopes.length * lineHeight);
+
+          let topOffset = 0;
+          try {
+            const endLineBlock = view.lineBlockAt(innermost.node.to);
+            // Convert end-of-scope bottom to viewport coordinates
+            const endBottomViewport = endLineBlock.bottom - scrollTop;
+            const stackBottomViewport = headerHeight;
+            if (endBottomViewport < stackBottomViewport) {
+              topOffset = endBottomViewport - stackBottomViewport;
+            }
+          } catch (e) {
+            // If geometry lookup fails, keep header pinned at the top.
+          }
+
+          this.dom.style.top = `${topOffset}px`;
 
           // Remember overlay height for the next sampling pass so that
           // detection uses a stable value and avoids jitter at boundaries.
-          this.lastOverlayHeight = this.dom.offsetHeight || 0;
+          this.lastOverlayHeight = headerHeight;
         }
         
         update(update) {
