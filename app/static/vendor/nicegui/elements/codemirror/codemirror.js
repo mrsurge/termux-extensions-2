@@ -1250,12 +1250,14 @@ export default {
         javascript: new Set([
           "FunctionDeclaration", "FunctionExpression", "ArrowFunction",
           "MethodDeclaration", "MethodDefinition", 
-          "ClassDeclaration", "ClassExpression"
+          "ClassDeclaration", "ClassExpression",
+          "ExportDefault", "ExportDefaultDeclaration", "ExportDeclaration", "export"
         ]),
         typescript: new Set([
           "FunctionDeclaration", "FunctionExpression", "ArrowFunction",
           "MethodDeclaration", "MethodDefinition",
           "ClassDeclaration", "ClassExpression",
+          "ExportDefault", "ExportDefaultDeclaration", "ExportDeclaration", "export",
           "InterfaceDeclaration", "TypeAliasDeclaration", "EnumDeclaration"
         ]),
         python: new Set([
@@ -1273,6 +1275,20 @@ export default {
       const getScopeTypes = () => {
         const lang = (this.language || 'default').toLowerCase();
         return SCOPE_NODE_TYPES[lang] || SCOPE_NODE_TYPES.default;
+      };
+
+      // Decide if a node counts as a scope header.
+      const isScopeNode = (node, scopeTypes) => {
+        if (scopeTypes.has(node.name)) return true;
+        const lname = node.name ? node.name.toLowerCase() : '';
+        // Treat any default export wrapper as a scope
+        if (lname.includes('export') && lname.includes('default')) return true;
+        // Capture `export default { ... }` object literals as top-level scopes.
+        if (node.name === 'ObjectExpression' && node.parent) {
+          const pl = node.parent.name ? node.parent.name.toLowerCase() : '';
+          if (pl.includes('export') && pl.includes('default')) return true;
+        }
+        return false;
       };
 
       // Escape HTML for safe rendering
@@ -1372,8 +1388,12 @@ export default {
           this.lastTopOffset = 0;
           // Track last rendered scope signature so we only log on changes.
           this.lastActiveSignature = '';
+          // Track last render key to skip redundant DOM rebuilds
+          this.lastRenderKey = '';
           // Track last scrollTop to infer scroll direction
           this.lastScrollTop = view.scrollDOM.scrollTop || 0;
+          // rAF tail to ensure a follow-up pass if layout lags
+          this.rafPending = false;
           
           // Append to editor DOM (works inside iframe)
           view.dom.appendChild(this.dom);
@@ -1395,7 +1415,16 @@ export default {
           });
           
           // Direct scroll listener for immediate response
-          this.scrollHandler = () => this.updateStickyHeader();
+          this.scrollHandler = () => {
+            this.updateStickyHeader();
+            if (!this.rafPending) {
+              this.rafPending = true;
+              requestAnimationFrame(() => {
+                this.rafPending = false;
+                this.updateStickyHeader();
+              });
+            }
+          };
           view.scrollDOM.addEventListener('scroll', this.scrollHandler, { passive: true });
           
           // Initial render
@@ -1551,7 +1580,7 @@ export default {
           const ancestorNodes = [];
           let node = tree.resolveInner(refPos);
           for (; node; node = node.parent) {
-            if (scopeTypes.has(node.name)) {
+            if (isScopeNode(node, scopeTypes)) {
               ancestorNodes.push(node);
             }
           }
@@ -1642,10 +1671,11 @@ export default {
             this.lastOverlayHeight = activeScopes.length * lineHeight;
           }
 
-          // Debug: log when the active scope set changes (appears/disappears)
+          // Debug logging (disabled by default); flip to true for diagnostics
+          const DEBUG_STICKY = false;
+          const signature = activeScopes.map((s) => `${s.depth}:${s.startLine}-${s.endLine}`).join('|');
           try {
-            const signature = activeScopes.map((s) => `${s.depth}:${s.startLine}-${s.endLine}`).join('|');
-            if (signature !== this.lastActiveSignature) {
+            if (DEBUG_STICKY && signature !== this.lastActiveSignature) {
               console.log('[StickyScroll] active change', {
                 refLine,
                 scrollTop,
@@ -1659,11 +1689,12 @@ export default {
                   endTrigger: s.endTriggerLine,
                 })),
               });
-              this.lastActiveSignature = signature;
             }
           } catch (e) {
             // Logging should never break rendering
           }
+          // Always update the last signature so renderKey reflects real state
+          this.lastActiveSignature = signature;
 
           // ---------------------------------------------------------------------------
           // 4) Render overlay from activeScopes
@@ -1735,7 +1766,7 @@ export default {
           if (Math.abs(topOffset - this.lastTopOffset) < epsilon) {
             topOffset = this.lastTopOffset;
           }
-          if (topOffset !== this.lastTopOffset) {
+          if (DEBUG_STICKY && topOffset !== this.lastTopOffset) {
             try {
               const endLine = state.doc.lineAt(innermost.node.to);
               const endBottomViewport = view.lineBlockAt(endLine.to).bottom - scrollTop;
@@ -1750,14 +1781,20 @@ export default {
           }
           this.lastTopOffset = topOffset;
 
-          // Adjust container height when lines slide; when only one line remains,
-          // shrink with it so no blank row is left behind.
-          const isSingle = activeScopes.length === 1;
-          const effectiveHeight = Math.max(0, isSingle ? lineHeight + topOffset : headerHeight + topOffset);
+          // Adjust container height to the sum of row heights:
+          // all but the innermost keep full line height; innermost can shrink when sliding.
+          const lastHeight = Math.max(0, lineHeight + topOffset);
+          const effectiveHeight = (activeScopes.length - 1) * lineHeight + lastHeight;
           this.dom.style.height = `${effectiveHeight}px`;
 
           // Build one overlay layer per scope (separate stacking). Only the
           // innermost layer is translated for push-up; others stay pinned.
+          const renderKey = `${signature}|${topOffset.toFixed(3)}|${effectiveHeight.toFixed(3)}`;
+          if (renderKey === this.lastRenderKey) {
+            return;
+          }
+          this.lastRenderKey = renderKey;
+
           this.dom.innerHTML = '';
           const lastIndex = activeScopes.length - 1;
           activeScopes.forEach((scope, idx) => {
@@ -1770,8 +1807,7 @@ export default {
             layer.style.setProperty('--cm-sticky-line-height', `${lineHeight}px`);
             layer.style.transform = idx === lastIndex ? `translateY(${topOffset}px)` : 'translateY(0)';
             if (idx === lastIndex) {
-              const layerHeight = Math.max(0, lineHeight + topOffset);
-              layer.style.height = `${layerHeight}px`;
+              layer.style.height = `${lastHeight}px`;
             } else {
               layer.style.height = `${lineHeight}px`;
             }
