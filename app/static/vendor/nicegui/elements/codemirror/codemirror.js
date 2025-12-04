@@ -1292,15 +1292,16 @@ export default {
           lineHeight: "1.4",
           zIndex: "10",
           pointerEvents: "auto",
+          // Soft shadow under the bottom-most overlay line
+          boxShadow: "0 6px 8px rgba(0,0,0,0.35)",
         },
         ".cm-stickyHeader:empty": {
           display: "none",
         },
         ".cm-sticky-line": {
-          padding: "1px 8px 1px 4px",
-          whiteSpace: "pre",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
+          padding: "1px 0 1px 0",
+          display: "flex",
+          alignItems: "center",
           cursor: "pointer",
           borderLeft: "2px solid transparent",
         },
@@ -1308,7 +1309,30 @@ export default {
           backgroundColor: "rgba(255,255,255,0.05)",
           borderLeftColor: "#007acc",
         },
-        // Nested scopes rely on their own code indentation; no extra padding.
+        ".cm-sticky-gutter": {
+          display: "flex",
+          flex: "0 0 auto",
+          textAlign: "right",
+          padding: "0 8px 0 4px",
+          opacity: "0.75",
+          fontVariantNumeric: "tabular-nums",
+          color: "var(--cm-gutter-foreground, #858585)",
+          boxSizing: "border-box",
+          borderRight: "1px solid rgba(255,255,255,0.08)",
+        },
+        ".cm-sticky-gutter-segment": {
+          flex: "0 0 auto",
+          textAlign: "right",
+          paddingRight: "4px",
+          boxSizing: "border-box",
+        },
+        ".cm-sticky-content": {
+          flex: "1 1 auto",
+          padding: "0 8px 0 4px",
+          whiteSpace: "pre",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        },
       });
 
       // ============================================================================
@@ -1394,13 +1418,30 @@ export default {
           const state = view.state;
           const scrollTop = view.scrollDOM.scrollTop;
           
-          // Get gutter width to position overlay beside it
-          const gutterEl = view.dom.querySelector('.cm-gutters');
-          const gutterWidth = gutterEl ? gutterEl.offsetWidth : 0;
-          
-          // Position absolute overlay to the right of gutter
+          // Get gutter container and child gutter segments (line numbers, folds, etc.)
+          const gutterRoot = view.dom.querySelector('.cm-gutters');
+          const gutterWidth = gutterRoot ? gutterRoot.offsetWidth : 0;
+          const gutterChildren = gutterRoot ? Array.from(gutterRoot.children) : [];
+          const gutterSegmentWidths = gutterChildren.map((child) => child.offsetWidth || 0);
+          const lineNumberGutter = gutterChildren.find((el) =>
+            el.classList && el.classList.contains('cm-lineNumbers')
+          ) || gutterChildren[0] || null;
+          // Sync font size with the line-number gutter if possible
+          if (lineNumberGutter) {
+            try {
+              const gutterStyle = window.getComputedStyle(lineNumberGutter);
+              if (gutterStyle && gutterStyle.fontSize) {
+                this.dom.style.fontSize = gutterStyle.fontSize;
+              }
+            } catch (e) {
+              // Ignore style lookup failures
+            }
+          }
+
+          // Position absolute overlay spanning the entire content area,
+          // including a synthetic gutter on the left.
           this.dom.style.top = '0';
-          this.dom.style.left = gutterWidth + 'px';
+          this.dom.style.left = '0';
           this.dom.style.right = '0';
 
           const lineHeight = view.defaultLineHeight;
@@ -1533,7 +1574,8 @@ export default {
           }
 
           // Build one single-line overlay element per scope. Each line is an
-          // absolutely positioned row inside the sticky header container.
+          // absolutely positioned row inside the sticky header container,
+          // with a synthetic gutter + content region.
           this.dom.innerHTML = '';
           const headerHeight = activeScopes.length * lineHeight;
           this.dom.style.height = `${headerHeight}px`;
@@ -1547,13 +1589,41 @@ export default {
             lineEl.style.left = '0';
             lineEl.style.right = '0';
 
-            const styled = this.getStyledLineHTML(scope.startLine);
-            if (styled != null) {
-              lineEl.innerHTML = styled;
+            const gutter = document.createElement('div');
+            gutter.className = 'cm-sticky-gutter';
+            gutter.style.width = `${gutterWidth}px`;
+            // Create one segment per actual gutter (line numbers, folds, etc.)
+            if (gutterSegmentWidths.length > 0) {
+              gutterSegmentWidths.forEach((segWidth, segIdx) => {
+                const seg = document.createElement('div');
+                seg.className = 'cm-sticky-gutter-segment';
+                seg.style.width = `${segWidth}px`;
+                // First segment corresponds to the line-number gutter: show the line number there
+                if (segIdx === 0) {
+                  seg.textContent = String(scope.startLine);
+                }
+                gutter.appendChild(seg);
+              });
             } else {
-              lineEl.textContent = scope.text;
+              // Fallback: single segment with the full width
+              const seg = document.createElement('div');
+              seg.className = 'cm-sticky-gutter-segment';
+              seg.style.width = `${gutterWidth}px`;
+              seg.textContent = String(scope.startLine);
+              gutter.appendChild(seg);
             }
 
+            const content = document.createElement('div');
+            content.className = 'cm-sticky-content';
+            const styled = this.getStyledLineHTML(scope.startLine);
+            if (styled != null) {
+              content.innerHTML = styled;
+            } else {
+              content.textContent = scope.text;
+            }
+
+            lineEl.appendChild(gutter);
+            lineEl.appendChild(content);
             this.dom.appendChild(lineEl);
           });
 
