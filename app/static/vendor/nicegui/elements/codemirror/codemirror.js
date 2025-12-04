@@ -1744,8 +1744,10 @@ export default {
           }
           this.lastTopOffset = topOffset;
 
-          // Adjust container height when innermost slides up so no blank line is left behind.
-          const effectiveHeight = Math.max(lineHeight, headerHeight + topOffset);
+          // Adjust container height when lines slide; when only one line remains,
+          // shrink with it so no blank row is left behind.
+          const isSingle = activeScopes.length === 1;
+          const effectiveHeight = Math.max(0, isSingle ? lineHeight + topOffset : headerHeight + topOffset);
           this.dom.style.height = `${effectiveHeight}px`;
 
           // Build one overlay layer per scope (separate stacking). Only the
@@ -1761,6 +1763,12 @@ export default {
             layer.style.zIndex = String(100 - idx);
             layer.style.setProperty('--cm-sticky-line-height', `${lineHeight}px`);
             layer.style.transform = idx === lastIndex ? `translateY(${topOffset}px)` : 'translateY(0)';
+            if (idx === lastIndex) {
+              const layerHeight = Math.max(0, lineHeight + topOffset);
+              layer.style.height = `${layerHeight}px`;
+            } else {
+              layer.style.height = `${lineHeight}px`;
+            }
 
             const gutter = document.createElement('div');
             gutter.className = 'cm-sticky-gutter';
