@@ -1324,6 +1324,8 @@ export default {
           this.dom = document.createElement("div");
           this.dom.className = "cm-stickyHeader";
           this.currentScopes = [];
+          this.lastRenderTime = 0;
+          this.lastOverlayHeight = 0;
           
           // Append to editor DOM (works inside iframe)
           view.dom.appendChild(this.dom);
@@ -1356,6 +1358,12 @@ export default {
           const view = this.view;
           const state = view.state;
           const scrollTop = view.scrollDOM.scrollTop;
+          const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+          // Simple time-based backoff to reduce boundary flicker
+          if (now - this.lastRenderTime < 100) {
+            return;
+          }
+          this.lastRenderTime = now;
           
           // Get gutter width to position overlay beside it
           const gutterEl = view.dom.querySelector('.cm-gutters');
@@ -1369,11 +1377,21 @@ export default {
           const lineHeight = view.defaultLineHeight;
 
           // ---------------------------------------------------------------------------
-          // 1) Compute reference line below the current overlay
-          //    Note: add a full lineHeight to bias slightly earlier capture.
+          // 1) Compute reference line just below the overlay, but use the
+          //    previous overlay height for sampling to avoid double-flash when
+          //    the header grows/shrinks on this frame.
           // ---------------------------------------------------------------------------
-          const overlayHeight = this.dom.offsetHeight || 0;
-          const effectiveTop = scrollTop + overlayHeight + lineHeight;
+          const currentOverlayHeight = this.dom.offsetHeight || 0;
+          const samplingOverlayHeight = this.lastOverlayHeight || currentOverlayHeight;
+          const effectiveTop = scrollTop + samplingOverlayHeight + lineHeight;
+
+          console.log('[StickyScroll] top', {
+            scrollTop,
+            currentOverlayHeight,
+            samplingOverlayHeight,
+            lineHeight,
+            effectiveTop,
+          });
           let refPos;
           try {
             const block = view.lineBlockAtHeight(effectiveTop);
@@ -1410,8 +1428,23 @@ export default {
             // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
             const offset = -(depth + 2);
             const triggerLine = startLine + offset;
-            return { node: n, depth, startLine, endLine, text, triggerLine };
+            // Apply the same offset to the effective end so scopes hand off cleanly
+            const endTriggerLine = Math.max(startLine, endLine + offset);
+            return { node: n, depth, startLine, endLine, text, triggerLine, endTriggerLine };
           });
+
+          console.log(
+            '[StickyScroll] scopes',
+            scopes.map((s) => ({
+              depth: s.depth,
+              startLine: s.startLine,
+              endLine: s.endLine,
+              triggerLine: s.triggerLine,
+              endTriggerLine: s.endTriggerLine,
+            })),
+            'refLine',
+            refLine
+          );
 
           // ---------------------------------------------------------------------------
           // 3) Decide active scopes based on refLine and per-depth triggerLine
@@ -1427,10 +1460,18 @@ export default {
               break;
             }
 
-            // Once past trigger, keep it active until refLine moves beyond scope end.
-            if (refLine <= scope.endLine) {
+            // Active between triggerLine and endTriggerLine (early exit at both start and end)
+            const active = refLine > scope.triggerLine && refLine <= scope.endTriggerLine;
+            if (active) {
               activeScopes.push(scope);
             }
+            console.log('[StickyScroll] eval', {
+              depth: scope.depth,
+              refLine,
+              triggerLine: scope.triggerLine,
+              endTriggerLine: scope.endTriggerLine,
+              active,
+            });
           }
 
           this.currentScopes = activeScopes;
@@ -1448,6 +1489,9 @@ export default {
               this.dom.innerHTML = newHtml;
             }
           }
+
+          // Remember overlay height for the next sampling pass
+          this.lastOverlayHeight = this.dom.offsetHeight || 0;
         }
         
         update(update) {
