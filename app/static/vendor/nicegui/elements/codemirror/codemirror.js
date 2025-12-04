@@ -1345,6 +1345,7 @@ export default {
           this.dom = document.createElement("div");
           this.dom.className = "cm-stickyHeader";
           this.currentScopes = [];
+          this.prevActiveScopes = [];
           // Used to break the feedback loop between overlay height and
           // sampling position; we always sample using the previous height.
           this.lastOverlayHeight = 0;
@@ -1425,6 +1426,8 @@ export default {
           const view = this.view;
           const state = view.state;
           const scrollTop = view.scrollDOM.scrollTop;
+
+          const prevActiveScopes = this.prevActiveScopes || [];
 
           // Remember which scopes were active on the previous pass for hysteresis
           const prevActiveKeys = new Set(
@@ -1555,6 +1558,7 @@ export default {
           const MAX_STICKY_LINES = 5;
           const activeScopes = [];
           const hysteresisLines = 0.5; // half-line hysteresis to prevent edge flicker
+          const earlyMarginLines = 3;   // allow push-up window to keep line briefly
 
           for (const scope of scopes) {
             if (activeScopes.length >= MAX_STICKY_LINES) break;
@@ -1583,12 +1587,33 @@ export default {
               upper -= hysteresisLines;
             }
 
-            if (scopedRef > lower && scopedRef <= upper) {
+            // Give the innermost candidate extra room at the top end so it
+            // doesn't drop before the push-up has a chance to run.
+            const isInnermost = scope.depth === scopes.length - 1;
+            if (isInnermost) {
+              upper += earlyMarginLines; // up to ~3 lines extra
+            }
+
+            // Allow the innermost candidate to linger near its end so the
+            // push-up effect can run before removal.
+            let nearEnd = false;
+            try {
+              const endLine = state.doc.lineAt(scope.node.to);
+              const endBlock = view.lineBlockAt(endLine.to);
+              const endBottomViewport = endBlock.bottom - scrollTop;
+              const prospectiveHeaderHeight = (activeScopes.length + 1) * lineHeight;
+              if (endBottomViewport < prospectiveHeaderHeight + earlyMarginLines * lineHeight) {
+                nearEnd = true;
+              }
+            } catch {}
+
+            if ((scopedRef > lower && scopedRef <= upper) || nearEnd) {
               activeScopes.push(scope);
             }
           }
 
           this.currentScopes = activeScopes;
+          this.prevActiveScopes = activeScopes;
 
           // Track overlay height even when active set toggles to avoid
           // sampling jitter at the exact moment a scope disappears.
@@ -1703,16 +1728,41 @@ export default {
           const innermost = activeScopes[activeScopes.length - 1];
 
           let topOffset = 0;
+          const earlyMargin = 3 * lineHeight; // start push-up up to three lines before collision
           try {
-            const endLineBlock = view.lineBlockAt(innermost.node.to);
+            // Use the end of the line containing the node end to better match visual bottom
+            const endLine = state.doc.lineAt(innermost.node.to);
+            const endLineBlock = view.lineBlockAt(endLine.to);
             // Convert end-of-scope bottom to viewport coordinates
             const endBottomViewport = endLineBlock.bottom - scrollTop;
             const stackBottomViewport = headerHeight;
-            if (endBottomViewport < stackBottomViewport) {
-              topOffset = endBottomViewport - stackBottomViewport;
+            const delta = endBottomViewport - stackBottomViewport;
+            if (delta < earlyMargin) {
+              // Start easing up as we enter the margin; never move down.
+              topOffset = Math.max(-earlyMargin, delta - earlyMargin);
             }
           } catch (e) {
             // If geometry lookup fails, keep header pinned at the top.
+          }
+
+          // If a scope just left (active set shrank), reuse its geometry to
+          // apply a push-up on the frame it disappears, so the stack slides
+          // instead of snapping when depth decreases.
+          if (prevActiveScopes.length > activeScopes.length && prevActiveScopes.length > 0) {
+            const dropped = prevActiveScopes[prevActiveScopes.length - 1];
+            try {
+              const droppedLine = state.doc.lineAt(dropped.node.to);
+              const droppedEnd = view.lineBlockAt(droppedLine.to);
+              const droppedEndBottomViewport = droppedEnd.bottom - scrollTop;
+              const prevHeaderHeight = prevActiveScopes.length * lineHeight;
+              const delta = droppedEndBottomViewport - prevHeaderHeight;
+              if (delta < earlyMargin) {
+                const dropOffset = Math.max(-earlyMargin, delta - earlyMargin);
+                if (dropOffset < topOffset) topOffset = dropOffset;
+              }
+            } catch (e) {
+              // ignore
+            }
           }
 
           // Apply small hysteresis to prevent rapid toggling when endBottom
@@ -1723,18 +1773,17 @@ export default {
             topOffset = this.lastTopOffset;
           }
           if (topOffset !== this.lastTopOffset) {
-            console.log('[StickyScroll] push-up', {
-              topOffset,
-              prev: this.lastTopOffset,
-              endBottomViewport: (() => {
-                try {
-                  return view.lineBlockAt(innermost.node.to).bottom - scrollTop;
-                } catch {
-                  return null;
-                }
-              })(),
-              stackBottomViewport: headerHeight,
-            });
+            try {
+              const endLine = state.doc.lineAt(innermost.node.to);
+              const endBottomViewport = view.lineBlockAt(endLine.to).bottom - scrollTop;
+              console.log('[StickyScroll] push-up', {
+                topOffset,
+                prev: this.lastTopOffset,
+                endBottomViewport,
+                stackBottomViewport: headerHeight,
+                earlyMargin,
+              });
+            } catch {}
           }
           this.lastTopOffset = topOffset;
 
