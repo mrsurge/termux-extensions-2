@@ -1243,6 +1243,8 @@ export default {
     applyStickyScroll(enabled) {
       if (!this.editor) return;
 
+      const cmComponent = this;
+
       // Language-aware scope node types
       const SCOPE_NODE_TYPES = {
         javascript: new Set([
@@ -1285,7 +1287,6 @@ export default {
         ".cm-stickyHeader": {
           position: "absolute",
           backgroundColor: "var(--cm-editor-bg, #1e1e1e)",
-          borderBottom: "1px solid rgba(255,255,255,0.1)",
           fontFamily: "inherit",
           fontSize: "inherit",
           lineHeight: "1.4",
@@ -1307,11 +1308,7 @@ export default {
           backgroundColor: "rgba(255,255,255,0.05)",
           borderLeftColor: "#007acc",
         },
-        // Indent nested scopes slightly
-        ".cm-sticky-line:not(:first-child)": {
-          paddingLeft: "12px",
-          opacity: "0.85",
-        },
+        // Nested scopes rely on their own code indentation; no extra padding.
       });
 
       // ============================================================================
@@ -1327,6 +1324,8 @@ export default {
           // Used to break the feedback loop between overlay height and
           // sampling position; we always sample using the previous height.
           this.lastOverlayHeight = 0;
+          // Track last scrollTop to infer scroll direction
+          this.lastScrollTop = view.scrollDOM.scrollTop || 0;
           
           // Append to editor DOM (works inside iframe)
           view.dom.appendChild(this.dom);
@@ -1354,12 +1353,46 @@ export default {
           // Initial render
           this.updateStickyHeader();
         }
+
+        // Try to get the styled HTML for a given 1-based line number by
+        // cloning the existing .cm-line DOM. Falls back to null if the
+        // line isn't currently rendered in the viewport.
+        getStyledLineHTML(lineNumber) {
+          const view = this.view;
+          const state = view.state;
+          if (!state || !view || !view.dom) return null;
+          if (lineNumber < 1 || lineNumber > state.doc.lines) return null;
+
+          try {
+            const line = state.doc.line(lineNumber);
+            const pos = line.from;
+            const domAt = view.domAtPos(pos);
+            let node = domAt.node;
+
+            if (!node) return null;
+            if (node.nodeType === Node.TEXT_NODE && node.parentElement) {
+              node = node.parentElement;
+            }
+
+            // Walk up until we hit the .cm-line container
+            while (node && node !== view.dom) {
+              if (node.nodeType === Node.ELEMENT_NODE &&
+                  node.classList &&
+                  node.classList.contains("cm-line")) {
+                return node.innerHTML;
+              }
+              node = node.parentNode;
+            }
+          } catch (e) {
+            // If DOM lookup fails (e.g., line not in viewport), just fall back.
+          }
+          return null;
+        }
         
         updateStickyHeader() {
           const view = this.view;
           const state = view.state;
           const scrollTop = view.scrollDOM.scrollTop;
-          const previousScopes = this.currentScopes || [];
           
           // Get gutter width to position overlay beside it
           const gutterEl = view.dom.querySelector('.cm-gutters');
@@ -1376,11 +1409,47 @@ export default {
           // 1) Compute reference line below the current overlay
           //    Use the previous overlay height for sampling to avoid the
           //    overlay changing and refLine jumping in the same frame.
-          //    Still add a full lineHeight to bias slightly earlier capture.
+          //    Apply a scroll-fraction-based early-capture offset so that
+          //    word-wrapped documents stay aligned from top to bottom.
           // ---------------------------------------------------------------------------
           const currentOverlayHeight = this.dom.offsetHeight || 0;
           const samplingOverlayHeight = this.lastOverlayHeight || currentOverlayHeight;
-          const effectiveTop = scrollTop + samplingOverlayHeight + lineHeight;
+
+          // Detect scroll direction: 1 = down, -1 = up, 0 = no change
+          const direction = scrollTop > this.lastScrollTop ? 1 : (scrollTop < this.lastScrollTop ? -1 : 0);
+
+          // Compute scroll fraction for the whole document (0 = top, 1 = bottom)
+          const { scrollHeight, clientHeight } = view.scrollDOM;
+          const denom = Math.max(1, scrollHeight - clientHeight);
+          const scrollFrac = Math.max(0, Math.min(1, scrollTop / denom));
+
+          // Base early capture behavior:
+          // - When line wrapping is OFF: use the original fixed offsets.
+          // - When line wrapping is ON: apply a scroll-fraction drift
+          //   correction to keep the top-level scope aligned from top to
+          //   bottom, then compensate for deeper scopes in the per-scope
+          //   activation step.
+          const wrappingEnabled = !!(cmComponent && cmComponent.lineWrapping);
+          let driftCorrectionLines = 0;
+          let earlyLines;
+          if (wrappingEnabled) {
+            const baseEarlyLines = 1;
+            const extraEarlyLinesAtBottom = 1;
+            driftCorrectionLines = scrollFrac * extraEarlyLinesAtBottom;
+            earlyLines =
+              direction >= 0
+                ? baseEarlyLines + driftCorrectionLines   // down or static
+                : driftCorrectionLines;                   // up
+          } else {
+            driftCorrectionLines = 0;
+            earlyLines = direction >= 0 ? 1 : 0;
+          }
+
+          const baseTop = scrollTop + samplingOverlayHeight;
+          const effectiveTop = direction >= 0
+            ? baseTop + earlyLines * lineHeight   // scroll down or unchanged
+            : baseTop + earlyLines * lineHeight;  // scroll up: correction only
+
           let refPos;
           try {
             const block = view.lineBlockAtHeight(effectiveTop);
@@ -1425,42 +1494,28 @@ export default {
           // ---------------------------------------------------------------------------
           // 3) Decide active scopes based on refLine and per-depth triggerLine
           //    Condition: triggerLine < refLine <= endLine
+          //    When wrapping is enabled, apply drift correction only to the
+          //    top-level (depth 0) scope; deeper scopes see a compensating
+          //    ref line so they don't get over-corrected.
           // ---------------------------------------------------------------------------
           const MAX_STICKY_LINES = 5;
           const activeScopes = [];
           for (const scope of scopes) {
             if (activeScopes.length >= MAX_STICKY_LINES) break;
 
+            let scopedRef = refLine;
+            if (wrappingEnabled && scope.depth > 0) {
+              scopedRef = refLine - driftCorrectionLines;
+            }
+
             // If we haven't reached this scope's trigger yet, no deeper scopes should be active.
-            if (refLine <= scope.triggerLine) {
+            if (scopedRef <= scope.triggerLine) {
               break;
             }
 
             // Active between triggerLine and endTriggerLine (early capture and early release).
-            if (refLine > scope.triggerLine && refLine <= scope.endTriggerLine) {
+            if (scopedRef > scope.triggerLine && scopedRef <= scope.endTriggerLine) {
               activeScopes.push(scope);
-            }
-          }
-
-          // ---------------------------------------------------------------------------
-          // 3b) Persistence for nested scopes:
-          //     Keep deeper sticky lines from the previous state until a new
-          //     scope at that depth (or a changed top-level owner) replaces them.
-          //     This mimics Monaco's behavior where inner scopes don't jitter
-          //     off as soon as their own window closes; they stay until consumed.
-          // ---------------------------------------------------------------------------
-          if (activeScopes.length > 0 && previousScopes.length > activeScopes.length) {
-            const currentTop = activeScopes[0];
-            const previousTop = previousScopes[0];
-            const sameTopOwner = currentTop && previousTop && currentTop.node === previousTop.node;
-
-            if (sameTopOwner) {
-              for (let depth = activeScopes.length; depth < Math.min(previousScopes.length, MAX_STICKY_LINES); depth++) {
-                const prevScope = previousScopes[depth];
-                if (prevScope) {
-                  activeScopes.push(prevScope);
-                }
-              }
             }
           }
 
@@ -1477,12 +1532,30 @@ export default {
             return;
           }
 
-          const newHtml = activeScopes.map((scope, idx) =>
-            `<div class="cm-sticky-line" data-index="${idx}">${escapeHtml(scope.text)}</div>`
-          ).join('');
-          if (this.dom.innerHTML !== newHtml) {
-            this.dom.innerHTML = newHtml;
-          }
+          // Build one single-line overlay element per scope. Each line is an
+          // absolutely positioned row inside the sticky header container.
+          this.dom.innerHTML = '';
+          const headerHeight = activeScopes.length * lineHeight;
+          this.dom.style.height = `${headerHeight}px`;
+
+          activeScopes.forEach((scope, idx) => {
+            const lineEl = document.createElement('div');
+            lineEl.className = 'cm-sticky-line';
+            lineEl.dataset.index = String(idx);
+            lineEl.style.position = 'absolute';
+            lineEl.style.top = `${idx * lineHeight}px`;
+            lineEl.style.left = '0';
+            lineEl.style.right = '0';
+
+            const styled = this.getStyledLineHTML(scope.startLine);
+            if (styled != null) {
+              lineEl.innerHTML = styled;
+            } else {
+              lineEl.textContent = scope.text;
+            }
+
+            this.dom.appendChild(lineEl);
+          });
 
           // ---------------------------------------------------------------------------
           // 5) Push-up effect (Monaco-style): as the innermost scope's end approaches
@@ -1490,8 +1563,6 @@ export default {
           //    appears attached to the end of that scope instead of overlapping it.
           // ---------------------------------------------------------------------------
           const innermost = activeScopes[activeScopes.length - 1];
-          const measuredHeight = this.dom.offsetHeight || 0;
-          const headerHeight = measuredHeight || (activeScopes.length * lineHeight);
 
           let topOffset = 0;
           try {
@@ -1508,9 +1579,10 @@ export default {
 
           this.dom.style.top = `${topOffset}px`;
 
-          // Remember overlay height for the next sampling pass so that
+          // Remember overlay height and scrollTop for the next sampling pass so that
           // detection uses a stable value and avoids jitter at boundaries.
           this.lastOverlayHeight = headerHeight;
+          this.lastScrollTop = scrollTop;
         }
         
         update(update) {
