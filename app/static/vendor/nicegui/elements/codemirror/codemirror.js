@@ -1348,6 +1348,14 @@ export default {
           // Used to break the feedback loop between overlay height and
           // sampling position; we always sample using the previous height.
           this.lastOverlayHeight = 0;
+          // Smoothed overlay height used for sampling (decays slowly to avoid
+          // ping-pong when a scope drops at the boundary).
+          this.lastOverlaySampleHeight = 0;
+          // Used to add hysteresis to push-up offset near scope ends to
+          // avoid flicker when hovering around the boundary.
+          this.lastTopOffset = 0;
+          // Track last rendered scope signature so we only log on changes.
+          this.lastActiveSignature = '';
           // Track last scrollTop to infer scroll direction
           this.lastScrollTop = view.scrollDOM.scrollTop || 0;
           
@@ -1417,6 +1425,11 @@ export default {
           const view = this.view;
           const state = view.state;
           const scrollTop = view.scrollDOM.scrollTop;
+
+          // Remember which scopes were active on the previous pass for hysteresis
+          const prevActiveKeys = new Set(
+            (this.currentScopes || []).map((s) => `${s.depth}:${s.startLine}-${s.endLine}`)
+          );
           
           // Get gutter container and child gutter segments (line numbers, folds, etc.)
           const gutterRoot = view.dom.querySelector('.cm-gutters');
@@ -1454,7 +1467,7 @@ export default {
           //    word-wrapped documents stay aligned from top to bottom.
           // ---------------------------------------------------------------------------
           const currentOverlayHeight = this.dom.offsetHeight || 0;
-          const samplingOverlayHeight = this.lastOverlayHeight || currentOverlayHeight;
+          const samplingOverlayHeight = this.lastOverlaySampleHeight || currentOverlayHeight;
 
           // Detect scroll direction: 1 = down, -1 = up, 0 = no change
           const direction = scrollTop > this.lastScrollTop ? 1 : (scrollTop < this.lastScrollTop ? -1 : 0);
@@ -1541,6 +1554,8 @@ export default {
           // ---------------------------------------------------------------------------
           const MAX_STICKY_LINES = 5;
           const activeScopes = [];
+          const hysteresisLines = 0.5; // half-line hysteresis to prevent edge flicker
+
           for (const scope of scopes) {
             if (activeScopes.length >= MAX_STICKY_LINES) break;
 
@@ -1550,26 +1565,72 @@ export default {
             }
 
             // If we haven't reached this scope's trigger yet, no deeper scopes should be active.
-            if (scopedRef <= scope.triggerLine) {
+            if (scopedRef <= scope.triggerLine - hysteresisLines) {
               break;
             }
 
-            // Active between triggerLine and endTriggerLine (early capture and early release).
-            if (scopedRef > scope.triggerLine && scopedRef <= scope.endTriggerLine) {
+            const key = `${scope.depth}:${scope.startLine}-${scope.endLine}`;
+            const wasActive = prevActiveKeys.has(key);
+
+            // Expand the active window if it was already active; shrink if not, to add hysteresis.
+            let lower = scope.triggerLine;
+            let upper = scope.endTriggerLine;
+            if (wasActive) {
+              lower -= hysteresisLines;
+              upper += hysteresisLines;
+            } else {
+              lower += hysteresisLines;
+              upper -= hysteresisLines;
+            }
+
+            if (scopedRef > lower && scopedRef <= upper) {
               activeScopes.push(scope);
             }
           }
 
           this.currentScopes = activeScopes;
 
+          // Track overlay height even when active set toggles to avoid
+          // sampling jitter at the exact moment a scope disappears.
+          if (activeScopes.length > 0) {
+            this.lastOverlayHeight = activeScopes.length * lineHeight;
+          }
+
+          // Debug: log when the active scope set changes (appears/disappears)
+          try {
+            const signature = activeScopes.map((s) => `${s.depth}:${s.startLine}-${s.endLine}`).join('|');
+            if (signature !== this.lastActiveSignature) {
+              console.log('[StickyScroll] active change', {
+                refLine,
+                scrollTop,
+                overlayHeight: this.lastOverlayHeight,
+                signature,
+                scopes: activeScopes.map((s) => ({
+                  depth: s.depth,
+                  start: s.startLine,
+                  end: s.endLine,
+                  trigger: s.triggerLine,
+                  endTrigger: s.endTriggerLine,
+                })),
+              });
+              this.lastActiveSignature = signature;
+            }
+          } catch (e) {
+            // Logging should never break rendering
+          }
+
           // ---------------------------------------------------------------------------
           // 4) Render overlay from activeScopes
           // ---------------------------------------------------------------------------
           if (activeScopes.length === 0) {
             if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
-            // When there is no overlay, pin it at the top and reset height memory.
+            // When there is no overlay, pin it at the top. Keep sample height
+            // to avoid refLine jump; let it decay slowly below.
             this.dom.style.top = '0px';
-            this.lastOverlayHeight = 0;
+            // Decay sample height by at most one line per pass
+            if (this.lastOverlaySampleHeight > 0) {
+              this.lastOverlaySampleHeight = Math.max(0, this.lastOverlaySampleHeight - lineHeight);
+            }
             return;
           }
 
@@ -1578,6 +1639,13 @@ export default {
           // with a synthetic gutter + content region.
           this.dom.innerHTML = '';
           const headerHeight = activeScopes.length * lineHeight;
+          this.lastOverlayHeight = headerHeight;
+          // Smooth sampling height: grow immediately, shrink at most one line per update
+          if (headerHeight > this.lastOverlaySampleHeight) {
+            this.lastOverlaySampleHeight = headerHeight;
+          } else if (headerHeight < this.lastOverlaySampleHeight) {
+            this.lastOverlaySampleHeight = Math.max(headerHeight, this.lastOverlaySampleHeight - lineHeight);
+          }
           this.dom.style.height = `${headerHeight}px`;
 
           activeScopes.forEach((scope, idx) => {
@@ -1646,6 +1714,29 @@ export default {
           } catch (e) {
             // If geometry lookup fails, keep header pinned at the top.
           }
+
+          // Apply small hysteresis to prevent rapid toggling when endBottom
+          // hovers around stackBottom. If the new offset is within epsilon of
+          // the previous value, keep the previous value to avoid flicker.
+          const epsilon = lineHeight * 0.25;
+          if (Math.abs(topOffset - this.lastTopOffset) < epsilon) {
+            topOffset = this.lastTopOffset;
+          }
+          if (topOffset !== this.lastTopOffset) {
+            console.log('[StickyScroll] push-up', {
+              topOffset,
+              prev: this.lastTopOffset,
+              endBottomViewport: (() => {
+                try {
+                  return view.lineBlockAt(innermost.node.to).bottom - scrollTop;
+                } catch {
+                  return null;
+                }
+              })(),
+              stackBottomViewport: headerHeight,
+            });
+          }
+          this.lastTopOffset = topOffset;
 
           this.dom.style.top = `${topOffset}px`;
 
