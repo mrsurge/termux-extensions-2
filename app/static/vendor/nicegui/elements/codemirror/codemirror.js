@@ -1328,7 +1328,7 @@ export default {
           display: "flex",
           flex: "0 0 auto",
           textAlign: "right",
-          padding: "0 8px 0 4px",
+          padding: "0 10px 0 4px", // extra right padding for line numbers
           opacity: "0.75",
           fontVariantNumeric: "tabular-nums",
           color: "var(--cm-gutter-foreground, #858585)",
@@ -1338,7 +1338,7 @@ export default {
         ".cm-sticky-gutter-segment": {
           flex: "0 0 auto",
           textAlign: "right",
-          paddingRight: "4px",
+          paddingRight: "7px",
           boxSizing: "border-box",
         },
         ".cm-sticky-content": {
@@ -1462,7 +1462,13 @@ export default {
             try {
               const gutterStyle = window.getComputedStyle(lineNumberGutter);
               if (gutterStyle && gutterStyle.fontSize) {
-                this.dom.style.fontSize = gutterStyle.fontSize;
+                const baseSize = parseFloat(gutterStyle.fontSize);
+                if (Number.isFinite(baseSize)) {
+                  // Bump size slightly for visibility while keeping alignment
+                  this.dom.style.fontSize = `${baseSize + 0.2}px`;
+                } else {
+                  this.dom.style.fontSize = gutterStyle.fontSize;
+                }
               }
             } catch (e) {
               // Ignore style lookup failures
