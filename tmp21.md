@@ -1,157 +1,174 @@
-# Fix Proposal: Stateless Geometric Sticky Scroll
+# Fix Proposal: Geometric "Consumed-By-Overlay" Sticky Scroll
 
 **Date:** 2025-12-03
 **Author:** jimmy - te2 team
-**Status:** Proposal
+**Status:** Corrected Proposal (Matching Monaco/VS Code behavior)
 
 ## Problem Analysis
-The current sticky scroll implementation suffers from two main issues:
-1. **Instability ("Double Drop"):** Caused by a feedback loop where `refLine` depends on `overlayHeight`. When the overlay appears, `refLine` shifts, potentially causing the overlay to disappear in the next frame. The `lastOverlayHeight` patch mitigated this but introduced a 1-frame lag.
-2. **Misalignment:** The `depth`-based offset logic (`-(depth + 2)`) attempts to predict "future" stickiness but leads to inconsistent capture points (depth 0 feels early, depth 2 feels right).
+The previous "Stateless" proposal failed because it only checked `startLine < topLine`. This causes **underscroll**: scopes disappear behind the overlay *before* becoming sticky, because the overlay itself consumes vertical space.
+As identified in `tmp22.md`, we must account for the "virtual slot" each scope occupies. Depth 0 needs to stick at 0px offset, Depth 1 at 20px (assuming 20px line height), etc.
 
-## Proposed Solution: Stateless Geometric Approach
-We should switch to a stateless, top-down approach similar to Monaco/VS Code. The core principle is: **Calculate stickiness based on the document's scroll position (`scrollTop`), independent of the sticky overlay's current state.**
+## The Monaco Solution (Verified)
+Monaco's `stickyScrollController.ts` uses a pixel-geometric check:
+```typescript
+const topOfElement = range.top; // Virtual slot (e.g., 0, 20, 40...)
+const topOfBeginningLine = this._editor.getTopForLineNumber(start) - scrollTop; // Physical position relative to viewport
 
-### 1. The Algorithm
-1. **Anchor Point:** Use `view.scrollDOM.scrollTop` to find the line at the very top of the viewport (`topLine`).
-   - Do *not* add `overlayHeight` to this. We want to know what is physically at the top of the scrollable area.
-2. **Candidate Discovery:** Resolve the syntax tree node at `topLine` and walk up the ancestors. These are the potential sticky scopes.
-3. **Activation Logic:** A scope is sticky if its `startLine` is strictly less than `topLine`.
-   - This means the header has scrolled off the top of the screen.
-   - We stack all active scopes.
-4. **Push-Up Logic:**
-   - Calculate the total height of the sticky stack (`headerHeight`).
-   - Check the `endLine` of the *innermost* active scope.
-   - If the bottom of that `endLine` is colliding with the bottom of our sticky stack, shift the entire stack upwards.
+if (topOfElement > topOfBeginningLine && topOfElement <= bottomOfEndLine) {
+    // Make sticky
+}
+```
+This condition `topOfElement > topOfBeginningLine` is the key. It means: "Is the slot where this header *should* be (e.g., 20px) currently *below* where the header actually is?"
+- If the header is at 30px (physically), and belongs at 20px (virtually), `20 > 30` is False.
+- If the header scrolls up to 19px, `20 > 19` is True. **It sticks.**
+- This automatically handles the "N+1" (or "consumed by overlay") effect geometrically.
 
-### 2. Implementation Details
+## Implementation Plan for CodeMirror 6
 
-Replace the `updateStickyHeader` method in `codemirror.js` with this logic:
+We will replace the `updateStickyHeader` method in `codemirror.js` with this logic.
+
+### 1. Helper: Calculate Scope Depth
+We need a helper to calculate the "Scope Depth" (number of scope-like ancestors) for any node, to assign its `virtualTop`.
+
+```javascript
+function getScopeDepth(node, scopeTypes) {
+  let depth = 0;
+  let curr = node.parent;
+  while (curr) {
+    if (scopeTypes.has(curr.name)) {
+      depth++;
+    }
+    curr = curr.parent;
+  }
+  return depth;
+}
+```
+
+### 2. The Algorithm
 
 ```javascript
 updateStickyHeader() {
   const view = this.view;
   const state = view.state;
   const scrollTop = view.scrollDOM.scrollTop;
+  const lineHeight = view.defaultLineHeight;
   
-  // 1. Anchor: The line currently at the top of the viewport
-  // We use the block at scrollTop. 
-  let refPos;
+  // 1. Define Search Window
+  // We must look ahead by the max potential overlay height to catch scopes 
+  // that are "consumed" (hidden behind the overlay) even if they start below 0.
+  const MAX_STICKY_LINES = 5;
+  const maxOverlayHeight = MAX_STICKY_LINES * lineHeight;
+  
+  // Find the document position corresponding to the bottom of the potential overlay
+  // We use lineBlockAtHeight to convert pixel Y -> document pos
+  let searchEndPos;
   try {
-    const block = view.lineBlockAtHeight(scrollTop);
-    refPos = block.from;
+     // scrollTop + maxOverlayHeight gives the absolute Y of the search limit
+     const block = view.lineBlockAtHeight(scrollTop + maxOverlayHeight);
+     searchEndPos = block.to;
   } catch {
-    refPos = view.viewport.from;
+     searchEndPos = view.viewport.to;
   }
-  const refLine = state.doc.lineAt(refPos).number;
 
-  // 2. Candidates: Walk up from refLine
   const tree = CM.syntaxTree(state);
-  if (!tree || !tree.topNode) {
-    if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
-    this.currentScopes = [];
-    return;
-  }
+  if (!tree) return;
 
   const scopeTypes = getScopeTypes();
-  const ancestorNodes = [];
-  let node = tree.resolveInner(refPos);
-  for (; node; node = node.parent) {
-    if (scopeTypes.has(node.name)) {
-      ancestorNodes.push(node);
-    }
-  }
-  ancestorNodes.reverse(); // depth 0 = outermost
+  const candidates = [];
 
-  // 3. Activation: Filter scopes that have scrolled out
-  // We strictly check startLine < refLine. 
-  // If startLine == refLine, the header is visible at the very top, so we don't need a sticky copy yet.
+  // 2. Iterate Tree in Search Window
+  // We look for ANY scope node that overlaps [scrollTop, scrollTop + maxOverlayHeight]
+  // actually, we iterate from viewport.from to searchEndPos to be safe/efficient
+  tree.iterate({
+    from: view.viewport.from,
+    to: searchEndPos,
+    enter: (node) => {
+      if (scopeTypes.has(node.name)) {
+        candidates.push(node);
+      }
+    }
+  });
+
+  // 3. Filter & Activate
   const activeScopes = [];
-  for (const n of ancestorNodes) {
-    const startLine = state.doc.lineAt(n.from).number;
-    const endLine = state.doc.lineAt(n.to).number;
+  
+  for (const node of candidates) {
+    // Calculate Depth -> Virtual Top
+    const depth = getScopeDepth(node, scopeTypes);
+    const virtualTop = depth * lineHeight;
     
-    // Core check: Is the start line above our current view?
-    // And are we still within the scope (refLine <= endLine)?
-    // (The tree traversal guarantees we are within the scope, but the push-up logic handles the exit)
-    if (startLine < refLine) {
-        activeScopes.push({
-            node: n,
-            startLine,
-            endLine,
-            text: state.doc.lineAt(n.from).text
-        });
+    // Calculate Physical Position
+    // lineBlockAt(node.from).top is the absolute Y of the line top
+    const block = view.lineBlockAt(node.from);
+    const physicalTop = block.top - scrollTop;
+    
+    // Bottom check (for exit)
+    // We can approximate bottom using line count or just use the node end
+    // Use the block at the END of the node to find physical bottom
+    const endBlock = view.lineBlockAt(node.to);
+    const physicalBottom = endBlock.bottom - scrollTop;
+
+    // CORE MONACO LOGIC:
+    // 1. Is the header physically "above" (or colliding with) its virtual slot? (Capture)
+    // 2. Is the bottom of the scope still below the virtual slot? (Exit/Push-up)
+    if (virtualTop > physicalTop && virtualTop < physicalBottom) {
+       activeScopes.push({
+         node,
+         depth,
+         text: state.doc.lineAt(node.from).text,
+         virtualTop,
+         physicalBottom
+       });
     }
   }
+
+  // 4. Sort & Prune
+  // Sort by depth (0 -> N)
+  activeScopes.sort((a, b) => a.depth - b.depth);
   
-  // Limit stack depth
-  const MAX_STICKY_LINES = 5;
+  // Keep only up to MAX
   if (activeScopes.length > MAX_STICKY_LINES) {
-    // Keep the innermost scopes or outermost? VS Code keeps outermost usually.
-    // Let's keep outermost (0 to MAX-1)
     activeScopes.length = MAX_STICKY_LINES;
   }
-
+  
   this.currentScopes = activeScopes;
 
-  // 4. Render
+  // 5. Render
   if (activeScopes.length === 0) {
     if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
-    this.dom.style.top = '0px'; // Reset position
+    this.dom.style.top = '0px';
     this.lastOverlayHeight = 0;
     return;
   }
 
-  const escapeHtml = (str) => {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  };
+  // ... (HTML generation same as before) ...
 
-  const newHtml = activeScopes.map((scope, idx) =>
-    `<div class="cm-sticky-line" data-index="${idx}">${escapeHtml(scope.text)}</div>`
-  ).join('');
-
-  if (this.dom.innerHTML !== newHtml) {
-    this.dom.innerHTML = newHtml;
-  }
-
-  // 5. Push-Up Calculation
-  // We need to check if the *innermost* scope is ending.
-  // If its end line is approaching the bottom of our sticky stack, push up.
+  // 6. Push-Up Logic
+  // Check the innermost scope (last in list)
   const innermost = activeScopes[activeScopes.length - 1];
-  const lineHeight = view.defaultLineHeight;
-  const headerHeight = activeScopes.length * lineHeight; // Approximation, or measure this.dom.offsetHeight
-  
-  // Find the bottom pixel of the innermost scope's end line
-  // We can use lineBlockAt for the end of the line
-  const endLineBlock = view.lineBlockAt(innermost.node.to);
-  const endLineBottom = endLineBlock.bottom;
-  
-  // The bottom of our sticky stack in "document space" would be scrollTop + headerHeight
-  const stackBottom = scrollTop + headerHeight;
+  const stackBottom = (activeScopes.length) * lineHeight; // Virtual bottom of stack
   
   let topOffset = 0;
-  if (endLineBottom < stackBottom) {
-    // The scope ends before our stack ends! Push up.
-    topOffset = endLineBottom - stackBottom;
+  // If the physical bottom of the innermost scope is pushing up the stack
+  if (innermost.physicalBottom < stackBottom) {
+     topOffset = innermost.physicalBottom - stackBottom;
   }
-
+  
   this.dom.style.top = `${topOffset}px`;
   
-  // Align left/right
+  // Align
   const gutterEl = view.dom.querySelector('.cm-gutters');
   const gutterWidth = gutterEl ? gutterEl.offsetWidth : 0;
   this.dom.style.left = gutterWidth + 'px';
   this.dom.style.right = '0';
   
-  this.lastOverlayHeight = headerHeight;
+  this.lastOverlayHeight = activeScopes.length * lineHeight;
 }
 ```
 
-## Benefits
-1. **Stability:** `refLine` depends *only* on `scrollTop`, which is stable regardless of whether the overlay is shown or hidden. No more flicker.
-2. **Accuracy:** Removing the arbitrary `offset` logic means scopes stick exactly when they scroll off-screen, consistent across all depths.
-3. **Smooth Exit:** The `topOffset` calculation provides a smooth slide-out animation as scopes end, matching VS Code/Monaco behavior.
+## Why This Works
+- **Correct Capture:** Depth 1 (20px slot) captures when the line reaches 19px (physically). This happens *before* it hits 0px, exactly effectively "consuming" the line into the overlay stack.
+- **Correct Exit:** The `virtualTop < physicalBottom` check ensures we don't stick to scopes that have completely scrolled off (top).
+- **Correct Push-Up:** `physicalBottom - stackBottom` exactly replicates the smooth exit animation.
 
 jimmy - te2 team

@@ -1315,8 +1315,8 @@ export default {
       });
 
       // ============================================================================
-      // ViewPlugin using Monaco's pixel-geometry approach
-      // Fixed: 2025-12-03 - Uses scrollTop-relative pixel positions instead of line numbers
+      // ViewPlugin using Monaco-style pixel geometry with line-based n+1 offsets
+      // (restored from last known good n+1 implementation)
       // ============================================================================
       const stickyScrollPlugin = CM.ViewPlugin.fromClass(class {
         constructor(view) {
@@ -1324,7 +1324,8 @@ export default {
           this.dom = document.createElement("div");
           this.dom.className = "cm-stickyHeader";
           this.currentScopes = [];
-          this.lastRenderTime = 0;
+          // Used to break the feedback loop between overlay height and
+          // sampling position; we always sample using the previous height.
           this.lastOverlayHeight = 0;
           
           // Append to editor DOM (works inside iframe)
@@ -1358,12 +1359,6 @@ export default {
           const view = this.view;
           const state = view.state;
           const scrollTop = view.scrollDOM.scrollTop;
-          const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-          // Simple time-based backoff to reduce boundary flicker
-          if (now - this.lastRenderTime < 100) {
-            return;
-          }
-          this.lastRenderTime = now;
           
           // Get gutter width to position overlay beside it
           const gutterEl = view.dom.querySelector('.cm-gutters');
@@ -1377,21 +1372,14 @@ export default {
           const lineHeight = view.defaultLineHeight;
 
           // ---------------------------------------------------------------------------
-          // 1) Compute reference line just below the overlay, but use the
-          //    previous overlay height for sampling to avoid double-flash when
-          //    the header grows/shrinks on this frame.
+          // 1) Compute reference line below the current overlay
+          //    Use the previous overlay height for sampling to avoid the
+          //    overlay changing and refLine jumping in the same frame.
+          //    Still add a full lineHeight to bias slightly earlier capture.
           // ---------------------------------------------------------------------------
           const currentOverlayHeight = this.dom.offsetHeight || 0;
           const samplingOverlayHeight = this.lastOverlayHeight || currentOverlayHeight;
           const effectiveTop = scrollTop + samplingOverlayHeight + lineHeight;
-
-          console.log('[StickyScroll] top', {
-            scrollTop,
-            currentOverlayHeight,
-            samplingOverlayHeight,
-            lineHeight,
-            effectiveTop,
-          });
           let refPos;
           try {
             const block = view.lineBlockAtHeight(effectiveTop);
@@ -1428,23 +1416,8 @@ export default {
             // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
             const offset = -(depth + 2);
             const triggerLine = startLine + offset;
-            // Apply the same offset to the effective end so scopes hand off cleanly
-            const endTriggerLine = Math.max(startLine, endLine + offset);
-            return { node: n, depth, startLine, endLine, text, triggerLine, endTriggerLine };
+            return { node: n, depth, startLine, endLine, text, triggerLine };
           });
-
-          console.log(
-            '[StickyScroll] scopes',
-            scopes.map((s) => ({
-              depth: s.depth,
-              startLine: s.startLine,
-              endLine: s.endLine,
-              triggerLine: s.triggerLine,
-              endTriggerLine: s.endTriggerLine,
-            })),
-            'refLine',
-            refLine
-          );
 
           // ---------------------------------------------------------------------------
           // 3) Decide active scopes based on refLine and per-depth triggerLine
@@ -1460,18 +1433,10 @@ export default {
               break;
             }
 
-            // Active between triggerLine and endTriggerLine (early exit at both start and end)
-            const active = refLine > scope.triggerLine && refLine <= scope.endTriggerLine;
-            if (active) {
+            // Once past trigger, keep it active until refLine moves beyond scope end.
+            if (refLine <= scope.endLine) {
               activeScopes.push(scope);
             }
-            console.log('[StickyScroll] eval', {
-              depth: scope.depth,
-              refLine,
-              triggerLine: scope.triggerLine,
-              endTriggerLine: scope.endTriggerLine,
-              active,
-            });
           }
 
           this.currentScopes = activeScopes;
@@ -1490,7 +1455,8 @@ export default {
             }
           }
 
-          // Remember overlay height for the next sampling pass
+          // Remember overlay height for the next sampling pass so that
+          // detection uses a stable value and avoids jitter at boundaries.
           this.lastOverlayHeight = this.dom.offsetHeight || 0;
         }
         
