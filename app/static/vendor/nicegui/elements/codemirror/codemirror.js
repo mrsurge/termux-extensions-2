@@ -1292,7 +1292,22 @@ export default {
           lineHeight: "1.4",
           zIndex: "10",
           pointerEvents: "auto",
+          overflow: "hidden",
           // Soft shadow under the bottom-most overlay line
+          boxShadow: "0 6px 8px rgba(0,0,0,0.35)",
+        },
+        ".cm-sticky-layer": {
+          position: "absolute",
+          left: "0",
+          right: "0",
+          height: "var(--cm-sticky-line-height, 1lh)",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          backgroundColor: "var(--cm-editor-bg, #1e1e1e)",
+          pointerEvents: "auto",
+        },
+        ".cm-sticky-layer.innermost": {
           boxShadow: "0 6px 8px rgba(0,0,0,0.35)",
         },
         ".cm-stickyHeader:empty": {
@@ -1659,66 +1674,8 @@ export default {
             return;
           }
 
-          // Build one single-line overlay element per scope. Each line is an
-          // absolutely positioned row inside the sticky header container,
-          // with a synthetic gutter + content region.
-          this.dom.innerHTML = '';
+          // Compute nominal header height (before push-up) for geometry
           const headerHeight = activeScopes.length * lineHeight;
-          this.lastOverlayHeight = headerHeight;
-          // Smooth sampling height: grow immediately, shrink at most one line per update
-          if (headerHeight > this.lastOverlaySampleHeight) {
-            this.lastOverlaySampleHeight = headerHeight;
-          } else if (headerHeight < this.lastOverlaySampleHeight) {
-            this.lastOverlaySampleHeight = Math.max(headerHeight, this.lastOverlaySampleHeight - lineHeight);
-          }
-          this.dom.style.height = `${headerHeight}px`;
-
-          activeScopes.forEach((scope, idx) => {
-            const lineEl = document.createElement('div');
-            lineEl.className = 'cm-sticky-line';
-            lineEl.dataset.index = String(idx);
-            lineEl.style.position = 'absolute';
-            lineEl.style.top = `${idx * lineHeight}px`;
-            lineEl.style.left = '0';
-            lineEl.style.right = '0';
-
-            const gutter = document.createElement('div');
-            gutter.className = 'cm-sticky-gutter';
-            gutter.style.width = `${gutterWidth}px`;
-            // Create one segment per actual gutter (line numbers, folds, etc.)
-            if (gutterSegmentWidths.length > 0) {
-              gutterSegmentWidths.forEach((segWidth, segIdx) => {
-                const seg = document.createElement('div');
-                seg.className = 'cm-sticky-gutter-segment';
-                seg.style.width = `${segWidth}px`;
-                // First segment corresponds to the line-number gutter: show the line number there
-                if (segIdx === 0) {
-                  seg.textContent = String(scope.startLine);
-                }
-                gutter.appendChild(seg);
-              });
-            } else {
-              // Fallback: single segment with the full width
-              const seg = document.createElement('div');
-              seg.className = 'cm-sticky-gutter-segment';
-              seg.style.width = `${gutterWidth}px`;
-              seg.textContent = String(scope.startLine);
-              gutter.appendChild(seg);
-            }
-
-            const content = document.createElement('div');
-            content.className = 'cm-sticky-content';
-            const styled = this.getStyledLineHTML(scope.startLine);
-            if (styled != null) {
-              content.innerHTML = styled;
-            } else {
-              content.textContent = scope.text;
-            }
-
-            lineEl.appendChild(gutter);
-            lineEl.appendChild(content);
-            this.dom.appendChild(lineEl);
-          });
 
           // ---------------------------------------------------------------------------
           // 5) Push-up effect (Monaco-style): as the innermost scope's end approaches
@@ -1787,11 +1744,67 @@ export default {
           }
           this.lastTopOffset = topOffset;
 
-          this.dom.style.top = `${topOffset}px`;
+          // Adjust container height when innermost slides up so no blank line is left behind.
+          const effectiveHeight = Math.max(lineHeight, headerHeight + topOffset);
+          this.dom.style.height = `${effectiveHeight}px`;
+
+          // Build one overlay layer per scope (separate stacking). Only the
+          // innermost layer is translated for push-up; others stay pinned.
+          this.dom.innerHTML = '';
+          const lastIndex = activeScopes.length - 1;
+          activeScopes.forEach((scope, idx) => {
+            const layer = document.createElement('div');
+            layer.className = 'cm-sticky-layer';
+            if (idx === lastIndex) layer.classList.add('innermost');
+            layer.style.top = `${idx * lineHeight}px`;
+            // Higher layers (outer scopes) sit above inner ones.
+            layer.style.zIndex = String(100 - idx);
+            layer.style.setProperty('--cm-sticky-line-height', `${lineHeight}px`);
+            layer.style.transform = idx === lastIndex ? `translateY(${topOffset}px)` : 'translateY(0)';
+
+            const gutter = document.createElement('div');
+            gutter.className = 'cm-sticky-gutter';
+            gutter.style.width = `${gutterWidth}px`;
+            // Create one segment per actual gutter (line numbers, folds, etc.)
+            if (gutterSegmentWidths.length > 0) {
+              gutterSegmentWidths.forEach((segWidth, segIdx) => {
+                const seg = document.createElement('div');
+                seg.className = 'cm-sticky-gutter-segment';
+                seg.style.width = `${segWidth}px`;
+                if (segIdx === 0) seg.textContent = String(scope.startLine);
+                gutter.appendChild(seg);
+              });
+            } else {
+              const seg = document.createElement('div');
+              seg.className = 'cm-sticky-gutter-segment';
+              seg.style.width = `${gutterWidth}px`;
+              seg.textContent = String(scope.startLine);
+              gutter.appendChild(seg);
+            }
+
+            const content = document.createElement('div');
+            content.className = 'cm-sticky-content';
+            const styled = this.getStyledLineHTML(scope.startLine);
+            if (styled != null) {
+              content.innerHTML = styled;
+            } else {
+              content.textContent = scope.text;
+            }
+
+            layer.appendChild(gutter);
+            layer.appendChild(content);
+            this.dom.appendChild(layer);
+          });
 
           // Remember overlay height and scrollTop for the next sampling pass so that
           // detection uses a stable value and avoids jitter at boundaries.
-          this.lastOverlayHeight = headerHeight;
+          this.lastOverlayHeight = effectiveHeight;
+          // Smooth sampling height: grow immediately, shrink at most one line per update
+          if (effectiveHeight > this.lastOverlaySampleHeight) {
+            this.lastOverlaySampleHeight = effectiveHeight;
+          } else if (effectiveHeight < this.lastOverlaySampleHeight) {
+            this.lastOverlaySampleHeight = Math.max(effectiveHeight, this.lastOverlaySampleHeight - lineHeight);
+          }
           this.lastScrollTop = scrollTop;
         }
         
