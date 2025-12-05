@@ -1,234 +1,166 @@
-# Explorer Card Menu Actions Restoration Plan
+Yeah, I follow exactly why you needed the whole `n+1` thing now — you’re compensating for both:
 
-**Date:** 2025-12-01  
-**Author:** VectorArc
+1. The “one line early” behavior from the minimap logic, **and**
+2. The fact that the sticky header itself eats up N visual lines, so nested scopes can still be *inside* the viewport but hidden under the overlay.
 
----
+Right now your code is *almost* there, but the flicker is coming from how you’re mixing the previous render’s `currentScopes` with the new scopes when you decide what to show. The thresholds are moving around *just* enough near the boundary that a nested scope keeps falling in/out as you hover around it.
 
-## Overview
+### What’s causing the flicker
 
-This plan documents the missing context menu ("⋮") actions in the current `explorer.js` (v2 / WS-driven) compared to the legacy `OLD_EXPLORER/explorer.js`, and outlines the steps to restore full feature parity.
+In your current implementation you do something like this inside `updateStickyHeader`: 
 
----
+```js
+const lineHeight = view.defaultLineHeight;
 
-## Gap Analysis
+// How many scopes are currently displayed from previous render
+const displayedCount = this.currentScopes.length;
 
-### Current v2 Explorer Card Menu (as implemented)
+// Filter: only show scopes whose definition line is above viewport (with offset)
+const filteredScopes = [];
+for (let i = 0; i < scopes.length; i++) {
+  const scopeNode = scopes[i];
+  try {
+    const defBlock = view.lineBlockAt(scopeNode.from);
+    // For scope at index i:
+    // - If i < displayedCount, it was already shown, use (i + 1) offset
+    // - If i >= displayedCount, it's new, use (displayedCount + 1) offset
+    const levelOffset = Math.min(i, displayedCount) + 1;
+    const triggerOffset = levelOffset * lineHeight;
+    
+    if (defBlock.bottom <= scrollTop + triggerOffset) {
+      const defLine = state.doc.lineAt(scopeNode.from);
+      filteredScopes.push({
+        node: scopeNode,
+        lineText: defLine.text
+      });
+    }
+  } catch {}
+}
 
-| For Dirs | For Files |
-|----------|-----------|
-| New File… | — |
-| New Folder… | — |
-| Rename… | Rename… |
-| Delete | Delete |
+this.currentScopes = filteredScopes;
+```
 
-### Legacy Explorer Card Menu (OLD_EXPLORER/explorer.js)
+Key problem:
 
-**Directory actions:**
-- Enable select mode
-- Add File
-- Add Directory
-- Open in File Explorer
-- Rename
-- Copy Name
-- Copy Path
-- Copy to…
-- Move to…
-- Copy from…
-- Move from…
-- Delete
+* You use **`displayedCount` from the previous frame** to decide whether a scope should appear now.
+* When you’re right at the boundary where a nested scope is about to be added or removed, a tiny scroll delta changes both:
 
-**File actions:**
-- Rename
-- Copy Name
-- Copy Path
-- Copy to…
-- Move to…
-- Stage (conditional: `modified`, `untracked`, `added`)
-- Unstage (conditional: `staged`, `staged_modified`)
-- Restore… (conditional: file + dirty git status)
-- Delete
+  * which scopes are in `scopes` (because `posAtCoords` moved slightly), **and**
+  * the offsets that depend on `displayedCount`.
+* That feedback loop makes the nested scope ping-pong between “in header” and “not in header”, which is what you’re seeing as flicker.
 
-**Select Mode actions (when enabled):**
-- Disable select mode
-- Copy selected (N)
-- Move selected (N)
-- Stage selected (N)
-- Unstage selected (N)
-- Delete selected (N)
+You already position the detection point correctly below the overlay using `overlayHeight` + `posAtCoords`, so nested scopes *are* being detected at the right place. 
+The instability is purely in the **filtering math**.
 
 ---
 
-## Missing Actions to Restore
+### Fix: use a “virtual viewport top” and pure `N+1` thresholds
 
-### 1. File Actions (Git-related)
+The clean way to keep your `n+1` behavior without flicker is:
 
-| Action | Condition | WS Event | Backend Handler |
-|--------|-----------|----------|-----------------|
-| **Stage** | `gitStatus` ∈ {modified, untracked, added} | `git:stage` | `handle_git_stage` |
-| **Unstage** | `gitStatus` ∈ {staged, staged_modified} | `git:unstage` | `handle_git_unstage` |
-| **Restore…** | file + `gitStatus` ≠ clean | `git:restore` | `handle_git_restore` |
+1. Treat the **virtual top of the viewport** (the “top of visible code under the header”) as:
 
-### 2. File & Directory Actions (Clipboard / Move / Copy)
+   ```js
+   const overlayLines = Math.min(this.currentScopes.length, 5); // you only render up to 5 anyway
+   const virtualTop = scrollTop + overlayLines * lineHeight;
+   ```
 
-| Action | Scope | WS Event | Backend Handler |
-|--------|-------|----------|-----------------|
-| **Copy Name** | both | N/A (client-side clipboard) | N/A |
-| **Copy Path** | both | N/A (client-side clipboard) | N/A |
-| **Copy to…** | both | `explorer:copy` | `handle_explorer_copy` |
-| **Move to…** | both | `explorer:move` | `handle_explorer_move` |
-| **Copy from…** | dir only | `explorer:copyFrom` | `handle_explorer_copyFrom` |
-| **Move from…** | dir only | `explorer:moveFrom` | `handle_explorer_moveFrom` |
+2. For scope at level `i` (0 = outermost, 1 = nested, …), trigger it when its definition line is **`(i + 1)` lines above this virtual top**:
 
-### 3. Directory-Specific Actions
+   ```js
+   const level = i + 1;
+   const triggerPx = virtualTop + level * lineHeight;
+   if (defBlock.bottom <= triggerPx) { /* show it */ }
+   ```
 
-| Action | WS Event | Backend Handler |
-|--------|----------|-----------------|
-| **Open in File Explorer** | N/A (REST + redirect) | `/api/apps/file_explorer/open` |
+This does exactly what you want conceptually:
 
-### 4. Multi-Select Mode
-
-| Action | WS Event | Backend Handler |
-|--------|----------|-----------------|
-| **Enable select mode** | N/A (client state) | N/A |
-| **Disable select mode** | N/A (client state) | N/A |
-| **Copy selected** | `explorer:batchCopy` | `handle_explorer_batchCopy` |
-| **Move selected** | `explorer:batchMove` | `handle_explorer_batchMove` |
-| **Stage selected** | `git:stage` (with `paths: [...]`) | `handle_git_stage` |
-| **Unstage selected** | `git:unstage` (with `paths: [...]`) | `handle_git_unstage` |
-| **Delete selected** | `explorer:batchDelete` | `handle_explorer_batchDelete` |
+* Header currently shows `overlayLines` scopes → it visually covers `overlayLines` lines of code.
+* For the **next** nested scope at index `i`, you want it to be captured when it’s `overlayLines` (already hidden) + 1 extra line above the scroll origin — that’s the `n+1` early-capture.
+* Once a scope starts satisfying that inequality, increasing `overlayLines` on the next frame only **raises** its threshold, so it **cannot drop out again** just because the header grew. Flicker goes away.
 
 ---
 
-## Implementation Plan
+### Concrete patch
 
-### Phase 1: Client-Side Only Actions
+In your current `updateStickyHeader`, leave the top part (gutter positioning, `posAtCoords`, syntax tree + `scopes` collection) as-is. Only replace the “Trigger offset” block that currently uses `displayedCount` with this:
 
-**Step 1.1 – Add `Copy Name` and `Copy Path` menu items**
-- Add items to `openCardMenuForEntry()` in `explorer.js`
-- Use `navigator.clipboard.writeText()` for clipboard access
-- Show toast on success/failure
-- No backend changes required
+```js
+// ============================================================================
+// Trigger offsets: N+1 early capture relative to the *virtual* top of viewport
+// - overlayLines = number of sticky lines currently rendered (max 5)
+// - virtualTop   = scrollTop + overlayLines * lineHeight
+//   (i.e. top of the visible code area under the header)
+// - Scope at level i (0-based) is captured when its definition line is
+//   (i + 1) lines above this virtual top.
+// ============================================================================
 
-### Phase 2: Single-Entry File/Dir Actions
+const lineHeight = view.defaultLineHeight;
 
-**Step 2.1 – Add `Copy to…` and `Move to…` actions**
-- Add menu items for both files and directories
-- Integrate with `window.teFilePicker.openDirectory()` for destination selection
-- Send `explorer:copy` / `explorer:move` via WS bus
-- Backend handlers already exist (verify in `explorer_ws.py`)
+// How many lines the overlay effectively occupies (you slice to 5 when rendering)
+const overlayLines = Math.min(this.currentScopes.length, 5);
+const virtualTop = scrollTop + overlayLines * lineHeight;
 
-**Step 2.2 – Add `Copy from…` and `Move from…` actions (directory only)**
-- Add menu items (visible only for `kind === 'dir'`)
-- Integrate with `window.teFilePicker.openFile()` or `openDirectory()` for source selection
-- Send `explorer:copyFrom` / `explorer:moveFrom` via WS bus
-- Backend handlers already exist (verify in `explorer_ws.py`)
+// Filter: only show scopes whose definition line is above the virtual viewport
+// with N+1 offset per nesting level.
+const filteredScopes = [];
+for (let i = 0; i < scopes.length; i++) {
+  const scopeNode = scopes[i];
+  try {
+    const defBlock = view.lineBlockAt(scopeNode.from);
 
-**Step 2.3 – Add `Open in File Explorer` action (directory only)**
-- Add menu item (visible only for `kind === 'dir'`)
-- Use REST call: `POST /api/apps/file_explorer/open` with `{ params: { path } }`
-- Redirect to returned URL on success
+    // Level index: 0 = outermost, 1 = next nested, etc.
+    const level = i + 1;
 
-### Phase 3: Git Actions for Individual Entries
+    // N+1 trigger: def line must be (level) lines above virtualTop
+    const triggerPx = virtualTop + level * lineHeight;
 
-**Step 3.1 – Add `Stage` action**
-- Add menu item conditionally: `gitStatus` ∈ {`modified`, `untracked`, `added`}
-- Send `git:stage` with `{ paths: [entry.rel] }` via WS bus
-- Verify `handle_git_stage` exists in `explorer_ws.py`
+    if (defBlock.bottom <= triggerPx) {
+      const defLine = state.doc.lineAt(scopeNode.from);
+      filteredScopes.push({
+        node: scopeNode,
+        lineText: defLine.text, // keep original indentation
+      });
+    }
+  } catch {}
+}
 
-**Step 3.2 – Add `Unstage` action**
-- Add menu item conditionally: `gitStatus` ∈ {`staged`, `staged_modified`}
-- Send `git:unstage` with `{ paths: [entry.rel] }` via WS bus
-- Verify `handle_git_unstage` exists in `explorer_ws.py`
+this.currentScopes = filteredScopes;
 
-**Step 3.3 – Add `Restore…` action**
-- Add menu item conditionally: file only + `gitStatus` exists and ≠ `clean`
-- Show confirmation dialog (warn about discarding changes)
-- Send `git:restore` with `{ path: entry.rel, commit: 'HEAD' }` via WS bus
-- Verify `handle_git_restore` exists in `explorer_ws.py`
-- Trigger file reload if currently open file is restored
+// Render (max 5 lines)
+const displayScopes = filteredScopes.slice(0, 5);
+if (displayScopes.length === 0) {
+  this.dom.innerHTML = '';
+} else {
+  this.dom.innerHTML = displayScopes
+    .map((scope, idx) =>
+      `<div class="cm-sticky-line" data-index="${idx}">${escapeHtml(scope.lineText)}</div>`
+    )
+    .join('');
+}
+```
 
-### Phase 4: Multi-Select Mode
+This replaces the block that starts at your current comment:
 
-**Step 4.1 – Add select mode state management**
-- Add `selectModeDir` and `selectedEntries` Set to module state
-- Implement `isInSelectMode(parentRel)` helper
-- Implement `enableSelectMode(entry)` and `disableSelectMode()` functions
-- Trigger tree re-render when entering/exiting select mode
+````js
+// Trigger offset: compensate for overlay height + 1 base line
+// Added: 2025-12-03 by vectorArc - TE2 Team
+// Fixed: Use previous render's scope count for offset calculation
+``` :contentReference[oaicite:2]{index=2}  
 
-**Step 4.2 – Render checkboxes in select mode**
-- Modify `renderEntriesInto()` to render checkboxes when parent is in select mode
-- Handle checkbox change events to update `selectedEntries` set
-
-**Step 4.3 – Add batch action menu items**
-- When `isInSelectMode(entry.rel)` is true, show select-mode menu:
-  - Disable select mode
-  - Copy selected (N)
-  - Move selected (N)
-  - Stage selected (N)
-  - Unstage selected (N)
-  - Delete selected (N)
-
-**Step 4.4 – Implement batch action handlers**
-- `batchCopyTo()`: Use file picker, send `explorer:batchCopy`
-- `batchMoveTo()`: Use file picker, send `explorer:batchMove`
-- `batchStage()`: Send `git:stage` with `{ paths: [...] }`
-- `batchUnstage()`: Send `git:unstage` with `{ paths: [...] }`
-- `batchDelete()`: Confirm, send `explorer:batchDelete`
-
-### Phase 5: Backend Verification & Wiring
-
-**Step 5.1 – Audit `explorer_ws.py` for required handlers**
-Verify existence and correct implementation of:
-- `handle_explorer_copy`
-- `handle_explorer_move`
-- `handle_explorer_copyFrom`
-- `handle_explorer_moveFrom`
-- `handle_explorer_batchCopy`
-- `handle_explorer_batchMove`
-- `handle_explorer_batchDelete`
-- `handle_git_stage`
-- `handle_git_unstage`
-- `handle_git_restore`
-
-**Step 5.2 – Add any missing handlers**
-- Implement missing handlers following existing patterns
-- Ensure each handler broadcasts appropriate state updates:
-  - `explorer:setList` for parent directory refresh
-  - `git:status` for git state changes
-  - `explorer:updateDecorations` for draft flag updates
-
-### Phase 6: Testing Plan Creation
-
-**Step 6.1 – Create a comprehensive testing plan**
-- Document test cases for each action
-- Include edge cases (e.g., missing files, permission errors, non-git repos)
-- Cover mobile/desktop layout differences
-- Test select mode state persistence across tree refreshes
+…and keeps everything else in `applyStickyScroll` intact — compartments, theme, and scroll listener setup are unchanged. :contentReference[oaicite:3]{index=3}  
 
 ---
 
-## Dependencies
+### What you should see after this
 
-1. **File Picker** (`window.teFilePicker`) – Required for destination/source selection
-2. **WS Bus** (`window.__explorerBusSend`) – Required for all backend operations
-3. **Clipboard API** (`navigator.clipboard`) – Required for Copy Name/Path
+Behavior you should get:
 
----
+- Top-level (`scope[0]`) still triggers one line early compared to the “true” viewport, exactly like your minimap logic.
+- Each deeper nested scope triggers earlier by one additional line (so level 2 is 2 lines early, level 3 is 3 lines early, etc.), matching the mental “N+1” model from your status doc. :contentReference[oaicite:4]{index=4}  
+- Once a nested scope pops into the header while scrolling **down**, it will stay there until you actually scroll back up past its true exit point; it won’t glitch in and out just because you hover near the boundary.
 
-## Risks & Mitigations
-
-| Risk | Mitigation |
-|------|------------|
-| Missing backend handlers | Phase 5.1 audit; add handlers if missing |
-| Select mode state lost on tree refresh | Store `selectModeDir` and restore after refresh |
-| File picker unavailable | Show toast "File picker not available" |
-| Clipboard API blocked | Fallback to `document.execCommand('copy')` or toast error |
-
----
-
-## Sign-off
-
-This plan covers all missing context menu actions identified through comparison of the legacy and current explorer implementations. Execution should proceed phase-by-phase, with each phase tested before moving to the next.
-
-— **VectorArc**, 2025-12-01
+If you still see any micro-jitter right at the exact crossing point, the next refinement would be a tiny hysteresis band (e.g. add/subtract `0.3 * lineHeight` to `triggerPx` depending on scroll direction), but I’d only bolt that on if this geometric fix doesn’t already make it feel stable.
+::contentReference[oaicite:5]{index=5}
+````
+_Dex_

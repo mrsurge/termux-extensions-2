@@ -1,5 +1,11 @@
 import * as CM from "nicegui-codemirror";
 
+// Forward console to parent window (for debug logging)
+if (window.parent && window.parent !== window) {
+  const _origLog = console.log.bind(console);
+  console.log = (...args) => { _origLog(...args); try { window.parent.console.log(...args); } catch {} };
+}
+
 const searchExtension = typeof CM.search === 'function' ? CM.search : null;
 const searchKeymap = Array.isArray(CM.searchKeymap) ? CM.searchKeymap : null;
 const highlightSelectionMatches = typeof CM.highlightSelectionMatches === 'function' ? CM.highlightSelectionMatches : null;
@@ -454,6 +460,7 @@ export default {
       pendingFontScale: clampFontScale(this.fontScale),
       colorPickerCompartment: null, // Color picker toggle compartment
       readOnlyCompartment: null,     // Read-only mode compartment
+      stickyScrollCompartment: null, // Sticky scroll toggle compartment - Added: 2025-12-03 by vectorArc - TE2 Team
       isMobileLayout: false,
     };
   },
@@ -998,24 +1005,54 @@ export default {
 
       return extensions;
     },
+    // ============================================================================
+    // CUSTOM METHOD: reportScrollPosition
+    // Updated: 2025-12-03 by vectorArc - TE2 Team
+    // Fix: Use lineBlockAtHeight instead of posAtCoords - stable during updates
+    // Added: Bottom-of-document detection
+    // ============================================================================
     reportScrollPosition(viewArg) {
       try {
         const view = viewArg || this.editor;
         if (!view) return;
         const state = view.state;
         if (!state) return;
-        const ranges = view.visibleRanges;
-        if (!ranges || !ranges.length) return;
-        const from = ranges[0].from;
-        const lineInfo = state.doc.lineAt(from);
-        const line = lineInfo.number;
-        const column = from - lineInfo.from;
 
-        console.log('[CodeMirror] reportScrollPosition', { line, column, from });
+        // Detect if at bottom of document first
+        const { scrollTop, scrollHeight, clientHeight } = view.scrollDOM;
+        const atBottom = Math.abs(scrollTop + clientHeight - scrollHeight) < 2;
+
+        if (atBottom) {
+          // Report last line when at bottom
+          const lastLine = state.doc.lines;
+          console.log('[CodeMirror] reportScrollPosition (at bottom)', { line: lastLine, atBottom: true });
+          this.notifyParent('cm6-scroll-state', {
+            line: lastLine,
+            column: 0,
+            top: state.doc.length,
+            atBottom: true,
+            timestamp: Date.now(),
+          });
+          return;
+        }
+
+        // Use visibleRanges / viewport.from to avoid layout reads during update
+        let pos = view.viewport.from;
+        const ranges = view.visibleRanges;
+        if (ranges && ranges.length > 0) {
+          pos = ranges[0].from;
+        }
+
+        const lineInfo = state.doc.lineAt(pos);
+        const line = lineInfo.number;
+        const column = pos - lineInfo.from;
+
+        console.log('[CodeMirror] reportScrollPosition', { line, column, pos });
         this.notifyParent('cm6-scroll-state', {
           line,
           column,
-          top: from,
+          top: pos,
+          atBottom: false,
           timestamp: Date.now(),
         });
       } catch (err) {
@@ -1199,6 +1236,818 @@ export default {
       } else {
         this.editor.dom.classList.remove('cm-has-minimap-desktop');
       }
+    },
+    // ============================================================================
+
+    // ============================================================================
+    // CUSTOM METHOD: applyStickyScroll
+    // Added: 2025-12-03 by vectorArc - TE2 Team
+    // Purpose: Enable Monaco-style sticky scroll showing current function/class scope
+    // Uses: CM6 ViewPlugin with absolute-positioned overlay + Lezer syntax tree
+    // Fixed: 2025-12-03 - Converted to Monaco pixel-geometry approach for proper triggering
+    // ============================================================================
+    applyStickyScroll(enabled) {
+      if (!this.editor) return;
+
+      const cmComponent = this;
+
+      // Language-aware scope node types
+      const SCOPE_NODE_TYPES = {
+        javascript: new Set([
+          "FunctionDeclaration", "FunctionExpression", "ArrowFunction",
+          "MethodDeclaration", "MethodDefinition", 
+          "ClassDeclaration", "ClassExpression",
+          "ExportDefault", "ExportDefaultDeclaration", "ExportDeclaration", "export"
+        ]),
+        typescript: new Set([
+          "FunctionDeclaration", "FunctionExpression", "ArrowFunction",
+          "MethodDeclaration", "MethodDefinition",
+          "ClassDeclaration", "ClassExpression",
+          "ExportDefault", "ExportDefaultDeclaration", "ExportDeclaration", "export",
+          "InterfaceDeclaration", "TypeAliasDeclaration", "EnumDeclaration"
+        ]),
+        python: new Set([
+          "FunctionDefinition", "ClassDefinition"
+        ]),
+        // Fallback for other languages
+        default: new Set([
+          "FunctionDeclaration", "FunctionDefinition", "FunctionExpression",
+          "ArrowFunction", "MethodDeclaration", "MethodDefinition",
+          "ClassDeclaration", "ClassDefinition", "ClassExpression"
+        ])
+      };
+
+      // Get scope types for current language
+      const getScopeTypes = () => {
+        const lang = (this.language || 'default').toLowerCase();
+        return SCOPE_NODE_TYPES[lang] || SCOPE_NODE_TYPES.default;
+      };
+
+      // Decide if a node counts as a scope header.
+      const isScopeNode = (node, scopeTypes, state, isPython) => {
+        if (scopeTypes.has(node.name)) return true;
+        const lname = node.name ? node.name.toLowerCase() : '';
+        // Treat any default export wrapper as a scope
+        if (lname.includes('export') && lname.includes('default')) return true;
+        // Capture `export default { ... }` object literals as top-level scopes.
+        if (node.name === 'ObjectExpression' && node.parent) {
+          const pl = node.parent.name ? node.parent.name.toLowerCase() : '';
+          if (pl.includes('export') && pl.includes('default')) return true;
+        }
+        // Python main guard: treat `if __name__ == '__main__':` as a scope header
+        if (isPython && node.name === 'IfStatement' && state) {
+          try {
+            const snippet = state.doc.sliceString(node.from, node.to);
+            if (/^\s*if\s+__name__\s*==\s*['"]__main__['"]\s*:/m.test(snippet)) {
+              return true;
+            }
+          } catch (e) {}
+        }
+        return false;
+      };
+
+      // Escape HTML for safe rendering
+      const escapeHtml = (str) => {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      };
+
+      // Sticky scroll theme - ABSOLUTE overlay beside gutter
+      const stickyScrollTheme = CM.EditorView.baseTheme({
+        ".cm-stickyHeader": {
+          position: "absolute",
+          backgroundColor: "var(--cm-editor-bg, #1e1e1e)",
+          fontFamily: "inherit",
+          fontSize: "inherit",
+          lineHeight: "1.4",
+          zIndex: "10",
+          pointerEvents: "auto",
+          overflow: "hidden",
+          // Soft shadow under the bottom-most overlay line
+          boxShadow: "0 6px 8px rgba(0,0,0,0.35)",
+        },
+        ".cm-sticky-layer": {
+          position: "absolute",
+          left: "0",
+          right: "0",
+          height: "var(--cm-sticky-line-height, 1lh)",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          backgroundColor: "var(--cm-editor-bg, #1e1e1e)",
+          pointerEvents: "auto",
+        },
+        ".cm-sticky-layer.innermost": {
+          boxShadow: "0 6px 8px rgba(0,0,0,0.35)",
+        },
+        ".cm-stickyHeader:empty": {
+          display: "none",
+        },
+        ".cm-sticky-line": {
+          padding: "1px 0 1px 0",
+          display: "flex",
+          alignItems: "center",
+          cursor: "pointer",
+          borderLeft: "2px solid transparent",
+        },
+        ".cm-sticky-line:hover": {
+          backgroundColor: "rgba(255,255,255,0.05)",
+          borderLeftColor: "#007acc",
+        },
+        ".cm-sticky-gutter": {
+          display: "flex",
+          flex: "0 0 auto",
+          textAlign: "right",
+          padding: "0 10px 0 4px", // extra right padding for line numbers
+          opacity: "0.75",
+          fontVariantNumeric: "tabular-nums",
+          color: "var(--cm-gutter-foreground, #858585)",
+          boxSizing: "border-box",
+          borderRight: "1px solid rgba(255,255,255,0.08)",
+        },
+        ".cm-sticky-gutter-segment": {
+          flex: "0 0 auto",
+          textAlign: "right",
+          paddingRight: "7px",
+          boxSizing: "border-box",
+        },
+        ".cm-sticky-content": {
+          flex: "1 1 auto",
+          padding: "0 8px 0 4px",
+          whiteSpace: "pre",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        },
+      });
+
+      // ============================================================================
+      // ViewPlugin using Monaco-style pixel geometry with line-based n+1 offsets
+      // (restored from last known good n+1 implementation)
+      // ============================================================================
+      // ========================================================================
+      // StickySlots: Enforces one scope per depth level (no Y-axis pileup)
+      // ========================================================================
+      class StickySlots {
+        constructor(maxSlots = 5) {
+          this.maxSlots = maxSlots;
+          this.slots = new Array(maxSlots).fill(null);
+        }
+
+        // Register a scope into its depth slot
+        // Returns true if registered, false if slot is occupied by different scope
+        register(scope) {
+          const slot = scope.depth;
+          if (slot < 0 || slot >= this.maxSlots) return false;
+          
+          const existing = this.slots[slot];
+          if (existing) {
+            // Same scope (by startLine) - update it
+            if (existing.startLine === scope.startLine) {
+              this.slots[slot] = scope;
+              return true;
+            }
+            // Different scope at same depth - reject (caller must clear first)
+            return false;
+          }
+          
+          this.slots[slot] = scope;
+          return true;
+        }
+
+        // Clear a slot and all deeper slots
+        clear(depth) {
+          for (let i = depth; i < this.maxSlots; i++) {
+            this.slots[i] = null;
+          }
+        }
+
+        // Clear all slots
+        clearAll() {
+          this.slots.fill(null);
+        }
+
+        // Get scope at depth (or null)
+        get(depth) {
+          return this.slots[depth] || null;
+        }
+
+        // Get all active scopes in depth order
+        getActive() {
+          return this.slots.filter(s => s !== null);
+        }
+
+        // Get the deepest occupied slot index (-1 if empty)
+        getMaxDepth() {
+          for (let i = this.maxSlots - 1; i >= 0; i--) {
+            if (this.slots[i] !== null) return i;
+          }
+          return -1;
+        }
+      }
+
+      const stickyScrollPlugin = CM.ViewPlugin.fromClass(class {
+        constructor(view) {
+          this.view = view;
+          this.dom = document.createElement("div");
+          this.dom.className = "cm-stickyHeader";
+          
+          // Slot-based scope management (enforces one scope per depth)
+          this.slots = new StickySlots(5);
+          this.currentScopes = []; // For click handler compatibility
+          
+          // Used to break the feedback loop between overlay height and
+          // sampling position; we always sample using the previous height.
+          this.lastOverlayHeight = 0;
+          // Smoothed overlay height used for sampling (decays slowly to avoid
+          // ping-pong when a scope drops at the boundary).
+          this.lastOverlaySampleHeight = 0;
+          // Used to add hysteresis to push-up offset near scope ends to
+          // avoid flicker when hovering around the boundary.
+          this.lastTopOffset = 0;
+          // Track last rendered scope signature so we only log on changes.
+          this.lastActiveSignature = '';
+          // Track last render key to skip redundant DOM rebuilds
+          this.lastRenderKey = '';
+          // Track last scrollTop to infer scroll direction
+          this.lastScrollTop = view.scrollDOM.scrollTop || 0;
+          // rAF tail to ensure a follow-up pass if layout lags
+          this.rafPending = false;
+          
+          // Append to editor DOM (works inside iframe)
+          view.dom.appendChild(this.dom);
+          
+          // Click handler for jump-to-definition
+          this.dom.addEventListener('click', (e) => {
+            const target = e.target.closest('.cm-sticky-line');
+            if (target && this.currentScopes.length > 0) {
+              const index = parseInt(target.dataset.index, 10);
+              const scope = this.currentScopes[index];
+              if (!isNaN(index) && scope && scope.node) {
+                view.dispatch({
+                  selection: { anchor: scope.node.from },
+                  scrollIntoView: true,
+                });
+                view.focus();
+              }
+            }
+          });
+          
+          // Direct scroll listener for immediate response
+          this.scrollHandler = () => {
+            this.updateStickyHeader();
+            if (!this.rafPending) {
+              this.rafPending = true;
+              requestAnimationFrame(() => {
+                this.rafPending = false;
+                this.updateStickyHeader();
+              });
+            }
+          };
+          view.scrollDOM.addEventListener('scroll', this.scrollHandler, { passive: true });
+          
+          // Initial render
+          this.updateStickyHeader();
+        }
+
+        // Try to get the styled HTML for a given 1-based line number by
+        // cloning the existing .cm-line DOM. Falls back to null if the
+        // line isn't currently rendered in the viewport.
+        getStyledLineHTML(lineNumber) {
+          const view = this.view;
+          const state = view.state;
+          if (!state || !view || !view.dom) return null;
+          if (lineNumber < 1 || lineNumber > state.doc.lines) return null;
+
+          try {
+            const line = state.doc.line(lineNumber);
+            const pos = line.from;
+            const domAt = view.domAtPos(pos);
+            let node = domAt.node;
+
+            if (!node) return null;
+            if (node.nodeType === Node.TEXT_NODE && node.parentElement) {
+              node = node.parentElement;
+            }
+
+            // Walk up until we hit the .cm-line container
+            while (node && node !== view.dom) {
+              if (node.nodeType === Node.ELEMENT_NODE &&
+                  node.classList &&
+                  node.classList.contains("cm-line")) {
+                return node.innerHTML;
+              }
+              node = node.parentNode;
+            }
+          } catch (e) {
+            // If DOM lookup fails (e.g., line not in viewport), just fall back.
+          }
+          return null;
+        }
+        
+        updateStickyHeader() {
+          const view = this.view;
+          const state = view.state;
+          const scrollTop = view.scrollDOM.scrollTop;
+
+          // Debug: log every 50th call to verify handler is running
+          if (!this._callCount) this._callCount = 0;
+          this._callCount++;
+          if (this._callCount % 50 === 0) {
+            console.log('[Slots] heartbeat', { callCount: this._callCount, scrollTop });
+          }
+
+          // CRITICAL: Update scroll tracking FIRST, before any early returns
+          const direction = scrollTop > this.lastScrollTop ? 1 : (scrollTop < this.lastScrollTop ? -1 : 0);
+          this.lastScrollTop = scrollTop;
+
+          // Remember which scopes were active on the previous pass for hysteresis
+          const prevActiveKeys = new Set(
+            (this.currentScopes || []).map((s) => `${s.depth}:${s.startLine}-${s.endLine}`)
+          );
+          
+          // Get gutter container and child gutter segments (line numbers, folds, etc.)
+          const gutterRoot = view.dom.querySelector('.cm-gutters');
+          const gutterWidth = gutterRoot ? gutterRoot.offsetWidth : 0;
+          const gutterChildren = gutterRoot ? Array.from(gutterRoot.children) : [];
+          const gutterSegmentWidths = gutterChildren.map((child) => child.offsetWidth || 0);
+          const lineNumberGutter = gutterChildren.find((el) =>
+            el.classList && el.classList.contains('cm-lineNumbers')
+          ) || gutterChildren[0] || null;
+          // Sync font size with the line-number gutter if possible
+          if (lineNumberGutter) {
+            try {
+              const gutterStyle = window.getComputedStyle(lineNumberGutter);
+              if (gutterStyle && gutterStyle.fontSize) {
+                const baseSize = parseFloat(gutterStyle.fontSize);
+                if (Number.isFinite(baseSize)) {
+                  // Bump size slightly for visibility while keeping alignment
+                  this.dom.style.fontSize = `${baseSize + 0.2}px`;
+                } else {
+                  this.dom.style.fontSize = gutterStyle.fontSize;
+                }
+              }
+            } catch (e) {
+              // Ignore style lookup failures
+            }
+          }
+
+          // Position absolute overlay spanning the entire content area,
+          // including a synthetic gutter on the left.
+          this.dom.style.top = '0';
+          this.dom.style.left = '0';
+          this.dom.style.right = '0';
+
+          const lineHeight = view.defaultLineHeight;
+
+          // ---------------------------------------------------------------------------
+          // 1) Compute reference line below the current overlay
+          //    Use the previous overlay height for sampling to avoid the
+          //    overlay changing and refLine jumping in the same frame.
+          //    Apply a scroll-fraction-based early-capture offset so that
+          //    word-wrapped documents stay aligned from top to bottom.
+          // ---------------------------------------------------------------------------
+          const currentOverlayHeight = this.dom.offsetHeight || 0;
+          const samplingOverlayHeight = this.lastOverlaySampleHeight || currentOverlayHeight;
+
+          // Compute scroll fraction for the whole document (0 = top, 1 = bottom)
+          const { scrollHeight, clientHeight } = view.scrollDOM;
+          const denom = Math.max(1, scrollHeight - clientHeight);
+          const scrollFrac = Math.max(0, Math.min(1, scrollTop / denom));
+
+          // Base early capture behavior:
+          // - When line wrapping is OFF: use the original fixed offsets.
+          // - When line wrapping is ON: apply a scroll-fraction drift
+          //   correction to keep the top-level scope aligned from top to
+          //   bottom, then compensate for deeper scopes in the per-scope
+          //   activation step.
+          const wrappingEnabled = !!(cmComponent && cmComponent.lineWrapping);
+          let driftCorrectionLines = 0;
+          let earlyLines;
+          if (wrappingEnabled) {
+            const baseEarlyLines = 1;
+            const extraEarlyLinesAtBottom = 1;
+            driftCorrectionLines = scrollFrac * extraEarlyLinesAtBottom;
+            earlyLines =
+              direction >= 0
+                ? baseEarlyLines + driftCorrectionLines   // down or static
+                : driftCorrectionLines;                   // up
+          } else {
+            driftCorrectionLines = 0;
+            earlyLines = direction >= 0 ? 1 : 0;
+          }
+
+          const baseTop = scrollTop + samplingOverlayHeight;
+          const effectiveTop = baseTop + earlyLines * lineHeight;
+
+          let refPos;
+          try {
+            const block = view.lineBlockAtHeight(effectiveTop);
+            refPos = block.from;
+          } catch {
+            refPos = view.viewport.from;
+          }
+          const refLine = state.doc.lineAt(refPos).number;
+
+          // ---------------------------------------------------------------------------
+          // 2) Build scope candidates from syntax tree
+          // ---------------------------------------------------------------------------
+          const tree = CM.syntaxTree(state);
+          if (!tree || !tree.topNode) {
+            if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
+            this.slots.clearAll();
+            this.currentScopes = [];
+            return;
+          }
+
+          const scopeTypes = getScopeTypes();
+          const isPython = (cmComponent && cmComponent.language || 'default').toLowerCase() === 'python';
+          const ancestorNodes = [];
+          let node = tree.resolveInner(refPos);
+          for (; node; node = node.parent) {
+            if (isScopeNode(node, scopeTypes, state, isPython)) {
+              ancestorNodes.push(node);
+            }
+          }
+          ancestorNodes.reverse(); // depth 0 = outermost
+
+          // Build scope objects with n+1 trigger calculations
+          const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
+
+          const candidateScopes = ancestorNodes.map((n, originalDepth) => {
+            const startLine = state.doc.lineAt(n.from).number;
+            const endLine = state.doc.lineAt(n.to).number;
+            const lineText = state.doc.lineAt(n.from).text;
+            const indentMatch = lineText.match(/^([ \t]*)/);
+            const indentRaw = indentMatch ? indentMatch[1] : '';
+            const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
+            const indentDepth = Math.floor(indentSpaces / indentSize);
+            // For Python, trust indentation over ancestor chain to avoid bogus nesting when
+            // the parser error-recovers and leaves a top-level scope open too long.
+            const depth = isPython ? indentDepth : originalDepth;
+
+            // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
+            const offset = -(depth + 2);
+            const triggerLine = startLine + offset;
+            // Apply the same offset to the effective end so scopes hand off cleanly
+            const endTriggerLine = Math.max(startLine, endLine + offset);
+
+            return {
+              node: n,
+              depth,
+              startLine,
+              endLine,
+              text: lineText,
+              triggerLine,
+              endTriggerLine,
+              indentDepth,
+              indentSpaces,
+            };
+          });
+
+          // ---------------------------------------------------------------------------
+          // 3) SLOT-BASED ACTIVATION: One scope per depth, no Y-axis pileup
+          //    - Clear slots for scopes we've scrolled past
+          //    - Register candidates into their depth slots
+          //    - Slots enforce the invariant: max one scope per depth level
+          // ---------------------------------------------------------------------------
+          const hysteresisLines = 0.5;
+          const earlyMarginLines = 1.5;
+          
+          const DEBUG_SLOTS = true; // Set true to log to browser_console.log
+
+          // First pass: clear slots that are no longer valid
+          // A slot should clear if refLine is outside its activation window
+          for (let depth = 0; depth < this.slots.maxSlots; depth++) {
+            const existing = this.slots.get(depth);
+            if (!existing) continue;
+            
+            let scopedRef = refLine;
+            if (wrappingEnabled && depth > 0) {
+              scopedRef = refLine - driftCorrectionLines;
+            }
+            
+            // Direction-aware release:
+            // - Downward scroll: keep scope until the actual end line passes the ref line
+            //   (no early shrink), preventing short scopes from disappearing too soon.
+            // - Upward scroll: use the earlier endTriggerLine with margin so scopes exit faster
+            //   when backing out.
+            const goingDown = direction >= 0;
+            const exitLine = goingDown ? existing.endLine : existing.endTriggerLine;
+            const exitMargin = goingDown ? 0 : earlyMarginLines;
+
+            // Release when we scroll ABOVE the bottom of the header line
+            // Since header shows the startLine, release when refLine goes above startLine + 1
+            const scrolledAbove = scopedRef <= existing.startLine;
+            const scrolledBelow = scopedRef > exitLine + exitMargin;
+            const shouldClear = scrolledAbove || scrolledBelow;
+            
+            if (DEBUG_SLOTS) {
+              console.log('[Slots] check', {
+                depth,
+                refLine,
+                scopedRef,
+                startLine: existing.startLine,
+                endLine: existing.endLine,
+                triggerLine: existing.triggerLine,
+                endTriggerLine: existing.endTriggerLine,
+                exitLine,
+                exitMargin,
+                shouldClear,
+                scrolledAbove,
+                scrolledBelow,
+                goingDown
+              });
+            }
+            
+            if (shouldClear) {
+              if (DEBUG_SLOTS) console.log('[Slots] CLEARING', { depth });
+              this.slots.clear(depth); // Clears this and all deeper slots
+            }
+          }
+
+          // Second pass: try to register candidate scopes into slots
+          for (const scope of candidateScopes) {
+            let scopedRef = refLine;
+            if (wrappingEnabled && scope.depth > 0) {
+              scopedRef = refLine - driftCorrectionLines;
+            }
+
+            const key = `${scope.depth}:${scope.startLine}-${scope.endLine}`;
+            const wasActive = prevActiveKeys.has(key);
+
+            // Calculate activation window with hysteresis
+            const lower = wasActive 
+              ? scope.triggerLine - hysteresisLines 
+              : scope.triggerLine + hysteresisLines;
+            const upper = wasActive 
+              ? scope.endTriggerLine + hysteresisLines 
+              : scope.endTriggerLine - hysteresisLines;
+
+            // Check if scope should be active
+            let shouldActivate = scopedRef > lower && scopedRef <= upper;
+
+            // Near-end linger: keep innermost scope active during push-up
+            if (!shouldActivate && scope.depth > 0) {
+              try {
+                const endLineObj = state.doc.lineAt(scope.node.to);
+                const endBlock = view.lineBlockAt(endLineObj.to);
+                const endBottomViewport = endBlock.bottom - scrollTop;
+                const prospectiveHeaderHeight = (scope.depth + 1) * lineHeight;
+                if (endBottomViewport < prospectiveHeaderHeight + earlyMarginLines * lineHeight) {
+                  shouldActivate = true;
+                }
+              } catch {}
+            }
+
+            if (DEBUG_SLOTS) {
+              console.log('[Slots] candidate', {
+                depth: scope.depth,
+                refLine,
+                scopedRef,
+                startLine: scope.startLine,
+                triggerLine: scope.triggerLine,
+                lower,
+                upper,
+                shouldActivate
+              });
+            }
+
+            if (shouldActivate) {
+              // Clear the slot first if occupied by a different scope
+              const existing = this.slots.get(scope.depth);
+              if (existing && existing.startLine !== scope.startLine) {
+                this.slots.clear(scope.depth);
+              }
+              if (DEBUG_SLOTS) console.log('[Slots] REGISTER', { depth: scope.depth, startLine: scope.startLine });
+              this.slots.register(scope);
+            }
+          }
+
+          // Get active scopes from slots (guaranteed no Y-axis pileup)
+          const activeScopes = this.slots.getActive();
+          this.currentScopes = activeScopes;
+
+          if (DEBUG_SLOTS) {
+            console.log('[Slots] activeScopes', { count: activeScopes.length, scopes: activeScopes.map(s => s.startLine) });
+          }
+
+          // Track overlay height even when active set toggles to avoid
+          // sampling jitter at the exact moment a scope disappears.
+          if (activeScopes.length > 0) {
+            this.lastOverlayHeight = activeScopes.length * lineHeight;
+          }
+
+          // Debug logging (disabled by default); flip to true for diagnostics
+          const DEBUG_STICKY = false;
+          const signature = activeScopes.map((s) => `${s.depth}:${s.startLine}-${s.endLine}`).join('|');
+          try {
+            if (DEBUG_STICKY && signature !== this.lastActiveSignature) {
+              console.log('[StickyScroll] active change', {
+                refLine,
+                scrollTop,
+                overlayHeight: this.lastOverlayHeight,
+                signature,
+                scopes: activeScopes.map((s) => ({
+                  depth: s.depth,
+                  start: s.startLine,
+                  end: s.endLine,
+                  trigger: s.triggerLine,
+                  endTrigger: s.endTriggerLine,
+                })),
+              });
+            }
+          } catch (e) {
+            // Logging should never break rendering
+          }
+          // Always update the last signature so renderKey reflects real state
+          this.lastActiveSignature = signature;
+
+          // ---------------------------------------------------------------------------
+          // 4) Render overlay from activeScopes
+          // ---------------------------------------------------------------------------
+          if (activeScopes.length === 0) {
+            if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
+            // When there is no overlay, pin it at the top. Keep sample height
+            // to avoid refLine jump; let it decay slowly below.
+            this.dom.style.top = '0px';
+            // Decay sample height by at most one line per pass
+            if (this.lastOverlaySampleHeight > 0) {
+              this.lastOverlaySampleHeight = Math.max(0, this.lastOverlaySampleHeight - lineHeight);
+            }
+            // Reset renderKey so next non-empty render won't be skipped
+            this.lastRenderKey = '';
+            return;
+          }
+
+          // Compute nominal header height (before push-up) for geometry
+          const headerHeight = activeScopes.length * lineHeight;
+
+          // ---------------------------------------------------------------------------
+          // 5) Push-up effect (Monaco-style): as the innermost scope's end approaches
+          //    the bottom of the sticky stack, slide the whole overlay up so it
+          //    appears attached to the end of that scope instead of overlapping it.
+          // ---------------------------------------------------------------------------
+          const innermost = activeScopes[activeScopes.length - 1];
+
+          let topOffset = 0;
+          // Scale push-up margin: small scopes shouldn't be pushed away too early.
+          const scopeLength = Math.max(1, innermost.endLine - innermost.startLine + 1);
+          const earlyMargin = (scopeLength <= 6 ? 1 : 3) * lineHeight; // 1 line for short scopes, 3 for larger
+          try {
+            // Use the end of the line containing the node end to better match visual bottom
+            const endLine = state.doc.lineAt(innermost.node.to);
+            const endLineBlock = view.lineBlockAt(endLine.to);
+            // Convert end-of-scope bottom to viewport coordinates
+            const endBottomViewport = endLineBlock.bottom - scrollTop;
+            const stackBottomViewport = headerHeight;
+            const delta = endBottomViewport - stackBottomViewport;
+            if (delta < earlyMargin) {
+              // Start easing up as we enter the margin; never move down.
+              topOffset = Math.max(-earlyMargin, delta - earlyMargin);
+            }
+          } catch (e) {
+            // If geometry lookup fails, keep header pinned at the top.
+          }
+
+          // Apply small hysteresis to prevent rapid toggling when endBottom
+          // hovers around stackBottom. If the new offset is within epsilon of
+          // the previous value, keep the previous value to avoid flicker.
+          const epsilon = lineHeight * 0.25;
+          if (Math.abs(topOffset - this.lastTopOffset) < epsilon) {
+            topOffset = this.lastTopOffset;
+          }
+          if (DEBUG_STICKY && topOffset !== this.lastTopOffset) {
+            try {
+              const endLine = state.doc.lineAt(innermost.node.to);
+              const endBottomViewport = view.lineBlockAt(endLine.to).bottom - scrollTop;
+              console.log('[StickyScroll] push-up', {
+                topOffset,
+                prev: this.lastTopOffset,
+                endBottomViewport,
+                stackBottomViewport: headerHeight,
+                earlyMargin,
+              });
+            } catch {}
+          }
+          this.lastTopOffset = topOffset;
+
+          // Adjust container height to the sum of row heights:
+          // all but the innermost keep full line height; innermost can shrink when sliding.
+          const lastHeight = Math.max(0, lineHeight + topOffset);
+          const effectiveHeight = (activeScopes.length - 1) * lineHeight + lastHeight;
+          this.dom.style.height = `${effectiveHeight}px`;
+
+          // Build one overlay layer per scope (separate stacking). Only the
+          // innermost layer is translated for push-up; others stay pinned.
+          const renderKey = `${signature}|${topOffset.toFixed(3)}|${effectiveHeight.toFixed(3)}`;
+          if (renderKey === this.lastRenderKey) {
+            return;
+          }
+          this.lastRenderKey = renderKey;
+
+          this.dom.innerHTML = '';
+          const lastIndex = activeScopes.length - 1;
+          activeScopes.forEach((scope, idx) => {
+            const layer = document.createElement('div');
+            layer.className = 'cm-sticky-layer';
+            if (idx === lastIndex) layer.classList.add('innermost');
+            layer.style.top = `${idx * lineHeight}px`;
+            // Higher layers (outer scopes) sit above inner ones.
+            layer.style.zIndex = String(100 - idx);
+            layer.style.setProperty('--cm-sticky-line-height', `${lineHeight}px`);
+            layer.style.transform = idx === lastIndex ? `translateY(${topOffset}px)` : 'translateY(0)';
+            if (idx === lastIndex) {
+              layer.style.height = `${lastHeight}px`;
+            } else {
+              layer.style.height = `${lineHeight}px`;
+            }
+
+            const gutter = document.createElement('div');
+            gutter.className = 'cm-sticky-gutter';
+            gutter.style.width = `${gutterWidth}px`;
+            // Create one segment per actual gutter (line numbers, folds, etc.)
+            if (gutterSegmentWidths.length > 0) {
+              gutterSegmentWidths.forEach((segWidth, segIdx) => {
+                const seg = document.createElement('div');
+                seg.className = 'cm-sticky-gutter-segment';
+                seg.style.width = `${segWidth}px`;
+                if (segIdx === 0) seg.textContent = String(scope.startLine);
+                gutter.appendChild(seg);
+              });
+            } else {
+              const seg = document.createElement('div');
+              seg.className = 'cm-sticky-gutter-segment';
+              seg.style.width = `${gutterWidth}px`;
+              seg.textContent = String(scope.startLine);
+              gutter.appendChild(seg);
+            }
+
+            const content = document.createElement('div');
+            content.className = 'cm-sticky-content';
+            const styled = this.getStyledLineHTML(scope.startLine);
+            if (styled != null) {
+              content.innerHTML = styled;
+            } else {
+              content.textContent = scope.text;
+            }
+
+            layer.appendChild(gutter);
+            layer.appendChild(content);
+            this.dom.appendChild(layer);
+          });
+
+          // Remember overlay height for the next sampling pass so that
+          // detection uses a stable value and avoids jitter at boundaries.
+          this.lastOverlayHeight = effectiveHeight;
+          // Smooth sampling height: grow immediately, shrink at most one line per update
+          if (effectiveHeight > this.lastOverlaySampleHeight) {
+            this.lastOverlaySampleHeight = effectiveHeight;
+          } else if (effectiveHeight < this.lastOverlaySampleHeight) {
+            this.lastOverlaySampleHeight = Math.max(effectiveHeight, this.lastOverlaySampleHeight - lineHeight);
+          }
+        }
+        
+        update(update) {
+          // Re-render on document changes (syntax tree may have changed)
+          if (update.docChanged) {
+            // Clear slots on document change to force re-evaluation
+            this.slots.clearAll();
+            this.updateStickyHeader();
+          }
+        }
+        
+        destroy() {
+          this.view.scrollDOM.removeEventListener('scroll', this.scrollHandler);
+          this.dom.remove();
+        }
+      });
+
+      // Extension array - theme + plugin
+      const stickyScrollExtension = [
+        stickyScrollTheme,
+        stickyScrollPlugin,
+      ];
+
+      // Compartment management
+      if (!this.stickyScrollCompartment) {
+        this.stickyScrollCompartment = new CM.Compartment();
+        // Install compartment (initially empty)
+        this.editor.dispatch({
+          effects: CM.StateEffect.appendConfig.of(
+            this.stickyScrollCompartment.of([])
+          )
+        });
+      }
+
+      // Reconfigure based on enabled state
+      this.editor.dispatch({
+        effects: this.stickyScrollCompartment.reconfigure(
+          enabled ? stickyScrollExtension : []
+        )
+      });
+      
+      console.log('[CodeMirror] Sticky scroll set to:', enabled);
     },
     // ============================================================================
   },

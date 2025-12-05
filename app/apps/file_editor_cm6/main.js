@@ -13,6 +13,63 @@ import { initAgentDrawer } from './static/js/agent_drawer.js';
 import ReconnectingWebSocket from './static/js/reconnecting_websocket.js';
 import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
 
+// =============================================================================
+// Debug Console WebSocket - forwards ALL console output to server file
+// =============================================================================
+let _debugWs = null;
+let _debugWsReady = false;
+const _originalConsole = {
+  log: console.log.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+  info: console.info.bind(console),
+};
+
+function initDebugConsole() {
+  if (_debugWs) return;
+  try {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    _debugWs = new WebSocket(`${protocol}//${window.location.host}/ws/app/file_editor_cm6/debug_console`);
+    _debugWs.onopen = () => { 
+      _debugWsReady = true; 
+      _originalConsole.log('[DebugWS] Connected'); 
+    };
+    _debugWs.onclose = () => { _debugWsReady = false; _debugWs = null; };
+    _debugWs.onerror = () => { _debugWsReady = false; };
+  } catch (e) {
+    // Silent fail
+  }
+}
+
+function sendToDebugWs(level, args) {
+  if (!_debugWsReady || !_debugWs) return;
+  try {
+    const msg = JSON.stringify({
+      ts: Date.now(),
+      level,
+      args: args.map(a => {
+        try {
+          return typeof a === 'object' ? JSON.stringify(a) : String(a);
+        } catch {
+          return String(a);
+        }
+      })
+    });
+    _debugWs.send(msg);
+  } catch (e) {
+    // Silent fail
+  }
+}
+
+// Override console methods
+console.log = (...args) => { _originalConsole.log(...args); sendToDebugWs('log', args); };
+console.warn = (...args) => { _originalConsole.warn(...args); sendToDebugWs('warn', args); };
+console.error = (...args) => { _originalConsole.error(...args); sendToDebugWs('error', args); };
+console.info = (...args) => { _originalConsole.info(...args); sendToDebugWs('info', args); };
+
+// Initialize debug console
+initDebugConsole();
+
 let explorerSocket = null;
 
 function connectExplorerSocket() {
@@ -355,6 +412,7 @@ const miToggleDiffs  = requireEl('#mi-toggle-diffs');
 const miToggleDraftDiffs = requireEl('#mi-toggle-draft-diffs');
 const miToggleColorPicker = requireEl('#mi-toggle-color-picker');
 const miToggleReadonly = requireEl('#mi-toggle-readonly');
+const miToggleStickyScroll = requireEl('#mi-toggle-sticky-scroll');  // Added: 2025-12-03 by vectorArc - TE2 Team
 const miTrackEdits   = requireEl('#mi-track-edits');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
@@ -1104,6 +1162,7 @@ function applyStateToMenus(state) {
   setMenuChecked(miToggleColorPicker, state.colorPicker);
   setMenuChecked(miToggleReadonly, state.readOnly);
   setMenuChecked(miToggleMinimap, state.showMinimap);
+  setMenuChecked(miToggleStickyScroll, state.stickyScroll);  // Added: 2025-12-03 by vectorArc - TE2 Team
   setMenuChecked(miTrackEdits, state.trackAgentEdits);
   
   // Update theme menu checkmarks
@@ -2471,6 +2530,15 @@ const miToggleMinimap = requireEl('#mi-toggle-minimap');
 bindMenuToggle(miToggleMinimap, async () => {
   const success = await updatePreference('showMinimap', !(editorViewState?.showMinimap));
   if (!success) host.toast('Failed to update preference');
+});
+
+// ============================================================================
+// Sticky Scroll Toggle
+// Added: 2025-12-03 by vectorArc - TE2 Team
+// ============================================================================
+bindMenuToggle(miToggleStickyScroll, async () => {
+  const success = await updatePreference('stickyScroll', !(editorViewState?.stickyScroll));
+  if (!success) host.toast('Failed to update sticky scroll preference');
 });
 
 bindMenuToggle(miTrackEdits, async () => {
