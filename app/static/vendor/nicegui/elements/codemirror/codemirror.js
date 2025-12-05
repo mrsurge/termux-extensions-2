@@ -1340,6 +1340,7 @@ export default {
         },
         ".cm-sticky-layer.innermost": {
           boxShadow: "0 6px 8px rgba(0,0,0,0.35)",
+          transition: "transform 140ms cubic-bezier(0.25, 0.1, 0.25, 1), height 140ms cubic-bezier(0.25, 0.1, 0.25, 1)",
         },
         ".cm-stickyHeader:empty": {
           display: "none",
