@@ -1661,10 +1661,11 @@ export default {
           }
 
           const scopeTypes = getScopeTypes();
+          const isPython = (cmComponent && cmComponent.language || 'default').toLowerCase() === 'python';
           const ancestorNodes = [];
           let node = tree.resolveInner(refPos);
           for (; node; node = node.parent) {
-            if (isScopeNode(node, scopeTypes)) {
+            if (isScopeNode(node, scopeTypes, state, isPython)) {
               ancestorNodes.push(node);
             }
           }
