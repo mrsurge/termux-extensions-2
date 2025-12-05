@@ -1269,6 +1269,19 @@ export default {
         python: new Set([
           "FunctionDefinition", "ClassDefinition"
         ]),
+        markdown: new Set([
+          // Treat headings as scopes so sticky scroll can show document outline
+          "ATXHeading1", "ATXHeading2", "ATXHeading3", "ATXHeading4", "ATXHeading5", "ATXHeading6",
+          "SetextHeading1", "SetextHeading2"
+        ]),
+        html: new Set([
+          // Use element nodes; keeps nesting matching the DOM tree
+          "Element"
+        ]),
+        css: new Set([
+          // Group by rule blocks
+          "StyleRule", "QualifiedRule", "AtRule"
+        ]),
         // Fallback for other languages
         default: new Set([
           "FunctionDeclaration", "FunctionDefinition", "FunctionExpression",
@@ -1304,6 +1317,31 @@ export default {
           } catch (e) {}
         }
         return false;
+      };
+
+      // Markdown heading collector: returns array of {line, level, text}
+      const collectMarkdownHeadings = (doc) => {
+        const headings = [];
+        const total = doc.lines;
+
+        for (let i = 1; i <= total; i++) {
+          const line = doc.line(i);
+          const text = line.text;
+
+          // ATX-only per request: match leading #s, ignore setext and other heuristics
+          const atx = text.match(/^ *(#{1,6})\s+(.*)$/);
+          if (!atx) continue;
+
+          const level = atx[1].length;
+          const label = atx[2].trim();
+          headings.push({ line: i, level, text: label });
+        }
+
+        if (headings.length === 0) return headings;
+
+        // Baseline = first heading level; drop any headings above it
+        const baseLevel = headings[0].level;
+        return headings.filter(h => h.level >= baseLevel).map(h => ({ ...h, baseLevel }));
       };
 
       // Escape HTML for safe rendering
@@ -1662,49 +1700,92 @@ export default {
           }
 
           const scopeTypes = getScopeTypes();
-          const isPython = (cmComponent && cmComponent.language || 'default').toLowerCase() === 'python';
+          const lang = (cmComponent && cmComponent.language || 'default').toLowerCase();
+          const isPython = lang === 'python';
+          const isMarkdown = lang === 'markdown' || lang === 'md' || lang === 'gfm';
           const ancestorNodes = [];
-          let node = tree.resolveInner(refPos);
-          for (; node; node = node.parent) {
-            if (isScopeNode(node, scopeTypes, state, isPython)) {
-              ancestorNodes.push(node);
+          let candidateScopes = [];
+
+          if (isMarkdown) {
+            // Heading-based scopes: headings aren’t nested in the Markdown CST, so build them manually
+            const headings = collectMarkdownHeadings(state.doc);
+            if (headings.length > 0) {
+              const baseLevel = headings[0].baseLevel || headings[0].level;
+              const sections = headings.map((h, i) => {
+                const nextLine = (i + 1 < headings.length) ? headings[i + 1].line : state.doc.lines + 1;
+                const endLine = Math.max(h.line, nextLine - 1);
+                const depth = Math.max(0, h.level - baseLevel);
+                const offset = -(depth + 2);
+                const triggerLine = h.line + offset;
+                const endTriggerLine = Math.max(h.line, endLine + offset);
+                const lineObj = state.doc.line(h.line);
+                return {
+                  node: { from: lineObj.from, to: lineObj.to },
+                  depth,
+                  startLine: h.line,
+                  endLine,
+                  text: h.text,
+                  triggerLine,
+                  endTriggerLine,
+                  indentDepth: depth,
+                  indentSpaces: 0,
+                };
+              });
+
+              // Build active chain up to refLine based on heading levels
+              const chain = [];
+              for (const section of sections) {
+                if (section.startLine > refLine) break;
+                while (chain.length && chain[chain.length - 1].depth >= section.depth) {
+                  chain.pop();
+                }
+                chain.push(section);
+              }
+              candidateScopes = chain;
             }
+          } else {
+            let node = tree.resolveInner(refPos);
+            for (; node; node = node.parent) {
+              if (isScopeNode(node, scopeTypes, state, isPython)) {
+                ancestorNodes.push(node);
+              }
+            }
+            ancestorNodes.reverse(); // depth 0 = outermost
+
+            // Build scope objects with n+1 trigger calculations
+            const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
+
+            candidateScopes = ancestorNodes.map((n, originalDepth) => {
+              const startLine = state.doc.lineAt(n.from).number;
+              const endLine = state.doc.lineAt(n.to).number;
+              const lineText = state.doc.lineAt(n.from).text;
+              const indentMatch = lineText.match(/^([ \t]*)/);
+              const indentRaw = indentMatch ? indentMatch[1] : '';
+              const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
+              const indentDepth = Math.floor(indentSpaces / indentSize);
+              // For Python, trust indentation over ancestor chain to avoid bogus nesting when
+              // the parser error-recovers and leaves a top-level scope open too long.
+              const depth = isPython ? indentDepth : originalDepth;
+
+              // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
+              const offset = -(depth + 2);
+              const triggerLine = startLine + offset;
+              // Apply the same offset to the effective end so scopes hand off cleanly
+              const endTriggerLine = Math.max(startLine, endLine + offset);
+
+              return {
+                node: n,
+                depth,
+                startLine,
+                endLine,
+                text: lineText,
+                triggerLine,
+                endTriggerLine,
+                indentDepth,
+                indentSpaces,
+              };
+            });
           }
-          ancestorNodes.reverse(); // depth 0 = outermost
-
-          // Build scope objects with n+1 trigger calculations
-          const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
-
-          const candidateScopes = ancestorNodes.map((n, originalDepth) => {
-            const startLine = state.doc.lineAt(n.from).number;
-            const endLine = state.doc.lineAt(n.to).number;
-            const lineText = state.doc.lineAt(n.from).text;
-            const indentMatch = lineText.match(/^([ \t]*)/);
-            const indentRaw = indentMatch ? indentMatch[1] : '';
-            const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
-            const indentDepth = Math.floor(indentSpaces / indentSize);
-            // For Python, trust indentation over ancestor chain to avoid bogus nesting when
-            // the parser error-recovers and leaves a top-level scope open too long.
-            const depth = isPython ? indentDepth : originalDepth;
-
-            // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
-            const offset = -(depth + 2);
-            const triggerLine = startLine + offset;
-            // Apply the same offset to the effective end so scopes hand off cleanly
-            const endTriggerLine = Math.max(startLine, endLine + offset);
-
-            return {
-              node: n,
-              depth,
-              startLine,
-              endLine,
-              text: lineText,
-              triggerLine,
-              endTriggerLine,
-              indentDepth,
-              indentSpaces,
-            };
-          });
 
           // ---------------------------------------------------------------------------
           // 3) SLOT-BASED ACTIVATION: One scope per depth, no Y-axis pileup
