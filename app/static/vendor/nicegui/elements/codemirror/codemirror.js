@@ -1,5 +1,11 @@
 import * as CM from "nicegui-codemirror";
 
+// Forward console to parent window (for debug logging)
+if (window.parent && window.parent !== window) {
+  const _origLog = console.log.bind(console);
+  console.log = (...args) => { _origLog(...args); try { window.parent.console.log(...args); } catch {} };
+}
+
 const searchExtension = typeof CM.search === 'function' ? CM.search : null;
 const searchKeymap = Array.isArray(CM.searchKeymap) ? CM.searchKeymap : null;
 const highlightSelectionMatches = typeof CM.highlightSelectionMatches === 'function' ? CM.highlightSelectionMatches : null;
@@ -1370,13 +1376,77 @@ export default {
       // ViewPlugin using Monaco-style pixel geometry with line-based n+1 offsets
       // (restored from last known good n+1 implementation)
       // ============================================================================
+      // ========================================================================
+      // StickySlots: Enforces one scope per depth level (no Y-axis pileup)
+      // ========================================================================
+      class StickySlots {
+        constructor(maxSlots = 5) {
+          this.maxSlots = maxSlots;
+          this.slots = new Array(maxSlots).fill(null);
+        }
+
+        // Register a scope into its depth slot
+        // Returns true if registered, false if slot is occupied by different scope
+        register(scope) {
+          const slot = scope.depth;
+          if (slot < 0 || slot >= this.maxSlots) return false;
+          
+          const existing = this.slots[slot];
+          if (existing) {
+            // Same scope (by startLine) - update it
+            if (existing.startLine === scope.startLine) {
+              this.slots[slot] = scope;
+              return true;
+            }
+            // Different scope at same depth - reject (caller must clear first)
+            return false;
+          }
+          
+          this.slots[slot] = scope;
+          return true;
+        }
+
+        // Clear a slot and all deeper slots
+        clear(depth) {
+          for (let i = depth; i < this.maxSlots; i++) {
+            this.slots[i] = null;
+          }
+        }
+
+        // Clear all slots
+        clearAll() {
+          this.slots.fill(null);
+        }
+
+        // Get scope at depth (or null)
+        get(depth) {
+          return this.slots[depth] || null;
+        }
+
+        // Get all active scopes in depth order
+        getActive() {
+          return this.slots.filter(s => s !== null);
+        }
+
+        // Get the deepest occupied slot index (-1 if empty)
+        getMaxDepth() {
+          for (let i = this.maxSlots - 1; i >= 0; i--) {
+            if (this.slots[i] !== null) return i;
+          }
+          return -1;
+        }
+      }
+
       const stickyScrollPlugin = CM.ViewPlugin.fromClass(class {
         constructor(view) {
           this.view = view;
           this.dom = document.createElement("div");
           this.dom.className = "cm-stickyHeader";
-          this.currentScopes = [];
-          this.prevActiveScopes = [];
+          
+          // Slot-based scope management (enforces one scope per depth)
+          this.slots = new StickySlots(5);
+          this.currentScopes = []; // For click handler compatibility
+          
           // Used to break the feedback loop between overlay height and
           // sampling position; we always sample using the previous height.
           this.lastOverlayHeight = 0;
@@ -1471,7 +1541,16 @@ export default {
           const state = view.state;
           const scrollTop = view.scrollDOM.scrollTop;
 
-          const prevActiveScopes = this.prevActiveScopes || [];
+          // Debug: log every 50th call to verify handler is running
+          if (!this._callCount) this._callCount = 0;
+          this._callCount++;
+          if (this._callCount % 50 === 0) {
+            console.log('[Slots] heartbeat', { callCount: this._callCount, scrollTop });
+          }
+
+          // CRITICAL: Update scroll tracking FIRST, before any early returns
+          const direction = scrollTop > this.lastScrollTop ? 1 : (scrollTop < this.lastScrollTop ? -1 : 0);
+          this.lastScrollTop = scrollTop;
 
           // Remember which scopes were active on the previous pass for hysteresis
           const prevActiveKeys = new Set(
@@ -1522,9 +1601,6 @@ export default {
           const currentOverlayHeight = this.dom.offsetHeight || 0;
           const samplingOverlayHeight = this.lastOverlaySampleHeight || currentOverlayHeight;
 
-          // Detect scroll direction: 1 = down, -1 = up, 0 = no change
-          const direction = scrollTop > this.lastScrollTop ? 1 : (scrollTop < this.lastScrollTop ? -1 : 0);
-
           // Compute scroll fraction for the whole document (0 = top, 1 = bottom)
           const { scrollHeight, clientHeight } = view.scrollDOM;
           const denom = Math.max(1, scrollHeight - clientHeight);
@@ -1553,9 +1629,7 @@ export default {
           }
 
           const baseTop = scrollTop + samplingOverlayHeight;
-          const effectiveTop = direction >= 0
-            ? baseTop + earlyLines * lineHeight   // scroll down or unchanged
-            : baseTop + earlyLines * lineHeight;  // scroll up: correction only
+          const effectiveTop = baseTop + earlyLines * lineHeight;
 
           let refPos;
           try {
@@ -1567,11 +1641,12 @@ export default {
           const refLine = state.doc.lineAt(refPos).number;
 
           // ---------------------------------------------------------------------------
-          // 2) Build scope hierarchy at refPos (outer → inner)
+          // 2) Build scope candidates from syntax tree
           // ---------------------------------------------------------------------------
           const tree = CM.syntaxTree(state);
           if (!tree || !tree.topNode) {
             if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
+            this.slots.clearAll();
             this.currentScopes = [];
             return;
           }
@@ -1586,7 +1661,8 @@ export default {
           }
           ancestorNodes.reverse(); // depth 0 = outermost
 
-          const scopes = ancestorNodes.map((n, depth) => {
+          // Build scope objects with n+1 trigger calculations
+          const candidateScopes = ancestorNodes.map((n, depth) => {
             const startLine = state.doc.lineAt(n.from).number;
             const endLine = state.doc.lineAt(n.to).number;
             const text = state.doc.lineAt(n.from).text;
@@ -1598,85 +1674,119 @@ export default {
             return { node: n, depth, startLine, endLine, text, triggerLine, endTriggerLine };
           });
 
-          // Adjust endTriggerLine using next same-depth sibling as a hard handoff point
-          for (let i = 0; i < scopes.length - 1; i++) {
-            const curr = scopes[i];
-            const next = scopes[i + 1];
-            if (next.depth === curr.depth) {
-              // Next sibling at same depth starts after current; hand off just before it
-              const siblingStart = next.startLine + (-(next.depth + 2));
-              curr.endTriggerLine = Math.min(curr.endTriggerLine, siblingStart - 1);
+          // ---------------------------------------------------------------------------
+          // 3) SLOT-BASED ACTIVATION: One scope per depth, no Y-axis pileup
+          //    - Clear slots for scopes we've scrolled past
+          //    - Register candidates into their depth slots
+          //    - Slots enforce the invariant: max one scope per depth level
+          // ---------------------------------------------------------------------------
+          const hysteresisLines = 0.5;
+          const earlyMarginLines = 1.5;
+          
+          const DEBUG_SLOTS = true; // Set true to log to browser_console.log
+
+          // First pass: clear slots that are no longer valid
+          // A slot should clear if refLine is outside its activation window
+          for (let depth = 0; depth < this.slots.maxSlots; depth++) {
+            const existing = this.slots.get(depth);
+            if (!existing) continue;
+            
+            let scopedRef = refLine;
+            if (wrappingEnabled && depth > 0) {
+              scopedRef = refLine - driftCorrectionLines;
+            }
+            
+            // Release when we scroll ABOVE the bottom of the header line
+            // Since header shows the startLine, release when refLine goes above startLine + 1
+            const scrolledAbove = scopedRef <= existing.startLine;
+            const scrolledBelow = scopedRef > existing.endTriggerLine + earlyMarginLines;
+            const shouldClear = scrolledAbove || scrolledBelow;
+            
+            if (DEBUG_SLOTS) {
+              console.log('[Slots] check', {
+                depth,
+                refLine,
+                scopedRef,
+                startLine: existing.startLine,
+                triggerLine: existing.triggerLine,
+                endTriggerLine: existing.endTriggerLine,
+                shouldClear,
+                scrolledAbove,
+                scrolledBelow
+              });
+            }
+            
+            if (shouldClear) {
+              if (DEBUG_SLOTS) console.log('[Slots] CLEARING', { depth });
+              this.slots.clear(depth); // Clears this and all deeper slots
             }
           }
 
-          // ---------------------------------------------------------------------------
-          // 3) Decide active scopes based on refLine and per-depth triggerLine
-          //    Condition: triggerLine < refLine <= endLine
-          //    When wrapping is enabled, apply drift correction only to the
-          //    top-level (depth 0) scope; deeper scopes see a compensating
-          //    ref line so they don't get over-corrected.
-          // ---------------------------------------------------------------------------
-          const MAX_STICKY_LINES = 5;
-          const activeScopes = [];
-          const hysteresisLines = 0.5; // half-line hysteresis to prevent edge flicker
-          const earlyMarginLines = 1.5;   // allow push-up window to keep line briefly
-
-          for (const scope of scopes) {
-            if (activeScopes.length >= MAX_STICKY_LINES) break;
-
+          // Second pass: try to register candidate scopes into slots
+          for (const scope of candidateScopes) {
             let scopedRef = refLine;
             if (wrappingEnabled && scope.depth > 0) {
               scopedRef = refLine - driftCorrectionLines;
             }
 
-            // If we haven't reached this scope's trigger yet, no deeper scopes should be active.
-            if (scopedRef <= scope.triggerLine - hysteresisLines) {
-              break;
-            }
-
             const key = `${scope.depth}:${scope.startLine}-${scope.endLine}`;
             const wasActive = prevActiveKeys.has(key);
 
-            // Expand the active window if it was already active; shrink if not, to add hysteresis.
-            let lower = scope.triggerLine;
-            let upper = scope.endTriggerLine;
-            if (wasActive) {
-              lower -= hysteresisLines;
-              upper += hysteresisLines;
-            } else {
-              lower += hysteresisLines;
-              upper -= hysteresisLines;
-            }
+            // Calculate activation window with hysteresis
+            const lower = wasActive 
+              ? scope.triggerLine - hysteresisLines 
+              : scope.triggerLine + hysteresisLines;
+            const upper = wasActive 
+              ? scope.endTriggerLine + hysteresisLines 
+              : scope.endTriggerLine - hysteresisLines;
 
-            // Give the innermost candidate extra room at the top end so it
-            // doesn't drop before the push-up has a chance to run.
-            const isInnermost = scope.depth === scopes.length - 1;
-            if (isInnermost) {
-              upper += earlyMarginLines; // up to ~3 lines extra
-            }
+            // Check if scope should be active
+            let shouldActivate = scopedRef > lower && scopedRef <= upper;
 
-            // Allow the innermost candidate to linger near its end so the
-            // push-up effect can run before removal.
-            let nearEnd = false;
-            if (scope.depth > 0) {
+            // Near-end linger: keep innermost scope active during push-up
+            if (!shouldActivate && scope.depth > 0) {
               try {
-                const endLine = state.doc.lineAt(scope.node.to);
-                const endBlock = view.lineBlockAt(endLine.to);
+                const endLineObj = state.doc.lineAt(scope.node.to);
+                const endBlock = view.lineBlockAt(endLineObj.to);
                 const endBottomViewport = endBlock.bottom - scrollTop;
-                const prospectiveHeaderHeight = (activeScopes.length + 1) * lineHeight;
+                const prospectiveHeaderHeight = (scope.depth + 1) * lineHeight;
                 if (endBottomViewport < prospectiveHeaderHeight + earlyMarginLines * lineHeight) {
-                  nearEnd = true;
+                  shouldActivate = true;
                 }
               } catch {}
             }
 
-            if ((scopedRef > lower && scopedRef <= upper) || nearEnd) {
-              activeScopes.push(scope);
+            if (DEBUG_SLOTS) {
+              console.log('[Slots] candidate', {
+                depth: scope.depth,
+                refLine,
+                scopedRef,
+                startLine: scope.startLine,
+                triggerLine: scope.triggerLine,
+                lower,
+                upper,
+                shouldActivate
+              });
+            }
+
+            if (shouldActivate) {
+              // Clear the slot first if occupied by a different scope
+              const existing = this.slots.get(scope.depth);
+              if (existing && existing.startLine !== scope.startLine) {
+                this.slots.clear(scope.depth);
+              }
+              if (DEBUG_SLOTS) console.log('[Slots] REGISTER', { depth: scope.depth, startLine: scope.startLine });
+              this.slots.register(scope);
             }
           }
 
+          // Get active scopes from slots (guaranteed no Y-axis pileup)
+          const activeScopes = this.slots.getActive();
           this.currentScopes = activeScopes;
-          this.prevActiveScopes = activeScopes;
+
+          if (DEBUG_SLOTS) {
+            console.log('[Slots] activeScopes', { count: activeScopes.length, scopes: activeScopes.map(s => s.startLine) });
+          }
 
           // Track overlay height even when active set toggles to avoid
           // sampling jitter at the exact moment a scope disappears.
@@ -1685,7 +1795,7 @@ export default {
           }
 
           // Debug logging (disabled by default); flip to true for diagnostics
-          const DEBUG_STICKY = false; // currently a point of interest (ie why does it does the behavior change while this is on?)
+          const DEBUG_STICKY = false;
           const signature = activeScopes.map((s) => `${s.depth}:${s.startLine}-${s.endLine}`).join('|');
           try {
             if (DEBUG_STICKY && signature !== this.lastActiveSignature) {
@@ -1721,6 +1831,8 @@ export default {
             if (this.lastOverlaySampleHeight > 0) {
               this.lastOverlaySampleHeight = Math.max(0, this.lastOverlaySampleHeight - lineHeight);
             }
+            // Reset renderKey so next non-empty render won't be skipped
+            this.lastRenderKey = '';
             return;
           }
 
@@ -1750,26 +1862,6 @@ export default {
             }
           } catch (e) {
             // If geometry lookup fails, keep header pinned at the top.
-          }
-
-          // If a scope just left (active set shrank), reuse its geometry to
-          // apply a push-up on the frame it disappears, so the stack slides
-          // instead of snapping when depth decreases.
-          if (prevActiveScopes.length > activeScopes.length && prevActiveScopes.length > 0) {
-            const dropped = prevActiveScopes[prevActiveScopes.length - 1];
-            try {
-              const droppedLine = state.doc.lineAt(dropped.node.to);
-              const droppedEnd = view.lineBlockAt(droppedLine.to);
-              const droppedEndBottomViewport = droppedEnd.bottom - scrollTop;
-              const prevHeaderHeight = prevActiveScopes.length * lineHeight;
-              const delta = droppedEndBottomViewport - prevHeaderHeight;
-              if (delta < earlyMargin) {
-                const dropOffset = Math.max(-earlyMargin, delta - earlyMargin);
-                if (dropOffset < topOffset) topOffset = dropOffset;
-              }
-            } catch (e) {
-              // ignore
-            }
           }
 
           // Apply small hysteresis to prevent rapid toggling when endBottom
@@ -1859,7 +1951,7 @@ export default {
             this.dom.appendChild(layer);
           });
 
-          // Remember overlay height and scrollTop for the next sampling pass so that
+          // Remember overlay height for the next sampling pass so that
           // detection uses a stable value and avoids jitter at boundaries.
           this.lastOverlayHeight = effectiveHeight;
           // Smooth sampling height: grow immediately, shrink at most one line per update
@@ -1868,12 +1960,13 @@ export default {
           } else if (effectiveHeight < this.lastOverlaySampleHeight) {
             this.lastOverlaySampleHeight = Math.max(effectiveHeight, this.lastOverlaySampleHeight - lineHeight);
           }
-          this.lastScrollTop = scrollTop;
         }
         
         update(update) {
           // Re-render on document changes (syntax tree may have changed)
           if (update.docChanged) {
+            // Clear slots on document change to force re-evaluation
+            this.slots.clearAll();
             this.updateStickyHeader();
           }
         }
