@@ -1672,16 +1672,37 @@ export default {
           ancestorNodes.reverse(); // depth 0 = outermost
 
           // Build scope objects with n+1 trigger calculations
-          const candidateScopes = ancestorNodes.map((n, depth) => {
+          const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
+
+          const candidateScopes = ancestorNodes.map((n, originalDepth) => {
             const startLine = state.doc.lineAt(n.from).number;
             const endLine = state.doc.lineAt(n.to).number;
-            const text = state.doc.lineAt(n.from).text;
+            const lineText = state.doc.lineAt(n.from).text;
+            const indentMatch = lineText.match(/^([ \t]*)/);
+            const indentRaw = indentMatch ? indentMatch[1] : '';
+            const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
+            const indentDepth = Math.floor(indentSpaces / indentSize);
+            // For Python, trust indentation over ancestor chain to avoid bogus nesting when
+            // the parser error-recovers and leaves a top-level scope open too long.
+            const depth = isPython ? indentDepth : originalDepth;
+
             // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
             const offset = -(depth + 2);
             const triggerLine = startLine + offset;
             // Apply the same offset to the effective end so scopes hand off cleanly
             const endTriggerLine = Math.max(startLine, endLine + offset);
-            return { node: n, depth, startLine, endLine, text, triggerLine, endTriggerLine };
+
+            return {
+              node: n,
+              depth,
+              startLine,
+              endLine,
+              text: lineText,
+              triggerLine,
+              endTriggerLine,
+              indentDepth,
+              indentSpaces,
+            };
           });
 
           // ---------------------------------------------------------------------------
