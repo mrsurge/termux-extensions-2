@@ -1284,7 +1284,7 @@ export default {
       };
 
       // Decide if a node counts as a scope header.
-      const isScopeNode = (node, scopeTypes) => {
+      const isScopeNode = (node, scopeTypes, state, isPython) => {
         if (scopeTypes.has(node.name)) return true;
         const lname = node.name ? node.name.toLowerCase() : '';
         // Treat any default export wrapper as a scope
@@ -1293,6 +1293,15 @@ export default {
         if (node.name === 'ObjectExpression' && node.parent) {
           const pl = node.parent.name ? node.parent.name.toLowerCase() : '';
           if (pl.includes('export') && pl.includes('default')) return true;
+        }
+        // Python main guard: treat `if __name__ == '__main__':` as a scope header
+        if (isPython && node.name === 'IfStatement' && state) {
+          try {
+            const snippet = state.doc.sliceString(node.from, node.to);
+            if (/^\s*if\s+__name__\s*==\s*['"]__main__['"]\s*:/m.test(snippet)) {
+              return true;
+            }
+          } catch (e) {}
         }
         return false;
       };
@@ -1696,10 +1705,19 @@ export default {
               scopedRef = refLine - driftCorrectionLines;
             }
             
+            // Direction-aware release:
+            // - Downward scroll: keep scope until the actual end line passes the ref line
+            //   (no early shrink), preventing short scopes from disappearing too soon.
+            // - Upward scroll: use the earlier endTriggerLine with margin so scopes exit faster
+            //   when backing out.
+            const goingDown = direction >= 0;
+            const exitLine = goingDown ? existing.endLine : existing.endTriggerLine;
+            const exitMargin = goingDown ? 0 : earlyMarginLines;
+
             // Release when we scroll ABOVE the bottom of the header line
             // Since header shows the startLine, release when refLine goes above startLine + 1
             const scrolledAbove = scopedRef <= existing.startLine;
-            const scrolledBelow = scopedRef > existing.endTriggerLine + earlyMarginLines;
+            const scrolledBelow = scopedRef > exitLine + exitMargin;
             const shouldClear = scrolledAbove || scrolledBelow;
             
             if (DEBUG_SLOTS) {
@@ -1708,11 +1726,15 @@ export default {
                 refLine,
                 scopedRef,
                 startLine: existing.startLine,
+                endLine: existing.endLine,
                 triggerLine: existing.triggerLine,
                 endTriggerLine: existing.endTriggerLine,
+                exitLine,
+                exitMargin,
                 shouldClear,
                 scrolledAbove,
-                scrolledBelow
+                scrolledBelow,
+                goingDown
               });
             }
             
@@ -1847,7 +1869,9 @@ export default {
           const innermost = activeScopes[activeScopes.length - 1];
 
           let topOffset = 0;
-          const earlyMargin = 3 * lineHeight; // start push-up up to three lines before collision
+          // Scale push-up margin: small scopes shouldn't be pushed away too early.
+          const scopeLength = Math.max(1, innermost.endLine - innermost.startLine + 1);
+          const earlyMargin = (scopeLength <= 6 ? 1 : 3) * lineHeight; // 1 line for short scopes, 3 for larger
           try {
             // Use the end of the line containing the node end to better match visual bottom
             const endLine = state.doc.lineAt(innermost.node.to);
