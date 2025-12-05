@@ -1598,6 +1598,17 @@ export default {
             return { node: n, depth, startLine, endLine, text, triggerLine, endTriggerLine };
           });
 
+          // Adjust endTriggerLine using next same-depth sibling as a hard handoff point
+          for (let i = 0; i < scopes.length - 1; i++) {
+            const curr = scopes[i];
+            const next = scopes[i + 1];
+            if (next.depth === curr.depth) {
+              // Next sibling at same depth starts after current; hand off just before it
+              const siblingStart = next.startLine + (-(next.depth + 2));
+              curr.endTriggerLine = Math.min(curr.endTriggerLine, siblingStart - 1);
+            }
+          }
+
           // ---------------------------------------------------------------------------
           // 3) Decide active scopes based on refLine and per-depth triggerLine
           //    Condition: triggerLine < refLine <= endLine
@@ -1608,7 +1619,7 @@ export default {
           const MAX_STICKY_LINES = 5;
           const activeScopes = [];
           const hysteresisLines = 0.5; // half-line hysteresis to prevent edge flicker
-          const earlyMarginLines = 3;   // allow push-up window to keep line briefly
+          const earlyMarginLines = 1.5;   // allow push-up window to keep line briefly
 
           for (const scope of scopes) {
             if (activeScopes.length >= MAX_STICKY_LINES) break;
@@ -1647,15 +1658,17 @@ export default {
             // Allow the innermost candidate to linger near its end so the
             // push-up effect can run before removal.
             let nearEnd = false;
-            try {
-              const endLine = state.doc.lineAt(scope.node.to);
-              const endBlock = view.lineBlockAt(endLine.to);
-              const endBottomViewport = endBlock.bottom - scrollTop;
-              const prospectiveHeaderHeight = (activeScopes.length + 1) * lineHeight;
-              if (endBottomViewport < prospectiveHeaderHeight + earlyMarginLines * lineHeight) {
-                nearEnd = true;
-              }
-            } catch {}
+            if (scope.depth > 0) {
+              try {
+                const endLine = state.doc.lineAt(scope.node.to);
+                const endBlock = view.lineBlockAt(endLine.to);
+                const endBottomViewport = endBlock.bottom - scrollTop;
+                const prospectiveHeaderHeight = (activeScopes.length + 1) * lineHeight;
+                if (endBottomViewport < prospectiveHeaderHeight + earlyMarginLines * lineHeight) {
+                  nearEnd = true;
+                }
+              } catch {}
+            }
 
             if ((scopedRef > lower && scopedRef <= upper) || nearEnd) {
               activeScopes.push(scope);
@@ -1672,7 +1685,7 @@ export default {
           }
 
           // Debug logging (disabled by default); flip to true for diagnostics
-          const DEBUG_STICKY = false;
+          const DEBUG_STICKY = false; // currently a point of interest (ie why does it does the behavior change while this is on?)
           const signature = activeScopes.map((s) => `${s.depth}:${s.startLine}-${s.endLine}`).join('|');
           try {
             if (DEBUG_STICKY && signature !== this.lastActiveSignature) {
