@@ -1487,6 +1487,19 @@ export default {
           boxShadow: "0 6px 8px rgba(0,0,0,0.35)",
           transition: "transform 140ms cubic-bezier(0.25, 0.1, 0.25, 1), height 140ms cubic-bezier(0.25, 0.1, 0.25, 1)",
         },
+        ".cm-sticky-layer.entering": {
+          animation: "cm-sticky-enter 150ms ease-out",
+        },
+        ".cm-sticky-layer.exiting": {
+          transform: "translateY(-100%)",
+          opacity: "0",
+          transition: "transform 150ms ease-out, opacity 150ms ease-out",
+          pointerEvents: "none",
+        },
+        "@keyframes cm-sticky-enter": {
+          "0%": { transform: "translateY(100%)", opacity: "0" },
+          "100%": { transform: "translateY(0)", opacity: "1" }
+        },
         ".cm-stickyHeader:empty": {
           display: "none",
         },
@@ -1620,6 +1633,8 @@ export default {
           this.lastScrollTop = view.scrollDOM.scrollTop || 0;
           // rAF tail to ensure a follow-up pass if layout lags
           this.rafPending = false;
+          // Pending sibling transitions: depth -> { outgoing, incoming, startTime }
+          this.pendingTransitions = new Map();
           
           // Append to editor DOM (works inside iframe)
           view.dom.appendChild(this.dom);
@@ -1857,8 +1872,8 @@ export default {
             const path = markdownPathAtSimple(sections, refLine - earlyLines);
             candidateScopes = path.map((sec, idx) => {
               const depth = idx;
-              // N+1 style early capture for markdown headings
-              const offset = -3;
+              // N+1 style early capture for markdown headings (tuned one line later)
+              const offset = -2;
               const triggerLine = sec.line + offset;
               const endTriggerLine = Math.max(sec.line, sec.endLine + offset);
               const lineObj = state.doc.line(sec.line);
@@ -2059,10 +2074,16 @@ export default {
               // Clear the slot first if occupied by a different scope
               const existing = this.slots.get(scope.depth);
               if (existing && existing.startLine !== scope.startLine) {
-                this.slots.clear(scope.depth);
+                // Sibling replacement: start transition, keep outgoing until animation completes
+                this.pendingTransitions.set(scope.depth, {
+                  outgoing: existing,
+                  incoming: scope,
+                  startTime: performance.now(),
+                });
+              } else {
+                if (DEBUG_SLOTS) console.log('[Slots] REGISTER', { depth: scope.depth, startLine: scope.startLine });
+                this.slots.register(scope);
               }
-              if (DEBUG_SLOTS) console.log('[Slots] REGISTER', { depth: scope.depth, startLine: scope.startLine });
-              this.slots.register(scope);
             }
           }
 
@@ -2106,7 +2127,19 @@ export default {
           this.lastActiveSignature = signature;
 
           // ---------------------------------------------------------------------------
-          // 4) Render overlay from activeScopes
+          // 4) Complete pending transitions after animation duration
+          // ---------------------------------------------------------------------------
+          const TRANSITION_MS = 150;
+          for (const [depth, t] of Array.from(this.pendingTransitions.entries())) {
+            if (performance.now() - t.startTime >= TRANSITION_MS) {
+              this.slots.clear(depth);
+              this.slots.register(t.incoming);
+              this.pendingTransitions.delete(depth);
+            }
+          }
+
+          // ---------------------------------------------------------------------------
+          // 5) Render overlay from activeScopes (+ any outgoing in transition)
           // ---------------------------------------------------------------------------
           if (activeScopes.length === 0) {
             if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
@@ -2201,16 +2234,17 @@ export default {
 
           this.dom.innerHTML = '';
           const lastIndex = activeScopes.length - 1;
-          activeScopes.forEach((scope, idx) => {
+          const renderLayer = (scope, idx, cls) => {
             const layer = document.createElement('div');
             layer.className = 'cm-sticky-layer';
+            if (cls) layer.classList.add(cls);
             if (idx === lastIndex) layer.classList.add('innermost');
             layer.style.top = `${idx * lineHeight}px`;
             // Higher layers (outer scopes) sit above inner ones.
-            layer.style.zIndex = String(100 - idx);
+            layer.style.zIndex = String(100 - idx - (cls === 'exiting' ? 1 : 0));
             layer.style.setProperty('--cm-sticky-line-height', `${lineHeight}px`);
-            layer.style.transform = idx === lastIndex ? `translateY(${topOffset}px)` : 'translateY(0)';
-            if (idx === lastIndex) {
+            layer.style.transform = idx === lastIndex && !cls ? `translateY(${topOffset}px)` : 'translateY(0)';
+            if (idx === lastIndex && !cls) {
               layer.style.height = `${lastHeight}px`;
             } else {
               layer.style.height = `${lineHeight}px`;
@@ -2236,23 +2270,34 @@ export default {
               gutter.appendChild(seg);
             }
 
-              const content = document.createElement('div');
-              content.className = 'cm-sticky-content';
-              const styled = this.getStyledLineHTML(scope.startLine);
-              if (styled != null) {
-                content.innerHTML = styled;
+            const content = document.createElement('div');
+            content.className = 'cm-sticky-content';
+            const styled = this.getStyledLineHTML(scope.startLine);
+            if (styled != null) {
+              content.innerHTML = styled;
+            } else {
+              if (isMarkdown && scope.rawText) {
+                content.textContent = scope.rawText;
               } else {
-                // Preserve heading markers for markdown when styled HTML isn't available
-                if (isMarkdown && scope.rawText) {
-                  content.textContent = scope.rawText;
-                } else {
-                  content.textContent = scope.text;
-                }
+                content.textContent = scope.text;
               }
+            }
 
             layer.appendChild(gutter);
             layer.appendChild(content);
             this.dom.appendChild(layer);
+          };
+
+          // Render active scopes and any outgoing transitions
+          activeScopes.forEach((scope, idx) => {
+            const t = this.pendingTransitions.get(scope.depth);
+            if (t && t.outgoing.startLine !== scope.startLine) {
+              // Render outgoing + incoming together
+              renderLayer(t.outgoing, idx, 'exiting');
+              renderLayer(t.incoming, idx, 'entering');
+            } else {
+              renderLayer(scope, idx, null);
+            }
           });
 
           // Remember overlay height for the next sampling pass so that
