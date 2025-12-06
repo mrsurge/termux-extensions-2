@@ -2074,12 +2074,18 @@ export default {
               // Clear the slot first if occupied by a different scope
               const existing = this.slots.get(scope.depth);
               if (existing && existing.startLine !== scope.startLine) {
-                // Sibling replacement: start transition, keep outgoing until animation completes
-                this.pendingTransitions.set(scope.depth, {
-                  outgoing: existing,
-                  incoming: scope,
-                  startTime: performance.now(),
-                });
+                if (isMarkdown) {
+                  // Markdown: smooth sibling transition
+                  this.pendingTransitions.set(scope.depth, {
+                    outgoing: existing,
+                    incoming: scope,
+                    startTime: performance.now(),
+                  });
+                } else {
+                  // Other languages: immediate swap to preserve snappy n+1 behavior
+                  this.slots.clear(scope.depth);
+                  this.slots.register(scope);
+                }
               } else {
                 if (DEBUG_SLOTS) console.log('[Slots] REGISTER', { depth: scope.depth, startLine: scope.startLine });
                 this.slots.register(scope);
