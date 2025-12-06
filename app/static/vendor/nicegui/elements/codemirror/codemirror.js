@@ -1292,6 +1292,142 @@ export default {
         return SCOPE_NODE_TYPES[lang] || SCOPE_NODE_TYPES.default;
       };
 
+      // Markdown sections (ATX only, Monaco-style)
+      const collectMarkdownHeadingsSimple = (doc) => {
+        const headings = [];
+        for (let i = 1; i <= doc.lines; i++) {
+          const text = doc.line(i).text;
+          const m = text.match(/^( {0,3})(#{1,6})\s+(.*)$/);
+          if (!m) continue;
+          headings.push({ line: i, level: m[2].length, text: m[3].trim() });
+        }
+        return headings;
+      };
+
+      const buildMarkdownSectionsSimple = (headings, totalLines) => {
+        if (!headings.length) return [];
+        return headings.map((h, idx) => {
+          const next = headings.slice(idx + 1).find(n => n.level <= h.level);
+          const endLine = next ? Math.max(h.line, next.line - 1) : totalLines;
+          return { ...h, endLine };
+        });
+      };
+
+      const markdownPathAtSimple = (sections, refLine) => {
+        if (!sections.length) return [];
+        const stack = [];
+        for (const sec of sections) {
+          if (sec.line > refLine) break;
+          if (refLine > sec.endLine) continue; // only include if ref within section
+          while (stack.length && stack[stack.length - 1].level >= sec.level) {
+            stack.pop();
+          }
+          stack.push(sec);
+        }
+        return stack;
+      };
+
+      // Generic fold-based section helpers (work for other/unknown langs)
+      const collectFoldSections = (state) => {
+        const doc = state.doc;
+        const sections = [];
+        for (let lineNo = 1; lineNo <= doc.lines; lineNo++) {
+          const line = doc.line(lineNo);
+          const range = CM.foldable(state, line.from, line.to);
+          // If foldable is missing (e.g., for some markdown headings), fall back to heading heuristics
+          if (!range) {
+            const atx = line.text.match(/^( {0,3})(#{1,6})\s+(.*)$/);
+            if (!atx) continue;
+            // Heuristic span: to next heading or doc end; resolved later
+            sections.push({
+              from: line.from,
+              to: doc.length, // temp; will be trimmed in post-processing
+              line: lineNo,
+              text: atx[3].trim(),
+              level: atx[2].length,
+              isHeuristic: true,
+            });
+            continue;
+          }
+          const text = line.text.trim();
+          if (!text) continue;
+          // Try to infer heading level for markdown (ATX) to help nesting when fold ranges overlap
+          let level = null;
+          const atx = text.match(/^(#{1,6})\s+/);
+          if (atx) level = atx[1].length;
+          sections.push({
+            // Expand to include the heading line itself so the section contains refPos within body
+            from: line.from,
+            to: range.to,
+            line: lineNo,
+            text,
+            level,
+            isHeuristic: false,
+          });
+        }
+        // Post-process heuristic headings to set their end to the next heading start
+        const sorted = sections.slice().sort((a, b) => a.from - b.from);
+
+        // First, trim heuristic headings to next heading start
+        for (let i = 0; i < sorted.length; i++) {
+          const s = sorted[i];
+          if (!s.isHeuristic) continue;
+          const next = sorted[i + 1];
+          if (next) s.to = Math.max(s.from, next.from);
+          else s.to = doc.length;
+        }
+
+        // Then, for markdown headings (level != null), extend to next heading of same or higher level
+        for (let i = 0; i < sorted.length; i++) {
+          const s = sorted[i];
+          if (s.level == null) continue;
+          let end = doc.length;
+          for (let j = i + 1; j < sorted.length; j++) {
+            const nxt = sorted[j];
+            if (nxt.level != null && nxt.level <= s.level) {
+              end = nxt.from;
+              break;
+            }
+          }
+          s.to = Math.max(s.from + 1, end);
+        }
+
+        return sorted;
+      };
+
+      // Given fold sections, build nested path at a reference position
+      const pathFromSectionsAtPos = (sections, pos, doc) => {
+        if (!sections || !sections.length) return [];
+        const candidates = sections.filter((s) => s.from <= pos && pos < s.to);
+        // Sort outermost -> innermost (by span)
+        candidates.sort((a, b) => {
+          if (a.from !== b.from) return a.from - b.from;
+          return b.to - a.to; // larger span first
+        });
+        const path = [];
+        for (const s of candidates) {
+          const last = path[path.length - 1];
+          const fitsNest = !last || (last.from <= s.from && s.to <= last.to);
+          const replaceSameOrHigher = last && last.level != null && s.level != null && last.level <= s.level;
+          if (fitsNest) {
+            path.push(s);
+          } else if (replaceSameOrHigher) {
+            path[path.length - 1] = s;
+          }
+        }
+        return path.map((s, idx) => ({
+          node: { from: doc.line(s.line).from, to: doc.line(s.line).to },
+          depth: idx,
+          startLine: s.line,
+          endLine: doc.lineAt(s.to).number,
+          text: s.text,
+          triggerLine: s.line - (idx + 2),
+          endTriggerLine: Math.max(s.line, doc.lineAt(s.to).number - (idx + 2)),
+          indentDepth: idx,
+          indentSpaces: 0,
+        }));
+      };
+
       // Decide if a node counts as a scope header.
       const isScopeNode = (node, scopeTypes, state, isPython) => {
         if (scopeTypes.has(node.name)) return true;
@@ -1661,6 +1797,11 @@ export default {
 
           const lineHeight = view.defaultLineHeight;
 
+          // Language flags early (used for sampling offsets too)
+          const langName = (cmComponent && cmComponent.language || 'default').toLowerCase();
+          const isPython = langName === 'python';
+          const isMarkdown = langName === 'markdown' || langName === 'md' || langName === 'gfm';
+
           // ---------------------------------------------------------------------------
           // 1) Compute reference line below the current overlay
           //    Use the previous overlay height for sampling to avoid the
@@ -1707,71 +1848,97 @@ export default {
           }
 
           const scopeTypes = getScopeTypes();
-          const langName = (cmComponent && cmComponent.language || 'default').toLowerCase();
-          const isPython = langName === 'python';
-          let ancestorNodes = [];
-          let node = tree.resolveInner(refPos);
-          for (; node; node = node.parent) {
-            if (isScopeNode(node, scopeTypes, state, isPython)) {
-              ancestorNodes.push(node);
-            }
-          }
-          ancestorNodes.reverse(); // depth 0 = outermost
 
-          // For Python, drop outermost ancestors that aren't truly indent-0 (parser fallbacks)
-          if (isPython && ancestorNodes.length > 0) {
-            ancestorNodes = ancestorNodes.filter((n, idx) => {
-              if (idx !== 0) return true;
+          let candidateScopes = [];
+
+          if (isMarkdown) {
+            const headings = collectMarkdownHeadingsSimple(state.doc);
+            const sections = buildMarkdownSectionsSimple(headings, state.doc.lines);
+            const path = markdownPathAtSimple(sections, refLine);
+            candidateScopes = path.map((sec, idx) => {
+              const depth = idx;
+              // Mild n+1 for markdown headings
+              const triggerLine = sec.line - 1;
+              const endTriggerLine = Math.max(sec.line, sec.endLine - 1);
+              const lineObj = state.doc.line(sec.line);
+              const rawText = lineObj.text;
+              return {
+                node: { from: lineObj.from, to: lineObj.to },
+                depth,
+                startLine: sec.line,
+                endLine: sec.endLine,
+                text: sec.text,
+                rawText,
+                triggerLine,
+                endTriggerLine,
+                indentDepth: depth,
+                indentSpaces: 0,
+              };
+            });
+          } else {
+            let ancestorNodes = [];
+            let node = tree.resolveInner(refPos);
+            for (; node; node = node.parent) {
+              if (isScopeNode(node, scopeTypes, state, isPython)) {
+                ancestorNodes.push(node);
+              }
+            }
+            ancestorNodes.reverse(); // depth 0 = outermost
+
+            // For Python, drop outermost ancestors that aren't truly indent-0 (parser fallbacks)
+            if (isPython && ancestorNodes.length > 0) {
+              ancestorNodes = ancestorNodes.filter((n, idx) => {
+                if (idx !== 0) return true;
+                const lineText = state.doc.lineAt(n.from).text;
+                const indentMatch = lineText.match(/^([ \t]*)/);
+                const indentRaw = indentMatch ? indentMatch[1] : '';
+                const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
+                return indentSpaces === 0;
+              });
+            }
+
+            const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
+
+            candidateScopes = ancestorNodes.map((n, pathDepth) => {
+              const startLine = state.doc.lineAt(n.from).number;
+              const endLine = state.doc.lineAt(n.to).number;
               const lineText = state.doc.lineAt(n.from).text;
               const indentMatch = lineText.match(/^([ \t]*)/);
               const indentRaw = indentMatch ? indentMatch[1] : '';
               const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
-              return indentSpaces === 0;
+              const indentDepth = Math.floor(indentSpaces / indentSize);
+              // Slot depth = ancestor index (outermost -> 0). Use indent only for cosmetics.
+              const depth = pathDepth;
+
+              // Use a "virtual" depth for n+1 offsets so Python indent scopes don't get an
+              // extra hidden level; this trims one line of early entry for Python scopes.
+              const offsetDepth = isPython ? Math.max(0, depth - 1) : depth;
+              // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
+              let offset = -(offsetDepth + 2);
+              // For first-level Python indents, start only one line early instead of two
+              if (isPython && depth === 1) {
+                offset = -1;
+              }
+              const triggerLine = startLine + offset;
+              // Apply the same offset to the effective end so scopes hand off cleanly
+              let endTriggerLine = Math.max(startLine, endLine + offset);
+              if (isPython) {
+                endTriggerLine += 4; // let Python scopes linger a bit before release
+              }
+
+              return {
+                node: n,
+                depth,
+                startLine,
+                endLine,
+                text: lineText,
+                triggerLine,
+                endTriggerLine,
+                indentDepth,
+                indentSpaces,
+              };
             });
           }
-
-          // Build scope objects with n+1 trigger calculations
-          const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
-
-          const candidateScopes = ancestorNodes.map((n, pathDepth) => {
-            const startLine = state.doc.lineAt(n.from).number;
-            const endLine = state.doc.lineAt(n.to).number;
-            const lineText = state.doc.lineAt(n.from).text;
-            const indentMatch = lineText.match(/^([ \t]*)/);
-            const indentRaw = indentMatch ? indentMatch[1] : '';
-            const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
-            const indentDepth = Math.floor(indentSpaces / indentSize);
-            // Slot depth = ancestor index (outermost -> 0). Use indent only for cosmetics.
-            const depth = pathDepth;
-
-            // Use a "virtual" depth for n+1 offsets so Python indent scopes don't get an
-            // extra hidden level; this trims one line of early entry for Python scopes.
-            const offsetDepth = isPython ? Math.max(0, depth - 1) : depth;
-            // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
-            let offset = -(offsetDepth + 2);
-            // For first-level Python indents, start only one line early instead of two
-            if (isPython && depth === 1) {
-              offset = -1;
-            }
-            const triggerLine = startLine + offset;
-            // Apply the same offset to the effective end so scopes hand off cleanly
-            let endTriggerLine = Math.max(startLine, endLine + offset);
-            if (isPython) {
-              endTriggerLine += 4; // let Python scopes linger a bit before release
-            }
-
-            return {
-              node: n,
-              depth,
-              startLine,
-              endLine,
-              text: lineText,
-              triggerLine,
-              endTriggerLine,
-              indentDepth,
-              indentSpaces,
-            };
-          });
 
           // ---------------------------------------------------------------------------
           // 3) SLOT-BASED ACTIVATION: One scope per depth, no Y-axis pileup
@@ -1807,7 +1974,13 @@ export default {
             // Release when we scroll ABOVE the bottom of the header line
             // Since header shows the startLine, release when refLine goes above startLine + 1
             const scrolledAbove = scopedRef <= existing.startLine;
-            const scrolledBelow = scopedRef > exitLine + exitMargin;
+            let scrolledBelow;
+            if (isMarkdown) {
+              // For fold-based scopes, allow early exit near the end to ensure clean handoff
+              scrolledBelow = scopedRef > (existing.endLine - 1);
+            } else {
+              scrolledBelow = scopedRef > exitLine + exitMargin;
+            }
             const shouldClear = scrolledAbove || scrolledBelow;
             
             if (DEBUG_SLOTS) {
@@ -1952,72 +2125,77 @@ export default {
           const headerHeight = activeScopes.length * lineHeight;
 
           // ---------------------------------------------------------------------------
-          // 5) Push-up effect (Monaco-style): as the innermost scope's end approaches
-          //    the bottom of the sticky stack, slide the whole overlay up so it
-          //    appears attached to the end of that scope instead of overlapping it.
+          // 5) Push-up effect: disabled for Markdown to avoid clipping deep stacks
           // ---------------------------------------------------------------------------
           const innermost = activeScopes[activeScopes.length - 1];
 
           let topOffset = 0;
-          // Scale push-up margin: avoid early push on short scopes and keep top-level gentler.
-          const scopeLength = Math.max(1, innermost.endLine - innermost.startLine + 1);
-          let pushMarginLines;
-          if (scopeLength <= 6) {
-            pushMarginLines = 1;
-          } else if (innermost.depth === 0) {
-            pushMarginLines = 1.5; // top-level: start later
+          let effectiveHeight;
+          let lastHeight = lineHeight;
+
+          if (isMarkdown) {
+            // Keep header pinned; no push-up for markdown to prevent clipping deeper slots
+            effectiveHeight = activeScopes.length * lineHeight;
+            lastHeight = lineHeight;
           } else {
-            pushMarginLines = 3;   // nested: keep earlier push for smooth handoff
-          }
-          const earlyMargin = pushMarginLines * lineHeight;
-          try {
-            // Use the end of the line containing the node end to better match visual bottom
-            const endLine = state.doc.lineAt(innermost.node.to);
-            const endLineBlock = view.lineBlockAt(endLine.to);
-            // Convert end-of-scope bottom to viewport coordinates
-            const endBottomViewport = endLineBlock.bottom - scrollTop;
-            const stackBottomViewport = headerHeight;
-            const delta = endBottomViewport - stackBottomViewport;
-            if (delta < earlyMargin) {
-              // Start easing up as we enter the margin; never move down.
-              topOffset = Math.max(-earlyMargin, delta - earlyMargin);
+            // Scale push-up margin: avoid early push on short scopes and keep top-level gentler.
+            const scopeLength = Math.max(1, innermost.endLine - innermost.startLine + 1);
+            let pushMarginLines;
+            if (scopeLength <= 6) {
+              pushMarginLines = 1;
+            } else if (innermost.depth === 0) {
+              pushMarginLines = 1.5; // top-level: start later
+            } else {
+              pushMarginLines = 3;   // nested: keep earlier push for smooth handoff
             }
-          } catch (e) {
-            // If geometry lookup fails, keep header pinned at the top.
-          }
-
-          // Apply small hysteresis to prevent rapid toggling when endBottom
-          // hovers around stackBottom. If the new offset is within epsilon of
-          // the previous value, keep the previous value to avoid flicker.
-          const epsilon = lineHeight * 0.25;
-          if (Math.abs(topOffset - this.lastTopOffset) < epsilon) {
-            topOffset = this.lastTopOffset;
-          }
-
-          // Mobile/slow-scroll assist: when scrolling up and the stack was pushed
-          // up, give it a small downward nudge so it fully settles back to 0.
-          if (direction < 0 && topOffset < 0) {
-            topOffset = Math.min(0, topOffset + lineHeight * 0.2);
-          }
-          if (DEBUG_STICKY && topOffset !== this.lastTopOffset) {
+            const earlyMargin = pushMarginLines * lineHeight;
             try {
+              // Use the end of the line containing the node end to better match visual bottom
               const endLine = state.doc.lineAt(innermost.node.to);
-              const endBottomViewport = view.lineBlockAt(endLine.to).bottom - scrollTop;
-              console.log('[StickyScroll] push-up', {
-                topOffset,
-                prev: this.lastTopOffset,
-                endBottomViewport,
-                stackBottomViewport: headerHeight,
-                earlyMargin,
-              });
-            } catch {}
-          }
-          this.lastTopOffset = topOffset;
+              const endLineBlock = view.lineBlockAt(endLine.to);
+              // Convert end-of-scope bottom to viewport coordinates
+              const endBottomViewport = endLineBlock.bottom - scrollTop;
+              const stackBottomViewport = headerHeight;
+              const delta = endBottomViewport - stackBottomViewport;
+              if (delta < earlyMargin) {
+                // Start easing up as we enter the margin; never move down.
+                topOffset = Math.max(-earlyMargin, delta - earlyMargin);
+              }
+            } catch (e) {
+              // If geometry lookup fails, keep header pinned at the top.
+            }
 
-          // Adjust container height to the sum of row heights:
-          // all but the innermost keep full line height; innermost can shrink when sliding.
-          const lastHeight = Math.max(0, lineHeight + topOffset);
-          const effectiveHeight = (activeScopes.length - 1) * lineHeight + lastHeight;
+            // Apply small hysteresis to prevent rapid toggling when endBottom
+            // hovers around stackBottom. If the new offset is within epsilon of
+            // the previous value, keep the previous value to avoid flicker.
+            const epsilon = lineHeight * 0.25;
+            if (Math.abs(topOffset - this.lastTopOffset) < epsilon) {
+              topOffset = this.lastTopOffset;
+            }
+
+            // Mobile/slow-scroll assist: when scrolling up and the stack was pushed
+            // up, give it a small downward nudge so it fully settles back to 0.
+            if (direction < 0 && topOffset < 0) {
+              topOffset = Math.min(0, topOffset + lineHeight * 0.2);
+            }
+            if (DEBUG_STICKY && topOffset !== this.lastTopOffset) {
+              try {
+                const endLine = state.doc.lineAt(innermost.node.to);
+                const endBottomViewport = view.lineBlockAt(endLine.to).bottom - scrollTop;
+                console.log('[StickyScroll] push-up', {
+                  topOffset,
+                  prev: this.lastTopOffset,
+                  endBottomViewport,
+                  stackBottomViewport: headerHeight,
+                  earlyMargin,
+                });
+              } catch {}
+            }
+            lastHeight = Math.max(0, lineHeight + topOffset);
+            effectiveHeight = (activeScopes.length - 1) * lineHeight + lastHeight;
+          }
+
+          this.lastTopOffset = topOffset;
           this.dom.style.height = `${effectiveHeight}px`;
 
           // Build one overlay layer per scope (separate stacking). Only the
@@ -2065,14 +2243,19 @@ export default {
               gutter.appendChild(seg);
             }
 
-            const content = document.createElement('div');
-            content.className = 'cm-sticky-content';
-            const styled = this.getStyledLineHTML(scope.startLine);
-            if (styled != null) {
-              content.innerHTML = styled;
-            } else {
-              content.textContent = scope.text;
-            }
+              const content = document.createElement('div');
+              content.className = 'cm-sticky-content';
+              const styled = this.getStyledLineHTML(scope.startLine);
+              if (styled != null) {
+                content.innerHTML = styled;
+              } else {
+                // Preserve heading markers for markdown when styled HTML isn't available
+                if (isMarkdown && scope.rawText) {
+                  content.textContent = scope.rawText;
+                } else {
+                  content.textContent = scope.text;
+                }
+              }
 
             layer.appendChild(gutter);
             layer.appendChild(content);
