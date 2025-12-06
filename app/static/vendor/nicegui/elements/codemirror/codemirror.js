@@ -1269,6 +1269,14 @@ export default {
         python: new Set([
           "FunctionDefinition", "ClassDefinition"
         ]),
+        html: new Set([
+          // Use element nodes; keeps nesting matching the DOM tree
+          "Element"
+        ]),
+        css: new Set([
+          // Group by rule blocks
+          "StyleRule", "QualifiedRule", "AtRule"
+        ]),
         // Fallback for other languages
         default: new Set([
           "FunctionDeclaration", "FunctionDefinition", "FunctionExpression",
@@ -1340,6 +1348,7 @@ export default {
         },
         ".cm-sticky-layer.innermost": {
           boxShadow: "0 6px 8px rgba(0,0,0,0.35)",
+          transition: "transform 140ms cubic-bezier(0.25, 0.1, 0.25, 1), height 140ms cubic-bezier(0.25, 0.1, 0.25, 1)",
         },
         ".cm-stickyHeader:empty": {
           display: "none",
@@ -1916,6 +1925,12 @@ export default {
           const epsilon = lineHeight * 0.25;
           if (Math.abs(topOffset - this.lastTopOffset) < epsilon) {
             topOffset = this.lastTopOffset;
+          }
+
+          // Mobile/slow-scroll assist: when scrolling up and the stack was pushed
+          // up, give it a small downward nudge so it fully settles back to 0.
+          if (direction < 0 && topOffset < 0) {
+            topOffset = Math.min(0, topOffset + lineHeight * 0.2);
           }
           if (DEBUG_STICKY && topOffset !== this.lastTopOffset) {
             try {
