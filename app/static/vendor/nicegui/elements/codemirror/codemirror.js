@@ -1374,7 +1374,7 @@ export default {
         },
         ".cm-sticky-content": {
           flex: "1 1 auto",
-          padding: "0 8px 0 4px",
+          padding: "0 8px 0 5px",
           whiteSpace: "pre",
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -1581,8 +1581,8 @@ export default {
               if (gutterStyle && gutterStyle.fontSize) {
                 const baseSize = parseFloat(gutterStyle.fontSize);
                 if (Number.isFinite(baseSize)) {
-                  // Bump size slightly for visibility while keeping alignment
-                  this.dom.style.fontSize = `${baseSize + 0.2}px`;
+                  // Nudge slightly smaller than gutter to avoid crowding
+                  this.dom.style.fontSize = `${Math.max(1, baseSize - 0.02)}px`;
                 } else {
                   this.dom.style.fontSize = gutterStyle.fontSize;
                 }
@@ -1714,7 +1714,7 @@ export default {
           const hysteresisLines = 0.5;
           const earlyMarginLines = 1.5;
           
-          const DEBUG_SLOTS = true; // Set true to log to browser_console.log
+          const DEBUG_SLOTS = false; // Set true to log to browser_console.log
 
           // First pass: clear slots that are no longer valid
           // A slot should clear if refLine is outside its activation window

@@ -26,19 +26,8 @@ const _originalConsole = {
 };
 
 function initDebugConsole() {
-  if (_debugWs) return;
-  try {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    _debugWs = new WebSocket(`${protocol}//${window.location.host}/ws/app/file_editor_cm6/debug_console`);
-    _debugWs.onopen = () => { 
-      _debugWsReady = true; 
-      _originalConsole.log('[DebugWS] Connected'); 
-    };
-    _debugWs.onclose = () => { _debugWsReady = false; _debugWs = null; };
-    _debugWs.onerror = () => { _debugWsReady = false; };
-  } catch (e) {
-    // Silent fail
-  }
+  // Debug console forwarding disabled
+  return;
 }
 
 function sendToDebugWs(level, args) {
