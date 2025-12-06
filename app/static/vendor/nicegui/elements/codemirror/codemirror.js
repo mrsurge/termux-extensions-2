@@ -564,6 +564,7 @@ export default {
       const new_theme = this.resolveThemeExtension(theme);
       this.editor.dispatch({
         effects: this.themeConfig.reconfigure([new_theme]),
+        annotations: [CM.Transaction.userEvent.of('setTheme')],
       });
     },
     setEditorValueFromProps() {
@@ -1325,7 +1326,7 @@ export default {
       const stickyScrollTheme = CM.EditorView.baseTheme({
         ".cm-stickyHeader": {
           position: "absolute",
-          backgroundColor: "var(--cm-editor-bg, #1e1e1e)",
+          backgroundColor: "var(--cm-sticky-bg, var(--cm-editor-bg, #1e1e1e))",
           fontFamily: "inherit",
           fontSize: "inherit",
           lineHeight: "1.4",
@@ -1343,7 +1344,7 @@ export default {
           overflow: "hidden",
           display: "flex",
           alignItems: "center",
-          backgroundColor: "var(--cm-editor-bg, #1e1e1e)",
+          backgroundColor: "var(--cm-sticky-bg, var(--cm-editor-bg, #1e1e1e))",
           pointerEvents: "auto",
         },
         ".cm-sticky-layer.innermost": {
@@ -1369,9 +1370,10 @@ export default {
           flex: "0 0 auto",
           textAlign: "right",
           padding: "0 10px 0 3.5px", // extra right padding for line numbers
-          opacity: "0.75",
+          opacity: "0.85",
           fontVariantNumeric: "tabular-nums",
-          color: "var(--cm-gutter-foreground, #858585)",
+          color: "var(--cm-sticky-gutter-fg, var(--cm-gutter-foreground, #858585))",
+          backgroundColor: "var(--cm-sticky-gutter-bg, var(--cm-gutter-background, transparent))",
           boxSizing: "border-box",
           borderRight: "1px solid rgba(255,255,255,0.08)",
         },
@@ -1485,6 +1487,9 @@ export default {
           
           // Append to editor DOM (works inside iframe)
           view.dom.appendChild(this.dom);
+
+          // Initial background sync to match current theme
+          this.syncBackgroundColor();
           
           // Click handler for jump-to-definition
           this.dom.addEventListener('click', (e) => {
@@ -1517,6 +1522,53 @@ export default {
           
           // Initial render
           this.updateStickyHeader();
+        }
+
+        // Sync overlay background to the editor's current background color.
+        syncBackgroundColor() {
+          const pickColor = (el) => {
+            if (!el) return null;
+            const style = getComputedStyle(el);
+            const bg = style && style.backgroundColor;
+            if (!bg) return null;
+            // Treat fully transparent as missing
+            if (bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') return null;
+            return bg;
+          };
+
+          let bg = null;
+          let gutterBg = null;
+          let gutterFg = null;
+
+          // Prefer the scrollDOM, then the scroller, then the root
+          bg = pickColor(this.view && this.view.scrollDOM) || bg;
+          const scroller = this.view && this.view.scrollDOM && this.view.scrollDOM.querySelector('.cm-scroller');
+          bg = bg || pickColor(scroller);
+          bg = bg || pickColor(this.view && this.view.dom);
+          bg = bg || 'var(--cm-editor-bg, #1e1e1e)';
+
+          // Try to read gutter colors to keep sticky gutter aligned
+          try {
+            const gutterRoot = this.view && this.view.dom && this.view.dom.querySelector('.cm-gutters');
+            if (gutterRoot) {
+              const gs = getComputedStyle(gutterRoot);
+              gutterBg = pickColor(gutterRoot) || (gs && gs.backgroundColor) || null;
+              gutterFg = (gs && gs.color) || null;
+            }
+          } catch (e) {}
+
+          try {
+            this.dom.style.backgroundColor = bg;
+            this.dom.style.setProperty('--cm-sticky-bg', bg);
+            if (gutterBg) {
+              this.dom.style.setProperty('--cm-sticky-gutter-bg', gutterBg);
+            }
+            if (gutterFg) {
+              this.dom.style.setProperty('--cm-sticky-gutter-fg', gutterFg);
+            }
+          } catch (e) {
+            // Fallback silently if computedStyle fails
+          }
         }
 
         // Try to get the styled HTML for a given 1-based line number by
@@ -1646,7 +1698,7 @@ export default {
           // ---------------------------------------------------------------------------
           // 2) Build scope candidates from syntax tree
           // ---------------------------------------------------------------------------
-          const tree = CM.syntaxTree(state);
+          const tree = CM.ensureSyntaxTree(state, state.doc.length, 200) || CM.syntaxTree(state);
           if (!tree || !tree.topNode) {
             if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
             this.slots.clearAll();
@@ -1655,8 +1707,9 @@ export default {
           }
 
           const scopeTypes = getScopeTypes();
-          const isPython = (cmComponent && cmComponent.language || 'default').toLowerCase() === 'python';
-          const ancestorNodes = [];
+          const langName = (cmComponent && cmComponent.language || 'default').toLowerCase();
+          const isPython = langName === 'python';
+          let ancestorNodes = [];
           let node = tree.resolveInner(refPos);
           for (; node; node = node.parent) {
             if (isScopeNode(node, scopeTypes, state, isPython)) {
@@ -1665,10 +1718,22 @@ export default {
           }
           ancestorNodes.reverse(); // depth 0 = outermost
 
+          // For Python, drop outermost ancestors that aren't truly indent-0 (parser fallbacks)
+          if (isPython && ancestorNodes.length > 0) {
+            ancestorNodes = ancestorNodes.filter((n, idx) => {
+              if (idx !== 0) return true;
+              const lineText = state.doc.lineAt(n.from).text;
+              const indentMatch = lineText.match(/^([ \t]*)/);
+              const indentRaw = indentMatch ? indentMatch[1] : '';
+              const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
+              return indentSpaces === 0;
+            });
+          }
+
           // Build scope objects with n+1 trigger calculations
           const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
 
-          const candidateScopes = ancestorNodes.map((n, originalDepth) => {
+          const candidateScopes = ancestorNodes.map((n, pathDepth) => {
             const startLine = state.doc.lineAt(n.from).number;
             const endLine = state.doc.lineAt(n.to).number;
             const lineText = state.doc.lineAt(n.from).text;
@@ -1676,18 +1741,24 @@ export default {
             const indentRaw = indentMatch ? indentMatch[1] : '';
             const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
             const indentDepth = Math.floor(indentSpaces / indentSize);
-            // For Python, trust indentation over ancestor chain to avoid bogus nesting when
-            // the parser error-recovers and leaves a top-level scope open too long.
-            const depth = isPython ? indentDepth : originalDepth;
+            // Slot depth = ancestor index (outermost -> 0). Use indent only for cosmetics.
+            const depth = pathDepth;
 
             // Use a "virtual" depth for n+1 offsets so Python indent scopes don't get an
             // extra hidden level; this trims one line of early entry for Python scopes.
             const offsetDepth = isPython ? Math.max(0, depth - 1) : depth;
             // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
-            const offset = -(offsetDepth + 2);
+            let offset = -(offsetDepth + 2);
+            // For first-level Python indents, start only one line early instead of two
+            if (isPython && depth === 1) {
+              offset = -1;
+            }
             const triggerLine = startLine + offset;
             // Apply the same offset to the effective end so scopes hand off cleanly
-            const endTriggerLine = Math.max(startLine, endLine + offset);
+            let endTriggerLine = Math.max(startLine, endLine + offset);
+            if (isPython) {
+              endTriggerLine += 4; // let Python scopes linger a bit before release
+            }
 
             return {
               node: n,
@@ -2025,6 +2096,14 @@ export default {
             // Clear slots on document change to force re-evaluation
             this.slots.clearAll();
             this.updateStickyHeader();
+          }
+          // Theme change marker: refresh overlay background
+          const themeChanged = update.transactions && update.transactions.some((tr) =>
+            tr.annotation && tr.annotation(CM.Transaction.userEvent) === 'setTheme'
+          );
+          if (themeChanged) {
+            // Allow the theme reconfigure to apply, then sample
+            requestAnimationFrame(() => this.syncBackgroundColor());
           }
         }
         
