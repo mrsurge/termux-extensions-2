@@ -1368,7 +1368,7 @@ export default {
           display: "flex",
           flex: "0 0 auto",
           textAlign: "right",
-          padding: "0 10px 0 4px", // extra right padding for line numbers
+          padding: "0 10px 0 3.5px", // extra right padding for line numbers
           opacity: "0.75",
           fontVariantNumeric: "tabular-nums",
           color: "var(--cm-gutter-foreground, #858585)",
@@ -1383,7 +1383,7 @@ export default {
         },
         ".cm-sticky-content": {
           flex: "1 1 auto",
-          padding: "0 8px 0 5px",
+          padding: "0 8px 0 6px",
           whiteSpace: "pre",
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -1591,7 +1591,7 @@ export default {
                 const baseSize = parseFloat(gutterStyle.fontSize);
                 if (Number.isFinite(baseSize)) {
                   // Nudge slightly smaller than gutter to avoid crowding
-                  this.dom.style.fontSize = `${Math.max(1, baseSize - 0.02)}px`;
+                  this.dom.style.fontSize = `${Math.max(1, baseSize + 0.1)}px`;
                 } else {
                   this.dom.style.fontSize = gutterStyle.fontSize;
                 }
@@ -1624,27 +1624,12 @@ export default {
           const denom = Math.max(1, scrollHeight - clientHeight);
           const scrollFrac = Math.max(0, Math.min(1, scrollTop / denom));
 
-          // Base early capture behavior:
-          // - When line wrapping is OFF: use the original fixed offsets.
-          // - When line wrapping is ON: apply a scroll-fraction drift
-          //   correction to keep the top-level scope aligned from top to
-          //   bottom, then compensate for deeper scopes in the per-scope
-          //   activation step.
-          const wrappingEnabled = !!(cmComponent && cmComponent.lineWrapping);
+          // Word-wrap drift correction was disabled after semantics stabilized.
+          // Keeping placeholders for possible re-enable; current behavior uses
+          // simple early capture without wrap-aware drift.
+          const wrappingEnabled = false; // !!(cmComponent && cmComponent.lineWrapping);
           let driftCorrectionLines = 0;
-          let earlyLines;
-          if (wrappingEnabled) {
-            const baseEarlyLines = 1;
-            const extraEarlyLinesAtBottom = 1;
-            driftCorrectionLines = scrollFrac * extraEarlyLinesAtBottom;
-            earlyLines =
-              direction >= 0
-                ? baseEarlyLines + driftCorrectionLines   // down or static
-                : driftCorrectionLines;                   // up
-          } else {
-            driftCorrectionLines = 0;
-            earlyLines = direction >= 0 ? 1 : 0;
-          }
+          let earlyLines = direction >= 0 ? 1 : 0;
 
           const baseTop = scrollTop + samplingOverlayHeight;
           const effectiveTop = baseTop + earlyLines * lineHeight;
@@ -1695,8 +1680,11 @@ export default {
             // the parser error-recovers and leaves a top-level scope open too long.
             const depth = isPython ? indentDepth : originalDepth;
 
+            // Use a "virtual" depth for n+1 offsets so Python indent scopes don't get an
+            // extra hidden level; this trims one line of early entry for Python scopes.
+            const offsetDepth = isPython ? Math.max(0, depth - 1) : depth;
             // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
-            const offset = -(depth + 2);
+            const offset = -(offsetDepth + 2);
             const triggerLine = startLine + offset;
             // Apply the same offset to the effective end so scopes hand off cleanly
             const endTriggerLine = Math.max(startLine, endLine + offset);
@@ -1900,9 +1888,17 @@ export default {
           const innermost = activeScopes[activeScopes.length - 1];
 
           let topOffset = 0;
-          // Scale push-up margin: small scopes shouldn't be pushed away too early.
+          // Scale push-up margin: avoid early push on short scopes and keep top-level gentler.
           const scopeLength = Math.max(1, innermost.endLine - innermost.startLine + 1);
-          const earlyMargin = (scopeLength <= 6 ? 1 : 3) * lineHeight; // 1 line for short scopes, 3 for larger
+          let pushMarginLines;
+          if (scopeLength <= 6) {
+            pushMarginLines = 1;
+          } else if (innermost.depth === 0) {
+            pushMarginLines = 1.5; // top-level: start later
+          } else {
+            pushMarginLines = 3;   // nested: keep earlier push for smooth handoff
+          }
+          const earlyMargin = pushMarginLines * lineHeight;
           try {
             // Use the end of the line containing the node end to better match visual bottom
             const endLine = state.doc.lineAt(innermost.node.to);
