@@ -2126,7 +2126,7 @@ export default {
           const headerHeight = activeScopes.length * lineHeight;
 
           // ---------------------------------------------------------------------------
-          // 5) Push-up effect: disabled for Markdown to avoid clipping deep stacks
+          // 5) Push-up effect (Markdown uses section end; code uses node end)
           // ---------------------------------------------------------------------------
           const innermost = activeScopes[activeScopes.length - 1];
 
@@ -2134,67 +2134,51 @@ export default {
           let effectiveHeight;
           let lastHeight = lineHeight;
 
+          // Scale push-up margin based on scope length and type
+          const scopeLength = Math.max(1, innermost.endLine - innermost.startLine + 1);
+          let pushMarginLines;
           if (isMarkdown) {
-            // Keep header pinned; no push-up for markdown to prevent clipping deeper slots
-            effectiveHeight = activeScopes.length * lineHeight;
-            lastHeight = lineHeight;
+            pushMarginLines = scopeLength <= 10 ? 2 : 4; // markdown sections typically longer
           } else {
-            // Scale push-up margin: avoid early push on short scopes and keep top-level gentler.
-            const scopeLength = Math.max(1, innermost.endLine - innermost.startLine + 1);
-            let pushMarginLines;
-            if (scopeLength <= 6) {
-              pushMarginLines = 1;
-            } else if (innermost.depth === 0) {
-              pushMarginLines = 1.5; // top-level: start later
+            if (scopeLength <= 6) pushMarginLines = 1;
+            else if (innermost.depth === 0) pushMarginLines = 1.5;
+            else pushMarginLines = 3;
+          }
+          const earlyMargin = pushMarginLines * lineHeight;
+
+          try {
+            let endBottomViewport;
+            if (isMarkdown) {
+              const endLineObj = state.doc.line(innermost.endLine);
+              const endLineBlock = view.lineBlockAt(endLineObj.to);
+              endBottomViewport = endLineBlock.bottom - scrollTop;
             } else {
-              pushMarginLines = 3;   // nested: keep earlier push for smooth handoff
-            }
-            const earlyMargin = pushMarginLines * lineHeight;
-            try {
-              // Use the end of the line containing the node end to better match visual bottom
               const endLine = state.doc.lineAt(innermost.node.to);
               const endLineBlock = view.lineBlockAt(endLine.to);
-              // Convert end-of-scope bottom to viewport coordinates
-              const endBottomViewport = endLineBlock.bottom - scrollTop;
-              const stackBottomViewport = headerHeight;
-              const delta = endBottomViewport - stackBottomViewport;
-              if (delta < earlyMargin) {
-                // Start easing up as we enter the margin; never move down.
-                topOffset = Math.max(-earlyMargin, delta - earlyMargin);
-              }
-            } catch (e) {
-              // If geometry lookup fails, keep header pinned at the top.
+              endBottomViewport = endLineBlock.bottom - scrollTop;
             }
-
-            // Apply small hysteresis to prevent rapid toggling when endBottom
-            // hovers around stackBottom. If the new offset is within epsilon of
-            // the previous value, keep the previous value to avoid flicker.
-            const epsilon = lineHeight * 0.25;
-            if (Math.abs(topOffset - this.lastTopOffset) < epsilon) {
-              topOffset = this.lastTopOffset;
+            const stackBottomViewport = headerHeight;
+            const delta = endBottomViewport - stackBottomViewport;
+            if (delta < earlyMargin) {
+              topOffset = Math.max(-earlyMargin, delta - earlyMargin);
             }
-
-            // Mobile/slow-scroll assist: when scrolling up and the stack was pushed
-            // up, give it a small downward nudge so it fully settles back to 0.
-            if (direction < 0 && topOffset < 0) {
-              topOffset = Math.min(0, topOffset + lineHeight * 0.2);
-            }
-            if (DEBUG_STICKY && topOffset !== this.lastTopOffset) {
-              try {
-                const endLine = state.doc.lineAt(innermost.node.to);
-                const endBottomViewport = view.lineBlockAt(endLine.to).bottom - scrollTop;
-                console.log('[StickyScroll] push-up', {
-                  topOffset,
-                  prev: this.lastTopOffset,
-                  endBottomViewport,
-                  stackBottomViewport: headerHeight,
-                  earlyMargin,
-                });
-              } catch {}
-            }
-            lastHeight = Math.max(0, lineHeight + topOffset);
-            effectiveHeight = (activeScopes.length - 1) * lineHeight + lastHeight;
+          } catch (e) {
+            // Keep pinned if geometry lookup fails
           }
+
+          // Hysteresis to prevent flicker
+          const epsilon = lineHeight * 0.25;
+          if (Math.abs(topOffset - this.lastTopOffset) < epsilon) {
+            topOffset = this.lastTopOffset;
+          }
+
+          // Upward scroll assist
+          if (direction < 0 && topOffset < 0) {
+            topOffset = Math.min(0, topOffset + lineHeight * 0.2);
+          }
+
+          lastHeight = Math.max(0, lineHeight + topOffset);
+          effectiveHeight = (activeScopes.length - 1) * lineHeight + lastHeight;
 
           this.lastTopOffset = topOffset;
           this.dom.style.height = `${effectiveHeight}px`;
