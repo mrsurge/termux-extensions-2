@@ -2138,7 +2138,8 @@ export default {
           const scopeLength = Math.max(1, innermost.endLine - innermost.startLine + 1);
           let pushMarginLines;
           if (isMarkdown) {
-            pushMarginLines = scopeLength <= 10 ? 2 : 4; // markdown sections typically longer
+            // For markdown, trigger push-up only when the section end crosses the stack bottom.
+            pushMarginLines = 0; // start exactly at boundary
           } else {
             if (scopeLength <= 6) pushMarginLines = 1;
             else if (innermost.depth === 0) pushMarginLines = 1.5;
@@ -2159,8 +2160,15 @@ export default {
             }
             const stackBottomViewport = headerHeight;
             const delta = endBottomViewport - stackBottomViewport;
-            if (delta < earlyMargin) {
-              topOffset = Math.max(-earlyMargin, delta - earlyMargin);
+            if (isMarkdown) {
+              if (delta < lineHeight) {
+                // Start push-up about one line before the end crosses the stack
+                topOffset = Math.max(-lineHeight, delta - lineHeight);
+              }
+            } else {
+              if (delta < earlyMargin) {
+                topOffset = Math.max(-earlyMargin, delta - earlyMargin);
+              }
             }
           } catch (e) {
             // Keep pinned if geometry lookup fails
