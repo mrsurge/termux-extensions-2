@@ -1854,12 +1854,13 @@ export default {
           if (isMarkdown) {
             const headings = collectMarkdownHeadingsSimple(state.doc);
             const sections = buildMarkdownSectionsSimple(headings, state.doc.lines);
-            const path = markdownPathAtSimple(sections, refLine);
+            const path = markdownPathAtSimple(sections, refLine - earlyLines);
             candidateScopes = path.map((sec, idx) => {
               const depth = idx;
-              // Mild n+1 for markdown headings
-              const triggerLine = sec.line - 1;
-              const endTriggerLine = Math.max(sec.line, sec.endLine - 1);
+              // N+1 style early capture for markdown headings
+              const offset = -3;
+              const triggerLine = sec.line + offset;
+              const endTriggerLine = Math.max(sec.line, sec.endLine + offset);
               const lineObj = state.doc.line(sec.line);
               const rawText = lineObj.text;
               return {
