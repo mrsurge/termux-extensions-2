@@ -1,9 +1,10 @@
 # Extension: Sessions & Shortcuts
 
+import asyncio
 import json
 import os
 import subprocess
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, WebSocket, WebSocketDisconnect
 
 # Create a APIRouter
 sessions_bp = APIRouter()
@@ -197,6 +198,45 @@ def get_shortcuts():
         return {"ok": True, "data": json.loads(output)}
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail='Failed to decode JSON from script.')
+
+
+async def _list_framework_shells():
+    try:
+        from app.libs.framework_shells import get_manager
+        manager = await get_manager()
+        shells = await manager.list_shells()
+        return [s.to_payload() for s in shells]
+    except Exception:
+        return []
+
+
+@sessions_bp.websocket('/ws')
+async def sessions_ws(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            try:
+                sessions_resp = get_sessions()
+                sessions_data = sessions_resp.get('data', []) if isinstance(sessions_resp, dict) else []
+            except Exception:
+                sessions_data = []
+
+            frameworks = await _list_framework_shells()
+            payload = {
+                "type": "update",
+                "sessions": sessions_data,
+                "frameworks": frameworks,
+                "containers": [],
+            }
+            await websocket.send_json(payload)
+            await asyncio.sleep(5)
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:
+        try:
+            await websocket.send_json({"type": "error", "message": str(exc)})
+        finally:
+            await websocket.close()
 
 @sessions_bp.post('/sessions/{sid}/command')
 def run_command(sid: str, data: dict = Body(...)):

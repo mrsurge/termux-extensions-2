@@ -2108,7 +2108,7 @@ export default {
           }
 
           // Debug logging (disabled by default); flip to true for diagnostics
-          const DEBUG_STICKY = false;
+          const DEBUG_STICKY = false; // set true for troubleshooting sticky overlay
           const signature = activeScopes.map((s) => `${s.depth}:${s.startLine}-${s.endLine}`).join('|');
           try {
             if (DEBUG_STICKY && signature !== this.lastActiveSignature) {

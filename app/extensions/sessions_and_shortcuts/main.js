@@ -6,8 +6,10 @@ const STATE = {
     containers: [],
     sessionNames: {},
     currentSessionId: null,
-    autoRefreshTimer: null,
 };
+
+let liveSocket = null;
+let reconnectTimer = null;
 
 let extensionRoot;
 let apiClient;
@@ -15,15 +17,12 @@ let apiClient;
 let elements = {
     visibleList: null,
     frameworkList: null,
-    refreshBtn: null,
     tabVisible: null,
     tabFramework: null,
-    autoRefreshSelect: null,
 };
 
 const storageKeys = {
     sessionNames: 'sessions_and_shortcuts.sessionNames',
-    autoRefresh: 'sessions_and_shortcuts.autoRefreshMs',
     frameworkToken: 'sessions_and_shortcuts.frameworkToken',
 };
 
@@ -31,7 +30,6 @@ const teStateStore = window.teState || null;
 const persisted = {
     frameworkToken: null,
     sessionNames: {},
-    autoRefresh: 0,
 };
 
 const SHORTCUTS_DIR = '/data/data/com.termux/files/home/.shortcuts';
@@ -39,14 +37,11 @@ const SHORTCUTS_DIR = '/data/data/com.termux/files/home/.shortcuts';
 async function preloadPersistentState() {
     if (!teStateStore) return;
     try {
-        await teStateStore.preload([storageKeys.sessionNames, storageKeys.autoRefresh, storageKeys.frameworkToken]);
+        await teStateStore.preload([storageKeys.sessionNames, storageKeys.frameworkToken]);
         const names = teStateStore.getSync(storageKeys.sessionNames, {});
         if (names && typeof names === 'object') {
             persisted.sessionNames = { ...names };
         }
-        const auto = teStateStore.getSync(storageKeys.autoRefresh, 0);
-        const autoInt = parseInt(auto, 10);
-        persisted.autoRefresh = Number.isNaN(autoInt) ? 0 : autoInt;
         const token = teStateStore.getSync(storageKeys.frameworkToken, null);
         persisted.frameworkToken = typeof token === 'string' && token.trim() ? token : null;
     } catch (err) {
@@ -252,28 +247,6 @@ function openMenu(sid, button) {
     menu.classList.add('open');
 }
 
-function applyAutoRefresh(ms) {
-    if (STATE.autoRefreshTimer) {
-        clearInterval(STATE.autoRefreshTimer);
-        STATE.autoRefreshTimer = null;
-    }
-    if (ms > 0) {
-        STATE.autoRefreshTimer = setInterval(() => refreshAll(), ms);
-    }
-}
-
-function loadAutoRefreshSetting() {
-    return Number.isFinite(persisted.autoRefresh) ? persisted.autoRefresh : 0;
-}
-
-function saveAutoRefreshSetting(ms) {
-    persisted.autoRefresh = Number.isFinite(ms) ? ms : 0;
-    if (!teStateStore) return;
-    teStateStore.set(storageKeys.autoRefresh, persisted.autoRefresh).catch((err) => {
-        console.warn('Failed to persist auto-refresh', err);
-    });
-}
-
 async function fetchFrameworkShells() {
     try {
         const data = await window.teFetch('/api/framework_shells');
@@ -316,6 +289,27 @@ async function refreshAll() {
     }
 }
 
+function applyLiveSnapshot(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    if (Array.isArray(payload.sessions)) STATE.visibleSessions = payload.sessions;
+    if (Array.isArray(payload.frameworks)) STATE.frameworkShells = payload.frameworks;
+    if (Array.isArray(payload.containers)) STATE.containers = payload.containers;
+    render();
+}
+
+function requestSnapshot() {
+    if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
+        try {
+            liveSocket.send(JSON.stringify({ type: 'refresh' }));
+            return;
+        } catch (err) {
+            console.warn('Failed to request snapshot over WS', err);
+        }
+    }
+    // Fallback to HTTP polling if websocket is not ready
+    refreshAll();
+}
+
 function runShortcut(path) {
     if (!STATE.currentSessionId) {
         alert('Please select a session from the list first.');
@@ -324,7 +318,7 @@ function runShortcut(path) {
     apiClient.post(`sessions/${STATE.currentSessionId}/shortcut`, { path })
         .then(() => {
             closeModal('shortcut-modal');
-            setTimeout(refreshAll, 250);
+            setTimeout(requestSnapshot, 250);
         })
         .catch(() => alert('Failed to run shortcut.'));
 }
@@ -348,7 +342,7 @@ function renameSession() {
             saveSessionNames();
             input.value = '';
             closeModal('rename-modal');
-            refreshAll();
+            requestSnapshot();
         })
         .catch(() => alert('Failed to rename session.'));
 }
@@ -387,7 +381,7 @@ function attachEventListeners() {
 
             if (action === 'kill') {
                 if (confirm(`Kill session ${sid}?`)) {
-                    apiClient.delete(`sessions/${sid}`).then(refreshAll);
+                    apiClient.delete(`sessions/${sid}`).then(requestSnapshot);
                 }
             } else if (action === 'run-command') {
                 openModal('command-modal', sid);
@@ -436,7 +430,7 @@ function attachEventListeners() {
                     .then(() => {
                         closeModal('command-modal');
                         commandInput.value = '';
-                        setTimeout(refreshAll, 250);
+                        setTimeout(requestSnapshot, 250);
                     })
                     .catch(() => alert('Failed to run command.'));
             }
@@ -478,7 +472,7 @@ async function killFrameworkShell(shellId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'kill' }),
         });
-        refreshAll();
+        requestSnapshot();
     } catch (err) {
         alert(err.message || 'Failed to kill shell');
     }
@@ -506,29 +500,54 @@ export default async function initialize(container, apiRef) {
 
     elements.visibleList = container.querySelector('#sessions-visible');
     elements.frameworkList = container.querySelector('#sessions-framework');
-    elements.refreshBtn = container.querySelector('#refresh-btn');
     elements.tabVisible = container.querySelector('#sas-tab-visible');
     elements.tabFramework = container.querySelector('#sas-tab-framework');
-    elements.autoRefreshSelect = container.querySelector('#auto-refresh-select');
 
     await preloadPersistentState();
     loadSessionNames();
 
-    if (elements.refreshBtn) elements.refreshBtn.addEventListener('click', () => refreshAll());
     if (elements.tabVisible) elements.tabVisible.addEventListener('click', () => selectTab('visible'));
     if (elements.tabFramework) elements.tabFramework.addEventListener('click', () => selectTab('framework'));
-
-    const savedMs = loadAutoRefreshSetting();
-    if (elements.autoRefreshSelect) {
-        elements.autoRefreshSelect.value = String(savedMs);
-        elements.autoRefreshSelect.addEventListener('change', (event) => {
-            const ms = parseInt(event.target.value, 10) || 0;
-            saveAutoRefreshSetting(ms);
-            applyAutoRefresh(ms);
-        });
-    }
-    applyAutoRefresh(savedMs);
-
     attachEventListeners();
-    refreshAll();
+
+    // Default to framework tab on load
+    selectTab('framework');
+
+    const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${wsScheme}://${window.location.host}/api/ext/sessions_and_shortcuts/ws`;
+
+    const connectSocket = () => {
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+        try {
+            liveSocket = new WebSocket(wsUrl);
+            liveSocket.onopen = () => {
+                try { liveSocket.send(JSON.stringify({ type: 'hello' })); } catch (_) {}
+            };
+            liveSocket.onmessage = (event) => {
+                try {
+                    const payload = JSON.parse(event.data);
+                    if (payload && payload.type === 'update') {
+                        applyLiveSnapshot(payload);
+                    }
+                } catch (err) {
+                    console.warn('Bad websocket payload', err);
+                }
+            };
+            liveSocket.onclose = () => {
+                reconnectTimer = setTimeout(connectSocket, 1500);
+            };
+            liveSocket.onerror = () => {
+                try { liveSocket.close(); } catch (_) {}
+            };
+        } catch (err) {
+            reconnectTimer = setTimeout(connectSocket, 2000);
+        }
+    };
+
+    connectSocket();
+    // Fallback: prime UI if WS is slow to connect
+    setTimeout(() => { if (!STATE.visibleSessions.length) refreshAll(); }, 500);
 }

@@ -89,7 +89,7 @@ export function initAgentDrawer() {
     if (!socketIoLoader) {
       socketIoLoader = new Promise((resolve, reject) => {
         const script = document.createElement('script');
-        script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
+      script.src = '/static/vendor/socket.io.min.js';
         script.async = true;
         script.onload = () => resolve(window.io);
         script.onerror = () => {
