@@ -1463,7 +1463,7 @@ export default {
         ".cm-stickyHeader": {
           position: "fixed",
           backgroundColor: "var(--cm-sticky-bg, var(--cm-editor-bg, #1e1e1e))",
-          fontFamily: "inherit",
+          fontFamily: '"EditorMono", "JetBrains Mono", monospace',
           fontSize: "inherit",
           lineHeight: "1.4",
           zIndex: "300",
@@ -1535,7 +1535,8 @@ export default {
         ".cm-sticky-content": {
           flex: "1 1 auto",
           padding: "0 8px 0 6px",
-          whiteSpace: "pre",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
           overflow: "hidden",
           textOverflow: "ellipsis",
         },
@@ -1615,6 +1616,7 @@ export default {
           // Slot-based scope management (enforces one scope per depth)
           this.slots = new StickySlots(5);
           this.currentScopes = []; // For click handler compatibility
+          this.scopeHeights = new Map(); // Cache for scope heights (lines)
           
           // Used to break the feedback loop between overlay height and
           // sampling position; we always sample using the previous height.
@@ -1757,10 +1759,11 @@ export default {
           return null;
         }
         
-        updateStickyHeader() {
+        updateStickyHeader(isRetry = false) {
           const view = this.view;
           const state = view.state;
           const scrollTop = view.scrollDOM.scrollTop;
+          const lineHeight = view.defaultLineHeight;
 
           // Debug: log every 50th call to verify handler is running
           if (!this._callCount) this._callCount = 0;
@@ -1794,7 +1797,7 @@ export default {
                 const baseSize = parseFloat(gutterStyle.fontSize);
                 if (Number.isFinite(baseSize)) {
                   // Nudge slightly smaller than gutter to avoid crowding
-                  this.dom.style.fontSize = `${Math.max(1, baseSize + 0.1)}px`;
+                  this.dom.style.fontSize = `${Math.max(1, baseSize + 0.0)}px`;
                 } else {
                   this.dom.style.fontSize = gutterStyle.fontSize;
                 }
@@ -1809,8 +1812,6 @@ export default {
           this.dom.style.top = '0';
           this.dom.style.left = '0';
           this.dom.style.right = '0';
-
-          const lineHeight = view.defaultLineHeight;
 
           // Language flags early (used for sampling offsets too)
           const langName = (cmComponent && cmComponent.language || 'default').toLowerCase();
@@ -1832,10 +1833,7 @@ export default {
           const denom = Math.max(1, scrollHeight - clientHeight);
           const scrollFrac = Math.max(0, Math.min(1, scrollTop / denom));
 
-          // Word-wrap drift correction was disabled after semantics stabilized.
-          // Keeping placeholders for possible re-enable; current behavior uses
-          // simple early capture without wrap-aware drift.
-          const wrappingEnabled = false; // !!(cmComponent && cmComponent.lineWrapping);
+          const wrappingEnabled = cmComponent ? cmComponent.lineWrapping : false;
           let driftCorrectionLines = 0;
           let earlyLines = direction >= 0 ? 1 : 0;
 
@@ -1870,10 +1868,25 @@ export default {
             const headings = collectMarkdownHeadingsSimple(state.doc);
             const sections = buildMarkdownSectionsSimple(headings, state.doc.lines);
             const path = markdownPathAtSimple(sections, refLine - earlyLines);
+            
+            let cumulativeHeight = 0;
             candidateScopes = path.map((sec, idx) => {
               const depth = idx;
-              // N+1 style early capture for markdown headings (tuned one line later)
-              const offset = -2;
+              let cachedHeight = 1;
+              let offset;
+
+              if (wrappingEnabled) {
+                const key = `${depth}:${sec.line}`;
+                cachedHeight = this.scopeHeights.get(key) || 1;
+                // N+1 style early capture for markdown headings (tuned one line later)
+                // Adjust offset based on cumulative height of ancestors
+                offset = -(cumulativeHeight + 2);
+                cumulativeHeight += cachedHeight;
+              } else {
+                // Old logic for non-wrapped mode
+                offset = -2;
+              }
+              
               const triggerLine = sec.line + offset;
               const endTriggerLine = Math.max(sec.line, sec.endLine + offset);
               const lineObj = state.doc.line(sec.line);
@@ -1889,6 +1902,7 @@ export default {
                 endTriggerLine,
                 indentDepth: depth,
                 indentSpaces: 0,
+                height: cachedHeight
               };
             });
           } else {
@@ -1915,6 +1929,7 @@ export default {
 
             const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
 
+            let cumulativeHeight = 0;
             candidateScopes = ancestorNodes.map((n, pathDepth) => {
               const startLine = state.doc.lineAt(n.from).number;
               const endLine = state.doc.lineAt(n.to).number;
@@ -1925,16 +1940,25 @@ export default {
               const indentDepth = Math.floor(indentSpaces / indentSize);
               // Slot depth = ancestor index (outermost -> 0). Use indent only for cosmetics.
               const depth = pathDepth;
+              
+              let cachedHeight = 1;
+              let offset;
 
-              // Use a "virtual" depth for n+1 offsets so Python indent scopes don't get an
-              // extra hidden level; this trims one line of early entry for Python scopes.
-              const offsetDepth = isPython ? Math.max(0, depth - 1) : depth;
-              // depth 0 => offset -2, depth 1 => -3, etc. (n+1 with global early capture)
-              let offset = -(offsetDepth + 2);
-              // For first-level Python indents, start only one line early instead of two
-              if (isPython && depth === 1) {
-                offset = -1;
+              if (wrappingEnabled) {
+                const key = `${depth}:${startLine}`;
+                cachedHeight = this.scopeHeights.get(key) || 1;
+                // Calculate offset based on cumulative height of ancestors
+                offset = -(cumulativeHeight + 2);
+                cumulativeHeight += cachedHeight;
+              } else {
+                // Old logic for non-wrapped mode
+                const offsetDepth = isPython ? Math.max(0, depth - 1) : depth;
+                offset = -(offsetDepth + 2);
+                if (isPython && depth === 1) {
+                  offset = -1;
+                }
               }
+
               const triggerLine = startLine + offset;
               // Apply the same offset to the effective end so scopes hand off cleanly
               let endTriggerLine = Math.max(startLine, endLine + offset);
@@ -1952,6 +1976,7 @@ export default {
                 endTriggerLine,
                 indentDepth,
                 indentSpaces,
+                height: cachedHeight
               };
             });
           }
@@ -1974,9 +1999,8 @@ export default {
             if (!existing) continue;
             
             let scopedRef = refLine;
-            if (wrappingEnabled && depth > 0) {
-              scopedRef = refLine - driftCorrectionLines;
-            }
+            // With dynamic heights, we don't need arbitrary drift correction
+            // scopedRef = refLine;
             
             // Direction-aware release:
             // - Downward scroll: keep scope until the actual end line passes the ref line
@@ -2026,9 +2050,9 @@ export default {
           // Second pass: try to register candidate scopes into slots
           for (const scope of candidateScopes) {
             let scopedRef = refLine;
-            if (wrappingEnabled && scope.depth > 0) {
-              scopedRef = refLine - driftCorrectionLines;
-            }
+            // if (wrappingEnabled && scope.depth > 0) {
+            //   scopedRef = refLine - driftCorrectionLines;
+            // }
 
             const key = `${scope.depth}:${scope.startLine}-${scope.endLine}`;
             const wasActive = prevActiveKeys.has(key);
@@ -2050,8 +2074,21 @@ export default {
                 const endLineObj = state.doc.lineAt(scope.node.to);
                 const endBlock = view.lineBlockAt(endLineObj.to);
                 const endBottomViewport = endBlock.bottom - scrollTop;
-                const prospectiveHeaderHeight = (scope.depth + 1) * lineHeight;
-                if (endBottomViewport < prospectiveHeaderHeight + earlyMarginLines * lineHeight) {
+                
+                // Calculate prospective header height using cumulative heights
+                let prospectiveHeight = 0;
+                for (let i = 0; i <= scope.depth; i++) {
+                   // Use cached height for ancestors, assume 1 for current if unknown
+                   // But we have cached height in scope.height
+                   // We need heights of all ancestors 0..depth
+                   // Since we are iterating candidates, we can sum them up
+                   const ancestor = candidateScopes[i];
+                   if (ancestor) prospectiveHeight += (ancestor.height || 1);
+                   else prospectiveHeight += 1;
+                }
+                const prospectiveHeightPx = prospectiveHeight * lineHeight;
+                
+                if (endBottomViewport < prospectiveHeightPx + earlyMarginLines * lineHeight) {
                   shouldActivate = true;
                 }
               } catch {}
@@ -2104,7 +2141,9 @@ export default {
           // Track overlay height even when active set toggles to avoid
           // sampling jitter at the exact moment a scope disappears.
           if (activeScopes.length > 0) {
-            this.lastOverlayHeight = activeScopes.length * lineHeight;
+            // Sum of heights of active scopes
+            const totalLines = activeScopes.reduce((sum, s) => sum + (s.height || 1), 0);
+            this.lastOverlayHeight = totalLines * lineHeight;
           }
 
           // Debug logging (disabled by default); flip to true for diagnostics
@@ -2162,7 +2201,8 @@ export default {
           }
 
           // Compute nominal header height (before push-up) for geometry
-          const headerHeight = activeScopes.length * lineHeight;
+          const headerHeightLines = activeScopes.reduce((sum, s) => sum + (s.height || 1), 0);
+          const headerHeight = headerHeightLines * lineHeight;
 
           // ---------------------------------------------------------------------------
           // 5) Push-up effect (Markdown uses section end; code uses node end)
@@ -2171,7 +2211,10 @@ export default {
 
           let topOffset = 0;
           let effectiveHeight;
-          let lastHeight = lineHeight;
+          
+          // Calculate height of the innermost scope (in pixels)
+          const innermostHeight = (innermost.height || 1) * lineHeight;
+          let lastHeight = innermostHeight;
 
           // Scale push-up margin based on scope length and type
           const scopeLength = Math.max(1, innermost.endLine - innermost.startLine + 1);
@@ -2202,7 +2245,7 @@ export default {
             if (isMarkdown) {
               if (delta < lineHeight) {
                 // Start push-up about one line before the end crosses the stack
-                topOffset = Math.max(-lineHeight, delta - lineHeight);
+                topOffset = Math.max(-innermostHeight, delta - innermostHeight);
               }
             } else {
               if (delta < earlyMargin) {
@@ -2224,8 +2267,11 @@ export default {
             topOffset = Math.min(0, topOffset + lineHeight * 0.2);
           }
 
-          lastHeight = Math.max(0, lineHeight + topOffset);
-          effectiveHeight = (activeScopes.length - 1) * lineHeight + lastHeight;
+          lastHeight = Math.max(0, innermostHeight + topOffset);
+          
+          // Effective height is sum of all previous scopes + lastHeight
+          const previousHeight = activeScopes.slice(0, -1).reduce((sum, s) => sum + (s.height || 1), 0) * lineHeight;
+          effectiveHeight = previousHeight + lastHeight;
 
           this.lastTopOffset = topOffset;
           this.dom.style.height = `${effectiveHeight}px`;
@@ -2233,28 +2279,40 @@ export default {
           // Build one overlay layer per scope (separate stacking). Only the
           // innermost layer is translated for push-up; others stay pinned.
           const renderKey = `${signature}|${topOffset.toFixed(3)}|${effectiveHeight.toFixed(3)}`;
-          if (renderKey === this.lastRenderKey) {
+          if (renderKey === this.lastRenderKey && !isRetry) {
             return;
           }
           this.lastRenderKey = renderKey;
 
           this.dom.innerHTML = '';
           const lastIndex = activeScopes.length - 1;
+          
+          let currentTop = 0;
+          
           const renderLayer = (scope, idx, cls) => {
+            const scopeLines = scope.height || 1;
+            const scopeHeightPx = scopeLines * lineHeight;
+            
             const layer = document.createElement('div');
             layer.className = 'cm-sticky-layer';
             if (cls) layer.classList.add(cls);
             if (idx === lastIndex) layer.classList.add('innermost');
-            layer.style.top = `${idx * lineHeight}px`;
+            
+            layer.style.top = `${currentTop}px`;
+            
             // Higher layers (outer scopes) sit above inner ones.
             layer.style.zIndex = String(100 - idx - (cls === 'exiting' ? 1 : 0));
             layer.style.setProperty('--cm-sticky-line-height', `${lineHeight}px`);
+            
+            // Apply push-up transform to innermost layer
             layer.style.transform = idx === lastIndex && !cls ? `translateY(${topOffset}px)` : 'translateY(0)';
-            if (idx === lastIndex && !cls) {
-              layer.style.height = `${lastHeight}px`;
-            } else {
-              layer.style.height = `${lineHeight}px`;
-            }
+            
+            // Allow height to be auto for wrapping, but set min-height
+            layer.style.height = 'auto';
+            layer.style.minHeight = `${lineHeight}px`;
+            
+            // Store scope key for measurement
+            layer.dataset.scopeKey = `${scope.depth}:${scope.startLine}`;
 
             const gutter = document.createElement('div');
             gutter.className = 'cm-sticky-gutter';
@@ -2278,6 +2336,12 @@ export default {
 
             const content = document.createElement('div');
             content.className = 'cm-sticky-content';
+            if (wrappingEnabled) {
+              content.style.whiteSpace = 'pre-wrap';
+              content.style.wordBreak = 'break-word';
+            } else {
+              content.style.whiteSpace = 'pre';
+            }
             const styled = this.getStyledLineHTML(scope.startLine);
             if (styled != null) {
               content.innerHTML = styled;
@@ -2292,6 +2356,11 @@ export default {
             layer.appendChild(gutter);
             layer.appendChild(content);
             this.dom.appendChild(layer);
+            
+            // Advance top for next layer
+            if (!cls) { // Only advance for main stack, not transitions
+               currentTop += scopeHeightPx;
+            }
           };
 
           // Render active scopes and any outgoing transitions
@@ -2305,6 +2374,34 @@ export default {
               renderLayer(scope, idx, null);
             }
           });
+
+          // ---------------------------------------------------------------------------
+          // 6) Measure actual heights and update cache
+          // ---------------------------------------------------------------------------
+          if (wrappingEnabled && !isRetry) {
+             let heightsChanged = false;
+             const layers = Array.from(this.dom.querySelectorAll('.cm-sticky-layer'));
+             layers.forEach(layer => {
+                const key = layer.dataset.scopeKey;
+                if (key) {
+                   const heightPx = layer.offsetHeight;
+                   const lines = Math.max(1, Math.round(heightPx / lineHeight));
+                   const oldLines = this.scopeHeights.get(key) || 1;
+                   
+                   if (lines !== oldLines) {
+                      this.scopeHeights.set(key, lines);
+                      heightsChanged = true;
+                      // console.log(`[Sticky] Height changed for ${key}: ${oldLines} -> ${lines}`);
+                   }
+                }
+             });
+             
+             if (heightsChanged) {
+                // Re-run update with new heights to correct offsets and positioning
+                // Use requestAnimationFrame to avoid synchronous layout thrashing loop
+                requestAnimationFrame(() => this.updateStickyHeader(true));
+             }
+          }
 
           // Remember overlay height for the next sampling pass so that
           // detection uses a stable value and avoids jitter at boundaries.
