@@ -1479,7 +1479,7 @@ export default {
           height: "var(--cm-sticky-line-height, 1lh)",
           overflow: "hidden",
           display: "flex",
-          alignItems: "flex-start",
+          alignItems: "stretch",
           backgroundColor: "var(--cm-sticky-bg, var(--cm-editor-bg, #1e1e1e))",
           pointerEvents: "auto",
         },
@@ -1537,7 +1537,8 @@ export default {
           flex: "1 1 auto",
           padding: "0 8px 0 6px",
           whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
+          wordBreak: "normal",
+          overflowWrap: "anywhere",
           overflow: "hidden",
           textOverflow: "ellipsis",
         },
@@ -2339,7 +2340,8 @@ export default {
             content.className = 'cm-sticky-content';
             if (wrappingEnabled) {
               content.style.whiteSpace = 'pre-wrap';
-              content.style.wordBreak = 'break-word';
+              content.style.wordBreak = 'normal';
+              content.style.overflowWrap = 'anywhere';
             } else {
               content.style.whiteSpace = 'pre';
             }
