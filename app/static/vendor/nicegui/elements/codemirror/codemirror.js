@@ -1479,7 +1479,7 @@ export default {
           height: "var(--cm-sticky-line-height, 1lh)",
           overflow: "hidden",
           display: "flex",
-          alignItems: "center",
+          alignItems: "flex-start",
           backgroundColor: "var(--cm-sticky-bg, var(--cm-editor-bg, #1e1e1e))",
           pointerEvents: "auto",
         },
@@ -1518,6 +1518,7 @@ export default {
           display: "flex",
           flex: "0 0 auto",
           textAlign: "right",
+          alignItems: "flex-start",
           padding: "0 10px 0 3.5px", // extra right padding for line numbers
           opacity: "0.85",
           fontVariantNumeric: "tabular-nums",
