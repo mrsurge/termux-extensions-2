@@ -1535,7 +1535,7 @@ export default {
         },
         ".cm-sticky-content": {
           flex: "1 1 auto",
-          padding: "0 8px 0 6px",
+          padding: "0 6px 0 6px",
           whiteSpace: "pre-wrap",
           wordBreak: "normal",
           overflowWrap: "anywhere",
