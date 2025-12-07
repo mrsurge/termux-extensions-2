@@ -53,6 +53,24 @@ from .explorer import search, review
 # Logger setup
 logger = logging.getLogger(__name__)
 
+
+class SocketIOSocketShim:
+    """Lightweight shim to let ExplorerDispatcher use Socket.IO sessions.
+
+    Provides accept() and send_text() to satisfy ConnectionManager.
+    """
+
+    def __init__(self, namespace, sid):
+        self.namespace = namespace
+        self.sid = sid
+
+    async def accept(self):
+        # Socket.IO is already connected; nothing to do
+        return
+
+    async def send_text(self, text: str):
+        await self.namespace.emit('explorer:event', text, room=self.sid)
+
 # --- Connection Manager ---
 
 class ConnectionManager:
@@ -63,7 +81,12 @@ class ConnectionManager:
         self.ws_project_map: Dict[WebSocket, str] = {}
 
     async def accept_and_register(self, websocket: WebSocket, project_path: str):
-        await websocket.accept()
+        # Some shims (Socket.IO) don't need accept; provide no-op if missing
+        if hasattr(websocket, 'accept'):
+            try:
+                await websocket.accept()
+            except Exception:
+                pass
         self.register_existing(websocket, project_path)
 
     def register_existing(self, websocket: WebSocket, project_path: str):
@@ -556,6 +579,27 @@ class ExplorerDispatcher:
             logger.exception(f"Error handling {msg_type}")
             await self.send_error(str(e), msg_id)
 
+    async def handle_message_json(self, data: dict):
+        msg_type = data.get("type") if isinstance(data, dict) else None
+        payload = data.get("payload", {}) if isinstance(data, dict) else {}
+        msg_id = data.get("id") if isinstance(data, dict) else None
+
+        if not msg_type:
+            return await self.send_error("Missing message type", msg_id)
+
+        handler_name = f"handle_{msg_type.replace(':', '_')}"
+        handler = getattr(self, handler_name, None)
+
+        if not handler:
+            logger.warning(f"Unknown message type: {msg_type}")
+            return await self.send_error(f"Unknown command: {msg_type}", msg_id)
+
+        try:
+            await handler(payload, msg_id)
+        except Exception as e:
+            logger.exception(f"Error handling {msg_type}")
+            await self.send_error(str(e), msg_id)
+
     # --- Handlers ---
 
     async def handle_explorer_list(self, payload: dict, msg_id: str):
@@ -1015,3 +1059,42 @@ async def explorer_websocket(websocket: WebSocket):
     except Exception as e:
         logger.error(f"Explorer WebSocket error: {e}")
         await dispatcher.cleanup()
+
+
+# --- Socket.IO Namespace Adapter ---
+
+import socketio
+
+
+class ExplorerSocketIONamespace(socketio.AsyncNamespace):
+    def __init__(self, namespace='/explorer'):
+        super().__init__(namespace)
+        self.dispatchers: Dict[str, ExplorerDispatcher] = {}
+
+    async def on_connect(self, sid, environ):
+        # Create dispatcher with Socket.IO shim
+        ws = SocketIOSocketShim(self, sid)
+        dispatcher = ExplorerDispatcher(ws)
+        await dispatcher.initialize()
+        self.dispatchers[sid] = dispatcher
+        logger.info(f"[ExplorerSIO] client connected sid={sid}")
+
+    async def on_disconnect(self, sid):
+        disp = self.dispatchers.pop(sid, None)
+        if disp:
+            await disp.cleanup()
+        logger.info(f"[ExplorerSIO] client disconnected sid={sid}")
+
+    async def on_explorer_send(self, sid, data):
+        disp = self.dispatchers.get(sid)
+        if not disp:
+            return
+        logger.info(f"[ExplorerSIO] recv sid={sid} data={data}")
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except Exception:
+                data = None
+        if not isinstance(data, dict):
+            return
+        await disp.handle_message_json(data)

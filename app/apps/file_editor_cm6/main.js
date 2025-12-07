@@ -10,7 +10,19 @@ import { createDiffController } from './static/js/diff_decorations.js';
 import { createTerminalDrawer } from './static/js/terminal.js';
 import { initBranchMenu } from './static/js/git_menu.js';
 import { initAgentDrawer } from './static/js/agent_drawer.js';
-import ReconnectingWebSocket from './static/js/reconnecting_websocket.js';
+import ReconnectingWebSocket from './static/js/reconnecting_websocket.js'; // used by other WS helpers (not explorer)
+
+function ensureSocketIoLoaded() {
+  if (window.io) return Promise.resolve(window.io);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = '/static/vendor/socket.io.min.js';
+    script.async = true;
+    script.onload = () => resolve(window.io);
+    script.onerror = () => reject(new Error('Failed to load Socket.IO client'));
+    document.head.appendChild(script);
+  });
+}
 import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
 
 // =============================================================================
@@ -60,55 +72,69 @@ console.info = (...args) => { _originalConsole.info(...args); sendToDebugWs('inf
 initDebugConsole();
 
 let explorerSocket = null;
+const explorerPending = [];
 
 function connectExplorerSocket() {
-  if (explorerSocket) {
-    return;
-  }
-  try {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // WebSocket proxy path: /ws/app/{app_id}/{route}
-    // -> worker sees /ws/{route} (here: /ws/explorer)
-    const wsUrl = `${protocol}//${window.location.host}/ws/app/file_editor_cm6/explorer`;
-    explorerSocket = new ReconnectingWebSocket(wsUrl);
+  if (explorerSocket) return;
+  ensureSocketIoLoaded()
+    .then((io) => {
+      if (!io) throw new Error('Socket.IO client unavailable');
+      // Use the existing NiceGUI Socket.IO endpoint (proxied via /ui/_nicegui_ws/socket.io)
+      const socketPath = '/ui/_nicegui_ws/socket.io';
+      explorerSocket = io('/explorer', {
+        path: socketPath,
+        transports: ['websocket'],
+        query: { app_id: 'file_editor_cm6' },
+      });
 
-    explorerSocket.onopen = () => {
-      console.log('[ExplorerWS] Connected to', wsUrl);
-    };
-    explorerSocket.onclose = () => {
-      console.log('[ExplorerWS] Disconnected from', wsUrl);
-    };
-    explorerSocket.onerror = (ev) => {
-      console.warn('[ExplorerWS] Error', ev);
-    };
+      explorerSocket.on('connect', () => {
+        console.log('[ExplorerSIO] Connected');
+        // Flush any queued messages
+        while (explorerPending.length) {
+          const msg = explorerPending.shift();
+          explorerSocket.emit('explorer_send', msg);
+        }
+      });
 
-    explorerSocket.onmessage = (event) => {
-      let msg;
-      try {
-        msg = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-      const type = msg.type;
-      const payload = msg.payload || {};
-      if (!type) return;
-      if (typeof window.__explorerBusDispatch === 'function') {
-        window.__explorerBusDispatch(type, payload);
-      }
-    };
+      explorerSocket.on('disconnect', (reason) => {
+        console.log('[ExplorerSIO] Disconnected', reason);
+      });
 
-    window.__explorerBusSend = (type, payload) => {
-      if (!explorerSocket || explorerSocket.readyState !== WebSocket.OPEN) return;
-      const msg = { type, payload: payload || {} };
-      try {
-        explorerSocket.send(JSON.stringify(msg));
-      } catch (err) {
-        console.warn('[ExplorerWS] Failed to send message', err);
-      }
-    };
-  } catch (err) {
-    console.warn('[ExplorerWS] Failed to open explorer WebSocket:', err);
-  }
+      explorerSocket.on('connect_error', (err) => {
+        console.warn('[ExplorerSIO] Connect error', err);
+      });
+
+      explorerSocket.on('explorer:event', (msg) => {
+        if (window.__debugExplorer) {
+          console.log('[ExplorerSIO:event]', msg);
+        }
+        if (!msg) return;
+        try {
+          if (typeof msg === 'string') {
+            msg = JSON.parse(msg);
+          }
+        } catch {
+          return;
+        }
+        const type = msg.type || msg?.data?.type;
+        const payload = msg.payload || msg?.data?.payload || {};
+        if (type && typeof window.__explorerBusDispatch === 'function') {
+          window.__explorerBusDispatch(type, payload);
+        }
+      });
+
+      window.__explorerBusSend = (type, payload) => {
+        const msg = { type, payload: payload || {} };
+        if (explorerSocket && explorerSocket.connected) {
+          explorerSocket.emit('explorer_send', msg);
+        } else {
+          explorerPending.push(msg);
+        }
+      };
+    })
+    .catch((err) => {
+      console.warn('[ExplorerSIO] Failed to open explorer Socket.IO:', err);
+    });
 }
 
 // === CM6 Code Disabled - Using NiceGUI iframe ===

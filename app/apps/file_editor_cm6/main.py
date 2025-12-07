@@ -394,15 +394,21 @@ def init_nicegui_with_app(fastapi_app):
     # internally at '/_nicegui_ws/', so externally this resolves to
     # f"{mount}/_nicegui_ws/socket.io" which matches the client's URL.
     ng.sio_app.engineio_path = '/socket.io'
-    
+
     ui.run_with(
         fastapi_app,
         mount_path=mount,
         storage_secret='file-editor-cm6-secret',  # For session management
     )
-    
+
     # Now import the page definitions
     from app.apps.file_editor_cm6.nicegui_editor import editor_app
+    # Register explorer Socket.IO namespace (shares NiceGUI sio server)
+    try:
+        from app.apps.file_editor_cm6.explorer_ws import ExplorerSocketIONamespace
+        ng.sio.register_namespace(ExplorerSocketIONamespace('/explorer'))
+    except Exception as e:
+        print(f"[ExplorerSIO] Failed to register namespace: {e}")
 
 # Don't expose SUBAPPS - ui.run_with() handles the mounting
 # Just expose the init hook for app_worker.py to call
