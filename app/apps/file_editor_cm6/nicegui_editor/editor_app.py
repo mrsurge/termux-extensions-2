@@ -829,8 +829,7 @@ async def editor_page():
       right: 0;
       height: 100%;
       pointer-events: auto;
-      z-index: 100; /* Increased z-index */
-      contain: strict;
+      z-index: 5000; /* Increased z-index */
     }
 
     /* Desktop: Sidebar style */
@@ -843,7 +842,7 @@ async def editor_page():
       opacity: 1.0;
       background: var(--bg, #0b0f1a); /* Fallback to dark bg */
       border-left: 1px solid rgba(128, 128, 128, 0.2);
-      z-index: 100;
+      z-index: 5000;
     }
     
     /* Desktop: Push content to the left */
@@ -861,7 +860,7 @@ async def editor_page():
       opacity: 0; /* Hidden by default */
       pointer-events: none;
       transition: opacity 0.3s ease; /* Smooth fade */
-      z-index: 200; /* Ensure it's above everything */
+      z-index: 5001; /* Ensure it's above everything */
     }
     
     /* Show mobile minimap when scrolling */

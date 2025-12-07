@@ -1461,12 +1461,12 @@ export default {
       // Sticky scroll theme - ABSOLUTE overlay beside gutter
       const stickyScrollTheme = CM.EditorView.baseTheme({
         ".cm-stickyHeader": {
-          position: "absolute",
+          position: "fixed",
           backgroundColor: "var(--cm-sticky-bg, var(--cm-editor-bg, #1e1e1e))",
           fontFamily: "inherit",
           fontSize: "inherit",
           lineHeight: "1.4",
-          zIndex: "10",
+          zIndex: "300",
           pointerEvents: "auto",
           overflow: "hidden",
           // Soft shadow under the bottom-most overlay line
@@ -1636,8 +1636,8 @@ export default {
           // Pending sibling transitions: depth -> { outgoing, incoming, startTime }
           this.pendingTransitions = new Map();
           
-          // Append to editor DOM (works inside iframe)
-          view.dom.appendChild(this.dom);
+          // Append to scrollDOM to share stacking context with minimap (fixes z-index layering)
+          view.scrollDOM.appendChild(this.dom);
 
           // Initial background sync to match current theme
           this.syncBackgroundColor();
