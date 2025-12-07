@@ -48,6 +48,18 @@ To prevent flickering and ensure clean handoffs between sibling scopes (e.g., on
 *   **Hysteresis:** Activation windows have a `0.5` line hysteresis buffer to prevent jitter at boundary conditions.
 *   **Transitions:** Markdown headings support smooth cross-fading transitions between siblings. Code scopes use immediate swapping for snappiness.
 
+### 5. Direction-Aware Scope Release
+The system tracks scroll direction to optimize scope release behavior:
+*   **Downward Scroll:** Scopes remain pinned until the actual `endLine` passes the reference line (no early shrink), preventing short scopes from disappearing prematurely.
+*   **Upward Scroll:** Uses the earlier `endTriggerLine` with an `earlyMarginLines` buffer so scopes exit faster when the user backs out.
+*   **Exit Logic:** `exitLine = goingDown ? existing.endLine : existing.endTriggerLine`
+
+### 6. Language-Specific Tuning (Python)
+Python receives special handling due to its indentation-based scoping:
+*   **Outermost Filtering:** Drops ancestors that aren't truly indent-0 (parser fallback nodes).
+*   **Offset Adjustment:** For `depth === 1`, uses `offset = -1` instead of the standard formula.
+*   **Lingering:** Python scopes add `+4` to `endTriggerLine` to let scopes linger before release, accommodating the common pattern of blank lines between functions.
+
 ## Technical Deep Dive: The Render Loop
 
 The `updateStickyHeader` method is the heart of the system, running on every scroll event.
@@ -83,26 +95,106 @@ The `updateStickyHeader` method is the heart of the system, running on every scr
 ## CSS Reference
 
 ```css
+/* Main overlay container */
 .cm-stickyHeader {
   position: fixed;
-  z-index: 300; /* Above gutter (200), below Minimap (5000) */
-  /* ... */
+  background-color: var(--cm-sticky-bg, var(--cm-editor-bg, #1e1e1e));
+  font-family: "EditorMono", "JetBrains Mono", monospace;
+  font-size: inherit;
+  line-height: 1.4;
+  z-index: 300; /* Above gutter (~200), below Minimap (5000) */
+  pointer-events: auto;
+  overflow: hidden;
+  box-shadow: 0 6px 8px rgba(0,0,0,0.35);
 }
 
+.cm-stickyHeader:empty {
+  display: none;
+}
+
+/* Individual scope layer */
 .cm-sticky-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--cm-sticky-line-height, 1lh);
+  overflow: hidden;
   display: flex;
   align-items: stretch; /* Fills height for wrapped lines */
+  background-color: var(--cm-sticky-bg, var(--cm-editor-bg, #1e1e1e));
+  pointer-events: auto;
 }
 
+/* Innermost layer gets special shadow + transitions */
+.cm-sticky-layer.innermost {
+  box-shadow: 0 6px 8px rgba(0,0,0,0.35);
+  transition: transform 140ms cubic-bezier(0.25, 0.1, 0.25, 1), 
+              height 140ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* Slide-in animation for entering scopes */
+.cm-sticky-layer.entering {
+  animation: cm-sticky-enter 150ms ease-out;
+}
+
+/* Slide-out animation for exiting scopes */
+.cm-sticky-layer.exiting {
+  transform: translateY(-100%);
+  opacity: 0;
+  transition: transform 150ms ease-out, opacity 150ms ease-out;
+  pointer-events: none;
+}
+
+@keyframes cm-sticky-enter {
+  0% { transform: translateY(100%); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+/* Clickable line wrapper */
+.cm-sticky-line {
+  padding: 1px 0;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.cm-sticky-line:hover {
+  background-color: rgba(255,255,255,0.05);
+  border-left-color: #007acc;
+}
+
+/* Synthetic gutter (mirrors editor gutter) */
 .cm-sticky-gutter {
+  display: flex;
+  flex: 0 0 auto;
+  text-align: right;
   align-items: flex-start; /* Numbers stay at top */
-  justify-content: flex-end; /* Numbers align right */
+  padding: 0 10px 0 3.5px;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+  color: var(--cm-sticky-gutter-fg, var(--cm-gutter-foreground, #858585));
+  background-color: var(--cm-sticky-gutter-bg, var(--cm-gutter-background, transparent));
+  box-sizing: border-box;
+  border-right: 1px solid rgba(255,255,255,0.08);
 }
 
+.cm-sticky-gutter-segment {
+  flex: 0 0 auto;
+  text-align: right;
+  padding-right: 7px;
+  box-sizing: border-box;
+}
+
+/* Scope content (syntax-highlighted line clone) */
 .cm-sticky-content {
-  padding: 0 0 0 6px; /* Matches CodeMirror internal padding */
+  flex: 1 1 auto;
+  padding: 0 6px; /* Matches CodeMirror internal padding */
   white-space: pre-wrap; /* Dynamic mode */
   word-break: normal;
   overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 ```
+
