@@ -13,13 +13,22 @@ Create a module to spawn and manage language server processes as framework shell
 
 ---
 
+## Dependencies
+
+- **Python:** `pyright` (vendored via npm in `app/static/vendor/lsp_servers`)
+- **JavaScript/TypeScript:** `typescript-language-server` + `typescript` (vendored in `app/static/vendor/lsp_servers`)
+- **Other:** `gopls`, `rust-analyzer` (future expansion)
+
+---
+
 ## Scope
 
 - Spawn `lsp-{language}` framework shells on demand
-- Map `languageId` → language server command
+- Map `languageId` → language server command (prefer vendored binaries under `app/static/vendor/lsp_servers/node_modules/.bin`)
 - Track active LSP shells
 - `didClose`/`didOpen` lifecycle on file switch
 - Graceful shutdown integration
+- **Verify:** Ensure `pyright` AND `typescript-language-server` binaries are available (vendored path first, PATH fallback)
 
 ---
 
@@ -28,15 +37,27 @@ Create a module to spawn and manage language server processes as framework shell
 ```python
 # app/apps/file_editor_cm6/lsp_shell_manager.py
 
+import shutil
+
 LSP_COMMANDS = {
+    # Ensure these binaries are in the system PATH
     "python": ["pyright-langserver", "--stdio"],
     "typescript": ["typescript-language-server", "--stdio"],
-    "javascript": ["typescript-language-server", "--stdio"],
+    "javascript": ["typescript-language-server", "--stdio"], # Uses the same server
     # Future: go, rust, etc.
 }
 
 def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> ShellRecord | None:
     """Get existing or spawn new LSP shell for language."""
+    cmd = LSP_COMMANDS.get(language_id)
+    if not cmd:
+        return None
+        
+    # Check if binary exists
+    if not shutil.which(cmd[0]):
+        print(f"LSP binary {cmd[0]} not found")
+        return None
+        
     pass
 
 def get_active_lsp_shell() -> ShellRecord | None:
@@ -58,6 +79,7 @@ def shutdown_lsp_shell(language_id: str) -> None:
 
 - **NEW:** `app/apps/file_editor_cm6/lsp_shell_manager.py`
 - **MODIFY:** `app/apps/file_editor_cm6/main.py` (import, expose endpoints?)
+- **MODIFY:** `requirements.txt` (add `pyright`)
 
 ---
 
@@ -70,12 +92,11 @@ def shutdown_lsp_shell(language_id: str) -> None:
 
 ---
 
-## Notes
+## References
 
-- Uses existing `get_framework_shell_manager()` from `app/libs/framework_shells.py`
-- Shell label format: `lsp-python`, `lsp-typescript`, etc.
-- Only one active LSP shell at a time (single document model)
+- **Framework Shells Architecture:** `docs/core/framework_shells.md`
+- **Settings/Timeouts:** See `FrameworkShellManager` in `app/libs/framework_shells.py`
 
 ---
 
-*Last Updated: 2025-12-07*
+*Last Updated: 2025-12-08 (Dex)*

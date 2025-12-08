@@ -113,4 +113,11 @@ Modal contents:
 
 ---
 
+## References
+
+- **State Management (ProjectSidecar):** `docs/apps/code_cm6/TECHNICAL.md` (See State Management section)
+- **Preference Store:** `app/apps/file_editor_cm6/preferences_store.py` (Reference implementation for stores)
+
+---
+
 *Last Updated: 2025-12-07*

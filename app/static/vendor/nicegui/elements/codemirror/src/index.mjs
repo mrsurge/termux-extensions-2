@@ -11,3 +11,4 @@ export * from "@replit/codemirror-indentation-markers";
 export * from "@uiw/codemirror-extensions-color";
 export * as events from "@uiw/codemirror-extensions-events";
 export { showMinimap } from "@replit/codemirror-minimap";
+export * from "@codemirror/lsp-client";

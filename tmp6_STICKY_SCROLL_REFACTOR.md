@@ -204,4 +204,11 @@ Filter to show: Class (5), Method (6), Function (12), Constructor (9)
 
 ---
 
+## References
+
+- **Current Sticky Scroll Implementation:** `notes/2025-12-7_CURRENT_STICKY_SCROLL_TECHNICAL.md`
+- **Technical Overview:** `docs/apps/code_cm6/TECHNICAL.md`
+
+---
+
 *Last Updated: 2025-12-07*

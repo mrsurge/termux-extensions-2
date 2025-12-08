@@ -44,6 +44,13 @@ from .git_helper import (
     get_worktree_changes,
     get_commit_info,
 )
+from .lsp_shell_manager import (
+    get_active_lsp_shell,
+    get_or_spawn_lsp_shell,
+    list_lsp_shells,
+    shutdown_lsp_shell,
+    switch_lsp_shell,
+)
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
 from .draft_diff_helper import compute_draft_diff
@@ -350,6 +357,52 @@ file_editor_cm6_bp = APIRouter()
 # # Register terminal routes and WebSocket handler
 # register_terminal_routes(file_editor_cm6_bp, sock)
 
+# --- LSP shell debug endpoints (Dex, 2025-12-08) ---
+@file_editor_cm6_bp.post("/api/lsp/switch")
+async def api_switch_lsp(payload: dict = Body(...)):
+    language_id = payload.get("languageId")
+    if not language_id:
+        raise HTTPException(status_code=400, detail="languageId is required")
+
+    project_root = payload.get("projectRoot") or get_project_root()
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    record = await switch_lsp_shell(language_id, Path(project_root))
+    if not record:
+        return JSONResponse(
+            {"ok": False, "error": "Unsupported language or missing binary"},
+            status_code=424,
+        )
+    return {"ok": True, "data": record.to_payload()}
+
+
+@file_editor_cm6_bp.get("/api/lsp/active")
+async def api_active_lsp():
+    record = await get_active_lsp_shell()
+    if not record:
+        return {"ok": True, "data": None}
+    return {"ok": True, "data": record.to_payload()}
+
+
+@file_editor_cm6_bp.post("/api/lsp/shutdown")
+async def api_shutdown_lsp(payload: dict = Body(...)):
+    language_id = payload.get("languageId")
+    if not language_id:
+        raise HTTPException(status_code=400, detail="languageId is required")
+    await shutdown_lsp_shell(language_id)
+    return {"ok": True}
+
+
+@file_editor_cm6_bp.get("/api/lsp/debug/cache")
+async def api_list_lsp_cache():
+    snapshot = await list_lsp_shells()
+    return {
+        "ok": True,
+        "data": {k: v.to_payload() if v else None for k, v in snapshot.items()},
+    }
+
+
 # # Register agent routes and WebSocket handler
 from .agent_routes import bp as agent_routes_bp
 file_editor_cm6_bp.include_router(agent_routes_bp)
@@ -409,6 +462,13 @@ def init_nicegui_with_app(fastapi_app):
         ng.sio.register_namespace(ExplorerSocketIONamespace('/explorer'))
     except Exception as e:
         print(f"[ExplorerSIO] Failed to register namespace: {e}")
+    
+    # Register LSP Socket.IO namespace
+    try:
+        from app.apps.file_editor_cm6.lsp_ws import LSPSocketIONamespace
+        ng.sio.register_namespace(LSPSocketIONamespace('/lsp'))
+    except Exception as e:
+        print(f"[LSPSIO] Failed to register namespace: {e}")
 
 # Don't expose SUBAPPS - ui.run_with() handles the mounting
 # Just expose the init hook for app_worker.py to call

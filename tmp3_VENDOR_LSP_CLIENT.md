@@ -45,11 +45,7 @@ export * from "@codemirror/lsp-client";
 npm run build
 ```
 
-If build fails (OOM/terser):
-```javascript
-// rollup.config.mjs - comment out:
-// terser(),
-```
+**System Note:** The user's Termux environment handles `esbuild` and `node` minification correctly (Android SDK for gyp is handled via system path). No special configuration for terser is required.
 
 ### 5. Verify exports
 ```bash
@@ -87,11 +83,11 @@ npm install  # restore node_modules
 
 ---
 
-## Notes
+## References
 
-- Follow pattern from search extension vendoring (Example 4 in guidelines)
-- Check package README for actual export names
-- May need to research actual API surface of @codemirror/lsp-client
+- **Feature Adding Guidelines (Vendoring):** `docs/core/2025-12-03_code_cm6_feature_adding_guidelines.md`
+  - See section: "Vendoring Guidelines" and "Bundle Management"
+- **Vendoring LSP Servers:** `tmp9_VENDOR_TANGENT.md`
 
 ---
 

@@ -2,19 +2,20 @@
 
 **Created:** 2025-12-07  
 **Status:** Not Started  
-**Depends On:** Vendor LSP Client (tmp3), WebSocket Bridge (tmp4)  
+**Depends On:** Vendor LSP Client (tmp3), LSP Socket.IO Bridge (tmp4)  
 **Blocks:** Sticky Scroll Refactor (tmp6)
 
 ---
 
 ## Purpose
 
-Wire `@codemirror/lsp-client` into vendored CM6 with Vue methods and Python wrappers.
+Wire `@codemirror/lsp-client` into vendored CM6 using the Socket.IO bridge.
 
 ---
 
 ## Scope
 
+- Implement `SocketIOTransport` adapter (LSP Client ↔ Socket.IO)
 - Add LSP client extension to codemirror.js
 - Vue methods for connect/disconnect
 - Python wrappers for backend control
@@ -24,82 +25,103 @@ Wire `@codemirror/lsp-client` into vendored CM6 with Vue methods and Python wrap
 
 ## JavaScript Changes (codemirror.js)
 
-### Imports
-```javascript
-// At top, check for LSP availability
-const LSPClient = typeof CM.LanguageServerClient === 'function' 
-  ? CM.LanguageServerClient : null;
-```
+### 1. The Socket.IO Transport Adapter
 
-### Data Properties
+The `@codemirror/lsp-client` expects a transport with `send(json)` and `close()`. We adapt Socket.IO to this interface.
+
 ```javascript
-data() {
-  return {
-    // ... existing ...
-    lspCompartment: null,
-    lspClient: null,
-    symbolSubscribers: [],
-  };
+class SocketIOTransport {
+  constructor(namespace, languageId, projectRoot) {
+    // 1. Connect to /lsp namespace
+    this.socket = io(namespace, {
+      path: "/ui/_nicegui_ws/socket.io",
+      transports: ["websocket", "polling"]
+    });
+
+    this.languageId = languageId;
+    this.projectRoot = projectRoot;
+    
+    // 2. Queue for incoming messages
+    this.onMessage = null; 
+
+    // 3. Setup listeners
+    this.socket.on('connect', () => {
+      // Send initialization handshake
+      this.socket.emit('initialize', { 
+        languageId: this.languageId, 
+        projectRoot: this.projectRoot 
+      });
+    });
+
+    this.socket.on('lsp:server_to_client', (data) => {
+      if (this.onMessage) {
+        this.onMessage(JSON.stringify(data)); // LSP client expects stringified JSON sometimes? Verify package docs.
+        // If package expects object: this.onMessage(data);
+      }
+    });
+  }
+
+  send(data) {
+    // data is usually a JSON object or string. 
+    // We emit 'lsp:client_to_server'
+    this.socket.emit('lsp:client_to_server', data);
+  }
+
+  close() {
+    this.socket.disconnect();
+  }
 }
 ```
 
-### Methods
+### 2. Integration in Component
+
 ```javascript
+// At top
+const LSPClient = typeof CM.LanguageServerClient === 'function' 
+  ? CM.LanguageServerClient : null;
+
 methods: {
-  // Connect to LSP server via WebSocket
-  connectLSP(wsUrl, languageId) {
+  connectLSP(languageId, projectRoot) {
     if (!LSPClient) {
       console.warn('[CM6] LSP client not available in bundle');
       return;
     }
     
-    if (!this.lspCompartment) {
-      this.lspCompartment = new CM.Compartment();
-      this.editor.dispatch({
-        effects: CM.StateEffect.appendConfig.of(this.lspCompartment.of([]))
-      });
-    }
-    
-    // Create LSP client
+    if (this.lspClient) this.disconnectLSP();
+
+    // Create Transport
+    const transport = new SocketIOTransport('/lsp', languageId, projectRoot);
+
+    // Create Client
     this.lspClient = new LSPClient({
-      transport: { type: 'websocket', url: wsUrl },
-      languageId: languageId,
-      // ... other config
+      transport: transport,
+      rootUri: 'file://' + projectRoot,
+      workspaceFolders: [{ name: 'root', uri: 'file://' + projectRoot }],
+      languageId: languageId
     });
-    
-    // Subscribe to document symbols
+
+    // Subscribe to symbols
     this.lspClient.on('documentSymbols', (symbols) => {
       this.handleDocumentSymbols(symbols);
     });
     
     // Install extension
+    if (!this.lspCompartment) this.lspCompartment = new CM.Compartment();
+    
     this.editor.dispatch({
-      effects: this.lspCompartment.reconfigure([this.lspClient.extension])
+      effects: [
+        this.lspCompartment.reconfigure([this.lspClient.extension])
+      ]
     });
   },
-  
+
   disconnectLSP() {
     if (this.lspClient) {
-      this.lspClient.dispose();
+      this.lspClient.dispose(); // Should close transport
       this.lspClient = null;
     }
-    if (this.lspCompartment) {
-      this.editor.dispatch({
-        effects: this.lspCompartment.reconfigure([])
-      });
-    }
-  },
-  
-  handleDocumentSymbols(symbols) {
-    // Notify sticky scroll (tmp6 integration point)
-    this.latestSymbols = symbols;
-    // Trigger sticky scroll update
-    this.updateStickyFromSymbols(symbols);
-  },
-  
-  onSymbolUpdate(callback) {
-    this.symbolSubscribers.push(callback);
-  },
+    // Clear compartment
+  }
 }
 ```
 
@@ -108,14 +130,14 @@ methods: {
 ## Python Changes (codemirror.py)
 
 ```python
-def connect_lsp(self, ws_url: str, language_id: str) -> None:
-    """Connect editor to LSP server via WebSocket.
+def connect_lsp(self, language_id: str, project_root: str) -> None:
+    """Connect editor to LSP server via Socket.IO.
     
     Args:
-        ws_url: WebSocket URL for LSP connection
         language_id: Language identifier (python, typescript, etc.)
+        project_root: Absolute path to project root
     """
-    self.run_method('connectLSP', {'wsUrl': ws_url, 'languageId': language_id})
+    self.run_method('connectLSP', {'languageId': language_id, 'projectRoot': project_root})
 
 def disconnect_lsp(self) -> None:
     """Disconnect from current LSP server."""
@@ -126,17 +148,36 @@ def disconnect_lsp(self) -> None:
 
 ## Backend Integration (editor_app.py)
 
+We need robust mapping from file extensions to LSP language identifiers.
+
 ```python
+LSP_LANGUAGE_MAP = {
+    '.py': 'python',
+    '.js': 'javascript',
+    '.mjs': 'javascript',
+    '.cjs': 'javascript',
+    '.jsx': 'javascriptreact',
+    '.ts': 'typescript',
+    '.mts': 'typescript',
+    '.tsx': 'typescriptreact',
+    '.go': 'go',
+    '.rs': 'rust',
+}
+
 # When opening a file, optionally connect LSP
-async def _maybe_connect_lsp(editor, language: str, project_root: Path):
+async def _maybe_connect_lsp(editor, file_path: Path, project_root: Path):
+    ext = file_path.suffix
+    language_id = LSP_LANGUAGE_MAP.get(ext)
+    
+    if not language_id:
+        return
+
     # Check if LSP enabled for this project/language
-    if not should_use_lsp(project_root, language):
+    if not should_use_lsp(project_root, language_id):
         return
     
-    # Get WebSocket URL for this language's LSP
-    ws_url = f"/api/app/file_editor_cm6/ws/lsp/{language}"
-    
-    editor.connect_lsp(ws_url, language)
+    # Trigger client-side connection logic
+    editor.connect_lsp(language_id, str(project_root))
 ```
 
 ---
@@ -151,19 +192,26 @@ async def _maybe_connect_lsp(editor, language: str, project_root: Path):
 
 ## Testing
 
-1. Open Python file
-2. Verify LSP connection established
-3. Check console for symbol updates
-4. Disconnect and verify cleanup
+1. Open Python file → Verify `python` LSP connects.
+2. Open `.js` file → Verify `javascript` LSP connects (uses `typescript-language-server`).
+3. Open `.tsx` file → Verify `typescriptreact` connection.
+4. Check console for symbol updates.
+5. Disconnect and verify cleanup.
 
 ---
 
 ## Notes
 
-- Actual API depends on @codemirror/lsp-client package
-- May need to adapt based on package's actual exports
-- Symbol format may need transformation for sticky scroll
+- **Verification:** Check `@codemirror/lsp-client` source or docs to confirm if `transport.send` receives an object or string, and what `onMessage` expects.
+- **Transport Interface:** The adapter must match the `Transport` interface expected by the specific version of the LSP package we vendor.
 
 ---
 
-*Last Updated: 2025-12-07*
+## References
+
+- **Feature Adding Guidelines:** `docs/core/2025-12-03_code_cm6_feature_adding_guidelines.md`
+- **Core Architecture:** `docs/apps/code_cm6/TECHNICAL.md` (See Frontend Architecture & Iframe Barrier)
+
+---
+
+*Last Updated: 2025-12-08*
