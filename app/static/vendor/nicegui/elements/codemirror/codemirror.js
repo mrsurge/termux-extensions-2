@@ -2147,6 +2147,10 @@ export default {
 
           // Initial render
           this.updateStickyHeader();
+          
+          // Re-render after a delay to catch late-arriving LSP symbols
+          setTimeout(() => this.updateStickyHeader(), 1500);
+          setTimeout(() => this.updateStickyHeader(), 3000);
         }
 
         // Sync overlay background to the editor's current background color.
@@ -2578,32 +2582,17 @@ export default {
                 const key = `${depth}:${startLine}`;
                 cachedHeight = this.scopeHeights.get(key) || 1;
                 // Calculate offset based on cumulative height of ancestors (same as Lezer)
-                offset = -(cumulativeHeight + 2);
+                offset = -(cumulativeHeight + 1);
                 cumulativeHeight += cachedHeight;
               } else {
-                // Language-specific offset logic for non-wrapped mode
-                if (isPython) {
-                  const offsetDepth = Math.max(0, depth - 1);
-                  offset = -(offsetDepth + 2);
-                  if (depth === 1) {
-                    offset = -1;
-                  }
-                } else if (isJSLike) {
-                  // JS/TS: simpler offset - no depth adjustment needed since braces are explicit
-                  offset = -(depth + 2);
-                } else {
-                  // Default behavior for other languages
-                  offset = -(depth + 2);
-                }
+                // Simplified offset: just account for the header stack height
+                // Each nested scope adds one line to the overlay
+                offset = -(depth + 1);
               }
 
               const triggerLine = startLine + offset;
-              // Apply the same offset to the effective end so scopes hand off cleanly
+              // End trigger: when scope's last line would push out of view
               let endTriggerLine = Math.max(startLine, endLine + offset);
-              if (isPython) {
-                endTriggerLine += 4; // let Python scopes linger a bit before release (same as Lezer)
-              }
-              // JS/TS: no lingering needed - scopes end exactly at closing brace
 
               const scopeObj = {
                 node: null, // LSP doesn't have syntax tree nodes
@@ -2725,7 +2714,7 @@ export default {
           const hysteresisLines = 0.5;
           const earlyMarginLines = 1.5;
 
-          const DEBUG_SLOTS = false; // Set true to log to browser_console.log
+          const DEBUG_SLOTS = true; // Set true to log to browser_console.log
 
           // First pass: clear slots that are no longer valid
           // A slot should clear if refLine is outside its activation window
