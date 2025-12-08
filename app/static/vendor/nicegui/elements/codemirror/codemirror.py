@@ -532,14 +532,19 @@ class CodeMirror(ValueElement, DisableableElement,
     # Added: 2025-12-08 by neonInk - TE2 Team
     # Purpose: Drive CM6 LSP client transport (Socket.IO) from backend
     # ============================================================================
-    def connect_lsp(self, language_id: str, project_root: str) -> None:
+    def connect_lsp(self, language_id: str, project_root: str, file_path: str = '') -> None:
         """Connect the editor to an LSP server via Socket.IO.
 
         Args:
             language_id: LSP language identifier (e.g. 'python', 'typescript').
             project_root: Absolute filesystem path to the project root.
+            file_path: Absolute path to the current file (for document symbol requests).
         """
-        self.run_method('connectLSP', {'languageId': language_id, 'projectRoot': project_root})
+        self.run_method('connectLSP', {
+            'languageId': language_id,
+            'projectRoot': project_root,
+            'filePath': file_path,
+        })
 
     def disconnect_lsp(self) -> None:
         """Disconnect any active LSP client/transport for this editor instance."""

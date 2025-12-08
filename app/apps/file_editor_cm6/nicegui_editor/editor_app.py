@@ -204,10 +204,10 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
         return
 
     # At this point we want LSP active for this document
-    print(f"[LSP] Triggering connect_lsp: {language_id} / {project_root}", file=sys.stderr)
+    print(f"[LSP] Triggering connect_lsp: {language_id} / {project_root} / {file_path}", file=sys.stderr)
     try:
         if hasattr(editor, 'connect_lsp'):
-            editor.connect_lsp(language_id, str(project_root))
+            editor.connect_lsp(language_id, str(project_root), str(file_path))
         else:
             print("[LSP] connect_lsp() not available on editor; bundle may be outdated", file=sys.stderr)
     except Exception as exc:

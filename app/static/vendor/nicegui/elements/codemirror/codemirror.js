@@ -695,20 +695,22 @@ export default {
       }
     },
     // Establish LSP connection using Socket.IO transport and @codemirror/lsp-client
-    // NOTE: Python run_method sends {languageId, projectRoot} as single dict argument
+    // NOTE: Python run_method sends {languageId, projectRoot, filePath} as single dict argument
     connectLSP(options) {
       // Handle both dict and separate args for flexibility
-      let languageId, projectRoot;
+      let languageId, projectRoot, filePath;
       if (typeof options === 'object' && options !== null) {
         languageId = options.languageId;
         projectRoot = options.projectRoot;
+        filePath = options.filePath || '';
       } else {
         // Legacy: separate args (languageId, projectRoot)
         languageId = options;
         projectRoot = arguments[1];
+        filePath = arguments[2] || '';
       }
 
-      console.log(`[LSP] connectLSP called: languageId=${languageId}, projectRoot=${projectRoot}`);
+      console.log(`[LSP] connectLSP called: languageId=${languageId}, projectRoot=${projectRoot}, filePath=${filePath}`);
 
       if (!this.editor) {
         console.warn('[LSP] connectLSP called before editor is ready');
@@ -749,29 +751,23 @@ export default {
         return;
       }
 
-      try {
-        if (typeof this.lspClient.on === 'function') {
-          this.lspClient.on('documentSymbols', (symbols) => {
-            try {
-              this.handleDocumentSymbols(symbols);
-            } catch (err) {
-              console.warn('[LSP] Error in documentSymbols handler:', err);
-            }
-          });
-        }
-      } catch (err) {
-        console.warn('[LSP] Failed to register documentSymbols handler:', err);
-      }
+      // Store connection info for document symbol requests
+      // Use the provided file path or construct from project root
+      this._lspFileUri = filePath ? ('file://' + filePath) : ('file://' + projectRoot + '/untitled');
+      this._lspLanguageId = languageId;
 
       // Install LSP extension into its own compartment
       if (!this.lspCompartment) {
         this.lspCompartment = new CM.Compartment();
       }
 
+      // Note: LSPClient.plugin() creates the extension and triggers didOpen
+      // We need to pass the file URI and language ID
       try {
+        const lspExtension = this.lspClient.plugin(this._lspFileUri, languageId);
         this.editor.dispatch({
           effects: [
-            this.lspCompartment.reconfigure([this.lspClient.extension]),
+            this.lspCompartment.reconfigure([lspExtension]),
           ],
         });
       } catch (err) {
@@ -779,6 +775,18 @@ export default {
       }
 
       console.log(`[LSP] Connected to ${languageId} (projectRoot=${projectRoot})`);
+
+      // Request document symbols after a short delay to let the server initialize
+      setTimeout(() => {
+        this.requestDocumentSymbols();
+      }, 500);
+
+      // Set up debounced symbol refresh on document changes
+      if (!this._symbolRefreshDebounce) {
+        this._symbolRefreshDebounce = this._debounce(() => {
+          this.requestDocumentSymbols();
+        }, 1000);
+      }
     },
 
     disconnectLSP() {
@@ -836,6 +844,8 @@ export default {
         this.lspSymbols = [];
       }
 
+      console.log(`[LSP] Received ${this.lspSymbols.length} document symbols`);
+
       // Notify Sticky Scroll to recompute its model if active
       try {
         if (this._stickyScrollPlugin && typeof this._stickyScrollPlugin.updateStickyHeader === 'function') {
@@ -851,6 +861,55 @@ export default {
       } catch (err) {
         // Host notifications are best-effort only
       }
+    },
+
+    // Request document symbols from the LSP server
+    async requestDocumentSymbols() {
+      if (!this.lspClient || !this._lspFileUri) {
+        return;
+      }
+
+      // Wait for client to be connected and initialized
+      if (!this.lspClient.connected) {
+        console.log('[LSP] Client not yet connected, skipping symbol request');
+        return;
+      }
+
+      try {
+        await this.lspClient.initializing;
+      } catch (err) {
+        console.warn('[LSP] Client initialization failed:', err);
+        return;
+      }
+
+      try {
+        console.log(`[LSP] Requesting document symbols for ${this._lspFileUri}`);
+        const symbols = await this.lspClient.request('textDocument/documentSymbol', {
+          textDocument: { uri: this._lspFileUri }
+        });
+        this.handleDocumentSymbols(symbols);
+      } catch (err) {
+        // Don't spam errors if the server doesn't support documentSymbol
+        if (err && err.code === -32601) {
+          console.log('[LSP] Server does not support textDocument/documentSymbol');
+        } else {
+          console.warn('[LSP] Failed to request document symbols:', err);
+        }
+      }
+    },
+
+    // Debounce utility for throttling repeated calls
+    _debounce(fn, delay) {
+      let timeoutId = null;
+      return (...args) => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        timeoutId = setTimeout(() => {
+          fn.apply(this, args);
+          timeoutId = null;
+        }, delay);
+      };
     },
     setDiffMode(mode) {
       if (!this.editor) return;
@@ -1137,6 +1196,11 @@ export default {
           update(update) {
             if (!update.docChanged) return;
             if (!self.emitting) return;
+
+            // Trigger LSP symbol refresh on document changes
+            if (self._symbolRefreshDebounce) {
+              self._symbolRefreshDebounce();
+            }
 
             if (this.debounceTimer) {
               clearTimeout(this.debounceTimer);
