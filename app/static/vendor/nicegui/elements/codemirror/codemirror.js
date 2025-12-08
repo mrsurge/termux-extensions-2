@@ -3,22 +3,26 @@ import * as CM from "nicegui-codemirror";
 // Forward console to parent window (for debug logging)
 if (window.parent && window.parent !== window) {
   const _origLog = console.log.bind(console);
-  console.log = (...args) => { _origLog(...args); try { window.parent.console.log(...args); } catch {} };
+  console.log = (...args) => { _origLog(...args); try { window.parent.console.log(...args); } catch { } };
 }
 
 // Socket.IO transport adapter for @codemirror/lsp-client
+// NOTE: CodeMirror runs in a NiceGUI iframe, but socket.io is loaded in the parent window.
+// We access `io` from the parent to bridge the iframe barrier.
+const _io = (window.parent && typeof window.parent.io === 'function') ? window.parent.io : (typeof io === 'function' ? io : null);
+
 class SocketIOTransport {
   constructor(namespace, languageId, projectRoot) {
     this.socket = null;
     this.onMessage = null;
 
     try {
-      if (typeof io !== 'function') {
-        console.warn('[LSP] socket.io client (io) is not available in this context');
+      if (!_io) {
+        console.warn('[LSP] socket.io client (io) is not available in this context or parent window');
         return;
       }
 
-      this.socket = io(namespace, {
+      this.socket = _io(namespace, {
         path: "/ui/_nicegui_ws/socket.io",
         transports: ["websocket", "polling"],
       });
@@ -117,7 +121,7 @@ const LANGUAGE_INDENT_MAP = {
   'xml': 2,
   'vue': 2,
   'svelte': 2,
-  
+
   // 4-space languages
   'python': 4,
   'java': 4,
@@ -150,7 +154,7 @@ const EMPTY_GUTTER_RANGESET = (() => {
 
 // Deletion widget class (moved to outer scope for facet access)
 class RemovedLineWidget extends CM.WidgetType {
-  constructor(text, wordWrap, originalLine, isDraft=false) {
+  constructor(text, wordWrap, originalLine, isDraft = false) {
     super();
     this.text = text;
     this.wordWrap = wordWrap;
@@ -210,8 +214,8 @@ class DeletedFoldMarker extends CM.GutterMarker {
 
 // Marker to add class to added lines (for gutterLineClass)
 class AddedLineClassMarker extends CM.GutterMarker {
-  constructor() { 
-    super(); 
+  constructor() {
+    super();
     this.elementClass = 'cm-diff-added-lineno';
   }
   eq(other) { return other instanceof AddedLineClassMarker; }
@@ -219,8 +223,8 @@ class AddedLineClassMarker extends CM.GutterMarker {
 const addedLineClassMarker = new AddedLineClassMarker();
 
 class AddedDraftLineClassMarker extends CM.GutterMarker {
-  constructor() { 
-    super(); 
+  constructor() {
+    super();
     this.elementClass = 'cm-diff-added-lineno-draft';
   }
   eq(other) { return other instanceof AddedDraftLineClassMarker; }
@@ -230,7 +234,7 @@ const addedDraftLineClassMarker = new AddedDraftLineClassMarker();
 // Inline diff decorations helper (extracted from diff_decorations.js)
 function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const { Decoration, RangeSetBuilder } = CM;
-  
+
   if (!hunks || hunks.length === 0) {
     return { decorations: Decoration.none, gutter: EMPTY_GUTTER_RANGESET, gutterClasses: EMPTY_GUTTER_RANGESET };
   }
@@ -239,7 +243,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
     class: 'cm-diff-line-added',
     diffKind: 'insert',
   });
-  
+
   const lineAddedDraftDeco = Decoration.line({
     class: 'cm-diff-line-added-draft',
     diffKind: 'insert-draft',
@@ -256,14 +260,14 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   let gutterCount = 0;
   let classCount = 0;
   const doc = view.state.doc;
-  
+
   const lineDecorations = new Map();
   const deletionWidgets = [];
-  
+
   for (const hunk of hunks) {
     let newLine = Math.max(1, hunk.newStart || 1);
     let oldLine = Math.max(1, hunk.oldStart || 1);
-    
+
     for (const line of hunk.lines || []) {
       const kind = line.type;
       if (kind === 'add') {
@@ -287,14 +291,14 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       }
     }
   }
-  
+
   deletionWidgets.sort((a, b) => a.line - b.line);
-  
+
   let widgetIndex = 0;
   for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
     const lineInfo = safeLine(doc, lineNum);
     if (!lineInfo) continue;
-    
+
     // Widgets before the line
     while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line < lineNum) {
       const widget = deletionWidgets[widgetIndex];
@@ -308,7 +312,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       }));
       widgetIndex++;
     }
-    
+
     // Widgets AT the line
     while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line === lineNum) {
       const widget = deletionWidgets[widgetIndex];
@@ -337,7 +341,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       }
     }
   }
-  
+
   // Remaining widgets
   while (widgetIndex < deletionWidgets.length) {
     const widget = deletionWidgets[widgetIndex];
@@ -361,7 +365,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
 // Helper to scan diff decorations and build minimap gutters
 function diffMinimapGuttersFromDecorations(state, diffField) {
   if (!diffField) return [];
-  
+
   // Get current decoration set from the state field
   const decos = state.field(diffField, false);
   if (!decos) return [];
@@ -621,7 +625,7 @@ export default {
         // Determine appropriate indent size for this language
         const indentSize = getIndentForLanguage(language);
         const indentString = ' '.repeat(indentSize);
-        
+
         // Reconfigure both language and indent unit together
         this.editor.dispatch({
           effects: [
@@ -880,11 +884,11 @@ export default {
           console.warn('[CM6] indentationMarkers not available in bundle');
           return;
         }
-        
+
         const { Compartment, StateEffect } = CM;
-        
+
         this.indentCompartment = new Compartment();
-        
+
         // Extension configuration
         this.indentExtensions = [
           indentationMarkers({
@@ -900,13 +904,13 @@ export default {
             }
           })
         ];
-        
+
         // Install empty compartment
         this.editor.dispatch({
           effects: StateEffect.appendConfig.of(this.indentCompartment.of([]))
         });
       }
-      
+
       // Reconfigure compartment
       const extensions = enabled ? this.indentExtensions : [];
       this.editor.dispatch({
@@ -918,17 +922,17 @@ export default {
       if (!this.zebraCompartment) {
         const { EditorView, Decoration, ViewPlugin } = CM;
         const { Facet, RangeSetBuilder, StateEffect, Compartment } = CM;
-        
+
         this.zebraCompartment = new Compartment();
-        
+
         const baseTheme = EditorView.baseTheme({
           "&light .cm-zebraStripe": { backgroundColor: "rgba(0,0,0,.035)" },
           "&dark .cm-zebraStripe": { backgroundColor: "rgba(255,255,255,.06)" },
         });
-        
+
         const stepSize = Facet.define({ combine: v => v.length ? v[0] : 2 });
         const stripe = Decoration.line({ attributes: { class: "cm-zebraStripe" } });
-        
+
         function stripeDeco(v) {
           const step = v.state.facet(stepSize);
           const b = new RangeSetBuilder();
@@ -941,42 +945,42 @@ export default {
           }
           return b.finish();
         }
-        
+
         const zebraPlugin = ViewPlugin.fromClass(class {
           constructor(v) { this.decorations = stripeDeco(v); }
           update(u) {
             if (u.docChanged || u.viewportChanged) this.decorations = stripeDeco(u.view);
           }
         }, { decorations: v => v.decorations });
-        
+
         this.zebraExtensions = [baseTheme, stepSize.of(2), zebraPlugin];
-        
+
         // Install empty compartment
         this.editor.dispatch({
           effects: StateEffect.appendConfig.of(this.zebraCompartment.of([]))
         });
       }
-      
+
       // Reconfigure compartment
       const extensions = enabled ? this.zebraExtensions : [];
       this.editor.dispatch({
         effects: this.zebraCompartment.reconfigure(extensions)
       });
     },
-    
+
     // Initialize diff compartments early so minimap can reference diffField
     initDiffCompartments() {
       if (this.diffCompartment) return; // Already initialized
-      
+
       const { StateEffect, StateField, Compartment } = CM;
-      
+
       this.diffCompartment = new Compartment();
       this.setDiffEffect = StateEffect.define();
       this.clearDiffEffect = StateEffect.define();
-      
+
       const setDiffEffect = this.setDiffEffect;
       const clearDiffEffect = this.clearDiffEffect;
-      
+
       const diffField = StateField.define({
         create() {
           return CM.Decoration.none;
@@ -996,13 +1000,13 @@ export default {
         },
         provide: field => CM.EditorView.decorations.from(field)
       });
-      
+
       this.diffField = diffField;
-      
+
       this.editor.dispatch({
         effects: StateEffect.appendConfig.of(this.diffCompartment.of([diffField]))
       });
-      
+
       // Also initialize gutter compartment
       this.diffGutterCompartment = new Compartment();
       this.setDiffGutterEffect = StateEffect.define();
@@ -1034,7 +1038,7 @@ export default {
           class: 'cm-diff-gutter',
           markers: view => view.state.field(diffGutterField),
           initialSpacer: () => new DiffGutterMarker(''),
-          ...(CM.gutterWidgetClass ? { 
+          ...(CM.gutterWidgetClass ? {
             widgetMarker: (view, widget, block) => {
               if (widget instanceof RemovedLineWidget) {
                 return widget.isDraft ? minusDraftMarker : minusMarker;
@@ -1053,27 +1057,27 @@ export default {
       this.editor.dispatch({
         effects: CM.StateEffect.appendConfig.of(this.diffGutterCompartment.of([]))
       });
-      
+
       console.log('[CodeMirror] Diff compartments initialized early');
     },
-    
+
     async applyDiffDecorations(hunks) {
       console.log('[applyDiffDecorations] Called with hunks:', JSON.stringify(hunks, null, 2));
       console.log('[applyDiffDecorations] Doc has', this.editor?.state?.doc?.lines, 'lines');
-      
+
       // Initialize diff compartment if not already done (fallback for direct calls)
       if (!this.diffCompartment) {
         this.initDiffCompartments();
       }
 
       const normalizedHunks = Array.isArray(hunks) ? hunks : [];
-      
+
       const getWordWrap = () => this.lineWrapping || false;
       console.log('[applyDiffDecorations] Building decorations, wordWrap:', getWordWrap());
       const { decorations: decoSet, gutter: gutterSet, gutterClasses: gutterClassSet } = buildDiffDecorations(this.editor, normalizedHunks, CM, getWordWrap);
       console.log('[applyDiffDecorations] Built diff decorations');
       const gutterActive = gutterSet !== EMPTY_GUTTER_RANGESET;
-      
+
       const effects = [
         this.setDiffEffect.of(decoSet)
       ];
@@ -1086,7 +1090,7 @@ export default {
           effects.push(this.diffGutterCompartment.reconfigure([]));
         }
       }
-      
+
       // Reconfigure gutter classes
       if (this.gutterClassCompartment) {
         if (gutterActive && gutterClassSet !== EMPTY_GUTTER_RANGESET) {
@@ -1095,9 +1099,9 @@ export default {
           effects.push(this.gutterClassCompartment.reconfigure([]));
         }
       }
-      
+
       this.editor.dispatch({ effects });
-      
+
       // Force minimap update to reflect new diff gutters
       if (this.showMinimap) {
         this.updateMinimapState();
@@ -1141,19 +1145,19 @@ export default {
             // Attach to scroller DOM
             this.view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
           }
-          
+
           onScroll() {
             const wrapper = this.view.dom;
             if (!wrapper.classList.contains('cm-scrolling')) {
               wrapper.classList.add('cm-scrolling');
             }
-            
+
             if (this.timeout) clearTimeout(this.timeout);
             this.timeout = setTimeout(() => {
               wrapper.classList.remove('cm-scrolling');
             }, 1500); // Keep visible for 1.5s after scroll stops
           }
-          
+
           destroy() {
             this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
             if (this.timeout) clearTimeout(this.timeout);
@@ -1163,7 +1167,7 @@ export default {
 
       // Create compartment for dynamic indent unit (before extensions array)
       this.indentUnitCompartment = new CM.Compartment();
-      
+
       // Create compartments for toggleable features
       this.colorPickerCompartment = new CM.Compartment();
       this.readOnlyCompartment = new CM.Compartment();
@@ -1199,10 +1203,10 @@ export default {
         this.gutterClassCompartment.of([]), // Gutter line classes
         // Apply styling to ALL gutters for deletion widgets (fixes fold gutter tinting)
         (CM.gutterWidgetClass ? CM.gutterWidgetClass.of((view, widget, block) => {
-            if (widget instanceof RemovedLineWidget) {
-              return new DeletedFoldMarker();
-            }
-            return null;
+          if (widget instanceof RemovedLineWidget) {
+            return new DeletedFoldMarker();
+          }
+          return null;
         }) : []),
         CM.EditorView.theme({
           "&": { height: "100%" },
@@ -1323,13 +1327,13 @@ export default {
         console.warn('[CodeMirror] jumpToLine: invalid line number', input);
         return;
       }
-      
+
       try {
         const doc = this.editor.state.doc;
         const maxLine = doc.lines;
         const targetLine = Math.max(1, Math.min(line, maxLine));
         const pos = doc.line(targetLine).from;
-        
+
         this.editor.dispatch({
           selection: { anchor: pos },
           scrollIntoView: true
@@ -1355,17 +1359,17 @@ export default {
         console.warn('[CodeMirror] toggleColorPicker: editor not ready');
         return;
       }
-      
+
       if (!colorExtension) {
         console.warn('[CodeMirror] colorExtension not available in bundle');
         return;
       }
-      
+
       try {
         const effects = enabled
           ? this.colorPickerCompartment.reconfigure(colorExtension)
           : this.colorPickerCompartment.reconfigure([]);
-        
+
         this.editor.dispatch({ effects });
         console.log('[CodeMirror] Color picker:', enabled ? 'enabled' : 'disabled');
       } catch (err) {
@@ -1384,15 +1388,15 @@ export default {
         console.warn('[CodeMirror] setReadOnly: editor not ready');
         return;
       }
-      
+
       try {
         const effects = readonly
           ? this.readOnlyCompartment.reconfigure([
-              CM.EditorState.readOnly.of(true),
-              CM.EditorView.editable.of(false)
-            ])
+            CM.EditorState.readOnly.of(true),
+            CM.EditorView.editable.of(false)
+          ])
           : this.readOnlyCompartment.reconfigure([]);
-        
+
         this.editor.dispatch({ effects });
         console.log('[CodeMirror] Read-only mode:', readonly ? 'enabled' : 'disabled');
       } catch (err) {
@@ -1414,7 +1418,7 @@ export default {
 
       if (!this.minimapCompartment) {
         this.minimapCompartment = new CM.Compartment();
-        
+
         // Install empty compartment once
         this.editor.dispatch({
           effects: CM.StateEffect.appendConfig.of(
@@ -1429,7 +1433,7 @@ export default {
       if (targetMode !== 'off') {
         // Include diffField in dependencies if it exists so minimap updates when diffs change
         const deps = this.diffField ? ['doc', this.diffField] : ['doc'];
-        
+
         const minimapExt = showMinimap.compute(deps, (state) => {
           // We just need to give it a container DOM node and config
           const create = (view) => {
@@ -1441,11 +1445,11 @@ export default {
 
           // Desktop vs mobile are just different config knobs
           const isMobile = targetMode === 'mobile';
-          
+
           // Collect diff gutters if diffField exists (diffs active)
           // Pass 'this.diffField' which is the StateField created in applyDiffDecorations
-          const gutters = this.diffField 
-            ? diffMinimapGuttersFromDecorations(state, this.diffField) 
+          const gutters = this.diffField
+            ? diffMinimapGuttersFromDecorations(state, this.diffField)
             : [];
 
           return {
@@ -1466,7 +1470,7 @@ export default {
         effects: this.minimapCompartment.reconfigure(extensions),
       });
       console.log('[CodeMirror] Minimap mode set to:', targetMode);
-      
+
       // Add class to editor DOM for desktop sidebar layout
       if (targetMode === 'desktop') {
         this.editor.dom.classList.add('cm-has-minimap-desktop');
@@ -1492,7 +1496,7 @@ export default {
       const SCOPE_NODE_TYPES = {
         javascript: new Set([
           "FunctionDeclaration", "FunctionExpression", "ArrowFunction",
-          "MethodDeclaration", "MethodDefinition", 
+          "MethodDeclaration", "MethodDefinition",
           "ClassDeclaration", "ClassExpression",
           "ExportDefault", "ExportDefaultDeclaration", "ExportDeclaration", "export"
         ]),
@@ -1682,7 +1686,7 @@ export default {
             if (/^\s*if\s+__name__\s*==\s*['"]__main__['"]\s*:/m.test(snippet)) {
               return true;
             }
-          } catch (e) {}
+          } catch (e) { }
         }
         return false;
       };
@@ -1798,7 +1802,7 @@ export default {
         register(scope) {
           const slot = scope.depth;
           if (slot < 0 || slot >= this.maxSlots) return false;
-          
+
           const existing = this.slots[slot];
           if (existing) {
             // Same scope (by startLine) - update it
@@ -1809,7 +1813,7 @@ export default {
             // Different scope at same depth - reject (caller must clear first)
             return false;
           }
-          
+
           this.slots[slot] = scope;
           return true;
         }
@@ -1850,12 +1854,12 @@ export default {
           this.view = view;
           this.dom = document.createElement("div");
           this.dom.className = "cm-stickyHeader";
-          
+
           // Slot-based scope management (enforces one scope per depth)
           this.slots = new StickySlots(5);
           this.currentScopes = []; // For click handler compatibility
           this.scopeHeights = new Map(); // Cache for scope heights (lines)
-          
+
           // Used to break the feedback loop between overlay height and
           // sampling position; we always sample using the previous height.
           this.lastOverlayHeight = 0;
@@ -1882,13 +1886,13 @@ export default {
           if (cmComponent) {
             cmComponent._stickyScrollPlugin = this;
           }
-          
+
           // Append to scrollDOM to share stacking context with minimap (fixes z-index layering)
           view.scrollDOM.appendChild(this.dom);
 
           // Initial background sync to match current theme
           this.syncBackgroundColor();
-          
+
           // Click handler for jump-to-definition
           this.dom.addEventListener('click', (e) => {
             const target = e.target.closest('.cm-sticky-line');
@@ -1904,7 +1908,7 @@ export default {
               }
             }
           });
-          
+
           // Direct scroll listener for immediate response
           this.scrollHandler = () => {
             this.updateStickyHeader();
@@ -1917,7 +1921,7 @@ export default {
             }
           };
           view.scrollDOM.addEventListener('scroll', this.scrollHandler, { passive: true });
-          
+
           // Initial render
           this.updateStickyHeader();
         }
@@ -1953,7 +1957,7 @@ export default {
               gutterBg = pickColor(gutterRoot) || (gs && gs.backgroundColor) || null;
               gutterFg = (gs && gs.color) || null;
             }
-          } catch (e) {}
+          } catch (e) { }
 
           try {
             this.dom.style.backgroundColor = bg;
@@ -1992,8 +1996,8 @@ export default {
             // Walk up until we hit the .cm-line container
             while (node && node !== view.dom) {
               if (node.nodeType === Node.ELEMENT_NODE &&
-                  node.classList &&
-                  node.classList.contains("cm-line")) {
+                node.classList &&
+                node.classList.contains("cm-line")) {
                 return node.innerHTML;
               }
               node = node.parentNode;
@@ -2003,7 +2007,7 @@ export default {
           }
           return null;
         }
-        
+
         updateStickyHeader(isRetry = false) {
           const view = this.view;
           const state = view.state;
@@ -2025,7 +2029,7 @@ export default {
           const prevActiveKeys = new Set(
             (this.currentScopes || []).map((s) => `${s.depth}:${s.startLine}-${s.endLine}`)
           );
-          
+
           // Get gutter container and child gutter segments (line numbers, folds, etc.)
           const gutterRoot = view.dom.querySelector('.cm-gutters');
           const gutterWidth = gutterRoot ? gutterRoot.offsetWidth : 0;
@@ -2105,7 +2109,7 @@ export default {
             const headings = collectMarkdownHeadingsSimple(state.doc);
             const sections = buildMarkdownSectionsSimple(headings, state.doc.lines);
             const path = markdownPathAtSimple(sections, refLine - earlyLines);
-            
+
             let cumulativeHeight = 0;
             candidateScopes = path.map((sec, idx) => {
               const depth = idx;
@@ -2123,7 +2127,7 @@ export default {
                 // Old logic for non-wrapped mode
                 offset = -2;
               }
-              
+
               const triggerLine = sec.line + offset;
               const endTriggerLine = Math.max(sec.line, sec.endLine + offset);
               const lineObj = state.doc.line(sec.line);
@@ -2273,7 +2277,7 @@ export default {
               const indentDepth = Math.floor(indentSpaces / indentSize);
               // Slot depth = ancestor index (outermost -> 0). Use indent only for cosmetics.
               const depth = pathDepth;
-              
+
               let cachedHeight = 1;
               let offset;
 
@@ -2322,7 +2326,7 @@ export default {
           // ---------------------------------------------------------------------------
           const hysteresisLines = 0.5;
           const earlyMarginLines = 1.5;
-          
+
           const DEBUG_SLOTS = false; // Set true to log to browser_console.log
 
           // First pass: clear slots that are no longer valid
@@ -2330,11 +2334,11 @@ export default {
           for (let depth = 0; depth < this.slots.maxSlots; depth++) {
             const existing = this.slots.get(depth);
             if (!existing) continue;
-            
+
             let scopedRef = refLine;
             // With dynamic heights, we don't need arbitrary drift correction
             // scopedRef = refLine;
-            
+
             // Direction-aware release:
             // - Downward scroll: keep scope until the actual end line passes the ref line
             //   (no early shrink), preventing short scopes from disappearing too soon.
@@ -2355,7 +2359,7 @@ export default {
               scrolledBelow = scopedRef > exitLine + exitMargin;
             }
             const shouldClear = scrolledAbove || scrolledBelow;
-            
+
             if (DEBUG_SLOTS) {
               console.log('[Slots] check', {
                 depth,
@@ -2373,7 +2377,7 @@ export default {
                 goingDown
               });
             }
-            
+
             if (shouldClear) {
               if (DEBUG_SLOTS) console.log('[Slots] CLEARING', { depth });
               this.slots.clear(depth); // Clears this and all deeper slots
@@ -2391,11 +2395,11 @@ export default {
             const wasActive = prevActiveKeys.has(key);
 
             // Calculate activation window with hysteresis
-            const lower = wasActive 
-              ? scope.triggerLine - hysteresisLines 
+            const lower = wasActive
+              ? scope.triggerLine - hysteresisLines
               : scope.triggerLine + hysteresisLines;
-            const upper = wasActive 
-              ? scope.endTriggerLine + hysteresisLines 
+            const upper = wasActive
+              ? scope.endTriggerLine + hysteresisLines
               : scope.endTriggerLine - hysteresisLines;
 
             // Check if scope should be active
@@ -2407,24 +2411,24 @@ export default {
                 const endLineObj = state.doc.lineAt(scope.node.to);
                 const endBlock = view.lineBlockAt(endLineObj.to);
                 const endBottomViewport = endBlock.bottom - scrollTop;
-                
+
                 // Calculate prospective header height using cumulative heights
                 let prospectiveHeight = 0;
                 for (let i = 0; i <= scope.depth; i++) {
-                   // Use cached height for ancestors, assume 1 for current if unknown
-                   // But we have cached height in scope.height
-                   // We need heights of all ancestors 0..depth
-                   // Since we are iterating candidates, we can sum them up
-                   const ancestor = candidateScopes[i];
-                   if (ancestor) prospectiveHeight += (ancestor.height || 1);
-                   else prospectiveHeight += 1;
+                  // Use cached height for ancestors, assume 1 for current if unknown
+                  // But we have cached height in scope.height
+                  // We need heights of all ancestors 0..depth
+                  // Since we are iterating candidates, we can sum them up
+                  const ancestor = candidateScopes[i];
+                  if (ancestor) prospectiveHeight += (ancestor.height || 1);
+                  else prospectiveHeight += 1;
                 }
                 const prospectiveHeightPx = prospectiveHeight * lineHeight;
-                
+
                 if (endBottomViewport < prospectiveHeightPx + earlyMarginLines * lineHeight) {
                   shouldActivate = true;
                 }
-              } catch {}
+              } catch { }
             }
 
             if (DEBUG_SLOTS) {
@@ -2544,7 +2548,7 @@ export default {
 
           let topOffset = 0;
           let effectiveHeight;
-          
+
           // Calculate height of the innermost scope (in pixels)
           const innermostHeight = (innermost.height || 1) * lineHeight;
           let lastHeight = innermostHeight;
@@ -2601,7 +2605,7 @@ export default {
           }
 
           lastHeight = Math.max(0, innermostHeight + topOffset);
-          
+
           // Effective height is sum of all previous scopes + lastHeight
           const previousHeight = activeScopes.slice(0, -1).reduce((sum, s) => sum + (s.height || 1), 0) * lineHeight;
           effectiveHeight = previousHeight + lastHeight;
@@ -2619,31 +2623,31 @@ export default {
 
           this.dom.innerHTML = '';
           const lastIndex = activeScopes.length - 1;
-          
+
           let currentTop = 0;
-          
+
           const renderLayer = (scope, idx, cls) => {
             const scopeLines = scope.height || 1;
             const scopeHeightPx = scopeLines * lineHeight;
-            
+
             const layer = document.createElement('div');
             layer.className = 'cm-sticky-layer';
             if (cls) layer.classList.add(cls);
             if (idx === lastIndex) layer.classList.add('innermost');
-            
+
             layer.style.top = `${currentTop}px`;
-            
+
             // Higher layers (outer scopes) sit above inner ones.
             layer.style.zIndex = String(100 - idx - (cls === 'exiting' ? 1 : 0));
             layer.style.setProperty('--cm-sticky-line-height', `${lineHeight}px`);
-            
+
             // Apply push-up transform to innermost layer
             layer.style.transform = idx === lastIndex && !cls ? `translateY(${topOffset}px)` : 'translateY(0)';
-            
+
             // Allow height to be auto for wrapping, but set min-height
             layer.style.height = 'auto';
             layer.style.minHeight = `${lineHeight}px`;
-            
+
             // Store scope key for measurement
             layer.dataset.scopeKey = `${scope.depth}:${scope.startLine}`;
 
@@ -2690,10 +2694,10 @@ export default {
             layer.appendChild(gutter);
             layer.appendChild(content);
             this.dom.appendChild(layer);
-            
+
             // Advance top for next layer
             if (!cls) { // Only advance for main stack, not transitions
-               currentTop += scopeHeightPx;
+              currentTop += scopeHeightPx;
             }
           };
 
@@ -2713,28 +2717,28 @@ export default {
           // 6) Measure actual heights and update cache
           // ---------------------------------------------------------------------------
           if (wrappingEnabled && !isRetry) {
-             let heightsChanged = false;
-             const layers = Array.from(this.dom.querySelectorAll('.cm-sticky-layer'));
-             layers.forEach(layer => {
-                const key = layer.dataset.scopeKey;
-                if (key) {
-                   const heightPx = layer.offsetHeight;
-                   const lines = Math.max(1, Math.round(heightPx / lineHeight));
-                   const oldLines = this.scopeHeights.get(key) || 1;
-                   
-                   if (lines !== oldLines) {
-                      this.scopeHeights.set(key, lines);
-                      heightsChanged = true;
-                      // console.log(`[Sticky] Height changed for ${key}: ${oldLines} -> ${lines}`);
-                   }
+            let heightsChanged = false;
+            const layers = Array.from(this.dom.querySelectorAll('.cm-sticky-layer'));
+            layers.forEach(layer => {
+              const key = layer.dataset.scopeKey;
+              if (key) {
+                const heightPx = layer.offsetHeight;
+                const lines = Math.max(1, Math.round(heightPx / lineHeight));
+                const oldLines = this.scopeHeights.get(key) || 1;
+
+                if (lines !== oldLines) {
+                  this.scopeHeights.set(key, lines);
+                  heightsChanged = true;
+                  // console.log(`[Sticky] Height changed for ${key}: ${oldLines} -> ${lines}`);
                 }
-             });
-             
-             if (heightsChanged) {
-                // Re-run update with new heights to correct offsets and positioning
-                // Use requestAnimationFrame to avoid synchronous layout thrashing loop
-                requestAnimationFrame(() => this.updateStickyHeader(true));
-             }
+              }
+            });
+
+            if (heightsChanged) {
+              // Re-run update with new heights to correct offsets and positioning
+              // Use requestAnimationFrame to avoid synchronous layout thrashing loop
+              requestAnimationFrame(() => this.updateStickyHeader(true));
+            }
           }
 
           // Remember overlay height for the next sampling pass so that
@@ -2747,7 +2751,7 @@ export default {
             this.lastOverlaySampleHeight = Math.max(effectiveHeight, this.lastOverlaySampleHeight - lineHeight);
           }
         }
-        
+
         update(update) {
           // Re-render on document changes (syntax tree may have changed)
           if (update.docChanged) {
@@ -2764,7 +2768,7 @@ export default {
             requestAnimationFrame(() => this.syncBackgroundColor());
           }
         }
-        
+
         destroy() {
           this.view.scrollDOM.removeEventListener('scroll', this.scrollHandler);
           this.dom.remove();
@@ -2797,7 +2801,7 @@ export default {
           enabled ? stickyScrollExtension : []
         )
       });
-      
+
       console.log('[CodeMirror] Sticky scroll set to:', enabled);
     },
     // ============================================================================
@@ -2867,16 +2871,16 @@ export default {
         console.warn('[CodeMirror] Failed to apply initial scroll line:', err);
       }
     }
-    
+
     // Initialize layout detection for minimap
     const mql = window.matchMedia('(max-width: 900px)');
     this.isMobileLayout = mql.matches;
     mql.addEventListener('change', this.handleLayoutChange);
-    
+
     // Initialize diff compartments BEFORE minimap so minimap can reference diffField
     // This ensures proper dependency order - minimap needs diffField to exist
     this.initDiffCompartments();
-    
+
     // Apply initial minimap state (now diffField exists for minimap to reference)
     this.updateMinimapState();
   },
