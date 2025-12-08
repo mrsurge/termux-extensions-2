@@ -467,9 +467,11 @@ def init_nicegui_with_app(fastapi_app):
     try:
         from app.apps.file_editor_cm6.lsp_ws import LSPSocketIONamespace
         ng.sio.register_namespace(LSPSocketIONamespace('/lsp'))
-        print("[LSPSIO] Successfully registered /lsp namespace")
+        import sys
+        print("[LSPSIO] Successfully registered /lsp namespace", file=sys.stderr, flush=True)
     except Exception as e:
-        print(f"[LSPSIO] Failed to register namespace: {e}")
+        import sys
+        print(f"[LSPSIO] Failed to register namespace: {e}", file=sys.stderr, flush=True)
 
 # Don't expose SUBAPPS - ui.run_with() handles the mounting
 # Just expose the init hook for app_worker.py to call

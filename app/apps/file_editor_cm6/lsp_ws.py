@@ -77,9 +77,12 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         super().__init__(namespace)
         self.active_sessions: Dict[str, dict] = {}  # sid -> session info
         self.reader_tasks: Dict[str, asyncio.Task] = {}
+        import sys
+        print(f"[LSP WS] Namespace initialized: {namespace}", file=sys.stderr, flush=True)
     
     async def on_connect(self, sid, environ):
-        print(f"[LSP WS] Client connected: {sid}")
+        import sys
+        print(f"[LSP WS] Client connected: {sid}", file=sys.stderr, flush=True)
     
     async def on_initialize(self, sid, data):
         """Client sends: { languageId: 'python', projectRoot: '/path/to/project' }"""
