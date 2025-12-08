@@ -86,6 +86,9 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
     
     async def on_initialize(self, sid, data):
         """Client sends: { languageId: 'python', projectRoot: '/path/to/project' }"""
+        import sys
+        print(f"[LSP WS] on_initialize called: sid={sid} data={data}", file=sys.stderr, flush=True)
+        
         language_id = data.get("languageId")
         project_root = data.get("projectRoot", ".")
         
@@ -123,11 +126,12 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
     
     async def on_lsp_client_to_server(self, sid, message):
         """Receive JSON LSP message from client, forward to shell stdin."""
-        print(f"[LSP WS] Received from client {sid}: {json.dumps(message)[:200]}...")
+        import sys
+        print(f"[LSP WS] on_lsp_client_to_server: sid={sid} msg={str(message)[:200]}", file=sys.stderr, flush=True)
         
         session = self.active_sessions.get(sid)
         if not session:
-            print(f"[LSP WS] No session for {sid}")
+            print(f"[LSP WS] No session for {sid}", file=sys.stderr, flush=True)
             return
         
         shell_id = session["shell_id"]
