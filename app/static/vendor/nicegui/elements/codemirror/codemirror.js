@@ -2507,6 +2507,26 @@ export default {
               });
             }
 
+            // Deduplicate scopes with the same startLine (e.g., variable + anonymous class)
+            // Keep the one with a more meaningful name (not <class>, <function>, etc.)
+            const deduped = [];
+            for (const sec of filteredPath) {
+              const prev = deduped[deduped.length - 1];
+              if (prev && prev.startLine === sec.startLine) {
+                // Same line - prefer the one with a real name over synthetic names
+                const prevIsSynthetic = /^<.*>$/.test(prev.name);
+                const currIsSynthetic = /^<.*>$/.test(sec.name);
+                if (prevIsSynthetic && !currIsSynthetic) {
+                  // Replace synthetic with real name
+                  deduped[deduped.length - 1] = sec;
+                }
+                // If current is synthetic or both are real, keep the previous (first one)
+              } else {
+                deduped.push(sec);
+              }
+            }
+            filteredPath = deduped;
+
             if (DEBUG_LSP_STICKY) {
               console.log('[LSP-Sticky] filteredPath:', filteredPath.map(p => ({ name: p.name, start: p.startLine, end: p.endLine })));
             }
