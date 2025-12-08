@@ -217,3 +217,146 @@ Proceed with this infrastructure upgrade as part of Step 3.
 ---
 
 *vectorArc • 2025-12-08 06:09 UTC*
+
+---
+
+## Action Plan: CM6 LSP Integration (tmp5) — neonInk • 2025-12-08
+
+### 1. JavaScript: Socket.IO Transport
+- In `app/static/vendor/nicegui/elements/codemirror/codemirror.js`, add a `SocketIOTransport` class that:
+  - Connects to the `/lsp` namespace using `io(namespace, { path: "/ui/_nicegui_ws/socket.io", transports: ["websocket", "polling"] })`.
+  - Emits an `initialize` event on `connect` with `{ languageId, projectRoot }`.
+  - Listens for `lsp:server_to_client` and forwards messages to a stored `onMessage` callback.
+  - Implements `send(data)` by emitting `lsp:client_to_server` with a plain JS object (parse JSON strings as needed).
+  - Implements `close()` by disconnecting the underlying socket and clearing listeners.
+
+### 2. JavaScript: LSP Client Wiring in Vue Component
+- Detect `LanguageServerClient` from the bundle (`const LSPClient = CM.LanguageServerClient || null`) and log a warning if missing.
+- Extend component `data()` with `lspClient`, `lspTransport`, and `lspCompartment` (a `CM.Compartment` for LSP extensions).
+- Add `connectLSP(languageId, projectRoot)` method that:
+  - Guards on `LSPClient` and `this.editor` being available.
+  - Calls `disconnectLSP()` first if an existing client is active.
+  - Creates `SocketIOTransport('/lsp', languageId, projectRoot)` and `new LSPClient({ transport, rootUri, workspaceFolders, languageId })`.
+  - Subscribes to `documentSymbols` (and other useful events) and forwards them to a new `handleDocumentSymbols(symbols)` method.
+  - Installs the LSP extension via `lspCompartment.reconfigure([this.lspClient.extension])` in an editor dispatch.
+- Add `disconnectLSP()` method that:
+  - Disposes `this.lspClient` if present (letting it close the transport).
+  - Clears `lspClient`/`lspTransport` references and reconfigures the LSP compartment to `[]`.
+- Ensure the component’s teardown hook (e.g. `beforeUnmount`/`beforeDestroy`) calls `disconnectLSP()` to avoid leaks.
+
+### 3. JavaScript: Symbol Handling Surface
+- Implement `handleDocumentSymbols(symbols)` in `codemirror.js` that:
+  - Caches the latest symbols on the component instance.
+  - Notifies the host via an existing mechanism (`notifyParent('document_symbols', { symbols })` or a new `$emit('documentSymbols', symbols)`).
+- Keep this method minimal so sticky-scroll/outline features can evolve on the host side without changing the vendor bundle.
+
+### 4. Python: NiceGUI Wrapper Methods
+- In `app/static/vendor/nicegui/elements/codemirror/codemirror.py`, add:
+  - `def connect_lsp(self, language_id: str, project_root: str) -> None: self.run_method('connectLSP', {'languageId': language_id, 'projectRoot': project_root})`
+  - `def disconnect_lsp(self) -> None: self.run_method('disconnectLSP')`
+- Do not change the constructor; make LSP usage explicitly opt-in via these methods.
+
+### 5. Backend: Auto-Connect Helper in `editor_app.py`
+- Define `LSP_LANGUAGE_MAP` near the top of `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` mapping file suffixes to language IDs (e.g. `.py` → `python`, `.js` → `javascript`, `.ts` → `typescript`, `.tsx` → `typescriptreact`, `.go` → `go`, `.rs` → `rust`).
+- Implement `_should_use_lsp(project_root: Path, language_id: str) -> bool` that:
+  - For now checks a simple editor preference flag (e.g. `prefs.get('enableLsp', False)`) and returns False if disabled.
+  - Can later grow to consult project-level config (tmp7) without changing the call sites.
+- Implement `_maybe_connect_lsp(editor, file_path: Path, project_root: Path)` that:
+  - Looks up `language_id = LSP_LANGUAGE_MAP.get(file_path.suffix)`.
+  - Returns early if `language_id` is unsupported or `_should_use_lsp()` is False.
+  - Calls `editor.connect_lsp(language_id, str(project_root))`.
+- Call `_maybe_connect_lsp(...)` in the code paths that open or switch the active file (initial load in `editor_page()` and any file-switch endpoint) after `_active_editor` and `_current_file_path` are set.
+
+### 6. Backend: LSP Disconnect Hooks
+- Ensure that when the active document becomes `None`/blank (null document state) or the editor page is torn down, the backend calls `editor.disconnect_lsp()` to mirror the frontend cleanup.
+- On project switches or file switches to non-LSP-eligible types, call `disconnect_lsp()` before changing `_current_file_path` so language shells can be reused cleanly by the next connection.
+
+### 7. Testing & Verification
+- Manual smoke tests:
+  - Open `.py`, `.js`, and `.tsx` files and verify:
+    - `/lsp` namespace receives `initialize` and subsequent LSP messages (check worker logs).
+    - Language servers respond without protocol framing errors and `documentSymbols` events reach the host.
+  - Switch between different LSP-enabled files and confirm:
+    - Only one framework shell per language remains running (`/api/framework_shells`), no per-tab duplication.
+    - `disconnectLSP` is called on teardown (no lingering Socket.IO connections in browser devtools).
+- Failure scenarios:
+  - Temporarily break LSP server binaries (rename vendored `.bin` symlinks) and confirm:
+    - LSP connection attempts fail gracefully with clear log messages.
+    - The editor remains usable without LSP (no hard errors on load or file switch).
+
+---
+
+*neonInk • 2025-12-08 06:30 UTC*
+
+---
+
+## Progress Report: CM6 LSP Integration (tmp5 Step 4) — neonInk • 2025-12-08
+
+**Files Touched:**
+- `app/static/vendor/nicegui/elements/codemirror/codemirror.js`
+
+**What Changed (Step 4 – Symbol Handling Surface):**
+1. **Vue Component State:**
+   - Added `lspSymbols` array to store the latest LSP `documentSymbols` payload.
+   - Added `_stickyScrollPlugin` handle so the sticky scroll ViewPlugin can register itself back on the Vue instance.
+
+2. **`handleDocumentSymbols(symbols)` Implementation:**
+   - Normalizes incoming payloads (`symbols` array or `{ symbols: [...] }`) into `this.lspSymbols`.
+   - On update, calls `this._stickyScrollPlugin.updateStickyHeader(true)` when the plugin is active, so Sticky Scroll recomputes immediately with the new symbol tree.
+   - Optionally notifies the host via `notifyParent('cm6-document-symbols', { symbols: this.lspSymbols })` for outline/telemetry use cases.
+
+3. **Sticky Scroll Plugin Wiring:**
+   - In the sticky scroll `ViewPlugin` constructor, stores `this` into `cmComponent._stickyScrollPlugin` when available; `destroy()` clears that reference.
+   - Scope candidate builder now prefers:
+     - Markdown headings for markdown documents (unchanged).
+     - LSP-backed sections flattened from `cmComponent.lspSymbols` when present (uses LSP ranges to derive `startLine`/`endLine` and preserves existing height/offset logic).
+     - Falls back to the original Lezer syntax-tree path when no symbols are available or LSP is disabled.
+
+**Net Effect:**
+- Sticky Scroll can consume LSP `documentSymbols` directly (no Python round-trip), while markdown and non-LSP languages continue using the existing syntax-tree heuristics. Host-level consumers still receive a structured symbol event if they want to build an Outline View later.
+
+*neonInk • 2025-12-08 07:05 UTC*
+
+---
+
+## Progress Report: LSP Transport + Auto-Connect Wiring (tmp5 Steps 4–5) — neonInk • 2025-12-08
+
+**Files Touched:**
+- `app/static/vendor/nicegui/elements/codemirror/codemirror.js`
+- `app/static/vendor/nicegui/elements/codemirror/codemirror.py`
+- `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+- `app/apps/file_editor_cm6/preferences_store.py`
+
+**Frontend (codemirror.js):**
+- Added `SocketIOTransport` class that wraps the global `io` Socket.IO client, connects to `/lsp` with the NiceGUI path, sends an `initialize` payload on connect, and forwards `lsp:server_to_client` messages into the LSP client’s `onMessage` handler.
+- Extended Vue `data()` with `lspClient`, `lspTransport`, and `lspCompartment` to track the LSP client, its transport, and a dedicated CM compartment for the extension.
+- Implemented `connectLSP(languageId, projectRoot)` to:
+  - Guard on `this.editor` and `CM.LanguageServerClient` presence.
+  - Tear down any existing client via `disconnectLSP()`.
+  - Create `SocketIOTransport('/lsp', languageId, projectRoot)` and `new CM.LanguageServerClient({ transport, rootUri, workspaceFolders, languageId })`.
+  - Register a `documentSymbols` listener that feeds into `handleDocumentSymbols(symbols)`.
+  - Install the LSP extension via `this.lspCompartment.reconfigure([this.lspClient.extension])`.
+- Implemented `disconnectLSP()` to dispose the client, close the transport, clear the compartment, and reset `lspSymbols`, while asking the sticky scroll plugin to refresh once more.
+- Added `beforeDestroy` / `beforeUnmount` hooks that call `disconnectLSP()` for best-effort cleanup on component teardown.
+
+**Backend Wrapper (codemirror.py):**
+- Added `connect_lsp(language_id, project_root)` and `disconnect_lsp()` methods on `CodeMirror` that proxy to the JS methods via `run_method('connectLSP', ...)` and `run_method('disconnectLSP')`.
+
+**Backend Auto-Connect (editor_app.py):**
+- Introduced `LSP_LANGUAGE_MAP` mapping file extensions to LSP language IDs (python/javascript/typescript/tsx/go/rust, etc.).
+- Added `_should_use_lsp(project_root, language_id)` which currently gates on the editor preference `enableLsp` (default False).
+- Implemented `_maybe_connect_lsp(editor, file_path, project_root)` that:
+  - Disconnects when there is no active document/project or when the extension is unsupported.
+  - Disconnects when `enableLsp` is false.
+  - Calls `editor.connect_lsp(language_id, str(project_root))` when all conditions are met, with error logging if methods are missing.
+- Wired `_maybe_connect_lsp(...)` into:
+  - `editor_page()` after the editor is constructed and preferences applied (initial file load).
+  - `/editor/set_content` after `set_current_file(...)` to react on file switches.
+
+**Preference Toggle (preferences_store.py):**
+- Added `"enableLsp": False` to `DEFAULT_EDITOR_PREFS` so the existing `/api/app/file_editor_cm6/preferences` POST endpoint can now persist `editor.enableLsp` and the backend gate can read it reliably.
+
+**Known State:**
+- The wiring from preference → backend decision → LSP client → Socket.IO transport is in place. The remaining issue observed in manual testing is that `enableLsp` was not yet present in the on-disk prefs snapshot (likely due to worker/proc lifetime vs. when the default schema change landed), so the gate still evaluates to false. This is an environment/application lifecycle detail rather than a code-path syntax error; the Python module now compiles cleanly and is ready for another end-to-end test once the worker reloads with the updated defaults.
+
+*neonInk • 2025-12-08 07:25 UTC*

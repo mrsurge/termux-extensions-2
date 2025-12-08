@@ -70,6 +70,21 @@ RUNNABLE_COMMANDS = {
     '.zsh': ['zsh'],
 }
 
+# Map file extensions to LSP language identifiers
+LSP_LANGUAGE_MAP = {
+    '.py': 'python',
+    '.pyw': 'python',
+    '.js': 'javascript',
+    '.mjs': 'javascript',
+    '.cjs': 'javascript',
+    '.jsx': 'javascriptreact',
+    '.ts': 'typescript',
+    '.mts': 'typescript',
+    '.tsx': 'typescriptreact',
+    '.go': 'go',
+    '.rs': 'rust',
+}
+
 
 def _current_diff_base(project_path: Optional[str]) -> str:
     return _history_store.get_diff_base(project_path) if project_path else 'HEAD'
@@ -136,6 +151,65 @@ def get_current_file():
 
 def get_current_file_sha256():
     return _current_file_sha256
+
+
+def _should_use_lsp(project_root: Path | None, language_id: str) -> bool:
+    """Determine whether LSP should be used for the given project and language.
+
+    For now this is driven by a simple editor preference flag. In the future
+    this can consult per-project configuration (see tmp7_PROJECT_LSP_CONFIG.md).
+    """
+    try:
+        prefs = _preferences_store.get_preferences().get('editor', {})
+    except Exception:
+        return False
+
+    # Explicit opt-in; default to disabled until the feature bakes
+    return bool(prefs.get('enableLsp', False))
+
+
+def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None) -> None:
+    """Connect or disconnect the CM6 LSP client based on file/language.
+
+    - If the file extension is mapped and LSP is enabled, connect the client.
+    - Otherwise, ensure any existing LSP connection is torn down.
+    """
+    if editor is None or file_path is None or project_root is None:
+        # No active document or project: best-effort disconnect
+        try:
+            if hasattr(editor, 'disconnect_lsp'):
+                editor.disconnect_lsp()
+        except Exception as exc:
+            print(f"[LSP] Failed to disconnect LSP for null document: {exc}", file=sys.stderr)
+        return
+
+    language_id = LSP_LANGUAGE_MAP.get(file_path.suffix)
+    if not language_id:
+        # Unsupported extension: ensure any previous client is stopped
+        try:
+            if hasattr(editor, 'disconnect_lsp'):
+                editor.disconnect_lsp()
+        except Exception as exc:
+            print(f"[LSP] Failed to disconnect LSP for unsupported type {file_path}: {exc}", file=sys.stderr)
+        return
+
+    if not _should_use_lsp(project_root, language_id):
+        # Preference gate disabled: disconnect if previously connected
+        try:
+            if hasattr(editor, 'disconnect_lsp'):
+                editor.disconnect_lsp()
+        except Exception as exc:
+            print(f"[LSP] Failed to disconnect LSP when disabled for {file_path}: {exc}", file=sys.stderr)
+        return
+
+    # At this point we want LSP active for this document
+    try:
+        if hasattr(editor, 'connect_lsp'):
+            editor.connect_lsp(language_id, str(project_root))
+        else:
+            print("[LSP] connect_lsp() not available on editor; bundle may be outdated", file=sys.stderr)
+    except Exception as exc:
+        print(f"[LSP] Failed to connect LSP for {file_path} ({language_id}): {exc}", file=sys.stderr)
 
 # --- Helpers ---
 def _get_runtime_metadata() -> dict:
@@ -724,6 +798,14 @@ async def editor_page():
             
             print(f"[EDITOR_APP] Applied runtime preferences: shading={editor_prefs.get('showShading')}, guides={editor_prefs.get('showIndentGuides')}, fontScale={editor_prefs.get('fontScale')}, colorPicker={editor_prefs.get('colorPicker')}, readOnly={editor_prefs.get('readOnly')}, stickyScroll={editor_prefs.get('stickyScroll')}", file=sys.stderr)
 
+            # 5b. Optionally connect LSP client for this initial file
+            try:
+                if initial_path and project_path:
+                    project_root_path = Path(project_path).expanduser()
+                    _maybe_connect_lsp(editor, Path(initial_path), project_root_path)
+            except Exception as exc:
+                print(f"[LSP] Failed to auto-connect LSP on init for {initial_path}: {exc}", file=sys.stderr)
+
             if initial_path:
                 if cached_was_restored:
                     _broadcast_cache_state(
@@ -1174,6 +1256,16 @@ async def set_editor_content(data: dict = Body(...)):
         or content_sha256
     )
     set_current_file(new_path, base_sha256)
+
+    # LSP: connect or disconnect based on the newly active file
+    try:
+        if project_path and new_path:
+            project_root_path = Path(project_path).expanduser()
+            _maybe_connect_lsp(editor, Path(new_path), project_root_path)
+        else:
+            _maybe_connect_lsp(editor, None, None)
+    except Exception as exc:
+        print(f"[LSP] Failed to update LSP on set_content for {new_path}: {exc}", file=sys.stderr)
     
     editor.set_value(content)
     editor._cached_content = content

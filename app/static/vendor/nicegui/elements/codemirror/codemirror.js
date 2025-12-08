@@ -6,6 +6,70 @@ if (window.parent && window.parent !== window) {
   console.log = (...args) => { _origLog(...args); try { window.parent.console.log(...args); } catch {} };
 }
 
+// Socket.IO transport adapter for @codemirror/lsp-client
+class SocketIOTransport {
+  constructor(namespace, languageId, projectRoot) {
+    this.socket = null;
+    this.onMessage = null;
+
+    try {
+      if (typeof io !== 'function') {
+        console.warn('[LSP] socket.io client (io) is not available in this context');
+        return;
+      }
+
+      this.socket = io(namespace, {
+        path: "/ui/_nicegui_ws/socket.io",
+        transports: ["websocket", "polling"],
+      });
+
+      this.socket.on('connect', () => {
+        try {
+          this.socket.emit('initialize', {
+            languageId: languageId,
+            projectRoot: projectRoot,
+          });
+        } catch (err) {
+          console.warn('[LSP] Failed to send initialize event:', err);
+        }
+      });
+
+      this.socket.on('lsp:server_to_client', (data) => {
+        try {
+          if (this.onMessage) {
+            this.onMessage(data);
+          }
+        } catch (err) {
+          console.warn('[LSP] Error in onMessage handler:', err);
+        }
+      });
+    } catch (err) {
+      console.warn('[LSP] Failed to initialize SocketIOTransport:', err);
+      this.socket = null;
+    }
+  }
+
+  send(data) {
+    if (!this.socket) return;
+    try {
+      this.socket.emit('lsp:client_to_server', data);
+    } catch (err) {
+      console.warn('[LSP] Failed to send client_to_server payload:', err);
+    }
+  }
+
+  close() {
+    try {
+      if (this.socket) {
+        this.socket.disconnect();
+        this.socket = null;
+      }
+    } catch (err) {
+      console.warn('[LSP] Error while closing SocketIOTransport:', err);
+    }
+  }
+}
+
 const searchExtension = typeof CM.search === 'function' ? CM.search : null;
 const searchKeymap = Array.isArray(CM.searchKeymap) ? CM.searchKeymap : null;
 const highlightSelectionMatches = typeof CM.highlightSelectionMatches === 'function' ? CM.highlightSelectionMatches : null;
@@ -461,8 +525,36 @@ export default {
       colorPickerCompartment: null, // Color picker toggle compartment
       readOnlyCompartment: null,     // Read-only mode compartment
       stickyScrollCompartment: null, // Sticky scroll toggle compartment - Added: 2025-12-03 by vectorArc - TE2 Team
+      // LSP client state
+      lspClient: null,
+      lspTransport: null,
+      lspCompartment: null,
+      // Latest LSP document symbols (used primarily by Sticky Scroll; host may also observe)
+      lspSymbols: [],
+      // Sticky scroll plugin instance handle (set by plugin constructor when enabled)
+      _stickyScrollPlugin: null,
       isMobileLayout: false,
     };
+  },
+  beforeDestroy() {
+    // Best-effort LSP cleanup for Vue 2 lifecycle
+    try {
+      if (typeof this.disconnectLSP === 'function') {
+        this.disconnectLSP();
+      }
+    } catch (err) {
+      console.warn('[LSP] Error during beforeDestroy disconnect:', err);
+    }
+  },
+  beforeUnmount() {
+    // Best-effort LSP cleanup for Vue 3 lifecycle
+    try {
+      if (typeof this.disconnectLSP === 'function') {
+        this.disconnectLSP();
+      }
+    } catch (err) {
+      console.warn('[LSP] Error during beforeUnmount disconnect:', err);
+    }
   },
   methods: {
     updateMinimapState() {
@@ -596,6 +688,150 @@ export default {
         }, '*');
       } catch (err) {
         console.warn('[CodeMirror] Failed to notify parent', err);
+      }
+    },
+    // Establish LSP connection using Socket.IO transport and @codemirror/lsp-client
+    connectLSP(languageId, projectRoot) {
+      if (!this.editor) {
+        console.warn('[LSP] connectLSP called before editor is ready');
+        return;
+      }
+
+      const LSPClient = CM && CM.LanguageServerClient ? CM.LanguageServerClient : null;
+      if (typeof LSPClient !== 'function') {
+        console.warn('[CM6] LSP client not available in bundle');
+        return;
+      }
+
+      // Tear down any existing client first
+      if (this.lspClient) {
+        this.disconnectLSP();
+      }
+
+      const transport = new SocketIOTransport('/lsp', languageId, projectRoot);
+      if (!transport || !transport.socket) {
+        console.warn('[LSP] SocketIOTransport not initialized; aborting LSP connect');
+        return;
+      }
+
+      this.lspTransport = transport;
+
+      try {
+        this.lspClient = new LSPClient({
+          transport: transport,
+          rootUri: 'file://' + projectRoot,
+          workspaceFolders: [{ name: 'root', uri: 'file://' + projectRoot }],
+          languageId: languageId,
+        });
+      } catch (err) {
+        console.error('[LSP] Failed to create LanguageServerClient:', err);
+        transport.close();
+        this.lspTransport = null;
+        this.lspClient = null;
+        return;
+      }
+
+      try {
+        if (typeof this.lspClient.on === 'function') {
+          this.lspClient.on('documentSymbols', (symbols) => {
+            try {
+              this.handleDocumentSymbols(symbols);
+            } catch (err) {
+              console.warn('[LSP] Error in documentSymbols handler:', err);
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('[LSP] Failed to register documentSymbols handler:', err);
+      }
+
+      // Install LSP extension into its own compartment
+      if (!this.lspCompartment) {
+        this.lspCompartment = new CM.Compartment();
+      }
+
+      try {
+        this.editor.dispatch({
+          effects: [
+            this.lspCompartment.reconfigure([this.lspClient.extension]),
+          ],
+        });
+      } catch (err) {
+        console.error('[LSP] Failed to install LSP extension:', err);
+      }
+
+      console.log(`[LSP] Connected to ${languageId} (projectRoot=${projectRoot})`);
+    },
+
+    disconnectLSP() {
+      // Dispose client (should close transport) and clear compartment
+      try {
+        if (this.lspClient && typeof this.lspClient.dispose === 'function') {
+          this.lspClient.dispose();
+        }
+      } catch (err) {
+        console.warn('[LSP] Error while disposing LSP client:', err);
+      }
+      this.lspClient = null;
+
+      try {
+        if (this.lspTransport && typeof this.lspTransport.close === 'function') {
+          this.lspTransport.close();
+        }
+      } catch (err) {
+        console.warn('[LSP] Error while closing LSP transport:', err);
+      }
+      this.lspTransport = null;
+
+      if (this.editor && this.lspCompartment) {
+        try {
+          this.editor.dispatch({
+            effects: [
+              this.lspCompartment.reconfigure([]),
+            ],
+          });
+        } catch (err) {
+          console.warn('[LSP] Failed to clear LSP compartment:', err);
+        }
+      }
+
+      // Clear LSP-driven symbols when disconnecting
+      this.lspSymbols = [];
+      try {
+        if (this._stickyScrollPlugin && typeof this._stickyScrollPlugin.updateStickyHeader === 'function') {
+          this._stickyScrollPlugin.updateStickyHeader(true);
+        }
+      } catch (err) {
+        console.warn('[StickyScroll] Failed to refresh after LSP disconnect:', err);
+      }
+    },
+    // Handle LSP documentSymbols payloads.
+    // Primary consumer is the in-bundle Sticky Scroll plugin; host notification is secondary.
+    handleDocumentSymbols(symbols) {
+      // Normalize payload to an array
+      if (Array.isArray(symbols)) {
+        this.lspSymbols = symbols;
+      } else if (symbols && Array.isArray(symbols.symbols)) {
+        // Some clients wrap under { symbols: [...] }
+        this.lspSymbols = symbols.symbols;
+      } else {
+        this.lspSymbols = [];
+      }
+
+      // Notify Sticky Scroll to recompute its model if active
+      try {
+        if (this._stickyScrollPlugin && typeof this._stickyScrollPlugin.updateStickyHeader === 'function') {
+          this._stickyScrollPlugin.updateStickyHeader(true);
+        }
+      } catch (err) {
+        console.warn('[StickyScroll] Failed to refresh from LSP symbols:', err);
+      }
+
+      // Optional: bubble up to host iframe consumer for outline/telemetry
+      try {
+        this.notifyParent('cm6-document-symbols', { symbols: this.lspSymbols });
+      } catch (err) {
+        // Host notifications are best-effort only
       }
     },
     setDiffMode(mode) {
@@ -1639,6 +1875,13 @@ export default {
           this.rafPending = false;
           // Pending sibling transitions: depth -> { outgoing, incoming, startTime }
           this.pendingTransitions = new Map();
+
+          // Expose this plugin instance back to the Vue component so LSP
+          // symbol handlers can request a sticky-header refresh when new
+          // symbols arrive (no host round-trip required).
+          if (cmComponent) {
+            cmComponent._stickyScrollPlugin = this;
+          }
           
           // Append to scrollDOM to share stacking context with minimap (fixes z-index layering)
           view.scrollDOM.appendChild(this.dom);
@@ -1852,16 +2095,8 @@ export default {
           const refLine = state.doc.lineAt(refPos).number;
 
           // ---------------------------------------------------------------------------
-          // 2) Build scope candidates from syntax tree
+          // 2) Build scope candidates from LSP symbols (if available) or syntax tree
           // ---------------------------------------------------------------------------
-          const tree = CM.ensureSyntaxTree(state, state.doc.length, 200) || CM.syntaxTree(state);
-          if (!tree || !tree.topNode) {
-            if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
-            this.slots.clearAll();
-            this.currentScopes = [];
-            return;
-          }
-
           const scopeTypes = getScopeTypes();
 
           let candidateScopes = [];
@@ -1907,7 +2142,103 @@ export default {
                 height: cachedHeight
               };
             });
+          } else if (cmComponent && Array.isArray(cmComponent.lspSymbols) && cmComponent.lspSymbols.length) {
+            // LSP-backed scopes for languages with documentSymbols
+            const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
+
+            const flattenSymbols = (symbols, depth) => {
+              const sections = [];
+              for (const sym of symbols) {
+                if (!sym) continue;
+                let startLine = null;
+                let endLine = null;
+
+                // Prefer full range; fall back to selectionRange if needed
+                const range = sym.range || sym.location?.range || sym.selectionRange;
+                if (range && range.start && typeof range.start.line === 'number') {
+                  startLine = range.start.line + 1; // LSP is 0-based
+                }
+                if (range && range.end && typeof range.end.line === 'number') {
+                  endLine = range.end.line + 1;
+                }
+
+                if (startLine == null) continue;
+                if (endLine == null || endLine < startLine) endLine = startLine;
+
+                // Clamp to document bounds
+                if (startLine < 1 || startLine > state.doc.lines) continue;
+                if (endLine < 1) endLine = startLine;
+                if (endLine > state.doc.lines) endLine = state.doc.lines;
+
+                sections.push({
+                  depth,
+                  startLine,
+                  endLine,
+                  name: sym.name || '',
+                  kind: sym.kind,
+                  rawText: null,
+                });
+
+                if (Array.isArray(sym.children) && sym.children.length) {
+                  sections.push(...flattenSymbols(sym.children, depth + 1));
+                }
+              }
+              return sections;
+            };
+
+            const sections = flattenSymbols(cmComponent.lspSymbols, 0);
+            let cumulativeHeight = 0;
+
+            candidateScopes = sections.map((sec) => {
+              const depth = sec.depth;
+              const startLine = sec.startLine;
+              const endLine = sec.endLine;
+
+              const lineText = state.doc.line(startLine).text;
+              const indentMatch = lineText.match(/^([ \t]*)/);
+              const indentRaw = indentMatch ? indentMatch[1] : '';
+              const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
+              const indentDepth = Math.floor(indentSpaces / indentSize);
+
+              let cachedHeight = 1;
+              let offset;
+
+              if (wrappingEnabled) {
+                const key = `${depth}:${startLine}`;
+                cachedHeight = this.scopeHeights.get(key) || 1;
+                offset = -(cumulativeHeight + 2);
+                cumulativeHeight += cachedHeight;
+              } else {
+                const offsetDepth = depth;
+                offset = -(offsetDepth + 2);
+              }
+
+              const triggerLine = startLine + offset;
+              let endTriggerLine = Math.max(startLine, endLine + offset);
+
+              return {
+                node: null,
+                depth,
+                startLine,
+                endLine,
+                text: sec.name || lineText,
+                rawText: sec.rawText || lineText,
+                triggerLine,
+                endTriggerLine,
+                indentDepth,
+                indentSpaces,
+                height: cachedHeight
+              };
+            });
           } else {
+            const tree = CM.ensureSyntaxTree(state, state.doc.length, 200) || CM.syntaxTree(state);
+            if (!tree || !tree.topNode) {
+              if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
+              this.slots.clearAll();
+              this.currentScopes = [];
+              return;
+            }
+
             let ancestorNodes = [];
             let node = tree.resolveInner(refPos);
             for (; node; node = node.parent) {
@@ -2437,6 +2768,9 @@ export default {
         destroy() {
           this.view.scrollDOM.removeEventListener('scroll', this.scrollHandler);
           this.dom.remove();
+          if (cmComponent && cmComponent._stickyScrollPlugin === this) {
+            cmComponent._stickyScrollPlugin = null;
+          }
         }
       });
 
