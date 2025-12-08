@@ -738,13 +738,47 @@ export default {
 
       try {
         this.lspClient = new LSPClient({
-          transport: transport,
           rootUri: 'file://' + projectRoot,
           workspaceFolders: [{ name: 'root', uri: 'file://' + projectRoot }],
-          languageId: languageId,
         });
       } catch (err) {
         console.error('[LSP] Failed to create LanguageServerClient:', err);
+        transport.close();
+        this.lspTransport = null;
+        this.lspClient = null;
+        return;
+      }
+
+      // Create a Transport adapter that @codemirror/lsp-client expects
+      // It needs: send(message: string), subscribe(handler), unsubscribe(handler)
+      const cmTransport = {
+        send: (message) => {
+          if (transport.socket) {
+            transport.socket.emit('lsp:client_to_server', message);
+          }
+        },
+        subscribe: (handler) => {
+          transport.onMessage = handler;
+          if (transport.socket) {
+            transport.socket.on('lsp:server_to_client', (data) => {
+              if (handler) handler(data);
+            });
+          }
+        },
+        unsubscribe: (handler) => {
+          transport.onMessage = null;
+          if (transport.socket) {
+            transport.socket.off('lsp:server_to_client');
+          }
+        },
+      };
+
+      // Connect the client to the server - this initiates the LSP handshake
+      try {
+        console.log('[LSP] Connecting client to transport...');
+        this.lspClient.connect(cmTransport);
+      } catch (err) {
+        console.error('[LSP] Failed to connect LSPClient:', err);
         transport.close();
         this.lspTransport = null;
         this.lspClient = null;
@@ -776,10 +810,13 @@ export default {
 
       console.log(`[LSP] Connected to ${languageId} (projectRoot=${projectRoot})`);
 
-      // Request document symbols after a short delay to let the server initialize
-      setTimeout(() => {
+      // Wait for initialization then request document symbols
+      this.lspClient.initializing.then(() => {
+        console.log('[LSP] Client initialized, requesting symbols...');
         this.requestDocumentSymbols();
-      }, 500);
+      }).catch((err) => {
+        console.warn('[LSP] Client initialization failed:', err);
+      });
 
       // Set up debounced symbol refresh on document changes
       if (!this._symbolRefreshDebounce) {
