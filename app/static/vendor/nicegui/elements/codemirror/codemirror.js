@@ -948,6 +948,22 @@ export default {
       }
 
       console.log(`[LSP] Received ${this.lspSymbols.length} document symbols`);
+      
+      // Debug: log structure of first few symbols to verify hierarchy
+      if (this.lspSymbols.length > 0) {
+        const sample = this.lspSymbols.slice(0, 3).map(sym => ({
+          name: sym.name,
+          kind: sym.kind,
+          hasRange: !!sym.range,
+          hasLocation: !!sym.location,
+          hasSelectionRange: !!sym.selectionRange,
+          hasChildren: !!(sym.children && sym.children.length),
+          childCount: sym.children?.length || 0,
+          range: sym.range,
+          location: sym.location
+        }));
+        console.log('[LSP] Symbol structure sample:', sample);
+      }
 
       // Notify Sticky Scroll to recompute its model if active
       try {
@@ -2418,6 +2434,19 @@ export default {
             
             if (DEBUG_LSP_STICKY) {
               console.log('[LSP-Sticky] refLine:', refLine, 'symbolCount:', cmComponent.lspSymbols.length);
+              // Log first few symbols to see their actual ranges
+              const firstFew = cmComponent.lspSymbols.slice(0, 5).map(sym => {
+                const range = sym.range || sym.location?.range || sym.selectionRange;
+                return {
+                  name: sym.name,
+                  kind: sym.kind,
+                  startLine: range?.start?.line,
+                  endLine: range?.end?.line,
+                  hasChildren: Array.isArray(sym.children) && sym.children.length > 0,
+                  childCount: sym.children?.length || 0
+                };
+              });
+              console.log('[LSP-Sticky] First 5 symbols:', firstFew);
               console.log('[LSP-Sticky] ancestorPath:', ancestorPath.map(p => ({ name: p.name, start: p.startLine, end: p.endLine })));
             }
             
