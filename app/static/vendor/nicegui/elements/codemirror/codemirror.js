@@ -24,7 +24,8 @@ class SocketIOTransport {
 
       this.socket = _io(namespace, {
         path: "/ui/_nicegui_ws/socket.io",
-        transports: ["websocket", "polling"],
+        transports: ["websocket"],
+        query: { app_id: 'file_editor_cm6' },
       });
 
       this.socket.on('connect', () => {
@@ -37,6 +38,14 @@ class SocketIOTransport {
         } catch (err) {
           console.warn('[LSP] Failed to send initialize event:', err);
         }
+      });
+
+      this.socket.on('connect_error', (err) => {
+        console.error('[LSP] Socket.IO connect_error:', err);
+      });
+
+      this.socket.on('error', (err) => {
+        console.error('[LSP] Socket.IO error:', err);
       });
 
       // NOTE: Don't register lsp:server_to_client handler here.
