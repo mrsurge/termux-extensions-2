@@ -751,17 +751,41 @@ export default {
 
       // Create a Transport adapter that @codemirror/lsp-client expects
       // It needs: send(message: string), subscribe(handler), unsubscribe(handler)
+      // NOTE: @codemirror/lsp-client expects JSON STRINGS, but Socket.IO auto-parses JSON.
+      // So we need to: stringify server responses before passing to handler,
+      // and parse outgoing messages if they're strings (Socket.IO will re-stringify).
       const cmTransport = {
         send: (message) => {
           if (transport.socket) {
-            transport.socket.emit('lsp:client_to_server', message);
+            // message is a JSON string from lsp-client; parse it so Socket.IO can serialize it
+            let payload = message;
+            try {
+              if (typeof message === 'string') {
+                payload = JSON.parse(message);
+              }
+            } catch (e) {
+              // If parsing fails, send as-is
+            }
+            transport.socket.emit('lsp:client_to_server', payload);
           }
         },
         subscribe: (handler) => {
           transport.onMessage = handler;
           if (transport.socket) {
             transport.socket.on('lsp:server_to_client', (data) => {
-              if (handler) handler(data);
+              if (handler) {
+                // data is already an object from Socket.IO; stringify for lsp-client
+                let msg = data;
+                if (typeof data !== 'string') {
+                  try {
+                    msg = JSON.stringify(data);
+                  } catch (e) {
+                    console.warn('[LSP] Failed to stringify server message:', e);
+                    return;
+                  }
+                }
+                handler(msg);
+              }
             });
           }
         },
