@@ -195,6 +195,7 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
 
     if not _should_use_lsp(project_root, language_id):
         # Preference gate disabled: disconnect if previously connected
+        print(f"[LSP] Preference gate disabled for {language_id}", file=sys.stderr)
         try:
             if hasattr(editor, 'disconnect_lsp'):
                 editor.disconnect_lsp()
@@ -203,6 +204,7 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
         return
 
     # At this point we want LSP active for this document
+    print(f"[LSP] Triggering connect_lsp: {language_id} / {project_root}", file=sys.stderr)
     try:
         if hasattr(editor, 'connect_lsp'):
             editor.connect_lsp(language_id, str(project_root))

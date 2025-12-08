@@ -695,7 +695,21 @@ export default {
       }
     },
     // Establish LSP connection using Socket.IO transport and @codemirror/lsp-client
-    connectLSP(languageId, projectRoot) {
+    // NOTE: Python run_method sends {languageId, projectRoot} as single dict argument
+    connectLSP(options) {
+      // Handle both dict and separate args for flexibility
+      let languageId, projectRoot;
+      if (typeof options === 'object' && options !== null) {
+        languageId = options.languageId;
+        projectRoot = options.projectRoot;
+      } else {
+        // Legacy: separate args (languageId, projectRoot)
+        languageId = options;
+        projectRoot = arguments[1];
+      }
+
+      console.log(`[LSP] connectLSP called: languageId=${languageId}, projectRoot=${projectRoot}`);
+
       if (!this.editor) {
         console.warn('[LSP] connectLSP called before editor is ready');
         return;
