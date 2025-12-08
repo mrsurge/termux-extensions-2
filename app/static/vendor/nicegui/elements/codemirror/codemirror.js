@@ -850,20 +850,27 @@ export default {
       this.lspClient.initializing.then(async () => {
         console.log('[LSP] Client initialized');
         
-        // Send textDocument/didOpen with the current document content
-        // This is required before the server will respond to documentSymbol
-        const docText = this.editor.state.doc.toString();
-        console.log(`[LSP] Sending didOpen for ${this._lspFileUri} (${docText.length} chars)`);
+        // Open the file with the LSP client's workspace
+        // This sends textDocument/didOpen with the current document content
+        console.log(`[LSP] Opening file ${this._lspFileUri} with workspace`);
         
         try {
-          await this.lspClient.notify('textDocument/didOpen', {
-            textDocument: {
-              uri: this._lspFileUri,
-              languageId: this._lspLanguageId,
-              version: 1,
-              text: docText
-            }
-          });
+          // Use workspace.openFile which sends didOpen notification
+          if (this.lspClient.workspace && typeof this.lspClient.workspace.openFile === 'function') {
+            this.lspClient.workspace.openFile(this._lspFileUri, this._lspLanguageId, this.editor);
+            console.log('[LSP] File opened via workspace.openFile');
+          } else {
+            // Fallback: send notification directly
+            this.lspClient.notification('textDocument/didOpen', {
+              textDocument: {
+                uri: this._lspFileUri,
+                languageId: this._lspLanguageId,
+                version: 1,
+                text: this.editor.state.doc.toString()
+              }
+            });
+            console.log('[LSP] File opened via notification');
+          }
         } catch (err) {
           console.warn('[LSP] didOpen failed:', err);
         }
