@@ -2535,10 +2535,31 @@ export default {
 
             candidateScopes = filteredPath.map((sec, pathIdx) => {
               const depth = pathIdx; // Use path index as depth (outermost = 0)
-              const startLine = sec.startLine;
+              let startLine = sec.startLine;
               const endLine = sec.endLine;
 
-              const lineText = state.doc.line(startLine).text;
+              let lineText = state.doc.line(startLine).text;
+              
+              // For Python: if the startLine is a decorator (@...), skip to the def/class line
+              if (isPython) {
+                const trimmed = lineText.trim();
+                if (trimmed.startsWith('@')) {
+                  // Scan forward to find the actual def/class line
+                  for (let scanLine = startLine + 1; scanLine <= Math.min(endLine, startLine + 10); scanLine++) {
+                    const scanText = state.doc.line(scanLine).text.trim();
+                    if (scanText.startsWith('def ') || scanText.startsWith('async def ') || scanText.startsWith('class ')) {
+                      startLine = scanLine;
+                      lineText = state.doc.line(scanLine).text;
+                      break;
+                    }
+                    // Stop if we hit a non-decorator, non-empty line that isn't def/class
+                    if (scanText && !scanText.startsWith('@') && !scanText.startsWith('#')) {
+                      break;
+                    }
+                  }
+                }
+              }
+
               const indentMatch = lineText.match(/^([ \t]*)/);
               const indentRaw = indentMatch ? indentMatch[1] : '';
               const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
