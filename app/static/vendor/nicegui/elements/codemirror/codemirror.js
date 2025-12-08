@@ -2450,7 +2450,8 @@ export default {
                   : startLine;
                 
                 // Check if this symbol contains the target line
-                if (targetLine >= startLine && targetLine <= endLine) {
+                // Use > startLine (not >=) so scope activates AFTER its definition scrolls out
+                if (targetLine > startLine && targetLine <= endLine) {
                   const newPath = [...currentPath, {
                     sym,
                     startLine,
