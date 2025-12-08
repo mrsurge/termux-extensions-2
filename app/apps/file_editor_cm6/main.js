@@ -38,8 +38,17 @@ const _originalConsole = {
 };
 
 function initDebugConsole() {
-  // Debug console forwarding disabled
-  return;
+  const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  // Use the framework's WebSocket proxy for apps
+  const wsUrl = `${wsProto}//${window.location.host}/ws/app/file_editor_cm6/ws/debug_console`;
+  try {
+    _debugWs = new WebSocket(wsUrl);
+    _debugWs.onopen = () => { _debugWsReady = true; };
+    _debugWs.onclose = () => { _debugWsReady = false; };
+    _debugWs.onerror = () => { _debugWsReady = false; };
+  } catch (e) {
+    // Silent fail
+  }
 }
 
 function sendToDebugWs(level, args) {

@@ -1995,25 +1995,27 @@ async def edit_tracker_ws(websocket: WebSocket):
             pass
 
 # =============================================================================
-# Debug Console WebSocket (disabled)
+# Debug Console WebSocket
 # =============================================================================
-# _debug_log_path = Path(__file__).parent / 'browser_console.log'
-#
-# @file_editor_cm6_bp.websocket('/ws/debug_console')
-# async def debug_console_ws(websocket: WebSocket):
-#     """WebSocket endpoint for browser console log forwarding. Writes to browser_console.log."""
-#     await websocket.accept()
-#     
-#     try:
-#         async for msg in websocket.iter_text():
-#             try:
-#                 # Append to log file silently
-#                 with open(_debug_log_path, 'a') as f:
-#                     f.write(msg + '\n')
-#             except Exception:
-#                 pass  # Stay silent
-#     except Exception:
-#         pass  # Stay silent on disconnect too
+_debug_log_path = Path(os.path.expanduser('~/.tmp/browser_console.log'))
+
+@file_editor_cm6_bp.websocket('/ws/debug_console')
+async def debug_console_ws(websocket: WebSocket):
+    """WebSocket endpoint for browser console log forwarding. Writes to ~/.tmp/browser_console.log."""
+    await websocket.accept()
+    # Ensure directory exists
+    _debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        async for msg in websocket.iter_text():
+            try:
+                # Append to log file silently
+                with open(_debug_log_path, 'a') as f:
+                    f.write(msg + '\n')
+            except Exception:
+                pass  # Stay silent
+    except Exception:
+        pass  # Stay silent on disconnect too
 
 @file_editor_cm6_bp.post('/editor/update_diffs')
 async def update_diffs(data: dict = Body(...)):

@@ -2591,8 +2591,9 @@ export default {
               }
 
               const triggerLine = startLine + offset;
-              // End trigger: when scope's last line would push out of view
-              let endTriggerLine = Math.max(startLine, endLine + offset);
+              // End trigger: use smaller offset for exit to prevent early release
+              // Only offset by 1 line (for the header itself) instead of full depth
+              let endTriggerLine = Math.max(startLine, endLine - 1);
 
               const scopeObj = {
                 node: null, // LSP doesn't have syntax tree nodes
@@ -2795,7 +2796,14 @@ export default {
             // Near-end linger: keep innermost scope active during push-up
             if (!shouldActivate && scope.depth > 0) {
               try {
-                const endLineObj = state.doc.lineAt(scope.node.to);
+                let endLineObj;
+                if (scope.node) {
+                  // Lezer-backed: use node.to
+                  endLineObj = state.doc.lineAt(scope.node.to);
+                } else {
+                  // LSP-backed: use endLine directly
+                  endLineObj = state.doc.line(scope.endLine);
+                }
                 const endBlock = view.lineBlockAt(endLineObj.to);
                 const endBottomViewport = endBlock.bottom - scrollTop;
 
@@ -2835,18 +2843,12 @@ export default {
               // Clear the slot first if occupied by a different scope
               const existing = this.slots.get(scope.depth);
               if (existing && existing.startLine !== scope.startLine) {
-                if (isMarkdown) {
-                  // Markdown: smooth sibling transition
-                  this.pendingTransitions.set(scope.depth, {
-                    outgoing: existing,
-                    incoming: scope,
-                    startTime: performance.now(),
-                  });
-                } else {
-                  // Other languages: immediate swap to preserve snappy n+1 behavior
-                  this.slots.clear(scope.depth);
-                  this.slots.register(scope);
-                }
+                // Smooth sibling transition for all scope types
+                this.pendingTransitions.set(scope.depth, {
+                  outgoing: existing,
+                  incoming: scope,
+                  startTime: performance.now(),
+                });
               } else {
                 if (DEBUG_SLOTS) console.log('[Slots] REGISTER', { depth: scope.depth, startLine: scope.startLine });
                 this.slots.register(scope);
@@ -2947,9 +2949,8 @@ export default {
             // For markdown, trigger push-up only when the section end crosses the stack bottom.
             pushMarginLines = 0; // start exactly at boundary
           } else {
-            if (scopeLength <= 6) pushMarginLines = 1;
-            else if (innermost.depth === 0) pushMarginLines = 1.5;
-            else pushMarginLines = 3;
+            // Use consistent small margin for all scopes - 1 line works well
+            pushMarginLines = 1;
           }
           const earlyMargin = pushMarginLines * lineHeight;
 
@@ -2972,6 +2973,24 @@ export default {
             }
             const stackBottomViewport = headerHeight;
             const delta = endBottomViewport - stackBottomViewport;
+            
+            const DEBUG_PUSHUP = true;
+            if (DEBUG_PUSHUP && delta < earlyMargin * 2) {
+              console.log('[PushUp]', {
+                scope: innermost.text?.slice(0, 40),
+                depth: innermost.depth,
+                startLine: innermost.startLine,
+                endLine: innermost.endLine,
+                endTriggerLine: innermost.endTriggerLine,
+                refLine,
+                delta: delta.toFixed(1),
+                earlyMargin: earlyMargin.toFixed(1),
+                topOffset: topOffset.toFixed(1),
+                headerHeight: headerHeight.toFixed(1),
+                isLSP: !innermost.node
+              });
+            }
+            
             if (isMarkdown) {
               if (delta < lineHeight) {
                 // Start push-up about one line before the end crosses the stack
