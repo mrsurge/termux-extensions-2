@@ -120,14 +120,18 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
     
     async def on_lsp_client_to_server(self, sid, message):
         """Receive JSON LSP message from client, forward to shell stdin."""
+        print(f"[LSP WS] Received from client {sid}: {json.dumps(message)[:200]}...")
+        
         session = self.active_sessions.get(sid)
         if not session:
+            print(f"[LSP WS] No session for {sid}")
             return
         
         shell_id = session["shell_id"]
         mgr = await get_manager()
         pipe_state = mgr.get_pipe_state(shell_id)
         if not pipe_state or not pipe_state.process.stdin:
+            print(f"[LSP WS] No pipe state or stdin for shell {shell_id}")
             return
         
         # Add LSP framing
@@ -137,11 +141,13 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         try:
             pipe_state.process.stdin.write(header + body)
             await pipe_state.process.stdin.drain()
+            print(f"[LSP WS] Wrote {len(body)} bytes to shell {shell_id}")
         except Exception as e:
             print(f"[LSP WS] Write error: {e}")
     
     async def _bridge_output(self, sid: str, pipe_state: PipeState):
         """Read from shell stdout, parse LSP frames, emit to client."""
+        print(f"[LSP WS] Starting output bridge for {sid}")
         session = self.active_sessions.get(sid)
         if not session:
             return
@@ -152,6 +158,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         try:
             while not pipe_state.stop.is_set():
                 if proc.stdout is None:
+                    print(f"[LSP WS] No stdout for {sid}")
                     break
                 
                 try:
@@ -161,9 +168,12 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                 
                 if not chunk:
                     # EOF
+                    print(f"[LSP WS] EOF on {sid}")
                     break
                 
+                print(f"[LSP WS] Read {len(chunk)} bytes from LSP server")
                 for msg in parser.feed(chunk):
+                    print(f"[LSP WS] Sending to client: {json.dumps(msg)[:200]}...")
                     await self.emit("lsp_server_to_client", msg, to=sid)
         except asyncio.CancelledError:
             pass
