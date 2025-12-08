@@ -3,6 +3,7 @@
 const STATE = {
     visibleSessions: [],
     frameworkShells: [],
+    shellTrees: [],  // Hierarchical shell trees (app-workers with children)
     containers: [],
     sessionNames: {},
     currentSessionId: null,
@@ -184,7 +185,11 @@ function renderFrameworkShells() {
     if (!list) return;
     list.innerHTML = '';
 
-    if (!STATE.frameworkShells.length) {
+    // Use shell trees if available, fall back to flat list
+    const trees = STATE.shellTrees.length > 0 ? STATE.shellTrees : 
+        STATE.frameworkShells.map(s => ({ shell: s, children: [], is_app_worker: false }));
+
+    if (!trees.length) {
         const placeholder = document.createElement('p');
         placeholder.className = 'session-empty';
         placeholder.textContent = 'No framework shells running.';
@@ -194,28 +199,89 @@ function renderFrameworkShells() {
 
     const containerByShell = containerLabelByShell();
 
-    STATE.frameworkShells.forEach((shell) => {
+    trees.forEach((tree) => {
+        const shell = tree.shell;
+        const children = tree.children || [];
+        const isAppWorker = tree.is_app_worker;
+        
         const card = document.createElement('div');
-        card.className = 'session framework';
+        card.className = 'session framework' + (isAppWorker ? ' app-worker-card' : '');
+        
         const stats = shell.stats || {};
-        const containerLabel = containerByShell[shell.id] || 'Unknown container';
+        const containerLabel = containerByShell[shell.id] || (isAppWorker ? extractAppName(shell.label) : 'Service');
         const uptime = stats.uptime != null ? `uptime: ${Math.max(0, Math.round(stats.uptime))}s` : '';
         const cpu = stats.cpu_percent != null ? `cpu: ${stats.cpu_percent.toFixed(1)}%` : '';
         const mem = stats.memory_rss != null ? `mem: ${(stats.memory_rss / (1024 * 1024)).toFixed(1)} MB` : '';
         const statLine = [uptime, cpu, mem].filter(Boolean).join(' · ');
+        
+        // Build children HTML if this is an app-worker with children
+        let childrenHTML = '';
+        if (children.length > 0) {
+            childrenHTML = `
+                <div class="shell-children">
+                    <div class="children-header">Child Processes (${children.length})</div>
+                    ${children.map(child => renderChildProcess(child)).join('')}
+                </div>
+            `;
+        }
 
         card.innerHTML = `
             <div class="session-header">
-                <div class="session-title">Framework Shell • ${escapeHTML(containerLabel)}</div>
-                <button class="framework-log" data-shell="${shell.id}">Log</button>
-                <button class="framework-kill" data-shell="${shell.id}">Kill</button>
+                <div class="session-title">
+                    ${isAppWorker ? '<span class="app-worker-badge">App Worker</span>' : ''}
+                    ${escapeHTML(containerLabel)}
+                </div>
+                <div class="shell-actions">
+                    <button class="framework-log" data-shell="${shell.id}" title="View Logs">📋</button>
+                    <button class="framework-kill ${isAppWorker ? 'kill-with-children' : ''}" 
+                            data-shell="${shell.id}" 
+                            data-pid="${shell.pid}"
+                            data-has-children="${children.length > 0}"
+                            title="${isAppWorker ? 'Kill App + Children' : 'Kill'}">✕</button>
+                </div>
             </div>
-            <div class="session-cwd">ID: ${shell.id}</div>
+            <div class="session-cwd">PID: ${shell.pid} · ID: ${shell.id}</div>
             <div class="session-cwd">Command: ${escapeHTML((shell.command || []).join(' '))}</div>
             ${statLine ? `<div class="session-cwd">${escapeHTML(statLine)}</div>` : ''}
+            ${childrenHTML}
         `;
         list.appendChild(card);
     });
+}
+
+function extractAppName(label) {
+    // Extract app name from label like "app-worker:file_editor_cm6"
+    if (!label) return 'Unknown';
+    const match = label.match(/^app-worker:(.+)$/);
+    return match ? match[1] : label;
+}
+
+function renderChildProcess(child) {
+    const proc = child.process;
+    const shell = child.shell;  // May be null if no matching framework shell
+    
+    const label = proc.label || proc.metadata?.label || 'Process';
+    const pid = proc.pid;
+    const type = proc.type || 'process';
+    const cmdPreview = proc.metadata?.command || '';
+    
+    // Determine if we have a shell record for richer info
+    const hasShell = !!shell;
+    const shellId = shell?.id;
+    
+    return `
+        <div class="child-process" data-pid="${pid}">
+            <div class="child-header">
+                <span class="child-label">${escapeHTML(label)}</span>
+                <span class="child-type">${escapeHTML(type)}</span>
+                <div class="child-actions">
+                    ${hasShell ? `<button class="child-log" data-shell="${shellId}" title="View Logs">📋</button>` : ''}
+                    <button class="child-kill" data-pid="${pid}" title="Kill Process">✕</button>
+                </div>
+            </div>
+            <div class="child-info">PID: ${pid}${cmdPreview ? ` · ${escapeHTML(cmdPreview.slice(0, 50))}${cmdPreview.length > 50 ? '...' : ''}` : ''}</div>
+        </div>
+    `;
 }
 
 function render() {
@@ -293,6 +359,7 @@ function applyLiveSnapshot(payload) {
     if (!payload || typeof payload !== 'object') return;
     if (Array.isArray(payload.sessions)) STATE.visibleSessions = payload.sessions;
     if (Array.isArray(payload.frameworks)) STATE.frameworkShells = payload.frameworks;
+    if (Array.isArray(payload.shell_trees)) STATE.shellTrees = payload.shell_trees;
     if (Array.isArray(payload.containers)) STATE.containers = payload.containers;
     render();
 }
@@ -399,7 +466,7 @@ function attachEventListeners() {
             return;
         }
 
-        if (target.classList.contains('framework-log')) {
+        if (target.classList.contains('framework-log') || target.classList.contains('child-log')) {
             const shellId = target.dataset.shell;
             if (shellId) {
                 window.location.href = `/shell-logs/${shellId}`;
@@ -409,8 +476,24 @@ function attachEventListeners() {
 
         if (target.classList.contains('framework-kill')) {
             const shellId = target.dataset.shell;
-            if (shellId && confirm(`Kill framework shell ${shellId}?`)) {
-                killFrameworkShell(shellId);
+            const pid = target.dataset.pid;
+            const hasChildren = target.dataset.hasChildren === 'true';
+            
+            if (shellId) {
+                const msg = hasChildren 
+                    ? `Kill this app worker and all its child processes?`
+                    : `Kill framework shell ${shellId}?`;
+                if (confirm(msg)) {
+                    killFrameworkShellWithChildren(shellId, pid, hasChildren);
+                }
+            }
+            return;
+        }
+
+        if (target.classList.contains('child-kill')) {
+            const pid = target.dataset.pid;
+            if (pid && confirm(`Kill child process ${pid}?`)) {
+                killProcessByPid(pid);
             }
             return;
         }
@@ -475,6 +558,34 @@ async function killFrameworkShell(shellId) {
         requestSnapshot();
     } catch (err) {
         alert(err.message || 'Failed to kill shell');
+    }
+}
+
+async function killFrameworkShellWithChildren(shellId, pid, killChildren) {
+    try {
+        if (killChildren && pid) {
+            // Use the new endpoint that kills parent + children
+            await apiClient.delete(`process/${pid}?kill_children=true`);
+        } else {
+            // Just kill the shell itself
+            await frameworkFetch(`/api/framework_shells/${shellId}/action`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'kill' }),
+            });
+        }
+        requestSnapshot();
+    } catch (err) {
+        alert(err.message || 'Failed to kill shell');
+    }
+}
+
+async function killProcessByPid(pid) {
+    try {
+        await apiClient.delete(`process/${pid}`);
+        requestSnapshot();
+    } catch (err) {
+        alert(err.message || 'Failed to kill process');
     }
 }
 

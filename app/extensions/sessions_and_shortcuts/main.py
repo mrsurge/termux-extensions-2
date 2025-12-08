@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 import subprocess
-from fastapi import APIRouter, HTTPException, Body, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Body, WebSocket, WebSocketDisconnect, Query
 
 # Create a APIRouter
 sessions_bp = APIRouter()
@@ -205,9 +205,91 @@ async def _list_framework_shells():
         from app.libs.framework_shells import get_manager
         manager = await get_manager()
         shells = await manager.list_shells()
-        return [s.to_payload() for s in shells]
+        return [await manager.describe(s) for s in shells]
     except Exception:
         return []
+
+
+async def _list_ipc_processes():
+    """Fetch all processes from the IPC registry."""
+    import httpx
+    ipc_url = f"http://{os.environ.get('TE_IPC_HOST', '127.0.0.1')}:{os.environ.get('TE_IPC_PORT', '9123')}"
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(f"{ipc_url}/processes/list")
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("data", {}).get("processes", [])
+    except Exception:
+        pass
+    return []
+
+
+def _build_shell_trees(shells, ipc_processes):
+    """Build hierarchical trees grouping app-workers with their children.
+    
+    Returns list of trees where each tree is:
+    {
+        'shell': ShellRecord payload (the app-worker),
+        'children': [
+            {'process': IPC process record, 'shell': optional matching ShellRecord}
+        ]
+    }
+    
+    Non-app-worker shells are returned as standalone trees with no children.
+    """
+    # Index shells by PID for fast lookup
+    shell_by_pid = {s.get('pid'): s for s in shells if s.get('pid')}
+    
+    # Find app-worker shells (these are the "parents" we care about)
+    app_workers = [s for s in shells if (s.get('label') or '').startswith('app-worker:')]
+    app_worker_pids = {s.get('pid') for s in app_workers if s.get('pid')}
+    
+    # Find child processes from IPC (processes whose parent_pid is an app-worker)
+    children_by_parent = {}
+    for proc in ipc_processes:
+        parent_pid = proc.get('parent_pid')
+        if parent_pid and parent_pid in app_worker_pids:
+            children_by_parent.setdefault(parent_pid, []).append(proc)
+    
+    trees = []
+    
+    # Build trees for app-workers
+    for shell in app_workers:
+        pid = shell.get('pid')
+        children = []
+        for proc in children_by_parent.get(pid, []):
+            child_pid = proc.get('pid')
+            # Check if this child process also has a framework shell record
+            matching_shell = shell_by_pid.get(child_pid)
+            children.append({
+                'process': proc,
+                'shell': matching_shell,
+            })
+        trees.append({
+            'shell': shell,
+            'children': children,
+            'is_app_worker': True,
+        })
+    
+    # Add standalone shells (non-app-workers that aren't children of app-workers)
+    child_pids = set()
+    for procs in children_by_parent.values():
+        child_pids.update(p.get('pid') for p in procs)
+    
+    for shell in shells:
+        if shell in app_workers:
+            continue
+        pid = shell.get('pid')
+        if pid in child_pids:
+            continue  # Already included as a child
+        trees.append({
+            'shell': shell,
+            'children': [],
+            'is_app_worker': False,
+        })
+    
+    return trees
 
 
 @sessions_bp.websocket('/ws')
@@ -222,10 +304,14 @@ async def sessions_ws(websocket: WebSocket):
                 sessions_data = []
 
             frameworks = await _list_framework_shells()
+            ipc_processes = await _list_ipc_processes()
+            shell_trees = _build_shell_trees(frameworks, ipc_processes)
+            
             payload = {
                 "type": "update",
                 "sessions": sessions_data,
-                "frameworks": frameworks,
+                "frameworks": frameworks,  # Keep flat list for backward compat
+                "shell_trees": shell_trees,  # New hierarchical structure
                 "containers": [],
             }
             await websocket.send_json(payload)
@@ -293,5 +379,61 @@ async def kill_session(sid: str):
         return {"ok": True}
     except ProcessLookupError:
         return {"ok": True, "data": {"message": 'Session already terminated.'}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@sessions_bp.delete('/process/{pid}')
+async def kill_process(pid: str, kill_children: bool = Query(False)):
+    """Kill a process by PID.
+    
+    If kill_children=True, also kills all child processes registered in IPC.
+    Used for both framework shells and their child processes (LSP servers, etc.).
+    """
+    try:
+        target_pid = int(pid)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail='Invalid PID')
+    
+    killed_pids = []
+    
+    # If killing children, find them first via IPC
+    if kill_children:
+        ipc_processes = await _list_ipc_processes()
+        child_pids = [p.get('pid') for p in ipc_processes if p.get('parent_pid') == target_pid]
+        
+        # Kill children first (in reverse order - deepest first if nested)
+        for child_pid in reversed(child_pids):
+            try:
+                from app.ipc.client import unregister_process
+                unregister_process(child_pid)
+                os.kill(child_pid, 9)
+                killed_pids.append(child_pid)
+            except (ProcessLookupError, OSError):
+                pass
+    
+    # Try framework shell manager first
+    try:
+        from app.libs.framework_shells import get_manager
+        manager = await get_manager()
+        shells = await manager.list_shells()
+        
+        for shell in shells:
+            if shell.pid == target_pid:
+                await manager.terminate_shell(shell.id, force=True)
+                killed_pids.append(target_pid)
+                return {"ok": True, "data": {"killed_pids": killed_pids}}
+    except Exception:
+        pass
+    
+    # Direct kill
+    try:
+        from app.ipc.client import unregister_process
+        unregister_process(target_pid)
+        os.kill(target_pid, 9)
+        killed_pids.append(target_pid)
+        return {"ok": True, "data": {"killed_pids": killed_pids}}
+    except ProcessLookupError:
+        return {"ok": True, "data": {"message": 'Process already terminated.', "killed_pids": killed_pids}}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

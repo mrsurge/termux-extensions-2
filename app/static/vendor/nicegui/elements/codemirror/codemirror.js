@@ -2959,9 +2959,15 @@ export default {
               const endLineObj = state.doc.line(innermost.endLine);
               const endLineBlock = view.lineBlockAt(endLineObj.to);
               endBottomViewport = endLineBlock.bottom - scrollTop;
-            } else {
+            } else if (innermost.node) {
+              // Lezer-backed scope: use node.to for precise end position
               const endLine = state.doc.lineAt(innermost.node.to);
               const endLineBlock = view.lineBlockAt(endLine.to);
+              endBottomViewport = endLineBlock.bottom - scrollTop;
+            } else {
+              // LSP-backed scope: use endLine directly
+              const endLineObj = state.doc.line(innermost.endLine);
+              const endLineBlock = view.lineBlockAt(endLineObj.to);
               endBottomViewport = endLineBlock.bottom - scrollTop;
             }
             const stackBottomViewport = headerHeight;
