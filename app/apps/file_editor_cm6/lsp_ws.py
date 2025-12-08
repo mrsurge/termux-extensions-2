@@ -77,12 +77,27 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         super().__init__(namespace)
         self.active_sessions: Dict[str, dict] = {}  # sid -> session info
         self.reader_tasks: Dict[str, asyncio.Task] = {}
+        self.pending_messages: Dict[str, list] = {}  # sid -> queued messages waiting for session
+        self.session_ready: Dict[str, asyncio.Event] = {}  # sid -> event signaling session is ready
         import sys
         print(f"[LSP WS] Namespace initialized: {namespace}", file=sys.stderr, flush=True)
     
     async def on_connect(self, sid, environ):
         import sys
         print(f"[LSP WS] Client connected: {sid}", file=sys.stderr, flush=True)
+        self.pending_messages[sid] = []
+        self.session_ready[sid] = asyncio.Event()
+    
+    async def on_disconnect(self, sid):
+        import sys
+        print(f"[LSP WS] Client disconnected: {sid}", file=sys.stderr, flush=True)
+        # Clean up
+        self.active_sessions.pop(sid, None)
+        self.pending_messages.pop(sid, None)
+        self.session_ready.pop(sid, None)
+        task = self.reader_tasks.pop(sid, None)
+        if task:
+            task.cancel()
     
     async def on_initialize(self, sid, data):
         """Client sends: { languageId: 'python', projectRoot: '/path/to/project' }"""
@@ -116,13 +131,26 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
             "shell_id": shell.id,
             "project_root": project_root,
             "parser": LSPFrameParser(),
+            "pipe_state": pipe_state,
         }
         
         # Start background reader for this session
         task = asyncio.create_task(self._bridge_output(sid, pipe_state))
         self.reader_tasks[sid] = task
         
-        await self.emit("lsp:initialized", {"shellId": shell.id}, to=sid)
+        # Signal that session is ready
+        if sid in self.session_ready:
+            self.session_ready[sid].set()
+        
+        # Process any pending messages that arrived before session was ready
+        pending = self.pending_messages.get(sid, [])
+        if pending:
+            print(f"[LSP WS] Processing {len(pending)} pending messages for {sid}", file=sys.stderr, flush=True)
+            for msg in pending:
+                await self._forward_to_shell(sid, msg)
+            self.pending_messages[sid] = []
+        
+        await self.emit("lsp_initialized", {"shellId": shell.id}, to=sid)
     
     async def on_lsp_client_to_server(self, sid, message):
         """Receive JSON LSP message from client, forward to shell stdin."""
@@ -131,30 +159,41 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         
         session = self.active_sessions.get(sid)
         if not session:
-            print(f"[LSP WS] No session for {sid}", file=sys.stderr, flush=True)
+            # Session not ready yet - queue the message
+            print(f"[LSP WS] Session not ready, queuing message for {sid}", file=sys.stderr, flush=True)
+            if sid in self.pending_messages:
+                self.pending_messages[sid].append(message)
             return
         
-        shell_id = session["shell_id"]
-        mgr = await get_manager()
-        pipe_state = mgr.get_pipe_state(shell_id)
-        if not pipe_state or not pipe_state.process.stdin:
-            print(f"[LSP WS] No pipe state or stdin for shell {shell_id}")
+        await self._forward_to_shell(sid, message)
+    
+    async def _forward_to_shell(self, sid: str, message: dict):
+        """Forward a single LSP message to the shell stdin."""
+        import sys
+        session = self.active_sessions.get(sid)
+        if not session:
             return
         
-        # Add LSP framing
+        pipe_state = session.get("pipe_state")
+        if not pipe_state or not pipe_state.process or not pipe_state.process.stdin:
+            print(f"[LSP WS] No pipe state or stdin for session {sid}", file=sys.stderr, flush=True)
+            return
+        
+        # Add LSP framing (Content-Length header)
         body = json.dumps(message).encode("utf-8")
         header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
         
         try:
             pipe_state.process.stdin.write(header + body)
             await pipe_state.process.stdin.drain()
-            print(f"[LSP WS] Wrote {len(body)} bytes to shell {shell_id}")
+            print(f"[LSP WS] Wrote {len(body)} bytes to shell", file=sys.stderr, flush=True)
         except Exception as e:
-            print(f"[LSP WS] Write error: {e}")
+            print(f"[LSP WS] Write error: {e}", file=sys.stderr, flush=True)
     
     async def _bridge_output(self, sid: str, pipe_state: PipeState):
         """Read from shell stdout, parse LSP frames, emit to client."""
-        print(f"[LSP WS] Starting output bridge for {sid}")
+        import sys
+        print(f"[LSP WS] Starting output bridge for {sid}", file=sys.stderr, flush=True)
         session = self.active_sessions.get(sid)
         if not session:
             return
@@ -165,7 +204,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         try:
             while not pipe_state.stop.is_set():
                 if proc.stdout is None:
-                    print(f"[LSP WS] No stdout for {sid}")
+                    print(f"[LSP WS] No stdout for {sid}", file=sys.stderr, flush=True)
                     break
                 
                 try:
@@ -175,29 +214,16 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                 
                 if not chunk:
                     # EOF
-                    print(f"[LSP WS] EOF on {sid}")
+                    print(f"[LSP WS] EOF on {sid}", file=sys.stderr, flush=True)
                     break
                 
-                print(f"[LSP WS] Read {len(chunk)} bytes from LSP server")
+                print(f"[LSP WS] Read {len(chunk)} bytes from LSP server", file=sys.stderr, flush=True)
                 for msg in parser.feed(chunk):
-                    print(f"[LSP WS] Sending to client: {json.dumps(msg)[:200]}...")
+                    print(f"[LSP WS] Sending to client: {str(msg)[:200]}...", file=sys.stderr, flush=True)
                     await self.emit("lsp_server_to_client", msg, to=sid)
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            print(f"[LSP WS] Reader error: {e}")
+            print(f"[LSP WS] Reader error: {e}", file=sys.stderr, flush=True)
     
-    async def on_disconnect(self, sid):
-        print(f"[LSP WS] Client disconnected: {sid}")
-        
-        # Cancel reader task
-        task = self.reader_tasks.pop(sid, None)
-        if task:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        
-        # Clean up session (don't kill shell - may be shared)
-        self.active_sessions.pop(sid, None)
+    # Note: on_disconnect is defined earlier in the class
