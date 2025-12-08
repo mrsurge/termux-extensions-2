@@ -1,10 +1,10 @@
 {
   "name": "System Stats",
-  "version": "0.1.0",
-  "description": "Displays live CPU and Memory usage.",
+  "version": "0.2.0",
+  "description": "Real-time system metrics via WebSocket.",
   "author": "Gemini",
   "entrypoints": {
-    "backend_blueprint": null,
+    "backend_blueprint": "backend.py",
     "frontend_template": "template.html",
     "frontend_script": "main.js"
   }
