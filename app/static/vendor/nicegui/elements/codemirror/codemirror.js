@@ -2076,10 +2076,6 @@ export default {
           this.slots = new StickySlots(5);
           this.currentScopes = []; // For click handler compatibility
           this.scopeHeights = new Map(); // Cache for scope heights (lines)
-          
-          // Cache for syntax-highlighted line HTML (line number -> innerHTML)
-          // This preserves highlighting when lines scroll out of viewport
-          this.lineHTMLCache = new Map();
 
           // Used to break the feedback loop between overlay height and
           // sampling position; we always sample using the previous height.
@@ -2194,45 +2190,64 @@ export default {
           }
         }
 
-        // Try to get the styled HTML for a given 1-based line number by
-        // cloning the existing .cm-line DOM. Uses caching to preserve
-        // syntax highlighting when lines scroll out of the viewport.
+        // Get styled HTML for a given 1-based line number using highlightCode
+        // to programmatically apply syntax highlighting (works for any line,
+        // even if not currently in the viewport).
         getStyledLineHTML(lineNumber) {
           const view = this.view;
           const state = view.state;
-          if (!state || !view || !view.dom) return this.lineHTMLCache.get(lineNumber) || null;
+          if (!state || !view) return null;
           if (lineNumber < 1 || lineNumber > state.doc.lines) return null;
 
           try {
             const line = state.doc.line(lineNumber);
-            const pos = line.from;
-            const domAt = view.domAtPos(pos);
-            let node = domAt.node;
+            const lineText = line.text;
 
-            if (!node) {
-              // Line not in DOM - return cached version if available
-              return this.lineHTMLCache.get(lineNumber) || null;
-            }
-            if (node.nodeType === Node.TEXT_NODE && node.parentElement) {
-              node = node.parentElement;
+            // Get the language parser from the current editor state
+            const lang = state.facet(CM.language);
+            if (!lang || !lang.parser) {
+              // No language configured - return escaped plain text
+              return this.escapeHTML(lineText);
             }
 
-            // Walk up until we hit the .cm-line container
-            while (node && node !== view.dom) {
-              if (node.nodeType === Node.ELEMENT_NODE &&
-                node.classList &&
-                node.classList.contains("cm-line")) {
-                const html = node.innerHTML;
-                // Cache the styled HTML for when this line scrolls out of viewport
-                this.lineHTMLCache.set(lineNumber, html);
-                return html;
+            // Build highlighted HTML using highlightCode
+            let result = "";
+            const highlighter = {
+              style: tags => CM.highlightingFor(state, tags)
+            };
+
+            CM.highlightCode(
+              lineText,
+              lang.parser.parse(lineText),
+              highlighter,
+              (text, cls) => {
+                result += cls
+                  ? `<span class="${cls}">${this.escapeHTML(text)}</span>`
+                  : this.escapeHTML(text);
+              },
+              () => {
+                // Line break callback - not needed for single line
               }
-              node = node.parentNode;
-            }
+            );
+
+            return result;
           } catch (e) {
-            // If DOM lookup fails (e.g., line not in viewport), use cache
+            console.warn('[StickyScroll] highlightCode failed:', e);
+            // Fallback to plain text
+            try {
+              const line = state.doc.line(lineNumber);
+              return this.escapeHTML(line.text);
+            } catch {
+              return null;
+            }
           }
-          return this.lineHTMLCache.get(lineNumber) || null;
+        }
+
+        // Escape HTML special characters
+        escapeHTML(text) {
+          return text.replace(/[<>&]/g, ch =>
+            ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : '&amp;'
+          );
         }
 
         updateStickyHeader(isRetry = false) {
@@ -3092,8 +3107,6 @@ export default {
           if (update.docChanged) {
             // Clear slots on document change to force re-evaluation
             this.slots.clearAll();
-            // Clear cached line HTML since line content/numbers may have changed
-            this.lineHTMLCache.clear();
             this.updateStickyHeader();
           }
           // Theme change marker: refresh overlay background

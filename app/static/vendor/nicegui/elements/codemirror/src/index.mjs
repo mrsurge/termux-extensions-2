@@ -12,3 +12,4 @@ export * from "@uiw/codemirror-extensions-color";
 export * as events from "@uiw/codemirror-extensions-events";
 export { showMinimap } from "@replit/codemirror-minimap";
 export * from "@codemirror/lsp-client";
+export { highlightCode } from "@lezer/highlight";

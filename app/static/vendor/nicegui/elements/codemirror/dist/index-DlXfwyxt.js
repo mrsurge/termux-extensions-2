@@ -27044,7 +27044,7 @@ function legacy(parser) {
     return new LanguageSupport(StreamLanguage.define(parser));
 }
 function sql(dialectName) {
-    return import('./index-wxqhO_sl.js').then(m => m.sql({ dialect: m[dialectName] }));
+    return import('./index-mpYYM-Ko.js').then(m => m.sql({ dialect: m[dialectName] }));
 }
 /**
 An array of language descriptions for known language packages.
@@ -27055,7 +27055,7 @@ const languages = [
         name: "C",
         extensions: ["c", "h", "ino"],
         load() {
-            return import('./index-Bc7wt_TL.js').then(m => m.cpp());
+            return import('./index-CICmfrQz.js').then(m => m.cpp());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27063,7 +27063,7 @@ const languages = [
         alias: ["cpp"],
         extensions: ["cpp", "c++", "cc", "cxx", "hpp", "h++", "hh", "hxx"],
         load() {
-            return import('./index-Bc7wt_TL.js').then(m => m.cpp());
+            return import('./index-CICmfrQz.js').then(m => m.cpp());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27076,14 +27076,14 @@ const languages = [
         name: "CSS",
         extensions: ["css"],
         load() {
-            return import('./index-Ce9bUIuT.js').then(m => m.css());
+            return import('./index-Cj0JvGEf.js').then(m => m.css());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
         name: "Go",
         extensions: ["go"],
         load() {
-            return import('./index-CvoqJ_Ib.js').then(m => m.go());
+            return import('./index-D8zsguqd.js').then(m => m.go());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27091,14 +27091,14 @@ const languages = [
         alias: ["xhtml"],
         extensions: ["html", "htm", "handlebars", "hbs"],
         load() {
-            return import('./index-CqhgSzkO.js').then(m => m.html());
+            return import('./index-DaBZPYKG.js').then(m => m.html());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
         name: "Java",
         extensions: ["java"],
         load() {
-            return import('./index-BIBlea1x.js').then(m => m.java());
+            return import('./index-Dgu_sjdB.js').then(m => m.java());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27106,7 +27106,7 @@ const languages = [
         alias: ["ecmascript", "js", "node"],
         extensions: ["js", "mjs", "cjs"],
         load() {
-            return import('./index-CA5f0-ro.js').then(m => m.javascript());
+            return import('./index-Cl5Ftmfz.js').then(m => m.javascript());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27114,28 +27114,28 @@ const languages = [
         alias: ["json5"],
         extensions: ["json", "map"],
         load() {
-            return import('./index-BFZ0J1Me.js').then(m => m.json());
+            return import('./index-zJcQs6hv.js').then(m => m.json());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
         name: "JSX",
         extensions: ["jsx"],
         load() {
-            return import('./index-CA5f0-ro.js').then(m => m.javascript({ jsx: true }));
+            return import('./index-Cl5Ftmfz.js').then(m => m.javascript({ jsx: true }));
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
         name: "LESS",
         extensions: ["less"],
         load() {
-            return import('./index-kOqLTo9g.js').then(m => m.less());
+            return import('./index-CUM5cHdG.js').then(m => m.less());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
         name: "Liquid",
         extensions: ["liquid"],
         load() {
-            return import('./index-Bwjl1vfE.js').then(m => m.liquid());
+            return import('./index-ClbB4dfN.js').then(m => m.liquid());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27146,7 +27146,7 @@ const languages = [
         name: "Markdown",
         extensions: ["md", "markdown", "mkd"],
         load() {
-            return import('./index-Bjt3ZzpR.js').then(m => m.markdown());
+            return import('./index-CsuI5Zxy.js').then(m => m.markdown());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27161,7 +27161,7 @@ const languages = [
         name: "PHP",
         extensions: ["php", "php3", "php4", "php5", "php7", "phtml"],
         load() {
-            return import('./index-BisKomWS.js').then(m => m.php());
+            return import('./index-RC6L_AiE.js').then(m => m.php());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27178,28 +27178,28 @@ const languages = [
         extensions: ["BUILD", "bzl", "py", "pyw"],
         filename: /^(BUCK|BUILD)$/,
         load() {
-            return import('./index-BahQ9x1f.js').then(m => m.python());
+            return import('./index-BdXz2NAq.js').then(m => m.python());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
         name: "Rust",
         extensions: ["rs"],
         load() {
-            return import('./index-BPrV6k1G.js').then(m => m.rust());
+            return import('./index-CQIIQams.js').then(m => m.rust());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
         name: "Sass",
         extensions: ["sass"],
         load() {
-            return import('./index-BqQ3STRu.js').then(m => m.sass({ indented: true }));
+            return import('./index-Xa2k1Kft.js').then(m => m.sass({ indented: true }));
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
         name: "SCSS",
         extensions: ["scss"],
         load() {
-            return import('./index-BqQ3STRu.js').then(m => m.sass());
+            return import('./index-Xa2k1Kft.js').then(m => m.sass());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27215,7 +27215,7 @@ const languages = [
         name: "TSX",
         extensions: ["tsx"],
         load() {
-            return import('./index-CA5f0-ro.js').then(m => m.javascript({ jsx: true, typescript: true }));
+            return import('./index-Cl5Ftmfz.js').then(m => m.javascript({ jsx: true, typescript: true }));
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27223,14 +27223,14 @@ const languages = [
         alias: ["ts"],
         extensions: ["ts", "mts", "cts"],
         load() {
-            return import('./index-CA5f0-ro.js').then(m => m.javascript({ typescript: true }));
+            return import('./index-Cl5Ftmfz.js').then(m => m.javascript({ typescript: true }));
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
         name: "WebAssembly",
         extensions: ["wat", "wast"],
         load() {
-            return import('./index-CH-6_ZP8.js').then(m => m.wast());
+            return import('./index-M-Hq_pNF.js').then(m => m.wast());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27238,7 +27238,7 @@ const languages = [
         alias: ["rss", "wsdl", "xsd"],
         extensions: ["xml", "xsl", "xsd", "svg"],
         load() {
-            return import('./index-O4tDI5Bj.js').then(m => m.xml());
+            return import('./index-DzVK8Tcu.js').then(m => m.xml());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
@@ -27246,7 +27246,7 @@ const languages = [
         alias: ["yml"],
         extensions: ["yaml", "yml"],
         load() {
-            return import('./index-BrPFjkjA.js').then(m => m.yaml());
+            return import('./index-Dzg_MoLV.js').then(m => m.yaml());
         }
     }),
     // Legacy modes ported from CodeMirror 5
@@ -28042,13 +28042,13 @@ const languages = [
         name: "Vue",
         extensions: ["vue"],
         load() {
-            return import('./index-BVPDfaU8.js').then(m => m.vue());
+            return import('./index-CpyWqdIL.js').then(m => m.vue());
         }
     }),
     /*@__PURE__*/LanguageDescription.of({
         name: "Angular Template",
         load() {
-            return import('./index-C-s1YMzq.js').then(m => m.angular());
+            return import('./index-BXyzhAuE.js').then(m => m.angular());
         }
     })
 ];
@@ -38792,5 +38792,5 @@ function languageServerExtensions() {
     ];
 }
 
-export { ViewPlugin as $, languageDataProp as A, EditorState as B, CompletionContext as C, LanguageDescription as D, EditorView as E, ParseContext as F, bracketMatchingHandle as G, DefaultBufferLength as H, IterMode as I, sublanguageProp as J, index$1 as K, LanguageSupport as L, index as M, NodeWeakMap as N, showMinimap as O, Parser as P, basicSetup as Q, minimalSetup as R, BidiSpan as S, Tag as T, BlockInfo as U, BlockType as V, Decoration as W, Direction as X, GutterMarker as Y, MatchDecorator as Z, RectangleMarker as _, LRLanguage as a, blockUncomment as a$, ViewUpdate as a0, WidgetType as a1, __test as a2, closeHoverTooltips as a3, crosshairCursor as a4, drawSelection as a5, dropCursor as a6, getDialog as a7, getDrawSelectionConfig as a8, getPanel as a9, tooltips as aA, Annotation as aB, AnnotationType as aC, ChangeDesc as aD, ChangeSet as aE, CharCategory as aF, Compartment as aG, Facet as aH, Line as aI, MapMode as aJ, Range$1 as aK, RangeSet as aL, RangeSetBuilder as aM, RangeValue as aN, SelectionRange as aO, StateEffect as aP, StateEffectType as aQ, StateField as aR, Text as aS, Transaction as aT, codePointAt as aU, codePointSize as aV, combineConfig as aW, findClusterBreak as aX, findColumn as aY, fromCodePoint as aZ, blockComment as a_, getTooltip as aa, gutter as ab, gutterLineClass as ac, gutterWidgetClass as ad, gutters as ae, hasHoverTooltips as af, highlightActiveLine as ag, highlightActiveLineGutter as ah, highlightSpecialChars as ai, highlightTrailingWhitespace as aj, highlightWhitespace as ak, hoverTooltip as al, layer as am, lineNumberMarkers as an, lineNumberWidgetMarker as ao, lineNumbers as ap, logException as aq, panels as ar, placeholder as as, rectangularSelection as at, repositionTooltips as au, runScopeHandlers as av, scrollPastEnd as aw, showDialog as ax, showPanel as ay, showTooltip as az, ifNotIn as b, redoSelection as b$, copyLineDown as b0, copyLineUp as b1, cursorCharBackward as b2, cursorCharBackwardLogical as b3, cursorCharForward as b4, cursorCharForwardLogical as b5, cursorCharLeft as b6, cursorCharRight as b7, cursorDocEnd as b8, cursorDocStart as b9, deleteLine as bA, deleteLineBoundaryBackward as bB, deleteLineBoundaryForward as bC, deleteToLineEnd as bD, deleteToLineStart as bE, deleteTrailingWhitespace as bF, emacsStyleKeymap as bG, history as bH, historyField as bI, historyKeymap as bJ, indentLess as bK, indentMore as bL, indentSelection as bM, indentWithTab as bN, insertBlankLine as bO, insertNewline as bP, insertNewlineAndIndent as bQ, insertNewlineKeepIndent as bR, insertTab as bS, invertedEffects as bT, isolateHistory as bU, lineComment as bV, lineUncomment as bW, moveLineDown as bX, moveLineUp as bY, redo as bZ, redoDepth as b_, cursorGroupBackward as ba, cursorGroupForward as bb, cursorGroupForwardWin as bc, cursorGroupLeft as bd, cursorGroupRight as be, cursorLineBoundaryBackward as bf, cursorLineBoundaryForward as bg, cursorLineBoundaryLeft as bh, cursorLineBoundaryRight as bi, cursorLineDown as bj, cursorLineEnd as bk, cursorLineStart as bl, cursorLineUp as bm, cursorMatchingBracket as bn, cursorPageDown as bo, cursorPageUp as bp, cursorSubwordBackward as bq, cursorSubwordForward as br, cursorSyntaxLeft as bs, cursorSyntaxRight as bt, defaultKeymap as bu, deleteCharBackward as bv, deleteCharBackwardStrict as bw, deleteCharForward as bx, deleteGroupBackward as by, deleteGroupForward as bz, continuedIndent as c, forceParsing as c$, selectAll as c0, selectCharBackward as c1, selectCharBackwardLogical as c2, selectCharForward as c3, selectCharForwardLogical as c4, selectCharLeft as c5, selectCharRight as c6, selectDocEnd as c7, selectDocStart as c8, selectGroupBackward as c9, toggleBlockCommentByLine as cA, toggleComment as cB, toggleLineComment as cC, toggleTabFocusMode as cD, transposeChars as cE, undo as cF, undoDepth as cG, undoSelection as cH, DocInput as cI, HighlightStyle as cJ, IndentContext as cK, StreamLanguage as cL, StringStream as cM, TreeIndentContext as cN, bidiIsolates as cO, bracketMatching as cP, codeFolding as cQ, defaultHighlightStyle as cR, ensureSyntaxTree as cS, foldAll as cT, foldCode as cU, foldEffect as cV, foldGutter as cW, foldKeymap as cX, foldState as cY, foldable as cZ, foldedRanges as c_, selectGroupForward as ca, selectGroupForwardWin as cb, selectGroupLeft as cc, selectGroupRight as cd, selectLine as ce, selectLineBoundaryBackward as cf, selectLineBoundaryForward as cg, selectLineBoundaryLeft as ch, selectLineBoundaryRight as ci, selectLineDown as cj, selectLineEnd as ck, selectLineStart as cl, selectLineUp as cm, selectMatchingBracket as cn, selectPageDown as co, selectPageUp as cp, selectParentSyntax as cq, selectSubwordBackward as cr, selectSubwordForward as cs, selectSyntaxLeft as ct, selectSyntaxRight as cu, simplifySelection as cv, splitLine as cw, standardKeymap as cx, temporarilySetTabFocusMode as cy, toggleBlockComment as cz, completeFromList as d, renameKeymap as d$, getIndentUnit as d0, getIndentation as d1, highlightingFor as d2, indentOnInput as d3, indentRange as d4, indentService as d5, indentString as d6, language as d7, matchBrackets as d8, syntaxHighlighting as d9, selectMatches as dA, selectNextOccurrence as dB, selectSelectionMatches as dC, setSearchQuery as dD, indentationMarkers as dE, ColorType as dF, colorView as dG, colorTheme as dH, LSPClient as dI, LSPPlugin as dJ, Workspace as dK, WorkspaceMapping as dL, closeReferencePanel as dM, findReferences as dN, findReferencesKeymap as dO, formatDocument as dP, formatKeymap as dQ, hoverTooltips as dR, jumpToDeclaration as dS, jumpToDefinition as dT, jumpToDefinitionKeymap as dU, jumpToImplementation as dV, jumpToTypeDefinition as dW, languageServerExtensions as dX, languageServerSupport as dY, nextSignature as dZ, prevSignature as d_, syntaxParserRunning as da, syntaxTreeAvailable as db, toggleFold as dc, unfoldAll as dd, unfoldCode as de, unfoldEffect as df, languages as dg, oneDark as dh, oneDarkHighlightStyle as di, oneDarkTheme as dj, RegExpCursor as dk, SearchCursor as dl, SearchQuery as dm, closeSearchPanel as dn, findNext as dp, findPrevious as dq, getSearchQuery as dr, gotoLine as ds, highlightSelectionMatches as dt, openSearchPanel as du, replaceAll as dv, replaceNext as dw, search as dx, searchKeymap as dy, searchPanelOpen as dz, syntaxTree as e, renameSymbol as e0, serverCompletion as e1, serverCompletionSource as e2, serverDiagnostics as e3, showSignatureHelp as e4, signatureHelp as e5, signatureKeymap as e6, foldNodeProp as f, delimitedIndent as g, flatIndent as h, indentNodeProp as i, foldInside as j, snippetCompletion as k, EditorSelection as l, NodeType as m, NodeProp as n, NodeSet as o, parseMixed as p, Tree as q, foldService as r, styleTags as s, tags as t, Prec as u, keymap as v, Language as w, defineLanguageFacet as x, countColumn as y, indentUnit as z };
-//# sourceMappingURL=index-Cm6kCRex.js.map
+export { RectangleMarker as $, languageDataProp as A, EditorState as B, CompletionContext as C, LanguageDescription as D, EditorView as E, ParseContext as F, bracketMatchingHandle as G, DefaultBufferLength as H, IterMode as I, sublanguageProp as J, index$1 as K, LanguageSupport as L, index as M, NodeWeakMap as N, showMinimap as O, Parser as P, highlightCode as Q, basicSetup as R, minimalSetup as S, Tag as T, BidiSpan as U, BlockInfo as V, BlockType as W, Decoration as X, Direction as Y, GutterMarker as Z, MatchDecorator as _, LRLanguage as a, blockComment as a$, ViewPlugin as a0, ViewUpdate as a1, WidgetType as a2, __test as a3, closeHoverTooltips as a4, crosshairCursor as a5, drawSelection as a6, dropCursor as a7, getDialog as a8, getDrawSelectionConfig as a9, showTooltip as aA, tooltips as aB, Annotation as aC, AnnotationType as aD, ChangeDesc as aE, ChangeSet as aF, CharCategory as aG, Compartment as aH, Facet as aI, Line as aJ, MapMode as aK, Range$1 as aL, RangeSet as aM, RangeSetBuilder as aN, RangeValue as aO, SelectionRange as aP, StateEffect as aQ, StateEffectType as aR, StateField as aS, Text as aT, Transaction as aU, codePointAt as aV, codePointSize as aW, combineConfig as aX, findClusterBreak as aY, findColumn as aZ, fromCodePoint as a_, getPanel as aa, getTooltip as ab, gutter as ac, gutterLineClass as ad, gutterWidgetClass as ae, gutters as af, hasHoverTooltips as ag, highlightActiveLine as ah, highlightActiveLineGutter as ai, highlightSpecialChars as aj, highlightTrailingWhitespace as ak, highlightWhitespace as al, hoverTooltip as am, layer as an, lineNumberMarkers as ao, lineNumberWidgetMarker as ap, lineNumbers as aq, logException as ar, panels as as, placeholder as at, rectangularSelection as au, repositionTooltips as av, runScopeHandlers as aw, scrollPastEnd as ax, showDialog as ay, showPanel as az, ifNotIn as b, redoDepth as b$, blockUncomment as b0, copyLineDown as b1, copyLineUp as b2, cursorCharBackward as b3, cursorCharBackwardLogical as b4, cursorCharForward as b5, cursorCharForwardLogical as b6, cursorCharLeft as b7, cursorCharRight as b8, cursorDocEnd as b9, deleteGroupForward as bA, deleteLine as bB, deleteLineBoundaryBackward as bC, deleteLineBoundaryForward as bD, deleteToLineEnd as bE, deleteToLineStart as bF, deleteTrailingWhitespace as bG, emacsStyleKeymap as bH, history as bI, historyField as bJ, historyKeymap as bK, indentLess as bL, indentMore as bM, indentSelection as bN, indentWithTab as bO, insertBlankLine as bP, insertNewline as bQ, insertNewlineAndIndent as bR, insertNewlineKeepIndent as bS, insertTab as bT, invertedEffects as bU, isolateHistory as bV, lineComment as bW, lineUncomment as bX, moveLineDown as bY, moveLineUp as bZ, redo as b_, cursorDocStart as ba, cursorGroupBackward as bb, cursorGroupForward as bc, cursorGroupForwardWin as bd, cursorGroupLeft as be, cursorGroupRight as bf, cursorLineBoundaryBackward as bg, cursorLineBoundaryForward as bh, cursorLineBoundaryLeft as bi, cursorLineBoundaryRight as bj, cursorLineDown as bk, cursorLineEnd as bl, cursorLineStart as bm, cursorLineUp as bn, cursorMatchingBracket as bo, cursorPageDown as bp, cursorPageUp as bq, cursorSubwordBackward as br, cursorSubwordForward as bs, cursorSyntaxLeft as bt, cursorSyntaxRight as bu, defaultKeymap as bv, deleteCharBackward as bw, deleteCharBackwardStrict as bx, deleteCharForward as by, deleteGroupBackward as bz, continuedIndent as c, foldedRanges as c$, redoSelection as c0, selectAll as c1, selectCharBackward as c2, selectCharBackwardLogical as c3, selectCharForward as c4, selectCharForwardLogical as c5, selectCharLeft as c6, selectCharRight as c7, selectDocEnd as c8, selectDocStart as c9, toggleBlockComment as cA, toggleBlockCommentByLine as cB, toggleComment as cC, toggleLineComment as cD, toggleTabFocusMode as cE, transposeChars as cF, undo as cG, undoDepth as cH, undoSelection as cI, DocInput as cJ, HighlightStyle as cK, IndentContext as cL, StreamLanguage as cM, StringStream as cN, TreeIndentContext as cO, bidiIsolates as cP, bracketMatching as cQ, codeFolding as cR, defaultHighlightStyle as cS, ensureSyntaxTree as cT, foldAll as cU, foldCode as cV, foldEffect as cW, foldGutter as cX, foldKeymap as cY, foldState as cZ, foldable as c_, selectGroupBackward as ca, selectGroupForward as cb, selectGroupForwardWin as cc, selectGroupLeft as cd, selectGroupRight as ce, selectLine as cf, selectLineBoundaryBackward as cg, selectLineBoundaryForward as ch, selectLineBoundaryLeft as ci, selectLineBoundaryRight as cj, selectLineDown as ck, selectLineEnd as cl, selectLineStart as cm, selectLineUp as cn, selectMatchingBracket as co, selectPageDown as cp, selectPageUp as cq, selectParentSyntax as cr, selectSubwordBackward as cs, selectSubwordForward as ct, selectSyntaxLeft as cu, selectSyntaxRight as cv, simplifySelection as cw, splitLine as cx, standardKeymap as cy, temporarilySetTabFocusMode as cz, completeFromList as d, prevSignature as d$, forceParsing as d0, getIndentUnit as d1, getIndentation as d2, highlightingFor as d3, indentOnInput as d4, indentRange as d5, indentService as d6, indentString as d7, language as d8, matchBrackets as d9, searchPanelOpen as dA, selectMatches as dB, selectNextOccurrence as dC, selectSelectionMatches as dD, setSearchQuery as dE, indentationMarkers as dF, ColorType as dG, colorView as dH, colorTheme as dI, LSPClient as dJ, LSPPlugin as dK, Workspace as dL, WorkspaceMapping as dM, closeReferencePanel as dN, findReferences as dO, findReferencesKeymap as dP, formatDocument as dQ, formatKeymap as dR, hoverTooltips as dS, jumpToDeclaration as dT, jumpToDefinition as dU, jumpToDefinitionKeymap as dV, jumpToImplementation as dW, jumpToTypeDefinition as dX, languageServerExtensions as dY, languageServerSupport as dZ, nextSignature as d_, syntaxHighlighting as da, syntaxParserRunning as db, syntaxTreeAvailable as dc, toggleFold as dd, unfoldAll as de, unfoldCode as df, unfoldEffect as dg, languages as dh, oneDark as di, oneDarkHighlightStyle as dj, oneDarkTheme as dk, RegExpCursor as dl, SearchCursor as dm, SearchQuery as dn, closeSearchPanel as dp, findNext as dq, findPrevious as dr, getSearchQuery as ds, gotoLine as dt, highlightSelectionMatches as du, openSearchPanel as dv, replaceAll as dw, replaceNext as dx, search as dy, searchKeymap as dz, syntaxTree as e, renameKeymap as e0, renameSymbol as e1, serverCompletion as e2, serverCompletionSource as e3, serverDiagnostics as e4, showSignatureHelp as e5, signatureHelp as e6, signatureKeymap as e7, foldNodeProp as f, delimitedIndent as g, flatIndent as h, indentNodeProp as i, foldInside as j, snippetCompletion as k, EditorSelection as l, NodeType as m, NodeProp as n, NodeSet as o, parseMixed as p, Tree as q, foldService as r, styleTags as s, tags as t, Prec as u, keymap as v, Language as w, defineLanguageFacet as x, countColumn as y, indentUnit as z };
+//# sourceMappingURL=index-DlXfwyxt.js.map
