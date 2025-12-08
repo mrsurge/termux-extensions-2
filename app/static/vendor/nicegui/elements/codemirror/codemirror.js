@@ -2411,9 +2411,23 @@ export default {
             };
 
             const ancestorPath = findAncestorPath(cmComponent.lspSymbols, refLine);
+            
+            // For Python, drop outermost ancestors that aren't truly indent-0 (same as Lezer path)
+            let filteredPath = ancestorPath;
+            if (isPython && filteredPath.length > 0) {
+              filteredPath = filteredPath.filter((sec, idx) => {
+                if (idx !== 0) return true;
+                const lineText = state.doc.line(sec.startLine).text;
+                const indentMatch = lineText.match(/^([ \t]*)/);
+                const indentRaw = indentMatch ? indentMatch[1] : '';
+                const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
+                return indentSpaces === 0;
+              });
+            }
+
             let cumulativeHeight = 0;
 
-            candidateScopes = ancestorPath.map((sec, pathIdx) => {
+            candidateScopes = filteredPath.map((sec, pathIdx) => {
               const depth = pathIdx; // Use path index as depth (outermost = 0)
               const startLine = sec.startLine;
               const endLine = sec.endLine;
@@ -2430,23 +2444,32 @@ export default {
               if (wrappingEnabled) {
                 const key = `${depth}:${startLine}`;
                 cachedHeight = this.scopeHeights.get(key) || 1;
+                // Calculate offset based on cumulative height of ancestors (same as Lezer)
                 offset = -(cumulativeHeight + 2);
                 cumulativeHeight += cachedHeight;
               } else {
-                const offsetDepth = depth;
+                // Same offset logic as Lezer path for non-wrapped mode
+                const offsetDepth = isPython ? Math.max(0, depth - 1) : depth;
                 offset = -(offsetDepth + 2);
+                if (isPython && depth === 1) {
+                  offset = -1;
+                }
               }
 
               const triggerLine = startLine + offset;
+              // Apply the same offset to the effective end so scopes hand off cleanly
               let endTriggerLine = Math.max(startLine, endLine + offset);
+              if (isPython) {
+                endTriggerLine += 4; // let Python scopes linger a bit before release (same as Lezer)
+              }
 
               return {
-                node: null,
+                node: null, // LSP doesn't have syntax tree nodes
                 depth,
                 startLine,
                 endLine,
                 text: sec.name || lineText,
-                rawText: sec.rawText || lineText,
+                rawText: lineText, // Use actual line text for syntax highlighting
                 triggerLine,
                 endTriggerLine,
                 indentDepth,
