@@ -2374,11 +2374,47 @@ export default {
               return sections;
             };
 
-            const sections = flattenSymbols(cmComponent.lspSymbols, 0);
+            // Build ancestor path: find symbols that contain refLine, keeping hierarchy
+            const findAncestorPath = (symbols, targetLine, currentPath = []) => {
+              for (const sym of symbols) {
+                if (!sym) continue;
+                
+                const range = sym.range || sym.location?.range || sym.selectionRange;
+                if (!range || !range.start || typeof range.start.line !== 'number') continue;
+                
+                const startLine = range.start.line + 1; // LSP is 0-based
+                const endLine = (range.end && typeof range.end.line === 'number') 
+                  ? range.end.line + 1 
+                  : startLine;
+                
+                // Check if this symbol contains the target line
+                if (targetLine >= startLine && targetLine <= endLine) {
+                  const newPath = [...currentPath, {
+                    sym,
+                    startLine,
+                    endLine,
+                    name: sym.name || '',
+                    kind: sym.kind
+                  }];
+                  
+                  // Recursively check children for deeper matches
+                  if (Array.isArray(sym.children) && sym.children.length) {
+                    const deeperPath = findAncestorPath(sym.children, targetLine, newPath);
+                    if (deeperPath.length > newPath.length) {
+                      return deeperPath;
+                    }
+                  }
+                  return newPath;
+                }
+              }
+              return currentPath;
+            };
+
+            const ancestorPath = findAncestorPath(cmComponent.lspSymbols, refLine);
             let cumulativeHeight = 0;
 
-            candidateScopes = sections.map((sec) => {
-              const depth = sec.depth;
+            candidateScopes = ancestorPath.map((sec, pathIdx) => {
+              const depth = pathIdx; // Use path index as depth (outermost = 0)
               const startLine = sec.startLine;
               const endLine = sec.endLine;
 
