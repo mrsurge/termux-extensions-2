@@ -164,7 +164,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                     break
                 
                 for msg in parser.feed(chunk):
-                    await self.emit("lsp:server_to_client", msg, to=sid)
+                    await self.emit("lsp_server_to_client", msg, to=sid)
         except asyncio.CancelledError:
             pass
         except Exception as e:

@@ -749,6 +749,7 @@ export default {
       // NOTE: @codemirror/lsp-client expects JSON STRINGS, but Socket.IO auto-parses JSON.
       // So we need to: stringify server responses before passing to handler,
       // and parse outgoing messages if they're strings (Socket.IO will re-stringify).
+      // NOTE: Event names use underscores to match Python AsyncNamespace on_* handlers
       const cmTransport = {
         send: (message) => {
           if (transport.socket) {
@@ -761,13 +762,13 @@ export default {
             } catch (e) {
               // If parsing fails, send as-is
             }
-            transport.socket.emit('lsp:client_to_server', payload);
+            transport.socket.emit('lsp_client_to_server', payload);
           }
         },
         subscribe: (handler) => {
           transport.onMessage = handler;
           if (transport.socket) {
-            transport.socket.on('lsp:server_to_client', (data) => {
+            transport.socket.on('lsp_server_to_client', (data) => {
               if (handler) {
                 // data is already an object from Socket.IO; stringify for lsp-client
                 let msg = data;
@@ -787,7 +788,7 @@ export default {
         unsubscribe: (handler) => {
           transport.onMessage = null;
           if (transport.socket) {
-            transport.socket.off('lsp:server_to_client');
+            transport.socket.off('lsp_server_to_client');
           }
         },
       };
