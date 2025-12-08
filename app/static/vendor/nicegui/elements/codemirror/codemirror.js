@@ -22,11 +22,17 @@ class SocketIOTransport {
         return;
       }
 
+      console.log('[LSP] Creating socket connection to namespace:', namespace);
+      console.log('[LSP] _io type:', typeof _io, '_io:', _io);
+
       this.socket = _io(namespace, {
         path: "/ui/_nicegui_ws/socket.io",
         transports: ["websocket"],
         query: { app_id: 'file_editor_cm6' },
       });
+
+      console.log('[LSP] Socket created:', this.socket);
+      console.log('[LSP] Socket connected?:', this.socket?.connected);
 
       this.socket.on('connect', () => {
         try {
@@ -60,7 +66,8 @@ class SocketIOTransport {
   send(data) {
     if (!this.socket) return;
     try {
-      this.socket.emit('lsp:client_to_server', data);
+      console.log('[LSP] Sending to server:', typeof data, data);
+      this.socket.emit('lsp_client_to_server', data);
     } catch (err) {
       console.warn('[LSP] Failed to send client_to_server payload:', err);
     }
