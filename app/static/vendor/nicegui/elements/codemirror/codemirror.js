@@ -893,10 +893,11 @@ export default {
         }
         
         // Give server time to process the file before requesting symbols
+        // Use longer delay on initial load to allow server warm-up
         setTimeout(() => {
           console.log('[LSP] Requesting symbols after didOpen...');
           this.requestDocumentSymbols();
-        }, 500);
+        }, 1000);
       }).catch((err) => {
         console.warn('[LSP] Client initialization failed:', err);
       });
@@ -1003,7 +1004,7 @@ export default {
     },
 
     // Request document symbols from the LSP server
-    async requestDocumentSymbols() {
+    async requestDocumentSymbols(retryCount = 0) {
       if (!this.lspClient || !this._lspFileUri) {
         return;
       }
@@ -1031,6 +1032,11 @@ export default {
         // Don't spam errors if the server doesn't support documentSymbol
         if (err && err.code === -32601) {
           console.log('[LSP] Server does not support textDocument/documentSymbol');
+        } else if (err && err.message && err.message.includes('timed out') && retryCount < 3) {
+          // Retry on timeout (server may still be initializing)
+          const delay = 1000 * (retryCount + 1); // 1s, 2s, 3s backoff
+          console.log(`[LSP] Symbol request timed out, retrying in ${delay}ms (attempt ${retryCount + 1}/3)`);
+          setTimeout(() => this.requestDocumentSymbols(retryCount + 1), delay);
         } else {
           console.warn('[LSP] Failed to request document symbols:', err);
         }
