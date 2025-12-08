@@ -2335,6 +2335,7 @@ export default {
             });
           } else if (cmComponent && Array.isArray(cmComponent.lspSymbols) && cmComponent.lspSymbols.length) {
             // LSP-backed scopes for languages with documentSymbols
+            const DEBUG_LSP_STICKY = true; // Enable for debugging
             const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
 
             const flattenSymbols = (symbols, depth) => {
@@ -2415,6 +2416,11 @@ export default {
 
             const ancestorPath = findAncestorPath(cmComponent.lspSymbols, refLine);
             
+            if (DEBUG_LSP_STICKY) {
+              console.log('[LSP-Sticky] refLine:', refLine, 'symbolCount:', cmComponent.lspSymbols.length);
+              console.log('[LSP-Sticky] ancestorPath:', ancestorPath.map(p => ({ name: p.name, start: p.startLine, end: p.endLine })));
+            }
+            
             // For Python, drop outermost ancestors that aren't truly indent-0 (same as Lezer path)
             // For JS/TS, no filtering needed - braces define scopes, not indentation
             let filteredPath = ancestorPath;
@@ -2427,6 +2433,10 @@ export default {
                 const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
                 return indentSpaces === 0;
               });
+            }
+
+            if (DEBUG_LSP_STICKY) {
+              console.log('[LSP-Sticky] filteredPath:', filteredPath.map(p => ({ name: p.name, start: p.startLine, end: p.endLine })));
             }
 
             let cumulativeHeight = 0;
@@ -2476,7 +2486,7 @@ export default {
               }
               // JS/TS: no lingering needed - scopes end exactly at closing brace
 
-              return {
+              const scopeObj = {
                 node: null, // LSP doesn't have syntax tree nodes
                 depth,
                 startLine,
@@ -2489,6 +2499,19 @@ export default {
                 indentSpaces,
                 height: cachedHeight
               };
+              
+              if (DEBUG_LSP_STICKY) {
+                console.log('[LSP-Sticky] candidate scope:', {
+                  depth,
+                  name: sec.name,
+                  startLine,
+                  endLine,
+                  triggerLine,
+                  endTriggerLine
+                });
+              }
+              
+              return scopeObj;
             });
           } else {
             const tree = CM.ensureSyntaxTree(state, state.doc.length, 200) || CM.syntaxTree(state);
