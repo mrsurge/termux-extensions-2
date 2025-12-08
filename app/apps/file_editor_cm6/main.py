@@ -467,6 +467,7 @@ def init_nicegui_with_app(fastapi_app):
     try:
         from app.apps.file_editor_cm6.lsp_ws import LSPSocketIONamespace
         ng.sio.register_namespace(LSPSocketIONamespace('/lsp'))
+        print("[LSPSIO] Successfully registered /lsp namespace")
     except Exception as e:
         print(f"[LSPSIO] Failed to register namespace: {e}")
 
