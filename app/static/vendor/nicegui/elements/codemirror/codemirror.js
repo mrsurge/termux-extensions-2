@@ -2076,6 +2076,10 @@ export default {
           this.slots = new StickySlots(5);
           this.currentScopes = []; // For click handler compatibility
           this.scopeHeights = new Map(); // Cache for scope heights (lines)
+          
+          // Cache for syntax-highlighted line HTML (line number -> innerHTML)
+          // This preserves highlighting when lines scroll out of viewport
+          this.lineHTMLCache = new Map();
 
           // Used to break the feedback loop between overlay height and
           // sampling position; we always sample using the previous height.
@@ -2191,12 +2195,12 @@ export default {
         }
 
         // Try to get the styled HTML for a given 1-based line number by
-        // cloning the existing .cm-line DOM. Falls back to null if the
-        // line isn't currently rendered in the viewport.
+        // cloning the existing .cm-line DOM. Uses caching to preserve
+        // syntax highlighting when lines scroll out of the viewport.
         getStyledLineHTML(lineNumber) {
           const view = this.view;
           const state = view.state;
-          if (!state || !view || !view.dom) return null;
+          if (!state || !view || !view.dom) return this.lineHTMLCache.get(lineNumber) || null;
           if (lineNumber < 1 || lineNumber > state.doc.lines) return null;
 
           try {
@@ -2205,7 +2209,10 @@ export default {
             const domAt = view.domAtPos(pos);
             let node = domAt.node;
 
-            if (!node) return null;
+            if (!node) {
+              // Line not in DOM - return cached version if available
+              return this.lineHTMLCache.get(lineNumber) || null;
+            }
             if (node.nodeType === Node.TEXT_NODE && node.parentElement) {
               node = node.parentElement;
             }
@@ -2215,14 +2222,17 @@ export default {
               if (node.nodeType === Node.ELEMENT_NODE &&
                 node.classList &&
                 node.classList.contains("cm-line")) {
-                return node.innerHTML;
+                const html = node.innerHTML;
+                // Cache the styled HTML for when this line scrolls out of viewport
+                this.lineHTMLCache.set(lineNumber, html);
+                return html;
               }
               node = node.parentNode;
             }
           } catch (e) {
-            // If DOM lookup fails (e.g., line not in viewport), just fall back.
+            // If DOM lookup fails (e.g., line not in viewport), use cache
           }
-          return null;
+          return this.lineHTMLCache.get(lineNumber) || null;
         }
 
         updateStickyHeader(isRetry = false) {
@@ -3082,6 +3092,8 @@ export default {
           if (update.docChanged) {
             // Clear slots on document change to force re-evaluation
             this.slots.clearAll();
+            // Clear cached line HTML since line content/numbers may have changed
+            this.lineHTMLCache.clear();
             this.updateStickyHeader();
           }
           // Theme change marker: refresh overlay background
