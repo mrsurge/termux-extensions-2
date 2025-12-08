@@ -846,10 +846,33 @@ export default {
 
       console.log(`[LSP] Connected to ${languageId} (projectRoot=${projectRoot})`);
 
-      // Wait for initialization then request document symbols
-      this.lspClient.initializing.then(() => {
-        console.log('[LSP] Client initialized, requesting symbols...');
-        this.requestDocumentSymbols();
+      // Wait for initialization then send didOpen and request document symbols
+      this.lspClient.initializing.then(async () => {
+        console.log('[LSP] Client initialized');
+        
+        // Send textDocument/didOpen with the current document content
+        // This is required before the server will respond to documentSymbol
+        const docText = this.editor.state.doc.toString();
+        console.log(`[LSP] Sending didOpen for ${this._lspFileUri} (${docText.length} chars)`);
+        
+        try {
+          await this.lspClient.notify('textDocument/didOpen', {
+            textDocument: {
+              uri: this._lspFileUri,
+              languageId: this._lspLanguageId,
+              version: 1,
+              text: docText
+            }
+          });
+        } catch (err) {
+          console.warn('[LSP] didOpen failed:', err);
+        }
+        
+        // Give server time to process the file before requesting symbols
+        setTimeout(() => {
+          console.log('[LSP] Requesting symbols after didOpen...');
+          this.requestDocumentSymbols();
+        }, 500);
       }).catch((err) => {
         console.warn('[LSP] Client initialization failed:', err);
       });
@@ -930,9 +953,12 @@ export default {
 
       // Optional: bubble up to host iframe consumer for outline/telemetry
       try {
-        this.notifyParent('cm6-document-symbols', { symbols: this.lspSymbols });
+        // Deep clone to avoid DataCloneError with postMessage
+        const clonedSymbols = JSON.parse(JSON.stringify(this.lspSymbols || []));
+        this.notifyParent('cm6-document-symbols', { symbols: clonedSymbols });
       } catch (err) {
         // Host notifications are best-effort only
+        console.warn('[CodeMirror] Failed to notify parent', err);
       }
     },
 
