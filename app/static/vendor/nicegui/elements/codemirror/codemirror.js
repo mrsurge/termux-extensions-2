@@ -715,9 +715,9 @@ export default {
         return;
       }
 
-      const LSPClient = CM && CM.LanguageServerClient ? CM.LanguageServerClient : null;
+      const LSPClient = CM && CM.LSPClient ? CM.LSPClient : null;
       if (typeof LSPClient !== 'function') {
-        console.warn('[CM6] LSP client not available in bundle');
+        console.warn('[CM6] LSP client not available in bundle (looked for CM.LSPClient)');
         return;
       }
 
