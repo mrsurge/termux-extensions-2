@@ -1963,6 +1963,13 @@ export default {
           "0%": { transform: "translateY(100%)", opacity: "0" },
           "100%": { transform: "translateY(0)", opacity: "1" }
         },
+        "@keyframes cm-sticky-enter-from-top": {
+          "0%": { transform: "translateY(-100%)", opacity: "0" },
+          "100%": { transform: "translateY(0)", opacity: "1" }
+        },
+        ".cm-sticky-layer.entering-from-top": {
+          animation: "cm-sticky-enter-from-top 150ms ease-out",
+        },
         ".cm-stickyHeader:empty": {
           display: "none",
         },
@@ -3053,8 +3060,13 @@ export default {
             layer.style.zIndex = String(100 - idx - (cls === 'exiting' ? 1 : 0));
             layer.style.setProperty('--cm-sticky-line-height', `${lineHeight}px`);
 
-            // Apply push-up transform to innermost layer
-            layer.style.transform = idx === lastIndex && !cls ? `translateY(${topOffset}px)` : 'translateY(0)';
+            // Apply push-up transform to innermost layer (but not during entry animation)
+            if (cls === 'entering-from-top' || cls === 'entering') {
+              // Let CSS animation handle the transform
+              layer.style.transform = '';
+            } else {
+              layer.style.transform = idx === lastIndex && !cls ? `translateY(${topOffset}px)` : 'translateY(0)';
+            }
 
             // Allow height to be auto for wrapping, but set min-height
             layer.style.height = 'auto';
@@ -3114,12 +3126,25 @@ export default {
           };
 
           // Render active scopes and any outgoing transitions
+          // Track which scopes are newly entering (for pull-down animation on scroll up)
+          const newlyEntering = new Set();
+          activeScopes.forEach((scope) => {
+            const key = `${scope.depth}:${scope.startLine}-${scope.endLine}`;
+            if (!prevActiveKeys.has(key) && direction < 0) {
+              // This scope is new and we're scrolling up - animate it entering
+              newlyEntering.add(scope.depth);
+            }
+          });
+
           activeScopes.forEach((scope, idx) => {
             const t = this.pendingTransitions.get(scope.depth);
             if (t && t.outgoing.startLine !== scope.startLine) {
               // Render outgoing + incoming together
               renderLayer(t.outgoing, idx, 'exiting');
               renderLayer(t.incoming, idx, 'entering');
+            } else if (newlyEntering.has(scope.depth)) {
+              // New scope appearing while scrolling up - animate entry from top
+              renderLayer(scope, idx, 'entering-from-top');
             } else {
               renderLayer(scope, idx, null);
             }
