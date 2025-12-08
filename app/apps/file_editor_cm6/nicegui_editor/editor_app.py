@@ -1500,6 +1500,7 @@ def _get_view_state_dict() -> dict:
         "showMinimap": editor_prefs.get('showMinimap'),
         "showDraftDiffs": editor_prefs.get('showDraftDiffs'),
         "stickyScroll": editor_prefs.get('stickyScroll'),  # Added: 2025-12-03 by vectorArc - TE2 Team
+        "enableLsp": editor_prefs.get('enableLsp'),  # Added: 2025-12-08 - LSP integration toggle
     }
 
 
@@ -1579,6 +1580,18 @@ async def update_preference(data: dict = Body(...)):
         elif key == 'stickyScroll':
             # Added: 2025-12-03 by vectorArc - TE2 Team
             editor.set_sticky_scroll(bool(value))
+        elif key == 'enableLsp':
+            # Added: 2025-12-08 - LSP integration toggle
+            # When toggling LSP, reconnect or disconnect as needed
+            if value:
+                # Will connect on next file open; for current file, trigger reconnect
+                current_file = get_current_file()
+                project_path = _history_store.get_active_project() or str(get_project_root())
+                if current_file and project_path:
+                    _maybe_connect_lsp(editor, Path(current_file), Path(project_path))
+            else:
+                # Disconnect any active LSP connection
+                editor.disconnect_lsp()
         elif key == 'showInlineDiffs':
             pass  # handled after preference persistence via _refresh_active_diffs
         elif key == 'showDraftDiffs':

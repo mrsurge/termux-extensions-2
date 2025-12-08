@@ -21,7 +21,9 @@ from app.libs.framework_shells import ShellRecord, get_manager
 LSP_COMMANDS: Dict[str, list[str]] = {
     "python": ["pyright-langserver", "--stdio"],
     "typescript": ["typescript-language-server", "--stdio"],
+    "typescriptreact": ["typescript-language-server", "--stdio"],
     "javascript": ["typescript-language-server", "--stdio"],
+    "javascriptreact": ["typescript-language-server", "--stdio"],
     # TODO: add go (gopls), rust (rust-analyzer) when ready.
 }
 

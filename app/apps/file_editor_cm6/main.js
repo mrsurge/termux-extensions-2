@@ -431,6 +431,7 @@ const miToggleStickyScroll = requireEl('#mi-toggle-sticky-scroll');  // Added: 2
 const miTrackEdits   = requireEl('#mi-track-edits');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
+const miLanguageServers = requireEl('#mi-language-servers');  // Added: 2025-12-08 - LSP settings modal
 
 initVirtualKeyboardAdjustments({
   root,
@@ -2265,6 +2266,94 @@ async function showProjectsDebugModal() {
   await loadProjectsDebugContent();
 }
 
+// ---------- Language Servers Modal ----------
+const lspModal = {
+  root: document.getElementById('lsp-modal'),
+  closeBtn: document.getElementById('lsp-modal-close'),
+  globalToggleBtn: document.getElementById('lsp-global-toggle-btn'),
+  statusPyright: document.getElementById('lsp-status-pyright'),
+  statusTypescript: document.getElementById('lsp-status-typescript'),
+};
+
+function updateLspModalUI(enableLsp) {
+  if (!lspModal.root) return;
+  
+  const isEnabled = Boolean(enableLsp);
+  
+  // Update global toggle button
+  if (lspModal.globalToggleBtn) {
+    lspModal.globalToggleBtn.textContent = isEnabled ? 'Disable' : 'Enable';
+    lspModal.globalToggleBtn.classList.toggle('enabled', isEnabled);
+  }
+  
+  // Update status dots
+  if (lspModal.statusPyright) {
+    lspModal.statusPyright.classList.toggle('enabled', isEnabled);
+    lspModal.statusPyright.classList.toggle('disabled', !isEnabled);
+  }
+  if (lspModal.statusTypescript) {
+    lspModal.statusTypescript.classList.toggle('enabled', isEnabled);
+    lspModal.statusTypescript.classList.toggle('disabled', !isEnabled);
+  }
+}
+
+function hideLspModal() {
+  if (!lspModal.root) return;
+  lspModal.root.classList.remove('show');
+  lspModal.root.setAttribute('aria-hidden', 'true');
+}
+
+async function showLspModal() {
+  if (!lspModal.root) {
+    host.toast('Language servers modal not available');
+    return;
+  }
+  
+  // Fetch current LSP state from backend
+  const state = await fetchEditorState();
+  const enableLsp = state?.enableLsp ?? false;
+  
+  updateLspModalUI(enableLsp);
+  
+  lspModal.root.classList.add('show');
+  lspModal.root.setAttribute('aria-hidden', 'false');
+}
+
+// Wire up LSP modal events
+if (lspModal.closeBtn) {
+  lspModal.closeBtn.addEventListener('click', hideLspModal);
+}
+
+if (lspModal.root) {
+  lspModal.root.addEventListener('click', (evt) => {
+    if (evt.target === lspModal.root) {
+      hideLspModal();
+    }
+  });
+}
+
+if (lspModal.globalToggleBtn) {
+  lspModal.globalToggleBtn.addEventListener('click', async () => {
+    // Get current state and toggle
+    const state = await fetchEditorState();
+    const currentValue = state?.enableLsp ?? false;
+    const newValue = !currentValue;
+    
+    try {
+      const success = await updatePreference('enableLsp', newValue);
+      if (success) {
+        updateLspModalUI(newValue);
+        host.toast(newValue ? 'LSP enabled - open a file to connect' : 'LSP disabled');
+      } else {
+        host.toast('Failed to update LSP preference');
+      }
+    } catch (err) {
+      console.error('[LSP Modal] Toggle failed:', err);
+      host.toast('Failed to toggle LSP');
+    }
+  });
+}
+
 // ---------- Picker helpers (shared modal provided by framework) ----------
 function pickerAvailable() {
   return window.teFilePicker && typeof window.teFilePicker.openFile === 'function';
@@ -2409,6 +2498,11 @@ bindMenuToggle(miQuit, () => {
 
 bindMenuToggle(miDebugProjects, () => {
   showProjectsDebugModal();
+});
+
+// Language Servers modal - Added: 2025-12-08
+bindMenuToggle(miLanguageServers, () => {
+  showLspModal();
 });
 
 bindMenuToggle(miUndo, () => { if (view && undo) undo(view); });

@@ -2249,6 +2249,9 @@ export default {
           // Language flags early (used for sampling offsets too)
           const langName = (cmComponent && cmComponent.language || 'default').toLowerCase();
           const isPython = langName === 'python';
+          const isJavaScript = langName === 'javascript' || langName === 'javascriptreact';
+          const isTypeScript = langName === 'typescript' || langName === 'typescriptreact';
+          const isJSLike = isJavaScript || isTypeScript;
           const isMarkdown = langName === 'markdown' || langName === 'md' || langName === 'gfm';
 
           // ---------------------------------------------------------------------------
@@ -2413,6 +2416,7 @@ export default {
             const ancestorPath = findAncestorPath(cmComponent.lspSymbols, refLine);
             
             // For Python, drop outermost ancestors that aren't truly indent-0 (same as Lezer path)
+            // For JS/TS, no filtering needed - braces define scopes, not indentation
             let filteredPath = ancestorPath;
             if (isPython && filteredPath.length > 0) {
               filteredPath = filteredPath.filter((sec, idx) => {
@@ -2448,11 +2452,19 @@ export default {
                 offset = -(cumulativeHeight + 2);
                 cumulativeHeight += cachedHeight;
               } else {
-                // Same offset logic as Lezer path for non-wrapped mode
-                const offsetDepth = isPython ? Math.max(0, depth - 1) : depth;
-                offset = -(offsetDepth + 2);
-                if (isPython && depth === 1) {
-                  offset = -1;
+                // Language-specific offset logic for non-wrapped mode
+                if (isPython) {
+                  const offsetDepth = Math.max(0, depth - 1);
+                  offset = -(offsetDepth + 2);
+                  if (depth === 1) {
+                    offset = -1;
+                  }
+                } else if (isJSLike) {
+                  // JS/TS: simpler offset - no depth adjustment needed since braces are explicit
+                  offset = -(depth + 2);
+                } else {
+                  // Default behavior for other languages
+                  offset = -(depth + 2);
                 }
               }
 
@@ -2462,6 +2474,7 @@ export default {
               if (isPython) {
                 endTriggerLine += 4; // let Python scopes linger a bit before release (same as Lezer)
               }
+              // JS/TS: no lingering needed - scopes end exactly at closing brace
 
               return {
                 node: null, // LSP doesn't have syntax tree nodes
