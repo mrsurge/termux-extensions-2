@@ -29,6 +29,7 @@ class SocketIOTransport {
 
       this.socket.on('connect', () => {
         try {
+          console.log('[LSP] Socket.IO connected, sending initialize...');
           this.socket.emit('initialize', {
             languageId: languageId,
             projectRoot: projectRoot,
@@ -38,15 +39,9 @@ class SocketIOTransport {
         }
       });
 
-      this.socket.on('lsp:server_to_client', (data) => {
-        try {
-          if (this.onMessage) {
-            this.onMessage(data);
-          }
-        } catch (err) {
-          console.warn('[LSP] Error in onMessage handler:', err);
-        }
-      });
+      // NOTE: Don't register lsp:server_to_client handler here.
+      // The cmTransport adapter will register its own handler that properly converts
+      // Socket.IO objects to JSON strings for @codemirror/lsp-client.
     } catch (err) {
       console.warn('[LSP] Failed to initialize SocketIOTransport:', err);
       this.socket = null;
