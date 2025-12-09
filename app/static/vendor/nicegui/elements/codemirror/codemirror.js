@@ -1964,7 +1964,7 @@ export default {
           "100%": { transform: "translateY(0)", opacity: "1" }
         },
         "@keyframes cm-sticky-enter-from-top": {
-          "0%": { transform: "translateY(-100%)", opacity: "0" },
+          "0%": { transform: "translateY(calc(-1 * var(--scope-height, 100%)))", opacity: "0" },
           "100%": { transform: "translateY(0)", opacity: "1" }
         },
         ".cm-sticky-layer.entering-from-top": {
@@ -3059,6 +3059,7 @@ export default {
             // Higher layers (outer scopes) sit above inner ones.
             layer.style.zIndex = String(100 - idx - (cls === 'exiting' ? 1 : 0));
             layer.style.setProperty('--cm-sticky-line-height', `${lineHeight}px`);
+            layer.style.setProperty('--scope-height', `${scopeHeightPx}px`);
 
             // Apply push-up transform to innermost layer (but not during entry animation)
             if (cls === 'entering-from-top' || cls === 'entering') {
