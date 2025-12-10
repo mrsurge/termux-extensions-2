@@ -680,8 +680,7 @@ function renderExplorerTree() {
 
 function renderEntriesInto(containerUl, entries, parentRel = null) {
   if (!containerUl) return;
-  clearElement(containerUl);
-
+  
   // Determine parent rel from container if not provided
   if (parentRel === null) {
     const parentLi = containerUl.closest('li.fe-tree-node[data-kind="dir"]');
@@ -694,78 +693,170 @@ function renderEntriesInto(containerUl, entries, parentRel = null) {
   containerUl.classList.toggle('fe-tree-select-mode', inSelectMode);
 
   const list = Array.isArray(entries) ? entries : [];
-  for (const entry of list) {
-    const li = document.createElement('li');
-    li.className = 'fe-tree-node';
-    li.dataset.kind = entry.kind || 'file';
-    li.dataset.rel = entry.rel || entry.path || '';
-    li.dataset.name = entry.name || '';
+  const newRels = new Set(list.map(e => e.rel || e.path));
+  
+  // 1. Index existing children by rel
+  const existingNodes = new Map();
+  Array.from(containerUl.children).forEach(li => {
+    if (li.dataset.rel) {
+      existingNodes.set(li.dataset.rel, li);
+    }
+  });
 
-    if (entry.gitStatus) {
-      li.dataset.gitStatus = entry.gitStatus;
-      li.classList.add(`fe-git-${entry.gitStatus}`);
+  // 2. Remove nodes that are no longer in the list
+  existingNodes.forEach((li, rel) => {
+    if (!newRels.has(rel)) {
+      li.remove();
+    }
+  });
+
+  // 3. Create or update nodes
+  list.forEach((entry, index) => {
+    const rel = entry.rel || entry.path || '';
+    let li = existingNodes.get(rel);
+    const isNew = !li;
+
+    if (isNew) {
+      li = document.createElement('li');
+      li.className = 'fe-tree-node';
+      li.dataset.rel = rel;
+      // Insert at correct position
+      if (index < containerUl.children.length) {
+        containerUl.insertBefore(li, containerUl.children[index]);
+      } else {
+        containerUl.appendChild(li);
+      }
+    } else {
+      // Ensure order: if current node at index isn't this one, move it
+      const currentNodeAtIndex = containerUl.children[index];
+      if (currentNodeAtIndex !== li) {
+        containerUl.insertBefore(li, currentNodeAtIndex);
+      }
     }
 
-    // Apply gitFlags for directories - these represent all descendant statuses
+    // Update attributes (always)
+    li.dataset.kind = entry.kind || 'file';
+    li.dataset.name = entry.name || '';
+
+    // Update Git Status
+    if (entry.gitStatus) {
+      li.dataset.gitStatus = entry.gitStatus;
+    } else {
+      delete li.dataset.gitStatus;
+    }
+    
+    // Update Git Flags (for directories)
     const flags = entry.gitFlags || [];
     if (flags.length > 0) {
       li.dataset.gitFlags = flags.join(',');
-      flags.forEach((flag) => {
-        li.classList.add(`fe-dir-has-${flag}`);
-      });
+    } else {
+      delete li.dataset.gitFlags;
     }
 
-    // Apply draft styling
+    // Update Draft Status
     if (entry.hasDraft) {
       li.dataset.hasDraft = '1';
+    } else {
+      delete li.dataset.hasDraft;
+    }
+
+    // Re-apply classes based on new data
+    // First, strip all dynamic classes to ensure clean state
+    const classesToRemove = [];
+    li.classList.forEach(cls => {
+      if (cls.startsWith('fe-git-') || 
+          cls.startsWith('fe-dir-has-') || 
+          cls === 'fe-draft') {
+        classesToRemove.push(cls);
+      }
+    });
+    classesToRemove.forEach(c => li.classList.remove(c));
+
+    // Re-add classes
+    if (li.dataset.gitStatus) {
+      li.classList.add(`fe-git-${li.dataset.gitStatus}`);
+    }
+    if (li.dataset.gitFlags) {
+      li.dataset.gitFlags.split(',').forEach(f => {
+        if (f) li.classList.add(`fe-dir-has-${f}`);
+      });
+    }
+    if (li.dataset.hasDraft === '1') {
       if (entry.kind === 'file') {
         li.classList.add('fe-draft');
       } else {
-        // Directory contains drafts
         li.classList.add('fe-dir-has-draft');
       }
     }
 
-    // In select mode: show checkbox instead of menu button
-    if (inSelectMode) {
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.className = 'fe-entry-checkbox';
-      checkbox.dataset.rel = entry.rel || '';
-      checkbox.checked = selectedEntries.has(entry.rel);
-      checkbox.addEventListener('change', (ev) => {
-        ev.stopPropagation();
-        if (ev.target.checked) {
-          selectedEntries.add(entry.rel);
-        } else {
-          selectedEntries.delete(entry.rel);
-        }
+    // Render/Update Content
+    // We only rebuild the inner content if it's a new node OR if we need to toggle select mode UI
+    // For existing nodes, we generally leave the structure alone to preserve the <ul> for children.
+    
+    // Check if we need to rebuild the "header" part (icon + text + menu/checkbox)
+    // We can identify the header elements easily.
+    
+    let iconSpan = li.querySelector('.fe-entry-icon');
+    let textSpan = li.querySelector('.fe-tree-text');
+    let menuButton = li.querySelector('.fe-card-menu-btn');
+    let checkbox = li.querySelector('.fe-entry-checkbox');
+
+    // If mode changed (select vs normal), we might need to swap checkbox/menu
+    const hasCheckbox = !!checkbox;
+    const needsCheckbox = inSelectMode;
+    
+    if (isNew || hasCheckbox !== needsCheckbox) {
+      // Rebuild header elements, but PRESERVE any existing <ul> (children)
+      const childUl = li.querySelector('ul.fe-tree');
+      
+      // Clear everything except the UL
+      Array.from(li.childNodes).forEach(node => {
+        if (node !== childUl) node.remove();
       });
-      li.appendChild(checkbox);
-    }
 
-    const iconSpan = document.createElement('span');
-    iconSpan.className = `fe-entry-icon fe-entry-icon-${entry.kind || 'file'}`;
+      // Re-create header
+      if (inSelectMode) {
+        checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'fe-entry-checkbox';
+        checkbox.dataset.rel = rel;
+        checkbox.checked = selectedEntries.has(rel);
+        checkbox.addEventListener('change', (ev) => {
+          ev.stopPropagation();
+          if (ev.target.checked) {
+            selectedEntries.add(rel);
+          } else {
+            selectedEntries.delete(rel);
+          }
+        });
+        li.insertBefore(checkbox, childUl); // Insert before UL
+      }
 
-    const textSpan = document.createElement('span');
-    textSpan.className = 'fe-tree-text';
-    textSpan.textContent = entry.name || '';
+      iconSpan = document.createElement('span');
+      iconSpan.className = `fe-entry-icon fe-entry-icon-${entry.kind || 'file'}`;
+      li.insertBefore(iconSpan, childUl);
 
-    // Only show menu button when NOT in select mode
-    if (!inSelectMode) {
-      const menuButton = document.createElement('button');
-      menuButton.className = 'fe-card-menu-btn';
-      menuButton.textContent = '⋮';
-      li.appendChild(iconSpan);
-      li.appendChild(textSpan);
-      li.appendChild(menuButton);
+      textSpan = document.createElement('span');
+      textSpan.className = 'fe-tree-text';
+      textSpan.textContent = entry.name || '';
+      li.insertBefore(textSpan, childUl);
+
+      if (!inSelectMode) {
+        menuButton = document.createElement('button');
+        menuButton.className = 'fe-card-menu-btn';
+        menuButton.textContent = '⋮';
+        li.insertBefore(menuButton, childUl);
+      }
     } else {
-      li.appendChild(iconSpan);
-      li.appendChild(textSpan);
+      // Just update existing header elements
+      if (iconSpan) iconSpan.className = `fe-entry-icon fe-entry-icon-${entry.kind || 'file'}`;
+      if (textSpan) textSpan.textContent = entry.name || '';
+      if (checkbox) {
+        checkbox.dataset.rel = rel;
+        checkbox.checked = selectedEntries.has(rel);
+      }
     }
-
-    containerUl.appendChild(li);
-  }
+  });
 
   // After entries are rendered, recompute aggregated git-status flags
   // (fe-dir-has-*) so parent directories can visually reflect dirty
