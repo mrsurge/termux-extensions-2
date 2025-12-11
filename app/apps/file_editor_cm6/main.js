@@ -1259,15 +1259,10 @@ window.__cm6RefreshRecents = function(state) {
         return;
       }
       try {
-        // Open the file
+        // Open the file - openFile() now handles scroll restoration automatically
         await openFile(path);
-        // Jump to stored scroll line if available
-        if (scrollLine && scrollLine > 1) {
-          // Small delay to let the editor initialize
-          setTimeout(() => {
-            jumpToCurrentFileLine(scrollLine, { flash: false });
-          }, 100);
-        }
+        // Note: scroll restoration is now handled by openFile() with offset=5
+        // No separate jump needed here
       } catch (err) {
         console.error('[Recents] Failed to open file:', err);
       }
@@ -1725,13 +1720,18 @@ async function openFile(path, options = {}) {
     }
 
     // Update persisted editor state (last file + recents)
+    // The returned entry includes scroll_line if previously stored
+    let scrollLineToRestore = null;
     try {
       const activity = await apiPost("state/file_activity", {
         path: resolved,
         project: cachedProjectRoot || projectState.activeProject,
       });
-      if (activity?.state) {
-        editorState = activity.state;
+      if (activity?.data?.entry?.scroll_line) {
+        scrollLineToRestore = activity.data.entry.scroll_line;
+      }
+      if (activity?.state || activity?.data?.state) {
+        editorState = activity.state || activity.data.state;
         cachedProjectRoot = editorState.activeProject || cachedProjectRoot;
         broadcastRecentsUpdate(editorState);
         syncSessionPath();
@@ -1746,6 +1746,15 @@ async function openFile(path, options = {}) {
       }
     } catch (err) {
       console.error("Failed to record file activity:", err);
+    }
+
+    // Restore scroll position if we have one stored for this file
+    // Use scrollToTop to position line at viewport top (symmetrical with recording)
+    if (scrollLineToRestore && scrollLineToRestore > 1) {
+      setTimeout(() => {
+        console.log("[Editor] Restoring scroll to line", scrollLineToRestore);
+        jumpToCurrentFileLine(scrollLineToRestore, { focus: false, scrollToTop: true });
+      }, 150); // Small delay to let editor render
     }
   } catch (e) {
     statusEl.textContent = "";
@@ -2414,6 +2423,10 @@ async function jumpToCurrentFileLine(line, options = {}) {
     const payload = { line: targetLine };
     if (options && Object.prototype.hasOwnProperty.call(options, 'focus')) {
       payload.focus = Boolean(options.focus);
+    }
+    // scrollToTop: position line at viewport top (for scroll restore)
+    if (options && Object.prototype.hasOwnProperty.call(options, 'scrollToTop')) {
+      payload.scroll_to_top = Boolean(options.scrollToTop);
     }
     await apiPost('editor/jump_to_line', payload);
   } catch (e) {

@@ -1493,29 +1493,34 @@ export default {
           this.notifyParent('cm6-scroll-state', {
             line: lastLine,
             column: 0,
-            top: state.doc.length,
+            top: scrollTop,
             atBottom: true,
             timestamp: Date.now(),
           });
           return;
         }
 
-        // Use visibleRanges / viewport.from to avoid layout reads during update
-        let pos = view.viewport.from;
-        const ranges = view.visibleRanges;
-        if (ranges && ranges.length > 0) {
-          pos = ranges[0].from;
+        // Get the line at actual viewport top using lineBlockAtHeight(scrollTop)
+        // This is symmetrical with restore which uses scrollTop = lineBlockAt(pos).top
+        let refLine;
+        try {
+          const block = view.lineBlockAtHeight(scrollTop);
+          refLine = state.doc.lineAt(block.from).number;
+        } catch {
+          // Fallback to viewport.from method
+          let pos = view.viewport.from;
+          const ranges = view.visibleRanges;
+          if (ranges && ranges.length > 0) {
+            pos = ranges[0].from;
+          }
+          refLine = state.doc.lineAt(pos).number;
         }
 
-        const lineInfo = state.doc.lineAt(pos);
-        const line = lineInfo.number;
-        const column = pos - lineInfo.from;
-
-        console.log('[CodeMirror] reportScrollPosition', { line, column, pos });
+        console.log('[CodeMirror] reportScrollPosition', { line: refLine, scrollTop });
         this.notifyParent('cm6-scroll-state', {
-          line,
-          column,
-          top: pos,
+          line: refLine,
+          column: 0,
+          top: scrollTop,
           atBottom: false,
           timestamp: Date.now(),
         });
@@ -1537,11 +1542,15 @@ export default {
       }
 
       let shouldFocus = true;
+      let scrollToTop = false; // If true, position line at viewport top (for scroll restore)
       let input = payload;
       if (payload && typeof payload === 'object') {
         input = payload.line;
         if (Object.prototype.hasOwnProperty.call(payload, 'focus')) {
           shouldFocus = !!payload.focus;
+        }
+        if (Object.prototype.hasOwnProperty.call(payload, 'scrollToTop')) {
+          scrollToTop = !!payload.scrollToTop;
         }
       }
 
@@ -1552,21 +1561,35 @@ export default {
       }
 
       try {
-        const doc = this.editor.state.doc;
+        const view = this.editor;
+        const doc = view.state.doc;
         const maxLine = doc.lines;
         const targetLine = Math.max(1, Math.min(line, maxLine));
         const pos = doc.line(targetLine).from;
 
-        this.editor.dispatch({
-          selection: { anchor: pos },
-          scrollIntoView: true
-        });
-
-        if (shouldFocus) {
-          this.editor.focus();
+        if (scrollToTop) {
+          // Scroll restore mode: position target line at viewport top
+          // Use lineBlockAt to get pixel position, then set scrollTop directly
+          const lineBlock = view.lineBlockAt(pos);
+          view.scrollDOM.scrollTop = lineBlock.top;
+          
+          // Set selection without scrolling (we already scrolled)
+          view.dispatch({
+            selection: { anchor: pos }
+          });
+          console.log('[CodeMirror] jumpToLine: scrolled line', targetLine, 'to top, scrollTop=', lineBlock.top);
+        } else {
+          // Default behavior: scroll target line into view (minimal scroll)
+          view.dispatch({
+            selection: { anchor: pos },
+            scrollIntoView: true
+          });
+          console.log('[CodeMirror] jumpToLine: jumped to line', targetLine, 'focus=', shouldFocus);
         }
 
-        console.log('[CodeMirror] jumpToLine: jumped to line', targetLine, 'focus=', shouldFocus);
+        if (shouldFocus) {
+          view.focus();
+        }
       } catch (err) {
         console.error('[CodeMirror] jumpToLine failed:', err);
       }
@@ -3294,17 +3317,24 @@ export default {
     }
 
     // Apply initial scroll position from backend, if provided
+    // Position target line at viewport top (symmetrical with how we record scroll position)
     if (typeof this.initialScrollLine === 'number' && this.initialScrollLine > 1) {
       try {
         const doc = this.editor.state.doc;
         const maxLine = doc.lines;
         const targetLine = Math.max(1, Math.min(this.initialScrollLine, maxLine));
-        const line = doc.line(targetLine);
+        const lineObj = doc.line(targetLine);
+        
+        // Use lineBlockAt to get pixel position, then set scrollTop directly
+        // This is symmetrical with reportScrollPosition which uses lineBlockAtHeight
+        const lineBlock = this.editor.lineBlockAt(lineObj.from);
+        this.editor.scrollDOM.scrollTop = lineBlock.top;
+        
+        // Set selection without scrolling (we already scrolled)
         this.editor.dispatch({
-          selection: { anchor: line.from },
-          scrollIntoView: true,
+          selection: { anchor: lineObj.from }
         });
-        console.log('[CodeMirror] Initial scroll to line', targetLine);
+        console.log('[CodeMirror] Initial scroll to line', targetLine, 'scrollTop=', lineBlock.top);
       } catch (err) {
         console.warn('[CodeMirror] Failed to apply initial scroll line:', err);
       }

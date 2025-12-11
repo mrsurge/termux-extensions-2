@@ -1379,7 +1379,14 @@ async def toggle_edit_tracking(data: dict = Body(...)):
 
 @editor_router.post('/jump_to_line')
 async def jump_to_line(data: dict = Body(...)):
-    """Jump to a line in the currently loaded file. Does NOT load new files."""
+    """Jump to a line in the currently loaded file. Does NOT load new files.
+    
+    Args (in data):
+        line: Target line number (1-based)
+        focus: Whether to focus editor (default: True)
+        scroll_to_top: If True, position line at viewport top (for scroll restore).
+                      If False, uses default scrollIntoView behavior. (default: False)
+    """
     editor = get_active_editor()
     if not editor:
         return {"ok": False, "error": "Editor not ready"}
@@ -1391,13 +1398,16 @@ async def jump_to_line(data: dict = Body(...)):
 
     focus_flag = data.get('focus')
     should_focus = True if focus_flag is None else bool(focus_flag)
+    
+    # scroll_to_top: position line at viewport top (symmetrical with scroll recording)
+    scroll_to_top = bool(data.get('scroll_to_top') or data.get('scrollToTop'))
 
-    print(f"[JUMP_TO_LINE] Scrolling to line {target_line}", file=sys.stderr)
+    print(f"[JUMP_TO_LINE] Scrolling to line {target_line}, scroll_to_top={scroll_to_top}", file=sys.stderr)
 
     # Use the vendored CodeMirror jump_to_line method
-    editor.jump_to_line(target_line, focus=should_focus)
+    editor.jump_to_line(target_line, focus=should_focus, scroll_to_top=scroll_to_top)
 
-    return {"ok": True, "line": target_line, "focus": should_focus}
+    return {"ok": True, "line": target_line, "focus": should_focus, "scroll_to_top": scroll_to_top}
 
 @editor_router.post('/search/open')
 async def editor_search_open(data: dict = Body(...)):

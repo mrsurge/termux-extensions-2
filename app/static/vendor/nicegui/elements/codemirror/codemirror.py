@@ -437,21 +437,25 @@ class CodeMirror(ValueElement, DisableableElement,
     # ============================================================================
     # CUSTOM METHOD: jump_to_line
     # Added: 2025-11-17 by TE-2 Team
+    # Updated: 2025-12-11 - Added scroll_to_top for symmetrical scroll restoration
     # Purpose: Jump to a specific line number in the editor
-    # Used by: Explorer search feature, Go To Line menu
+    # Used by: Explorer search feature, Go To Line menu, scroll restoration
     # Note: Calls vendored JavaScript jumpToLine() method via run_method()
     # ============================================================================
-    def jump_to_line(self, line: int, *, focus: bool = True) -> None:
+    def jump_to_line(self, line: int, *, focus: bool = True, scroll_to_top: bool = False) -> None:
         """Jump to a specific line in the editor.
         
         Args:
             line: The line number to jump to (1-based indexing)
             focus: Whether to focus the editor after scrolling (default: True)
+            scroll_to_top: If True, position line at viewport top (for scroll restore).
+                          If False, uses default scrollIntoView behavior. (default: False)
             
         Example:
             editor.jump_to_line(42, focus=False)  # Scroll without triggering focus
+            editor.jump_to_line(100, focus=False, scroll_to_top=True)  # Line 100 at viewport top
         """
-        self.run_method('jumpToLine', {"line": line, "focus": focus})
+        self.run_method('jumpToLine', {"line": line, "focus": focus, "scrollToTop": scroll_to_top})
     # ============================================================================
 
     # ============================================================================
