@@ -29,6 +29,12 @@ const uiState = {
 let selectModeDir = null;           // rel of directory in select mode, or null
 const selectedEntries = new Set();  // rel paths of checked items
 
+// --- Open Directories Persistence ---
+const openDirectories = new Set();  // rel paths of currently open directories
+let openDirsSyncTimer = null;
+const OPEN_DIRS_SYNC_DEBOUNCE = 500;  // ms
+let openDirsInitialized = false;  // True after we've received initial open dirs from backend
+
 // --- Search / Review overlay state ---
 let searchOverlayVisible = false;
 let searchMode = 'name'; // 'name' | 'content' | 'changes' | 'review'
@@ -341,6 +347,146 @@ function checkAutoDisableSelectMode(collapsedRel) {
   if (selectModeDir && selectModeDir === collapsedRel) {
     selectModeDir = null;
     selectedEntries.clear();
+  }
+}
+
+// --- Open Directories Persistence ---
+
+function markDirectoryOpen(rel, isOpen) {
+  /**
+   * Track directory open/close state and schedule sync to backend.
+   * Called when user expands or collapses a directory.
+   */
+  if (!rel || rel === '.') return;  // Don't track root
+  
+  if (isOpen) {
+    openDirectories.add(rel);
+  } else {
+    openDirectories.delete(rel);
+    // Also remove any children that were open under this directory
+    const prefix = rel + '/';
+    for (const dir of openDirectories) {
+      if (dir.startsWith(prefix)) {
+        openDirectories.delete(dir);
+      }
+    }
+  }
+  
+  // Only sync after initialization (don't sync during restore)
+  if (openDirsInitialized) {
+    scheduleOpenDirsSync();
+  }
+}
+
+function scheduleOpenDirsSync() {
+  /**
+   * Debounced sync of open directories to backend.
+   */
+  if (openDirsSyncTimer) {
+    clearTimeout(openDirsSyncTimer);
+  }
+  openDirsSyncTimer = setTimeout(() => {
+    openDirsSyncTimer = null;
+    syncOpenDirsToBackend();
+  }, OPEN_DIRS_SYNC_DEBOUNCE);
+}
+
+function syncOpenDirsToBackend() {
+  /**
+   * Send current open directories list to backend for persistence.
+   */
+  if (typeof window.__explorerBusSend !== 'function') return;
+  
+  const dirs = Array.from(openDirectories);
+  window.__explorerBusSend('explorer:setOpenDirs', { dirs });
+}
+
+async function restoreOpenDirectories(dirs) {
+  /**
+   * Restore open directories from backend on page load.
+   * Expands each directory in order, skipping any that don't exist.
+   */
+  if (!Array.isArray(dirs) || !dirs.length) {
+    openDirsInitialized = true;
+    return;
+  }
+  
+  // Sort by depth (shortest paths first) to expand parents before children
+  const sorted = [...dirs].sort((a, b) => {
+    const depthA = (a.match(/\//g) || []).length;
+    const depthB = (b.match(/\//g) || []).length;
+    return depthA - depthB;
+  });
+  
+  for (const rel of sorted) {
+    try {
+      await expandDirectoryIfExists(rel);
+    } catch (e) {
+      // Directory doesn't exist or failed to expand - skip it
+      console.warn(`[Explorer] Failed to restore open directory: ${rel}`, e);
+    }
+  }
+  
+  openDirsInitialized = true;
+  
+  // Sync cleaned list back to backend (removes any dirs that no longer exist)
+  scheduleOpenDirsSync();
+}
+
+async function expandDirectoryIfExists(rel) {
+  /**
+   * Expand a single directory if it exists in the tree.
+   * Unlike expandToPath, this only expands the target directory itself,
+   * assuming parent directories are already open.
+   */
+  if (!treeElement) {
+    treeElement = document.getElementById('fe-file-tree');
+  }
+  if (!treeElement || !rel) return;
+  
+  // First, expand any parent directories needed
+  const parts = rel.split('/').filter(Boolean);
+  let currentRel = '.';
+  
+  for (let i = 0; i < parts.length; i++) {
+    const segment = parts[i];
+    const nextRel = currentRel === '.' ? segment : `${currentRel}/${segment}`;
+    
+    let targetLi = treeElement.querySelector(
+      `li.fe-tree-node[data-kind="dir"][data-rel="${nextRel}"]`
+    );
+    
+    if (!targetLi) {
+      // Node not in DOM - need to request parent listing first
+      const parentLi = treeElement.querySelector(
+        `li.fe-tree-node[data-kind="dir"][data-rel="${currentRel}"]`
+      );
+      
+      if (parentLi && parentLi.dataset.open !== 'true') {
+        parentLi.dataset.open = 'true';
+        openDirectories.add(currentRel === '.' ? '' : currentRel);
+        await _requestDirListAndWait(currentRel);
+      }
+      
+      // Try again after parent expanded
+      targetLi = treeElement.querySelector(
+        `li.fe-tree-node[data-kind="dir"][data-rel="${nextRel}"]`
+      );
+      
+      if (!targetLi) {
+        // Directory doesn't exist - stop here
+        throw new Error(`Directory not found: ${nextRel}`);
+      }
+    }
+    
+    // Expand this directory if not already open
+    if (targetLi.dataset.open !== 'true') {
+      targetLi.dataset.open = 'true';
+      openDirectories.add(nextRel);
+      await _requestDirListAndWait(nextRel);
+    }
+    
+    currentRel = nextRel;
   }
 }
 
@@ -982,6 +1128,15 @@ function handleExplorerEvent(type, payload) {
       // When the active project changes, refresh diff base from backend
       // so both footer and overlay selectors stay in sync with HistoryStore.
       initDiffBaseFromBackend();
+      // Reset open directories tracking for new project
+      openDirectories.clear();
+      openDirsInitialized = false;
+      break;
+    }
+    case 'explorer:setOpenDirs': {
+      // Restore open directories from backend on page load
+      const dirs = payload.dirs || [];
+      restoreOpenDirectories(dirs);
       break;
     }
     case 'explorer:setList': {
@@ -1011,11 +1166,15 @@ function handleExplorerEvent(type, payload) {
         );
         if (!dirLi) break;
         
-        // Only update if directory is already open (or being opened)
+        // Check if directory should be open:
+        // 1. Already marked open in DOM
+        // 2. Has existing child list
+        // 3. Is tracked as open in our Set (handles race conditions)
         const wasOpen = dirLi.dataset.open === 'true';
         let childList = dirLi.querySelector(':scope > ul.fe-tree');
+        const trackedAsOpen = openDirectories.has(cwd);
         
-        if (wasOpen || childList) {
+        if (wasOpen || childList || trackedAsOpen) {
           // Directory is open - update its contents
           if (!childList) {
             childList = document.createElement('ul');
@@ -1024,6 +1183,11 @@ function handleExplorerEvent(type, payload) {
           }
           dirLi.dataset.open = 'true';
           renderEntriesInto(childList, payload.entries);
+          
+          // Ensure it's tracked as open
+          if (cwd !== '.' && cwd !== '') {
+            openDirectories.add(cwd);
+          }
         }
         // If directory was closed and has no childList, ignore the update
         // (it will be fetched when user opens it)
@@ -1344,6 +1508,14 @@ function handleExplorerEvent(type, payload) {
         if (searchOverlayVisible) {
           renderSearchOverlay();
         }
+      }
+      break;
+    }
+    case 'pulse': {
+      // Heartbeat from server. Respond to confirm we are alive.
+      // console.debug('[Explorer] Pulse received 💓');
+      if (typeof window.__explorerBusSend === 'function') {
+        window.__explorerBusSend('pulse:alive', {});
       }
       break;
     }
@@ -2380,12 +2552,18 @@ export async function initExplorerUI() {
           
           // Auto-disable select mode if collapsing the select-mode directory
           checkAutoDisableSelectMode(rel);
+          
+          // Track directory close for persistence
+          markDirectoryOpen(rel, false);
         } else {
           // Expand: ask backend for this directory listing
           li.dataset.open = 'true';
           if (typeof window.__explorerBusSend === 'function') {
             window.__explorerBusSend('explorer:list', { rel });
           }
+          
+          // Track directory open for persistence
+          markDirectoryOpen(rel, true);
         }
         return;
       }

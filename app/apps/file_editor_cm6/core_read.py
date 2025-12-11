@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import uuid
+import errno
 from collections import deque
 from pathlib import Path
 from threading import Thread, Lock, Timer
@@ -330,12 +331,24 @@ def init_watcher(project_root: Path = None):
 
     # Start new watcher
     if _is_watchdog_available:
-        handler = WatchdogHandler(_handle_fs_event)
-        observer = Observer()
-        observer.schedule(handler, str(desired_root), recursive=True)
-        observer.start()
-        with _lock:
-            _watcher_thread = observer
+        try:
+            handler = WatchdogHandler(_handle_fs_event)
+            observer = Observer()
+            observer.schedule(handler, str(desired_root), recursive=True)
+            observer.start()
+            with _lock:
+                _watcher_thread = observer
+        except OSError as e:
+            if e.errno == errno.ENOSPC:
+                logger.warning("[WATCHER] Inotify watch limit reached (ENOSPC). Falling back to PollingWatcher.")
+                # Fallback to polling
+                watcher = PollingWatcher(str(desired_root), _handle_fs_event)
+                watcher.start()
+                with _lock:
+                    _watcher_thread = watcher
+            else:
+                # Re-raise other OSErrors
+                raise e
     else:
         watcher = PollingWatcher(str(desired_root), _handle_fs_event)
         watcher.start()

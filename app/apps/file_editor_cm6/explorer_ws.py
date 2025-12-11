@@ -79,6 +79,7 @@ class ConnectionManager:
         self.active_connections: Dict[str, List[WebSocket]] = {}
         # Map: websocket -> project_path (for cleanup)
         self.ws_project_map: Dict[WebSocket, str] = {}
+        self.pulse_task: Optional[asyncio.Task] = None
 
     async def accept_and_register(self, websocket: WebSocket, project_path: str):
         # Some shims (Socket.IO) don't need accept; provide no-op if missing
@@ -90,11 +91,23 @@ class ConnectionManager:
         self.register_existing(websocket, project_path)
 
     def register_existing(self, websocket: WebSocket, project_path: str):
+        # Check if this is the very first connection globally
+        was_empty = not any(self.active_connections.values())
+        
         if project_path not in self.active_connections:
             self.active_connections[project_path] = []
         self.active_connections[project_path].append(websocket)
         self.ws_project_map[websocket] = project_path
         logger.info(f"Client registered to project: {project_path}")
+        
+        if was_empty:
+            self.start_pulse()
+            # Start watcher for the project (using SSOT active project)
+            try:
+                from .core_read import init_watcher
+                init_watcher()
+            except Exception as e:
+                logger.warning(f"Failed to start watcher on connect: {e}")
 
     def disconnect(self, websocket: WebSocket):
         project_path = self.ws_project_map.get(websocket)
@@ -103,15 +116,51 @@ class ConnectionManager:
                 self.active_connections[project_path].remove(websocket)
             if not self.active_connections[project_path]:
                 del self.active_connections[project_path]
-                # --- WATCHER LIFECYCLE (future implementation) ---
-                # When last client disconnects from a project, we could stop the
-                # file watcher to save resources:
-                # from .core_read import stop_watcher
-                # stop_watcher()
-                # ------------------------------------------------
+        
         if websocket in self.ws_project_map:
             del self.ws_project_map[websocket]
+        
         logger.info(f"Client disconnected from project: {project_path}")
+        
+        # Check if no connections remain globally
+        if not any(self.active_connections.values()):
+            self.stop_pulse()
+            # Stop watcher to save resources
+            try:
+                from .core_read import stop_watcher
+                stop_watcher()
+            except Exception as e:
+                logger.warning(f"Failed to stop watcher on disconnect: {e}")
+
+    def start_pulse(self):
+        """Start the heartbeat pulse task."""
+        if self.pulse_task is None or self.pulse_task.done():
+            loop = asyncio.get_event_loop()
+            self.pulse_task = loop.create_task(self._pulse_loop())
+            logger.info("[PULSE] Heart monitor started")
+
+    def stop_pulse(self):
+        """Stop the heartbeat pulse task."""
+        if self.pulse_task:
+            self.pulse_task.cancel()
+            self.pulse_task = None
+            logger.info("[PULSE] Heart monitor stopped")
+
+    async def _pulse_loop(self):
+        """Periodically ping clients to ensure they are alive and keep connection active."""
+        try:
+            while True:
+                await asyncio.sleep(30)
+                if not any(self.active_connections.values()):
+                    break
+                
+                # Broadcast pulse to all projects
+                for project_path in list(self.active_connections.keys()):
+                    await self.broadcast(project_path, {"type": "pulse"})
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"[PULSE] Error in pulse loop: {e}")
     
     def get_connection_count(self, project_path: str) -> int:
         """Returns the number of active connections for a project."""
@@ -427,6 +476,13 @@ class ExplorerDispatcher:
         await self.emit_personal("explorer:setList", list_dir('.'))
         # 4. Review List (if any)
         await self.broadcast_review_state()
+        # 5. Open Directories (for restoring tree state)
+        try:
+            sidecar = ProjectSidecar.load_or_create(str(self.project_root))
+            open_dirs = sidecar.get_open_directories()
+            await self.emit_personal("explorer:setOpenDirs", {"dirs": open_dirs})
+        except Exception as e:
+            logger.warning(f"Failed to load open directories: {e}")
     
     async def _pump_job_events(self):
         """Background task to forward job updates to this client."""
@@ -620,6 +676,18 @@ class ExplorerDispatcher:
         # Let's broadcast root to be safe.
         data = list_dir('.')
         await self.broadcast("explorer:setList", data)
+
+    async def handle_explorer_setOpenDirs(self, payload: dict, msg_id: str):
+        """Persist the list of open directories in explorer tree."""
+        dirs = payload.get("dirs", [])
+        if not isinstance(dirs, list):
+            dirs = []
+        try:
+            sidecar = ProjectSidecar.load_or_create(str(self.project_root))
+            sidecar.set_open_directories(dirs)
+            sidecar.save()
+        except Exception as e:
+            logger.warning(f"Failed to save open directories: {e}")
 
     # --- File Operations (Broadcasts updates) ---
 
@@ -1028,6 +1096,10 @@ class ExplorerDispatcher:
         from .explorer_helper import mark_draft_cache_dirty
         mark_draft_cache_dirty(self.project_root)
         await self.broadcast_review_state()
+
+    async def handle_pulse_alive(self, payload: dict, msg_id: str):
+        """Handle client heartbeat response (silently)."""
+        pass
 
 
 # --- WebSocket Endpoint ---

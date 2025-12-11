@@ -1,7 +1,7 @@
 # LSP-Powered Sticky Scroll MVP
 **Date:** 2025-12-08  
 **Status:** ✅ Working MVP (Python via Pyright, TypeScript/JavaScript via typescript-language-server)  
-**Authors:** vectorArc, neonInk, Dex (AI assistants)
+**Authors:** vectorArc, neonInk, Dex 
 
 ---
 

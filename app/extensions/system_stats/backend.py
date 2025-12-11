@@ -53,22 +53,17 @@ def get_all_ips():
     return ips
 
 def check_root():
-    """Check if running as root or has sudo/su access."""
-    if os.geteuid() == 0:
-        return {"is_root": True, "method": "uid 0"}
-    
-    # Check for sudo
+    """Check if running as root.
+
+    NOTE: Root-based collection is currently disabled for safety. This function
+    is retained only to report whether the process is UID 0; the system_stats
+    extension always uses the non-privileged psutil path regardless.
+    """
     try:
-        import subprocess
-        # -n: non-interactive, -v: validate credentials (or just check availability)
-        # Using 'true' is safer/faster
-        ret = subprocess.run(["sudo", "-n", "true"], capture_output=True)
-        if ret.returncode == 0:
-            return {"is_root": True, "method": "sudo"}
-    except Exception:
-        pass
-        
-    return {"is_root": False, "method": "none"}
+        return {"is_root": os.geteuid() == 0, "method": "uid 0" if os.geteuid() == 0 else "none"}
+    except AttributeError:
+        # os.geteuid may not exist on some platforms (e.g., Windows/Termux quirks)
+        return {"is_root": False, "method": "none"}
 
 @bp.get("/ping")
 def ping():
@@ -87,89 +82,64 @@ async def websocket_endpoint(websocket: WebSocket):
         "root": check_root()
     })
 
-    # Determine collection strategy
-    root_info = check_root()
-    use_sudo = root_info["method"] == "sudo"
-    
-    proc = None
-    
     try:
-        if use_sudo:
-            # Resolve worker path
-            worker_path = os.path.join(os.path.dirname(__file__), 'root_stats_worker.py')
-            
-            # Spawn long-lived root worker
-            proc = await asyncio.create_subprocess_exec(
-                "sudo", "python3", worker_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            # Read loop
-            while True:
-                if proc.stdout.at_eof():
-                    break
-                    
-                line = await proc.stdout.readline()
-                if not line:
-                    break
-                    
+        # Local non-privileged loop (root-based worker path intentionally disabled)
+        permission_failure_logged = False
+        while True:
+            try:
+                cpu_total = psutil.cpu_percent(interval=None)
+                cpu_cores = psutil.cpu_percent(interval=None, percpu=True)
+                mem = psutil.virtual_memory()
+                
+                payload = {
+                    "type": "metrics",
+                    "cpu": {
+                        "total": cpu_total,
+                        "cores": cpu_cores,
+                        "count": len(cpu_cores)
+                    },
+                    "memory": {
+                        "percent": mem.percent,
+                        "used": round(mem.used / (1024**3), 2),
+                        "total": round(mem.total / (1024**3), 2)
+                    },
+                    "ip": get_ip_address(),
+                    "ips": get_all_ips()
+                }
+                await websocket.send_json(payload)
+            except PermissionError as e:
+                # Some Android/Termux environments deny access to /proc/*
+                if not permission_failure_logged:
+                    print(f"[Stats] Permission denied for local metrics; disabling system_stats stream: {e}")
+                    permission_failure_logged = True
+                # Best-effort error payload for the client, then stop the loop
                 try:
-                    data = json.loads(line.decode())
-                    if 'error' in data:
-                        print(f"Worker error: {data['error']}")
-                        continue
-                        
-                    mem_used_gb = round(data['mem_used'] / (1024**3), 2)
-                    mem_total_gb = round(data['mem_total'] / (1024**3), 2)
-                    
-                    payload = {
-                        "type": "metrics",
-                        "cpu": {
-                            "total": data['cpu_total'],
-                            "cores": data['cpu_cores'],
-                            "count": len(data['cpu_cores'])
-                        },
-                        "memory": {
-                            "percent": data['mem_percent'],
-                            "used": mem_used_gb,
-                            "total": mem_total_gb
-                        },
-                        "ip": get_ip_address(),
-                        "ips": get_all_ips()
-                    }
-                    await websocket.send_json(payload)
-                except json.JSONDecodeError:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Permission denied reading system metrics on this device."
+                    })
+                except Exception:
                     pass
-                    
-        else:
-            # Local fallback loop
-            while True:
-                try:
-                    cpu_total = psutil.cpu_percent(interval=None)
-                    cpu_cores = psutil.cpu_percent(interval=None, percpu=True)
-                    mem = psutil.virtual_memory()
-                    
-                    payload = {
-                        "type": "metrics",
-                        "cpu": {
-                            "total": cpu_total,
-                            "cores": cpu_cores,
-                            "count": len(cpu_cores)
-                        },
-                        "memory": {
-                            "percent": mem.percent,
-                            "used": round(mem.used / (1024**3), 2),
-                            "total": round(mem.total / (1024**3), 2)
-                        },
-                        "ip": get_ip_address(),
-                        "ips": get_all_ips()
-                    }
-                    await websocket.send_json(payload)
-                except Exception as e:
-                    print(f"Local stats error: {e}")
-                    
-                await asyncio.sleep(1)
+                break
+            except OSError as e:
+                if getattr(e, "errno", None) == 13:
+                    if not permission_failure_logged:
+                        print(f"[Stats] Permission denied (errno 13) for local metrics; disabling system_stats stream: {e}")
+                        permission_failure_logged = True
+                    try:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Permission denied reading system metrics on this device."
+                        })
+                    except Exception:
+                        pass
+                    break
+                else:
+                    print(f"[Stats] Local stats OS error: {e}")
+            except Exception as e:
+                print(f"[Stats] Local stats error: {e}")
+            
+            await asyncio.sleep(1)
             
     except WebSocketDisconnect:
         pass
@@ -180,12 +150,4 @@ async def websocket_endpoint(websocket: WebSocket):
         except:
             pass
     finally:
-        # Cleanup subprocess if it exists
-        if proc:
-            try:
-                if proc.returncode is None:
-                    proc.terminate()
-                    await proc.wait()
-            except Exception as e:
-                print(f"Failed to kill worker: {e}")
         print("Client disconnected from stats")
