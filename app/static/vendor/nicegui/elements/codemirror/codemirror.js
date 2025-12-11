@@ -2393,7 +2393,10 @@ export default {
           if (isMarkdown) {
             const headings = collectMarkdownHeadingsSimple(state.doc);
             const sections = buildMarkdownSectionsSimple(headings, state.doc.lines);
-            const path = markdownPathAtSimple(sections, refLine - earlyLines);
+            // For markdown: use earlyLines=1 when scrolling down, but also subtract 1 when
+            // scrolling up to get early "release" of headers (they disappear one line sooner)
+            const markdownOffset = direction < 0 ? 1 : earlyLines;
+            const path = markdownPathAtSimple(sections, refLine - markdownOffset);
 
             let cumulativeHeight = 0;
             candidateScopes = path.map((sec, idx) => {
