@@ -796,7 +796,7 @@ async def editor_page():
             # Theme and line wrapping already applied in constructor - don't re-apply
             editor.toggle_color_picker(editor_prefs.get('colorPicker', True))
             editor.set_read_only(editor_prefs.get('readOnly', False))
-            editor.set_sticky_scroll(editor_prefs.get('stickyScroll', False))  # Added: 2025-12-03 by vectorArc - TE2 Team
+            # NOTE: sticky scroll moved to end of init (after LSP, diffs, watcher) to avoid rendering issues
             
             print(f"[EDITOR_APP] Applied runtime preferences: shading={editor_prefs.get('showShading')}, guides={editor_prefs.get('showIndentGuides')}, fontScale={editor_prefs.get('fontScale')}, colorPicker={editor_prefs.get('colorPicker')}, readOnly={editor_prefs.get('readOnly')}, stickyScroll={editor_prefs.get('stickyScroll')}", file=sys.stderr)
 
@@ -888,6 +888,10 @@ async def editor_page():
                                 print(f"[FILE_WATCH] Failed to recalculate diffs: {e}", file=sys.stderr)
                 
                 subscribe(initial_path, 'nicegui_backend', on_file_change)
+
+            # 7b. Enable sticky scroll LAST - after content, LSP, diffs, watcher are ready
+            # This prevents rendering issues (whitespace, empty slots) on page load
+            editor.set_sticky_scroll(editor_prefs.get('stickyScroll', False))
 
     # 8. Add Diff Styling
     ui.add_head_html('''

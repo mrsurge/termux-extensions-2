@@ -1,5 +1,5 @@
 # LSP-Powered Sticky Scroll MVP
-**Date:** 2025-12-08  
+**Date:** 2025-12-08 (Updated: 2025-12-11)  
 **Status:** ✅ Working MVP (Python via Pyright, TypeScript/JavaScript via typescript-language-server)  
 **Authors:** vectorArc, neonInk, Dex 
 
@@ -15,6 +15,8 @@ We successfully integrated Language Server Protocol (LSP) document symbols into 
 - Push-up animations working for LSP-backed scopes
 - Decorator skip for Python (shows `def` line, not `@decorator` line)
 - Deduplication of same-line scopes (e.g., variable + anonymous class)
+- Mid-document initialization with proper scope height pre-measurement (word-wrap support)
+- Direction-aware scroll handling for markdown headers
 
 ---
 
@@ -275,6 +277,72 @@ cumulativeHeight += cachedHeight;
 
 ---
 
+### 3b. Mid-Document Initialization
+
+#### The Problem
+When sticky scroll is enabled mid-document (page reload, document switch, or toggle), the plugin doesn't know about ancestor scopes that would normally accumulate as you scroll from the top. This causes rendering issues: whitespace gaps, empty slots, or scopes that briefly appear then vanish.
+
+#### The Solution: `initializeAtCurrentPosition()`
+A dedicated initialization method that:
+
+1. **Resets rendering state** (slots, currentScopes, overlay heights) but preserves `scopeHeights` cache
+2. **Pre-measures line heights** for word-wrap mode (lines 1 to current position)
+3. **Forces a clean render** with follow-up renders at 100ms and 500ms
+
+```javascript
+initializeAtCurrentPosition() {
+  // Reset rendering state but KEEP scopeHeights cache
+  this.slots.clear();
+  this.currentScopes = [];
+  this.lastOverlayHeight = 0;
+  this.lastOverlaySampleHeight = 0;
+  // ... other state resets ...
+  
+  // For word-wrap mode, pre-measure heights
+  if (wrappingEnabled) {
+    const refLine = state.doc.lineAt(block.from).number;
+    for (let lineNo = 1; lineNo <= refLine; lineNo++) {
+      const lineBlock = view.lineBlockAt(doc.line(lineNo).from);
+      const heightPx = lineBlock.bottom - lineBlock.top;
+      const lines = Math.round(heightPx / lineHeight);
+      // Cache for all depth levels
+      for (let depth = 0; depth < 5; depth++) {
+        this.scopeHeights.set(`${depth}:${lineNo}`, lines);
+      }
+    }
+  }
+  
+  this.dom.innerHTML = '';
+  this.updateStickyHeader(true);
+}
+```
+
+#### When It's Called
+- **Plugin constructor**: Initial render uses `initializeAtCurrentPosition()` instead of `updateStickyHeader()`
+- **Sticky scroll enable**: After compartment reconfiguration (50ms delay)
+- **`jumpToLine` with `scrollToTop: true`**: After scroll position is set (50ms delay)
+- **Initial scroll on page reload**: After `scrollTop` is set (100ms delay)
+
+---
+
+### 3c. Markdown Scroll Direction Handling
+
+#### The Problem
+Markdown headers were releasing too late when scrolling up - they stayed visible until the reference line passed their end, causing a "sticky" feel.
+
+#### The Solution
+Apply direction-aware offset for markdown scope path lookup:
+
+```javascript
+// For markdown: subtract 1 when scrolling down (early capture) OR scrolling up (early release)
+const markdownOffset = direction < 0 ? 1 : earlyLines;
+const path = markdownPathAtSimple(sections, refLine - markdownOffset);
+```
+
+This ensures headers disappear one line earlier when scrolling up, matching the behavior of when they appear while scrolling down.
+
+---
+
 ### 4. Backend: `lsp_ws.py`
 
 #### Session Management
@@ -370,10 +438,10 @@ LSP_COMMANDS = {
 
 | File | Changes |
 |------|---------|
-| `codemirror.js` | SocketIOTransport, connectLSP, handleDocumentSymbols, requestDocumentSymbols (with retry), findAncestorPath, decorator skip, deduplication, getStyledLineHTML (highlightCode), push-up for LSP scopes |
+| `codemirror.js` | SocketIOTransport, connectLSP, handleDocumentSymbols, requestDocumentSymbols (with retry), findAncestorPath, decorator skip, deduplication, getStyledLineHTML (highlightCode), push-up for LSP scopes, `initializeAtCurrentPosition()` for mid-document init, markdown direction-aware offsets |
 | `src/index.mjs` | Added `export { highlightCode } from "@lezer/highlight"` |
-| `codemirror.py` | Added `connect_lsp(language_id, project_root, file_path)` wrapper |
-| `editor_app.py` | LSP_LANGUAGE_MAP, `_should_use_lsp()`, `_maybe_connect_lsp()` |
+| `codemirror.py` | Added `connect_lsp(language_id, project_root, file_path)` wrapper, `jump_to_line` with `scroll_to_top` parameter |
+| `editor_app.py` | LSP_LANGUAGE_MAP, `_should_use_lsp()`, `_maybe_connect_lsp()`, sticky scroll enabled last in init sequence |
 | `lsp_ws.py` | LSPSocketIONamespace with session management and output bridging |
 | `lsp_shell_manager.py` | `get_or_spawn_lsp_shell()` with JSX/TSX support |
 | `main.py` | Namespace registration |
@@ -397,6 +465,9 @@ const DEBUG_SLOTS = true;       // For activation logic
 | No highlighting | `highlightCode` not exported | Rebuild bundle |
 | Push-up broken | Using `node.to` for LSP scope | Check `innermost.node` before using |
 | Timeout on load | LSP server cold start | Retry logic with backoff |
+| Whitespace/empty slots on init | Missing `initializeAtCurrentPosition()` | Ensure called on enable/reload |
+| Word-wrap height flash | `scopeHeights` empty on init | Pre-measure heights in `initializeAtCurrentPosition()` |
+| Markdown headers sticky on scroll-up | No direction-aware offset | Use `markdownOffset` with `direction < 0` check |
 
 ---
 
@@ -405,8 +476,31 @@ const DEBUG_SLOTS = true;       // For activation logic
 1. **Single-line parsing**: `highlightCode` parses each line in isolation, so multi-line constructs (template literals, etc.) may not highlight correctly at boundaries
 2. **Initial delay**: LSP symbols take ~1-3 seconds on cold start
 3. **No incremental sync**: Full document sent on each change (could optimize with `textDocument/didChange`)
+4. **Word-wrap height pre-measurement**: Measures all lines from 1 to current position on init, which could be slow for very large files at the end
+
+---
+
+## Scroll Position Restoration
+
+The editor now properly saves and restores scroll positions per-file:
+
+### Recording (reportScrollPosition)
+```javascript
+// Get the line at actual viewport top using lineBlockAtHeight(scrollTop)
+const block = view.lineBlockAtHeight(scrollTop);
+refLine = state.doc.lineAt(block.from).number;
+```
+
+### Restoring (jumpToLine with scrollToTop)
+```javascript
+// Use lineBlockAt to get pixel position, then set scrollTop directly
+const lineBlock = view.lineBlockAt(pos);
+view.scrollDOM.scrollTop = lineBlock.top;
+```
+
+These are perfect inverses - `lineBlockAtHeight` converts pixels→line, `lineBlockAt` converts line→pixels. This ensures repeated page refreshes don't cause scroll drift.
 
 ---
 
 **Status:** MVP Complete ✅  
-**Last Updated:** 2025-12-08
+**Last Updated:** 2025-12-11

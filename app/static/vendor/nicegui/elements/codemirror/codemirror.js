@@ -1577,6 +1577,16 @@ export default {
           view.dispatch({
             selection: { anchor: pos }
           });
+          
+          // Re-initialize sticky scroll at new position to avoid rendering issues
+          if (this._stickyScrollPlugin && typeof this._stickyScrollPlugin.initializeAtCurrentPosition === 'function') {
+            setTimeout(() => {
+              if (this._stickyScrollPlugin) {
+                this._stickyScrollPlugin.initializeAtCurrentPosition();
+              }
+            }, 50);
+          }
+          
           console.log('[CodeMirror] jumpToLine: scrolled line', targetLine, 'to top, scrollTop=', lineBlock.top);
         } else {
           // Default behavior: scroll target line into view (minimal scroll)
@@ -2175,8 +2185,9 @@ export default {
           };
           view.scrollDOM.addEventListener('scroll', this.scrollHandler, { passive: true });
 
-          // Initial render
-          this.updateStickyHeader();
+          // Initial render - use initializeAtCurrentPosition for proper setup
+          // This handles the mid-document case correctly (word wrap heights, etc.)
+          this.initializeAtCurrentPosition();
           
           // Re-render after a delay to catch late-arriving LSP symbols
           setTimeout(() => this.updateStickyHeader(), 1500);
@@ -2288,6 +2299,71 @@ export default {
           return text.replace(/[<>&]/g, ch =>
             ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : '&amp;'
           );
+        }
+
+        // Initialize sticky scroll at current position - clears cached state and
+        // forces a clean render. Call this when enabling sticky scroll or opening
+        // a file mid-document to avoid rendering issues (whitespace, empty slots).
+        initializeAtCurrentPosition() {
+          console.log('[StickyScroll] Initializing at current position');
+          
+          const view = this.view;
+          const state = view.state;
+          const lineHeight = view.defaultLineHeight || 20;
+          const wrappingEnabled = cmComponent ? cmComponent.lineWrapping : false;
+          
+          // Reset rendering state but KEEP scopeHeights cache - those measurements
+          // are still valid and needed for word-wrap mode to avoid visual flashing
+          this.slots.clear();
+          this.currentScopes = [];
+          // Note: NOT clearing scopeHeights - preserve height measurements
+          this.lastOverlayHeight = 0;
+          this.lastOverlaySampleHeight = 0;
+          this.lastTopOffset = 0;
+          this.lastActiveSignature = '';
+          this.lastRenderKey = '';
+          this.lastScrollTop = view.scrollDOM.scrollTop || 0;
+          this.pendingTransitions.clear();
+          
+          // For word-wrap mode, pre-measure heights of lines that will be in the
+          // sticky header. This avoids the flash when heights default to 1.
+          if (wrappingEnabled) {
+            try {
+              const scrollTop = view.scrollDOM.scrollTop;
+              const block = view.lineBlockAtHeight(scrollTop);
+              const refLine = state.doc.lineAt(block.from).number;
+              
+              // Pre-measure heights for lines from start to current position
+              // Only measure lines we haven't already cached
+              for (let lineNo = 1; lineNo <= Math.min(refLine, state.doc.lines); lineNo++) {
+                const lineObj = state.doc.line(lineNo);
+                const lineBlock = view.lineBlockAt(lineObj.from);
+                const heightPx = lineBlock.bottom - lineBlock.top;
+                const lines = Math.max(1, Math.round(heightPx / lineHeight));
+                
+                // Cache height for potential scope keys at various depths
+                for (let depth = 0; depth < 5; depth++) {
+                  const key = `${depth}:${lineNo}`;
+                  if (!this.scopeHeights.has(key)) {
+                    this.scopeHeights.set(key, lines);
+                  }
+                }
+              }
+              console.log('[StickyScroll] Pre-measured heights for lines 1-' + Math.min(refLine, state.doc.lines));
+            } catch (err) {
+              console.warn('[StickyScroll] Failed to pre-measure heights:', err);
+            }
+          }
+          
+          // Clear the DOM
+          this.dom.innerHTML = '';
+          
+          // Force a fresh render
+          this.updateStickyHeader(true);
+          
+          // Schedule follow-up renders to catch any late layout
+          setTimeout(() => this.updateStickyHeader(true), 100);
+          setTimeout(() => this.updateStickyHeader(true), 500);
         }
 
         updateStickyHeader(isRetry = false) {
@@ -3266,6 +3342,17 @@ export default {
         )
       });
 
+      // When enabling, initialize the sticky scroll at the current position
+      // to avoid rendering issues when starting mid-document
+      if (enabled && this._stickyScrollPlugin && typeof this._stickyScrollPlugin.initializeAtCurrentPosition === 'function') {
+        // Small delay to ensure the plugin is fully mounted
+        setTimeout(() => {
+          if (this._stickyScrollPlugin) {
+            this._stickyScrollPlugin.initializeAtCurrentPosition();
+          }
+        }, 50);
+      }
+
       console.log('[CodeMirror] Sticky scroll set to:', enabled);
     },
     // ============================================================================
@@ -3337,6 +3424,16 @@ export default {
         this.editor.dispatch({
           selection: { anchor: lineObj.from }
         });
+        
+        // Re-initialize sticky scroll at new position to avoid rendering issues
+        if (this._stickyScrollPlugin && typeof this._stickyScrollPlugin.initializeAtCurrentPosition === 'function') {
+          setTimeout(() => {
+            if (this._stickyScrollPlugin) {
+              this._stickyScrollPlugin.initializeAtCurrentPosition();
+            }
+          }, 100);
+        }
+        
         console.log('[CodeMirror] Initial scroll to line', targetLine, 'scrollTop=', lineBlock.top);
       } catch (err) {
         console.warn('[CodeMirror] Failed to apply initial scroll line:', err);
