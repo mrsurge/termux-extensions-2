@@ -1319,6 +1319,117 @@
     z-index: 250;
   }
 
+  /* Language Servers Modal */
+  .lsp-server-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .lsp-server-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border, #333);
+    border-radius: 8px;
+  }
+
+  .lsp-server-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .lsp-server-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .lsp-server-langs {
+    font-size: 0.75rem;
+    color: var(--muted-foreground, #9ca3af);
+  }
+
+  .lsp-server-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .lsp-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #6b7280;
+  }
+
+  .lsp-status-dot.enabled {
+    background: #22c55e;
+  }
+
+  .lsp-status-dot.disabled {
+    background: #6b7280;
+  }
+
+  .lsp-toggle-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border, #333);
+    border-radius: 6px;
+    background: var(--secondary, #0a0d14);
+    color: var(--foreground, #e5e7eb);
+    cursor: pointer;
+    font-size: 0.8rem;
+    min-width: 70px;
+  }
+
+  .lsp-toggle-btn:hover {
+    border-color: var(--primary, #3b82f6);
+  }
+
+  .lsp-toggle-btn.enabled {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: #22c55e;
+    color: #22c55e;
+  }
+
+  .lsp-global-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 8px;
+    margin-bottom: 16px;
+  }
+
+  .lsp-global-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .lsp-global-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+
+  .lsp-global-desc {
+    font-size: 0.75rem;
+    color: var(--muted-foreground, #9ca3af);
+  }
+
+  .lsp-section-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted-foreground, #9ca3af);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
 </style>
 
 <div class="fe-root">
@@ -1421,6 +1532,8 @@
         <div class="fe-dd-item" id="mi-font-large" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0">
           <span>Large (115%)</span>
         </div>
+        <div class="fe-dd-separator"></div>
+        <div class="fe-dd-item" id="mi-language-servers"><span>Language Servers…</span></div>
       </div>
     </div>
     <div class="fe-menu" id="menu-view">
@@ -1613,6 +1726,56 @@
   </div>
 
 
+</div>
+
+<!-- Language Servers Modal -->
+<div id="lsp-modal" class="fe-modal" aria-hidden="true" style="z-index: 300;">
+  <div class="fe-modal-card" style="max-width: 540px;">
+    <div class="fe-modal-header">
+      <strong>Language Servers</strong>
+      <span style="flex:1"></span>
+      <button class="fe-btn" id="lsp-modal-close" aria-label="Close">✕</button>
+    </div>
+    <div class="fe-modal-body">
+      <!-- Global Enable/Disable Toggle -->
+      <div class="lsp-global-toggle">
+        <div class="lsp-global-info">
+          <div class="lsp-global-title">Enable LSP Integration</div>
+          <div class="lsp-global-desc">Language servers provide intelligent code features like symbol navigation</div>
+        </div>
+        <button class="lsp-toggle-btn" id="lsp-global-toggle-btn">Enable</button>
+      </div>
+
+      <!-- Available Servers -->
+      <div class="lsp-section-title">Available Servers</div>
+      <div class="lsp-server-list" id="lsp-server-list">
+        <!-- Pyright -->
+        <div class="lsp-server-item" data-server="pyright">
+          <div class="lsp-server-info">
+            <div class="lsp-server-name">Pyright</div>
+            <div class="lsp-server-langs">.py, .pyw — Python type checking &amp; analysis</div>
+          </div>
+          <div class="lsp-server-status">
+            <span class="lsp-status-dot" id="lsp-status-pyright"></span>
+          </div>
+        </div>
+        <!-- TypeScript Language Server -->
+        <div class="lsp-server-item" data-server="typescript">
+          <div class="lsp-server-info">
+            <div class="lsp-server-name">TypeScript Language Server</div>
+            <div class="lsp-server-langs">.js, .jsx, .ts, .tsx — JavaScript &amp; TypeScript</div>
+          </div>
+          <div class="lsp-server-status">
+            <span class="lsp-status-dot" id="lsp-status-typescript"></span>
+          </div>
+        </div>
+      </div>
+
+      <p style="margin-top: 16px; font-size: 0.75rem; color: var(--muted-foreground, #9ca3af);">
+        Note: Changes take effect when you open a new file of the corresponding type.
+      </p>
+    </div>
+  </div>
 </div>
 
 <div id="crash-modal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.8); z-index:9999; justify-content:center; align-items:center;">

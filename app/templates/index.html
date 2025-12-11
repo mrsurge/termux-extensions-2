@@ -39,7 +39,7 @@
             --warning: hsl(38, 92%, 50%);
         }
         body {
-            font-family: 'Inter', 'Segoe UI', sans-serif;
+            font-family: 'JetBrains Mono', monospace;
             background-color: var(--background);
             color: var(--foreground);
             margin: 0;
@@ -48,17 +48,18 @@
             width: 100%;
             min-height: 100vh;
             background-color: var(--background);
-            padding: 16px;
+            padding: 0;
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
-            gap: 24px;
+            gap: 0;
         }
         .section-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 12px;
+            padding: 16px; /* Re-add padding for internal sections if needed */
         }
         .section-title {
             font-size: 0.9em;
@@ -87,6 +88,7 @@
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 12px;
+            padding: 0 16px 16px 16px; /* Add padding to grid container */
         }
         .stat-card {
             background-color: var(--secondary);
@@ -146,11 +148,54 @@
         .btn-secondary { background-color: var(--secondary); color: var(--secondary-foreground); }
 
         .settings-gear { position: fixed; bottom: 16px; right: 16px; font-size: 1.8em; background-color: var(--secondary); color: var(--foreground); border: 1px solid var(--border); width: 50px; height: 50px; border-radius: 50%; cursor: pointer; z-index: 150; }
-    .extension-wrapper { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 16px; background-color: var(--card); }
-    .extension-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+    
+    /* Edge-to-Edge Extension Styles */
+    .extension-wrapper { 
+        border: none; 
+        border-bottom: 1px solid var(--border); /* Separator */
+        border-radius: 0; 
+        margin-bottom: 0; 
+        background-color: var(--card); 
+    }
+    .extension-header { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center; 
+        padding: 12px 16px; 
+        border-bottom: 1px solid var(--border); 
+        background-color: hsl(224, 71%, 12%); /* Slightly lighter blue */
+    }
     .extension-title { font-weight: 600; }
-    .collapse-btn { background: none; border: none; color: var(--muted-foreground); font-size: 1.2em; cursor: pointer; }
-    .extension-content { padding: 12px; }
+    
+    .window-controls {
+        display: flex;
+        gap: 8px;
+    }
+    .window-btn {
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        color: var(--muted-foreground);
+        width: 28px;
+        height: 28px;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 16px;
+        font-weight: bold;
+        line-height: 1;
+    }
+    .window-btn:hover {
+        background: rgba(255, 255, 255, 0.2);
+        color: var(--foreground);
+    }
+
+    .extension-content { 
+        padding: 16px; 
+        background-color: hsl(224, 71%, 5%); /* Slightly darker/base blue */
+    }
     .extension-content.collapsed { display: none; }
 
     </style>
@@ -252,12 +297,27 @@
                     title.className = 'extension-title';
                     title.textContent = ext.name;
 
-                    const collapseBtn = document.createElement('button');
-                    collapseBtn.className = 'collapse-btn';
-                    collapseBtn.innerHTML = '&#9660;'; // Down arrow
+                    // Window Controls Container
+                    const controls = document.createElement('div');
+                    controls.className = 'window-controls';
+
+                    // Minimize Button [-]
+                    const minimizeBtn = document.createElement('button');
+                    minimizeBtn.className = 'window-btn';
+                    minimizeBtn.innerHTML = '&minus;'; // Minus sign
+                    minimizeBtn.title = 'Minimize';
+
+                    // Expand Button [□]
+                    const expandBtn = document.createElement('button');
+                    expandBtn.className = 'window-btn';
+                    expandBtn.innerHTML = '&#9633;'; // White square
+                    expandBtn.title = 'Maximize';
+
+                    controls.appendChild(minimizeBtn);
+                    controls.appendChild(expandBtn);
 
                     header.appendChild(title);
-                    header.appendChild(collapseBtn);
+                    header.appendChild(controls);
                     wrapper.appendChild(header);
 
                     const content = document.createElement('div');
@@ -300,14 +360,22 @@
 
                     // Collapse logic
                     const collapsedState = (settingsCache && typeof settingsCache.extensionCollapse === 'object') ? settingsCache.extensionCollapse : {};
+                    // Helper to set initial state (inverted logic: minimize button shows '+' when collapsed?)
+                    // Actually standard UI: [-] always means minimize. If minimized, content is hidden.
+                    // Maybe change icon to [+] when minimized? 
+                    // User request: "minus and a square want to expand and one to collapse"
+                    // Let's stick to standard: [-] toggles collapse.
+                    
                     if (collapsedState[extDir]) {
                         content.classList.add('collapsed');
-                        collapseBtn.innerHTML = '&#9650;'; // Up arrow
+                        minimizeBtn.innerHTML = '+'; // Show plus if already collapsed to indicate "Restore"
                     }
 
-                    header.addEventListener('click', async () => {
+                    minimizeBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
                         const isCollapsed = content.classList.toggle('collapsed');
-                        collapseBtn.innerHTML = isCollapsed ? '&#9650;' : '&#9660;';
+                        minimizeBtn.innerHTML = isCollapsed ? '+' : '&minus;';
+                        
                         const currentState = { ...(settingsCache.extensionCollapse || {}) };
                         currentState[extDir] = isCollapsed;
                         settingsCache.extensionCollapse = currentState;
@@ -316,6 +384,12 @@
                         } catch (err) {
                             console.error('Failed to persist collapse state', err);
                         }
+                    });
+                    
+                    expandBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        // Future: Maximize logic
+                        console.log('Maximize clicked for', ext.name);
                     });
                 }
             } catch (error) {

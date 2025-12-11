@@ -27,6 +27,8 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "readOnly": False,
     "showMinimap": False,
     "stickyScroll": False,  # Added: 2025-12-03 by vectorArc - TE2 Team
+    # LSP integration toggle (backend-only; no UI yet)
+    "enableLsp": False,
 }
 
 DEFAULT_UI_PREFS: Dict[str, Any] = {

@@ -117,7 +117,7 @@
 .fe-tree {
   list-style: none;
   margin: 0;
-  padding: 8px;
+  padding: 8px 12px 8px 7px;
   overflow-y: auto;
   overflow-x: visible;
   flex: 1;
@@ -127,9 +127,9 @@
   display: grid;
   grid-template-columns: 20px 1fr auto;    /* icon, text, menu (twisty removed) */
   gap: 8px;
-  padding: 6px 10px;
+  padding: 6px 1px 6px 10px;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 8px 1px 1px 8px;
   transition: background 0.15s;
   color: #e5e7eb;
   font-size: calc(0.8rem * var(--chrome-font-scale));
@@ -181,7 +181,7 @@
 }
 /* ACTUAL CARD DIMENSIONS */
 .fe-tree li > ul > li {
-  margin: 4px 0px 4px 4px;
+  margin: 4px 2px 4px 4px;
   width: auto;
   box-sizing: border-box;
 }
@@ -241,7 +241,7 @@
   border: none;
   color: var(--muted, #9ca3af);
   cursor: pointer;
-  padding: 0;
+  padding: 0px 8px 0px 0px;
   margin: 0;
   width: 24px;
   height: 24px;

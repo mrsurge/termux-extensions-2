@@ -73,6 +73,7 @@ class ShellRecord:
     launcher_pid: Optional[int] = None
     adopted: bool = False
     uses_pty: bool = False
+    uses_pipes: bool = False
 
     def to_payload(self, *, include_env: bool = False) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
@@ -93,6 +94,7 @@ class ShellRecord:
             "launcher_pid": self.launcher_pid,
             "adopted": self.adopted,
             "uses_pty": self.uses_pty,
+            "uses_pipes": self.uses_pipes,
         }
         if include_env:
             payload["env_overrides"] = dict(self.env_overrides)
@@ -107,6 +109,15 @@ class PTYState:
     subscribers: List["AsyncQueue[str]"] = field(default_factory=list)
     stop: asyncio.Event = field(default_factory=asyncio.Event)
     reader: Optional[asyncio.Task] = None
+
+
+@dataclass
+class PipeState:
+    """State for shells with live stdin/stdout pipes (for LSP, etc.)."""
+    process: asyncio.subprocess.Process
+    label: Optional[str] = None
+    shell_id: Optional[str] = None
+    stop: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class FrameworkShellManager:
@@ -134,6 +145,7 @@ class FrameworkShellManager:
         self.launcher_pid = os.getpid()
         self.started_at = time.time()
         self._pty: Dict[str, PTYState] = {}
+        self._pipes: Dict[str, PipeState] = {}
 
     def _get_lock(self):
         """Get or create the instance lock (lazy initialization)."""
@@ -300,6 +312,7 @@ class FrameworkShellManager:
                 launcher_pid=data.get("launcher_pid"),
                 adopted=bool(data.get("adopted", False)),
                 uses_pty=bool(data.get("uses_pty", False)),
+                uses_pipes=bool(data.get("uses_pipes", False)),
             )
         except Exception:
             return None
@@ -327,6 +340,7 @@ class FrameworkShellManager:
             "launcher_pid": record.launcher_pid,
             "adopted": record.adopted,
             "uses_pty": record.uses_pty,
+            "uses_pipes": record.uses_pipes,
         }
         async with aiofiles.open(tmp_path, "w", encoding="utf-8") as fh:
             await fh.write(json.dumps(data, indent=2))
@@ -375,6 +389,7 @@ class FrameworkShellManager:
         label: Optional[str],
         autostart: bool,
         uses_pty: bool = False,
+        uses_pipes: bool = False,
     ) -> ShellRecord:
         shell_id = f"fs_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         command_list = self._normalize_command(command)
@@ -403,6 +418,7 @@ class FrameworkShellManager:
             launcher_pid=self.launcher_pid,
             adopted=False,
             uses_pty=uses_pty,
+            uses_pipes=uses_pipes,
         )
 
     async def _launch(self, record: ShellRecord) -> ShellRecord:
@@ -559,6 +575,62 @@ class FrameworkShellManager:
         self._pty[record.id] = state
         return record
 
+    async def _launch_pipe(self, record: ShellRecord) -> ShellRecord:
+        """Launch shell with live stdin/stdout pipes for bidirectional streaming."""
+        record.uses_pipes = True
+        record.uses_pty = False
+        env = self._prepare_env(record)
+        
+        stdout_path = Path(record.stdout_log)
+        stderr_path = Path(record.stderr_log)
+        await asyncio.to_thread(stdout_path.parent.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(stdout_path.touch, exist_ok=True)
+        await asyncio.to_thread(stderr_path.touch, exist_ok=True)
+        
+        # Spawn with PIPE for stdin/stdout, stderr to log file
+        stderr_fh = await asyncio.to_thread(open, stderr_path, "ab")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *record.command,
+                cwd=record.cwd,
+                env=env,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=stderr_fh,
+                start_new_session=True,
+            )
+        finally:
+            await asyncio.to_thread(stderr_fh.close)
+        
+        record.pid = proc.pid
+        record.status = "running"
+        record.exit_code = None
+        record.updated_at = time.time()
+        await self._save_record(record)
+        
+        # Register with IPC
+        from app.ipc.client import register_process
+        register_process(
+            pid=record.pid,
+            type="shell",
+            label=record.label,
+            parent_pid=os.getpid(),
+            metadata={
+                "shell_id": record.id,
+                "command": " ".join(record.command),
+                "cwd": record.cwd,
+                "uses_pipes": True,
+            }
+        )
+        
+        state = PipeState(
+            process=proc,
+            label=record.label,
+            shell_id=record.id,
+        )
+        self._pipes[record.id] = state
+        return record
+
     async def _is_pid_alive(self, pid: Optional[int]) -> bool:
         if not pid:
             return False
@@ -618,6 +690,19 @@ class FrameworkShellManager:
             await asyncio.to_thread(os.close, state.master_fd)
         except Exception:
             pass
+
+    async def _stop_pipe(self, shell_id: str) -> None:
+        state = self._pipes.pop(shell_id, None)
+        if not state:
+            return
+        state.stop.set()
+        proc = state.process
+        if proc.stdin and not proc.stdin.is_closing():
+            proc.stdin.close()
+            try:
+                await proc.stdin.wait_closed()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Public manager API
@@ -744,6 +829,41 @@ class FrameworkShellManager:
             )
             return await self._launch_pty(record)
 
+    async def spawn_shell_pipe(
+        self,
+        command: Iterable[str],
+        *,
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+        label: Optional[str] = None,
+        autostart: bool = False,
+    ) -> ShellRecord:
+        """Spawn shell with live stdin/stdout pipes for bidirectional streaming (LSP, etc.)."""
+        async with self._get_lock():
+            await self.sweep()
+            if label:
+                existing = await self._find_shell_by_label_unlocked(label, status="running")
+                if existing:
+                    return existing
+            is_app_worker = (label or "").startswith("app-worker:")
+            limit = self.max_app_shells if is_app_worker else self.max_service_shells
+            if limit and await self._active_shell_count(app_shell=is_app_worker) >= limit:
+                raise RuntimeError(f"Maximum shell count reached.")
+
+            record = self._create_record(
+                command,
+                cwd=cwd,
+                env=env,
+                label=label,
+                autostart=autostart,
+                uses_pipes=True,
+            )
+            return await self._launch_pipe(record)
+
+    def get_pipe_state(self, shell_id: str) -> Optional[PipeState]:
+        """Get pipe state for direct stdin/stdout access (no lock, caller manages)."""
+        return self._pipes.get(shell_id)
+
     async def write_to_pty(self, shell_id: str, data: bytes | str) -> None:
         async with self._get_lock():
             state = self._pty.get(shell_id)
@@ -802,6 +922,7 @@ class FrameworkShellManager:
                 exit_code = record.exit_code or await self._collect_exit_code(record.pid)
                 await self._mark_exited(record, exit_code)
                 await self._stop_pty(shell_id)
+                await self._stop_pipe(shell_id)
                 return record
             
             # Unregister from IPC before killing
@@ -816,6 +937,7 @@ class FrameworkShellManager:
                 exit_code = record.exit_code or await self._collect_exit_code(record.pid)
                 await self._mark_exited(record, exit_code)
                 await self._stop_pty(shell_id)
+                await self._stop_pipe(shell_id)
                 return record
             
             if not force:
@@ -833,6 +955,7 @@ class FrameworkShellManager:
             exit_code = await self._collect_exit_code(record.pid)
             await self._mark_exited(record, exit_code)
             await self._stop_pty(shell_id)
+            await self._stop_pipe(shell_id)
             return record
 
     async def restart_shell(self, shell_id: str) -> ShellRecord:
@@ -849,6 +972,8 @@ class FrameworkShellManager:
             await self._save_record(record)
             if record.uses_pty:
                 return await self._launch_pty(record)
+            if record.uses_pipes:
+                return await self._launch_pipe(record)
             return await self._launch(record)
 
     async def remove_shell(self, shell_id: str, *, force: bool = False) -> None:
@@ -865,6 +990,7 @@ class FrameworkShellManager:
             if record.pid and await self._is_pid_alive(record.pid):
                 await self.terminate_shell(shell_id, force=force)
             await self._stop_pty(shell_id)
+            await self._stop_pipe(shell_id)
             await self._purge_record_files(record)
 
     async def _purge_record_files(self, record: ShellRecord) -> None:

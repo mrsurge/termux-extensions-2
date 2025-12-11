@@ -2,8 +2,8 @@
 
 **Architecture Philosophy:** Code CM6 implements the code-server pattern - disk-backed state with ephemeral UI clients. Multiple devices (desktop, mobile, vim) converge on the same backend without sync logic.
 
-**Document Version:** 1.2  
-**Last Updated:** 2025-12-03  
+**Document Version:** 1.3  
+**Last Updated:** 2025-12-11  
 **Target Audience:** Framework contributors, extension developers, and technical users
 
 This document provides a comprehensive technical overview of Code CM6's internal architecture, focusing on the frameworks, patterns, and implementation details that make the editor function.
@@ -1125,6 +1125,91 @@ case 'explorer:updateDecorations': {
 }
 ```
 
+### 8.5.1 Open Directories Persistence
+
+**Added:** 2025-12-11
+
+The explorer preserves which directories are expanded across page reloads. This state is stored per-project in the ProjectSidecar.
+
+**Backend Storage (`project_sidecar.py`):**
+
+```python
+# ProjectSidecar schema includes:
+"open_directories": ["src", "src/components", "lib"]  # List of rel paths
+
+# API Methods:
+def get_open_directories(self) -> List[str]:
+    """Return list of open directory rel paths."""
+    
+def set_open_directories(self, dirs: List[str]) -> None:
+    """Set the list (normalized, deduplicated)."""
+    
+def add_open_directory(self, rel: str) -> None:
+    """Add single directory to open list."""
+    
+def remove_open_directory(self, rel: str) -> None:
+    """Remove single directory from open list."""
+```
+
+**WebSocket Events:**
+
+| Event | Direction | Payload | Description |
+|-------|-----------|---------|-------------|
+| `explorer:setOpenDirs` | Backend→Frontend | `{dirs: ["src", "lib"]}` | Sent on connect with saved open directories |
+| `explorer:setOpenDirs` | Frontend→Backend | `{dirs: ["src", "lib"]}` | Sync current state to persist |
+
+**Frontend Tracking (`explorer.js`):**
+
+```javascript
+// State
+const openDirectories = new Set();  // Currently open directories
+let openDirsInitialized = false;    // True after initial restore
+
+// On directory expand/collapse
+function markDirectoryOpen(rel, isOpen) {
+  if (isOpen) openDirectories.add(rel);
+  else {
+    openDirectories.delete(rel);
+    // Also remove children
+    for (const dir of openDirectories) {
+      if (dir.startsWith(rel + '/')) openDirectories.delete(dir);
+    }
+  }
+  if (openDirsInitialized) scheduleOpenDirsSync();  // Debounced 500ms
+}
+
+// On page load
+async function restoreOpenDirectories(dirs) {
+  // Sort by depth (parents first)
+  // Expand each directory sequentially
+  // Skip any that no longer exist
+  // Sync cleaned list back to backend
+}
+```
+
+**Flow:**
+
+```
+Page Load:
+1. Backend sends explorer:setOpenDirs with saved dirs
+2. Frontend calls restoreOpenDirectories()
+3. Directories expand in order (parents before children)
+4. Missing directories are skipped and removed from list
+5. openDirsInitialized = true
+
+User Expands/Collapses:
+1. Click handler calls markDirectoryOpen(rel, isOpen)
+2. openDirectories Set updated
+3. 500ms debounce timer started
+4. Timer fires: sends explorer:setOpenDirs to backend
+5. Backend saves to ProjectSidecar
+
+explorer:setList (from file creation, etc.):
+1. Check if directory is in openDirectories Set
+2. If yes, keep it expanded even if DOM state was unclear
+3. Prevents regression where broadcast would collapse open dirs
+```
+
 ### 8.6 Tree Generation
 
 **File:** `app/apps/file_editor_cm6/explorer_helper.py`
@@ -1734,7 +1819,8 @@ Code CM6 uses a **two-tier state management system**:
 │    ],                                                    │
 │    "diff_base": {"ref": "HEAD", "commit_sha": null},    │
 │    "session_cache": { "<hash>": {...draft...} },        │
-│    "tracked_jobs": []                                    │
+│    "tracked_jobs": [],                                   │
+│    "open_directories": ["src", "src/components"]         │
 │  }                                                       │
 └─────────────────────────────────────────────────────────┘
 ```

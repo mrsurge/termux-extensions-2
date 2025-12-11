@@ -70,6 +70,21 @@ RUNNABLE_COMMANDS = {
     '.zsh': ['zsh'],
 }
 
+# Map file extensions to LSP language identifiers
+LSP_LANGUAGE_MAP = {
+    '.py': 'python',
+    '.pyw': 'python',
+    '.js': 'javascript',
+    '.mjs': 'javascript',
+    '.cjs': 'javascript',
+    '.jsx': 'javascriptreact',
+    '.ts': 'typescript',
+    '.mts': 'typescript',
+    '.tsx': 'typescriptreact',
+    '.go': 'go',
+    '.rs': 'rust',
+}
+
 
 def _current_diff_base(project_path: Optional[str]) -> str:
     return _history_store.get_diff_base(project_path) if project_path else 'HEAD'
@@ -136,6 +151,67 @@ def get_current_file():
 
 def get_current_file_sha256():
     return _current_file_sha256
+
+
+def _should_use_lsp(project_root: Path | None, language_id: str) -> bool:
+    """Determine whether LSP should be used for the given project and language.
+
+    For now this is driven by a simple editor preference flag. In the future
+    this can consult per-project configuration (see tmp7_PROJECT_LSP_CONFIG.md).
+    """
+    try:
+        prefs = _preferences_store.get_preferences().get('editor', {})
+    except Exception:
+        return False
+
+    # Explicit opt-in; default to disabled until the feature bakes
+    return bool(prefs.get('enableLsp', False))
+
+
+def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None) -> None:
+    """Connect or disconnect the CM6 LSP client based on file/language.
+
+    - If the file extension is mapped and LSP is enabled, connect the client.
+    - Otherwise, ensure any existing LSP connection is torn down.
+    """
+    if editor is None or file_path is None or project_root is None:
+        # No active document or project: best-effort disconnect
+        try:
+            if hasattr(editor, 'disconnect_lsp'):
+                editor.disconnect_lsp()
+        except Exception as exc:
+            print(f"[LSP] Failed to disconnect LSP for null document: {exc}", file=sys.stderr)
+        return
+
+    language_id = LSP_LANGUAGE_MAP.get(file_path.suffix)
+    if not language_id:
+        # Unsupported extension: ensure any previous client is stopped
+        try:
+            if hasattr(editor, 'disconnect_lsp'):
+                editor.disconnect_lsp()
+        except Exception as exc:
+            print(f"[LSP] Failed to disconnect LSP for unsupported type {file_path}: {exc}", file=sys.stderr)
+        return
+
+    if not _should_use_lsp(project_root, language_id):
+        # Preference gate disabled: disconnect if previously connected
+        print(f"[LSP] Preference gate disabled for {language_id}", file=sys.stderr)
+        try:
+            if hasattr(editor, 'disconnect_lsp'):
+                editor.disconnect_lsp()
+        except Exception as exc:
+            print(f"[LSP] Failed to disconnect LSP when disabled for {file_path}: {exc}", file=sys.stderr)
+        return
+
+    # At this point we want LSP active for this document
+    print(f"[LSP] Triggering connect_lsp: {language_id} / {project_root} / {file_path}", file=sys.stderr)
+    try:
+        if hasattr(editor, 'connect_lsp'):
+            editor.connect_lsp(language_id, str(project_root), str(file_path))
+        else:
+            print("[LSP] connect_lsp() not available on editor; bundle may be outdated", file=sys.stderr)
+    except Exception as exc:
+        print(f"[LSP] Failed to connect LSP for {file_path} ({language_id}): {exc}", file=sys.stderr)
 
 # --- Helpers ---
 def _get_runtime_metadata() -> dict:
@@ -720,9 +796,17 @@ async def editor_page():
             # Theme and line wrapping already applied in constructor - don't re-apply
             editor.toggle_color_picker(editor_prefs.get('colorPicker', True))
             editor.set_read_only(editor_prefs.get('readOnly', False))
-            editor.set_sticky_scroll(editor_prefs.get('stickyScroll', False))  # Added: 2025-12-03 by vectorArc - TE2 Team
+            # NOTE: sticky scroll moved to end of init (after LSP, diffs, watcher) to avoid rendering issues
             
             print(f"[EDITOR_APP] Applied runtime preferences: shading={editor_prefs.get('showShading')}, guides={editor_prefs.get('showIndentGuides')}, fontScale={editor_prefs.get('fontScale')}, colorPicker={editor_prefs.get('colorPicker')}, readOnly={editor_prefs.get('readOnly')}, stickyScroll={editor_prefs.get('stickyScroll')}", file=sys.stderr)
+
+            # 5b. Optionally connect LSP client for this initial file
+            try:
+                if initial_path and project_path:
+                    project_root_path = Path(project_path).expanduser()
+                    _maybe_connect_lsp(editor, Path(initial_path), project_root_path)
+            except Exception as exc:
+                print(f"[LSP] Failed to auto-connect LSP on init for {initial_path}: {exc}", file=sys.stderr)
 
             if initial_path:
                 if cached_was_restored:
@@ -804,6 +888,10 @@ async def editor_page():
                                 print(f"[FILE_WATCH] Failed to recalculate diffs: {e}", file=sys.stderr)
                 
                 subscribe(initial_path, 'nicegui_backend', on_file_change)
+
+            # 7b. Enable sticky scroll LAST - after content, LSP, diffs, watcher are ready
+            # This prevents rendering issues (whitespace, empty slots) on page load
+            editor.set_sticky_scroll(editor_prefs.get('stickyScroll', False))
 
     # 8. Add Diff Styling
     ui.add_head_html('''
@@ -1174,6 +1262,16 @@ async def set_editor_content(data: dict = Body(...)):
         or content_sha256
     )
     set_current_file(new_path, base_sha256)
+
+    # LSP: connect or disconnect based on the newly active file
+    try:
+        if project_path and new_path:
+            project_root_path = Path(project_path).expanduser()
+            _maybe_connect_lsp(editor, Path(new_path), project_root_path)
+        else:
+            _maybe_connect_lsp(editor, None, None)
+    except Exception as exc:
+        print(f"[LSP] Failed to update LSP on set_content for {new_path}: {exc}", file=sys.stderr)
     
     editor.set_value(content)
     editor._cached_content = content
@@ -1285,7 +1383,14 @@ async def toggle_edit_tracking(data: dict = Body(...)):
 
 @editor_router.post('/jump_to_line')
 async def jump_to_line(data: dict = Body(...)):
-    """Jump to a line in the currently loaded file. Does NOT load new files."""
+    """Jump to a line in the currently loaded file. Does NOT load new files.
+    
+    Args (in data):
+        line: Target line number (1-based)
+        focus: Whether to focus editor (default: True)
+        scroll_to_top: If True, position line at viewport top (for scroll restore).
+                      If False, uses default scrollIntoView behavior. (default: False)
+    """
     editor = get_active_editor()
     if not editor:
         return {"ok": False, "error": "Editor not ready"}
@@ -1297,13 +1402,16 @@ async def jump_to_line(data: dict = Body(...)):
 
     focus_flag = data.get('focus')
     should_focus = True if focus_flag is None else bool(focus_flag)
+    
+    # scroll_to_top: position line at viewport top (symmetrical with scroll recording)
+    scroll_to_top = bool(data.get('scroll_to_top') or data.get('scrollToTop'))
 
-    print(f"[JUMP_TO_LINE] Scrolling to line {target_line}", file=sys.stderr)
+    print(f"[JUMP_TO_LINE] Scrolling to line {target_line}, scroll_to_top={scroll_to_top}", file=sys.stderr)
 
     # Use the vendored CodeMirror jump_to_line method
-    editor.jump_to_line(target_line, focus=should_focus)
+    editor.jump_to_line(target_line, focus=should_focus, scroll_to_top=scroll_to_top)
 
-    return {"ok": True, "line": target_line, "focus": should_focus}
+    return {"ok": True, "line": target_line, "focus": should_focus, "scroll_to_top": scroll_to_top}
 
 @editor_router.post('/search/open')
 async def editor_search_open(data: dict = Body(...)):
@@ -1406,6 +1514,7 @@ def _get_view_state_dict() -> dict:
         "showMinimap": editor_prefs.get('showMinimap'),
         "showDraftDiffs": editor_prefs.get('showDraftDiffs'),
         "stickyScroll": editor_prefs.get('stickyScroll'),  # Added: 2025-12-03 by vectorArc - TE2 Team
+        "enableLsp": editor_prefs.get('enableLsp'),  # Added: 2025-12-08 - LSP integration toggle
     }
 
 
@@ -1485,6 +1594,18 @@ async def update_preference(data: dict = Body(...)):
         elif key == 'stickyScroll':
             # Added: 2025-12-03 by vectorArc - TE2 Team
             editor.set_sticky_scroll(bool(value))
+        elif key == 'enableLsp':
+            # Added: 2025-12-08 - LSP integration toggle
+            # When toggling LSP, reconnect or disconnect as needed
+            if value:
+                # Will connect on next file open; for current file, trigger reconnect
+                current_file = get_current_file()
+                project_path = _history_store.get_active_project() or str(get_project_root())
+                if current_file and project_path:
+                    _maybe_connect_lsp(editor, Path(current_file), Path(project_path))
+            else:
+                # Disconnect any active LSP connection
+                editor.disconnect_lsp()
         elif key == 'showInlineDiffs':
             pass  # handled after preference persistence via _refresh_active_diffs
         elif key == 'showDraftDiffs':

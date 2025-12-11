@@ -1513,3 +1513,23 @@ The git status inheritance works because `gitFlags` is computed by the backend f
 3. **Performance** - Cache `list_dir` for large directories
 
 — _VectorArc, 2025-12-01 11:20 UTC_
+
+## 2025-12-09 – Regression Fix: Explorer Tree Collapse on File Change
+
+### Issue
+The explorer tree was collapsing whenever a file change occurred (e.g., saving a file, git operations). This was caused by the `explorer:setList` handler in `explorer.js` calling `renderEntriesInto`, which blindly cleared the container element (`clearElement(containerUl)`) before re-rendering entries. This destroyed the DOM nodes of open subdirectories.
+
+### Fix Implementation
+Refactored `renderEntriesInto` in `app/apps/file_editor_cm6/static/js/explorer.js` to perform a **DOM diff-and-patch** instead of a full rebuild.
+
+**Key Changes:**
+1.  **Removed `clearElement`**: The container is no longer wiped.
+2.  **Reconciliation Logic**:
+    *   Maps existing children by `data-rel`.
+    *   Removes nodes that are no longer in the new entry list.
+    *   Creates new nodes for new entries.
+    *   Updates attributes (`data-git-status`, `data-hasDraft`, etc.) and classes on existing nodes.
+    *   **Crucially**: Preserves the inner `<ul class="fe-tree">` of directory nodes, maintaining the expansion state of subdirectories.
+    *   Reorders nodes to match the backend list order.
+
+This ensures that when the backend broadcasts a directory update (triggered by the file watcher), the frontend updates the metadata of the files/folders in that directory without closing any open subfolders.

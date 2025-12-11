@@ -437,21 +437,25 @@ class CodeMirror(ValueElement, DisableableElement,
     # ============================================================================
     # CUSTOM METHOD: jump_to_line
     # Added: 2025-11-17 by TE-2 Team
+    # Updated: 2025-12-11 - Added scroll_to_top for symmetrical scroll restoration
     # Purpose: Jump to a specific line number in the editor
-    # Used by: Explorer search feature, Go To Line menu
+    # Used by: Explorer search feature, Go To Line menu, scroll restoration
     # Note: Calls vendored JavaScript jumpToLine() method via run_method()
     # ============================================================================
-    def jump_to_line(self, line: int, *, focus: bool = True) -> None:
+    def jump_to_line(self, line: int, *, focus: bool = True, scroll_to_top: bool = False) -> None:
         """Jump to a specific line in the editor.
         
         Args:
             line: The line number to jump to (1-based indexing)
             focus: Whether to focus the editor after scrolling (default: True)
+            scroll_to_top: If True, position line at viewport top (for scroll restore).
+                          If False, uses default scrollIntoView behavior. (default: False)
             
         Example:
             editor.jump_to_line(42, focus=False)  # Scroll without triggering focus
+            editor.jump_to_line(100, focus=False, scroll_to_top=True)  # Line 100 at viewport top
         """
-        self.run_method('jumpToLine', {"line": line, "focus": focus})
+        self.run_method('jumpToLine', {"line": line, "focus": focus, "scrollToTop": scroll_to_top})
     # ============================================================================
 
     # ============================================================================
@@ -525,6 +529,30 @@ class CodeMirror(ValueElement, DisableableElement,
             editor.set_sticky_scroll(True)  # Enable sticky scroll
         """
         self.run_method('applyStickyScroll', enabled)
+    # ============================================================================
+
+    # ============================================================================
+    # CUSTOM METHODS: LSP connect/disconnect
+    # Added: 2025-12-08 by neonInk - TE2 Team
+    # Purpose: Drive CM6 LSP client transport (Socket.IO) from backend
+    # ============================================================================
+    def connect_lsp(self, language_id: str, project_root: str, file_path: str = '') -> None:
+        """Connect the editor to an LSP server via Socket.IO.
+
+        Args:
+            language_id: LSP language identifier (e.g. 'python', 'typescript').
+            project_root: Absolute filesystem path to the project root.
+            file_path: Absolute path to the current file (for document symbol requests).
+        """
+        self.run_method('connectLSP', {
+            'languageId': language_id,
+            'projectRoot': project_root,
+            'filePath': file_path,
+        })
+
+    def disconnect_lsp(self) -> None:
+        """Disconnect any active LSP client/transport for this editor instance."""
+        self.run_method('disconnectLSP')
     # ============================================================================
 
     def notify_parent(self, type: str, data: dict) -> None:

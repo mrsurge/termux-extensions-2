@@ -118,6 +118,8 @@ class ProjectSidecar:
             "recent_files": [],
             # Last opened file for this project (SSOT).
             "last_file": None,
+            # Open directories in explorer tree (persisted across reloads).
+            "open_directories": [],
         }
 
     # --------------------------------------------------------------------- #
@@ -408,6 +410,43 @@ class ProjectSidecar:
         """Return count of unsaved drafts for this project."""
         cache: Dict[str, Dict[str, Any]] = self._data.get("session_cache") or {}
         return sum(1 for e in cache.values() if e.get("unsaved"))
+
+    # --------------------------------------------------------------------- #
+    # Open directories API (explorer tree state)
+    # --------------------------------------------------------------------- #
+
+    def get_open_directories(self) -> List[str]:
+        """Return list of open directory rel paths in explorer tree."""
+        dirs: List[str] = self._data.get("open_directories") or []
+        return list(dirs)
+
+    def set_open_directories(self, dirs: List[str]) -> None:
+        """Set the list of open directory rel paths in explorer tree."""
+        # Normalize and deduplicate, preserving order
+        seen: set = set()
+        normalized: List[str] = []
+        for d in dirs:
+            if d and d not in seen:
+                seen.add(d)
+                normalized.append(d)
+        self._data["open_directories"] = normalized
+
+    def add_open_directory(self, rel: str) -> None:
+        """Add a directory to the open list (if not already present)."""
+        if not rel:
+            return
+        dirs: List[str] = self._data.setdefault("open_directories", [])
+        if rel not in dirs:
+            dirs.append(rel)
+
+    def remove_open_directory(self, rel: str) -> None:
+        """Remove a directory from the open list."""
+        if not rel:
+            return
+        dirs: List[str] = self._data.get("open_directories") or []
+        if rel in dirs:
+            dirs.remove(rel)
+            self._data["open_directories"] = dirs
 
 
 def clear_project_state(project_path: str) -> bool:

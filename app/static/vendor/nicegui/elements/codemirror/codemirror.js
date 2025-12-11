@@ -3,7 +3,86 @@ import * as CM from "nicegui-codemirror";
 // Forward console to parent window (for debug logging)
 if (window.parent && window.parent !== window) {
   const _origLog = console.log.bind(console);
-  console.log = (...args) => { _origLog(...args); try { window.parent.console.log(...args); } catch {} };
+  console.log = (...args) => { _origLog(...args); try { window.parent.console.log(...args); } catch { } };
+}
+
+// Socket.IO transport adapter for @codemirror/lsp-client
+// NOTE: CodeMirror runs in a NiceGUI iframe, but socket.io is loaded in the parent window.
+// We access `io` from the parent to bridge the iframe barrier.
+const _io = (window.parent && typeof window.parent.io === 'function') ? window.parent.io : (typeof io === 'function' ? io : null);
+
+class SocketIOTransport {
+  constructor(namespace, languageId, projectRoot) {
+    this.socket = null;
+    this.onMessage = null;
+
+    try {
+      if (!_io) {
+        console.warn('[LSP] socket.io client (io) is not available in this context or parent window');
+        return;
+      }
+
+      console.log('[LSP] Creating socket connection to namespace:', namespace);
+      console.log('[LSP] _io type:', typeof _io, '_io:', _io);
+
+      this.socket = _io(namespace, {
+        path: "/ui/_nicegui_ws/socket.io",
+        transports: ["websocket"],
+        query: { app_id: 'file_editor_cm6' },
+      });
+
+      console.log('[LSP] Socket created:', this.socket);
+      console.log('[LSP] Socket connected?:', this.socket?.connected);
+
+      this.socket.on('connect', () => {
+        try {
+          console.log('[LSP] Socket.IO connected, sending initialize...');
+          this.socket.emit('initialize', {
+            languageId: languageId,
+            projectRoot: projectRoot,
+          });
+        } catch (err) {
+          console.warn('[LSP] Failed to send initialize event:', err);
+        }
+      });
+
+      this.socket.on('connect_error', (err) => {
+        console.error('[LSP] Socket.IO connect_error:', err);
+      });
+
+      this.socket.on('error', (err) => {
+        console.error('[LSP] Socket.IO error:', err);
+      });
+
+      // NOTE: Don't register lsp:server_to_client handler here.
+      // The cmTransport adapter will register its own handler that properly converts
+      // Socket.IO objects to JSON strings for @codemirror/lsp-client.
+    } catch (err) {
+      console.warn('[LSP] Failed to initialize SocketIOTransport:', err);
+      this.socket = null;
+    }
+  }
+
+  send(data) {
+    if (!this.socket) return;
+    try {
+      console.log('[LSP] Sending to server:', typeof data, data);
+      this.socket.emit('lsp_client_to_server', data);
+    } catch (err) {
+      console.warn('[LSP] Failed to send client_to_server payload:', err);
+    }
+  }
+
+  close() {
+    try {
+      if (this.socket) {
+        this.socket.disconnect();
+        this.socket = null;
+      }
+    } catch (err) {
+      console.warn('[LSP] Error while closing SocketIOTransport:', err);
+    }
+  }
 }
 
 const searchExtension = typeof CM.search === 'function' ? CM.search : null;
@@ -53,7 +132,7 @@ const LANGUAGE_INDENT_MAP = {
   'xml': 2,
   'vue': 2,
   'svelte': 2,
-  
+
   // 4-space languages
   'python': 4,
   'java': 4,
@@ -86,7 +165,7 @@ const EMPTY_GUTTER_RANGESET = (() => {
 
 // Deletion widget class (moved to outer scope for facet access)
 class RemovedLineWidget extends CM.WidgetType {
-  constructor(text, wordWrap, originalLine, isDraft=false) {
+  constructor(text, wordWrap, originalLine, isDraft = false) {
     super();
     this.text = text;
     this.wordWrap = wordWrap;
@@ -146,8 +225,8 @@ class DeletedFoldMarker extends CM.GutterMarker {
 
 // Marker to add class to added lines (for gutterLineClass)
 class AddedLineClassMarker extends CM.GutterMarker {
-  constructor() { 
-    super(); 
+  constructor() {
+    super();
     this.elementClass = 'cm-diff-added-lineno';
   }
   eq(other) { return other instanceof AddedLineClassMarker; }
@@ -155,8 +234,8 @@ class AddedLineClassMarker extends CM.GutterMarker {
 const addedLineClassMarker = new AddedLineClassMarker();
 
 class AddedDraftLineClassMarker extends CM.GutterMarker {
-  constructor() { 
-    super(); 
+  constructor() {
+    super();
     this.elementClass = 'cm-diff-added-lineno-draft';
   }
   eq(other) { return other instanceof AddedDraftLineClassMarker; }
@@ -166,7 +245,7 @@ const addedDraftLineClassMarker = new AddedDraftLineClassMarker();
 // Inline diff decorations helper (extracted from diff_decorations.js)
 function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const { Decoration, RangeSetBuilder } = CM;
-  
+
   if (!hunks || hunks.length === 0) {
     return { decorations: Decoration.none, gutter: EMPTY_GUTTER_RANGESET, gutterClasses: EMPTY_GUTTER_RANGESET };
   }
@@ -175,7 +254,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
     class: 'cm-diff-line-added',
     diffKind: 'insert',
   });
-  
+
   const lineAddedDraftDeco = Decoration.line({
     class: 'cm-diff-line-added-draft',
     diffKind: 'insert-draft',
@@ -192,14 +271,14 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   let gutterCount = 0;
   let classCount = 0;
   const doc = view.state.doc;
-  
+
   const lineDecorations = new Map();
   const deletionWidgets = [];
-  
+
   for (const hunk of hunks) {
     let newLine = Math.max(1, hunk.newStart || 1);
     let oldLine = Math.max(1, hunk.oldStart || 1);
-    
+
     for (const line of hunk.lines || []) {
       const kind = line.type;
       if (kind === 'add') {
@@ -223,14 +302,14 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       }
     }
   }
-  
+
   deletionWidgets.sort((a, b) => a.line - b.line);
-  
+
   let widgetIndex = 0;
   for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
     const lineInfo = safeLine(doc, lineNum);
     if (!lineInfo) continue;
-    
+
     // Widgets before the line
     while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line < lineNum) {
       const widget = deletionWidgets[widgetIndex];
@@ -244,7 +323,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       }));
       widgetIndex++;
     }
-    
+
     // Widgets AT the line
     while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line === lineNum) {
       const widget = deletionWidgets[widgetIndex];
@@ -273,7 +352,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
       }
     }
   }
-  
+
   // Remaining widgets
   while (widgetIndex < deletionWidgets.length) {
     const widget = deletionWidgets[widgetIndex];
@@ -297,7 +376,7 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
 // Helper to scan diff decorations and build minimap gutters
 function diffMinimapGuttersFromDecorations(state, diffField) {
   if (!diffField) return [];
-  
+
   // Get current decoration set from the state field
   const decos = state.field(diffField, false);
   if (!decos) return [];
@@ -461,8 +540,36 @@ export default {
       colorPickerCompartment: null, // Color picker toggle compartment
       readOnlyCompartment: null,     // Read-only mode compartment
       stickyScrollCompartment: null, // Sticky scroll toggle compartment - Added: 2025-12-03 by vectorArc - TE2 Team
+      // LSP client state
+      lspClient: null,
+      lspTransport: null,
+      lspCompartment: null,
+      // Latest LSP document symbols (used primarily by Sticky Scroll; host may also observe)
+      lspSymbols: [],
+      // Sticky scroll plugin instance handle (set by plugin constructor when enabled)
+      _stickyScrollPlugin: null,
       isMobileLayout: false,
     };
+  },
+  beforeDestroy() {
+    // Best-effort LSP cleanup for Vue 2 lifecycle
+    try {
+      if (typeof this.disconnectLSP === 'function') {
+        this.disconnectLSP();
+      }
+    } catch (err) {
+      console.warn('[LSP] Error during beforeDestroy disconnect:', err);
+    }
+  },
+  beforeUnmount() {
+    // Best-effort LSP cleanup for Vue 3 lifecycle
+    try {
+      if (typeof this.disconnectLSP === 'function') {
+        this.disconnectLSP();
+      }
+    } catch (err) {
+      console.warn('[LSP] Error during beforeUnmount disconnect:', err);
+    }
   },
   methods: {
     updateMinimapState() {
@@ -529,7 +636,7 @@ export default {
         // Determine appropriate indent size for this language
         const indentSize = getIndentForLanguage(language);
         const indentString = ' '.repeat(indentSize);
-        
+
         // Reconfigure both language and indent unit together
         this.editor.dispatch({
           effects: [
@@ -598,6 +705,357 @@ export default {
         console.warn('[CodeMirror] Failed to notify parent', err);
       }
     },
+    // Establish LSP connection using Socket.IO transport and @codemirror/lsp-client
+    // NOTE: Python run_method sends {languageId, projectRoot, filePath} as single dict argument
+    connectLSP(options) {
+      // Handle both dict and separate args for flexibility
+      let languageId, projectRoot, filePath;
+      if (typeof options === 'object' && options !== null) {
+        languageId = options.languageId;
+        projectRoot = options.projectRoot;
+        filePath = options.filePath || '';
+      } else {
+        // Legacy: separate args (languageId, projectRoot)
+        languageId = options;
+        projectRoot = arguments[1];
+        filePath = arguments[2] || '';
+      }
+
+      console.log(`[LSP] connectLSP called: languageId=${languageId}, projectRoot=${projectRoot}, filePath=${filePath}`);
+
+      if (!this.editor) {
+        console.warn('[LSP] connectLSP called before editor is ready');
+        return;
+      }
+
+      const LSPClient = CM && CM.LSPClient ? CM.LSPClient : null;
+      if (typeof LSPClient !== 'function') {
+        console.warn('[CM6] LSP client not available in bundle (looked for CM.LSPClient)');
+        return;
+      }
+
+      // Tear down any existing client first
+      if (this.lspClient) {
+        this.disconnectLSP();
+      }
+
+      const transport = new SocketIOTransport('/lsp', languageId, projectRoot);
+      if (!transport || !transport.socket) {
+        console.warn('[LSP] SocketIOTransport not initialized; aborting LSP connect');
+        return;
+      }
+
+      this.lspTransport = transport;
+
+      try {
+        // Add extension to request hierarchical DocumentSymbol (with children) instead of flat SymbolInformation
+        // This is required for nested sticky scroll to work correctly
+        const hierarchicalSymbolCapability = {
+          clientCapabilities: {
+            textDocument: {
+              documentSymbol: {
+                hierarchicalDocumentSymbolSupport: true,
+                symbolKind: {
+                  valueSet: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26]
+                },
+                labelSupport: true
+              }
+            }
+          }
+        };
+        
+        this.lspClient = new LSPClient({
+          rootUri: 'file://' + projectRoot,
+          workspaceFolders: [{ name: 'root', uri: 'file://' + projectRoot }],
+          extensions: [hierarchicalSymbolCapability],
+        });
+      } catch (err) {
+        console.error('[LSP] Failed to create LanguageServerClient:', err);
+        transport.close();
+        this.lspTransport = null;
+        this.lspClient = null;
+        return;
+      }
+
+      // Create a Transport adapter that @codemirror/lsp-client expects
+      // It needs: send(message: string), subscribe(handler), unsubscribe(handler)
+      // NOTE: @codemirror/lsp-client expects JSON STRINGS, but Socket.IO auto-parses JSON.
+      // So we need to: stringify server responses before passing to handler,
+      // and parse outgoing messages if they're strings (Socket.IO will re-stringify).
+      // NOTE: Event names use underscores to match Python AsyncNamespace on_* handlers
+      const cmTransport = {
+        send: (message) => {
+          if (transport.socket) {
+            // message is a JSON string from lsp-client; parse it so Socket.IO can serialize it
+            let payload = message;
+            try {
+              if (typeof message === 'string') {
+                payload = JSON.parse(message);
+              }
+            } catch (e) {
+              // If parsing fails, send as-is
+            }
+            transport.socket.emit('lsp_client_to_server', payload);
+          }
+        },
+        subscribe: (handler) => {
+          transport.onMessage = handler;
+          if (transport.socket) {
+            transport.socket.on('lsp_server_to_client', (data) => {
+              if (handler) {
+                // data is already an object from Socket.IO; stringify for lsp-client
+                let msg = data;
+                if (typeof data !== 'string') {
+                  try {
+                    msg = JSON.stringify(data);
+                  } catch (e) {
+                    console.warn('[LSP] Failed to stringify server message:', e);
+                    return;
+                  }
+                }
+                handler(msg);
+              }
+            });
+          }
+        },
+        unsubscribe: (handler) => {
+          transport.onMessage = null;
+          if (transport.socket) {
+            transport.socket.off('lsp_server_to_client');
+          }
+        },
+      };
+
+      // Connect the client to the server - this initiates the LSP handshake
+      try {
+        console.log('[LSP] Connecting client to transport...');
+        this.lspClient.connect(cmTransport);
+      } catch (err) {
+        console.error('[LSP] Failed to connect LSPClient:', err);
+        transport.close();
+        this.lspTransport = null;
+        this.lspClient = null;
+        return;
+      }
+
+      // Store connection info for document symbol requests
+      // Use the provided file path or construct from project root
+      this._lspFileUri = filePath ? ('file://' + filePath) : ('file://' + projectRoot + '/untitled');
+      this._lspLanguageId = languageId;
+
+      // Install LSP extension into its own compartment
+      if (!this.lspCompartment) {
+        this.lspCompartment = new CM.Compartment();
+      }
+
+      // Note: LSPClient.plugin() creates the extension and triggers didOpen
+      // We need to pass the file URI and language ID
+      try {
+        const lspExtension = this.lspClient.plugin(this._lspFileUri, languageId);
+        this.editor.dispatch({
+          effects: [
+            this.lspCompartment.reconfigure([lspExtension]),
+          ],
+        });
+      } catch (err) {
+        console.error('[LSP] Failed to install LSP extension:', err);
+      }
+
+      console.log(`[LSP] Connected to ${languageId} (projectRoot=${projectRoot})`);
+
+      // Wait for initialization then send didOpen and request document symbols
+      this.lspClient.initializing.then(async () => {
+        console.log('[LSP] Client initialized');
+        
+        // Open the file with the LSP client's workspace
+        // This sends textDocument/didOpen with the current document content
+        console.log(`[LSP] Opening file ${this._lspFileUri} with workspace`);
+        
+        try {
+          // Use workspace.openFile which sends didOpen notification
+          if (this.lspClient.workspace && typeof this.lspClient.workspace.openFile === 'function') {
+            this.lspClient.workspace.openFile(this._lspFileUri, this._lspLanguageId, this.editor);
+            console.log('[LSP] File opened via workspace.openFile');
+          } else {
+            // Fallback: send notification directly
+            this.lspClient.notification('textDocument/didOpen', {
+              textDocument: {
+                uri: this._lspFileUri,
+                languageId: this._lspLanguageId,
+                version: 1,
+                text: this.editor.state.doc.toString()
+              }
+            });
+            console.log('[LSP] File opened via notification');
+          }
+        } catch (err) {
+          console.warn('[LSP] didOpen failed:', err);
+        }
+        
+        // Give server time to process the file before requesting symbols
+        // Use longer delay on initial load to allow server warm-up
+        setTimeout(() => {
+          console.log('[LSP] Requesting symbols after didOpen...');
+          this.requestDocumentSymbols();
+        }, 1000);
+      }).catch((err) => {
+        console.warn('[LSP] Client initialization failed:', err);
+      });
+
+      // Set up debounced symbol refresh on document changes
+      if (!this._symbolRefreshDebounce) {
+        this._symbolRefreshDebounce = this._debounce(() => {
+          this.requestDocumentSymbols();
+        }, 1000);
+      }
+    },
+
+    disconnectLSP() {
+      // Dispose client (should close transport) and clear compartment
+      try {
+        if (this.lspClient && typeof this.lspClient.dispose === 'function') {
+          this.lspClient.dispose();
+        }
+      } catch (err) {
+        console.warn('[LSP] Error while disposing LSP client:', err);
+      }
+      this.lspClient = null;
+
+      try {
+        if (this.lspTransport && typeof this.lspTransport.close === 'function') {
+          this.lspTransport.close();
+        }
+      } catch (err) {
+        console.warn('[LSP] Error while closing LSP transport:', err);
+      }
+      this.lspTransport = null;
+
+      if (this.editor && this.lspCompartment) {
+        try {
+          this.editor.dispatch({
+            effects: [
+              this.lspCompartment.reconfigure([]),
+            ],
+          });
+        } catch (err) {
+          console.warn('[LSP] Failed to clear LSP compartment:', err);
+        }
+      }
+
+      // Clear LSP-driven symbols when disconnecting
+      this.lspSymbols = [];
+      try {
+        if (this._stickyScrollPlugin && typeof this._stickyScrollPlugin.updateStickyHeader === 'function') {
+          this._stickyScrollPlugin.updateStickyHeader(true);
+        }
+      } catch (err) {
+        console.warn('[StickyScroll] Failed to refresh after LSP disconnect:', err);
+      }
+    },
+    // Handle LSP documentSymbols payloads.
+    // Primary consumer is the in-bundle Sticky Scroll plugin; host notification is secondary.
+    handleDocumentSymbols(symbols) {
+      // Normalize payload to an array
+      if (Array.isArray(symbols)) {
+        this.lspSymbols = symbols;
+      } else if (symbols && Array.isArray(symbols.symbols)) {
+        // Some clients wrap under { symbols: [...] }
+        this.lspSymbols = symbols.symbols;
+      } else {
+        this.lspSymbols = [];
+      }
+
+      console.log(`[LSP] Received ${this.lspSymbols.length} document symbols`);
+      
+      // Debug: log structure of first few symbols to verify hierarchy
+      if (this.lspSymbols.length > 0) {
+        const sample = this.lspSymbols.slice(0, 3).map(sym => ({
+          name: sym.name,
+          kind: sym.kind,
+          hasRange: !!sym.range,
+          hasLocation: !!sym.location,
+          hasSelectionRange: !!sym.selectionRange,
+          hasChildren: !!(sym.children && sym.children.length),
+          childCount: sym.children?.length || 0,
+          range: sym.range,
+          location: sym.location
+        }));
+        console.log('[LSP] Symbol structure sample:', sample);
+      }
+
+      // Notify Sticky Scroll to recompute its model if active
+      try {
+        if (this._stickyScrollPlugin && typeof this._stickyScrollPlugin.updateStickyHeader === 'function') {
+          this._stickyScrollPlugin.updateStickyHeader(true);
+        }
+      } catch (err) {
+        console.warn('[StickyScroll] Failed to refresh from LSP symbols:', err);
+      }
+
+      // Optional: bubble up to host iframe consumer for outline/telemetry
+      try {
+        // Deep clone to avoid DataCloneError with postMessage
+        const clonedSymbols = JSON.parse(JSON.stringify(this.lspSymbols || []));
+        this.notifyParent('cm6-document-symbols', { symbols: clonedSymbols });
+      } catch (err) {
+        // Host notifications are best-effort only
+        console.warn('[CodeMirror] Failed to notify parent', err);
+      }
+    },
+
+    // Request document symbols from the LSP server
+    async requestDocumentSymbols(retryCount = 0) {
+      if (!this.lspClient || !this._lspFileUri) {
+        return;
+      }
+
+      // Wait for client to be connected and initialized
+      if (!this.lspClient.connected) {
+        console.log('[LSP] Client not yet connected, skipping symbol request');
+        return;
+      }
+
+      try {
+        await this.lspClient.initializing;
+      } catch (err) {
+        console.warn('[LSP] Client initialization failed:', err);
+        return;
+      }
+
+      try {
+        console.log(`[LSP] Requesting document symbols for ${this._lspFileUri}`);
+        const symbols = await this.lspClient.request('textDocument/documentSymbol', {
+          textDocument: { uri: this._lspFileUri }
+        });
+        this.handleDocumentSymbols(symbols);
+      } catch (err) {
+        // Don't spam errors if the server doesn't support documentSymbol
+        if (err && err.code === -32601) {
+          console.log('[LSP] Server does not support textDocument/documentSymbol');
+        } else if (err && err.message && err.message.includes('timed out') && retryCount < 3) {
+          // Retry on timeout (server may still be initializing)
+          const delay = 1000 * (retryCount + 1); // 1s, 2s, 3s backoff
+          console.log(`[LSP] Symbol request timed out, retrying in ${delay}ms (attempt ${retryCount + 1}/3)`);
+          setTimeout(() => this.requestDocumentSymbols(retryCount + 1), delay);
+        } else {
+          console.warn('[LSP] Failed to request document symbols:', err);
+        }
+      }
+    },
+
+    // Debounce utility for throttling repeated calls
+    _debounce(fn, delay) {
+      let timeoutId = null;
+      return (...args) => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        timeoutId = setTimeout(() => {
+          fn.apply(this, args);
+          timeoutId = null;
+        }, delay);
+      };
+    },
     setDiffMode(mode) {
       if (!this.editor) return;
       if (mode === 'draft') {
@@ -644,11 +1102,11 @@ export default {
           console.warn('[CM6] indentationMarkers not available in bundle');
           return;
         }
-        
+
         const { Compartment, StateEffect } = CM;
-        
+
         this.indentCompartment = new Compartment();
-        
+
         // Extension configuration
         this.indentExtensions = [
           indentationMarkers({
@@ -664,13 +1122,13 @@ export default {
             }
           })
         ];
-        
+
         // Install empty compartment
         this.editor.dispatch({
           effects: StateEffect.appendConfig.of(this.indentCompartment.of([]))
         });
       }
-      
+
       // Reconfigure compartment
       const extensions = enabled ? this.indentExtensions : [];
       this.editor.dispatch({
@@ -682,17 +1140,17 @@ export default {
       if (!this.zebraCompartment) {
         const { EditorView, Decoration, ViewPlugin } = CM;
         const { Facet, RangeSetBuilder, StateEffect, Compartment } = CM;
-        
+
         this.zebraCompartment = new Compartment();
-        
+
         const baseTheme = EditorView.baseTheme({
           "&light .cm-zebraStripe": { backgroundColor: "rgba(0,0,0,.035)" },
           "&dark .cm-zebraStripe": { backgroundColor: "rgba(255,255,255,.06)" },
         });
-        
+
         const stepSize = Facet.define({ combine: v => v.length ? v[0] : 2 });
         const stripe = Decoration.line({ attributes: { class: "cm-zebraStripe" } });
-        
+
         function stripeDeco(v) {
           const step = v.state.facet(stepSize);
           const b = new RangeSetBuilder();
@@ -705,42 +1163,42 @@ export default {
           }
           return b.finish();
         }
-        
+
         const zebraPlugin = ViewPlugin.fromClass(class {
           constructor(v) { this.decorations = stripeDeco(v); }
           update(u) {
             if (u.docChanged || u.viewportChanged) this.decorations = stripeDeco(u.view);
           }
         }, { decorations: v => v.decorations });
-        
+
         this.zebraExtensions = [baseTheme, stepSize.of(2), zebraPlugin];
-        
+
         // Install empty compartment
         this.editor.dispatch({
           effects: StateEffect.appendConfig.of(this.zebraCompartment.of([]))
         });
       }
-      
+
       // Reconfigure compartment
       const extensions = enabled ? this.zebraExtensions : [];
       this.editor.dispatch({
         effects: this.zebraCompartment.reconfigure(extensions)
       });
     },
-    
+
     // Initialize diff compartments early so minimap can reference diffField
     initDiffCompartments() {
       if (this.diffCompartment) return; // Already initialized
-      
+
       const { StateEffect, StateField, Compartment } = CM;
-      
+
       this.diffCompartment = new Compartment();
       this.setDiffEffect = StateEffect.define();
       this.clearDiffEffect = StateEffect.define();
-      
+
       const setDiffEffect = this.setDiffEffect;
       const clearDiffEffect = this.clearDiffEffect;
-      
+
       const diffField = StateField.define({
         create() {
           return CM.Decoration.none;
@@ -760,13 +1218,13 @@ export default {
         },
         provide: field => CM.EditorView.decorations.from(field)
       });
-      
+
       this.diffField = diffField;
-      
+
       this.editor.dispatch({
         effects: StateEffect.appendConfig.of(this.diffCompartment.of([diffField]))
       });
-      
+
       // Also initialize gutter compartment
       this.diffGutterCompartment = new Compartment();
       this.setDiffGutterEffect = StateEffect.define();
@@ -798,7 +1256,7 @@ export default {
           class: 'cm-diff-gutter',
           markers: view => view.state.field(diffGutterField),
           initialSpacer: () => new DiffGutterMarker(''),
-          ...(CM.gutterWidgetClass ? { 
+          ...(CM.gutterWidgetClass ? {
             widgetMarker: (view, widget, block) => {
               if (widget instanceof RemovedLineWidget) {
                 return widget.isDraft ? minusDraftMarker : minusMarker;
@@ -817,27 +1275,27 @@ export default {
       this.editor.dispatch({
         effects: CM.StateEffect.appendConfig.of(this.diffGutterCompartment.of([]))
       });
-      
+
       console.log('[CodeMirror] Diff compartments initialized early');
     },
-    
+
     async applyDiffDecorations(hunks) {
       console.log('[applyDiffDecorations] Called with hunks:', JSON.stringify(hunks, null, 2));
       console.log('[applyDiffDecorations] Doc has', this.editor?.state?.doc?.lines, 'lines');
-      
+
       // Initialize diff compartment if not already done (fallback for direct calls)
       if (!this.diffCompartment) {
         this.initDiffCompartments();
       }
 
       const normalizedHunks = Array.isArray(hunks) ? hunks : [];
-      
+
       const getWordWrap = () => this.lineWrapping || false;
       console.log('[applyDiffDecorations] Building decorations, wordWrap:', getWordWrap());
       const { decorations: decoSet, gutter: gutterSet, gutterClasses: gutterClassSet } = buildDiffDecorations(this.editor, normalizedHunks, CM, getWordWrap);
       console.log('[applyDiffDecorations] Built diff decorations');
       const gutterActive = gutterSet !== EMPTY_GUTTER_RANGESET;
-      
+
       const effects = [
         this.setDiffEffect.of(decoSet)
       ];
@@ -850,7 +1308,7 @@ export default {
           effects.push(this.diffGutterCompartment.reconfigure([]));
         }
       }
-      
+
       // Reconfigure gutter classes
       if (this.gutterClassCompartment) {
         if (gutterActive && gutterClassSet !== EMPTY_GUTTER_RANGESET) {
@@ -859,9 +1317,9 @@ export default {
           effects.push(this.gutterClassCompartment.reconfigure([]));
         }
       }
-      
+
       this.editor.dispatch({ effects });
-      
+
       // Force minimap update to reflect new diff gutters
       if (this.showMinimap) {
         this.updateMinimapState();
@@ -884,6 +1342,11 @@ export default {
             if (!update.docChanged) return;
             if (!self.emitting) return;
 
+            // Trigger LSP symbol refresh on document changes
+            if (self._symbolRefreshDebounce) {
+              self._symbolRefreshDebounce();
+            }
+
             if (this.debounceTimer) {
               clearTimeout(this.debounceTimer);
             }
@@ -905,19 +1368,19 @@ export default {
             // Attach to scroller DOM
             this.view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
           }
-          
+
           onScroll() {
             const wrapper = this.view.dom;
             if (!wrapper.classList.contains('cm-scrolling')) {
               wrapper.classList.add('cm-scrolling');
             }
-            
+
             if (this.timeout) clearTimeout(this.timeout);
             this.timeout = setTimeout(() => {
               wrapper.classList.remove('cm-scrolling');
             }, 1500); // Keep visible for 1.5s after scroll stops
           }
-          
+
           destroy() {
             this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
             if (this.timeout) clearTimeout(this.timeout);
@@ -927,7 +1390,7 @@ export default {
 
       // Create compartment for dynamic indent unit (before extensions array)
       this.indentUnitCompartment = new CM.Compartment();
-      
+
       // Create compartments for toggleable features
       this.colorPickerCompartment = new CM.Compartment();
       this.readOnlyCompartment = new CM.Compartment();
@@ -963,10 +1426,10 @@ export default {
         this.gutterClassCompartment.of([]), // Gutter line classes
         // Apply styling to ALL gutters for deletion widgets (fixes fold gutter tinting)
         (CM.gutterWidgetClass ? CM.gutterWidgetClass.of((view, widget, block) => {
-            if (widget instanceof RemovedLineWidget) {
-              return new DeletedFoldMarker();
-            }
-            return null;
+          if (widget instanceof RemovedLineWidget) {
+            return new DeletedFoldMarker();
+          }
+          return null;
         }) : []),
         CM.EditorView.theme({
           "&": { height: "100%" },
@@ -1030,29 +1493,34 @@ export default {
           this.notifyParent('cm6-scroll-state', {
             line: lastLine,
             column: 0,
-            top: state.doc.length,
+            top: scrollTop,
             atBottom: true,
             timestamp: Date.now(),
           });
           return;
         }
 
-        // Use visibleRanges / viewport.from to avoid layout reads during update
-        let pos = view.viewport.from;
-        const ranges = view.visibleRanges;
-        if (ranges && ranges.length > 0) {
-          pos = ranges[0].from;
+        // Get the line at actual viewport top using lineBlockAtHeight(scrollTop)
+        // This is symmetrical with restore which uses scrollTop = lineBlockAt(pos).top
+        let refLine;
+        try {
+          const block = view.lineBlockAtHeight(scrollTop);
+          refLine = state.doc.lineAt(block.from).number;
+        } catch {
+          // Fallback to viewport.from method
+          let pos = view.viewport.from;
+          const ranges = view.visibleRanges;
+          if (ranges && ranges.length > 0) {
+            pos = ranges[0].from;
+          }
+          refLine = state.doc.lineAt(pos).number;
         }
 
-        const lineInfo = state.doc.lineAt(pos);
-        const line = lineInfo.number;
-        const column = pos - lineInfo.from;
-
-        console.log('[CodeMirror] reportScrollPosition', { line, column, pos });
+        console.log('[CodeMirror] reportScrollPosition', { line: refLine, scrollTop });
         this.notifyParent('cm6-scroll-state', {
-          line,
-          column,
-          top: pos,
+          line: refLine,
+          column: 0,
+          top: scrollTop,
           atBottom: false,
           timestamp: Date.now(),
         });
@@ -1074,11 +1542,15 @@ export default {
       }
 
       let shouldFocus = true;
+      let scrollToTop = false; // If true, position line at viewport top (for scroll restore)
       let input = payload;
       if (payload && typeof payload === 'object') {
         input = payload.line;
         if (Object.prototype.hasOwnProperty.call(payload, 'focus')) {
           shouldFocus = !!payload.focus;
+        }
+        if (Object.prototype.hasOwnProperty.call(payload, 'scrollToTop')) {
+          scrollToTop = !!payload.scrollToTop;
         }
       }
 
@@ -1087,23 +1559,47 @@ export default {
         console.warn('[CodeMirror] jumpToLine: invalid line number', input);
         return;
       }
-      
+
       try {
-        const doc = this.editor.state.doc;
+        const view = this.editor;
+        const doc = view.state.doc;
         const maxLine = doc.lines;
         const targetLine = Math.max(1, Math.min(line, maxLine));
         const pos = doc.line(targetLine).from;
-        
-        this.editor.dispatch({
-          selection: { anchor: pos },
-          scrollIntoView: true
-        });
 
-        if (shouldFocus) {
-          this.editor.focus();
+        if (scrollToTop) {
+          // Scroll restore mode: position target line at viewport top
+          // Use lineBlockAt to get pixel position, then set scrollTop directly
+          const lineBlock = view.lineBlockAt(pos);
+          view.scrollDOM.scrollTop = lineBlock.top;
+          
+          // Set selection without scrolling (we already scrolled)
+          view.dispatch({
+            selection: { anchor: pos }
+          });
+          
+          // Re-initialize sticky scroll at new position to avoid rendering issues
+          if (this._stickyScrollPlugin && typeof this._stickyScrollPlugin.initializeAtCurrentPosition === 'function') {
+            setTimeout(() => {
+              if (this._stickyScrollPlugin) {
+                this._stickyScrollPlugin.initializeAtCurrentPosition();
+              }
+            }, 50);
+          }
+          
+          console.log('[CodeMirror] jumpToLine: scrolled line', targetLine, 'to top, scrollTop=', lineBlock.top);
+        } else {
+          // Default behavior: scroll target line into view (minimal scroll)
+          view.dispatch({
+            selection: { anchor: pos },
+            scrollIntoView: true
+          });
+          console.log('[CodeMirror] jumpToLine: jumped to line', targetLine, 'focus=', shouldFocus);
         }
 
-        console.log('[CodeMirror] jumpToLine: jumped to line', targetLine, 'focus=', shouldFocus);
+        if (shouldFocus) {
+          view.focus();
+        }
       } catch (err) {
         console.error('[CodeMirror] jumpToLine failed:', err);
       }
@@ -1119,17 +1615,17 @@ export default {
         console.warn('[CodeMirror] toggleColorPicker: editor not ready');
         return;
       }
-      
+
       if (!colorExtension) {
         console.warn('[CodeMirror] colorExtension not available in bundle');
         return;
       }
-      
+
       try {
         const effects = enabled
           ? this.colorPickerCompartment.reconfigure(colorExtension)
           : this.colorPickerCompartment.reconfigure([]);
-        
+
         this.editor.dispatch({ effects });
         console.log('[CodeMirror] Color picker:', enabled ? 'enabled' : 'disabled');
       } catch (err) {
@@ -1148,15 +1644,15 @@ export default {
         console.warn('[CodeMirror] setReadOnly: editor not ready');
         return;
       }
-      
+
       try {
         const effects = readonly
           ? this.readOnlyCompartment.reconfigure([
-              CM.EditorState.readOnly.of(true),
-              CM.EditorView.editable.of(false)
-            ])
+            CM.EditorState.readOnly.of(true),
+            CM.EditorView.editable.of(false)
+          ])
           : this.readOnlyCompartment.reconfigure([]);
-        
+
         this.editor.dispatch({ effects });
         console.log('[CodeMirror] Read-only mode:', readonly ? 'enabled' : 'disabled');
       } catch (err) {
@@ -1178,7 +1674,7 @@ export default {
 
       if (!this.minimapCompartment) {
         this.minimapCompartment = new CM.Compartment();
-        
+
         // Install empty compartment once
         this.editor.dispatch({
           effects: CM.StateEffect.appendConfig.of(
@@ -1193,7 +1689,7 @@ export default {
       if (targetMode !== 'off') {
         // Include diffField in dependencies if it exists so minimap updates when diffs change
         const deps = this.diffField ? ['doc', this.diffField] : ['doc'];
-        
+
         const minimapExt = showMinimap.compute(deps, (state) => {
           // We just need to give it a container DOM node and config
           const create = (view) => {
@@ -1205,11 +1701,11 @@ export default {
 
           // Desktop vs mobile are just different config knobs
           const isMobile = targetMode === 'mobile';
-          
+
           // Collect diff gutters if diffField exists (diffs active)
           // Pass 'this.diffField' which is the StateField created in applyDiffDecorations
-          const gutters = this.diffField 
-            ? diffMinimapGuttersFromDecorations(state, this.diffField) 
+          const gutters = this.diffField
+            ? diffMinimapGuttersFromDecorations(state, this.diffField)
             : [];
 
           return {
@@ -1230,7 +1726,7 @@ export default {
         effects: this.minimapCompartment.reconfigure(extensions),
       });
       console.log('[CodeMirror] Minimap mode set to:', targetMode);
-      
+
       // Add class to editor DOM for desktop sidebar layout
       if (targetMode === 'desktop') {
         this.editor.dom.classList.add('cm-has-minimap-desktop');
@@ -1256,7 +1752,7 @@ export default {
       const SCOPE_NODE_TYPES = {
         javascript: new Set([
           "FunctionDeclaration", "FunctionExpression", "ArrowFunction",
-          "MethodDeclaration", "MethodDefinition", 
+          "MethodDeclaration", "MethodDefinition",
           "ClassDeclaration", "ClassExpression",
           "ExportDefault", "ExportDefaultDeclaration", "ExportDeclaration", "export"
         ]),
@@ -1446,7 +1942,7 @@ export default {
             if (/^\s*if\s+__name__\s*==\s*['"]__main__['"]\s*:/m.test(snippet)) {
               return true;
             }
-          } catch (e) {}
+          } catch (e) { }
         }
         return false;
       };
@@ -1499,6 +1995,13 @@ export default {
         "@keyframes cm-sticky-enter": {
           "0%": { transform: "translateY(100%)", opacity: "0" },
           "100%": { transform: "translateY(0)", opacity: "1" }
+        },
+        "@keyframes cm-sticky-enter-from-top": {
+          "0%": { transform: "translateY(calc(-1 * var(--scope-height, 100%)))", opacity: "0" },
+          "100%": { transform: "translateY(0)", opacity: "1" }
+        },
+        ".cm-sticky-layer.entering-from-top": {
+          animation: "cm-sticky-enter-from-top 150ms ease-out",
         },
         ".cm-stickyHeader:empty": {
           display: "none",
@@ -1562,7 +2065,7 @@ export default {
         register(scope) {
           const slot = scope.depth;
           if (slot < 0 || slot >= this.maxSlots) return false;
-          
+
           const existing = this.slots[slot];
           if (existing) {
             // Same scope (by startLine) - update it
@@ -1573,7 +2076,7 @@ export default {
             // Different scope at same depth - reject (caller must clear first)
             return false;
           }
-          
+
           this.slots[slot] = scope;
           return true;
         }
@@ -1614,12 +2117,12 @@ export default {
           this.view = view;
           this.dom = document.createElement("div");
           this.dom.className = "cm-stickyHeader";
-          
+
           // Slot-based scope management (enforces one scope per depth)
           this.slots = new StickySlots(5);
           this.currentScopes = []; // For click handler compatibility
           this.scopeHeights = new Map(); // Cache for scope heights (lines)
-          
+
           // Used to break the feedback loop between overlay height and
           // sampling position; we always sample using the previous height.
           this.lastOverlayHeight = 0;
@@ -1639,13 +2142,20 @@ export default {
           this.rafPending = false;
           // Pending sibling transitions: depth -> { outgoing, incoming, startTime }
           this.pendingTransitions = new Map();
-          
+
+          // Expose this plugin instance back to the Vue component so LSP
+          // symbol handlers can request a sticky-header refresh when new
+          // symbols arrive (no host round-trip required).
+          if (cmComponent) {
+            cmComponent._stickyScrollPlugin = this;
+          }
+
           // Append to scrollDOM to share stacking context with minimap (fixes z-index layering)
           view.scrollDOM.appendChild(this.dom);
 
           // Initial background sync to match current theme
           this.syncBackgroundColor();
-          
+
           // Click handler for jump-to-definition
           this.dom.addEventListener('click', (e) => {
             const target = e.target.closest('.cm-sticky-line');
@@ -1661,7 +2171,7 @@ export default {
               }
             }
           });
-          
+
           // Direct scroll listener for immediate response
           this.scrollHandler = () => {
             this.updateStickyHeader();
@@ -1674,9 +2184,14 @@ export default {
             }
           };
           view.scrollDOM.addEventListener('scroll', this.scrollHandler, { passive: true });
+
+          // Initial render - use initializeAtCurrentPosition for proper setup
+          // This handles the mid-document case correctly (word wrap heights, etc.)
+          this.initializeAtCurrentPosition();
           
-          // Initial render
-          this.updateStickyHeader();
+          // Re-render after a delay to catch late-arriving LSP symbols
+          setTimeout(() => this.updateStickyHeader(), 1500);
+          setTimeout(() => this.updateStickyHeader(), 3000);
         }
 
         // Sync overlay background to the editor's current background color.
@@ -1710,7 +2225,7 @@ export default {
               gutterBg = pickColor(gutterRoot) || (gs && gs.backgroundColor) || null;
               gutterFg = (gs && gs.color) || null;
             }
-          } catch (e) {}
+          } catch (e) { }
 
           try {
             this.dom.style.backgroundColor = bg;
@@ -1726,41 +2241,131 @@ export default {
           }
         }
 
-        // Try to get the styled HTML for a given 1-based line number by
-        // cloning the existing .cm-line DOM. Falls back to null if the
-        // line isn't currently rendered in the viewport.
+        // Get styled HTML for a given 1-based line number using highlightCode
+        // to programmatically apply syntax highlighting (works for any line,
+        // even if not currently in the viewport).
         getStyledLineHTML(lineNumber) {
           const view = this.view;
           const state = view.state;
-          if (!state || !view || !view.dom) return null;
+          if (!state || !view) return null;
           if (lineNumber < 1 || lineNumber > state.doc.lines) return null;
 
           try {
             const line = state.doc.line(lineNumber);
-            const pos = line.from;
-            const domAt = view.domAtPos(pos);
-            let node = domAt.node;
+            const lineText = line.text;
 
-            if (!node) return null;
-            if (node.nodeType === Node.TEXT_NODE && node.parentElement) {
-              node = node.parentElement;
+            // Get the language parser from the current editor state
+            const lang = state.facet(CM.language);
+            if (!lang || !lang.parser) {
+              // No language configured - return escaped plain text
+              return this.escapeHTML(lineText);
             }
 
-            // Walk up until we hit the .cm-line container
-            while (node && node !== view.dom) {
-              if (node.nodeType === Node.ELEMENT_NODE &&
-                  node.classList &&
-                  node.classList.contains("cm-line")) {
-                return node.innerHTML;
+            // Build highlighted HTML using highlightCode
+            let result = "";
+            const highlighter = {
+              style: tags => CM.highlightingFor(state, tags)
+            };
+
+            CM.highlightCode(
+              lineText,
+              lang.parser.parse(lineText),
+              highlighter,
+              (text, cls) => {
+                result += cls
+                  ? `<span class="${cls}">${this.escapeHTML(text)}</span>`
+                  : this.escapeHTML(text);
+              },
+              () => {
+                // Line break callback - not needed for single line
               }
-              node = node.parentNode;
-            }
+            );
+
+            return result;
           } catch (e) {
-            // If DOM lookup fails (e.g., line not in viewport), just fall back.
+            console.warn('[StickyScroll] highlightCode failed:', e);
+            // Fallback to plain text
+            try {
+              const line = state.doc.line(lineNumber);
+              return this.escapeHTML(line.text);
+            } catch {
+              return null;
+            }
           }
-          return null;
         }
-        
+
+        // Escape HTML special characters
+        escapeHTML(text) {
+          return text.replace(/[<>&]/g, ch =>
+            ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : '&amp;'
+          );
+        }
+
+        // Initialize sticky scroll at current position - clears cached state and
+        // forces a clean render. Call this when enabling sticky scroll or opening
+        // a file mid-document to avoid rendering issues (whitespace, empty slots).
+        initializeAtCurrentPosition() {
+          console.log('[StickyScroll] Initializing at current position');
+          
+          const view = this.view;
+          const state = view.state;
+          const lineHeight = view.defaultLineHeight || 20;
+          const wrappingEnabled = cmComponent ? cmComponent.lineWrapping : false;
+          
+          // Reset rendering state but KEEP scopeHeights cache - those measurements
+          // are still valid and needed for word-wrap mode to avoid visual flashing
+          this.slots.clear();
+          this.currentScopes = [];
+          // Note: NOT clearing scopeHeights - preserve height measurements
+          this.lastOverlayHeight = 0;
+          this.lastOverlaySampleHeight = 0;
+          this.lastTopOffset = 0;
+          this.lastActiveSignature = '';
+          this.lastRenderKey = '';
+          this.lastScrollTop = view.scrollDOM.scrollTop || 0;
+          this.pendingTransitions.clear();
+          
+          // For word-wrap mode, pre-measure heights of lines that will be in the
+          // sticky header. This avoids the flash when heights default to 1.
+          if (wrappingEnabled) {
+            try {
+              const scrollTop = view.scrollDOM.scrollTop;
+              const block = view.lineBlockAtHeight(scrollTop);
+              const refLine = state.doc.lineAt(block.from).number;
+              
+              // Pre-measure heights for lines from start to current position
+              // Only measure lines we haven't already cached
+              for (let lineNo = 1; lineNo <= Math.min(refLine, state.doc.lines); lineNo++) {
+                const lineObj = state.doc.line(lineNo);
+                const lineBlock = view.lineBlockAt(lineObj.from);
+                const heightPx = lineBlock.bottom - lineBlock.top;
+                const lines = Math.max(1, Math.round(heightPx / lineHeight));
+                
+                // Cache height for potential scope keys at various depths
+                for (let depth = 0; depth < 5; depth++) {
+                  const key = `${depth}:${lineNo}`;
+                  if (!this.scopeHeights.has(key)) {
+                    this.scopeHeights.set(key, lines);
+                  }
+                }
+              }
+              console.log('[StickyScroll] Pre-measured heights for lines 1-' + Math.min(refLine, state.doc.lines));
+            } catch (err) {
+              console.warn('[StickyScroll] Failed to pre-measure heights:', err);
+            }
+          }
+          
+          // Clear the DOM
+          this.dom.innerHTML = '';
+          
+          // Force a fresh render
+          this.updateStickyHeader(true);
+          
+          // Schedule follow-up renders to catch any late layout
+          setTimeout(() => this.updateStickyHeader(true), 100);
+          setTimeout(() => this.updateStickyHeader(true), 500);
+        }
+
         updateStickyHeader(isRetry = false) {
           const view = this.view;
           const state = view.state;
@@ -1782,7 +2387,7 @@ export default {
           const prevActiveKeys = new Set(
             (this.currentScopes || []).map((s) => `${s.depth}:${s.startLine}-${s.endLine}`)
           );
-          
+
           // Get gutter container and child gutter segments (line numbers, folds, etc.)
           const gutterRoot = view.dom.querySelector('.cm-gutters');
           const gutterWidth = gutterRoot ? gutterRoot.offsetWidth : 0;
@@ -1818,6 +2423,9 @@ export default {
           // Language flags early (used for sampling offsets too)
           const langName = (cmComponent && cmComponent.language || 'default').toLowerCase();
           const isPython = langName === 'python';
+          const isJavaScript = langName === 'javascript' || langName === 'javascriptreact';
+          const isTypeScript = langName === 'typescript' || langName === 'typescriptreact';
+          const isJSLike = isJavaScript || isTypeScript;
           const isMarkdown = langName === 'markdown' || langName === 'md' || langName === 'gfm';
 
           // ---------------------------------------------------------------------------
@@ -1852,16 +2460,8 @@ export default {
           const refLine = state.doc.lineAt(refPos).number;
 
           // ---------------------------------------------------------------------------
-          // 2) Build scope candidates from syntax tree
+          // 2) Build scope candidates from LSP symbols (if available) or syntax tree
           // ---------------------------------------------------------------------------
-          const tree = CM.ensureSyntaxTree(state, state.doc.length, 200) || CM.syntaxTree(state);
-          if (!tree || !tree.topNode) {
-            if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
-            this.slots.clearAll();
-            this.currentScopes = [];
-            return;
-          }
-
           const scopeTypes = getScopeTypes();
 
           let candidateScopes = [];
@@ -1869,8 +2469,11 @@ export default {
           if (isMarkdown) {
             const headings = collectMarkdownHeadingsSimple(state.doc);
             const sections = buildMarkdownSectionsSimple(headings, state.doc.lines);
-            const path = markdownPathAtSimple(sections, refLine - earlyLines);
-            
+            // For markdown: use earlyLines=1 when scrolling down, but also subtract 1 when
+            // scrolling up to get early "release" of headers (they disappear one line sooner)
+            const markdownOffset = direction < 0 ? 1 : earlyLines;
+            const path = markdownPathAtSimple(sections, refLine - markdownOffset);
+
             let cumulativeHeight = 0;
             candidateScopes = path.map((sec, idx) => {
               const depth = idx;
@@ -1888,7 +2491,7 @@ export default {
                 // Old logic for non-wrapped mode
                 offset = -2;
               }
-              
+
               const triggerLine = sec.line + offset;
               const endTriggerLine = Math.max(sec.line, sec.endLine + offset);
               const lineObj = state.doc.line(sec.line);
@@ -1907,7 +2510,236 @@ export default {
                 height: cachedHeight
               };
             });
+          } else if (cmComponent && Array.isArray(cmComponent.lspSymbols) && cmComponent.lspSymbols.length) {
+            // LSP-backed scopes for languages with documentSymbols
+            const DEBUG_LSP_STICKY = true; // Enable for debugging
+            const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
+
+            const flattenSymbols = (symbols, depth) => {
+              const sections = [];
+              for (const sym of symbols) {
+                if (!sym) continue;
+                let startLine = null;
+                let endLine = null;
+
+                // Prefer full range; fall back to selectionRange if needed
+                const range = sym.range || sym.location?.range || sym.selectionRange;
+                if (range && range.start && typeof range.start.line === 'number') {
+                  startLine = range.start.line + 1; // LSP is 0-based
+                }
+                if (range && range.end && typeof range.end.line === 'number') {
+                  endLine = range.end.line + 1;
+                }
+
+                if (startLine == null) continue;
+                if (endLine == null || endLine < startLine) endLine = startLine;
+
+                // Clamp to document bounds
+                if (startLine < 1 || startLine > state.doc.lines) continue;
+                if (endLine < 1) endLine = startLine;
+                if (endLine > state.doc.lines) endLine = state.doc.lines;
+
+                sections.push({
+                  depth,
+                  startLine,
+                  endLine,
+                  name: sym.name || '',
+                  kind: sym.kind,
+                  rawText: null,
+                });
+
+                if (Array.isArray(sym.children) && sym.children.length) {
+                  sections.push(...flattenSymbols(sym.children, depth + 1));
+                }
+              }
+              return sections;
+            };
+
+            // Build ancestor path: find symbols that contain refLine, keeping hierarchy
+            const findAncestorPath = (symbols, targetLine, currentPath = []) => {
+              for (const sym of symbols) {
+                if (!sym) continue;
+                
+                const range = sym.range || sym.location?.range || sym.selectionRange;
+                if (!range || !range.start || typeof range.start.line !== 'number') continue;
+                
+                const startLine = range.start.line + 1; // LSP is 0-based
+                const endLine = (range.end && typeof range.end.line === 'number') 
+                  ? range.end.line + 1 
+                  : startLine;
+                
+                // Check if this symbol contains the target line
+                // Use > startLine (not >=) so scope activates AFTER its definition scrolls out
+                if (targetLine > startLine && targetLine <= endLine) {
+                  const newPath = [...currentPath, {
+                    sym,
+                    startLine,
+                    endLine,
+                    name: sym.name || '',
+                    kind: sym.kind
+                  }];
+                  
+                  // Recursively check children for deeper matches
+                  if (Array.isArray(sym.children) && sym.children.length) {
+                    const deeperPath = findAncestorPath(sym.children, targetLine, newPath);
+                    if (deeperPath.length > newPath.length) {
+                      return deeperPath;
+                    }
+                  }
+                  return newPath;
+                }
+              }
+              return currentPath;
+            };
+
+            const ancestorPath = findAncestorPath(cmComponent.lspSymbols, refLine);
+            
+            if (DEBUG_LSP_STICKY) {
+              console.log('[LSP-Sticky] refLine:', refLine, 'symbolCount:', cmComponent.lspSymbols.length);
+              // Log first few symbols to see their actual ranges
+              const firstFew = cmComponent.lspSymbols.slice(0, 5).map(sym => {
+                const range = sym.range || sym.location?.range || sym.selectionRange;
+                return {
+                  name: sym.name,
+                  kind: sym.kind,
+                  startLine: range?.start?.line,
+                  endLine: range?.end?.line,
+                  hasChildren: Array.isArray(sym.children) && sym.children.length > 0,
+                  childCount: sym.children?.length || 0
+                };
+              });
+              console.log('[LSP-Sticky] First 5 symbols:', firstFew);
+              console.log('[LSP-Sticky] ancestorPath:', ancestorPath.map(p => ({ name: p.name, start: p.startLine, end: p.endLine })));
+            }
+            
+            // For Python, drop outermost ancestors that aren't truly indent-0 (same as Lezer path)
+            // For JS/TS, no filtering needed - braces define scopes, not indentation
+            let filteredPath = ancestorPath;
+            if (isPython && filteredPath.length > 0) {
+              filteredPath = filteredPath.filter((sec, idx) => {
+                if (idx !== 0) return true;
+                const lineText = state.doc.line(sec.startLine).text;
+                const indentMatch = lineText.match(/^([ \t]*)/);
+                const indentRaw = indentMatch ? indentMatch[1] : '';
+                const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
+                return indentSpaces === 0;
+              });
+            }
+
+            // Deduplicate scopes with the same startLine (e.g., variable + anonymous class)
+            // Keep the one with a more meaningful name (not <class>, <function>, etc.)
+            const deduped = [];
+            for (const sec of filteredPath) {
+              const prev = deduped[deduped.length - 1];
+              if (prev && prev.startLine === sec.startLine) {
+                // Same line - prefer the one with a real name over synthetic names
+                const prevIsSynthetic = /^<.*>$/.test(prev.name);
+                const currIsSynthetic = /^<.*>$/.test(sec.name);
+                if (prevIsSynthetic && !currIsSynthetic) {
+                  // Replace synthetic with real name
+                  deduped[deduped.length - 1] = sec;
+                }
+                // If current is synthetic or both are real, keep the previous (first one)
+              } else {
+                deduped.push(sec);
+              }
+            }
+            filteredPath = deduped;
+
+            if (DEBUG_LSP_STICKY) {
+              console.log('[LSP-Sticky] filteredPath:', filteredPath.map(p => ({ name: p.name, start: p.startLine, end: p.endLine })));
+            }
+
+            let cumulativeHeight = 0;
+
+            candidateScopes = filteredPath.map((sec, pathIdx) => {
+              const depth = pathIdx; // Use path index as depth (outermost = 0)
+              let startLine = sec.startLine;
+              const endLine = sec.endLine;
+
+              let lineText = state.doc.line(startLine).text;
+              
+              // For Python: if the startLine is a decorator (@...), skip to the def/class line
+              if (isPython) {
+                const trimmed = lineText.trim();
+                if (trimmed.startsWith('@')) {
+                  // Scan forward to find the actual def/class line
+                  for (let scanLine = startLine + 1; scanLine <= Math.min(endLine, startLine + 10); scanLine++) {
+                    const scanText = state.doc.line(scanLine).text.trim();
+                    if (scanText.startsWith('def ') || scanText.startsWith('async def ') || scanText.startsWith('class ')) {
+                      startLine = scanLine;
+                      lineText = state.doc.line(scanLine).text;
+                      break;
+                    }
+                    // Stop if we hit a non-decorator, non-empty line that isn't def/class
+                    if (scanText && !scanText.startsWith('@') && !scanText.startsWith('#')) {
+                      break;
+                    }
+                  }
+                }
+              }
+
+              const indentMatch = lineText.match(/^([ \t]*)/);
+              const indentRaw = indentMatch ? indentMatch[1] : '';
+              const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
+              const indentDepth = Math.floor(indentSpaces / indentSize);
+
+              let cachedHeight = 1;
+              let offset;
+
+              if (wrappingEnabled) {
+                const key = `${depth}:${startLine}`;
+                cachedHeight = this.scopeHeights.get(key) || 1;
+                // Calculate offset based on cumulative height of ancestors (same as Lezer)
+                offset = -(cumulativeHeight + 1);
+                cumulativeHeight += cachedHeight;
+              } else {
+                // Simplified offset: just account for the header stack height
+                // Each nested scope adds one line to the overlay
+                offset = -(depth + 1);
+              }
+
+              const triggerLine = startLine + offset;
+              // End trigger: use smaller offset for exit to prevent early release
+              // Only offset by 1 line (for the header itself) instead of full depth
+              let endTriggerLine = Math.max(startLine, endLine - 1);
+
+              const scopeObj = {
+                node: null, // LSP doesn't have syntax tree nodes
+                depth,
+                startLine,
+                endLine,
+                text: sec.name || lineText,
+                rawText: lineText, // Use actual line text for syntax highlighting
+                triggerLine,
+                endTriggerLine,
+                indentDepth,
+                indentSpaces,
+                height: cachedHeight
+              };
+              
+              if (DEBUG_LSP_STICKY) {
+                console.log('[LSP-Sticky] candidate scope:', {
+                  depth,
+                  name: sec.name,
+                  startLine,
+                  endLine,
+                  triggerLine,
+                  endTriggerLine
+                });
+              }
+              
+              return scopeObj;
+            });
           } else {
+            const tree = CM.ensureSyntaxTree(state, state.doc.length, 200) || CM.syntaxTree(state);
+            if (!tree || !tree.topNode) {
+              if (this.dom.innerHTML !== '') this.dom.innerHTML = '';
+              this.slots.clearAll();
+              this.currentScopes = [];
+              return;
+            }
+
             let ancestorNodes = [];
             let node = tree.resolveInner(refPos);
             for (; node; node = node.parent) {
@@ -1942,7 +2774,7 @@ export default {
               const indentDepth = Math.floor(indentSpaces / indentSize);
               // Slot depth = ancestor index (outermost -> 0). Use indent only for cosmetics.
               const depth = pathDepth;
-              
+
               let cachedHeight = 1;
               let offset;
 
@@ -1991,19 +2823,19 @@ export default {
           // ---------------------------------------------------------------------------
           const hysteresisLines = 0.5;
           const earlyMarginLines = 1.5;
-          
-          const DEBUG_SLOTS = false; // Set true to log to browser_console.log
+
+          const DEBUG_SLOTS = true; // Set true to log to browser_console.log
 
           // First pass: clear slots that are no longer valid
           // A slot should clear if refLine is outside its activation window
           for (let depth = 0; depth < this.slots.maxSlots; depth++) {
             const existing = this.slots.get(depth);
             if (!existing) continue;
-            
+
             let scopedRef = refLine;
             // With dynamic heights, we don't need arbitrary drift correction
             // scopedRef = refLine;
-            
+
             // Direction-aware release:
             // - Downward scroll: keep scope until the actual end line passes the ref line
             //   (no early shrink), preventing short scopes from disappearing too soon.
@@ -2024,7 +2856,7 @@ export default {
               scrolledBelow = scopedRef > exitLine + exitMargin;
             }
             const shouldClear = scrolledAbove || scrolledBelow;
-            
+
             if (DEBUG_SLOTS) {
               console.log('[Slots] check', {
                 depth,
@@ -2042,7 +2874,7 @@ export default {
                 goingDown
               });
             }
-            
+
             if (shouldClear) {
               if (DEBUG_SLOTS) console.log('[Slots] CLEARING', { depth });
               this.slots.clear(depth); // Clears this and all deeper slots
@@ -2060,11 +2892,11 @@ export default {
             const wasActive = prevActiveKeys.has(key);
 
             // Calculate activation window with hysteresis
-            const lower = wasActive 
-              ? scope.triggerLine - hysteresisLines 
+            const lower = wasActive
+              ? scope.triggerLine - hysteresisLines
               : scope.triggerLine + hysteresisLines;
-            const upper = wasActive 
-              ? scope.endTriggerLine + hysteresisLines 
+            const upper = wasActive
+              ? scope.endTriggerLine + hysteresisLines
               : scope.endTriggerLine - hysteresisLines;
 
             // Check if scope should be active
@@ -2073,27 +2905,34 @@ export default {
             // Near-end linger: keep innermost scope active during push-up
             if (!shouldActivate && scope.depth > 0) {
               try {
-                const endLineObj = state.doc.lineAt(scope.node.to);
+                let endLineObj;
+                if (scope.node) {
+                  // Lezer-backed: use node.to
+                  endLineObj = state.doc.lineAt(scope.node.to);
+                } else {
+                  // LSP-backed: use endLine directly
+                  endLineObj = state.doc.line(scope.endLine);
+                }
                 const endBlock = view.lineBlockAt(endLineObj.to);
                 const endBottomViewport = endBlock.bottom - scrollTop;
-                
+
                 // Calculate prospective header height using cumulative heights
                 let prospectiveHeight = 0;
                 for (let i = 0; i <= scope.depth; i++) {
-                   // Use cached height for ancestors, assume 1 for current if unknown
-                   // But we have cached height in scope.height
-                   // We need heights of all ancestors 0..depth
-                   // Since we are iterating candidates, we can sum them up
-                   const ancestor = candidateScopes[i];
-                   if (ancestor) prospectiveHeight += (ancestor.height || 1);
-                   else prospectiveHeight += 1;
+                  // Use cached height for ancestors, assume 1 for current if unknown
+                  // But we have cached height in scope.height
+                  // We need heights of all ancestors 0..depth
+                  // Since we are iterating candidates, we can sum them up
+                  const ancestor = candidateScopes[i];
+                  if (ancestor) prospectiveHeight += (ancestor.height || 1);
+                  else prospectiveHeight += 1;
                 }
                 const prospectiveHeightPx = prospectiveHeight * lineHeight;
-                
+
                 if (endBottomViewport < prospectiveHeightPx + earlyMarginLines * lineHeight) {
                   shouldActivate = true;
                 }
-              } catch {}
+              } catch { }
             }
 
             if (DEBUG_SLOTS) {
@@ -2113,18 +2952,12 @@ export default {
               // Clear the slot first if occupied by a different scope
               const existing = this.slots.get(scope.depth);
               if (existing && existing.startLine !== scope.startLine) {
-                if (isMarkdown) {
-                  // Markdown: smooth sibling transition
-                  this.pendingTransitions.set(scope.depth, {
-                    outgoing: existing,
-                    incoming: scope,
-                    startTime: performance.now(),
-                  });
-                } else {
-                  // Other languages: immediate swap to preserve snappy n+1 behavior
-                  this.slots.clear(scope.depth);
-                  this.slots.register(scope);
-                }
+                // Smooth sibling transition for all scope types
+                this.pendingTransitions.set(scope.depth, {
+                  outgoing: existing,
+                  incoming: scope,
+                  startTime: performance.now(),
+                });
               } else {
                 if (DEBUG_SLOTS) console.log('[Slots] REGISTER', { depth: scope.depth, startLine: scope.startLine });
                 this.slots.register(scope);
@@ -2213,7 +3046,7 @@ export default {
 
           let topOffset = 0;
           let effectiveHeight;
-          
+
           // Calculate height of the innermost scope (in pixels)
           const innermostHeight = (innermost.height || 1) * lineHeight;
           let lastHeight = innermostHeight;
@@ -2225,9 +3058,8 @@ export default {
             // For markdown, trigger push-up only when the section end crosses the stack bottom.
             pushMarginLines = 0; // start exactly at boundary
           } else {
-            if (scopeLength <= 6) pushMarginLines = 1;
-            else if (innermost.depth === 0) pushMarginLines = 1.5;
-            else pushMarginLines = 3;
+            // Use consistent small margin for all scopes - 1 line works well
+            pushMarginLines = 1;
           }
           const earlyMargin = pushMarginLines * lineHeight;
 
@@ -2237,13 +3069,37 @@ export default {
               const endLineObj = state.doc.line(innermost.endLine);
               const endLineBlock = view.lineBlockAt(endLineObj.to);
               endBottomViewport = endLineBlock.bottom - scrollTop;
-            } else {
+            } else if (innermost.node) {
+              // Lezer-backed scope: use node.to for precise end position
               const endLine = state.doc.lineAt(innermost.node.to);
               const endLineBlock = view.lineBlockAt(endLine.to);
+              endBottomViewport = endLineBlock.bottom - scrollTop;
+            } else {
+              // LSP-backed scope: use endLine directly
+              const endLineObj = state.doc.line(innermost.endLine);
+              const endLineBlock = view.lineBlockAt(endLineObj.to);
               endBottomViewport = endLineBlock.bottom - scrollTop;
             }
             const stackBottomViewport = headerHeight;
             const delta = endBottomViewport - stackBottomViewport;
+            
+            const DEBUG_PUSHUP = true;
+            if (DEBUG_PUSHUP && delta < earlyMargin * 2) {
+              console.log('[PushUp]', {
+                scope: innermost.text?.slice(0, 40),
+                depth: innermost.depth,
+                startLine: innermost.startLine,
+                endLine: innermost.endLine,
+                endTriggerLine: innermost.endTriggerLine,
+                refLine,
+                delta: delta.toFixed(1),
+                earlyMargin: earlyMargin.toFixed(1),
+                topOffset: topOffset.toFixed(1),
+                headerHeight: headerHeight.toFixed(1),
+                isLSP: !innermost.node
+              });
+            }
+            
             if (isMarkdown) {
               if (delta < lineHeight) {
                 // Start push-up about one line before the end crosses the stack
@@ -2270,7 +3126,7 @@ export default {
           }
 
           lastHeight = Math.max(0, innermostHeight + topOffset);
-          
+
           // Effective height is sum of all previous scopes + lastHeight
           const previousHeight = activeScopes.slice(0, -1).reduce((sum, s) => sum + (s.height || 1), 0) * lineHeight;
           effectiveHeight = previousHeight + lastHeight;
@@ -2288,31 +3144,37 @@ export default {
 
           this.dom.innerHTML = '';
           const lastIndex = activeScopes.length - 1;
-          
+
           let currentTop = 0;
-          
+
           const renderLayer = (scope, idx, cls) => {
             const scopeLines = scope.height || 1;
             const scopeHeightPx = scopeLines * lineHeight;
-            
+
             const layer = document.createElement('div');
             layer.className = 'cm-sticky-layer';
             if (cls) layer.classList.add(cls);
             if (idx === lastIndex) layer.classList.add('innermost');
-            
+
             layer.style.top = `${currentTop}px`;
-            
+
             // Higher layers (outer scopes) sit above inner ones.
             layer.style.zIndex = String(100 - idx - (cls === 'exiting' ? 1 : 0));
             layer.style.setProperty('--cm-sticky-line-height', `${lineHeight}px`);
-            
-            // Apply push-up transform to innermost layer
-            layer.style.transform = idx === lastIndex && !cls ? `translateY(${topOffset}px)` : 'translateY(0)';
-            
+            layer.style.setProperty('--scope-height', `${scopeHeightPx}px`);
+
+            // Apply push-up transform to innermost layer (but not during entry animation)
+            if (cls === 'entering-from-top' || cls === 'entering') {
+              // Let CSS animation handle the transform
+              layer.style.transform = '';
+            } else {
+              layer.style.transform = idx === lastIndex && !cls ? `translateY(${topOffset}px)` : 'translateY(0)';
+            }
+
             // Allow height to be auto for wrapping, but set min-height
             layer.style.height = 'auto';
             layer.style.minHeight = `${lineHeight}px`;
-            
+
             // Store scope key for measurement
             layer.dataset.scopeKey = `${scope.depth}:${scope.startLine}`;
 
@@ -2359,20 +3221,33 @@ export default {
             layer.appendChild(gutter);
             layer.appendChild(content);
             this.dom.appendChild(layer);
-            
+
             // Advance top for next layer
             if (!cls) { // Only advance for main stack, not transitions
-               currentTop += scopeHeightPx;
+              currentTop += scopeHeightPx;
             }
           };
 
           // Render active scopes and any outgoing transitions
+          // Track which scopes are newly entering (for pull-down animation on scroll up)
+          const newlyEntering = new Set();
+          activeScopes.forEach((scope) => {
+            const key = `${scope.depth}:${scope.startLine}-${scope.endLine}`;
+            if (!prevActiveKeys.has(key) && direction < 0) {
+              // This scope is new and we're scrolling up - animate it entering
+              newlyEntering.add(scope.depth);
+            }
+          });
+
           activeScopes.forEach((scope, idx) => {
             const t = this.pendingTransitions.get(scope.depth);
             if (t && t.outgoing.startLine !== scope.startLine) {
               // Render outgoing + incoming together
               renderLayer(t.outgoing, idx, 'exiting');
               renderLayer(t.incoming, idx, 'entering');
+            } else if (newlyEntering.has(scope.depth)) {
+              // New scope appearing while scrolling up - animate entry from top
+              renderLayer(scope, idx, 'entering-from-top');
             } else {
               renderLayer(scope, idx, null);
             }
@@ -2382,28 +3257,28 @@ export default {
           // 6) Measure actual heights and update cache
           // ---------------------------------------------------------------------------
           if (wrappingEnabled && !isRetry) {
-             let heightsChanged = false;
-             const layers = Array.from(this.dom.querySelectorAll('.cm-sticky-layer'));
-             layers.forEach(layer => {
-                const key = layer.dataset.scopeKey;
-                if (key) {
-                   const heightPx = layer.offsetHeight;
-                   const lines = Math.max(1, Math.round(heightPx / lineHeight));
-                   const oldLines = this.scopeHeights.get(key) || 1;
-                   
-                   if (lines !== oldLines) {
-                      this.scopeHeights.set(key, lines);
-                      heightsChanged = true;
-                      // console.log(`[Sticky] Height changed for ${key}: ${oldLines} -> ${lines}`);
-                   }
+            let heightsChanged = false;
+            const layers = Array.from(this.dom.querySelectorAll('.cm-sticky-layer'));
+            layers.forEach(layer => {
+              const key = layer.dataset.scopeKey;
+              if (key) {
+                const heightPx = layer.offsetHeight;
+                const lines = Math.max(1, Math.round(heightPx / lineHeight));
+                const oldLines = this.scopeHeights.get(key) || 1;
+
+                if (lines !== oldLines) {
+                  this.scopeHeights.set(key, lines);
+                  heightsChanged = true;
+                  // console.log(`[Sticky] Height changed for ${key}: ${oldLines} -> ${lines}`);
                 }
-             });
-             
-             if (heightsChanged) {
-                // Re-run update with new heights to correct offsets and positioning
-                // Use requestAnimationFrame to avoid synchronous layout thrashing loop
-                requestAnimationFrame(() => this.updateStickyHeader(true));
-             }
+              }
+            });
+
+            if (heightsChanged) {
+              // Re-run update with new heights to correct offsets and positioning
+              // Use requestAnimationFrame to avoid synchronous layout thrashing loop
+              requestAnimationFrame(() => this.updateStickyHeader(true));
+            }
           }
 
           // Remember overlay height for the next sampling pass so that
@@ -2416,7 +3291,7 @@ export default {
             this.lastOverlaySampleHeight = Math.max(effectiveHeight, this.lastOverlaySampleHeight - lineHeight);
           }
         }
-        
+
         update(update) {
           // Re-render on document changes (syntax tree may have changed)
           if (update.docChanged) {
@@ -2433,10 +3308,13 @@ export default {
             requestAnimationFrame(() => this.syncBackgroundColor());
           }
         }
-        
+
         destroy() {
           this.view.scrollDOM.removeEventListener('scroll', this.scrollHandler);
           this.dom.remove();
+          if (cmComponent && cmComponent._stickyScrollPlugin === this) {
+            cmComponent._stickyScrollPlugin = null;
+          }
         }
       });
 
@@ -2463,7 +3341,18 @@ export default {
           enabled ? stickyScrollExtension : []
         )
       });
-      
+
+      // When enabling, initialize the sticky scroll at the current position
+      // to avoid rendering issues when starting mid-document
+      if (enabled && this._stickyScrollPlugin && typeof this._stickyScrollPlugin.initializeAtCurrentPosition === 'function') {
+        // Small delay to ensure the plugin is fully mounted
+        setTimeout(() => {
+          if (this._stickyScrollPlugin) {
+            this._stickyScrollPlugin.initializeAtCurrentPosition();
+          }
+        }, 50);
+      }
+
       console.log('[CodeMirror] Sticky scroll set to:', enabled);
     },
     // ============================================================================
@@ -2518,31 +3407,48 @@ export default {
     }
 
     // Apply initial scroll position from backend, if provided
+    // Position target line at viewport top (symmetrical with how we record scroll position)
     if (typeof this.initialScrollLine === 'number' && this.initialScrollLine > 1) {
       try {
         const doc = this.editor.state.doc;
         const maxLine = doc.lines;
         const targetLine = Math.max(1, Math.min(this.initialScrollLine, maxLine));
-        const line = doc.line(targetLine);
+        const lineObj = doc.line(targetLine);
+        
+        // Use lineBlockAt to get pixel position, then set scrollTop directly
+        // This is symmetrical with reportScrollPosition which uses lineBlockAtHeight
+        const lineBlock = this.editor.lineBlockAt(lineObj.from);
+        this.editor.scrollDOM.scrollTop = lineBlock.top;
+        
+        // Set selection without scrolling (we already scrolled)
         this.editor.dispatch({
-          selection: { anchor: line.from },
-          scrollIntoView: true,
+          selection: { anchor: lineObj.from }
         });
-        console.log('[CodeMirror] Initial scroll to line', targetLine);
+        
+        // Re-initialize sticky scroll at new position to avoid rendering issues
+        if (this._stickyScrollPlugin && typeof this._stickyScrollPlugin.initializeAtCurrentPosition === 'function') {
+          setTimeout(() => {
+            if (this._stickyScrollPlugin) {
+              this._stickyScrollPlugin.initializeAtCurrentPosition();
+            }
+          }, 100);
+        }
+        
+        console.log('[CodeMirror] Initial scroll to line', targetLine, 'scrollTop=', lineBlock.top);
       } catch (err) {
         console.warn('[CodeMirror] Failed to apply initial scroll line:', err);
       }
     }
-    
+
     // Initialize layout detection for minimap
     const mql = window.matchMedia('(max-width: 900px)');
     this.isMobileLayout = mql.matches;
     mql.addEventListener('change', this.handleLayoutChange);
-    
+
     // Initialize diff compartments BEFORE minimap so minimap can reference diffField
     // This ensures proper dependency order - minimap needs diffField to exist
     this.initDiffCompartments();
-    
+
     // Apply initial minimap state (now diffField exists for minimap to reference)
     this.updateMinimapState();
   },

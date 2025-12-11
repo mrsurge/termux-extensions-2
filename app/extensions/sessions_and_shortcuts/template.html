@@ -58,12 +58,105 @@
         text-transform: uppercase;
     }
     .session { position: relative; }
-    .session.framework { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: rgba(255,255,255,0.02); }
+    .session.framework { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: rgba(255,255,255,0.02); margin-bottom: 12px; }
     .session.framework .session-cwd { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
-    .framework-log { border: 1px solid var(--border); background: var(--primary); color: var(--primary-foreground, #fff); padding: 4px 10px; border-radius: 6px; cursor: pointer; margin-right: 8px; }
-    .framework-log:hover { filter: brightness(1.1); }
-    .framework-kill { border: 1px solid var(--border); background: var(--destructive); color: var(--destructive-foreground, #fff); padding: 4px 10px; border-radius: 6px; cursor: pointer; }
-    .framework-kill:hover { filter: brightness(1.1); }
+    
+    /* App worker card styling */
+    .session.framework.app-worker-card {
+        border-color: var(--primary);
+        border-width: 2px;
+    }
+    .app-worker-badge {
+        background: var(--primary);
+        color: var(--primary-foreground);
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-right: 8px;
+    }
+    
+    /* Shell actions (log + kill buttons) */
+    .shell-actions {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+    }
+    .framework-log, .child-log {
+        border: 1px solid var(--border);
+        background: var(--secondary);
+        color: inherit;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.85rem;
+    }
+    .framework-log:hover, .child-log:hover { background: var(--muted); }
+    .framework-kill, .child-kill {
+        border: 1px solid var(--destructive);
+        background: transparent;
+        color: var(--destructive);
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: bold;
+    }
+    .framework-kill:hover, .child-kill:hover { background: var(--destructive); color: var(--destructive-foreground, #fff); }
+    .framework-kill.kill-with-children {
+        background: var(--destructive);
+        color: var(--destructive-foreground, #fff);
+    }
+    
+    /* Child processes tree */
+    .shell-children {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px dashed var(--border);
+    }
+    .children-header {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+        margin-bottom: 8px;
+        letter-spacing: 0.05em;
+    }
+    .child-process {
+        background: rgba(0,0,0,0.15);
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+        border-left: 3px solid var(--muted-foreground);
+    }
+    .child-process:last-child { margin-bottom: 0; }
+    .child-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .child-label {
+        font-weight: 500;
+        flex: 1;
+    }
+    .child-type {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+        background: var(--secondary);
+        padding: 2px 6px;
+        border-radius: 3px;
+    }
+    .child-actions {
+        display: flex;
+        gap: 4px;
+    }
+    .child-info {
+        font-size: 0.8rem;
+        color: var(--muted-foreground);
+        margin-top: 4px;
+    }
+    
     .session .menu { position: absolute; top: 36px; right: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 30px rgba(0,0,0,0.35); display: none; padding: 6px 0; min-width: 180px; z-index: 20; }
     .session .menu.open { display: block; }
     .session .menu .menu-item { border: none; background: transparent; color: inherit; width: 100%; text-align: left; padding: 8px 14px; font-size: 0.9rem; cursor: pointer; }

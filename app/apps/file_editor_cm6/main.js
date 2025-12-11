@@ -38,8 +38,17 @@ const _originalConsole = {
 };
 
 function initDebugConsole() {
-  // Debug console forwarding disabled
-  return;
+  const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  // Use the framework's WebSocket proxy for apps
+  const wsUrl = `${wsProto}//${window.location.host}/ws/app/file_editor_cm6/ws/debug_console`;
+  try {
+    _debugWs = new WebSocket(wsUrl);
+    _debugWs.onopen = () => { _debugWsReady = true; };
+    _debugWs.onclose = () => { _debugWsReady = false; };
+    _debugWs.onerror = () => { _debugWsReady = false; };
+  } catch (e) {
+    // Silent fail
+  }
 }
 
 function sendToDebugWs(level, args) {
@@ -431,6 +440,7 @@ const miToggleStickyScroll = requireEl('#mi-toggle-sticky-scroll');  // Added: 2
 const miTrackEdits   = requireEl('#mi-track-edits');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
+const miLanguageServers = requireEl('#mi-language-servers');  // Added: 2025-12-08 - LSP settings modal
 
 initVirtualKeyboardAdjustments({
   root,
@@ -1249,15 +1259,10 @@ window.__cm6RefreshRecents = function(state) {
         return;
       }
       try {
-        // Open the file
+        // Open the file - openFile() now handles scroll restoration automatically
         await openFile(path);
-        // Jump to stored scroll line if available
-        if (scrollLine && scrollLine > 1) {
-          // Small delay to let the editor initialize
-          setTimeout(() => {
-            jumpToCurrentFileLine(scrollLine, { flash: false });
-          }, 100);
-        }
+        // Note: scroll restoration is now handled by openFile() with offset=5
+        // No separate jump needed here
       } catch (err) {
         console.error('[Recents] Failed to open file:', err);
       }
@@ -1715,13 +1720,18 @@ async function openFile(path, options = {}) {
     }
 
     // Update persisted editor state (last file + recents)
+    // The returned entry includes scroll_line if previously stored
+    let scrollLineToRestore = null;
     try {
       const activity = await apiPost("state/file_activity", {
         path: resolved,
         project: cachedProjectRoot || projectState.activeProject,
       });
-      if (activity?.state) {
-        editorState = activity.state;
+      if (activity?.data?.entry?.scroll_line) {
+        scrollLineToRestore = activity.data.entry.scroll_line;
+      }
+      if (activity?.state || activity?.data?.state) {
+        editorState = activity.state || activity.data.state;
         cachedProjectRoot = editorState.activeProject || cachedProjectRoot;
         broadcastRecentsUpdate(editorState);
         syncSessionPath();
@@ -1736,6 +1746,15 @@ async function openFile(path, options = {}) {
       }
     } catch (err) {
       console.error("Failed to record file activity:", err);
+    }
+
+    // Restore scroll position if we have one stored for this file
+    // Use scrollToTop to position line at viewport top (symmetrical with recording)
+    if (scrollLineToRestore && scrollLineToRestore > 1) {
+      setTimeout(() => {
+        console.log("[Editor] Restoring scroll to line", scrollLineToRestore);
+        jumpToCurrentFileLine(scrollLineToRestore, { focus: false, scrollToTop: true });
+      }, 150); // Small delay to let editor render
     }
   } catch (e) {
     statusEl.textContent = "";
@@ -2265,6 +2284,94 @@ async function showProjectsDebugModal() {
   await loadProjectsDebugContent();
 }
 
+// ---------- Language Servers Modal ----------
+const lspModal = {
+  root: document.getElementById('lsp-modal'),
+  closeBtn: document.getElementById('lsp-modal-close'),
+  globalToggleBtn: document.getElementById('lsp-global-toggle-btn'),
+  statusPyright: document.getElementById('lsp-status-pyright'),
+  statusTypescript: document.getElementById('lsp-status-typescript'),
+};
+
+function updateLspModalUI(enableLsp) {
+  if (!lspModal.root) return;
+  
+  const isEnabled = Boolean(enableLsp);
+  
+  // Update global toggle button
+  if (lspModal.globalToggleBtn) {
+    lspModal.globalToggleBtn.textContent = isEnabled ? 'Disable' : 'Enable';
+    lspModal.globalToggleBtn.classList.toggle('enabled', isEnabled);
+  }
+  
+  // Update status dots
+  if (lspModal.statusPyright) {
+    lspModal.statusPyright.classList.toggle('enabled', isEnabled);
+    lspModal.statusPyright.classList.toggle('disabled', !isEnabled);
+  }
+  if (lspModal.statusTypescript) {
+    lspModal.statusTypescript.classList.toggle('enabled', isEnabled);
+    lspModal.statusTypescript.classList.toggle('disabled', !isEnabled);
+  }
+}
+
+function hideLspModal() {
+  if (!lspModal.root) return;
+  lspModal.root.classList.remove('show');
+  lspModal.root.setAttribute('aria-hidden', 'true');
+}
+
+async function showLspModal() {
+  if (!lspModal.root) {
+    host.toast('Language servers modal not available');
+    return;
+  }
+  
+  // Fetch current LSP state from backend
+  const state = await fetchEditorState();
+  const enableLsp = state?.enableLsp ?? false;
+  
+  updateLspModalUI(enableLsp);
+  
+  lspModal.root.classList.add('show');
+  lspModal.root.setAttribute('aria-hidden', 'false');
+}
+
+// Wire up LSP modal events
+if (lspModal.closeBtn) {
+  lspModal.closeBtn.addEventListener('click', hideLspModal);
+}
+
+if (lspModal.root) {
+  lspModal.root.addEventListener('click', (evt) => {
+    if (evt.target === lspModal.root) {
+      hideLspModal();
+    }
+  });
+}
+
+if (lspModal.globalToggleBtn) {
+  lspModal.globalToggleBtn.addEventListener('click', async () => {
+    // Get current state and toggle
+    const state = await fetchEditorState();
+    const currentValue = state?.enableLsp ?? false;
+    const newValue = !currentValue;
+    
+    try {
+      const success = await updatePreference('enableLsp', newValue);
+      if (success) {
+        updateLspModalUI(newValue);
+        host.toast(newValue ? 'LSP enabled - open a file to connect' : 'LSP disabled');
+      } else {
+        host.toast('Failed to update LSP preference');
+      }
+    } catch (err) {
+      console.error('[LSP Modal] Toggle failed:', err);
+      host.toast('Failed to toggle LSP');
+    }
+  });
+}
+
 // ---------- Picker helpers (shared modal provided by framework) ----------
 function pickerAvailable() {
   return window.teFilePicker && typeof window.teFilePicker.openFile === 'function';
@@ -2316,6 +2423,10 @@ async function jumpToCurrentFileLine(line, options = {}) {
     const payload = { line: targetLine };
     if (options && Object.prototype.hasOwnProperty.call(options, 'focus')) {
       payload.focus = Boolean(options.focus);
+    }
+    // scrollToTop: position line at viewport top (for scroll restore)
+    if (options && Object.prototype.hasOwnProperty.call(options, 'scrollToTop')) {
+      payload.scroll_to_top = Boolean(options.scrollToTop);
     }
     await apiPost('editor/jump_to_line', payload);
   } catch (e) {
@@ -2409,6 +2520,11 @@ bindMenuToggle(miQuit, () => {
 
 bindMenuToggle(miDebugProjects, () => {
   showProjectsDebugModal();
+});
+
+// Language Servers modal - Added: 2025-12-08
+bindMenuToggle(miLanguageServers, () => {
+  showLspModal();
 });
 
 bindMenuToggle(miUndo, () => { if (view && undo) undo(view); });
