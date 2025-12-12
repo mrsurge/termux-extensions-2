@@ -197,6 +197,9 @@ async def ensure_app_running(app_id):
     nicegui_module = entrypoints.get('nicegui_module')
     nicegui_shell = entrypoints.get('nicegui_shell', False)
     backend_module = entrypoints.get('backend_blueprint')
+    framework_shell_ui = app_manifest.get('framework_shell_ui')
+    if not isinstance(framework_shell_ui, dict):
+        framework_shell_ui = None
 
     # Go up 3 levels: app/libs/app_manager.py -> app/libs -> app -> project_root
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -224,7 +227,7 @@ async def ensure_app_running(app_id):
         ]
 
         manager = await get_framework_shell_manager()
-        shell = await manager.spawn_shell(command, label=f"asgi-app:{app_id}", cwd=project_root, env=env)
+        shell = await manager.spawn_shell(command, label=f"asgi-app:{app_id}", cwd=project_root, env=env, ui=framework_shell_ui)
 
         await asyncio.sleep(1.5)
         updated_shell = await manager.get_shell(shell.id)
@@ -274,7 +277,7 @@ async def ensure_app_running(app_id):
     ]
 
     manager = await get_framework_shell_manager()
-    shell = await manager.spawn_shell(command, label=f"app-worker:{app_id}", cwd=project_root, env=env)
+    shell = await manager.spawn_shell(command, label=f"app-worker:{app_id}", cwd=project_root, env=env, ui=framework_shell_ui)
 
     # Wait a moment and check if the shell is still alive
     await asyncio.sleep(1.5)

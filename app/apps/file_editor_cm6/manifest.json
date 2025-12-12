@@ -11,6 +11,12 @@
     "frontend_script": "main.js"
   },
   "fullscreen": true,
+  "framework_shell_ui": {
+    "subgroup_styles": {
+      "lsp": { "bg": "rgba(68, 45, 47, 0.80)", "border": "rgba(168, 85, 247, 0.60)" },
+      "project:*": { "bg": "rgba(0, 0, 0, 0.88)", "border": "rgba(29, 70, 126, 0.88)" }
+    }
+  },
   "ipc_modules": [
     "app.apps.file_editor_cm6.ipc_stack"
   ]

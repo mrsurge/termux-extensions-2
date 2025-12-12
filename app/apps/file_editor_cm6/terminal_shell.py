@@ -7,6 +7,26 @@ from pathlib import Path
 from app.libs.framework_shells import get_manager as _manager
 
 
+def _terminal_subgroups(project_path: str | None) -> list[str]:
+    """App-defined framework shell subgroups for sessions grouping.
+
+    Convention:
+    - index 0: app umbrella group
+    - index 1+: optional subgroups (e.g., per-project)
+    """
+    groups: list[str] = ["file_editor_cm6"]
+    if not project_path:
+        return groups
+    try:
+        norm = str(Path(project_path).expanduser().resolve(strict=False))
+    except Exception:
+        norm = project_path
+    digest = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:8]
+    base = Path(norm).name or "project"
+    groups.append(f"project:{base}:{digest}")
+    return groups
+
+
 def _terminal_label(project_path: str | None, sequence: int | None = None) -> str:
     """Stable per-project label for editor terminals.
 
@@ -54,9 +74,11 @@ async def create_editor_shell(cwd=None, shell_cmd=None, project_path: str | None
     label = _terminal_label(project_path, sequence=sequence)
 
     # Create PTY-backed shell using spawn_shell_pty
+    subgroups = _terminal_subgroups(project_path)
     rec = await mgr.spawn_shell_pty(
         shell_cmd,
         label=label,
+        subgroups=subgroups,
         cwd=cwd
     )
     

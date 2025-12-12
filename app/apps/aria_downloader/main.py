@@ -455,7 +455,14 @@ async def spawn_shell(payload: dict = Body(...)):
     autostart = bool(payload.get('autostart', False))
 
     try:
-        record = await mgr.spawn_shell(command, cwd=cwd, env=env or {}, label=label, autostart=autostart)
+        record = await mgr.spawn_shell(
+            command,
+            cwd=cwd,
+            env=env or {},
+            label=label,
+            subgroups=["aria_downloader", "aria2"],
+            autostart=autostart,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:

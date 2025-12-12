@@ -66,21 +66,24 @@
         border-color: var(--primary);
         border-width: 2px;
     }
-    .app-worker-badge {
-        background: var(--primary);
-        color: var(--primary-foreground);
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin-right: 8px;
-    }
-    
-    /* Shell actions (log + kill buttons) */
-    .shell-actions {
-        display: flex;
-        gap: 6px;
+	    .app-worker-badge {
+	        background: var(--primary);
+	        color: var(--primary-foreground);
+	        padding: 2px 8px;
+	        border-radius: 4px;
+	        font-size: 0.7rem;
+	        text-transform: uppercase;
+	        letter-spacing: 0.05em;
+	        margin-right: 8px;
+	        cursor: pointer;
+	        user-select: none;
+	    }
+	    .app-worker-badge:hover { text-decoration: underline; }
+	    
+	    /* Shell actions (log + kill buttons) */
+	    .shell-actions {
+	        display: flex;
+	        gap: 6px;
         align-items: center;
     }
     .framework-log, .child-log {
@@ -108,6 +111,112 @@
         background: var(--destructive);
         color: var(--destructive-foreground, #fff);
     }
+    .framework-purge {
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--muted-foreground);
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.85rem;
+    }
+    .framework-purge:hover { background: var(--muted); color: inherit; }
+    .framework-group-kill {
+        border: 1px solid var(--destructive);
+        background: transparent;
+        color: var(--destructive);
+        padding: 2px 8px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.8rem;
+        font-weight: bold;
+        line-height: 1.2;
+    }
+    .framework-group-kill:hover { background: var(--destructive); color: var(--destructive-foreground, #fff); }
+
+    /* Shell grouping */
+    .shell-group-header {
+        margin: 18px 0 10px;
+        padding: 6px 10px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.03);
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: inherit;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .shell-group-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .shell-subgroup-header {
+        margin: 10px 0 6px;
+        padding-left: 6px;
+        font-size: 0.8rem;
+        color: var(--muted-foreground);
+        opacity: 0.9;
+    }
+    .shell-subgroup-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 10px 0 6px;
+        padding: 6px 8px;
+        border-radius: 10px;
+        background: var(--subgroup-bg, transparent);
+        border: 1px solid var(--subgroup-border, transparent);
+        color: var(--subgroup-color, inherit);
+    }
+    .shell-subgroup-row .shell-subgroup-header {
+        margin: 0;
+        padding-left: 0;
+        color: inherit;
+        opacity: 0.95;
+    }
+    .shell-subgroup-shells {
+        margin-bottom: 8px;
+        border-radius: 12px;
+        padding: 6px;
+        background: var(--subgroup-bg, transparent);
+        border: 1px solid var(--subgroup-border, transparent);
+        color: var(--subgroup-color, inherit);
+    }
+    .session.framework.nested-shell {
+        margin: 8px 0;
+        padding: 10px;
+        background: rgba(255,255,255,0.015);
+        border-color: rgba(255,255,255,0.08);
+    }
+    .shell-related { margin-top: 10px; }
+    .session.framework.exited-shells-card {
+        margin-top: 16px;
+        border: 1px dashed var(--border);
+        border-radius: 10px;
+        padding: 10px;
+        background: rgba(0,0,0,0.12);
+    }
+    .exited-shells-header {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted-foreground);
+        padding: 6px 8px;
+        border-radius: 8px;
+        cursor: pointer;
+        text-align: left;
+        user-select: none;
+    }
+    .exited-shells-header:hover { background: rgba(255,255,255,0.04); color: inherit; }
+    .exited-shells-title { font-size: 0.9rem; }
+    .exited-shells-chevron { font-size: 0.9rem; opacity: 0.9; }
+    .exited-shells-list { margin-top: 10px; }
+    .session.framework.exited-shell { opacity: 0.85; }
     
     /* Child processes tree */
     .shell-children {

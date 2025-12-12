@@ -4,6 +4,11 @@
   "icon_emoji": "</>",
   "version": "0.1.0",
   "description": "Embedded terminals powered by framework shells (dtach).",
+  "framework_shell_ui": {
+    "subgroup_styles": {
+      "shell": { "bg": "rgb(100, 10, 2)", "border": "rgb(207, 10, 2)" }
+    }
+  },
   "entrypoints": {
     "backend_blueprint": "backend.py",
     "frontend_template": "template.html",

@@ -4,6 +4,7 @@ import os
 import shlex
 import asyncio
 import shutil
+import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Body, Query, WebSocket
@@ -24,11 +25,37 @@ def _default_shell_command() -> list[str]:
     return ["sh", "-i"]
 
 
+async def _next_terminal_sequence(m) -> int:
+    """Return next terminal-app sequence number (1-based)."""
+    max_seq = 0
+    try:
+        records = await m.list_shells()
+    except Exception:
+        records = []
+    for rec in records:
+        label = rec.label or ''
+        if label == 'terminal-app':
+            max_seq = max(max_seq, 1)
+            continue
+        m_label = re.match(r'^terminal-app:(\\d+)$', label)
+        if not m_label:
+            continue
+        try:
+            max_seq = max(max_seq, int(m_label.group(1)))
+        except Exception:
+            continue
+    return max_seq + 1
+
+
 @terminal_bp.get("/shells")
 async def list_shells() -> Any:
-    """List framework shells created by this app (label == 'terminal-app')."""
+    """List framework shells created by this app (label startswith 'terminal-app')."""
     m = await mgr()
-    records = [await m.describe(r) for r in await m.list_shells() if r.label == "terminal-app"]
+    records = [
+        await m.describe(r)
+        for r in await m.list_shells()
+        if (r.label or "").startswith("terminal-app")
+    ]
     return {"ok": True, "data": records}
 
 
@@ -46,8 +73,16 @@ async def create_shell(payload: dict = Body(...)) -> Any:
     cwd = str(payload.get("cwd") or "~")
 
     m = await mgr()
+    label = f"terminal-app:{await _next_terminal_sequence(m)}"
     try:
-        record = await m.spawn_shell_pty(shell_cmd, cwd=cwd, env={}, label="terminal-app", autostart=True)
+        record = await m.spawn_shell_pty(
+            shell_cmd,
+            cwd=cwd,
+            env={},
+            label=label,
+            subgroups=["terminal", "shell"],
+            autostart=True,
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to spawn shell: {exc}")
 
