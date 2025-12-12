@@ -51,6 +51,6 @@ for item in "$TARGET_DIR"/*; do
     fi
 done
 
-# End JSON array
+# End JSON array & an excuse for a commit
 echo
 echo "]"
