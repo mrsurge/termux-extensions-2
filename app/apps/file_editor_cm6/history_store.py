@@ -50,6 +50,8 @@ class HistoryStore:
             "active_project": None,
             "session_state": {},
             "session_cache": {},
+            # Legacy global terminal shell id (kept for lazy migration).
+            "terminal_shell_id": None,
         }
         self._load()
 
@@ -70,12 +72,13 @@ class HistoryStore:
                 self._data["session_state"] = data.get("session_state", {})
                 # Session cache is primarily stored in sidecars, but we can load keys here
                 self._data["session_cache"] = data.get("session_cache", {})
+                self._data["terminal_shell_id"] = data.get("terminal_shell_id")
                 for entry in self._data["projects"].values():
                     if isinstance(entry, dict):
                         entry.setdefault("diff_base", "HEAD")
         except Exception:
             # Corrupt or unreadable history; start fresh.
-            self._data = {"recent_projects": [], "projects": {}, "active_project": None, "session_state": {}, "session_cache": {}}
+            self._data = {"recent_projects": [], "projects": {}, "active_project": None, "session_state": {}, "session_cache": {}, "terminal_shell_id": None}
 
     def _save_locked(self) -> None:
         tmp_path = self._path.with_suffix(".tmp")
@@ -377,17 +380,81 @@ class HistoryStore:
         with self._lock:
             return self._data.get("active_project")
 
-    def set_terminal_shell_id(self, shell_id: Optional[str]) -> Optional[str]:
-        """Store the current terminal shell ID."""
+    def set_terminal_shell_id(
+        self, shell_id: Optional[str], project_path: Optional[str] = None
+    ) -> Optional[str]:
+        """Store the current terminal shell ID.
+
+        New behavior: per-project SSOT via ProjectSidecar. If project_path is not
+        provided, uses the active project. A legacy global slot is retained only
+        for migration/fallback.
+        """
+        normalized_project = (
+            self._normalize_project_path(project_path)
+            if project_path
+            else self.get_active_project()
+        )
+
+        if normalized_project:
+            try:
+                sidecar = ProjectSidecar.load_or_create(normalized_project)
+                sidecar.set_terminal_shell_id(shell_id)
+                sidecar.save()
+            except Exception:
+                pass
+            # Clear legacy global value to avoid cross-project bleed.
+            with self._lock:
+                self._data["terminal_shell_id"] = None
+                self._save_locked()
+            return shell_id
+
+        # No project context; fallback to legacy global storage.
         with self._lock:
             self._data["terminal_shell_id"] = shell_id
             self._save_locked()
             return shell_id
 
-    def get_terminal_shell_id(self) -> Optional[str]:
-        """Get the stored terminal shell ID."""
+    def get_terminal_shell_id(
+        self, project_path: Optional[str] = None
+    ) -> Optional[str]:
+        """Get the stored terminal shell ID.
+
+        Prefers per-project sidecar (SSOT). If missing, lazily migrates any legacy
+        global terminal_shell_id into the active project's sidecar.
+        """
+        normalized_project = (
+            self._normalize_project_path(project_path)
+            if project_path
+            else self.get_active_project()
+        )
+
+        if normalized_project:
+            try:
+                sidecar = ProjectSidecar.load_or_create(normalized_project)
+                sid = sidecar.get_terminal_shell_id()
+                if sid:
+                    return sid
+            except Exception:
+                sid = None
+
+            # Lazy migration from legacy global slot.
+            with self._lock:
+                legacy = self._data.get("terminal_shell_id")
+            if legacy:
+                try:
+                    sidecar = ProjectSidecar.load_or_create(normalized_project)
+                    sidecar.set_terminal_shell_id(legacy)
+                    sidecar.save()
+                except Exception:
+                    pass
+                with self._lock:
+                    self._data["terminal_shell_id"] = None
+                    self._save_locked()
+                return str(legacy)
+
         with self._lock:
-            return self._data.get("terminal_shell_id")
+            val = self._data.get("terminal_shell_id")
+            return str(val) if val else None
 
     def set_last_file(self, project_path: str, file_path: Optional[str]) -> Optional[str]:
         """Set last opened file — delegates to sidecar as SSOT."""

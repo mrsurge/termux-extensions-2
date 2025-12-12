@@ -905,6 +905,12 @@ async def project_open(data: dict = Body(...)):
         _history_store.set_active_project(str(abs_path))
         invalidate_diff_cache(abs_path)
         edit_tracker.set_project_root(abs_path)
+        # Force terminal drawers to reconnect to the new project's shell.
+        try:
+            from .terminal_backend import close_active_terminal_sockets
+            await close_active_terminal_sockets()
+        except Exception:
+            pass
         state = _build_state_payload()
         return {"ok": True, "data": {"path": str(abs_path), "state": state}}
     except Exception as e:
@@ -924,6 +930,12 @@ async def project_create(data: dict = Body(...)):
         new_project_path = result['path']
         _history_store.touch_project(new_project_path)
         _history_store.set_active_project(new_project_path)
+        # Force terminal drawers to reconnect to the new project's shell.
+        try:
+            from .terminal_backend import close_active_terminal_sockets
+            await close_active_terminal_sockets()
+        except Exception:
+            pass
         
         return {"ok": True, "data": result}
     except Exception as e:

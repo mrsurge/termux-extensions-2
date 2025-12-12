@@ -139,6 +139,14 @@ export function createTerminalDrawer(options = {}) {
           console.log('Received shell ID from server:', shellId);
           
           if (isNewShell) {
+            // Backend switched us to a different shell (e.g., project change).
+            // Clear the in-browser buffer so the next history load is unambiguous.
+            try {
+              term?.reset();
+            } catch (err) {
+              // reset() may not exist on older xterm versions; fallback to clear.
+              try { term?.clear(); } catch (_) {}
+            }
             shellHistoryPrimed = false;
           }
           lastShellId = receivedShellId;

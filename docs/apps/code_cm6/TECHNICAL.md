@@ -359,6 +359,7 @@ async function apiPost(endpoint, data) {
 Implements:
 - **File tree rendering** with lazy expansion
 - **Search UI** (by name, content, changes)
+- **Seti‑UI filetype icons** for file entries (loaded from `static/vendor/seti-icons`)
 - **Git status badges** (M/A/D/U indicators)
 - **Context menus** (rename, delete, copy, move, create)
 - **Diff base selector** (dropdown with commit info)

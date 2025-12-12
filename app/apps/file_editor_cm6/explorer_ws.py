@@ -200,7 +200,7 @@ from threading import Timer
 _explorer_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
-def reset_project_session(new_project_path: str) -> None:
+async def reset_project_session(new_project_path: str) -> None:
     """Set the active project on explicit project switch.
 
     This is called from explorer flows (open/create/clone) whenever the user
@@ -230,6 +230,14 @@ def reset_project_session(new_project_path: str) -> None:
     # NOTE: We intentionally do NOT clear session_cache or tracked_jobs here.
     # Drafts and jobs persist across project switches.
     sidecar.save()
+
+    # Force any live terminal drawers to reconnect so they bind to the
+    # new active project's shell. Frontend stays project-agnostic.
+    try:
+        from .terminal_backend import close_active_terminal_sockets
+        await close_active_terminal_sockets()
+    except Exception:
+        pass
 
 # Debounce explorer refreshes to avoid flooding
 _explorer_refresh_timers: Dict[str, Timer] = {}
@@ -955,7 +963,7 @@ class ExplorerDispatcher:
 
         new_root = set_project_root(path)
         # Persist active project + reset per-project session state
-        reset_project_session(str(new_root))
+        await reset_project_session(str(new_root))
         self.project_root = new_root
         
         # Register to new
@@ -1017,7 +1025,7 @@ class ExplorerDispatcher:
             new_root = set_project_root(str(target))
             init_watcher(new_root)  # Start watching the new directory
             # Persist active project + reset per-project session state
-            reset_project_session(str(new_root))
+            await reset_project_session(str(new_root))
             self.project_root = new_root
             
             manager.register_existing(self.websocket, str(new_root))

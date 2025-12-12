@@ -7,7 +7,9 @@ Provides REST endpoints and WebSocket PTY streaming for embedded terminal.
 
 import asyncio
 import json
+import shlex
 from pathlib import Path
+from typing import Set
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query, Depends
 
 from app.libs.framework_shells import FrameworkShellManager, get_manager
@@ -21,34 +23,60 @@ from app.apps.file_editor_cm6.terminal_shell import (
 
 terminal_router = APIRouter()
 
+# Track active terminal websocket clients so the backend can force a reconnect on project switch.
+_active_terminal_sockets: Set[WebSocket] = set()
+_active_terminal_lock = asyncio.Lock()
+
+
+async def close_active_terminal_sockets(reason: str = "project switch") -> None:
+    """Close all live terminal websocket connections.
+
+    This is used to force clients to reconnect to /ws/terminal/auto so the
+    backend can bind them to the newly active project's shell. The frontend
+    remains project-agnostic.
+    """
+    async with _active_terminal_lock:
+        sockets = list(_active_terminal_sockets)
+        _active_terminal_sockets.clear()
+
+    for ws in sockets:
+        try:
+            await ws.close(code=1012, reason=reason)
+        except Exception:
+            pass
+
 def get_history_store():
     """Return the shared HistoryStore instance used across the app."""
     return _shared_history_store
 
+# Commands allowed for "run current file" action.
+RUNNABLE_COMMANDS = {
+    ".py": ["python3"],
+    ".pyw": ["python3"],
+    ".sh": ["bash"],
+    ".bash": ["bash"],
+    ".zsh": ["zsh"],
+}
+
 @terminal_router.get('/terminal/shell-id')
 async def get_terminal_shell_id():
-    """Get the stored terminal shell ID, validating it still exists and cleaning up orphans."""
+    """Get the stored terminal shell ID for the active project.
+
+    Validates the shell is still alive; does not terminate other shells.
+    """
     history_store = get_history_store()
     mgr = await get_manager()
     
     try:
-        shell_id = history_store.get_terminal_shell_id()
-        
-        # First, clean up orphaned terminal shells (except the saved one)
-        shells = await mgr.list_shells()
-        orphans = [s for s in shells if s.label == 'code-editor-terminal' and s.id != shell_id]
-        for orphan in orphans:
-            try:
-                await mgr.terminate_shell(orphan.id)
-            except Exception as e:
-                print(f"Failed to cleanup orphan shell {orphan.id}: {e}")
+        project_path = history_store.get_active_project()
+        shell_id = history_store.get_terminal_shell_id(project_path)
         
         # If we have a stored shell ID, verify it still exists
         if shell_id:
             rec = await mgr.get_shell(shell_id)
-            if not rec or rec.status != 'running':
+            if not rec or rec.status != 'running' or not rec.pid:
                 # Shell was deleted or died - clear the stale ID
-                history_store.set_terminal_shell_id(None)
+                history_store.set_terminal_shell_id(None, project_path)
                 shell_id = None
         
         # Return null if no valid shell ID
@@ -68,6 +96,58 @@ async def set_terminal_shell_id(data: dict = Body(...)):
         return {"ok": True, "data": {"shell_id": shell_id}}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@terminal_router.post('/terminal/run_active_file')
+async def run_active_file():
+    """Run the currently active (last opened) file in the project terminal.
+
+    Saving is handled separately by the editor save endpoint; this only dispatches.
+    """
+    history_store = get_history_store()
+
+    project_path = history_store.get_active_project()
+    current_file = history_store.get_last_file(project_path) if project_path else None
+    if not current_file:
+        raise HTTPException(status_code=400, detail="No file is currently open")
+
+    path_obj = Path(current_file).expanduser().resolve(strict=False)
+    ext = path_obj.suffix.lower()
+    runner = RUNNABLE_COMMANDS.get(ext)
+    if not runner:
+        raise HTTPException(status_code=400, detail="Only Python and shell scripts can be executed")
+
+    workdir = str(path_obj.parent)
+    cmd_tokens = runner + [str(path_obj)]
+    command_preview = " ".join(shlex.quote(part) for part in cmd_tokens)
+
+    mgr = await get_manager()
+    shell_id = history_store.get_terminal_shell_id(project_path)
+    if shell_id:
+        rec = await mgr.get_shell(shell_id)
+        if not rec or rec.status != "running" or not rec.pid:
+            history_store.set_terminal_shell_id(None, project_path)
+            shell_id = None
+
+    if not shell_id:
+        preferred_cwd = project_path if project_path and Path(project_path).is_dir() else workdir
+        shell_info = await create_editor_shell(cwd=preferred_cwd, project_path=project_path)
+        shell_id = shell_info["id"]
+        history_store.set_terminal_shell_id(shell_id, project_path)
+
+    try:
+        await mgr.write_to_pty(shell_id, command_preview + "\n")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to dispatch command: {e}")
+
+    return {
+        "ok": True,
+        "data": {
+            "shell_id": shell_id,
+            "command_preview": command_preview,
+            "working_dir": workdir,
+        },
+    }
 
 @terminal_router.delete('/terminal/{shell_id}')
 async def terminal_destroy(shell_id: str):
@@ -154,33 +234,30 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
     If shell_id is 'auto', backend will restore or create a shell automatically.
     """
     await websocket.accept()
+
+    # Register this websocket for backend-managed project switches.
+    async with _active_terminal_lock:
+        _active_terminal_sockets.add(websocket)
+
+    history_store = get_history_store()
+    shell_project_path: str | None = None
     
     # Handle auto shell management
     if shell_id == 'auto':
         print(f"[Terminal WS] Auto shell management requested")
-        history_store = get_history_store()
-        saved_shell_id = history_store.get_terminal_shell_id()
+        shell_project_path = history_store.get_active_project()
+        saved_shell_id = history_store.get_terminal_shell_id(shell_project_path)
         print(f"[Terminal WS] Saved shell ID from history: {saved_shell_id}")
-        
-        # Clean up orphaned shells first - DIRECT AWAIT
-        shells = await mgr.list_shells()
-        orphans = [s for s in shells if s.label == 'code-editor-terminal' and s.id != saved_shell_id]
-        print(f"[Terminal WS] Found {len(orphans)} orphaned terminal shells")
-        for s in orphans:
-            try:
-                print(f"[Terminal WS] Cleaning up orphaned shell: {s.id}")
-                await mgr.terminate_shell(s.id)
-            except Exception as e:
-                print(f"[Terminal WS] Failed to cleanup orphan {s.id}: {e}")
         
         # Validate saved shell - DIRECT AWAIT
         if saved_shell_id:
             rec = await mgr.get_shell(saved_shell_id)
-            if rec and rec.status == 'running':
+            if rec and rec.status == 'running' and rec.pid:
                 print(f"[Terminal WS] Reconnecting to existing shell: {saved_shell_id}")
                 shell_id = saved_shell_id
             else:
                 print(f"[Terminal WS] Saved shell no longer running (status={rec.status if rec else 'not found'})")
+                history_store.set_terminal_shell_id(None, shell_project_path)
                 saved_shell_id = None
         else:
             print(f"[Terminal WS] No saved shell ID found")
@@ -188,13 +265,13 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
         # Create new shell if needed - DIRECT AWAIT
         if not saved_shell_id:
             # Use active project path if available, fallback to home
-            project_path = history_store.get_active_project()
+            project_path = shell_project_path
             cwd = project_path if project_path and Path(project_path).is_dir() else str(Path.home())
             print(f"[Terminal WS] Creating new terminal shell (cwd={cwd})")
-            shell_rec = await create_editor_shell(cwd=cwd)
+            shell_rec = await create_editor_shell(cwd=cwd, project_path=project_path)
             shell_id = shell_rec['id']
             print(f"[Terminal WS] New shell created: {shell_id}")
-            history_store.set_terminal_shell_id(shell_id)
+            history_store.set_terminal_shell_id(shell_id, project_path)
             print(f"[Terminal WS] Saved shell ID to history store")
         
         # Send shell ID to client
@@ -250,7 +327,7 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
                         print(f"[Terminal WS] Error terminating shell: {e}")
                     
                     # Clear from history store (ATOMIC with terminate)
-                    history_store.set_terminal_shell_id(None)
+                    history_store.set_terminal_shell_id(None, shell_project_path)
                     print(f"[Terminal WS] Shell {shell_id} destroyed and cache cleared")
                     
                     # Send confirmation and close
@@ -268,6 +345,8 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
     finally:
         stop_event.set()
         edit_tracker.unregister_shell_watcher(shell_id)
+        async with _active_terminal_lock:
+            _active_terminal_sockets.discard(websocket)
         forward_task.cancel()
         try:
             await forward_task

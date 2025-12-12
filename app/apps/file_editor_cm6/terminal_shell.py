@@ -1,9 +1,26 @@
 # app/apps/file_editor_cm6/terminal_shell.py
 
 import os
+import hashlib
+from pathlib import Path
+
 from app.libs.framework_shells import get_manager as _manager
 
-async def create_editor_shell(cwd=None, shell_cmd=None):
+
+def _terminal_label(project_path: str | None) -> str:
+    """Stable per-project label for editor terminals."""
+    if not project_path:
+        return "code-editor-terminal"
+    try:
+        norm = str(Path(project_path).expanduser().resolve(strict=False))
+    except Exception:
+        norm = project_path
+    digest = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:8]
+    base = Path(norm).name or "project"
+    return f"code-editor-terminal:{base}:{digest}"
+
+
+async def create_editor_shell(cwd=None, shell_cmd=None, project_path: str | None = None):
     """
     Create a new PTY-backed shell session for the code editor terminal drawer.
     
@@ -22,10 +39,12 @@ async def create_editor_shell(cwd=None, shell_cmd=None):
     if cwd is None:
         cwd = os.path.expanduser('~')
     
+    label = _terminal_label(project_path)
+
     # Create PTY-backed shell using spawn_shell_pty
     rec = await mgr.spawn_shell_pty(
         shell_cmd,
-        label='code-editor-terminal',
+        label=label,
         cwd=cwd
     )
     

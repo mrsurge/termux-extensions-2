@@ -11,6 +11,7 @@
 // messages as the source of truth and only keeps enough transient state to draw.
 
 import { showNewProjectModal } from './new_project_modal.js';
+import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
 
 let treeElement = null;
 let projectLabelEl = null;
@@ -24,6 +25,32 @@ const uiState = {
   gitStatus: null,
   reviewEntries: [],
 };
+
+// --- Seti-UI file icons (files only; dirs keep emoji) ---
+function applySetiIconToSpan(span, fileName, kind = 'file') {
+  if (!span) return;
+  if (kind !== 'file') {
+    // Ensure directories don't inherit prior SVG.
+    span.innerHTML = '';
+    span.style.color = '';
+    return;
+  }
+  const name = fileName || '';
+  if (!span.innerHTML && !span.textContent) {
+    span.textContent = '📄';
+  }
+  getSetiIcon(name)
+    .then((icon) => {
+      if (!span.isConnected) return;
+      if (icon && icon.svg) {
+        span.innerHTML = icon.svg;
+      }
+      span.style.color = icon && icon.color ? icon.color : '';
+    })
+    .catch(() => {
+      // Leave fallback (emoji / default) in place.
+    });
+}
 
 // --- Batch Select Mode state ---
 let selectModeDir = null;           // rel of directory in select mode, or null
@@ -981,6 +1008,7 @@ function renderEntriesInto(containerUl, entries, parentRel = null) {
       iconSpan = document.createElement('span');
       iconSpan.className = `fe-entry-icon fe-entry-icon-${entry.kind || 'file'}`;
       li.insertBefore(iconSpan, childUl);
+      applySetiIconToSpan(iconSpan, entry.name || '', entry.kind || 'file');
 
       textSpan = document.createElement('span');
       textSpan.className = 'fe-tree-text';
@@ -995,7 +1023,10 @@ function renderEntriesInto(containerUl, entries, parentRel = null) {
       }
     } else {
       // Just update existing header elements
-      if (iconSpan) iconSpan.className = `fe-entry-icon fe-entry-icon-${entry.kind || 'file'}`;
+      if (iconSpan) {
+        iconSpan.className = `fe-entry-icon fe-entry-icon-${entry.kind || 'file'}`;
+        applySetiIconToSpan(iconSpan, entry.name || '', entry.kind || 'file');
+      }
       if (textSpan) textSpan.textContent = entry.name || '';
       if (checkbox) {
         checkbox.dataset.rel = rel;
@@ -3122,7 +3153,12 @@ function renderNameResults(container, data) {
 
     const icon = document.createElement('span');
     icon.className = 'fe-search-icon';
-    icon.textContent = item.type === 'dir' ? '📁' : '📄';
+    if (item.type === 'dir') {
+      icon.textContent = '📁';
+    } else {
+      icon.textContent = '📄'; // fallback while Seti loads
+      applySetiIconToSpan(icon, basename(item.rel || ''), 'file');
+    }
     row.appendChild(icon);
 
     const name = document.createElement('span');

@@ -228,12 +228,26 @@
   color: var(--muted, #9ca3af);
 }
 
+.fe-entry-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+  display: block;
+}
+
+/* Make file Seti icons slightly larger without changing layout columns. */
+.fe-entry-icon-file svg {
+  transform: scale(2);
+  transform-origin: center;
+}
+
 .fe-entry-icon-dir::before {
   content: '📁';
 }
 
+/* Files get Seti SVGs injected via JS; keep CSS fallback empty. */
 .fe-entry-icon-file::before {
-  content: '📄';
+  content: '';
 }
 
 .fe-card-menu-btn {
@@ -709,6 +723,21 @@
 
 .fe-search-icon {
   font-size: 16px;
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted, #9ca3af);
+}
+
+.fe-search-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+  display: block;
+  transform: scale(2);
+  transform-origin: center;
 }
 
 .fe-search-name {

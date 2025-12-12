@@ -120,6 +120,8 @@ class ProjectSidecar:
             "last_file": None,
             # Open directories in explorer tree (persisted across reloads).
             "open_directories": [],
+            # Per-project terminal framework shell id.
+            "terminal_shell_id": None,
         }
 
     # --------------------------------------------------------------------- #
@@ -447,6 +449,20 @@ class ProjectSidecar:
         if rel in dirs:
             dirs.remove(rel)
             self._data["open_directories"] = dirs
+
+    # --------------------------------------------------------------------- #
+    # Terminal shell ID (per-project)
+    # --------------------------------------------------------------------- #
+
+    def get_terminal_shell_id(self) -> Optional[str]:
+        """Return the stored framework shell id for this project's terminal."""
+        val = self._data.get("terminal_shell_id")
+        return str(val) if val else None
+
+    def set_terminal_shell_id(self, shell_id: Optional[str]) -> Optional[str]:
+        """Persist the framework shell id for this project's terminal."""
+        self._data["terminal_shell_id"] = shell_id or None
+        return shell_id or None
 
 
 def clear_project_state(project_path: str) -> bool:

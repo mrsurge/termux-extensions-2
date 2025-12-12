@@ -542,7 +542,12 @@ class FrameworkShellManager:
                         if not data:
                             await asyncio.sleep(0.05)
                             continue
-                    except (OSError, asyncio.TimeoutError):
+                    except asyncio.TimeoutError:
+                        # Executor/select may occasionally exceed the timeout on busy systems.
+                        # Treat as "no data yet" instead of tearing down the PTY.
+                        continue
+                    except OSError as exc:
+                        _drawer_debug("PTY recv", f"select/read error shell={record.id}: {exc}")
                         break
                     
                     try:

@@ -5,7 +5,6 @@ import sys
 import os
 import hashlib
 import time
-import shlex
 from pathlib import Path
 from typing import Optional
 import anyio
@@ -21,8 +20,6 @@ from app.apps.file_editor_cm6.preferences_store import ALLOWED_FONT_SCALES
 from app.apps.file_editor_cm6.explorer_helper import get_project_root, _normalize_rel_path, mark_git_cache_dirty
 from app.apps.file_editor_cm6.core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe
 from app.apps.file_editor_cm6.core_write import write_full, BaseMismatchError
-from app.apps.file_editor_cm6.terminal_shell import create_editor_shell
-from app.libs.framework_shells import get_manager
 from app.apps.file_editor_cm6.diff_helper import invalidate_diff_cache, collect_diff
 from app.apps.file_editor_cm6.draft_diff_helper import compute_draft_diff
 
@@ -60,14 +57,6 @@ THEME_MAP = {
     'darcula': 'darcula',
     'basic-dark': 'basicDark',
     'basic-light': 'basicLight',
-}
-
-RUNNABLE_COMMANDS = {
-    '.py': ['python3'],
-    '.pyw': ['python3'],
-    '.sh': ['bash'],
-    '.bash': ['bash'],
-    '.zsh': ['zsh'],
 }
 
 # Map file extensions to LSP language identifiers
@@ -1789,61 +1778,6 @@ async def save_current_file(data: dict = Body(...)):
         print(f"[SAVE] ERROR path={current_file!r} error={e}", file=sys.stderr)
         return {"ok": False, "error": str(e)}
 
-
-@editor_router.post('/run_active_file')
-async def run_active_file():
-    current_file = get_current_file()
-    if not current_file:
-        raise HTTPException(status_code=400, detail="No file is currently open")
-
-    try:
-        await _write_editor_buffer_to_disk(client_id='run_active_file', op_id=f"run_{int(time.time() * 1000)}")
-    except SaveValidationError as e:
-        raise HTTPException(status_code=400, detail=e.message)
-    except BaseMismatchError as e:
-        raise HTTPException(status_code=409, detail={"error": "BASE_MISMATCH", "current": e.current_meta})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file before running: {e}")
-
-    path_obj = Path(current_file).expanduser().resolve(strict=False)
-
-    ext = path_obj.suffix.lower()
-    runner = RUNNABLE_COMMANDS.get(ext)
-    if not runner:
-        raise HTTPException(status_code=400, detail="Only Python and shell scripts can be executed")
-
-    workdir = str(path_obj.parent)
-    cmd_tokens = runner + [str(path_obj)]
-    command_preview = ' '.join(shlex.quote(part) for part in cmd_tokens)
-
-    mgr = await get_manager()
-    shell_id = _history_store.get_terminal_shell_id()
-    if shell_id:
-        rec = await mgr.get_shell(shell_id)
-        if not rec or rec.status != 'running':
-            _history_store.set_terminal_shell_id(None)
-            shell_id = None
-
-    if not shell_id:
-        project_path = _history_store.get_active_project()
-        preferred_cwd = project_path if project_path and Path(project_path).is_dir() else workdir
-        shell_info = await create_editor_shell(cwd=preferred_cwd)
-        shell_id = shell_info['id']
-        _history_store.set_terminal_shell_id(shell_id)
-
-    try:
-        await mgr.write_to_pty(shell_id, command_preview + "\n")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to dispatch command: {e}")
-
-    return {
-        "ok": True,
-        "data": {
-            "shell_id": shell_id,
-            "command_preview": command_preview,
-            "working_dir": workdir,
-        },
-    }
 
 @editor_router.post('/set_view_settings')
 async def set_view_settings(data: dict = Body(...)):

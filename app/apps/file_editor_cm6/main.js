@@ -1906,11 +1906,18 @@ async function runCurrentFile() {
 
   runActiveBtn.disabled = true;
   try {
+    // Ensure backend buffer is flushed before running.
+    const saved = await saveFile();
+    if (!saved) {
+      host.toast('Save failed; not running file');
+      return;
+    }
+
     if (terminal && typeof terminal.open === 'function') {
       await terminal.open();
     }
 
-    const response = await apiPost('editor/run_active_file', {});
+    const response = await apiPost('terminal/run_active_file', {});
     if (response?.ok) {
       const preview = response.data?.command_preview || basename(currentPath);
       host.toast(`Running ${preview} in terminal`);
@@ -2680,12 +2687,6 @@ bindMenuToggle(miTrackEdits, async () => {
 // Initialize terminal drawer
 const terminal = createTerminalDrawer({
   onReady: () => console.log('Terminal drawer ready'),
-  getCurrentProjectPath: () => {
-    if (!currentPath) return null;
-    // Extract directory from file path
-    const lastSlash = currentPath.lastIndexOf('/');
-    return lastSlash > 0 ? currentPath.substring(0, lastSlash) : null;
-  },
 });
 
 // Bind terminal toggle menu item
