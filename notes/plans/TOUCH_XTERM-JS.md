@@ -1,6 +1,6 @@
 Short version: xterm.js is *not* very touch-friendly out of the box (and the maintainers explicitly call this out as an open problem) so you have to build most of the mobile UX yourself around it: layout/CSS, custom touch → scroll/selection/zoom handling, your own copy/paste affordances, and explicit “show keyboard” hooks. I’ll walk through the full stack and give you concrete patterns you can drop in.
 
-## Implementation plan (mrselect5 / `file_editor_cm6` terminal)
+## Implementation plan (Termux-Extensions-2 / `file_editor_cm6` terminal)
 
 Scope for the next iteration: **incremental zoom** + **touch scroll semantics** + **touch selection semantics** (no project state in the browser).
 

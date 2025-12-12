@@ -1,7 +1,7 @@
 # Work Summary: `file_editor_cm6` Explorer + Terminal + Sessions
 
 **Created:** 2025-12-12 11:12:11 CST  
-**Last updated:** 2025-12-12 16:39:01 CST
+**Last updated:** 2025-12-12 17:41:46 CST
 
 This document summarizes the changes made across the Code CM6 app (`app/apps/file_editor_cm6/`) and the core framework while implementing:
 - Seti-UI-style file icons in the Explorer drawer
@@ -73,13 +73,13 @@ This document summarizes the changes made across the Code CM6 app (`app/apps/fil
 
 ### Terminal frontend UX
 - Terminal header is now a selector / dropdown (instead of a static “Terminal” label):
-  - Shells display as `Terminal XXXX` (last 4 chars of the `fs-id`)
+  - Shells display as `<title>/<last4>` (defaults to `Terminal/<last4>`)
   - “+” creates new shells
   - per-shell “✕” destroys a shell
 - Per-shell titles can be set (stored per project) and displayed as:
   - `<title>/<last4>` (title max 16 chars, blank clears)
-  - a per-row ✏️ button in the dropdown sets the title
-  - shells show an italic status tag (e.g. `(live)`, `(exited)`)
+  - a per-row ✏️ button (left of label) sets the title
+  - exited shells are visually indicated by italicizing the shell label (header + dropdown row)
 - When the backend rebinds to a different shell (project switch or activation):
   - the in-browser xterm buffer is cleared (`reset()`/`clear()` fallback) before loading the new shell’s history, avoiding confusion where it looked like the directory just changed.
 - Project hot-switch race prevention:
@@ -198,4 +198,4 @@ Files:
 
 — **vectorArc**, 2025-12-12 11:12:11 CST
   
-— **vectorArc**, updated 2025-12-12 16:39:01 CST
+— **vectorArc**, updated 2025-12-12 17:41:46 CST
