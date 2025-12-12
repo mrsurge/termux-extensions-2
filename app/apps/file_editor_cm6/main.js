@@ -1840,21 +1840,34 @@ async function saveFile() {
 
   try {
     const result = await apiPost('editor/save', payload);
-    
+
     console.log('[SAVE] Response:', result);
-    
-    if (result.ok) {
-      lastSha256 = result.data.sha256 || lastSha256;
-      markUnsaved(false);
-      statusEl.textContent = 'Saved';
-      setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
-      return true;
-    } else {
+
+    // apiPost unwraps {ok,data} -> data for most endpoints.
+    // Handle both wrapped and unwrapped save responses.
+    const isWrapped = result && typeof result === 'object' && Object.prototype.hasOwnProperty.call(result, 'ok');
+    if (isWrapped && result.ok === false) {
       console.error('[SAVE] Failed:', result.error);
       if (result.error) host.toast(`Save failed: ${result.error}`);
       statusEl.textContent = '';
       return false;
     }
+
+    const fileMeta = isWrapped ? (result.data || {}) : (result || {});
+
+    if (fileMeta && Object.keys(fileMeta).length > 0) {
+      lastSha256 = fileMeta.sha256 || lastSha256;
+      markUnsaved(false);
+      statusEl.textContent = 'Saved';
+      setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
+      return true;
+    }
+
+    // Empty/invalid payload treated as failure.
+    console.error('[SAVE] Failed: empty or invalid response');
+    host.toast('Save failed');
+    statusEl.textContent = '';
+    return false;
   } catch (e) {
     console.error('[SAVE] Exception:', e);
     
@@ -1918,11 +1931,19 @@ async function runCurrentFile() {
     }
 
     const response = await apiPost('terminal/run_active_file', {});
-    if (response?.ok) {
-      const preview = response.data?.command_preview || basename(currentPath);
-      host.toast(`Running ${preview} in terminal`);
+
+    // apiPost may unwrap {ok,data} -> data. Handle both shapes.
+    const isWrapped = response && typeof response === 'object' && Object.prototype.hasOwnProperty.call(response, 'ok');
+    if (isWrapped && response.ok === false) {
+      host.toast(response.error || 'Failed to run file');
     } else {
-      host.toast(response?.error || 'Failed to run file');
+      const payload = isWrapped ? (response.data || {}) : (response || {});
+      if (payload && Object.keys(payload).length > 0) {
+        const preview = payload.command_preview || basename(currentPath);
+        host.toast(`Running ${preview} in terminal`);
+      } else {
+        host.toast('Failed to run file');
+      }
     }
   } catch (err) {
     console.error('[RUN] Failed to execute file:', err);
