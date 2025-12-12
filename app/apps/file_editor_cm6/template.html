@@ -522,21 +522,25 @@
     flex: 1;
     min-width: 0;
   }
-  .terminal-header .terminal-shell-toggle {
-    width: 100%;
-    text-align: left;
-    font-weight: 600;
-    font-size: 0.9rem;
-    color: var(--foreground, #e5e7eb);
-    background: transparent;
-    border: none;
-    padding: 2px 4px;
-    cursor: pointer;
-  }
-  .terminal-header .terminal-shell-toggle:focus {
-    outline: 1px solid var(--border, #333);
-    border-radius: 4px;
-  }
+	  .terminal-header .terminal-shell-toggle {
+	    width: 100%;
+	    text-align: left;
+	    font-weight: 600;
+	    font-size: 0.9rem;
+	    color: var(--foreground, #e5e7eb);
+	    background: transparent;
+	    border: none;
+	    padding: 2px 4px;
+	    cursor: pointer;
+	  }
+	  .terminal-header .terminal-shell-toggle.terminal-shell-toggle-exited {
+	    font-style: italic;
+	    opacity: 0.75;
+	  }
+	  .terminal-header .terminal-shell-toggle:focus {
+	    outline: 1px solid var(--border, #333);
+	    border-radius: 4px;
+	  }
   .terminal-shell-menu {
     position: absolute;
     top: calc(100% + 4px);
@@ -564,15 +568,32 @@
   .terminal-shell-item:hover {
     background: rgba(255,255,255,0.05);
   }
-  .terminal-shell-item.active {
-    background: rgba(255,255,255,0.08);
-  }
-  .terminal-shell-item-label { flex: 1; min-width: 0; }
-  .terminal-shell-item-close {
-    background: transparent;
-    border: none;
-    color: var(--destructive, #ef4444);
-    cursor: pointer;
+	  .terminal-shell-item.active {
+	    background: rgba(255,255,255,0.08);
+	  }
+	  .terminal-shell-item-label { flex: 1; min-width: 0; }
+	  .terminal-shell-item-exited .terminal-shell-item-label {
+	    font-style: italic;
+	    opacity: 0.75;
+	  }
+	  .terminal-shell-item-edit {
+	    background: transparent;
+	    border: none;
+	    color: var(--muted-foreground, #9ca3af);
+	    cursor: pointer;
+	    padding: 2px 6px;
+	    border-radius: 4px;
+	    font-size: 0.9rem;
+	  }
+	  .terminal-shell-item-edit:hover {
+	    background: rgba(255,255,255,0.05);
+	    color: var(--foreground, #e5e7eb);
+	  }
+	  .terminal-shell-item-close {
+	    background: transparent;
+	    border: none;
+	    color: var(--destructive, #ef4444);
+	    cursor: pointer;
     padding: 2px 6px;
     border-radius: 4px;
     font-size: 0.9rem;
@@ -593,16 +614,27 @@
     background: rgba(255, 255, 255, 0.05);
     color: var(--foreground, #e5e7eb);
   }
+  .terminal-header button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .terminal-header button:disabled:hover {
+    background: transparent;
+    color: var(--muted-foreground, #9ca3af);
+  }
   #terminal-container {
     flex: 1;
     min-height: 0;
     overflow: hidden;
     padding: 8px;
     position: relative;
+    overscroll-behavior: contain;
+    touch-action: none;
   }
+  #terminal-container .xterm { touch-action: none; }
   /* Custom scrollbar for xterm - solid and wide */
   #terminal-container .xterm-viewport::-webkit-scrollbar {
-    width: 29px;
+    width: 10px;
   }
   #terminal-container .xterm-viewport::-webkit-scrollbar-track {
     background: var(--bg, #0b0f1a);
@@ -613,6 +645,12 @@
   }
   #terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
     background: var(--muted-foreground, #9ca3af);
+  }
+  @media (hover: none) and (pointer: coarse) {
+    /* Prefer gesture scrolling on touch; keep scrollbar out of the way. */
+    #terminal-container .xterm-viewport { scrollbar-width: none; }
+    #terminal-container .xterm-viewport::-webkit-scrollbar { width: 0px; }
+    #terminal-container .xterm-viewport::-webkit-scrollbar-thumb { background: transparent; }
   }
   .fe-agent-toggle { font-size: 1.1rem; line-height: 1; }
   .fe-git-actions .fe-btn {
@@ -1663,6 +1701,9 @@
         <button id="terminal-shell-toggle" class="terminal-shell-toggle" aria-haspopup="listbox" aria-expanded="false">Terminal</button>
         <div id="terminal-shell-menu" class="terminal-shell-menu" role="listbox" aria-label="Terminal shells"></div>
       </div>
+      <button id="terminal-zoom-out" title="Zoom out" aria-label="Zoom out">A−</button>
+      <button id="terminal-zoom-in" title="Zoom in" aria-label="Zoom in">A+</button>
+      <button id="terminal-copy" title="Copy selection" aria-label="Copy selection" disabled>📋</button>
       <button id="terminal-fullscreen" title="Toggle fullscreen" aria-label="Fullscreen">⛶</button>
       <button id="terminal-collapse" title="Collapse terminal" aria-label="Collapse">▼</button>
       <button id="terminal-new" title="New terminal" aria-label="New terminal">＋</button>

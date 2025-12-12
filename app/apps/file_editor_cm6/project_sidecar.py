@@ -128,6 +128,8 @@ class ProjectSidecar:
             "active_terminal_shell_id": None,
             # Cap for number of stored terminal shells per project.
             "terminal_shell_cap": 5,
+            # Optional per-shell titles (fs-id -> short label) for terminal dropdown.
+            "terminal_shell_titles": {},
         }
 
     # --------------------------------------------------------------------- #
@@ -468,6 +470,8 @@ class ProjectSidecar:
             self._data["active_terminal_shell_id"] = None
         if "terminal_shell_cap" not in self._data or not isinstance(self._data.get("terminal_shell_cap"), int):
             self._data["terminal_shell_cap"] = 5
+        if "terminal_shell_titles" not in self._data or not isinstance(self._data.get("terminal_shell_titles"), dict):
+            self._data["terminal_shell_titles"] = {}
 
         legacy = self._data.get("terminal_shell_id")
         ids: List[str] = self._data.get("terminal_shell_ids") or []
@@ -492,6 +496,7 @@ class ProjectSidecar:
             return shell_id
         self._migrate_terminal_legacy()
         ids: List[str] = self._data.get("terminal_shell_ids") or []
+        titles: Dict[str, str] = self._data.get("terminal_shell_titles") or {}
         sid = str(shell_id)
         if sid not in ids:
             ids.append(sid)
@@ -499,11 +504,16 @@ class ProjectSidecar:
         if cap > 0 and len(ids) > cap:
             # Trim oldest, but never drop the active/new shell.
             while len(ids) > cap and ids[0] != sid:
-                ids.pop(0)
+                removed = ids.pop(0)
+                try:
+                    titles.pop(str(removed), None)
+                except Exception:
+                    pass
         self._data["terminal_shell_ids"] = ids
         self._data["active_terminal_shell_id"] = sid
         # Mirror to legacy field for compatibility.
         self._data["terminal_shell_id"] = sid
+        self._data["terminal_shell_titles"] = titles
         return sid
 
     def remove_terminal_shell_id(self, shell_id: str) -> Optional[str]:
@@ -512,15 +522,21 @@ class ProjectSidecar:
             return self.get_active_terminal_shell_id()
         self._migrate_terminal_legacy()
         ids: List[str] = self._data.get("terminal_shell_ids") or []
+        titles: Dict[str, str] = self._data.get("terminal_shell_titles") or {}
         sid = str(shell_id)
         if sid in ids:
             ids.remove(sid)
+        try:
+            titles.pop(sid, None)
+        except Exception:
+            pass
         self._data["terminal_shell_ids"] = ids
         active = self._data.get("active_terminal_shell_id")
         if active == sid:
             active = ids[-1] if ids else None
             self._data["active_terminal_shell_id"] = active
         self._data["terminal_shell_id"] = active
+        self._data["terminal_shell_titles"] = titles
         return str(active) if active else None
 
     def get_active_terminal_shell_id(self) -> Optional[str]:
@@ -553,6 +569,38 @@ class ProjectSidecar:
     def set_terminal_shell_id(self, shell_id: Optional[str]) -> Optional[str]:
         """Compatibility wrapper: set active terminal shell id."""
         return self.set_active_terminal_shell_id(shell_id)
+
+    def get_terminal_shell_title(self, shell_id: str) -> Optional[str]:
+        """Return the optional terminal title for a shell id."""
+        if not shell_id:
+            return None
+        self._migrate_terminal_legacy()
+        titles: Dict[str, str] = self._data.get("terminal_shell_titles") or {}
+        try:
+            val = titles.get(str(shell_id))
+        except Exception:
+            val = None
+        text = str(val).strip() if val else ""
+        return text or None
+
+    def set_terminal_shell_title(self, shell_id: str, title: Optional[str]) -> Optional[str]:
+        """Set (or clear) the optional terminal title for a shell id."""
+        if not shell_id:
+            return None
+        self._migrate_terminal_legacy()
+        sid = str(shell_id)
+        titles: Dict[str, str] = self._data.get("terminal_shell_titles") or {}
+        text = str(title).strip() if title is not None else ""
+        if not text:
+            try:
+                titles.pop(sid, None)
+            except Exception:
+                pass
+            self._data["terminal_shell_titles"] = titles
+            return None
+        titles[sid] = text
+        self._data["terminal_shell_titles"] = titles
+        return text
 
 
 def clear_project_state(project_path: str) -> bool:

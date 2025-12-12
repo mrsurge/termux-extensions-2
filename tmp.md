@@ -1,6 +1,7 @@
 # Work Summary: `file_editor_cm6` Explorer + Terminal + Sessions
 
-**Timestamp:** 2025-12-12 11:12:11 CST
+**Created:** 2025-12-12 11:12:11 CST  
+**Last updated:** 2025-12-12 16:39:01 CST
 
 This document summarizes the changes made across the Code CM6 app (`app/apps/file_editor_cm6/`) and the core framework while implementing:
 - Seti-UI-style file icons in the Explorer drawer
@@ -75,6 +76,10 @@ This document summarizes the changes made across the Code CM6 app (`app/apps/fil
   - Shells display as `Terminal XXXX` (last 4 chars of the `fs-id`)
   - “+” creates new shells
   - per-shell “✕” destroys a shell
+- Per-shell titles can be set (stored per project) and displayed as:
+  - `<title>/<last4>` (title max 16 chars, blank clears)
+  - a per-row ✏️ button in the dropdown sets the title
+  - shells show an italic status tag (e.g. `(live)`, `(exited)`)
 - When the backend rebinds to a different shell (project switch or activation):
   - the in-browser xterm buffer is cleared (`reset()`/`clear()` fallback) before loading the new shell’s history, avoiding confusion where it looked like the directory just changed.
 - Project hot-switch race prevention:
@@ -131,11 +136,16 @@ This document summarizes the changes made across the Code CM6 app (`app/apps/fil
 - Added “✕” next to group headers (and subgroup headers) to stop all shells in that group.
   - The group stop uses the same “stop” semantics as individual cards: it sends `terminate` to each matching shell, leaving the record to appear under Exited.
 
+### App worker badge navigation
+- The “App Worker” badge is clickable and navigates to the app page:
+  - `GET /app/<app_id>` (same behavior as the “Recent Apps” modal shallow link).
+
 ### Subgroup color hints (optional)
 - Sessions can optionally style subgroup “cards” using `app-worker.ui.subgroup_styles`:
   - exact key match (`"lsp"`)
   - prefix match (`"project:*"` matches `project:...`)
-- Example manifests (require restarting the relevant app worker to see changes):
+- Dev affordance: Sessions & Shortcuts reads `framework_shell_ui` directly from app manifests on disk, so subgroup color tweaks apply on the next live refresh (no framework restart).
+- Example manifests:
   - `app/apps/file_editor_cm6/manifest.json`
   - `app/apps/terminal/manifest.json`
   - `app/apps/aria_downloader/manifest.json`
@@ -187,3 +197,5 @@ Files:
 ---
 
 — **vectorArc**, 2025-12-12 11:12:11 CST
+  
+— **vectorArc**, updated 2025-12-12 16:39:01 CST

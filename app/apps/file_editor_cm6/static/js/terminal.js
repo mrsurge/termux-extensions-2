@@ -36,12 +36,105 @@ export function createTerminalDrawer(options = {}) {
   const collapseBtn = document.getElementById('terminal-collapse');
   const fullscreenBtn = document.getElementById('terminal-fullscreen');
   const newBtn = document.getElementById('terminal-new');
+  const zoomOutBtn = document.getElementById('terminal-zoom-out');
+  const zoomInBtn = document.getElementById('terminal-zoom-in');
+  const copyBtn = document.getElementById('terminal-copy');
 
   let shellMenuOpen = false;
+  let touchHandlersInstalled = false;
+
+  const FONT_SIZE_MIN = 10;
+  const FONT_SIZE_MAX = 28;
+  const FONT_SIZE_STEP = 1;
 
   function formatShellLabel(id) {
     if (!id) return 'Terminal';
     return `Terminal ${String(id).slice(-4)}`;
+  }
+
+  function formatShellDisplayLabel(shell) {
+    if (!shell) return 'Terminal';
+    if (shell.display_label) return String(shell.display_label);
+    if (shell.title) return `${String(shell.title).trim()}/${String(shell.id || '').slice(-4)}`;
+    if (shell.id) return `Terminal/${String(shell.id).slice(-4)}`;
+    return 'Terminal';
+  }
+
+  function isShellExited(shell) {
+    const status = String(shell?.status || '').trim().toLowerCase();
+    return !!(status && status !== 'live');
+  }
+
+  function setShellToggleShell(activeShell, activeIdFallback) {
+    if (!shellToggle) return;
+    if (activeShell) {
+      shellToggle.textContent = formatShellDisplayLabel(activeShell);
+      shellToggle.classList.toggle('terminal-shell-toggle-exited', isShellExited(activeShell));
+      return;
+    }
+    if (activeIdFallback) {
+      shellToggle.textContent = `Terminal/${String(activeIdFallback).slice(-4)}`;
+      shellToggle.classList.remove('terminal-shell-toggle-exited');
+      return;
+    }
+    shellToggle.textContent = 'Terminal';
+    shellToggle.classList.remove('terminal-shell-toggle-exited');
+  }
+
+  function getCurrentFontSize() {
+    try {
+      const size = term?.options?.fontSize;
+      if (typeof size === 'number' && Number.isFinite(size)) return size;
+    } catch (_) {}
+    return 14;
+  }
+
+  function applyFontSize(size) {
+    if (!term) return;
+    const clamped = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(size)));
+    try {
+      term.options.fontSize = clamped;
+    } catch (err) {
+      try {
+        term.setOption?.('fontSize', clamped);
+      } catch (_) {}
+    }
+
+    if (zoomOutBtn) zoomOutBtn.title = `Zoom out (${clamped}px)`;
+    if (zoomInBtn) zoomInBtn.title = `Zoom in (${clamped}px)`;
+
+    if (fitAddon && isOpen) {
+      // Let the layout settle before fitting, then backend resize is handled by onResize.
+      setTimeout(() => {
+        try { fitAddon.fit(); } catch (_) {}
+      }, 0);
+    }
+  }
+
+  function updateCopyButtonState() {
+    if (!copyBtn) return;
+    let hasSelection = false;
+    try { hasSelection = !!(term && term.hasSelection && term.hasSelection()); } catch (_) {}
+    copyBtn.disabled = !hasSelection;
+  }
+
+  async function copySelection() {
+    if (!term) return;
+    let text = '';
+    try { text = term.getSelection?.() || ''; } catch (_) {}
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      updateCopyButtonState();
+      if (copyBtn) {
+        const original = copyBtn.title;
+        copyBtn.title = 'Copied';
+        setTimeout(() => { copyBtn.title = original || 'Copy selection'; }, 700);
+      }
+    } catch (err) {
+      console.warn('Failed to copy selection:', err);
+    }
   }
 
   async function fetchShellList() {
@@ -73,10 +166,18 @@ export function createTerminalDrawer(options = {}) {
       const row = document.createElement('div');
       row.className = 'terminal-shell-item' + (s.id === activeId ? ' active' : '');
       row.dataset.id = s.id;
+      row.classList.toggle('terminal-shell-item-exited', isShellExited(s));
 
       const label = document.createElement('span');
       label.className = 'terminal-shell-item-label';
-      label.textContent = s.label || formatShellLabel(s.id);
+      label.textContent = formatShellDisplayLabel(s);
+
+      const edit = document.createElement('button');
+      edit.className = 'terminal-shell-item-edit';
+      edit.type = 'button';
+      edit.dataset.id = s.id;
+      edit.textContent = '✏️';
+      edit.title = 'Set terminal title';
 
       const close = document.createElement('button');
       close.className = 'terminal-shell-item-close';
@@ -85,6 +186,7 @@ export function createTerminalDrawer(options = {}) {
       close.textContent = '✕';
       close.title = 'Close terminal';
 
+      row.appendChild(edit);
       row.appendChild(label);
       row.appendChild(close);
 
@@ -111,6 +213,29 @@ export function createTerminalDrawer(options = {}) {
         }
       });
 
+      edit.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const current = (s.title || '').trim();
+        const next = prompt('Terminal title (max 16 chars). Leave blank to clear.', current);
+        if (next === null) return;
+        const trimmed = String(next).trim();
+        if (trimmed && trimmed.length > 16) {
+          alert('Title must be 16 characters or less.');
+          return;
+        }
+        try {
+          await fetch(`/api/app/file_editor_cm6/terminal/shells/${encodeURIComponent(s.id)}/title`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: trimmed }),
+          });
+        } catch (err) {
+          console.warn('Failed to set terminal title:', err);
+        } finally {
+          await refreshShellMenu();
+        }
+      });
+
       shellMenu.appendChild(row);
     });
   }
@@ -119,15 +244,18 @@ export function createTerminalDrawer(options = {}) {
     const data = await fetchShellList();
     const activeId = data.active_shell_id || shellId;
     renderShellMenu(data.shells, activeId);
-    if (shellToggle) {
-      shellToggle.textContent = activeId ? formatShellLabel(activeId) : 'Terminal';
-    }
+    const activeShell = (data.shells || []).find((s) => s.id === activeId);
+    setShellToggleShell(activeShell || null, activeId);
   }
 
   if (shellToggle) {
-    shellToggle.addEventListener('click', (ev) => {
+    shellToggle.addEventListener('click', async (ev) => {
       ev.stopPropagation();
-      setShellMenuOpen(!shellMenuOpen);
+      const nextOpen = !shellMenuOpen;
+      if (nextOpen) {
+        try { await refreshShellMenu(); } catch (_) {}
+      }
+      setShellMenuOpen(nextOpen);
     });
   }
 
@@ -308,6 +436,14 @@ export function createTerminalDrawer(options = {}) {
             }
           }
           return;
+        } else if (msg.type === 'shell_list') {
+          try {
+            renderShellMenu(msg.shells || [], msg.active_shell_id || shellId);
+            const activeShellId = msg.active_shell_id || shellId;
+            const activeShell = (msg.shells || []).find((s) => s.id === activeShellId);
+            setShellToggleShell(activeShell || null, activeShellId);
+          } catch (_) {}
+          return;
         } else if (msg.type === 'error') {
           console.error('Terminal error:', msg.message);
           return;
@@ -371,12 +507,21 @@ export function createTerminalDrawer(options = {}) {
     term.open(container);
     // Don't fit here - we'll fit after shell is created in open()
 
+    // Touch UX: install handlers once after open() creates the terminal element.
+    installTouchHandlers();
+
     // Send user input to PTY
     term.onData((data) => {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(data);
       }
     });
+
+    // Selection-driven UI affordances.
+    term.onSelectionChange(() => {
+      updateCopyButtonState();
+    });
+    updateCopyButtonState();
 
     // Handle terminal resize
     term.onResize(({ cols, rows }) => {
@@ -401,6 +546,153 @@ export function createTerminalDrawer(options = {}) {
     resizeObserver.observe(drawer);
 
     return term;
+  }
+
+  function installTouchHandlers() {
+    if (touchHandlersInstalled) return;
+    const el = term?.element;
+    if (!el) return;
+
+    // Only enable gesture semantics on touch-first devices.
+    const isTouchFirst = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    if (!isTouchFirst) return;
+
+    touchHandlersInstalled = true;
+
+    const LONG_PRESS_MS = 450;
+    const MOVE_CANCEL_PX = 8;
+    const DOUBLE_TAP_MS = 280;
+    const DOUBLE_TAP_PX = 24;
+
+    let mode = null; // 'scroll' | 'select' | null
+    let startX = 0;
+    let startY = 0;
+    let lastY = 0;
+    let longPressTimer = null;
+    let scrollRemainder = 0;
+    let lastTapTime = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
+
+    function clearLongPress() {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    }
+
+    function synthMouse(type, touch) {
+      try {
+        const evt = new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+          button: 0,
+        });
+        el.dispatchEvent(evt);
+      } catch (_) {}
+    }
+
+    function scrollByPixels(deltaY) {
+      if (!term) return;
+      const pxPerLine = Math.max(14, getCurrentFontSize() * 1.35);
+      scrollRemainder += (-deltaY) / pxPerLine;
+      const whole = scrollRemainder > 0 ? Math.floor(scrollRemainder) : Math.ceil(scrollRemainder);
+      if (whole) {
+        try { term.scrollLines(whole); } catch (_) {}
+        scrollRemainder -= whole;
+      }
+    }
+
+    el.addEventListener('touchstart', (e) => {
+      if (!term) return;
+      if (e.touches.length !== 1) return;
+
+      const t = e.touches[0];
+      mode = null;
+      startX = t.clientX;
+      startY = t.clientY;
+      lastY = t.clientY;
+      scrollRemainder = 0;
+
+      clearLongPress();
+      longPressTimer = setTimeout(() => {
+        mode = 'select';
+        synthMouse('mousedown', t);
+      }, LONG_PRESS_MS);
+    }, { passive: false });
+
+    el.addEventListener('touchmove', (e) => {
+      if (!term) return;
+      if (e.touches.length !== 1) {
+        clearLongPress();
+        return;
+      }
+
+      const t = e.touches[0];
+      const dx = t.clientX - startX;
+      const dyFromStart = t.clientY - startY;
+      const moved = Math.hypot(dx, dyFromStart) > MOVE_CANCEL_PX;
+
+      if (mode !== 'select' && moved) {
+        // Movement means "scroll" unless selection mode has already been entered.
+        clearLongPress();
+        mode = 'scroll';
+      }
+
+      if (mode === 'select') {
+        synthMouse('mousemove', t);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      if (mode === 'scroll') {
+        const deltaY = t.clientY - lastY;
+        lastY = t.clientY;
+        scrollByPixels(deltaY);
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, { passive: false });
+
+    el.addEventListener('touchend', (e) => {
+      if (!term) return;
+      clearLongPress();
+
+      const t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+
+      if (mode === 'select') {
+        synthMouse('mouseup', t);
+        updateCopyButtonState();
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      // Tap-to-focus + optional double-tap word select (synthetic dblclick).
+      const now = Date.now();
+      const isDoubleTap = (now - lastTapTime) < DOUBLE_TAP_MS
+        && Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY) < DOUBLE_TAP_PX;
+
+      if (isDoubleTap) {
+        synthMouse('dblclick', t);
+        lastTapTime = 0;
+      } else {
+        lastTapTime = now;
+        lastTapX = t.clientX;
+        lastTapY = t.clientY;
+      }
+
+      try { term.focus(); } catch (_) {}
+    }, { passive: false });
+
+    el.addEventListener('touchcancel', () => {
+      clearLongPress();
+      mode = null;
+    }, { passive: false });
   }
 
   /**
@@ -611,6 +903,27 @@ export function createTerminalDrawer(options = {}) {
 
   if (fullscreenBtn) {
     fullscreenBtn.addEventListener('click', toggleFullscreen);
+  }
+
+  if (zoomOutBtn) {
+    zoomOutBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      applyFontSize(getCurrentFontSize() - FONT_SIZE_STEP);
+    });
+  }
+
+  if (zoomInBtn) {
+    zoomInBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      applyFontSize(getCurrentFontSize() + FONT_SIZE_STEP);
+    });
+  }
+
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      await copySelection();
+    });
   }
 
   // Enable draggable resize
