@@ -8,13 +8,15 @@ Provides REST endpoints and WebSocket PTY streaming for embedded terminal.
 import asyncio
 import json
 import shlex
+import re
 from pathlib import Path
-from typing import Set
+from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query, Depends
 
 from app.libs.framework_shells import FrameworkShellManager, get_manager
 from app.apps.file_editor_cm6 import edit_tracker
 from app.apps.file_editor_cm6.stores import _history_store as _shared_history_store
+from app.apps.file_editor_cm6.project_sidecar import ProjectSidecar
 from app.apps.file_editor_cm6.terminal_shell import (
     create_editor_shell,
     destroy_editor_shell,
@@ -24,7 +26,7 @@ from app.apps.file_editor_cm6.terminal_shell import (
 terminal_router = APIRouter()
 
 # Track active terminal websocket clients so the backend can force a reconnect on project switch.
-_active_terminal_sockets: Set[WebSocket] = set()
+_active_terminal_sockets: Dict[WebSocket, Optional[str]] = {}
 _active_terminal_lock = asyncio.Lock()
 
 
@@ -36,14 +38,82 @@ async def close_active_terminal_sockets(reason: str = "project switch") -> None:
     remains project-agnostic.
     """
     async with _active_terminal_lock:
-        sockets = list(_active_terminal_sockets)
+        sockets = list(_active_terminal_sockets.keys())
         _active_terminal_sockets.clear()
 
-    for ws in sockets:
+    async def _close_one(ws: WebSocket) -> None:
         try:
-            await ws.close(code=1012, reason=reason)
+            # Don't block request handlers on slow/busy sockets.
+            await asyncio.wait_for(ws.close(code=1012, reason=reason), timeout=0.5)
         except Exception:
             pass
+
+    for ws in sockets:
+        asyncio.create_task(_close_one(ws))
+
+
+def _terminal_display_label(title: Optional[str], shell_id: str) -> str:
+    base = (title or "").strip() or "Terminal"
+    suffix = str(shell_id)[-4:] if shell_id else "????"
+    return f"{base}/{suffix}"
+
+
+def _terminal_status_tag(status: str, pid: Optional[int]) -> str:
+    # Keep labels short and UI-friendly.
+    if status == "running" and pid:
+        return "live"
+    if status in ("exited", "missing"):
+        return status
+    if status == "running" and not pid:
+        return "exited"
+    return status or "unknown"
+
+
+async def _build_terminal_shell_list(project_path: str, *, include_exited: bool = True) -> dict:
+    sidecar = ProjectSidecar.load_or_create(project_path)
+    shell_ids = sidecar.get_terminal_shell_ids()
+    active_id = sidecar.get_active_terminal_shell_id()
+
+    mgr = await get_manager()
+    shells = []
+    for sid in shell_ids:
+        rec = await mgr.get_shell(sid)
+        raw_status = rec.status if rec else "missing"
+        pid = rec.pid if rec else None
+        title = sidecar.get_terminal_shell_title(sid)
+        tag = _terminal_status_tag(raw_status, pid)
+        if not include_exited and tag != "live":
+            continue
+        shells.append({
+            "id": sid,
+            "title": title,
+            "display_label": _terminal_display_label(title, sid),
+            "status": tag,
+            "pid": pid,
+        })
+
+    return {"active_shell_id": active_id, "shells": shells}
+
+
+async def _broadcast_terminal_shell_list(project_path: str) -> None:
+    payload = {"type": "shell_list"}
+    try:
+        payload.update(await _build_terminal_shell_list(project_path, include_exited=True))
+    except Exception:
+        return
+
+    async with _active_terminal_lock:
+        targets = [(ws, proj) for ws, proj in _active_terminal_sockets.items()]
+
+    for ws, proj in targets:
+        if proj != project_path:
+            continue
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            # Drop dead sockets.
+            async with _active_terminal_lock:
+                _active_terminal_sockets.pop(ws, None)
 
 def get_history_store():
     """Return the shared HistoryStore instance used across the app."""
@@ -57,6 +127,35 @@ RUNNABLE_COMMANDS = {
     ".bash": ["bash"],
     ".zsh": ["zsh"],
 }
+
+
+async def _next_sequence_for_project(
+    project_path: str,
+    sidecar: ProjectSidecar,
+    mgr: FrameworkShellManager,
+) -> int:
+    """Compute the next terminal sequence number for a project.
+
+    We cannot rely on list length because dead shells may be pruned, and labels
+    use the sequence suffix for uniqueness. Instead, scan tracked shells for
+    the highest numeric suffix and increment.
+    """
+    max_seq = 0
+    for sid in sidecar.get_terminal_shell_ids():
+        try:
+            rec = await mgr.get_shell(sid)
+        except Exception:
+            rec = None
+        if rec and rec.label:
+            m = re.search(r":(\d+)$", rec.label)
+            if m:
+                try:
+                    max_seq = max(max_seq, int(m.group(1)))
+                except Exception:
+                    pass
+    if max_seq <= 0:
+        max_seq = len(sidecar.get_terminal_shell_ids())
+    return max_seq + 1
 
 @terminal_router.get('/terminal/shell-id')
 async def get_terminal_shell_id():
@@ -98,6 +197,106 @@ async def set_terminal_shell_id(data: dict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@terminal_router.get('/terminal/shells')
+async def list_terminal_shells(include_exited: bool = Query(True)):
+    """List terminal shells for the active project.
+
+    Returns ordered shells for the active project. By default includes exited
+    shells so the UI can show their status; the user can explicitly close them.
+    """
+    history_store = get_history_store()
+    project_path = history_store.get_active_project()
+    if not project_path:
+        return {"ok": True, "data": {"active_shell_id": None, "shells": []}}
+
+    data = await _build_terminal_shell_list(project_path, include_exited=include_exited)
+    return {"ok": True, "data": data}
+
+
+@terminal_router.post('/terminal/shells')
+async def create_terminal_shell():
+    """Create a new PTY terminal shell for the active project and set active."""
+    history_store = get_history_store()
+    project_path = history_store.get_active_project()
+    if not project_path:
+        raise HTTPException(status_code=400, detail="No active project selected")
+
+    sidecar = ProjectSidecar.load_or_create(project_path)
+    mgr = await get_manager()
+    sequence = await _next_sequence_for_project(project_path, sidecar, mgr)
+
+    cwd = project_path if Path(project_path).is_dir() else str(Path.home())
+    shell_rec = await create_editor_shell(cwd=cwd, project_path=project_path, sequence=sequence)
+    shell_id = shell_rec["id"]
+
+    sidecar.add_terminal_shell_id(shell_id)
+    sidecar.save()
+
+    # Force any open drawers to rebind to the new active shell.
+    await close_active_terminal_sockets("new terminal")
+
+    title = sidecar.get_terminal_shell_title(shell_id)
+    return {"ok": True, "data": {"shell_id": shell_id, "label": _terminal_display_label(title, shell_id)}}
+
+
+@terminal_router.post('/terminal/shells/{shell_id}/title')
+async def set_terminal_shell_title(shell_id: str, data: dict = Body(...)):
+    """Set (or clear) a short terminal title for the current project.
+
+    Body:
+      {"title": "build"}  # max 16 chars, trimmed; empty clears
+    """
+    history_store = get_history_store()
+    project_path = history_store.get_active_project()
+    if not project_path:
+        raise HTTPException(status_code=400, detail="No active project selected")
+
+    title_raw = data.get("title")
+    text = str(title_raw).strip() if title_raw is not None else ""
+    if text and len(text) > 16:
+        raise HTTPException(status_code=400, detail="title must be <= 16 characters")
+
+    sidecar = ProjectSidecar.load_or_create(project_path)
+    if shell_id not in sidecar.get_terminal_shell_ids():
+        raise HTTPException(status_code=404, detail="Shell not tracked for this project")
+
+    new_title = sidecar.set_terminal_shell_title(shell_id, text or None)
+    sidecar.save()
+
+    # Push an updated list to any connected terminal drawers for this project.
+    await _broadcast_terminal_shell_list(project_path)
+
+    return {"ok": True, "data": {"shell_id": shell_id, "title": new_title}}
+
+
+@terminal_router.post('/terminal/shells/{shell_id}/activate')
+async def activate_terminal_shell(shell_id: str):
+    """Activate an existing terminal shell for the active project."""
+    history_store = get_history_store()
+    project_path = history_store.get_active_project()
+    if not project_path:
+        raise HTTPException(status_code=400, detail="No active project selected")
+
+    sidecar = ProjectSidecar.load_or_create(project_path)
+    ids = sidecar.get_terminal_shell_ids()
+    if shell_id not in ids:
+        raise HTTPException(status_code=404, detail="Shell not tracked for this project")
+
+    mgr = await get_manager()
+    rec = await mgr.get_shell(shell_id)
+    if not rec or rec.status != "running" or not rec.pid:
+        # Prune dead shell.
+        sidecar.remove_terminal_shell_id(shell_id)
+        sidecar.save()
+        raise HTTPException(status_code=409, detail="Shell is not running")
+
+    sidecar.set_active_terminal_shell_id(shell_id)
+    sidecar.save()
+
+    await close_active_terminal_sockets("terminal activate")
+    return {"ok": True, "data": {"shell_id": shell_id}}
+
+
 @terminal_router.post('/terminal/run_active_file')
 async def run_active_file():
     """Run the currently active (last opened) file in the project terminal.
@@ -131,7 +330,15 @@ async def run_active_file():
 
     if not shell_id:
         preferred_cwd = project_path if project_path and Path(project_path).is_dir() else workdir
-        shell_info = await create_editor_shell(cwd=preferred_cwd, project_path=project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(project_path) if project_path else None
+        except Exception:
+            sidecar = None
+        if sidecar and project_path:
+            seq = await _next_sequence_for_project(project_path, sidecar, mgr)
+        else:
+            seq = 1
+        shell_info = await create_editor_shell(cwd=preferred_cwd, project_path=project_path, sequence=seq)
         shell_id = shell_info["id"]
         history_store.set_terminal_shell_id(shell_id, project_path)
 
@@ -163,6 +370,20 @@ async def terminal_destroy(shell_id: str):
     """
     try:
         success = await destroy_editor_shell(shell_id)
+        # Remove from per-project list if applicable.
+        history_store = get_history_store()
+        project_path = history_store.get_active_project()
+        was_active = False
+        if project_path:
+            try:
+                sidecar = ProjectSidecar.load_or_create(project_path)
+                was_active = sidecar.get_active_terminal_shell_id() == shell_id
+                sidecar.remove_terminal_shell_id(shell_id)
+                sidecar.save()
+            except Exception:
+                pass
+        if was_active:
+            await close_active_terminal_sockets("terminal closed")
         if success:
             return {"ok": True, "data": {"id": shell_id}}
         else:
@@ -237,7 +458,7 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
 
     # Register this websocket for backend-managed project switches.
     async with _active_terminal_lock:
-        _active_terminal_sockets.add(websocket)
+        _active_terminal_sockets[websocket] = None
 
     history_store = get_history_store()
     shell_project_path: str | None = None
@@ -267,8 +488,16 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
             # Use active project path if available, fallback to home
             project_path = shell_project_path
             cwd = project_path if project_path and Path(project_path).is_dir() else str(Path.home())
+            try:
+                sidecar = ProjectSidecar.load_or_create(project_path) if project_path else None
+            except Exception:
+                sidecar = None
+            if sidecar and project_path:
+                seq = await _next_sequence_for_project(project_path, sidecar, mgr)
+            else:
+                seq = 1
             print(f"[Terminal WS] Creating new terminal shell (cwd={cwd})")
-            shell_rec = await create_editor_shell(cwd=cwd, project_path=project_path)
+            shell_rec = await create_editor_shell(cwd=cwd, project_path=project_path, sequence=seq)
             shell_id = shell_rec['id']
             print(f"[Terminal WS] New shell created: {shell_id}")
             history_store.set_terminal_shell_id(shell_id, project_path)
@@ -277,6 +506,18 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
         # Send shell ID to client
         print(f"[Terminal WS] Sending shell_id to client: {shell_id}")
         await websocket.send_json({"type": "shell_id", "shell_id": shell_id})
+
+        # Track project association for UI update broadcasts.
+        async with _active_terminal_lock:
+            _active_terminal_sockets[websocket] = shell_project_path
+
+        # Send initial shell list snapshot (titles + statuses) to seed the header.
+        if shell_project_path:
+            try:
+                snapshot = await _build_terminal_shell_list(shell_project_path, include_exited=True)
+                await websocket.send_json({"type": "shell_list", **snapshot})
+            except Exception:
+                pass
     
     # Subscribe to output - DIRECT AWAIT, AsyncQueue returned
     try:
@@ -287,14 +528,71 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
         return
     
     stop_event = asyncio.Event()
+    exit_notified = False
     
     async def forward_pty_to_ws():
         """Forward PTY output to WebSocket client"""
+        nonlocal exit_notified
+        last_status_check = 0.0
         while not stop_event.is_set():
             try:
                 # AsyncQueue.get is already async - DIRECT AWAIT
                 chunk = await asyncio.wait_for(output_queue.get(), timeout=0.5)
             except asyncio.TimeoutError:
+                # No data: periodically check if the shell is still alive so the
+                # UI can update (no HTTP polling needed).
+                if exit_notified:
+                    continue
+                now = asyncio.get_running_loop().time()
+                if now - last_status_check < 2.0:
+                    continue
+                last_status_check = now
+
+                try:
+                    rec = await mgr.get_shell(shell_id)
+                except Exception:
+                    rec = None
+
+                live = bool(rec and rec.status == "running" and rec.pid)
+                if live:
+                    continue
+
+                # Stop PTY state now that the process is gone (prevents stale subscriptions).
+                try:
+                    if rec:
+                        await mgr.terminate_shell(shell_id, force=True)
+                except Exception:
+                    pass
+
+                status_tag = _terminal_status_tag(rec.status if rec else "missing", rec.pid if rec else None)
+                exit_code = rec.exit_code if rec else None
+                exit_notified = True
+
+                marker = f"\r\n\r\n[{status_tag}]\r\n"
+                if exit_code is not None and status_tag in ("exited", "live"):
+                    marker = f"\r\n\r\n[{status_tag}: {exit_code}]\r\n"
+
+                # Append marker to stdout log so history loads show it.
+                try:
+                    if rec and rec.stdout_log:
+                        with open(rec.stdout_log, "ab") as fh:
+                            fh.write(marker.encode("utf-8", errors="replace"))
+                except Exception:
+                    pass
+
+                try:
+                    await websocket.send_text(marker)
+                except Exception:
+                    stop_event.set()
+                    break
+
+                # Push an updated shell list to refresh dropdown statuses.
+                if shell_project_path:
+                    try:
+                        await _broadcast_terminal_shell_list(shell_project_path)
+                    except Exception:
+                        pass
+                stop_event.set()
                 continue
             
             try:
@@ -327,7 +625,15 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
                         print(f"[Terminal WS] Error terminating shell: {e}")
                     
                     # Clear from history store (ATOMIC with terminate)
-                    history_store.set_terminal_shell_id(None, shell_project_path)
+                    if shell_project_path:
+                        try:
+                            sidecar = ProjectSidecar.load_or_create(shell_project_path)
+                            sidecar.remove_terminal_shell_id(shell_id)
+                            sidecar.save()
+                        except Exception:
+                            history_store.set_terminal_shell_id(None, shell_project_path)
+                    else:
+                        history_store.set_terminal_shell_id(None, shell_project_path)
                     print(f"[Terminal WS] Shell {shell_id} destroyed and cache cleared")
                     
                     # Send confirmation and close
@@ -346,7 +652,7 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
         stop_event.set()
         edit_tracker.unregister_shell_watcher(shell_id)
         async with _active_terminal_lock:
-            _active_terminal_sockets.discard(websocket)
+            _active_terminal_sockets.pop(websocket, None)
         forward_task.cancel()
         try:
             await forward_task

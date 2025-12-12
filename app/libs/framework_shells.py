@@ -69,6 +69,8 @@ class ShellRecord:
     stdout_log: str
     stderr_log: str
     exit_code: Optional[int] = None
+    subgroups: List[str] = field(default_factory=list)
+    ui: Dict[str, Any] = field(default_factory=dict)
     run_id: Optional[str] = None
     launcher_pid: Optional[int] = None
     adopted: bool = False
@@ -80,6 +82,8 @@ class ShellRecord:
             "id": self.id,
             "command": list(self.command),
             "label": self.label,
+            "subgroups": list(self.subgroups or []),
+            "ui": dict(self.ui or {}),
             "cwd": self.cwd,
             "pid": self.pid,
             "status": self.status,
@@ -288,10 +292,19 @@ class FrameworkShellManager:
         except Exception:
             return None
         try:
+            raw_subgroups = data.get("subgroups") or []
+            if not isinstance(raw_subgroups, list):
+                raw_subgroups = []
+            subgroups = [str(v) for v in raw_subgroups if isinstance(v, (str, int, float)) and str(v).strip()]
+            ui = data.get("ui") or {}
+            if not isinstance(ui, dict):
+                ui = {}
             return ShellRecord(
                 id=data.get("id", shell_id),
                 command=list(data.get("command") or []),
                 label=data.get("label"),
+                subgroups=subgroups,
+                ui=ui,
                 cwd=data.get("cwd", str(HOME_DIR)),
                 env_overrides=dict(data.get("env_overrides") or {}),
                 pid=data.get("pid"),
@@ -326,6 +339,8 @@ class FrameworkShellManager:
             "id": record.id,
             "command": record.command,
             "label": record.label,
+            "subgroups": list(record.subgroups or []),
+            "ui": dict(record.ui or {}),
             "cwd": record.cwd,
             "env_overrides": record.env_overrides,
             "pid": record.pid,
@@ -387,6 +402,8 @@ class FrameworkShellManager:
         cwd: Optional[str],
         env: Optional[Dict[str, str]],
         label: Optional[str],
+        subgroups: Optional[List[str]] = None,
+        ui: Optional[Dict[str, Any]] = None,
         autostart: bool,
         uses_pty: bool = False,
         uses_pipes: bool = False,
@@ -400,10 +417,30 @@ class FrameworkShellManager:
             overrides.setdefault("TE_RUN_ID", run_id)
         overrides.setdefault("TE_SPAWNED_BY", "framework_shell_manager")
         now = time.time()
+        normalized_subgroups = []
+        for value in (subgroups or []):
+            try:
+                text = str(value).strip()
+            except Exception:
+                continue
+            if text:
+                normalized_subgroups.append(text)
+
+        normalized_ui: Dict[str, Any] = {}
+        if isinstance(ui, dict) and ui:
+            # Ensure UI metadata is JSON-serializable and safe to persist.
+            try:
+                normalized_ui = json.loads(json.dumps(ui))
+                if not isinstance(normalized_ui, dict):
+                    normalized_ui = {}
+            except Exception:
+                normalized_ui = {}
         return ShellRecord(
             id=shell_id,
             command=command_list,
             label=label,
+            subgroups=normalized_subgroups,
+            ui=normalized_ui,
             cwd=cwd_path,
             env_overrides=overrides,
             pid=None,
@@ -753,6 +790,8 @@ class FrameworkShellManager:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         label: Optional[str] = None,
+        subgroups: Optional[List[str]] = None,
+        ui: Optional[Dict[str, Any]] = None,
         autostart: bool = False,
     ) -> ShellRecord:
         async with self._get_lock():
@@ -786,6 +825,8 @@ class FrameworkShellManager:
                 cwd=cwd,
                 env=env,
                 label=label,
+                subgroups=subgroups,
+                ui=ui,
                 autostart=autostart,
             )
             return await self._launch(record)
@@ -797,6 +838,8 @@ class FrameworkShellManager:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         label: Optional[str] = None,
+        subgroups: Optional[List[str]] = None,
+        ui: Optional[Dict[str, Any]] = None,
         autostart: bool = True,
     ) -> ShellRecord:
         async with self._get_lock():
@@ -829,6 +872,8 @@ class FrameworkShellManager:
                 cwd=cwd,
                 env=env,
                 label=label,
+                subgroups=subgroups,
+                ui=ui,
                 autostart=autostart,
                 uses_pty=True,
             )
@@ -841,6 +886,8 @@ class FrameworkShellManager:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         label: Optional[str] = None,
+        subgroups: Optional[List[str]] = None,
+        ui: Optional[Dict[str, Any]] = None,
         autostart: bool = False,
     ) -> ShellRecord:
         """Spawn shell with live stdin/stdout pipes for bidirectional streaming (LSP, etc.)."""
@@ -860,6 +907,8 @@ class FrameworkShellManager:
                 cwd=cwd,
                 env=env,
                 label=label,
+                subgroups=subgroups,
+                ui=ui,
                 autostart=autostart,
                 uses_pipes=True,
             )
@@ -982,18 +1031,31 @@ class FrameworkShellManager:
             return await self._launch(record)
 
     async def remove_shell(self, shell_id: str, *, force: bool = False) -> None:
+        # NOTE: terminate_shell() acquires the same manager lock.
+        # Do not call it while holding _get_lock(), or we deadlock.
         async with self._get_lock():
             record = await self._load_record(shell_id)
             if not record:
                 raise KeyError("Shell not found")
-            
-            # Unregister from IPC (defensive - should already be unregistered by terminate_shell)
-            if record.pid:
+            pid = record.pid
+
+        # Unregister from IPC (defensive - should already be unregistered by terminate_shell)
+        if pid:
+            try:
                 from app.ipc.client import unregister_process
-                unregister_process(record.pid)
-            
-            if record.pid and await self._is_pid_alive(record.pid):
-                await self.terminate_shell(shell_id, force=force)
+                unregister_process(pid)
+            except Exception:
+                pass
+
+        if pid and await self._is_pid_alive(pid):
+            # Terminate outside lock to avoid deadlock.
+            await self.terminate_shell(shell_id, force=force)
+
+        async with self._get_lock():
+            # Reload record in case terminate_shell mutated it.
+            record = await self._load_record(shell_id)
+            if not record:
+                return
             await self._stop_pty(shell_id)
             await self._stop_pipe(shell_id)
             await self._purge_record_files(record)
@@ -1175,10 +1237,15 @@ async def create_framework_shell(mgr: FrameworkShellManager = Depends(get_manage
     if not isinstance(env, dict):
         raise HTTPException(status_code=400, detail="env must be an object")
     label = payload.get("label")
+    subgroups = payload.get("subgroups") or []
+    if subgroups is None:
+        subgroups = []
+    if not isinstance(subgroups, list) or not all(isinstance(item, str) and item.strip() for item in subgroups):
+        raise HTTPException(status_code=400, detail="subgroups must be a list of non-empty strings")
     autostart = bool(payload.get("autostart", False))
     cwd = payload.get("cwd")
     try:
-        record = await mgr.spawn_shell(command, cwd=cwd, env=env, label=label, autostart=autostart)
+        record = await mgr.spawn_shell(command, cwd=cwd, env=env, label=label, subgroups=subgroups, autostart=autostart)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:

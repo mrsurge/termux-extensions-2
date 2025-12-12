@@ -1,5 +1,25 @@
 Short version: xterm.js is *not* very touch-friendly out of the box (and the maintainers explicitly call this out as an open problem) so you have to build most of the mobile UX yourself around it: layout/CSS, custom touch → scroll/selection/zoom handling, your own copy/paste affordances, and explicit “show keyboard” hooks. I’ll walk through the full stack and give you concrete patterns you can drop in.
 
+## Implementation plan (Termux-Extensions-2 / `file_editor_cm6` terminal)
+
+Scope for the next iteration: **incremental zoom** + **touch scroll semantics** + **touch selection semantics** (no project state in the browser).
+
+1. **Incremental zoom**
+   - Add `A−` / `A+` buttons in `.terminal-header` (`app/apps/file_editor_cm6/template.html`).
+   - Wire them to clamp + update `term.options.fontSize` and refit (`app/apps/file_editor_cm6/static/js/terminal.js`).
+   - (Optional later) add 2‑finger pinch → fontSize mapping.
+
+2. **Touch scroll semantics**
+   - Hide scrollbar on touch; keep it narrow on desktop (`app/apps/file_editor_cm6/template.html` CSS).
+   - Implement 1‑finger drag → scrollback via `term.scrollLines()` with integer-safe accumulation (no wheel required).
+   - Prevent the page behind the drawer from scrolling while dragging (use `touch-action` + `preventDefault`).
+
+3. **Touch selection semantics**
+   - Tap: focus terminal (bring up keyboard).
+   - Long‑press (e.g. ~450ms): enter selection mode; drag selects via synthetic mouse events (`mousedown/mousemove/mouseup`) so xterm’s built-in selection model is used.
+   - (Optional later) double‑tap → word select via synthetic `dblclick`.
+   - Add a simple “Copy selection” button so selection is actually usable on mobile.
+
 ---
 
 ## 0. Reality check: what xterm.js does (and doesn’t) do on touch

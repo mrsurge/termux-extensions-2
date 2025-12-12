@@ -7,6 +7,8 @@ const STATE = {
     containers: [],
     sessionNames: {},
     currentSessionId: null,
+    exitedShellsExpanded: false,
+    frameworkUiByAppId: {},
 };
 
 let liveSocket = null;
@@ -101,6 +103,71 @@ function escapeHTML(str) {
     return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+function isShellLive(shell) {
+    if (!shell) return false;
+    if (shell.status !== 'running') return false;
+    if (!shell.pid) return false;
+    if (shell.stats && shell.stats.alive === false) return false;
+    return true;
+}
+
+function getSubgroups(shell) {
+    return Array.isArray(shell?.subgroups) ? shell.subgroups.filter(Boolean).map(String) : [];
+}
+
+function resolveSubgroupStyle(appUi, subgroup) {
+    if (!appUi || typeof appUi !== 'object') return null;
+    const raw = appUi.subgroup_styles || appUi.subgroupStyles || null;
+    if (!raw || typeof raw !== 'object') return null;
+
+    const name = String(subgroup || '');
+    if (!name) return null;
+
+    const normalize = (value) => {
+        if (!value) return null;
+        if (typeof value === 'string') {
+            const bg = value.trim();
+            return bg ? { bg } : null;
+        }
+        if (typeof value === 'object') {
+            const bg = (value.bg || value.background || '').toString().trim();
+            const border = (value.border || '').toString().trim();
+            const color = (value.color || '').toString().trim();
+            const out = {};
+            if (bg) out.bg = bg;
+            if (border) out.border = border;
+            if (color) out.color = color;
+            return Object.keys(out).length ? out : null;
+        }
+        return null;
+    };
+
+    // Exact match first.
+    if (Object.prototype.hasOwnProperty.call(raw, name)) {
+        return normalize(raw[name]);
+    }
+
+    // Prefix matches next (choose most specific/longest).
+    let bestKey = null;
+    let bestLen = -1;
+    for (const key of Object.keys(raw)) {
+        if (!key) continue;
+        let prefix = null;
+        if (key.endsWith('*')) prefix = key.slice(0, -1);
+        else if (key.endsWith(':')) prefix = key;
+        if (!prefix) continue;
+        if (name.startsWith(prefix) && prefix.length > bestLen) {
+            bestKey = key;
+            bestLen = prefix.length;
+        }
+    }
+    if (bestKey) {
+        return normalize(raw[bestKey]);
+    }
+
+    return null;
+}
+
 function loadSessionNames() {
     STATE.sessionNames = { ...(persisted.sessionNames || {}) };
 }
@@ -185,11 +252,8 @@ function renderFrameworkShells() {
     if (!list) return;
     list.innerHTML = '';
 
-    // Use shell trees if available, fall back to flat list
-    const trees = STATE.shellTrees.length > 0 ? STATE.shellTrees : 
-        STATE.frameworkShells.map(s => ({ shell: s, children: [], is_app_worker: false }));
-
-    if (!trees.length) {
+    const shells = Array.isArray(STATE.frameworkShells) ? STATE.frameworkShells : [];
+    if (!shells.length) {
         const placeholder = document.createElement('p');
         placeholder.className = 'session-empty';
         placeholder.textContent = 'No framework shells running.';
@@ -199,22 +263,48 @@ function renderFrameworkShells() {
 
     const containerByShell = containerLabelByShell();
 
-    trees.forEach((tree) => {
+    // Optional: app-worker → child processes (from websocket shell tree snapshot).
+    // We intentionally exclude children that already have a framework shell record,
+    // so those shells show up in the main list (and can be grouped by subgroups).
+    const childrenByAppWorkerId = new Map();
+    if (Array.isArray(STATE.shellTrees)) {
+        STATE.shellTrees.forEach((tree) => {
+            if (!tree || !tree.is_app_worker) return;
+            const root = tree.shell;
+            if (!root || !root.id) return;
+            const children = Array.isArray(tree.children) ? tree.children : [];
+            const filtered = children.filter((child) => !(child && child.shell));
+            childrenByAppWorkerId.set(root.id, filtered);
+        });
+    }
+
+    const trees = shells.map((shell) => {
+        const isAppWorker = (shell?.label || '').startsWith('app-worker:');
+        const children = isAppWorker ? (childrenByAppWorkerId.get(shell.id) || []) : [];
+        return { shell, children, is_app_worker: isAppWorker };
+    });
+
+    function renderFrameworkTreeCard(tree) {
         const shell = tree.shell;
         const children = tree.children || [];
         const isAppWorker = tree.is_app_worker;
-        
+
         const card = document.createElement('div');
         card.className = 'session framework' + (isAppWorker ? ' app-worker-card' : '');
-        
+        if (isAppWorker) {
+            try {
+                card.dataset.appId = extractAppName(shell.label);
+            } catch (_) {}
+        }
+
         const stats = shell.stats || {};
-        const containerLabel = containerByShell[shell.id] || (isAppWorker ? extractAppName(shell.label) : 'Service');
+        const containerLabel = containerByShell[shell.id]
+            || (isAppWorker ? extractAppName(shell.label) : (shell.label || 'Service'));
         const uptime = stats.uptime != null ? `uptime: ${Math.max(0, Math.round(stats.uptime))}s` : '';
         const cpu = stats.cpu_percent != null ? `cpu: ${stats.cpu_percent.toFixed(1)}%` : '';
         const mem = stats.memory_rss != null ? `mem: ${(stats.memory_rss / (1024 * 1024)).toFixed(1)} MB` : '';
         const statLine = [uptime, cpu, mem].filter(Boolean).join(' · ');
-        
-        // Build children HTML if this is an app-worker with children
+
         let childrenHTML = '';
         if (children.length > 0) {
             childrenHTML = `
@@ -228,7 +318,7 @@ function renderFrameworkShells() {
         card.innerHTML = `
             <div class="session-header">
                 <div class="session-title">
-                    ${isAppWorker ? '<span class="app-worker-badge">App Worker</span>' : ''}
+                    ${isAppWorker ? '<span class="app-worker-badge" title="Open app">App Worker</span>' : ''}
                     ${escapeHTML(containerLabel)}
                 </div>
                 <div class="shell-actions">
@@ -236,8 +326,8 @@ function renderFrameworkShells() {
                     <button class="framework-kill ${isAppWorker ? 'kill-with-children' : ''}" 
                             data-shell="${shell.id}" 
                             data-pid="${shell.pid}"
-                            data-has-children="${children.length > 0}"
-                            title="${isAppWorker ? 'Kill App + Children' : 'Kill'}">✕</button>
+                            data-has-children="${isAppWorker ? 'true' : (children.length > 0)}"
+                            title="${isAppWorker ? 'Kill App + Children' : 'Stop'}">✕</button>
                 </div>
             </div>
             <div class="session-cwd">PID: ${shell.pid} · ID: ${shell.id}</div>
@@ -245,8 +335,237 @@ function renderFrameworkShells() {
             ${statLine ? `<div class="session-cwd">${escapeHTML(statLine)}</div>` : ''}
             ${childrenHTML}
         `;
+        return card;
+    }
+
+    function renderNestedShellCard(tree) {
+        const shell = tree.shell;
+        const isAppWorker = tree.is_app_worker;
+        const card = document.createElement('div');
+        card.className = 'session framework nested-shell';
+
+        const stats = shell.stats || {};
+        const containerLabel = containerByShell[shell.id] || (shell.label || 'Shell');
+        const uptime = stats.uptime != null ? `uptime: ${Math.max(0, Math.round(stats.uptime))}s` : '';
+        const cpu = stats.cpu_percent != null ? `cpu: ${stats.cpu_percent.toFixed(1)}%` : '';
+        const mem = stats.memory_rss != null ? `mem: ${(stats.memory_rss / (1024 * 1024)).toFixed(1)} MB` : '';
+        const statLine = [uptime, cpu, mem].filter(Boolean).join(' · ');
+
+        card.innerHTML = `
+            <div class="session-header">
+                <div class="session-title">${escapeHTML(containerLabel)}</div>
+                <div class="shell-actions">
+                    <button class="framework-log" data-shell="${shell.id}" title="View Logs">📋</button>
+                    <button class="framework-kill ${isAppWorker ? 'kill-with-children' : ''}"
+                            data-shell="${shell.id}"
+                            data-pid="${shell.pid}"
+                            data-has-children="${isAppWorker ? 'true' : 'false'}"
+                            title="${isAppWorker ? 'Kill App + Children' : 'Stop'}">✕</button>
+                </div>
+            </div>
+            <div class="session-cwd">PID: ${shell.pid} · ID: ${shell.id}</div>
+            ${statLine ? `<div class="session-cwd">${escapeHTML(statLine)}</div>` : ''}
+        `;
+        return card;
+    }
+
+    const runningTrees = [];
+    const exitedTrees = [];
+    trees.forEach((tree) => {
+        const shell = tree.shell;
+        if (isShellLive(shell)) runningTrees.push(tree);
+        else exitedTrees.push(tree);
+    });
+
+    const consumedShellIds = new Set();
+    const appWorkers = [];
+    runningTrees.forEach((tree) => {
+        if (tree.is_app_worker) appWorkers.push(tree);
+    });
+
+    const appWorkerByAppId = new Map();
+    appWorkers.forEach((tree) => {
+        const label = tree.shell?.label || '';
+        const m = label.match(/^app-worker:(.+)$/);
+        const appId = m ? m[1] : null;
+        if (appId) appWorkerByAppId.set(appId, tree);
+    });
+
+    // Build umbrella→subgroup→trees, and bucket those that should be enveloped inside app-worker cards.
+    const groupedOutside = new Map(); // umbrella -> Map(subgroup -> trees)
+    const groupedInApp = new Map(); // appId -> Map(subgroup -> trees)
+
+    runningTrees.forEach((tree) => {
+        if (tree.is_app_worker) return;
+        const shell = tree.shell || {};
+        const groups = getSubgroups(shell);
+        if (groups.length < 2) return;
+        const umbrella = groups[0] || 'Other';
+        const subgroup = groups[1] || '';
+        if (appWorkerByAppId.has(umbrella)) {
+            if (!groupedInApp.has(umbrella)) groupedInApp.set(umbrella, new Map());
+            const subMap = groupedInApp.get(umbrella);
+            if (!subMap.has(subgroup)) subMap.set(subgroup, []);
+            subMap.get(subgroup).push(tree);
+            consumedShellIds.add(shell.id);
+            return;
+        }
+        if (!groupedOutside.has(umbrella)) groupedOutside.set(umbrella, new Map());
+        const subMap = groupedOutside.get(umbrella);
+        if (!subMap.has(subgroup)) subMap.set(subgroup, []);
+        subMap.get(subgroup).push(tree);
+    });
+
+    // Render app-worker cards first, enveloping any grouped shells for that app ID.
+    appWorkers.forEach((tree) => {
+        const label = tree.shell?.label || '';
+        const m = label.match(/^app-worker:(.+)$/);
+        const appId = m ? m[1] : null;
+        const subMap = appId ? groupedInApp.get(appId) : null;
+        if (!appId || !subMap || subMap.size === 0) {
+            list.appendChild(renderFrameworkTreeCard(tree));
+            return;
+        }
+
+        const appUi =
+            (appId && STATE.frameworkUiByAppId && STATE.frameworkUiByAppId[appId])
+            || ((tree.shell && typeof tree.shell.ui === 'object') ? tree.shell.ui : null);
+        const card = renderFrameworkTreeCard(tree);
+        const shellGroups = document.createElement('div');
+        shellGroups.className = 'shell-children shell-related';
+        shellGroups.innerHTML = `<div class="children-header">Shell Groups</div>`;
+
+        subMap.forEach((treesForSub, subgroup) => {
+            const headerRow = document.createElement('div');
+            headerRow.className = 'shell-subgroup-row';
+            headerRow.innerHTML = `
+                <div class="shell-subgroup-header">${escapeHTML(subgroup || 'group')}</div>
+                <button class="framework-group-kill" data-umbrella="${escapeHTML(appId)}" data-subgroup="${escapeHTML(subgroup)}" title="Stop this group">✕</button>
+            `;
+            const subgroupStyle = resolveSubgroupStyle(appUi, subgroup);
+            if (subgroupStyle && subgroupStyle.bg) {
+                headerRow.style.setProperty('--subgroup-bg', subgroupStyle.bg);
+            }
+            if (subgroupStyle && subgroupStyle.border) {
+                headerRow.style.setProperty('--subgroup-border', subgroupStyle.border);
+            }
+            if (subgroupStyle && subgroupStyle.color) {
+                headerRow.style.setProperty('--subgroup-color', subgroupStyle.color);
+            }
+            shellGroups.appendChild(headerRow);
+
+            const wrap = document.createElement('div');
+            wrap.className = 'shell-subgroup-shells';
+            if (subgroupStyle && subgroupStyle.bg) {
+                wrap.style.setProperty('--subgroup-bg', subgroupStyle.bg);
+            }
+            if (subgroupStyle && subgroupStyle.border) {
+                wrap.style.setProperty('--subgroup-border', subgroupStyle.border);
+            }
+            if (subgroupStyle && subgroupStyle.color) {
+                wrap.style.setProperty('--subgroup-color', subgroupStyle.color);
+            }
+            treesForSub.forEach((t) => {
+                wrap.appendChild(renderNestedShellCard(t));
+            });
+            shellGroups.appendChild(wrap);
+        });
+
+        card.appendChild(shellGroups);
         list.appendChild(card);
     });
+
+    // Render remaining uncategorized shells (excluding app-workers and shells already enveloped).
+    runningTrees.forEach((tree) => {
+        const shell = tree.shell || {};
+        if (tree.is_app_worker) return;
+        if (consumedShellIds.has(shell.id)) return;
+        const groups = getSubgroups(shell);
+        if (groups.length >= 2) return; // will be rendered in groupedOutside
+        list.appendChild(renderFrameworkTreeCard(tree));
+    });
+
+    // Render grouped shells that are not under an app-worker card.
+    groupedOutside.forEach((subMap, umbrella) => {
+        const appUi = (STATE.frameworkUiByAppId && STATE.frameworkUiByAppId[umbrella]) || null;
+        const h = document.createElement('div');
+        h.className = 'shell-group-header';
+        h.innerHTML = `
+            <span class="shell-group-title">${escapeHTML(umbrella)}</span>
+            <button class="framework-group-kill" data-umbrella="${escapeHTML(umbrella)}" title="Stop all in group">✕</button>
+        `;
+        list.appendChild(h);
+
+        subMap.forEach((treesForSub, subgroup) => {
+            if (subgroup) {
+                const sh = document.createElement('div');
+                sh.className = 'shell-subgroup-row';
+                sh.innerHTML = `
+                    <div class="shell-subgroup-header">${escapeHTML(subgroup)}</div>
+                    <button class="framework-group-kill" data-umbrella="${escapeHTML(umbrella)}" data-subgroup="${escapeHTML(subgroup)}" title="Stop this group">✕</button>
+                `;
+                const subgroupStyle = resolveSubgroupStyle(appUi, subgroup);
+                if (subgroupStyle && subgroupStyle.bg) {
+                    sh.style.setProperty('--subgroup-bg', subgroupStyle.bg);
+                }
+                if (subgroupStyle && subgroupStyle.border) {
+                    sh.style.setProperty('--subgroup-border', subgroupStyle.border);
+                }
+                if (subgroupStyle && subgroupStyle.color) {
+                    sh.style.setProperty('--subgroup-color', subgroupStyle.color);
+                }
+                list.appendChild(sh);
+            }
+            treesForSub.forEach((tree) => {
+                list.appendChild(renderFrameworkTreeCard(tree));
+            });
+        });
+    });
+
+    if (exitedTrees.length > 0) {
+        const card = document.createElement('div');
+        card.className = 'session framework exited-shells-card';
+
+        const header = document.createElement('button');
+        header.type = 'button';
+        header.className = 'exited-shells-header';
+        header.dataset.action = 'toggle-exited-shells';
+        header.innerHTML = `
+            <span class="exited-shells-title">Exited shells (${exitedTrees.length})</span>
+            <span class="exited-shells-chevron">${STATE.exitedShellsExpanded ? '▾' : '▸'}</span>
+        `;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'exited-shells-list';
+        wrap.style.display = STATE.exitedShellsExpanded ? 'block' : 'none';
+
+        exitedTrees.forEach((tree) => {
+            const shell = tree.shell || {};
+            const title = shell.label || shell.id || 'Shell';
+            const status = shell.status || 'exited';
+            const exitCode = (shell.exit_code !== undefined && shell.exit_code !== null) ? `exit: ${shell.exit_code}` : '';
+            const line = [status, exitCode].filter(Boolean).join(' · ');
+
+            const card = document.createElement('div');
+            card.className = 'session framework exited-shell';
+            card.innerHTML = `
+                <div class="session-header">
+                    <div class="session-title">${escapeHTML(title)}</div>
+                    <div class="shell-actions">
+                        <button class="framework-log" data-shell="${shell.id}" title="View Logs">📋</button>
+                        <button class="framework-purge" data-shell="${shell.id}" title="Purge metadata/logs">🗑</button>
+                    </div>
+                </div>
+                <div class="session-cwd">ID: ${shell.id}</div>
+                ${line ? `<div class="session-cwd">${escapeHTML(line)}</div>` : ''}
+            `;
+            wrap.appendChild(card);
+        });
+
+        card.appendChild(header);
+        card.appendChild(wrap);
+        list.appendChild(card);
+    }
 }
 
 function extractAppName(label) {
@@ -335,16 +654,28 @@ async function fetchContainers() {
     }
 }
 
+async function fetchFrameworkUi() {
+    try {
+        const data = await apiClient.get('framework_ui');
+        return (data && typeof data === 'object') ? data : {};
+    } catch (err) {
+        console.warn('Failed to load framework UI hints', err);
+        return {};
+    }
+}
+
 async function refreshAll() {
     try {
-        const [sessions, frameworks, containers] = await Promise.all([
+        const [sessions, frameworks, containers, frameworkUi] = await Promise.all([
             apiClient.get('sessions'),
             fetchFrameworkShells(),
             fetchContainers(),
+            fetchFrameworkUi(),
         ]);
         STATE.visibleSessions = Array.isArray(sessions) ? sessions : [];
         STATE.frameworkShells = frameworks;
         STATE.containers = containers;
+        STATE.frameworkUiByAppId = frameworkUi;
         render();
     } catch (err) {
         console.error('Failed to refresh sessions', err);
@@ -361,6 +692,9 @@ function applyLiveSnapshot(payload) {
     if (Array.isArray(payload.frameworks)) STATE.frameworkShells = payload.frameworks;
     if (Array.isArray(payload.shell_trees)) STATE.shellTrees = payload.shell_trees;
     if (Array.isArray(payload.containers)) STATE.containers = payload.containers;
+    if (payload.framework_ui && typeof payload.framework_ui === 'object') {
+        STATE.frameworkUiByAppId = payload.framework_ui;
+    }
     render();
 }
 
@@ -434,6 +768,41 @@ function selectTab(target) {
 function attachEventListeners() {
     extensionRoot.addEventListener('click', (e) => {
         const target = e.target;
+
+        const appWorkerBadge = target.closest?.('.app-worker-badge');
+        if (appWorkerBadge) {
+            const card = appWorkerBadge.closest('.session.framework.app-worker-card');
+            const appId = card?.dataset?.appId;
+            if (appId) {
+                window.location.href = `/app/${encodeURIComponent(appId)}`;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
+        const groupKill = target.closest?.('.framework-group-kill');
+        if (groupKill) {
+            const umbrella = groupKill.dataset.umbrella || '';
+            const subgroup = groupKill.dataset.subgroup || '';
+            const scope = subgroup ? `${umbrella} → ${subgroup}` : umbrella;
+            if (umbrella && confirm(`Stop group ${scope}?`)) {
+                stopFrameworkShellGroup(umbrella, subgroup || null);
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
+        const actionBtn = target.closest?.('[data-action]');
+        if (actionBtn && actionBtn.dataset.action === 'toggle-exited-shells') {
+            STATE.exitedShellsExpanded = !STATE.exitedShellsExpanded;
+            renderFrameworkShells();
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
         if (target.classList.contains('menu-btn')) {
             openMenu(target.dataset.sid, target);
             e.stopPropagation();
@@ -474,6 +843,16 @@ function attachEventListeners() {
             return;
         }
 
+        if (target.classList.contains('framework-purge')) {
+            const shellId = target.dataset.shell;
+            if (shellId) {
+                if (confirm(`Purge metadata/logs for ${shellId}?`)) {
+                    purgeFrameworkShell(shellId);
+                }
+            }
+            return;
+        }
+
         if (target.classList.contains('framework-kill')) {
             const shellId = target.dataset.shell;
             const pid = target.dataset.pid;
@@ -482,7 +861,7 @@ function attachEventListeners() {
             if (shellId) {
                 const msg = hasChildren 
                     ? `Kill this app worker and all its child processes?`
-                    : `Kill framework shell ${shellId}?`;
+                    : `Stop framework shell ${shellId}?`;
                 if (confirm(msg)) {
                     killFrameworkShellWithChildren(shellId, pid, hasChildren);
                 }
@@ -553,11 +932,52 @@ async function killFrameworkShell(shellId) {
         await frameworkFetch(`/api/framework_shells/${shellId}/action`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'kill' }),
+            body: JSON.stringify({ action: 'terminate' }),
         });
         requestSnapshot();
     } catch (err) {
-        alert(err.message || 'Failed to kill shell');
+        alert(err.message || 'Failed to stop shell');
+    }
+}
+
+async function stopFrameworkShellGroup(umbrella, subgroup) {
+    const shells = Array.isArray(STATE.frameworkShells) ? STATE.frameworkShells : [];
+    const ids = shells
+        .filter((shell) => isShellLive(shell))
+        .filter((shell) => {
+            const groups = getSubgroups(shell);
+            if (!groups.length) return false;
+            if (groups[0] !== umbrella) return false;
+            if (subgroup) return groups[1] === subgroup;
+            return true;
+        })
+        .map((shell) => shell.id)
+        .filter(Boolean);
+
+    if (!ids.length) return;
+
+    try {
+        for (const id of ids) {
+            await frameworkFetch(`/api/framework_shells/${id}/action`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'terminate' }),
+            });
+        }
+        requestSnapshot();
+    } catch (err) {
+        alert(err.message || 'Failed to stop group');
+    }
+}
+
+async function purgeFrameworkShell(shellId) {
+    try {
+        await frameworkFetch(`/api/framework_shells/${shellId}`, {
+            method: 'DELETE',
+        });
+        requestSnapshot();
+    } catch (err) {
+        alert(err.message || 'Failed to purge shell');
     }
 }
 
@@ -567,16 +987,16 @@ async function killFrameworkShellWithChildren(shellId, pid, killChildren) {
             // Use the new endpoint that kills parent + children
             await apiClient.delete(`process/${pid}?kill_children=true`);
         } else {
-            // Just kill the shell itself
+            // Just stop the shell itself (preserve metadata/logs for Exited section)
             await frameworkFetch(`/api/framework_shells/${shellId}/action`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'kill' }),
+                body: JSON.stringify({ action: 'terminate' }),
             });
         }
         requestSnapshot();
     } catch (err) {
-        alert(err.message || 'Failed to kill shell');
+        alert(err.message || 'Failed to stop shell');
     }
 }
 

@@ -1275,6 +1275,16 @@ window.__cm6RefreshRecents = function(state) {
 // Synchronize host + iframe when a project is opened in the explorer.
 // Called from explorer.js via window.__cm6HandleProjectOpened(path).
 async function handleProjectOpened(newProjectPath) {
+  // If the terminal drawer is open, shut it down first so it doesn't try to
+  // auto-rebind shells during a hot project switch.
+  try {
+    if (terminal && typeof terminal.closeAndDisconnect === 'function') {
+      terminal.closeAndDisconnect();
+    }
+  } catch (err) {
+    console.warn('[ProjectSwitch] Failed to close terminal drawer:', err);
+  }
+
   // Reset host-side editor/file state so we don't keep editing a file
   // from the previous project while the backend has already switched.
   closeWebSocket();

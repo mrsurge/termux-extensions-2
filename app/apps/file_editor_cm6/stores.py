@@ -17,6 +17,16 @@ _history_store = HistoryStore()
 _preferences_store = PreferencesStore()
 
 
+def get_history_store() -> HistoryStore:
+    """Return the shared HistoryStore instance (SSOT)."""
+    return _history_store
+
+
+def get_preferences_store() -> PreferencesStore:
+    """Return the shared PreferencesStore instance (SSOT)."""
+    return _preferences_store
+
+
 def get_project_sidecar(project_path: Optional[str]) -> Optional[ProjectSidecar]:
     """Convenience helper to fetch the ProjectSidecar for a project path."""
     if not project_path:

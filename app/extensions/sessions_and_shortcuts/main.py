@@ -14,6 +14,39 @@ sessions_bp = APIRouter()
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 _app_root_path = os.path.join(_project_root, 'app')
 
+def _load_framework_shell_ui_by_app() -> dict:
+    """Load app-defined framework shell UI hints from manifests on disk.
+
+    This is a dev affordance: it lets you tweak subgroup colors without
+    restarting the framework or re-spawning shells.
+    """
+    apps_dir = os.path.join(_app_root_path, 'apps')
+    out: dict = {}
+    try:
+        entries = os.listdir(apps_dir)
+    except Exception:
+        return out
+
+    for entry in entries:
+        manifest_path = os.path.join(apps_dir, entry, 'manifest.json')
+        if not os.path.isfile(manifest_path):
+            continue
+        try:
+            with open(manifest_path, 'r', encoding='utf-8') as fh:
+                manifest = json.load(fh)
+        except Exception:
+            continue
+
+        app_id = manifest.get('id') or entry
+        if not isinstance(app_id, str) or not app_id:
+            continue
+
+        ui = manifest.get('framework_shell_ui')
+        if isinstance(ui, dict) and ui:
+            out[app_id] = ui
+
+    return out
+
 def run_script(script_name, app_root_path, args=None):
     """Helper function to run a shell script and return its output."""
     project_root = os.path.dirname(app_root_path)
@@ -200,6 +233,12 @@ def get_shortcuts():
         raise HTTPException(status_code=500, detail='Failed to decode JSON from script.')
 
 
+@sessions_bp.get('/framework_ui')
+def get_framework_ui():
+    """Return app-defined framework shell UI hints (live from disk)."""
+    return {"ok": True, "data": _load_framework_shell_ui_by_app()}
+
+
 async def _list_framework_shells():
     try:
         from app.libs.framework_shells import get_manager
@@ -306,6 +345,7 @@ async def sessions_ws(websocket: WebSocket):
             frameworks = await _list_framework_shells()
             ipc_processes = await _list_ipc_processes()
             shell_trees = _build_shell_trees(frameworks, ipc_processes)
+            framework_ui = _load_framework_shell_ui_by_app()
             
             payload = {
                 "type": "update",
@@ -313,6 +353,7 @@ async def sessions_ws(websocket: WebSocket):
                 "frameworks": frameworks,  # Keep flat list for backward compat
                 "shell_trees": shell_trees,  # New hierarchical structure
                 "containers": [],
+                "framework_ui": framework_ui,
             }
             await websocket.send_json(payload)
             await asyncio.sleep(5)

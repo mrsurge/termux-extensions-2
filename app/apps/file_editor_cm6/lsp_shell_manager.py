@@ -102,6 +102,7 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
             full_cmd,
             cwd=str(project_root),
             label=label,
+            subgroups=["file_editor_cm6", "lsp"],
             autostart=False,
         )
     except Exception as exc:  # Keep failure silent-ish; editor shouldn't crash.
