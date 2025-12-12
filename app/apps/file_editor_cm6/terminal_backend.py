@@ -8,6 +8,7 @@ Provides REST endpoints and WebSocket PTY streaming for embedded terminal.
 import asyncio
 import json
 import shlex
+import re
 from pathlib import Path
 from typing import Set
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query, Depends
@@ -40,11 +41,15 @@ async def close_active_terminal_sockets(reason: str = "project switch") -> None:
         sockets = list(_active_terminal_sockets)
         _active_terminal_sockets.clear()
 
-    for ws in sockets:
+    async def _close_one(ws: WebSocket) -> None:
         try:
-            await ws.close(code=1012, reason=reason)
+            # Don't block request handlers on slow/busy sockets.
+            await asyncio.wait_for(ws.close(code=1012, reason=reason), timeout=0.5)
         except Exception:
             pass
+
+    for ws in sockets:
+        asyncio.create_task(_close_one(ws))
 
 def get_history_store():
     """Return the shared HistoryStore instance used across the app."""
@@ -58,6 +63,35 @@ RUNNABLE_COMMANDS = {
     ".bash": ["bash"],
     ".zsh": ["zsh"],
 }
+
+
+async def _next_sequence_for_project(
+    project_path: str,
+    sidecar: ProjectSidecar,
+    mgr: FrameworkShellManager,
+) -> int:
+    """Compute the next terminal sequence number for a project.
+
+    We cannot rely on list length because dead shells may be pruned, and labels
+    use the sequence suffix for uniqueness. Instead, scan tracked shells for
+    the highest numeric suffix and increment.
+    """
+    max_seq = 0
+    for sid in sidecar.get_terminal_shell_ids():
+        try:
+            rec = await mgr.get_shell(sid)
+        except Exception:
+            rec = None
+        if rec and rec.label:
+            m = re.search(r":(\d+)$", rec.label)
+            if m:
+                try:
+                    max_seq = max(max_seq, int(m.group(1)))
+                except Exception:
+                    pass
+    if max_seq <= 0:
+        max_seq = len(sidecar.get_terminal_shell_ids())
+    return max_seq + 1
 
 @terminal_router.get('/terminal/shell-id')
 async def get_terminal_shell_id():
@@ -151,8 +185,8 @@ async def create_terminal_shell():
         raise HTTPException(status_code=400, detail="No active project selected")
 
     sidecar = ProjectSidecar.load_or_create(project_path)
-    existing_ids = sidecar.get_terminal_shell_ids()
-    sequence = len(existing_ids) + 1
+    mgr = await get_manager()
+    sequence = await _next_sequence_for_project(project_path, sidecar, mgr)
 
     cwd = project_path if Path(project_path).is_dir() else str(Path.home())
     shell_rec = await create_editor_shell(cwd=cwd, project_path=project_path, sequence=sequence)
@@ -230,8 +264,11 @@ async def run_active_file():
         preferred_cwd = project_path if project_path and Path(project_path).is_dir() else workdir
         try:
             sidecar = ProjectSidecar.load_or_create(project_path) if project_path else None
-            seq = (len(sidecar.get_terminal_shell_ids()) + 1) if sidecar else 1
         except Exception:
+            sidecar = None
+        if sidecar and project_path:
+            seq = await _next_sequence_for_project(project_path, sidecar, mgr)
+        else:
             seq = 1
         shell_info = await create_editor_shell(cwd=preferred_cwd, project_path=project_path, sequence=seq)
         shell_id = shell_info["id"]
@@ -385,8 +422,11 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
             cwd = project_path if project_path and Path(project_path).is_dir() else str(Path.home())
             try:
                 sidecar = ProjectSidecar.load_or_create(project_path) if project_path else None
-                seq = (len(sidecar.get_terminal_shell_ids()) + 1) if sidecar else 1
             except Exception:
+                sidecar = None
+            if sidecar and project_path:
+                seq = await _next_sequence_for_project(project_path, sidecar, mgr)
+            else:
                 seq = 1
             print(f"[Terminal WS] Creating new terminal shell (cwd={cwd})")
             shell_rec = await create_editor_shell(cwd=cwd, project_path=project_path, sequence=seq)
