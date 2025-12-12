@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, Body, Query, Depends
 from app.libs.framework_shells import FrameworkShellManager, get_manager
 from app.apps.file_editor_cm6 import edit_tracker
 from app.apps.file_editor_cm6.stores import _history_store as _shared_history_store
+from app.apps.file_editor_cm6.project_sidecar import ProjectSidecar
 from app.apps.file_editor_cm6.terminal_shell import (
     create_editor_shell,
     destroy_editor_shell,
@@ -98,6 +99,102 @@ async def set_terminal_shell_id(data: dict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@terminal_router.get('/terminal/shells')
+async def list_terminal_shells(include_exited: bool = Query(False)):
+    """List terminal shells for the active project.
+
+    Returns ordered live shells by default. Exited/stale shells are pruned from
+    the per-project list unless include_exited is true.
+    """
+    history_store = get_history_store()
+    project_path = history_store.get_active_project()
+    if not project_path:
+        return {"ok": True, "data": {"active_shell_id": None, "shells": []}}
+
+    sidecar = ProjectSidecar.load_or_create(project_path)
+    shell_ids = sidecar.get_terminal_shell_ids()
+    active_id = sidecar.get_active_terminal_shell_id()
+
+    mgr = await get_manager()
+    shells = []
+    dead_ids = []
+    for sid in shell_ids:
+        rec = await mgr.get_shell(sid)
+        live = bool(rec and rec.status == "running" and rec.pid)
+        if not live:
+            dead_ids.append(sid)
+            if not include_exited:
+                continue
+        shells.append({
+            "id": sid,
+            "label": f"Terminal {sid[-4:]}",
+            "status": rec.status if rec else "missing",
+            "pid": rec.pid if rec else None,
+        })
+
+    # Prune dead ids from sidecar to keep list clean.
+    if dead_ids and not include_exited:
+        for sid in dead_ids:
+            sidecar.remove_terminal_shell_id(sid)
+        active_id = sidecar.get_active_terminal_shell_id()
+        sidecar.save()
+
+    return {"ok": True, "data": {"active_shell_id": active_id, "shells": shells}}
+
+
+@terminal_router.post('/terminal/shells')
+async def create_terminal_shell():
+    """Create a new PTY terminal shell for the active project and set active."""
+    history_store = get_history_store()
+    project_path = history_store.get_active_project()
+    if not project_path:
+        raise HTTPException(status_code=400, detail="No active project selected")
+
+    sidecar = ProjectSidecar.load_or_create(project_path)
+    existing_ids = sidecar.get_terminal_shell_ids()
+    sequence = len(existing_ids) + 1
+
+    cwd = project_path if Path(project_path).is_dir() else str(Path.home())
+    shell_rec = await create_editor_shell(cwd=cwd, project_path=project_path, sequence=sequence)
+    shell_id = shell_rec["id"]
+
+    sidecar.add_terminal_shell_id(shell_id)
+    sidecar.save()
+
+    # Force any open drawers to rebind to the new active shell.
+    await close_active_terminal_sockets("new terminal")
+
+    return {"ok": True, "data": {"shell_id": shell_id, "label": f"Terminal {shell_id[-4:]}"}}
+
+
+@terminal_router.post('/terminal/shells/{shell_id}/activate')
+async def activate_terminal_shell(shell_id: str):
+    """Activate an existing terminal shell for the active project."""
+    history_store = get_history_store()
+    project_path = history_store.get_active_project()
+    if not project_path:
+        raise HTTPException(status_code=400, detail="No active project selected")
+
+    sidecar = ProjectSidecar.load_or_create(project_path)
+    ids = sidecar.get_terminal_shell_ids()
+    if shell_id not in ids:
+        raise HTTPException(status_code=404, detail="Shell not tracked for this project")
+
+    mgr = await get_manager()
+    rec = await mgr.get_shell(shell_id)
+    if not rec or rec.status != "running" or not rec.pid:
+        # Prune dead shell.
+        sidecar.remove_terminal_shell_id(shell_id)
+        sidecar.save()
+        raise HTTPException(status_code=409, detail="Shell is not running")
+
+    sidecar.set_active_terminal_shell_id(shell_id)
+    sidecar.save()
+
+    await close_active_terminal_sockets("terminal activate")
+    return {"ok": True, "data": {"shell_id": shell_id}}
+
+
 @terminal_router.post('/terminal/run_active_file')
 async def run_active_file():
     """Run the currently active (last opened) file in the project terminal.
@@ -131,7 +228,12 @@ async def run_active_file():
 
     if not shell_id:
         preferred_cwd = project_path if project_path and Path(project_path).is_dir() else workdir
-        shell_info = await create_editor_shell(cwd=preferred_cwd, project_path=project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(project_path) if project_path else None
+            seq = (len(sidecar.get_terminal_shell_ids()) + 1) if sidecar else 1
+        except Exception:
+            seq = 1
+        shell_info = await create_editor_shell(cwd=preferred_cwd, project_path=project_path, sequence=seq)
         shell_id = shell_info["id"]
         history_store.set_terminal_shell_id(shell_id, project_path)
 
@@ -163,6 +265,20 @@ async def terminal_destroy(shell_id: str):
     """
     try:
         success = await destroy_editor_shell(shell_id)
+        # Remove from per-project list if applicable.
+        history_store = get_history_store()
+        project_path = history_store.get_active_project()
+        was_active = False
+        if project_path:
+            try:
+                sidecar = ProjectSidecar.load_or_create(project_path)
+                was_active = sidecar.get_active_terminal_shell_id() == shell_id
+                sidecar.remove_terminal_shell_id(shell_id)
+                sidecar.save()
+            except Exception:
+                pass
+        if was_active:
+            await close_active_terminal_sockets("terminal closed")
         if success:
             return {"ok": True, "data": {"id": shell_id}}
         else:
@@ -267,8 +383,13 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
             # Use active project path if available, fallback to home
             project_path = shell_project_path
             cwd = project_path if project_path and Path(project_path).is_dir() else str(Path.home())
+            try:
+                sidecar = ProjectSidecar.load_or_create(project_path) if project_path else None
+                seq = (len(sidecar.get_terminal_shell_ids()) + 1) if sidecar else 1
+            except Exception:
+                seq = 1
             print(f"[Terminal WS] Creating new terminal shell (cwd={cwd})")
-            shell_rec = await create_editor_shell(cwd=cwd, project_path=project_path)
+            shell_rec = await create_editor_shell(cwd=cwd, project_path=project_path, sequence=seq)
             shell_id = shell_rec['id']
             print(f"[Terminal WS] New shell created: {shell_id}")
             history_store.set_terminal_shell_id(shell_id, project_path)
@@ -327,7 +448,15 @@ async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellMa
                         print(f"[Terminal WS] Error terminating shell: {e}")
                     
                     # Clear from history store (ATOMIC with terminate)
-                    history_store.set_terminal_shell_id(None, shell_project_path)
+                    if shell_project_path:
+                        try:
+                            sidecar = ProjectSidecar.load_or_create(shell_project_path)
+                            sidecar.remove_terminal_shell_id(shell_id)
+                            sidecar.save()
+                        except Exception:
+                            history_store.set_terminal_shell_id(None, shell_project_path)
+                    else:
+                        history_store.set_terminal_shell_id(None, shell_project_path)
                     print(f"[Terminal WS] Shell {shell_id} destroyed and cache cleared")
                     
                     # Send confirmation and close

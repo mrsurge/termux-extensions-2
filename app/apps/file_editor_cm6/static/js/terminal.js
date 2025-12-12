@@ -30,10 +30,113 @@ export function createTerminalDrawer(options = {}) {
   const drawer = document.getElementById('terminal-drawer');
   const container = document.getElementById('terminal-container');
   const header = drawer?.querySelector('.terminal-header');
+  const shellToggle = drawer?.querySelector('#terminal-shell-toggle');
+  const shellMenu = drawer?.querySelector('#terminal-shell-menu');
   const toggleBtn = document.getElementById('terminal-toggle');
-  const closeBtn = document.getElementById('terminal-close');
   const collapseBtn = document.getElementById('terminal-collapse');
   const fullscreenBtn = document.getElementById('terminal-fullscreen');
+  const newBtn = document.getElementById('terminal-new');
+
+  let shellMenuOpen = false;
+
+  function formatShellLabel(id) {
+    if (!id) return 'Terminal';
+    return `Terminal ${String(id).slice(-4)}`;
+  }
+
+  async function fetchShellList() {
+    try {
+      const res = await fetch('/api/app/file_editor_cm6/terminal/shells', { cache: 'no-store' });
+      const json = await res.json();
+      if (json && json.ok && json.data) return json.data;
+    } catch (err) {
+      console.warn('Failed to fetch terminal shells:', err);
+    }
+    return { active_shell_id: null, shells: [] };
+  }
+
+  function setShellMenuOpen(open) {
+    shellMenuOpen = !!open;
+    if (shellMenu) {
+      shellMenu.classList.toggle('open', shellMenuOpen);
+    }
+    if (shellToggle) {
+      shellToggle.setAttribute('aria-expanded', shellMenuOpen ? 'true' : 'false');
+    }
+  }
+
+  function renderShellMenu(shells, activeId) {
+    if (!shellMenu) return;
+    shellMenu.innerHTML = '';
+
+    (shells || []).forEach((s) => {
+      const row = document.createElement('div');
+      row.className = 'terminal-shell-item' + (s.id === activeId ? ' active' : '');
+      row.dataset.id = s.id;
+
+      const label = document.createElement('span');
+      label.className = 'terminal-shell-item-label';
+      label.textContent = s.label || formatShellLabel(s.id);
+
+      const close = document.createElement('button');
+      close.className = 'terminal-shell-item-close';
+      close.type = 'button';
+      close.dataset.id = s.id;
+      close.textContent = '✕';
+      close.title = 'Close terminal';
+
+      row.appendChild(label);
+      row.appendChild(close);
+
+      // Activate on label/row click (ignore close button clicks).
+      row.addEventListener('click', async (ev) => {
+        if (ev.target === close) return;
+        try {
+          await fetch(`/api/app/file_editor_cm6/terminal/shells/${encodeURIComponent(s.id)}/activate`, { method: 'POST' });
+        } catch (err) {
+          console.warn('Failed to activate terminal shell:', err);
+        } finally {
+          setShellMenuOpen(false);
+        }
+      });
+
+      close.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        try {
+          await fetch(`/api/app/file_editor_cm6/terminal/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+        } catch (err) {
+          console.warn('Failed to close terminal shell:', err);
+        } finally {
+          await refreshShellMenu();
+        }
+      });
+
+      shellMenu.appendChild(row);
+    });
+  }
+
+  async function refreshShellMenu() {
+    const data = await fetchShellList();
+    const activeId = data.active_shell_id || shellId;
+    renderShellMenu(data.shells, activeId);
+    if (shellToggle) {
+      shellToggle.textContent = activeId ? formatShellLabel(activeId) : 'Terminal';
+    }
+  }
+
+  if (shellToggle) {
+    shellToggle.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      setShellMenuOpen(!shellMenuOpen);
+    });
+  }
+
+  // Close menu on outside clicks.
+  document.addEventListener('click', (ev) => {
+    if (!shellMenuOpen) return;
+    if (header && header.contains(ev.target)) return;
+    setShellMenuOpen(false);
+  });
 
   /**
    * Load xterm.js dynamically
@@ -150,6 +253,11 @@ export function createTerminalDrawer(options = {}) {
             shellHistoryPrimed = false;
           }
           lastShellId = receivedShellId;
+
+          // Sync dropdown to backend active shell.
+          try {
+            await refreshShellMenu();
+          } catch (_) {}
 
           // Now fetch logs with the real shell ID (only once per shell)
           if (term && !shellHistoryPrimed) {
@@ -284,6 +392,9 @@ export function createTerminalDrawer(options = {}) {
       await initTerminal();
     }
 
+    // Refresh shell selector from backend (project-agnostic, backend-owned).
+    await refreshShellMenu();
+
     // Create shell if doesn't exist (getOrCreateShell returns null now)
     if (!shellId) {
       await getOrCreateShell();  // This just prepares, doesn't return ID
@@ -408,7 +519,8 @@ export function createTerminalDrawer(options = {}) {
     let isResizing = false;
 
     header.addEventListener('mousedown', (e) => {
-      // Only resize on header span, not buttons
+      // Only resize on header background, not interactive controls
+      if (e.target.closest('.terminal-shell-dropdown')) return;
       if (e.target.tagName === 'BUTTON') return;
       
       isResizing = true;
@@ -455,9 +567,16 @@ export function createTerminalDrawer(options = {}) {
     toggleBtn.addEventListener('click', toggle);
   }
 
-  if (closeBtn) {
-    closeBtn.addEventListener('click', async () => {
-      await destroy();  // ✅ Properly await async function
+  if (newBtn) {
+    newBtn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      try {
+        await fetch('/api/app/file_editor_cm6/terminal/shells', { method: 'POST' });
+      } catch (err) {
+        console.warn('Failed to create new terminal shell:', err);
+      } finally {
+        await refreshShellMenu();
+      }
     });
   }
 

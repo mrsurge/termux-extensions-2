@@ -120,8 +120,14 @@ class ProjectSidecar:
             "last_file": None,
             # Open directories in explorer tree (persisted across reloads).
             "open_directories": [],
-            # Per-project terminal framework shell id.
+            # Legacy single terminal framework shell id (kept for lazy migration).
             "terminal_shell_id": None,
+            # Ordered list of terminal framework shell ids for this project.
+            "terminal_shell_ids": [],
+            # Currently active terminal framework shell id for this project.
+            "active_terminal_shell_id": None,
+            # Cap for number of stored terminal shells per project.
+            "terminal_shell_cap": 5,
         }
 
     # --------------------------------------------------------------------- #
@@ -454,15 +460,99 @@ class ProjectSidecar:
     # Terminal shell ID (per-project)
     # --------------------------------------------------------------------- #
 
+    def _migrate_terminal_legacy(self) -> None:
+        """Ensure multi-shell fields exist and migrate legacy single-shell slot."""
+        if "terminal_shell_ids" not in self._data or not isinstance(self._data.get("terminal_shell_ids"), list):
+            self._data["terminal_shell_ids"] = []
+        if "active_terminal_shell_id" not in self._data:
+            self._data["active_terminal_shell_id"] = None
+        if "terminal_shell_cap" not in self._data or not isinstance(self._data.get("terminal_shell_cap"), int):
+            self._data["terminal_shell_cap"] = 5
+
+        legacy = self._data.get("terminal_shell_id")
+        ids: List[str] = self._data.get("terminal_shell_ids") or []
+        if legacy and legacy not in ids:
+            ids.append(str(legacy))
+            self._data["terminal_shell_ids"] = ids
+        if legacy and not self._data.get("active_terminal_shell_id"):
+            self._data["active_terminal_shell_id"] = str(legacy)
+        if legacy and ("terminal_shell_id" in self._data):
+            # Clear legacy slot once migrated to avoid cross-field drift.
+            self._data["terminal_shell_id"] = None
+
+    def get_terminal_shell_ids(self) -> List[str]:
+        """Return ordered terminal shell ids for this project."""
+        self._migrate_terminal_legacy()
+        ids: List[str] = self._data.get("terminal_shell_ids") or []
+        return [str(i) for i in ids if i]
+
+    def add_terminal_shell_id(self, shell_id: str) -> str:
+        """Append a shell id to the list, enforce cap, and mark active."""
+        if not shell_id:
+            return shell_id
+        self._migrate_terminal_legacy()
+        ids: List[str] = self._data.get("terminal_shell_ids") or []
+        sid = str(shell_id)
+        if sid not in ids:
+            ids.append(sid)
+        cap = int(self._data.get("terminal_shell_cap") or 5)
+        if cap > 0 and len(ids) > cap:
+            # Trim oldest, but never drop the active/new shell.
+            while len(ids) > cap and ids[0] != sid:
+                ids.pop(0)
+        self._data["terminal_shell_ids"] = ids
+        self._data["active_terminal_shell_id"] = sid
+        # Mirror to legacy field for compatibility.
+        self._data["terminal_shell_id"] = sid
+        return sid
+
+    def remove_terminal_shell_id(self, shell_id: str) -> Optional[str]:
+        """Remove a shell id from the list. Adjust active if needed."""
+        if not shell_id:
+            return self.get_active_terminal_shell_id()
+        self._migrate_terminal_legacy()
+        ids: List[str] = self._data.get("terminal_shell_ids") or []
+        sid = str(shell_id)
+        if sid in ids:
+            ids.remove(sid)
+        self._data["terminal_shell_ids"] = ids
+        active = self._data.get("active_terminal_shell_id")
+        if active == sid:
+            active = ids[-1] if ids else None
+            self._data["active_terminal_shell_id"] = active
+        self._data["terminal_shell_id"] = active
+        return str(active) if active else None
+
+    def get_active_terminal_shell_id(self) -> Optional[str]:
+        """Return active terminal shell id (fallback to newest)."""
+        self._migrate_terminal_legacy()
+        ids = self._data.get("terminal_shell_ids") or []
+        active = self._data.get("active_terminal_shell_id")
+        if active and active in ids:
+            return str(active)
+        if ids:
+            newest = str(ids[-1])
+            self._data["active_terminal_shell_id"] = newest
+            self._data["terminal_shell_id"] = newest
+            return newest
+        return None
+
+    def set_active_terminal_shell_id(self, shell_id: Optional[str]) -> Optional[str]:
+        """Set active terminal shell id, ensuring membership in list."""
+        self._migrate_terminal_legacy()
+        if not shell_id:
+            self._data["active_terminal_shell_id"] = None
+            self._data["terminal_shell_id"] = None
+            return None
+        return self.add_terminal_shell_id(str(shell_id))
+
     def get_terminal_shell_id(self) -> Optional[str]:
-        """Return the stored framework shell id for this project's terminal."""
-        val = self._data.get("terminal_shell_id")
-        return str(val) if val else None
+        """Compatibility wrapper: return the active terminal shell id."""
+        return self.get_active_terminal_shell_id()
 
     def set_terminal_shell_id(self, shell_id: Optional[str]) -> Optional[str]:
-        """Persist the framework shell id for this project's terminal."""
-        self._data["terminal_shell_id"] = shell_id or None
-        return shell_id or None
+        """Compatibility wrapper: set active terminal shell id."""
+        return self.set_active_terminal_shell_id(shell_id)
 
 
 def clear_project_state(project_path: str) -> bool:

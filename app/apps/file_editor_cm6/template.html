@@ -517,12 +517,68 @@
     cursor: ns-resize;
     user-select: none;
   }
-  .terminal-header span {
+  .terminal-shell-dropdown {
+    position: relative;
     flex: 1;
+    min-width: 0;
+  }
+  .terminal-header .terminal-shell-toggle {
+    width: 100%;
+    text-align: left;
     font-weight: 600;
     font-size: 0.9rem;
     color: var(--foreground, #e5e7eb);
-    cursor: ns-resize;
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    cursor: pointer;
+  }
+  .terminal-header .terminal-shell-toggle:focus {
+    outline: 1px solid var(--border, #333);
+    border-radius: 4px;
+  }
+  .terminal-shell-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--card, #0b0f1a);
+    border: 1px solid var(--border, #333);
+    border-radius: 6px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.45);
+    padding: 4px 0;
+    max-height: 240px;
+    overflow-y: auto;
+    display: none;
+    z-index: 220;
+  }
+  .terminal-shell-menu.open { display: block; }
+  .terminal-shell-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .terminal-shell-item:hover {
+    background: rgba(255,255,255,0.05);
+  }
+  .terminal-shell-item.active {
+    background: rgba(255,255,255,0.08);
+  }
+  .terminal-shell-item-label { flex: 1; min-width: 0; }
+  .terminal-shell-item-close {
+    background: transparent;
+    border: none;
+    color: var(--destructive, #ef4444);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+  }
+  .terminal-shell-item-close:hover {
+    background: rgba(239,68,68,0.15);
   }
   .terminal-header button {
     background: transparent;
@@ -1603,10 +1659,13 @@
   <!-- Terminal Drawer -->
   <div id="terminal-drawer" class="terminal-drawer">
     <div class="terminal-header">
-      <span>Terminal</span>
+      <div class="terminal-shell-dropdown">
+        <button id="terminal-shell-toggle" class="terminal-shell-toggle" aria-haspopup="listbox" aria-expanded="false">Terminal</button>
+        <div id="terminal-shell-menu" class="terminal-shell-menu" role="listbox" aria-label="Terminal shells"></div>
+      </div>
       <button id="terminal-fullscreen" title="Toggle fullscreen" aria-label="Fullscreen">⛶</button>
       <button id="terminal-collapse" title="Collapse terminal" aria-label="Collapse">▼</button>
-      <button id="terminal-close" title="Destroy terminal" aria-label="Close terminal">✕</button>
+      <button id="terminal-new" title="New terminal" aria-label="New terminal">＋</button>
     </div>
     <div id="terminal-container"></div>
   </div>

@@ -982,18 +982,31 @@ class FrameworkShellManager:
             return await self._launch(record)
 
     async def remove_shell(self, shell_id: str, *, force: bool = False) -> None:
+        # NOTE: terminate_shell() acquires the same manager lock.
+        # Do not call it while holding _get_lock(), or we deadlock.
         async with self._get_lock():
             record = await self._load_record(shell_id)
             if not record:
                 raise KeyError("Shell not found")
-            
-            # Unregister from IPC (defensive - should already be unregistered by terminate_shell)
-            if record.pid:
+            pid = record.pid
+
+        # Unregister from IPC (defensive - should already be unregistered by terminate_shell)
+        if pid:
+            try:
                 from app.ipc.client import unregister_process
-                unregister_process(record.pid)
-            
-            if record.pid and await self._is_pid_alive(record.pid):
-                await self.terminate_shell(shell_id, force=force)
+                unregister_process(pid)
+            except Exception:
+                pass
+
+        if pid and await self._is_pid_alive(pid):
+            # Terminate outside lock to avoid deadlock.
+            await self.terminate_shell(shell_id, force=force)
+
+        async with self._get_lock():
+            # Reload record in case terminate_shell mutated it.
+            record = await self._load_record(shell_id)
+            if not record:
+                return
             await self._stop_pty(shell_id)
             await self._stop_pipe(shell_id)
             await self._purge_record_files(record)
