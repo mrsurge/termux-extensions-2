@@ -138,6 +138,31 @@ export function createTerminalDrawer(options = {}) {
     setShellMenuOpen(false);
   });
 
+  function closeAndDisconnect() {
+    // Close UI (do NOT destroy shells). Used for project hot-switches.
+    try {
+      close();
+    } catch (_) {}
+
+    setShellMenuOpen(false);
+
+    // Stop reconnect attempts and drop the socket so a future open()
+    // will establish a fresh /ws/.../auto connection for the new project.
+    if (ws) {
+      try { ws.close(); } catch (_) {}
+      ws = null;
+    }
+
+    // Force fresh history priming on next shell_id message.
+    shellId = null;
+    lastShellId = null;
+    shellHistoryPrimed = false;
+
+    if (shellToggle) {
+      shellToggle.textContent = 'Terminal';
+    }
+  }
+
   /**
    * Load xterm.js dynamically
    */
@@ -599,6 +624,7 @@ export function createTerminalDrawer(options = {}) {
     close,
     toggle,
     destroy,
+    closeAndDisconnect,
     isOpen: () => isOpen,
   };
 }
