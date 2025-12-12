@@ -1,6 +1,6 @@
 """Core-managed framework shell orchestration.
 
-This module exposes a Flask blueprint plus a light manager that can spawn,
+This module exposes a FastAPI APIRouter plus a light manager that can spawn,
 inspect, and control long-running background processes ("framework shells").
 The shells inherit `TE_SESSION_TYPE=framework`, keeping them out of the
 interactive Sessions UI while allowing extensions to manage supporting
