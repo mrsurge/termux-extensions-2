@@ -109,10 +109,6 @@ export function initExplorerStickyScopes({
 
   // Mirrors `.fe-tree` padding: 8px 12px 8px 7px
   const PADDING_TOP = 8;
-  const PADDING_LEFT = 7;
-  const PADDING_RIGHT = 12;
-  const INDENT_PER_DEPTH = 12;
-  const BASE_PADDING_LEFT = 10;
   // Extra early capture rows. For the explorer we want the scope to "dock"
   // exactly as it reaches the sticky stack, so keep this at 0.
   const EARLY_ROWS = 0;
@@ -227,11 +223,23 @@ export function initExplorerStickyScopes({
     const rowEl = stickyRows[depth];
     if (!slotEl || !rowEl) return;
 
+    // Match the source node's horizontal geometry (indent + width) so
+    // sticky rows line up with their real DOM counterparts.
+    const bodyRect = drawerBodyEl.getBoundingClientRect();
+    const srcRect = srcLi.getBoundingClientRect();
+    if (isElementVisibleRect(bodyRect) && isElementVisibleRect(srcRect)) {
+      const left = Math.round(srcRect.left - bodyRect.left);
+      const right = Math.round(bodyRect.right - srcRect.right);
+      slotEl.style.left = `${Math.max(0, left)}px`;
+      slotEl.style.right = `${Math.max(0, right)}px`;
+    } else {
+      slotEl.style.left = '0px';
+      slotEl.style.right = '0px';
+    }
+
     slotEl.style.top = `${PADDING_TOP + depth * rowStepPx}px`;
     slotEl.style.height = `${rowStepPx}px`;
     slotEl.style.zIndex = `${1000 - depth}`;
-    slotEl.style.left = `${PADDING_LEFT}px`;
-    slotEl.style.right = `${PADDING_RIGHT}px`;
 
     copyExplorerVisualClasses(srcLi, rowEl);
     rowEl.dataset.kind = 'dir';
@@ -256,7 +264,8 @@ export function initExplorerStickyScopes({
       delete rowEl.dataset.hasDraft;
     }
 
-    rowEl.style.paddingLeft = `${BASE_PADDING_LEFT + depth * INDENT_PER_DEPTH}px`;
+    // Let CSS control padding; indentation comes from the slot geometry above.
+    rowEl.style.paddingLeft = '';
 
     if (!rebuild) return;
 
