@@ -133,7 +133,6 @@
   z-index: 9; /* below search overlay (10) */
   pointer-events: none; /* pass scroll/taps through, except menu buttons */
   overflow: hidden;
-  padding: 8px 12px 0 7px; /* match .fe-tree horizontal padding */
   background: linear-gradient(
     to bottom,
     rgba(11, 18, 32, 0.98) 0%,

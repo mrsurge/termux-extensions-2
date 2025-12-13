@@ -105,9 +105,15 @@ export function initExplorerStickyScopes({
   let stickySourceLis = [];
   let rowStepPx = 0;
 
-  const PADDING_TOP = 8; // mirrors .fe-tree padding-top
+  // Mirrors `.fe-tree` padding: 8px 12px 8px 7px
+  const PADDING_TOP = 8;
+  const PADDING_LEFT = 7;
+  const PADDING_RIGHT = 12;
   const INDENT_PER_DEPTH = 12;
   const BASE_PADDING_LEFT = 10;
+  // Extra early capture rows. For the explorer we want the scope to "dock"
+  // exactly as it reaches the sticky stack, so keep this at 0.
+  const EARLY_ROWS = 0;
 
   function scheduleUpdate() {
     if (disposed) return;
@@ -142,7 +148,7 @@ export function initExplorerStickyScopes({
     return Math.round(rect.height || 0);
   }
 
-  function computeFocusNode() {
+  function computeFocusNode(offsetTopPx = 12) {
     const rect = treeElement.getBoundingClientRect();
     if (!isElementVisibleRect(rect)) return null;
 
@@ -152,13 +158,42 @@ export function initExplorerStickyScopes({
       rect.right - 12,
       rect.left + Math.min(160, rect.width * 0.5),
     );
-    const y = rect.top + 12;
+    const y = Math.min(rect.bottom - 12, rect.top + Math.max(12, offsetTopPx));
     const els = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [];
     for (const el of els) {
       const li = findClosestTreeNode(treeElement, el);
       if (li) return li;
     }
     return findClosestTreeNode(treeElement, document.elementFromPoint(x, y));
+  }
+
+  function computeStickyChainWithOffset() {
+    const rootLi = treeElement.querySelector('li.fe-tree-node.fe-tree-root');
+    if (!rootLi) return [];
+
+    // Start from previous chain length so we converge quickly.
+    let assumedCount = Math.max(1, stickySourceLis.length || 1);
+    let chain = [];
+    let lastIterKey = '';
+
+    for (let i = 0; i < 5; i++) {
+      const offsetRows = assumedCount + EARLY_ROWS;
+      const offsetPx = PADDING_TOP + 12 + offsetRows * rowStepPx;
+      const focusLi = computeFocusNode(offsetPx);
+      chain = getDirectoryChainFromNode(focusLi);
+      if (!chain.length) chain = [rootLi];
+      const key = chain.map((li) => li.dataset.rel || '').join('|');
+      if (key && key === lastIterKey) break;
+      lastIterKey = key;
+      assumedCount = Math.max(1, chain.length);
+    }
+
+    // Root is always slot 0.
+    if (chain[0] !== rootLi) {
+      // Ensure we don't duplicate root if already present.
+      chain = [rootLi, ...chain.filter((li) => li !== rootLi)];
+    }
+    return chain;
   }
 
   function ensureSlotCount(count) {
@@ -186,9 +221,11 @@ export function initExplorerStickyScopes({
     const rowEl = stickyRows[depth];
     if (!slotEl || !rowEl) return;
 
-    slotEl.style.top = `${depth * rowStepPx}px`;
+    slotEl.style.top = `${PADDING_TOP + depth * rowStepPx}px`;
     slotEl.style.height = `${rowStepPx}px`;
     slotEl.style.zIndex = `${1000 - depth}`;
+    slotEl.style.left = `${PADDING_LEFT}px`;
+    slotEl.style.right = `${PADDING_RIGHT}px`;
 
     copyExplorerVisualClasses(srcLi, rowEl);
     rowEl.dataset.kind = 'dir';
@@ -302,8 +339,7 @@ export function initExplorerStickyScopes({
     }
     rowStepPx = step;
 
-    const focusLi = computeFocusNode();
-    const chain = getDirectoryChainFromNode(focusLi);
+    const chain = computeStickyChainWithOffset();
     const key = chain.map((li) => li.dataset.rel || '').join('|');
 
     if (!key || chain.length === 0) {
