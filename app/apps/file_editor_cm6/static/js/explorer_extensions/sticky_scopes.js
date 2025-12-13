@@ -116,6 +116,11 @@ export function initExplorerStickyScopes({
   // When scrolling up, release scopes slightly earlier to avoid "sticking"
   // for too long. (-1 row == release one row sooner).
   const UP_RELEASE_ROWS = 1;
+  // Fine-tune (px) to make capture/push align visually.
+  // Negative values move the capture trigger *later* (requires more scrolling).
+  const CAPTURE_Y_ADJUST_PX = -5;
+  // Positive values start the push-up sooner (and delay pull-down when scrolling up).
+  const PUSH_TRIGGER_ADJUST_PX = 5;
 
   function scheduleUpdate() {
     if (disposed) return;
@@ -181,7 +186,8 @@ export function initExplorerStickyScopes({
     for (let i = 0; i < 5; i++) {
       const dirAdj = scrollDirection === 'up' ? -UP_RELEASE_ROWS : 0;
       const offsetRows = Math.max(0, assumedCount + EARLY_ROWS + dirAdj);
-      const offsetPx = PADDING_TOP + 12 + offsetRows * rowStepPx;
+      const offsetPx =
+        PADDING_TOP + 12 + offsetRows * rowStepPx + CAPTURE_Y_ADJUST_PX;
       const focusLi = computeFocusNode(offsetPx);
       chain = getDirectoryChainFromNode(focusLi);
       if (!chain.length) chain = [rootLi];
@@ -343,7 +349,11 @@ export function initExplorerStickyScopes({
       const nextDir = findNextSiblingDirectory(srcLi);
       if (nextDir) {
         const nextRect = nextDir.getBoundingClientRect();
-        const anchorY = listTop + (depth + 1) * rowStepPx + cumulativePush;
+        const anchorY =
+          listTop +
+          (depth + 1) * rowStepPx +
+          cumulativePush +
+          PUSH_TRIGGER_ADJUST_PX;
         const overlap = nextRect.top - anchorY;
         if (overlap < 0) {
           push = Math.max(overlap, -rowStepPx);
