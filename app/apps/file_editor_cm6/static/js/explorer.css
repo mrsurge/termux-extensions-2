@@ -416,7 +416,7 @@
 
 /* Staged descendants: solid green background (when no untracked). */
 .fe-tree-node[data-kind="dir"].fe-dir-has-staged:not(.fe-dir-has-untracked) {
-  background: rgba(52, 211, 153, 0.15);
+  background: rgb(52, 99, 80);
 }
 
 /* Both untracked + staged descendants: smooth diagonal blue→green gradient. */

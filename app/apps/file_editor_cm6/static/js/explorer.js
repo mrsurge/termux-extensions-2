@@ -2629,6 +2629,13 @@ export async function initExplorerUI() {
                   treeElement.scrollTop = nextTop;
                 }
               }
+
+              // Nudge sticky overlay to recompute immediately (some engines may not
+              // emit a scroll event for programmatic `scrollTop` changes).
+              const stickyApi = window.__explorerStickyScopes;
+              if (stickyApi && typeof stickyApi.update === 'function') {
+                stickyApi.update();
+              }
             }
           }
           return;

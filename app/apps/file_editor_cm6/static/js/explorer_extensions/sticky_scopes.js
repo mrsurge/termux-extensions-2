@@ -110,6 +110,7 @@ export function initExplorerStickyScopes({
   let scrollDirection = 'down'; // 'down' | 'up'
   let pendingKey = '';
   let pendingKeyFrames = 0;
+  let stabilityResampleBudget = 0;
 
   // Mirrors `.fe-tree` padding: 8px 12px 8px 7px
   const PADDING_TOP = 8;
@@ -421,6 +422,7 @@ export function initExplorerStickyScopes({
     // (common during push-up/pull-down transitions).
     let chain = rawChain;
     let key = rawKey;
+    let needsStabilityResample = false;
     if (rawKey && lastKey && rawKey !== lastKey && stickySourceLis.length) {
       if (rawKey === pendingKey) {
         pendingKeyFrames += 1;
@@ -432,13 +434,20 @@ export function initExplorerStickyScopes({
       if (pendingKeyFrames < KEY_STABILITY_FRAMES) {
         chain = stickySourceLis;
         key = lastKey;
+        needsStabilityResample = true;
+        stabilityResampleBudget = Math.max(
+          stabilityResampleBudget,
+          KEY_STABILITY_FRAMES - pendingKeyFrames,
+        );
       } else {
         pendingKey = '';
         pendingKeyFrames = 0;
+        stabilityResampleBudget = 0;
       }
     } else {
       pendingKey = '';
       pendingKeyFrames = 0;
+      stabilityResampleBudget = 0;
     }
 
     if (!key || chain.length === 0) {
@@ -474,6 +483,13 @@ export function initExplorerStickyScopes({
     }
 
     applyPushTransforms();
+
+    // If we held the old chain for stability, ensure we sample again on the next
+    // animation frame so the overlay can converge without requiring user scroll.
+    if (needsStabilityResample && stabilityResampleBudget > 0) {
+      stabilityResampleBudget -= 1;
+      scheduleUpdate();
+    }
   }
 
   const observer = new MutationObserver(scheduleUpdate);
