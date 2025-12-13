@@ -118,9 +118,9 @@ export function initExplorerStickyScopes({
   const UP_RELEASE_ROWS = 1;
   // Fine-tune (px) to make capture/push align visually.
   // Negative values move the capture trigger *later* (requires more scrolling).
-  const CAPTURE_Y_ADJUST_PX = -5;
+  const CAPTURE_Y_ADJUST_PX = -12;
   // Positive values start the push-up sooner (and delay pull-down when scrolling up).
-  const PUSH_TRIGGER_ADJUST_PX = 5;
+  const PUSH_TRIGGER_ADJUST_PX = 10;
 
   function scheduleUpdate() {
     if (disposed) return;
