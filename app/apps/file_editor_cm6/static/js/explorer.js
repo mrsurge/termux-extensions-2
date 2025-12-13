@@ -12,6 +12,7 @@
 
 import { showNewProjectModal } from './new_project_modal.js';
 import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
+import { initExplorerStickyScopes } from './explorer_extensions/sticky_scopes.js';
 
 let treeElement = null;
 let projectLabelEl = null;
@@ -1558,6 +1559,7 @@ function handleExplorerEvent(type, payload) {
 export async function initExplorerUI() {
   const root = document.querySelector('.fe-root');
   const drawer = document.getElementById('fe-drawer');
+  const drawerBody = drawer?.querySelector('.fe-drawer-body');
   const drawerClose = document.getElementById('fe-drawer-close');
   const drawerOpenBtn = document.getElementById('fe-drawer-open');
   const drawerBackdrop = document.getElementById('fe-drawer-backdrop');
@@ -2543,6 +2545,20 @@ export async function initExplorerUI() {
     },
     false
   );
+
+  // Sticky scopes (Monaco-ish "docked folders") overlay for the explorer tree.
+  // Uses geometry; does not change backend/SSOT behavior.
+  try {
+    if (treeElement && drawerBody) {
+      window.__explorerStickyScopes = initExplorerStickyScopes({
+        treeElement,
+        drawerBodyEl: drawerBody,
+        openCardMenuForEntry,
+      });
+    }
+  } catch (err) {
+    console.warn('[Explorer] Sticky scopes init failed:', err);
+  }
 
   // Basic click handling: expand/collapse dirs, open files, open context menu
   if (treeElement) {

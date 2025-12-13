@@ -123,6 +123,42 @@
   flex: 1;
 }
 
+/* Explorer "sticky scopes" (Monaco-ish docked folders) */
+.fe-sticky-scopes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 9; /* below search overlay (10) */
+  pointer-events: none; /* pass scroll/taps through, except menu buttons */
+  overflow: hidden;
+  padding: 8px 12px 0 7px; /* match .fe-tree horizontal padding */
+  background: linear-gradient(
+    to bottom,
+    rgba(11, 18, 32, 0.98) 0%,
+    rgba(11, 18, 32, 0.92) 85%,
+    rgba(11, 18, 32, 0) 100%
+  );
+}
+
+.fe-sticky-scopes-list {
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  flex: none;
+  position: relative;
+}
+
+.fe-sticky-scope {
+  cursor: default;
+  user-select: none;
+}
+
+.fe-sticky-scopes .fe-card-menu-btn {
+  pointer-events: auto;
+}
+
 .fe-tree li {
   display: grid;
   grid-template-columns: 20px 1fr auto;    /* icon, text, menu (twisty removed) */
