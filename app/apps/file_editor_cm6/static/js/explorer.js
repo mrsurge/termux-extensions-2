@@ -2563,12 +2563,74 @@ export async function initExplorerUI() {
   // Basic click handling: expand/collapse dirs, open files, open context menu
   if (treeElement) {
     treeElement.addEventListener('click', (ev) => {
-      // Sticky scopes overlay: clicking the docked rows should do nothing.
+      // Sticky scopes overlay: clicking the docked rows should collapse that scope.
       // (Menu clicks are handled by the overlay itself.)
       const sticky = document.getElementById('fe-sticky-scopes');
       if (sticky && sticky.style.display !== 'none') {
         const r = sticky.getBoundingClientRect();
         if (ev.clientY >= r.top && ev.clientY <= r.bottom) {
+          // Map the click to the sticky slot that visually contains the point.
+          // The overlay itself is `pointer-events: none`, so clicks pass through
+          // to the underlying tree; we intercept them here for correct behavior.
+          const slots = sticky.querySelectorAll('ul.fe-sticky-scope-slot');
+          let bestSlot = null;
+          let bestZ = -Infinity;
+          for (const slot of slots) {
+            const rect = slot.getBoundingClientRect();
+            if (
+              ev.clientX >= rect.left &&
+              ev.clientX <= rect.right &&
+              ev.clientY >= rect.top &&
+              ev.clientY <= rect.bottom
+            ) {
+              const z = Number(slot.style.zIndex || 0);
+              if (z > bestZ) {
+                bestZ = z;
+                bestSlot = slot;
+              }
+            }
+          }
+
+          const rel = bestSlot?.querySelector('li.fe-tree-node')?.dataset?.rel;
+          if (rel && rel !== '.') {
+            const slotRect = bestSlot?.getBoundingClientRect?.();
+            const selRel =
+              (window.CSS && typeof window.CSS.escape === 'function')
+                ? window.CSS.escape(rel)
+                : rel.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+            const dirLi = treeElement.querySelector(
+              `li.fe-tree-node[data-kind="dir"][data-rel="${selRel}"]`
+            );
+            if (dirLi && dirLi.dataset.open === 'true') {
+              dirLi.dataset.open = 'false';
+              const childList = dirLi.querySelector(':scope > ul.fe-tree');
+              if (childList) childList.remove();
+
+              // Auto-disable select mode if collapsing the select-mode directory
+              checkAutoDisableSelectMode(rel);
+
+              // Track directory close for persistence
+              markDirectoryOpen(rel, false);
+
+              // "Magic" UX: after closing a sticky scope, scroll so the closed
+              // directory row lands exactly where the sticky header was.
+              if (slotRect) {
+                const dirRect = dirLi.getBoundingClientRect();
+                const delta = dirRect.top - slotRect.top;
+                if (Math.abs(delta) >= 1) {
+                  const maxScroll = Math.max(
+                    0,
+                    treeElement.scrollHeight - treeElement.clientHeight,
+                  );
+                  const nextTop = Math.min(
+                    maxScroll,
+                    Math.max(0, treeElement.scrollTop + delta),
+                  );
+                  treeElement.scrollTop = nextTop;
+                }
+              }
+            }
+          }
           return;
         }
       }
