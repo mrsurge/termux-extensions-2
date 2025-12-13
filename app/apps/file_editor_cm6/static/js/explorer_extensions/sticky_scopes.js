@@ -101,6 +101,7 @@ export function initExplorerStickyScopes({
   let disposed = false;
   let lastKey = '';
   let stickySlots = [];
+  let stickyUnderlays = [];
   let stickyRows = [];
   let stickySourceLis = [];
   let rowStepPx = 0;
@@ -200,6 +201,11 @@ export function initExplorerStickyScopes({
 
   function ensureSlotCount(count) {
     while (stickySlots.length < count) {
+      const underlay = document.createElement('div');
+      underlay.className = 'fe-sticky-scope-underlay';
+      container.appendChild(underlay);
+      stickyUnderlays.push(underlay);
+
       const slot = document.createElement('ul');
       slot.className = 'fe-tree fe-sticky-scope-slot';
       const li = document.createElement('li');
@@ -213,15 +219,19 @@ export function initExplorerStickyScopes({
       const slot = stickySlots.pop();
       slot?.remove();
       stickyRows.pop();
+
+      const underlay = stickyUnderlays.pop();
+      underlay?.remove();
     }
   }
 
   function fillRowFromSource(srcLi, depth, rebuild = true) {
     const rel = srcLi?.dataset?.rel || '';
     if (!rel) return;
+    const underlayEl = stickyUnderlays[depth];
     const slotEl = stickySlots[depth];
     const rowEl = stickyRows[depth];
-    if (!slotEl || !rowEl) return;
+    if (!slotEl || !rowEl || !underlayEl) return;
 
     // Match the source node's horizontal geometry (indent + width) so
     // sticky rows line up with their real DOM counterparts.
@@ -230,16 +240,27 @@ export function initExplorerStickyScopes({
     if (isElementVisibleRect(bodyRect) && isElementVisibleRect(srcRect)) {
       const left = Math.round(srcRect.left - bodyRect.left);
       const right = Math.round(bodyRect.right - srcRect.right);
-      slotEl.style.left = `${Math.max(0, left)}px`;
-      slotEl.style.right = `${Math.max(0, right)}px`;
+      const leftPx = Math.max(0, left);
+      const rightPx = Math.max(0, right);
+      slotEl.style.left = `${leftPx}px`;
+      slotEl.style.right = `${rightPx}px`;
+      underlayEl.style.left = `${leftPx}px`;
+      underlayEl.style.right = `${rightPx}px`;
     } else {
       slotEl.style.left = '0px';
       slotEl.style.right = '0px';
+      underlayEl.style.left = '0px';
+      underlayEl.style.right = '0px';
     }
 
     slotEl.style.top = `${PADDING_TOP + depth * rowStepPx}px`;
     slotEl.style.height = `${rowStepPx}px`;
-    slotEl.style.zIndex = `${1000 - depth}`;
+    const slotZ = 1000 - depth;
+    slotEl.style.zIndex = `${slotZ}`;
+
+    // Solid underlay behind the row area (per-scope width).
+    underlayEl.style.top = '0px';
+    underlayEl.style.zIndex = `${slotZ - 1}`;
 
     copyExplorerVisualClasses(srcLi, rowEl);
     rowEl.dataset.kind = 'dir';
@@ -313,9 +334,10 @@ export function initExplorerStickyScopes({
 
     let cumulativePush = 0;
     for (let depth = 0; depth < stickySourceLis.length; depth++) {
+      const underlayEl = stickyUnderlays[depth];
       const slotEl = stickySlots[depth];
       const srcLi = stickySourceLis[depth];
-      if (!slotEl || !srcLi) continue;
+      if (!slotEl || !srcLi || !underlayEl) continue;
 
       let push = 0;
       const nextDir = findNextSiblingDirectory(srcLi);
@@ -328,7 +350,20 @@ export function initExplorerStickyScopes({
         }
       }
 
-      slotEl.style.transform = `translateY(${cumulativePush + push}px)`;
+      const translateY = cumulativePush + push;
+      slotEl.style.transform = `translateY(${translateY}px)`;
+
+      // Per-scope background underlay: anchored at the top of the sticky region,
+      // with its "bottom edge" landing around halfway down this scope row.
+      // This hides noisy content behind the indented sides while preserving
+      // the stepped/nested geometry.
+      const underlayHeight = Math.max(
+        0,
+        PADDING_TOP + depth * rowStepPx + translateY + rowStepPx * 0.5,
+      );
+      underlayEl.style.height = `${underlayHeight}px`;
+      underlayEl.style.transform = 'none';
+
       cumulativePush += push;
     }
   }

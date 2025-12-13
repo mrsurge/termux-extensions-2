@@ -133,12 +133,7 @@
   z-index: 9; /* below search overlay (10) */
   pointer-events: none; /* pass scroll/taps through, except menu buttons */
   overflow: hidden;
-  background: linear-gradient(
-    to bottom,
-    rgba(11, 18, 32, 0.98) 0%,
-    rgba(11, 18, 32, 0.92) 85%,
-    rgba(11, 18, 32, 0) 100%
-  );
+  background: transparent;
 }
 
 .fe-sticky-scope-slot {
@@ -149,6 +144,16 @@
   margin: 0;
   overflow: hidden;
   flex: none;
+}
+
+.fe-sticky-scope-underlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  background: var(--explorer-bg);
+  pointer-events: none;
 }
 
 .fe-tree li.fe-sticky-scope {
