@@ -105,8 +105,11 @@ export function initExplorerStickyScopes({
   let stickyRows = [];
   let stickySourceLis = [];
   let rowStepPx = 0;
+  let lastBottomTranslateY = 0;
   let lastScrollTop = 0;
   let scrollDirection = 'down'; // 'down' | 'up'
+  let pendingKey = '';
+  let pendingKeyFrames = 0;
 
   // Mirrors `.fe-tree` padding: 8px 12px 8px 7px
   const PADDING_TOP = 8;
@@ -121,6 +124,8 @@ export function initExplorerStickyScopes({
   const CAPTURE_Y_ADJUST_PX = -12;
   // Positive values start the push-up sooner (and delay pull-down when scrolling up).
   const PUSH_TRIGGER_ADJUST_PX = 10;
+  // Small hysteresis to prevent rapid "scope-flapping" during push transitions.
+  const KEY_STABILITY_FRAMES = 2;
 
   function scheduleUpdate() {
     if (disposed) return;
@@ -187,7 +192,11 @@ export function initExplorerStickyScopes({
       const dirAdj = scrollDirection === 'up' ? -UP_RELEASE_ROWS : 0;
       const offsetRows = Math.max(0, assumedCount + EARLY_ROWS + dirAdj);
       const offsetPx =
-        PADDING_TOP + 12 + offsetRows * rowStepPx + CAPTURE_Y_ADJUST_PX;
+        PADDING_TOP +
+        12 +
+        offsetRows * rowStepPx +
+        CAPTURE_Y_ADJUST_PX +
+        lastBottomTranslateY;
       const focusLi = computeFocusNode(offsetPx);
       chain = getDirectoryChainFromNode(focusLi);
       if (!chain.length) chain = [rootLi];
@@ -339,6 +348,7 @@ export function initExplorerStickyScopes({
     const listTop = containerRect.top + PADDING_TOP;
 
     let cumulativePush = 0;
+    let bottomTranslateY = 0;
     for (let depth = 0; depth < stickySourceLis.length; depth++) {
       const underlayEl = stickyUnderlays[depth];
       const slotEl = stickySlots[depth];
@@ -362,6 +372,7 @@ export function initExplorerStickyScopes({
 
       const translateY = cumulativePush + push;
       slotEl.style.transform = `translateY(${translateY}px)`;
+      if (depth === stickySourceLis.length - 1) bottomTranslateY = translateY;
 
       // Per-scope background underlay: anchored at the top of the sticky region,
       // with its "bottom edge" landing around halfway down this scope row.
@@ -376,6 +387,10 @@ export function initExplorerStickyScopes({
 
       cumulativePush += push;
     }
+
+    // Keep the focus probe aligned with the *visual* bottom of the sticky stack,
+    // otherwise the chain can oscillate during push-up transitions (flicker).
+    lastBottomTranslateY = bottomTranslateY;
   }
 
   function updateNow() {
@@ -399,14 +414,39 @@ export function initExplorerStickyScopes({
     }
     rowStepPx = step;
 
-    const chain = computeStickyChainWithOffset();
-    const key = chain.map((li) => li.dataset.rel || '').join('|');
+    const rawChain = computeStickyChainWithOffset();
+    const rawKey = rawChain.map((li) => li.dataset.rel || '').join('|');
+
+    // Avoid rapid key oscillation when we are exactly on a geometric threshold
+    // (common during push-up/pull-down transitions).
+    let chain = rawChain;
+    let key = rawKey;
+    if (rawKey && lastKey && rawKey !== lastKey && stickySourceLis.length) {
+      if (rawKey === pendingKey) {
+        pendingKeyFrames += 1;
+      } else {
+        pendingKey = rawKey;
+        pendingKeyFrames = 1;
+      }
+
+      if (pendingKeyFrames < KEY_STABILITY_FRAMES) {
+        chain = stickySourceLis;
+        key = lastKey;
+      } else {
+        pendingKey = '';
+        pendingKeyFrames = 0;
+      }
+    } else {
+      pendingKey = '';
+      pendingKeyFrames = 0;
+    }
 
     if (!key || chain.length === 0) {
       lastKey = '';
       container.style.height = '0px';
       ensureSlotCount(0);
       stickySourceLis = [];
+      lastBottomTranslateY = 0;
       return;
     }
 
