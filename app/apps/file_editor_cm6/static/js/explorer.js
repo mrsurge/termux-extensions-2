@@ -2563,6 +2563,16 @@ export async function initExplorerUI() {
   // Basic click handling: expand/collapse dirs, open files, open context menu
   if (treeElement) {
     treeElement.addEventListener('click', (ev) => {
+      // Sticky scopes overlay: clicking the docked rows should do nothing.
+      // (Menu clicks are handled by the overlay itself.)
+      const sticky = document.getElementById('fe-sticky-scopes');
+      if (sticky && sticky.style.display !== 'none') {
+        const r = sticky.getBoundingClientRect();
+        if (ev.clientY >= r.top && ev.clientY <= r.bottom) {
+          return;
+        }
+      }
+
       const li = ev.target.closest('li.fe-tree-node');
       if (!li) return;
       const rel = li.dataset.rel;
