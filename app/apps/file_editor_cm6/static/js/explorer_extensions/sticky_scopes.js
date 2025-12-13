@@ -104,6 +104,8 @@ export function initExplorerStickyScopes({
   let stickyRows = [];
   let stickySourceLis = [];
   let rowStepPx = 0;
+  let lastScrollTop = 0;
+  let scrollDirection = 'down'; // 'down' | 'up'
 
   // Mirrors `.fe-tree` padding: 8px 12px 8px 7px
   const PADDING_TOP = 8;
@@ -114,6 +116,9 @@ export function initExplorerStickyScopes({
   // Extra early capture rows. For the explorer we want the scope to "dock"
   // exactly as it reaches the sticky stack, so keep this at 0.
   const EARLY_ROWS = 0;
+  // When scrolling up, release scopes slightly earlier to avoid "sticking"
+  // for too long. (-1 row == release one row sooner).
+  const UP_RELEASE_ROWS = 1;
 
   function scheduleUpdate() {
     if (disposed) return;
@@ -177,7 +182,8 @@ export function initExplorerStickyScopes({
     let lastIterKey = '';
 
     for (let i = 0; i < 5; i++) {
-      const offsetRows = assumedCount + EARLY_ROWS;
+      const dirAdj = scrollDirection === 'up' ? -UP_RELEASE_ROWS : 0;
+      const offsetRows = Math.max(0, assumedCount + EARLY_ROWS + dirAdj);
       const offsetPx = PADDING_TOP + 12 + offsetRows * rowStepPx;
       const focusLi = computeFocusNode(offsetPx);
       chain = getDirectoryChainFromNode(focusLi);
@@ -393,7 +399,19 @@ export function initExplorerStickyScopes({
     ],
   });
 
-  treeElement.addEventListener('scroll', scheduleUpdate, { passive: true });
+  lastScrollTop = treeElement.scrollTop || 0;
+  function onScroll() {
+    const nextTop = treeElement.scrollTop || 0;
+    if (nextTop < lastScrollTop) {
+      scrollDirection = 'up';
+    } else if (nextTop > lastScrollTop) {
+      scrollDirection = 'down';
+    }
+    lastScrollTop = nextTop;
+    scheduleUpdate();
+  }
+
+  treeElement.addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('resize', scheduleUpdate);
   scheduleUpdate();
 
@@ -402,7 +420,7 @@ export function initExplorerStickyScopes({
     destroy() {
       disposed = true;
       observer.disconnect();
-      treeElement.removeEventListener('scroll', scheduleUpdate);
+      treeElement.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', scheduleUpdate);
       if (rafId) {
         cancelAnimationFrame(rafId);
