@@ -22,10 +22,18 @@ function getDirectoryChainFromNode(li) {
   let cursor = li;
   if (cursor.dataset.kind !== 'dir') {
     cursor = cursor.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
+  } else if (cursor.dataset.open !== 'true') {
+    // Closed directories shouldn't become scopes just because they're visible.
+    cursor = cursor.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
   }
   const chain = [];
   while (cursor) {
-    chain.push(cursor);
+    const rel = cursor.dataset.rel || '';
+    const isRoot = rel === '.';
+    const isOpen = cursor.dataset.open === 'true';
+    if (isRoot || isOpen) {
+      chain.push(cursor);
+    }
     cursor = cursor.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
   }
   chain.reverse();
