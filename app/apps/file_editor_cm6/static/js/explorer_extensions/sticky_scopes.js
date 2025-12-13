@@ -94,16 +94,13 @@ export function initExplorerStickyScopes({
     drawerBodyEl.appendChild(container);
   }
 
-  let listEl = container.querySelector('ul.fe-sticky-scopes-list');
-  if (!listEl) {
-    listEl = document.createElement('ul');
-    listEl.className = 'fe-tree fe-sticky-scopes-list';
-    container.appendChild(listEl);
-  }
+  // Cleanup from earlier iterations that used a single UL list container.
+  container.querySelector('ul.fe-sticky-scopes-list')?.remove();
 
   let rafId = null;
   let disposed = false;
   let lastKey = '';
+  let stickySlots = [];
   let stickyRows = [];
   let stickySourceLis = [];
   let rowStepPx = 0;
@@ -164,92 +161,122 @@ export function initExplorerStickyScopes({
     return findClosestTreeNode(treeElement, document.elementFromPoint(x, y));
   }
 
-  function renderChain(chain) {
-    listEl.innerHTML = '';
-    stickyRows = [];
-    stickySourceLis = chain.slice();
-
-    chain.forEach((srcLi, depth) => {
-      const rel = srcLi.dataset.rel || '';
-      if (!rel) return;
-
+  function ensureSlotCount(count) {
+    while (stickySlots.length < count) {
+      const slot = document.createElement('ul');
+      slot.className = 'fe-tree fe-sticky-scope-slot';
       const li = document.createElement('li');
-      copyExplorerVisualClasses(srcLi, li);
-      li.dataset.kind = 'dir';
-      li.dataset.rel = rel;
-      li.dataset.name =
-        srcLi.dataset.name ||
-        srcLi.querySelector('.fe-tree-text')?.textContent ||
-        '';
-      if (srcLi.dataset.gitStatus) {
-        li.dataset.gitStatus = srcLi.dataset.gitStatus;
-      }
-      if (srcLi.dataset.gitFlags) {
-        li.dataset.gitFlags = srcLi.dataset.gitFlags;
-      }
-      if (srcLi.dataset.hasDraft) {
-        li.dataset.hasDraft = srcLi.dataset.hasDraft;
-      }
-
-      li.style.position = 'absolute';
-      li.style.left = '0';
-      li.style.right = '0';
-      li.style.top = `${depth * rowStepPx}px`;
-      li.style.paddingLeft = `${BASE_PADDING_LEFT + depth * INDENT_PER_DEPTH}px`;
-
-      const icon = document.createElement('span');
-      icon.className = 'fe-entry-icon fe-entry-icon-dir';
-
-      const text = document.createElement('span');
-      text.className = 'fe-tree-text';
-      text.textContent =
-        srcLi.querySelector('.fe-tree-text')?.textContent ||
-        srcLi.dataset.name ||
-        '';
-
-      const menuBtn = document.createElement('button');
-      menuBtn.className = 'fe-card-menu-btn';
-      menuBtn.textContent = '⋮';
-      menuBtn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        if (typeof openCardMenuForEntry === 'function') {
-          openCardMenuForEntry(buildEntryFromLi(srcLi), menuBtn);
-        }
-      });
-
-      li.appendChild(icon);
-      li.appendChild(text);
-      li.appendChild(menuBtn);
-      listEl.appendChild(li);
-
+      li.className = 'fe-tree-node fe-sticky-scope';
+      slot.appendChild(li);
+      container.appendChild(slot);
+      stickySlots.push(slot);
       stickyRows.push(li);
+    }
+    while (stickySlots.length > count) {
+      const slot = stickySlots.pop();
+      slot?.remove();
+      stickyRows.pop();
+    }
+  }
+
+  function fillRowFromSource(srcLi, depth, rebuild = true) {
+    const rel = srcLi?.dataset?.rel || '';
+    if (!rel) return;
+    const slotEl = stickySlots[depth];
+    const rowEl = stickyRows[depth];
+    if (!slotEl || !rowEl) return;
+
+    slotEl.style.top = `${depth * rowStepPx}px`;
+    slotEl.style.height = `${rowStepPx}px`;
+    slotEl.style.zIndex = `${1000 - depth}`;
+
+    copyExplorerVisualClasses(srcLi, rowEl);
+    rowEl.dataset.kind = 'dir';
+    rowEl.dataset.rel = rel;
+    rowEl.dataset.name =
+      srcLi.dataset.name ||
+      srcLi.querySelector('.fe-tree-text')?.textContent ||
+      '';
+    if (srcLi.dataset.gitStatus) {
+      rowEl.dataset.gitStatus = srcLi.dataset.gitStatus;
+    } else {
+      delete rowEl.dataset.gitStatus;
+    }
+    if (srcLi.dataset.gitFlags) {
+      rowEl.dataset.gitFlags = srcLi.dataset.gitFlags;
+    } else {
+      delete rowEl.dataset.gitFlags;
+    }
+    if (srcLi.dataset.hasDraft) {
+      rowEl.dataset.hasDraft = srcLi.dataset.hasDraft;
+    } else {
+      delete rowEl.dataset.hasDraft;
+    }
+
+    rowEl.style.paddingLeft = `${BASE_PADDING_LEFT + depth * INDENT_PER_DEPTH}px`;
+
+    if (!rebuild) return;
+
+    rowEl.innerHTML = '';
+
+    const icon = document.createElement('span');
+    icon.className = 'fe-entry-icon fe-entry-icon-dir';
+
+    const text = document.createElement('span');
+    text.className = 'fe-tree-text';
+    text.textContent =
+      srcLi.querySelector('.fe-tree-text')?.textContent ||
+      srcLi.dataset.name ||
+      '';
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'fe-card-menu-btn';
+    menuBtn.textContent = '⋮';
+    menuBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof openCardMenuForEntry === 'function') {
+        openCardMenuForEntry(buildEntryFromLi(srcLi), menuBtn);
+      }
+    });
+
+    rowEl.appendChild(icon);
+    rowEl.appendChild(text);
+    rowEl.appendChild(menuBtn);
+  }
+
+  function renderChain(chain) {
+    stickySourceLis = chain.slice();
+    ensureSlotCount(chain.length);
+    chain.forEach((srcLi, depth) => {
+      fillRowFromSource(srcLi, depth, true);
     });
   }
 
   function applyPushTransforms() {
-    if (!stickyRows.length || !stickySourceLis.length) return;
-    const listRect = listEl.getBoundingClientRect();
-    if (!isElementVisibleRect(listRect)) return;
+    if (!stickySlots.length || !stickySourceLis.length) return;
+    const containerRect = container.getBoundingClientRect();
+    if (!isElementVisibleRect(containerRect)) return;
+    const listTop = containerRect.top + PADDING_TOP;
 
     let cumulativePush = 0;
     for (let depth = 0; depth < stickySourceLis.length; depth++) {
-      const rowEl = stickyRows[depth];
+      const slotEl = stickySlots[depth];
       const srcLi = stickySourceLis[depth];
-      if (!rowEl || !srcLi) continue;
+      if (!slotEl || !srcLi) continue;
 
       let push = 0;
       const nextDir = findNextSiblingDirectory(srcLi);
       if (nextDir) {
         const nextRect = nextDir.getBoundingClientRect();
-        const anchorY = listRect.top + (depth + 1) * rowStepPx + cumulativePush;
+        const anchorY = listTop + (depth + 1) * rowStepPx + cumulativePush;
         const overlap = nextRect.top - anchorY;
         if (overlap < 0) {
           push = Math.max(overlap, -rowStepPx);
         }
       }
 
-      rowEl.style.transform = `translateY(${cumulativePush + push}px)`;
+      slotEl.style.transform = `translateY(${cumulativePush + push}px)`;
       cumulativePush += push;
     }
   }
@@ -269,9 +296,7 @@ export function initExplorerStickyScopes({
     const step = computeRowStep();
     if (!step) {
       container.style.height = '0px';
-      listEl.style.height = '0px';
-      listEl.innerHTML = '';
-      stickyRows = [];
+      ensureSlotCount(0);
       stickySourceLis = [];
       return;
     }
@@ -284,9 +309,7 @@ export function initExplorerStickyScopes({
     if (!key || chain.length === 0) {
       lastKey = '';
       container.style.height = '0px';
-      listEl.style.height = '0px';
-      listEl.innerHTML = '';
-      stickyRows = [];
+      ensureSlotCount(0);
       stickySourceLis = [];
       return;
     }
@@ -294,7 +317,6 @@ export function initExplorerStickyScopes({
     // Set fixed geometry first; render can rely on rowStepPx.
     const contentHeight = chain.length * rowStepPx;
     container.style.height = `${PADDING_TOP + contentHeight}px`;
-    listEl.style.height = `${contentHeight}px`;
 
     const sameIdentityChain =
       key === lastKey &&
@@ -307,12 +329,9 @@ export function initExplorerStickyScopes({
     } else {
       // Keep menu positioning / labels fresh (git classes can change).
       chain.forEach((srcLi, depth) => {
+        fillRowFromSource(srcLi, depth, false);
         const rowEl = stickyRows[depth];
-        if (!rowEl) return;
-        copyExplorerVisualClasses(srcLi, rowEl);
-        rowEl.style.top = `${depth * rowStepPx}px`;
-        rowEl.style.paddingLeft = `${BASE_PADDING_LEFT + depth * INDENT_PER_DEPTH}px`;
-        const text = rowEl.querySelector('.fe-tree-text');
+        const text = rowEl?.querySelector('.fe-tree-text');
         const srcText = srcLi.querySelector('.fe-tree-text')?.textContent || '';
         if (text && srcText) text.textContent = srcText;
       });

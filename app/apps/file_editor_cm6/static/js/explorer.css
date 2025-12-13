@@ -142,12 +142,14 @@
   );
 }
 
-.fe-sticky-scopes-list {
+.fe-sticky-scope-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
   padding: 0;
   margin: 0;
   overflow: hidden;
   flex: none;
-  position: relative;
 }
 
 .fe-sticky-scope {
