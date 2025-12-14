@@ -2844,7 +2844,7 @@ document.addEventListener('keydown', (e) => {
 
 
 // ---------- State load/init ----------
-host.setTitle('Code Viewer (CM6)');
+host.setTitle('Code CM6');
 
 // Set up global file opening hooks for explorer.js
 window.appOpenFile = (absPath) => {
