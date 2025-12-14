@@ -40,17 +40,20 @@ function getDirectoryChainFromNode(li) {
   return chain;
 }
 
-function findNextSiblingDirectory(li) {
+function findNextTreeNodeAfterSubtree(li) {
   if (!li) return null;
-  let sib = li.nextElementSibling;
-  while (sib) {
-    if (
-      sib.matches &&
-      sib.matches('li.fe-tree-node[data-kind="dir"]')
-    ) {
-      return sib;
+  // We need the first *tree row* after this directory's entire subtree,
+  // regardless of whether that row is a dir or a file. This avoids a common
+  // edge case where the "last directory" in a scope never gets pushed out
+  // because only files follow it.
+  let cursor = li;
+  while (cursor) {
+    let sib = cursor.nextElementSibling;
+    while (sib) {
+      if (sib.matches && sib.matches('li.fe-tree-node')) return sib;
+      sib = sib.nextElementSibling;
     }
-    sib = sib.nextElementSibling;
+    cursor = cursor.parentElement?.closest('li.fe-tree-node');
   }
   return null;
 }
@@ -357,9 +360,9 @@ export function initExplorerStickyScopes({
       if (!slotEl || !srcLi || !underlayEl) continue;
 
       let push = 0;
-      const nextDir = findNextSiblingDirectory(srcLi);
-      if (nextDir) {
-        const nextRect = nextDir.getBoundingClientRect();
+      const nextNode = findNextTreeNodeAfterSubtree(srcLi);
+      if (nextNode) {
+        const nextRect = nextNode.getBoundingClientRect();
         const anchorY =
           listTop +
           (depth + 1) * rowStepPx +
