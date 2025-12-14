@@ -8,6 +8,8 @@
   --explorer-card-bg: #111827;
   --explorer-card-border: #1f2937;
   --explorer-card-hover: #1c2540;
+  --explorer-header-z: 1050;
+  --explorer-header-menu-z: 1100;
 }
 
 /* Drawer container - positioned off-screen by default */
@@ -58,7 +60,11 @@
   box-shadow: 0 10px 18px rgba(0, 0, 0, 0.45);
   position: sticky;
   top: 0;
-  z-index: 5;
+  z-index: var(--explorer-header-z);
+}
+
+#fe-explorer-menu-dd {
+  z-index: var(--explorer-header-menu-z);
 }
 
 .fe-label-missing {
@@ -416,7 +422,7 @@
 
 /* Staged descendants: solid green background (when no untracked). */
 .fe-tree-node[data-kind="dir"].fe-dir-has-staged:not(.fe-dir-has-untracked) {
-  background: rgb(52, 99, 80);
+  background: rgb(0, 58, 43);
 }
 
 /* Both untracked + staged descendants: smooth diagonal blue→green gradient. */

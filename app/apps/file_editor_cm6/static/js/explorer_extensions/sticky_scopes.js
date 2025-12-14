@@ -267,8 +267,15 @@ export function initExplorerStickyScopes({
     if (isElementVisibleRect(bodyRect) && isElementVisibleRect(srcRect)) {
       const left = Math.round(srcRect.left - bodyRect.left);
       const right = Math.round(bodyRect.right - srcRect.right);
-      const leftPx = Math.max(0, left);
-      const rightPx = Math.max(0, right);
+      let leftPx = Math.max(0, left);
+      let rightPx = Math.max(0, right);
+      // Deeply indented scopes can accumulate a 1px rounding drift vs the
+      // underlying tree cards. Nudge slot+underlay left for slot 5+ so the
+      // underlay properly masks the scrolling content behind rounded corners.
+      if (depth >= 4) {
+        leftPx = Math.max(0, leftPx - 0.5);
+        rightPx = Math.max(0, rightPx - 0.4);
+      }
       slotEl.style.left = `${leftPx}px`;
       slotEl.style.right = `${rightPx}px`;
       underlayEl.style.left = `${leftPx}px`;
