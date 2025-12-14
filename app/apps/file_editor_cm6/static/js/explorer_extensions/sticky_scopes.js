@@ -47,13 +47,17 @@ function findNextTreeNodeAfterSubtree(li) {
   // edge case where the "last directory" in a scope never gets pushed out
   // because only files follow it.
   let cursor = li;
+  let climbed = 0;
   while (cursor) {
     let sib = cursor.nextElementSibling;
     while (sib) {
-      if (sib.matches && sib.matches('li.fe-tree-node')) return sib;
+      if (sib.matches && sib.matches('li.fe-tree-node')) {
+        return { node: sib, climbed };
+      }
       sib = sib.nextElementSibling;
     }
     cursor = cursor.parentElement?.closest('li.fe-tree-node');
+    climbed += 1;
   }
   return null;
 }
@@ -128,6 +132,10 @@ export function initExplorerStickyScopes({
   const CAPTURE_Y_ADJUST_PX = -12;
   // Positive values start the push-up sooner (and delay pull-down when scrolling up).
   const PUSH_TRIGGER_ADJUST_PX = 10;
+  // When the next collision boundary comes from a *different* ancestor scope,
+  // there is a small visual gap (card spacing) that makes push start a few px
+  // late. Compensate only for those cases.
+  const CROSS_SCOPE_GAP_PX = 10;
   // Small hysteresis to prevent rapid "scope-flapping" during push transitions.
   const KEY_STABILITY_FRAMES = 2;
 
@@ -360,15 +368,17 @@ export function initExplorerStickyScopes({
       if (!slotEl || !srcLi || !underlayEl) continue;
 
       let push = 0;
-      const nextNode = findNextTreeNodeAfterSubtree(srcLi);
-      if (nextNode) {
-        const nextRect = nextNode.getBoundingClientRect();
+      const nextInfo = findNextTreeNodeAfterSubtree(srcLi);
+      if (nextInfo?.node) {
+        const nextRect = nextInfo.node.getBoundingClientRect();
         const anchorY =
           listTop +
           (depth + 1) * rowStepPx +
           cumulativePush +
           PUSH_TRIGGER_ADJUST_PX;
-        const overlap = nextRect.top - anchorY;
+        const boundaryTop =
+          nextRect.top - (nextInfo.climbed > 0 ? CROSS_SCOPE_GAP_PX : 0);
+        const overlap = boundaryTop - anchorY;
         if (overlap < 0) {
           push = Math.max(overlap, -rowStepPx);
         }
