@@ -1772,7 +1772,9 @@ export default {
         ]),
         css: new Set([
           // Group by rule blocks
-          "StyleRule", "QualifiedRule", "AtRule"
+          // Lezer's CSS grammar uses `RuleSet`/`AtRule` as the main block nodes.
+          // Keep additional names for compatibility with other grammars/bundles.
+          "RuleSet", "AtRule", "StyleRule", "QualifiedRule"
         ]),
         // Fallback for other languages
         default: new Set([
@@ -2158,17 +2160,55 @@ export default {
 
           // Click handler for jump-to-definition
           this.dom.addEventListener('click', (e) => {
-            const target = e.target.closest('.cm-sticky-line');
-            if (target && this.currentScopes.length > 0) {
-              const index = parseInt(target.dataset.index, 10);
-              const scope = this.currentScopes[index];
-              if (!isNaN(index) && scope && scope.node) {
-                view.dispatch({
-                  selection: { anchor: scope.node.from },
-                  scrollIntoView: true,
-                });
-                view.focus();
+            const targetLayer = e.target.closest('.cm-sticky-layer');
+            if (!targetLayer || !this.currentScopes.length) return;
+
+            const index = parseInt(targetLayer.dataset.index, 10);
+            if (Number.isNaN(index) || index < 0 || index >= this.currentScopes.length) return;
+
+            const scope = this.currentScopes[index];
+            if (!scope) return;
+
+            // Resolve a document position for the scope.
+            // - Lezer-backed scopes: use `node.from`
+            // - LSP-backed scopes: use `startLine` (1-based) -> doc position
+            let pos = null;
+            try {
+              if (scope.node && typeof scope.node.from === 'number') {
+                pos = scope.node.from;
+              } else if (typeof scope.startLine === 'number') {
+                pos = view.state.doc.line(scope.startLine).from;
               }
+            } catch { }
+            if (pos == null) return;
+
+            // Jump so the target line lands at the same Y position as the clicked
+            // sticky row (anchored jump). This keeps the gesture feeling "local".
+            try {
+              const scrollRect = view.scrollDOM.getBoundingClientRect();
+              const slotRect = targetLayer.getBoundingClientRect();
+              const slotY = slotRect.top - scrollRect.top;
+              const lineBlock = view.lineBlockAt(pos);
+
+              const maxScroll = Math.max(
+                0,
+                view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight,
+              );
+              const nextTop = Math.min(
+                maxScroll,
+                Math.max(0, lineBlock.top - slotY),
+              );
+              view.scrollDOM.scrollTop = nextTop;
+
+              view.dispatch({ selection: { anchor: pos } });
+              view.focus();
+            } catch {
+              // Fallback: let CM handle scroll if geometry lookup fails.
+              view.dispatch({
+                selection: { anchor: pos },
+                scrollIntoView: true,
+              });
+              view.focus();
             }
           });
 
@@ -2966,7 +3006,37 @@ export default {
           }
 
           // Get active scopes from slots (guaranteed no Y-axis pileup)
-          const activeScopes = this.slots.getActive();
+          let activeScopes = this.slots.getActive();
+
+          // -------------------------------------------------------------------
+          // Heuristic fix: "Double Entries" (same scope rendered twice)
+          //
+          // Observed symptom:
+          // - Occasionally the same scope shows up twice, back-to-back, in
+          //   adjacent sticky slots (most commonly on LSP-driven symbol paths).
+          //
+          // Root cause:
+          // - Likely a deterministic timing/range edge case between symbol
+          //   updates + geometry-based sampling. It's hard to reproduce and
+          //   not worth risking destabilizing the core algorithm right now.
+          //
+          // Heuristic:
+          // - Enforce unique startLine per adjacent slot by squashing
+          //   consecutive scopes with the same `startLine`.
+          // -------------------------------------------------------------------
+          if (activeScopes.length > 1) {
+            const deduped = [activeScopes[0]];
+            for (let i = 1; i < activeScopes.length; i++) {
+              const prev = deduped[deduped.length - 1];
+              const cur = activeScopes[i];
+              if (prev && cur && prev.startLine === cur.startLine) {
+                continue;
+              }
+              deduped.push(cur);
+            }
+            activeScopes = deduped;
+          }
+
           this.currentScopes = activeScopes;
 
           if (DEBUG_SLOTS) {
@@ -3177,6 +3247,7 @@ export default {
 
             // Store scope key for measurement
             layer.dataset.scopeKey = `${scope.depth}:${scope.startLine}`;
+            layer.dataset.index = String(idx);
 
             const gutter = document.createElement('div');
             gutter.className = 'cm-sticky-gutter';
