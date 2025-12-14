@@ -2184,6 +2184,12 @@ export default {
 
             // Jump so the target line lands at the same Y position as the clicked
             // sticky row (anchored jump). This keeps the gesture feeling "local".
+            //
+            // IMPORTANT UX DETAIL:
+            // - If the editor does NOT currently have focus (for example, the user
+            //   is interacting with host chrome and doesn't want the virtual keyboard),
+            //   we scroll without forcing focus/cursor movement.
+            const hadFocus = typeof view.hasFocus === 'function' ? view.hasFocus() : false;
             try {
               const scrollRect = view.scrollDOM.getBoundingClientRect();
               const slotRect = targetLayer.getBoundingClientRect();
@@ -2200,15 +2206,33 @@ export default {
               );
               view.scrollDOM.scrollTop = nextTop;
 
-              view.dispatch({ selection: { anchor: pos } });
-              view.focus();
+              if (hadFocus) {
+                view.dispatch({ selection: { anchor: pos } });
+                view.focus();
+              }
             } catch {
               // Fallback: let CM handle scroll if geometry lookup fails.
-              view.dispatch({
-                selection: { anchor: pos },
-                scrollIntoView: true,
-              });
-              view.focus();
+              if (hadFocus) {
+                view.dispatch({
+                  selection: { anchor: pos },
+                  scrollIntoView: true,
+                });
+                view.focus();
+              } else {
+                // As a last resort, just try to scroll the line into view
+                // without moving cursor or focusing.
+                try {
+                  const lineBlock = view.lineBlockAt(pos);
+                  const maxScroll = Math.max(
+                    0,
+                    view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight,
+                  );
+                  view.scrollDOM.scrollTop = Math.min(
+                    maxScroll,
+                    Math.max(0, lineBlock.top),
+                  );
+                } catch { }
+              }
             }
           });
 
