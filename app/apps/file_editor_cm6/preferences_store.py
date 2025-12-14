@@ -34,6 +34,8 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
 DEFAULT_UI_PREFS: Dict[str, Any] = {
     "assistantCollapsed": True,
     "gitIndicators": True,
+    # Explorer drawer (Monaco-ish sticky scope headers)
+    "explorerStickyHeaders": True,
 }
 
 

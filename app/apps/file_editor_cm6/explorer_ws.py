@@ -46,7 +46,7 @@ from .git_helper import (
     get_commits as git_get_commits,
     GitError,
 )
-from .stores import _history_store
+from .stores import _history_store, _preferences_store
 from .project_sidecar import ProjectSidecar
 from .explorer import search, review
 
@@ -478,6 +478,13 @@ class ExplorerDispatcher:
         # Send initial state snapshots
         # 1. Project Info
         await self.emit_personal("project:setActive", {"path": str(self.project_root)})
+        # 1.5 UI Preferences (PreferenceStore-backed)
+        try:
+            prefs = _preferences_store.get_preferences()
+            ui_prefs = prefs.get("ui") or {}
+            await self.emit_personal("prefs:setUi", {"ui": ui_prefs})
+        except Exception as e:
+            logger.warning(f"Failed to load UI preferences: {e}")
         # 2. Git Status
         await self.broadcast_git_status()
         # 3. Explorer Tree (Root)
@@ -696,6 +703,44 @@ class ExplorerDispatcher:
             sidecar.save()
         except Exception as e:
             logger.warning(f"Failed to save open directories: {e}")
+
+    async def handle_prefs_updateUi(self, payload: dict, msg_id: str):
+        """Update a single UI preference key via PreferenceStore (backend owns defaults)."""
+        key = payload.get("key")
+        value = payload.get("value")
+
+        if not isinstance(key, str) or not key.strip():
+            return await self.send_error("prefs:updateUi requires 'key' (string)", msg_id)
+
+        if not isinstance(value, bool):
+            # Accept a few common serializations to be resilient.
+            if isinstance(value, (int, float)) and value in (0, 1):
+                value = bool(value)
+            elif isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered in ("true", "1", "yes", "on"):
+                    value = True
+                elif lowered in ("false", "0", "no", "off"):
+                    value = False
+                else:
+                    return await self.send_error(
+                        "prefs:updateUi requires 'value' (boolean)",
+                        msg_id,
+                    )
+            else:
+                return await self.send_error(
+                    "prefs:updateUi requires 'value' (boolean)",
+                    msg_id,
+                )
+
+        try:
+            updated = _preferences_store.update_preferences(ui={key: value})
+        except Exception as e:
+            logger.warning(f"Failed to update UI preference {key}: {e}")
+            return await self.send_error(str(e), msg_id)
+
+        ui_prefs = updated.get("ui") or {}
+        await self.broadcast("prefs:setUi", {"ui": ui_prefs})
 
     # --- File Operations (Broadcasts updates) ---
 

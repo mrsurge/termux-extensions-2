@@ -8,6 +8,8 @@
   --explorer-card-bg: #111827;
   --explorer-card-border: #1f2937;
   --explorer-card-hover: #1c2540;
+  --explorer-header-z: 1050;
+  --explorer-header-menu-z: 1100;
 }
 
 /* Drawer container - positioned off-screen by default */
@@ -58,7 +60,11 @@
   box-shadow: 0 10px 18px rgba(0, 0, 0, 0.45);
   position: sticky;
   top: 0;
-  z-index: 5;
+  z-index: var(--explorer-header-z);
+}
+
+#fe-explorer-menu-dd {
+  z-index: var(--explorer-header-menu-z);
 }
 
 .fe-label-missing {
@@ -78,8 +84,8 @@
 
 @media (hover: hover) and (pointer: fine) {
   .drawer-action:hover {
-    background: var(--explorer-card-hover);
-    border-color: #3b82f6;
+    background: var(--explorer-card-bg);
+    border-color: var(--explorer-card-border);
   }
 }
 
@@ -97,8 +103,8 @@
 
 @media (hover: hover) and (pointer: fine) {
   .drawer-close:hover {
-    background: var(--explorer-card-hover);
-    border-color: #3b82f6;
+    background: var(--explorer-card-bg);
+    border-color: var(--explorer-card-border);
   }
 }
 
@@ -123,6 +129,51 @@
   flex: 1;
 }
 
+/* Explorer "sticky scopes" (Monaco-ish docked folders) */
+.fe-sticky-scopes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 9; /* below search overlay (10) */
+  pointer-events: none; /* pass scroll/taps through, except menu buttons */
+  overflow: hidden;
+  background: transparent;
+}
+
+.fe-sticky-scope-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  flex: none;
+}
+
+.fe-sticky-scope-underlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  background: var(--explorer-bg);
+  pointer-events: none;
+}
+
+.fe-tree li.fe-sticky-scope {
+  cursor: default;
+  user-select: none;
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.fe-sticky-scopes .fe-card-menu-btn {
+  pointer-events: auto;
+}
+
 .fe-tree li {
   display: grid;
   grid-template-columns: 20px 1fr auto;    /* icon, text, menu (twisty removed) */
@@ -130,7 +181,7 @@
   padding: 6px 1px 6px 10px;
   cursor: pointer;
   border-radius: 8px 1px 1px 8px;
-  transition: background 0.15s;
+  transition: none;
   color: #e5e7eb;
   font-size: calc(0.8rem * var(--chrome-font-scale));
   border-left: 3px solid transparent;
@@ -146,10 +197,6 @@
   grid-column: 1 / -1;         /* Span both grid columns */
   margin: 0;
   padding: 0;
-}
-
-.fe-tree li:hover {
-  background: var(--explorer-card-hover);
 }
 
 .fe-tree-twisty {
@@ -264,7 +311,7 @@
 
 @media (hover: hover) and (pointer: fine) {
   .fe-card-menu-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: none;
   }
 }
 
@@ -342,10 +389,6 @@
   border-color: rgba(96, 165, 250, 0.35);
 }
 
-.fe-tree-node[data-kind="dir"]:hover {
-  border-color: rgba(96, 165, 250, 0.6);
-}
-
 /* Preserve legacy directory styling based directly on gitStatus so
    collapsed parents still show the orange/blue cues from the backend. */
 
@@ -374,12 +417,12 @@
 
 /* Untracked descendants: solid blue background (when no staged). */
 .fe-tree-node[data-kind="dir"].fe-dir-has-untracked:not(.fe-dir-has-staged) {
-  background: rgba(59, 130, 246, 0.15);
+  background: rgb(15, 49, 101);
 }
 
 /* Staged descendants: solid green background (when no untracked). */
 .fe-tree-node[data-kind="dir"].fe-dir-has-staged:not(.fe-dir-has-untracked) {
-  background: rgba(52, 211, 153, 0.15);
+  background: rgb(0, 58, 43);
 }
 
 /* Both untracked + staged descendants: smooth diagonal blue→green gradient. */
@@ -412,23 +455,6 @@
 /* Staged+modified files: keep orange (modified takes priority visually). */
 .fe-tree-node.fe-git-staged_modified[data-kind="file"] {
   background: rgba(249, 115, 22, 0.15);
-}
-
-.fe-tree-node.fe-git-modified[data-kind="file"]:hover {
-  background: rgba(249, 115, 22, 0.22);
-}
-
-.fe-tree-node.fe-git-untracked[data-kind="file"]:hover {
-  background: rgba(59, 130, 246, 0.22);
-}
-
-.fe-tree-node.fe-git-staged[data-kind="file"]:hover,
-.fe-tree-node.fe-git-added[data-kind="file"]:hover {
-  background: rgba(52, 211, 153, 0.22);
-}
-
-.fe-tree-node.fe-git-staged_modified[data-kind="file"]:hover {
-  background: rgba(249, 115, 22, 0.22);
 }
 
 .fe-git-footer {
@@ -717,10 +743,6 @@
   border-bottom: 1px solid #333;
 }
 
-.fe-search-item:hover {
-  background: rgba(59, 130, 246, 0.1);
-}
-
 .fe-search-icon {
   font-size: 16px;
   width: 15px;
@@ -770,10 +792,6 @@
   border-radius: 0;
   margin-left: 0;
   background: #333;
-}
-
-.fe-search-match:hover {
-  background: rgba(59, 130, 246, 0.1);
 }
 
 .fe-search-line-num {
@@ -1016,12 +1034,6 @@
   border-color: var(--primary);
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .fe-search-close:hover {
-    opacity: 0.7;
-  }
-}
-
 
 /* Review Panel Styles */
 .fe-review-toolbar {
@@ -1044,10 +1056,6 @@
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   gap: 12px;
-}
-
-.fe-review-item:hover {
-  background: var(--explorer-card-hover);
 }
 
 .fe-review-checkbox {
@@ -1096,17 +1104,9 @@
   color: #3b82f6;
 }
 
-.fe-btn-primary:hover {
-  background: rgba(59, 130, 246, 0.1);
-}
-
 .fe-btn-danger {
   border-color: #ef4444;
   color: #ef4444;
-}
-
-.fe-btn-danger:hover {
-  background: rgba(239, 68, 68, 0.1);
 }
 
 

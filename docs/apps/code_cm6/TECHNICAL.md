@@ -3,7 +3,7 @@
 **Architecture Philosophy:** Code CM6 implements the code-server pattern - disk-backed state with ephemeral UI clients. Multiple devices (desktop, mobile, vim) converge on the same backend without sync logic.
 
 **Document Version:** 1.3  
-**Last Updated:** 2025-12-11  
+**Last Updated:** 2025-12-13  
 **Target Audience:** Framework contributors, extension developers, and technical users
 
 This document provides a comprehensive technical overview of Code CM6's internal architecture, focusing on the frameworks, patterns, and implementation details that make the editor function.
@@ -1210,6 +1210,29 @@ explorer:setList (from file creation, etc.):
 2. If yes, keep it expanded even if DOM state was unclear
 3. Prevents regression where broadcast would collapse open dirs
 ```
+
+### 8.5.2 Sticky Scopes (Monaco-ish Docked Folders)
+
+**Added:** 2025-12-13
+
+The explorer includes a *frontend-only* sticky-scroll overlay that docks the open directory chain at the top of the tree while scrolling (similar to Monaco’s “sticky scroll”, but for directory scopes).
+
+**Files:**
+- JS: `app/apps/file_editor_cm6/static/js/explorer_extensions/sticky_scopes.js`
+- Hook + click interception: `app/apps/file_editor_cm6/static/js/explorer.js`
+- CSS: `app/apps/file_editor_cm6/static/js/explorer.css`
+
+**Key Properties:**
+- **No backend involvement:** This is purely DOM/geometry logic; SSOT and explorer WS protocol remain unchanged.
+- **Open-only scopes:** Root is always slot 0; additional sticky scopes are created only for *open* directories (closed directories are never promoted into the sticky stack).
+- **Geometry-based animation:** Push-up / pull-down is computed via DOM rects and applied as `transform: translateY(...)` per sticky slot.
+- **Menu preservation:** Sticky rows are non-interactive except for their ⋮ menu button (`pointer-events` is enabled only for the button).
+- **Sticky click behavior:** Clicking a sticky row collapses that directory in the underlying tree and scrolls so the collapsed row lands where the sticky header was (“magic” alignment).
+
+**Important Edge Case (fixed):**
+Originally, push-up collision used the “next sibling directory” as the boundary. This breaks when the active/open directory is the **last directory** in a scope (e.g., only files follow), because the push boundary never arrives and the stack can flicker/oscillate.
+
+The corrected approach uses the **next tree node after the directory’s entire subtree** (dir *or* file), climbing to ancestor scopes if needed. A small cross-scope gap compensation is applied when that boundary comes from an ancestor scope transition.
 
 ### 8.6 Tree Generation
 

@@ -12,6 +12,7 @@
 
 import { showNewProjectModal } from './new_project_modal.js';
 import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
+import { initExplorerStickyScopes } from './explorer_extensions/sticky_scopes.js';
 
 let treeElement = null;
 let projectLabelEl = null;
@@ -20,11 +21,80 @@ let gitBaseBtn = null;
 let gitBaseDropdown = null;
 let gitButtons = null;
 
+let explorerMenuBtn = null;
+let explorerMenuDropdown = null;
+let explorerMenuStickyHeadersItem = null;
+
+const UI_PREF_KEY_EXPLORER_STICKY_HEADERS = 'explorerStickyHeaders';
+let explorerStickyHeadersEnabled = null; // boolean | null (unknown until prefs arrive)
+const stickyScopesContext = {
+  treeElement: null,
+  drawerBodyEl: null,
+  openCardMenuForEntry: null,
+};
+
 const uiState = {
   projectPath: null,
   gitStatus: null,
   reviewEntries: [],
 };
+
+function setCheckableMenuItem(el, checked) {
+  if (!el) return;
+  el.classList.toggle('fe-menu-item-checked', !!checked);
+  el.setAttribute('aria-checked', checked ? 'true' : 'false');
+}
+
+function closeExplorerMenu() {
+  explorerMenuDropdown?.classList.remove('show');
+}
+
+function syncExplorerPrefsUI() {
+  const checked = explorerStickyHeadersEnabled === true;
+  setCheckableMenuItem(explorerMenuStickyHeadersItem, checked);
+}
+
+function applyExplorerStickyScopesPreference() {
+  const enabled = explorerStickyHeadersEnabled === true;
+  const existing = window.__explorerStickyScopes;
+
+  if (!enabled) {
+    if (existing && typeof existing.destroy === 'function') {
+      try {
+        existing.destroy();
+      } catch {
+        // Ignore cleanup errors.
+      }
+    }
+    window.__explorerStickyScopes = null;
+    return;
+  }
+
+  const ctx = stickyScopesContext;
+  if (
+    !ctx.treeElement ||
+    !ctx.drawerBodyEl ||
+    typeof ctx.openCardMenuForEntry !== 'function'
+  ) {
+    return;
+  }
+
+  if (existing && typeof existing.update === 'function') {
+    existing.update();
+    return;
+  }
+
+  try {
+    window.__explorerStickyScopes = initExplorerStickyScopes({
+      treeElement: ctx.treeElement,
+      drawerBodyEl: ctx.drawerBodyEl,
+      openCardMenuForEntry: ctx.openCardMenuForEntry,
+    });
+  } catch (err) {
+    console.warn('[Explorer] Sticky scopes init failed:', err);
+    window.__explorerStickyScopes = null;
+  }
+}
 
 // --- Seti-UI file icons (files only; dirs keep emoji) ---
 function applySetiIconToSpan(span, fileName, kind = 'file') {
@@ -1153,6 +1223,17 @@ function refreshOpenDirectoriesAfterGit() {
 
 function handleExplorerEvent(type, payload) {
   switch (type) {
+    case 'prefs:setUi': {
+      const ui =
+        payload && typeof payload.ui === 'object' && payload.ui ? payload.ui : null;
+      const next = ui ? ui[UI_PREF_KEY_EXPLORER_STICKY_HEADERS] : undefined;
+      if (typeof next === 'boolean') {
+        explorerStickyHeadersEnabled = next;
+      }
+      syncExplorerPrefsUI();
+      applyExplorerStickyScopesPreference();
+      break;
+    }
     case 'project:setActive': {
       uiState.projectPath = payload.path || payload.projectPath || uiState.projectPath;
       renderProjectLabel();
@@ -1558,9 +1639,15 @@ function handleExplorerEvent(type, payload) {
 export async function initExplorerUI() {
   const root = document.querySelector('.fe-root');
   const drawer = document.getElementById('fe-drawer');
+  const drawerBody = drawer?.querySelector('.fe-drawer-body');
   const drawerClose = document.getElementById('fe-drawer-close');
   const drawerOpenBtn = document.getElementById('fe-drawer-open');
   const drawerBackdrop = document.getElementById('fe-drawer-backdrop');
+  explorerMenuBtn = document.getElementById('fe-explorer-menu-btn');
+  explorerMenuDropdown = document.getElementById('fe-explorer-menu-dd');
+  explorerMenuStickyHeadersItem = document.getElementById(
+    'fe-mi-explorer-sticky-headers',
+  );
   const btnNewProject = document.getElementById('fe-new-project');
   const btnOpenProject = document.getElementById('fe-open-project');
   treeElement = document.getElementById('fe-file-tree');
@@ -1635,6 +1722,42 @@ export async function initExplorerUI() {
       toggleDiffBaseMenu(gitBaseBtn, gitBaseDropdown);
     });
   }
+
+  if (explorerMenuBtn && explorerMenuDropdown) {
+    explorerMenuBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      closeDiffBaseMenus();
+      explorerMenuDropdown.classList.toggle('show');
+    });
+  }
+
+  if (explorerMenuStickyHeadersItem) {
+    explorerMenuStickyHeadersItem.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      closeExplorerMenu();
+      if (typeof explorerStickyHeadersEnabled !== 'boolean') {
+        toast('Explorer preferences not loaded yet.');
+        return;
+      }
+      if (typeof window.__explorerBusSend !== 'function') {
+        toast('Explorer connection unavailable.');
+        return;
+      }
+      window.__explorerBusSend('prefs:updateUi', {
+        key: UI_PREF_KEY_EXPLORER_STICKY_HEADERS,
+        value: !explorerStickyHeadersEnabled,
+      });
+    });
+  }
+
+  document.addEventListener(
+    'click',
+    (ev) => {
+      if (ev.target.closest('#fe-explorer-menu')) return;
+      closeExplorerMenu();
+    },
+    false,
+  );
 
   // Close diff-base dropdowns when clicking outside either button/dropdown.
   document.addEventListener(
@@ -2544,9 +2667,98 @@ export async function initExplorerUI() {
     false
   );
 
+  // Initialize explorer dropdown UI with any already-known prefs snapshot.
+  syncExplorerPrefsUI();
+
+  // Sticky scopes (Monaco-ish "docked folders") overlay for the explorer tree.
+  // Uses geometry; does not change backend/SSOT behavior.
+  stickyScopesContext.treeElement = treeElement;
+  stickyScopesContext.drawerBodyEl = drawerBody;
+  stickyScopesContext.openCardMenuForEntry = openCardMenuForEntry;
+  applyExplorerStickyScopesPreference();
+
   // Basic click handling: expand/collapse dirs, open files, open context menu
   if (treeElement) {
     treeElement.addEventListener('click', (ev) => {
+      // Sticky scopes overlay: clicking the docked rows should collapse that scope.
+      // (Menu clicks are handled by the overlay itself.)
+      const sticky = document.getElementById('fe-sticky-scopes');
+      if (sticky && sticky.style.display !== 'none') {
+        const r = sticky.getBoundingClientRect();
+        if (ev.clientY >= r.top && ev.clientY <= r.bottom) {
+          // Map the click to the sticky slot that visually contains the point.
+          // The overlay itself is `pointer-events: none`, so clicks pass through
+          // to the underlying tree; we intercept them here for correct behavior.
+          const slots = sticky.querySelectorAll('ul.fe-sticky-scope-slot');
+          let bestSlot = null;
+          let bestZ = -Infinity;
+          for (const slot of slots) {
+            const rect = slot.getBoundingClientRect();
+            if (
+              ev.clientX >= rect.left &&
+              ev.clientX <= rect.right &&
+              ev.clientY >= rect.top &&
+              ev.clientY <= rect.bottom
+            ) {
+              const z = Number(slot.style.zIndex || 0);
+              if (z > bestZ) {
+                bestZ = z;
+                bestSlot = slot;
+              }
+            }
+          }
+
+          const rel = bestSlot?.querySelector('li.fe-tree-node')?.dataset?.rel;
+          if (rel && rel !== '.') {
+            const slotRect = bestSlot?.getBoundingClientRect?.();
+            const selRel =
+              (window.CSS && typeof window.CSS.escape === 'function')
+                ? window.CSS.escape(rel)
+                : rel.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+            const dirLi = treeElement.querySelector(
+              `li.fe-tree-node[data-kind="dir"][data-rel="${selRel}"]`
+            );
+            if (dirLi && dirLi.dataset.open === 'true') {
+              dirLi.dataset.open = 'false';
+              const childList = dirLi.querySelector(':scope > ul.fe-tree');
+              if (childList) childList.remove();
+
+              // Auto-disable select mode if collapsing the select-mode directory
+              checkAutoDisableSelectMode(rel);
+
+              // Track directory close for persistence
+              markDirectoryOpen(rel, false);
+
+              // "Magic" UX: after closing a sticky scope, scroll so the closed
+              // directory row lands exactly where the sticky header was.
+              if (slotRect) {
+                const dirRect = dirLi.getBoundingClientRect();
+                const delta = dirRect.top - slotRect.top;
+                if (Math.abs(delta) >= 1) {
+                  const maxScroll = Math.max(
+                    0,
+                    treeElement.scrollHeight - treeElement.clientHeight,
+                  );
+                  const nextTop = Math.min(
+                    maxScroll,
+                    Math.max(0, treeElement.scrollTop + delta),
+                  );
+                  treeElement.scrollTop = nextTop;
+                }
+              }
+
+              // Nudge sticky overlay to recompute immediately (some engines may not
+              // emit a scroll event for programmatic `scrollTop` changes).
+              const stickyApi = window.__explorerStickyScopes;
+              if (stickyApi && typeof stickyApi.update === 'function') {
+                stickyApi.update();
+              }
+            }
+          }
+          return;
+        }
+      }
+
       const li = ev.target.closest('li.fe-tree-node');
       if (!li) return;
       const rel = li.dataset.rel;
