@@ -48,7 +48,7 @@ DEFAULT_MAX_SHELLS = 5
 LOG_TAIL_BYTES = 4096
 LOG_TAIL_LINES = 200
 
-def _drawer_debug(stage: str, message: str) -> None:
+def _shell_debug(stage: str, message: str) -> None:
     print(f"[PTY][{stage}] {message}")
 
 
@@ -518,6 +518,22 @@ class FrameworkShellManager:
         await asyncio.to_thread(stdout_path.touch, exist_ok=True)
         await asyncio.to_thread(stderr_path.touch, exist_ok=True)
         
+        # Configure PTY to raw mode to avoid 4096-byte line limit (ICANON)
+        try:
+            attrs = termios.tcgetattr(slave_fd)
+            # iflag: Clear ICRNL (translate CR to NL), IXON (flow control)
+            attrs[0] = attrs[0] & ~(termios.ICRNL | termios.IXON)
+            # oflag: Clear OPOST (output processing)
+            attrs[1] = attrs[1] & ~termios.OPOST
+            # lflag: Clear ICANON (canonical mode), ECHO (local echo), ISIG (signals)
+            attrs[3] = attrs[3] & ~(termios.ICANON | termios.ECHO | termios.ISIG)
+            # cc: Set VMIN=1, VTIME=0 (blocking read)
+            attrs[6][termios.VMIN] = 1
+            attrs[6][termios.VTIME] = 0
+            termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
+        except termios.error:
+            _shell_debug("PTY launch", "Failed to set termios attributes (raw mode)")
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 *record.command,
@@ -584,7 +600,7 @@ class FrameworkShellManager:
                         # Treat as "no data yet" instead of tearing down the PTY.
                         continue
                     except OSError as exc:
-                        _drawer_debug("PTY recv", f"select/read error shell={record.id}: {exc}")
+                        _shell_debug("PTY recv", f"select/read error shell={record.id}: {exc}")
                         break
                     
                     try:
@@ -596,7 +612,7 @@ class FrameworkShellManager:
                     text = data.decode("utf-8", errors="replace")
                     preview = text.strip().replace("\n", "\\n")
                     if preview:
-                        _drawer_debug(
+                        _shell_debug(
                             "PTY recv",
                             f"shell={record.id} label={record.label} chunk={preview[:200]}"
                         )
@@ -925,17 +941,29 @@ class FrameworkShellManager:
                 raise KeyError("No PTY for this shell")
             payload = data.encode("utf-8") if isinstance(data, str) else data
             preview = payload[:200].decode("utf-8", errors="replace")
-            _drawer_debug(
+            _shell_debug(
                 "PTY write",
                 f"shell={shell_id} label={state.label} bytes={len(payload)} data={preview}"
             )
             try:
-                await asyncio.to_thread(os.write, state.master_fd, payload)
+                # Chunk writes to handle PTY buffer limits (typically 4096 bytes)
+                # and partial writes. os.write returns bytes written.
+                offset = 0
+                total = len(payload)
+                while offset < total:
+                    # Write in chunks of 4096 to be safe and efficient with PTY interactions
+                    chunk = payload[offset:offset + 4096]
+                    written = await asyncio.to_thread(os.write, state.master_fd, chunk)
+                    if written == 0:
+                        _shell_debug("PTY write", f"zero write shell={shell_id}")
+                        # Avoid infinite loop if PTY is in a weird state
+                        break
+                    offset += written
             except OSError as exc:
-                _drawer_debug("PTY write", f"error shell={shell_id}: {exc}")
+                _shell_debug("PTY write", f"error shell={shell_id}: {exc}")
                 raise
             else:
-                _drawer_debug("PTY write", f"complete shell={shell_id}")
+                _shell_debug("PTY write", f"complete shell={shell_id} bytes={total}")
 
     async def subscribe_output(self, shell_id: str) -> "AsyncQueue[str]":
         async with self._get_lock():

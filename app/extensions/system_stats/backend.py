@@ -136,8 +136,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     break
                 else:
                     print(f"[Stats] Local stats OS error: {e}")
+            except RuntimeError as e:
+                # Starlette/FastAPI raises RuntimeError if the connection is closed during send
+                if "close message has been sent" in str(e) or "Unexpected ASGI message" in str(e):
+                    break
+                print(f"[Stats] Local stats runtime error: {e}")
             except Exception as e:
                 print(f"[Stats] Local stats error: {e}")
+                # Don't spin rapidly on errors
+                await asyncio.sleep(1)
             
             await asyncio.sleep(1)
             
