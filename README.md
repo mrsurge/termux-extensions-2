@@ -1,7 +1,7 @@
 # Termux Extensions 2
 
 ## What TE2 Gives You
-<img width="225" height="500" alt="Screenshot_20251124-203443 Termux Extensions" src="https://github.com/user-attachments/assets/32c2031a-bbec-4ad1-87df-4f75911c8c0f" />
+<img width="225" height="500" alt="Screenshot_20251213-234841 Termux Extensions" src="https://github.com/user-attachments/assets/b5331afd-2ac2-40ba-9f00-86f3f6b0a15b" />
 <img width="225" height="500" alt="Screenshot_20251124-212029 Termux Extensions" src="https://github.com/user-attachments/assets/70bf817d-ddba-4956-af68-2603d247abce" />
 <img width="225" height="500" alt="Screenshot_20251123-233724 Termux Extensions" src="https://github.com/user-attachments/assets/a6315058-aac9-4301-aff8-88ad4de5463a" />
 <img width="225" height="500" alt="Screenshot_20251124-091516 Termux Extensions" src="https://github.com/user-attachments/assets/7aa5f90c-4c9b-451a-b6c0-8172bde87fe9" />
@@ -38,7 +38,8 @@ An integrated developement environment & complete with
 <img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/user-attachments/assets/5e6aef7c-2c11-4ce3-9783-5db505ad66c4" />
 <img width="225" height="500" alt="Screenshot_20251124-223352 Termux Extensions" src="https://github.com/user-attachments/assets/8f3ce5fb-7923-46df-9732-73a06d1c7971" />
 <img width="225" height="500" alt="Screenshot_20251123-221530 Termux Extensions" src="https://github.com/user-attachments/assets/14752214-3ffd-4a66-a290-7bf36ccc3774" />
-<img width="225" height="500" alt="Screenshot_20251124-095030 Termux Extensions" src="https://github.com/user-attachments/assets/9c0f64f6-5cd5-44ee-8d7b-5828293526ce" />
+<img width="225" height="500" alt="Screenshot_20251213-235218 Termux Extensions" src="https://github.com/user-attachments/assets/4b348858-1938-4ae5-9157-61369a74e2f2" />
+
 
 5. Drafting system
    -
