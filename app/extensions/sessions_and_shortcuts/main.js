@@ -26,63 +26,23 @@ let elements = {
 
 const storageKeys = {
     sessionNames: 'sessions_and_shortcuts.sessionNames',
-    frameworkToken: 'sessions_and_shortcuts.frameworkToken',
 };
 
-const teStateStore = window.teState || null;
+// No localStorage/cookies - state is in-memory only
+// Session names could be backend-persisted in future if needed
 const persisted = {
-    frameworkToken: null,
     sessionNames: {},
 };
 
 const SHORTCUTS_DIR = '/data/data/com.termux/files/home/.shortcuts';
 
 async function preloadPersistentState() {
-    if (!teStateStore) return;
-    try {
-        await teStateStore.preload([storageKeys.sessionNames, storageKeys.frameworkToken]);
-        const names = teStateStore.getSync(storageKeys.sessionNames, {});
-        if (names && typeof names === 'object') {
-            persisted.sessionNames = { ...names };
-        }
-        const token = teStateStore.getSync(storageKeys.frameworkToken, null);
-        persisted.frameworkToken = typeof token === 'string' && token.trim() ? token : null;
-    } catch (err) {
-        console.warn('Failed to preload sessions state', err);
-    }
+    // No-op: no localStorage usage
 }
 
-function loadFrameworkToken() {
-    return persisted.frameworkToken;
-}
-
-function saveFrameworkToken(token) {
-    persisted.frameworkToken = token ? token : null;
-    if (!teStateStore) return;
-    if (persisted.frameworkToken) {
-        teStateStore.set(storageKeys.frameworkToken, persisted.frameworkToken).catch((err) => {
-            console.warn('Failed to persist framework token', err);
-        });
-    } else {
-        teStateStore.remove(storageKeys.frameworkToken).catch((err) => {
-            console.warn('Failed to clear framework token', err);
-        });
-    }
-}
-
-async function frameworkFetch(url, options = {}, allowPrompt = true) {
-    const headers = Object.assign({}, options.headers || {});
-    const token = loadFrameworkToken();
-    if (token) headers['X-Framework-Key'] = token;
-    const response = await fetch(url, Object.assign({}, options, { headers }));
-    if (response.status === 403 && allowPrompt) {
-        const input = window.prompt('Framework shell token required. Enter token (leave blank to clear):');
-        if (input !== null) {
-            const trimmed = input.trim();
-            saveFrameworkToken(trimmed);
-            return frameworkFetch(url, options, false);
-        }
-    }
+async function frameworkFetch(url, options = {}) {
+    // No auth token needed - auth is disabled when TE_FRAMEWORK_SHELL_TOKEN not set
+    const response = await fetch(url, options);
     let body = null;
     try {
         body = await response.json();
@@ -173,11 +133,8 @@ function loadSessionNames() {
 }
 
 function saveSessionNames() {
+    // In-memory only - no localStorage
     persisted.sessionNames = { ...STATE.sessionNames };
-    if (!teStateStore) return;
-    teStateStore.set(storageKeys.sessionNames, persisted.sessionNames).catch((err) => {
-        console.warn('Failed to persist session names', err);
-    });
 }
 
 function containersBySession() {
@@ -698,6 +655,36 @@ function applyLiveSnapshot(payload) {
     render();
 }
 
+function applyShellEvent(payload) {
+    if (!payload || !payload.event) return;
+    
+    const event = payload.event;
+    const shellId = event.shell_id;
+    const eventType = event.type;
+    const shellData = payload.shell;
+    
+    // Update the shell in STATE.frameworkShells
+    const idx = STATE.frameworkShells.findIndex(s => s.id === shellId);
+    
+    if (eventType === 'shell.removed') {
+        // Remove shell from list
+        if (idx !== -1) {
+            STATE.frameworkShells.splice(idx, 1);
+        }
+    } else if (shellData) {
+        if (idx !== -1) {
+            // Update existing shell
+            STATE.frameworkShells[idx] = shellData;
+        } else {
+            // Add new shell
+            STATE.frameworkShells.push(shellData);
+        }
+    }
+    
+    // Re-render framework shells section
+    renderFrameworkShells();
+}
+
 function requestSnapshot() {
     if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
         try {
@@ -961,7 +948,7 @@ async function stopFrameworkShellGroup(umbrella, subgroup) {
             await frameworkFetch(`/api/framework_shells/${id}/action`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'terminate' }),
+                body: JSON.stringify({ action: 'terminate', force: true }),
             });
         }
         requestSnapshot();
@@ -991,7 +978,7 @@ async function killFrameworkShellWithChildren(shellId, pid, killChildren) {
             await frameworkFetch(`/api/framework_shells/${shellId}/action`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'terminate' }),
+                body: JSON.stringify({ action: 'terminate', force: true }),
             });
         }
         requestSnapshot();
@@ -1060,8 +1047,18 @@ export default async function initialize(container, apiRef) {
             liveSocket.onmessage = (event) => {
                 try {
                     const payload = JSON.parse(event.data);
-                    if (payload && payload.type === 'update') {
+                    if (payload.type === 'snapshot' || payload.type === 'update') {
+                        // Full state update
                         applyLiveSnapshot(payload);
+                    } else if (payload.type === 'shell_event') {
+                        // Incremental shell update
+                        applyShellEvent(payload);
+                    } else if (payload.type === 'sessions_update') {
+                        // Session-only update (non-framework shells)
+                        if (Array.isArray(payload.sessions)) {
+                            STATE.sessions = payload.sessions;
+                            renderSessions();
+                        }
                     }
                 } catch (err) {
                     console.warn('Bad websocket payload', err);

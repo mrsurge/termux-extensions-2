@@ -806,26 +806,58 @@ class FrameworkShellManager:
 
     async def terminate_shell(self, shell_id: str, force: bool = False) -> None:
         rec = await self._load_record(shell_id)
-        if not rec or not rec.pid: return
+        if not rec: return
         
-        # Kill the underlying shell
-        try:
-            sig = signal.SIGKILL if force else signal.SIGTERM
-            os.kill(rec.pid, sig)
-        except Exception:
-            pass
+        # Dtach shells need SIGKILL - bash inside dtach ignores SIGTERM
+        if rec.uses_dtach:
+            force = True
         
-        # The proxy might stay alive until it sees disconnect, but we can kill it too
+        sig = signal.SIGKILL if force else signal.SIGTERM
+        
+        # For dtach shells, we need to kill the dtach master process
+        # The socket file tells us if dtach is involved
+        if rec.uses_dtach:
+            socket_path = self.sockets_dir / f"{shell_id}.sock"
+            pid_file = self.sockets_dir / f"{shell_id}.pid"
+            
+            # Kill the shell process inside dtach
+            if rec.pid:
+                try:
+                    os.kill(rec.pid, sig)
+                except ProcessLookupError:
+                    pass
+            
+            # Find and kill dtach master by checking who owns the socket
+            # Or just remove the socket to force dtach to exit
+            if socket_path.exists():
+                try:
+                    socket_path.unlink()
+                except Exception:
+                    pass
+            if pid_file.exists():
+                try:
+                    pid_file.unlink()
+                except Exception:
+                    pass
+        elif rec.pid:
+            # Regular process - just kill it
+            try:
+                os.kill(rec.pid, sig)
+            except ProcessLookupError:
+                pass
+        
+        # Stop any PTY/pipe proxies we're running
         await self._stop_pty(shell_id)
         await self._stop_pipe(shell_id)
         
         await asyncio.sleep(0.1)
-        if not await self._is_pid_alive(rec.pid):
+        if rec.pid and not await self._is_pid_alive(rec.pid):
              code = await self._collect_exit_code(rec.pid)
              await self._mark_exited(rec, code)
 
     async def remove_shell(self, shell_id: str, force: bool = False) -> bool:
         """Terminate shell and remove its metadata/logs."""
+        rec = await self._load_record(shell_id)
         await self.terminate_shell(shell_id, force=force)
         
         # Remove metadata
@@ -834,7 +866,6 @@ class FrameworkShellManager:
             await asyncio.to_thread(shutil.rmtree, meta_dir, ignore_errors=True)
         
         # Remove logs
-        rec = await self._load_record(shell_id)
         if rec:
             for log_path in [rec.stdout_log, rec.stderr_log]:
                 p = Path(log_path)
@@ -843,6 +874,8 @@ class FrameworkShellManager:
                         await asyncio.to_thread(p.unlink)
                     except Exception:
                         pass
+            # Emit removed event
+            await self._emit(EventType.SHELL_REMOVED, rec)
         
         return True
 

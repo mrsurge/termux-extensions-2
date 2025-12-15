@@ -20,24 +20,35 @@ async def get_manager() -> FrameworkShellManager:
         # Optionally trigger load? Manager loads lazily on list/get.
     return _manager_instance
 
-async def require_auth(authorization: str = Header(None)) -> None:
-    """Require valid Bearer token for mutating endpoints."""
-    try:
-        secret = get_secret()
-    except RuntimeError:
-        # If secret not configured (maybe dev mode?), we might skip?
-        # But plan says "Hard prerequisites".
-        raise HTTPException(500, "Server misconfigured: missing secret")
-
+async def require_auth(
+    authorization: str = Header(None),
+    x_framework_key: str = Header(None, alias="X-Framework-Key")
+) -> None:
+    """Require valid Bearer token or X-Framework-Key for mutating endpoints."""
+    secret = get_secret()
+    
+    # If no secret configured, skip auth (dev mode / legacy behavior)
+    if not secret:
+        return
+    
     expected = derive_api_token(secret)
+    token = None
     
-    if not authorization:
-        raise HTTPException(403, "Missing Authorization header")
+    # Check X-Framework-Key first (frontend uses this)
+    if x_framework_key:
+        token = x_framework_key
+    # Fall back to Authorization: Bearer
+    elif authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
     
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(403, "Authorization header must use Bearer scheme")
+    # No token provided - skip auth if no token required
+    if not token:
+        # Legacy behavior: if TE_FRAMEWORK_SHELL_TOKEN not set, allow unauthenticated
+        import os
+        if not os.environ.get("TE_FRAMEWORK_SHELL_TOKEN"):
+            return
+        raise HTTPException(403, "Missing auth token (X-Framework-Key or Authorization header)")
     
-    token = authorization[7:]
     if not hmac.compare_digest(token, expected):
         raise HTTPException(403, "Invalid auth token")
 
@@ -97,6 +108,22 @@ async def terminate_shell(
 ):
     await mgr.terminate_shell(shell_id)
     return {"ok": True}
+
+@router.post('/api/framework_shells/{shell_id}/action')
+async def shell_action(
+    shell_id: str,
+    payload: dict = Body(...),
+    mgr: FrameworkShellManager = Depends(get_manager),
+    _: None = Depends(require_auth)
+):
+    """Handle shell actions (terminate, etc.)."""
+    action = payload.get("action")
+    if action == "terminate":
+        force = payload.get("force", False)
+        await mgr.terminate_shell(shell_id, force=force)
+        return {"ok": True}
+    else:
+        raise HTTPException(400, f"Unknown action: {action}")
 
 from fastapi.responses import FileResponse
 

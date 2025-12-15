@@ -84,9 +84,27 @@ async def lifespan(app_instance):
 
     yield
 
-    # Note: Don't unregister here - IPC server is busy in shutdown_all() and can't process the request
-    # IPC will clean the registry after killing all processes
-    print("--- Shutting down: IPC will handle process termination ---")
+    # Terminate all framework shells before exiting
+    # This runs when framework receives SIGTERM from supervisor
+    print("--- Terminating framework shells ---")
+    terminated_count = 0
+    try:
+        mgr = await get_manager()
+        shells = await mgr.list_shells()
+        for shell in shells:
+            if shell.status != "running":
+                continue
+            try:
+                await mgr.terminate_shell(shell.id, force=True)
+                terminated_count += 1
+                print(f"  Terminated: {shell.id} ({shell.label or 'unlabeled'})")
+            except Exception as e:
+                print(f"  Failed to terminate {shell.id}: {e}")
+        print(f"--- Terminated {terminated_count} framework shell(s) ---")
+    except Exception as e:
+        print(f"  Error during shell termination: {e}")
+    
+    print("--- Framework shutdown complete ---")
 
 
 app = FastAPI(lifespan=lifespan)

@@ -245,7 +245,10 @@ async def _list_framework_shells():
         manager = await get_manager()
         shells = await manager.list_shells()
         return [await manager.describe(s) for s in shells]
-    except Exception:
+    except Exception as e:
+        print(f"[sessions_and_shortcuts] _list_framework_shells error: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
@@ -337,12 +340,12 @@ async def sessions_ws(websocket: WebSocket):
     
     # Get event bus from framework_shells
     from framework_shells.events import get_event_bus
+    from framework_shells import get_manager
     bus = get_event_bus()
     q = bus.subscribe()
 
-    try:
-        # Initial snapshot
-        # Note: We still send sessions/containers for now
+    async def send_full_snapshot():
+        """Send complete state snapshot."""
         try:
             sessions_resp = get_sessions()
             sessions_data = sessions_resp.get('data', []) if isinstance(sessions_resp, dict) else []
@@ -354,90 +357,72 @@ async def sessions_ws(websocket: WebSocket):
         shell_trees = _build_shell_trees(frameworks, ipc_processes)
         framework_ui = _load_framework_shell_ui_by_app()
         
-        snapshot = {
-            "type": "snapshot", # Or "update" if we want to reuse existing frontend logic immediately? 
-            # Existing frontend expects "update" with all fields.
-            # Let's send an "update" first as the snapshot.
+        await websocket.send_json({
+            "type": "snapshot",
             "sessions": sessions_data,
             "frameworks": frameworks,
             "shell_trees": shell_trees,
             "containers": [],
             "framework_ui": framework_ui,
-        }
-        # If frontend supports "snapshot", send that. If it only knows "update", send usage.
-        # Assuming we update frontend later or it handles it. 
-        # For now, let's send "update" to be safe with existing UI code if we haven't changed JS.
-        # But wait, implementation plan said "Sessions & Shortcuts becomes snapshot + event stream".
-        # This implies updating JS too.
-        # But the user only asked for "Understanding of this plan".
-        # If I change backend to send 'snapshot' type, frontend might break if it expects 'update'.
-        # However, 'update' is full state.
-        # Let's send 'update' as the initial state.
-        
-        await websocket.send_json({**snapshot, "type": "update"})
-        
-        if bus and q:
-            # Stream events
-            while True:
-                # We need to handle sessions/shortcuts polling separately if we want to keep them live?
-                # Standard sessions (pid-based) don't have events.
-                # So maybe we still need a loop for sessions, but shell events come from bus?
-                # Hybrid approach:
-                # 1. Listen to bus for shell events.
-                # 2. Use a timeout on q.get() to poll sessions?
-                # Or spawn a separate task for sessions polling.
-                
-                try:
-                    event = await asyncio.wait_for(q.get(), timeout=5.0)
-                    # Helper to convert event back to "update" or new "event" type?
-                    # If frontend supports incremental:
-                    await websocket.send_json({
-                        "type": "event",
-                        "event": event.to_dict(),
-                    })
-                except asyncio.TimeoutError:
-                    # Timeout -> Poll sessions
-                    pass
+        })
 
-                # Poll sessions every 5s (approx)
-                # (This is a simplified hybrid; ideally completely separate)
+    async def send_shell_event(event):
+        """Send a single shell event with updated shell data."""
+        mgr = await get_manager()
+        shell_data = None
+        
+        # Get current shell state if shell still exists
+        if event.type.value not in ("shell.removed",):
+            try:
+                rec = await mgr.get_shell(event.shell_id)
+                if rec:
+                    shell_data = await mgr.describe(rec)
+            except Exception:
+                pass
+        
+        await websocket.send_json({
+            "type": "shell_event",
+            "event": event.to_dict(),
+            "shell": shell_data,
+        })
+
+    try:
+        # Send initial snapshot
+        await send_full_snapshot()
+        
+        # Event-driven loop with periodic session polling
+        last_session_poll = asyncio.get_event_loop().time()
+        SESSION_POLL_INTERVAL = 10.0  # Poll sessions every 10s (they don't have events)
+        
+        while True:
+            try:
+                # Wait for event with timeout
+                event = await asyncio.wait_for(q.get(), timeout=2.0)
+                # Send the event immediately
+                await send_shell_event(event)
+            except asyncio.TimeoutError:
+                pass
+            
+            # Periodic session poll (non-framework shells don't emit events)
+            now = asyncio.get_event_loop().time()
+            if now - last_session_poll > SESSION_POLL_INTERVAL:
+                last_session_poll = now
                 try:
                     sessions_resp = get_sessions()
                     sessions_data = sessions_resp.get('data', []) if isinstance(sessions_resp, dict) else []
                     await websocket.send_json({
-                        "type": "sessions_update", # New type? Or just partial update
-                        "sessions": sessions_data
+                        "type": "sessions_update",
+                        "sessions": sessions_data,
                     })
                 except Exception:
                     pass
-        else:
-            # Fallback to polling loop
-            while True:
-                try:
-                    sessions_resp = get_sessions()
-                    sessions_data = sessions_resp.get('data', []) if isinstance(sessions_resp, dict) else []
-                except Exception:
-                    sessions_data = []
-
-                frameworks = await _list_framework_shells()
-                ipc_processes = await _list_ipc_processes()
-                shell_trees = _build_shell_trees(frameworks, ipc_processes)
-                framework_ui = _load_framework_shell_ui_by_app()
-                
-                payload = {
-                    "type": "update",
-                    "sessions": sessions_data,
-                    "frameworks": frameworks,
-                    "shell_trees": shell_trees,
-                    "containers": [],
-                    "framework_ui": framework_ui,
-                }
-                await websocket.send_json(payload)
-                await asyncio.sleep(5)
 
     except WebSocketDisconnect:
         pass
     except Exception as exc:
+        print(f"[sessions_and_shortcuts] WebSocket error: {exc}")
+        import traceback
+        traceback.print_exc()
         try:
             await websocket.send_json({"type": "error", "message": str(exc)})
         finally:

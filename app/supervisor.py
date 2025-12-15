@@ -78,30 +78,49 @@ def run(argv: List[str]) -> int:
         shutting_down = True
         print(f"[supervisor] Received signal {signum}; shutting down run {run_id}")
         
-        # IPC handles shutdown - no timeout needed
-        print("[supervisor] Requesting IPC to shutdown all processes")
-        import requests
-        ipc_url = f"http://127.0.0.1:9123/actions/shutdown"
+        # Step 1: Send SIGTERM to framework and let it shutdown gracefully
+        # The framework's lifespan shutdown will terminate all framework shells
+        print("[supervisor] Sending SIGTERM to framework for graceful shutdown")
         try:
-            resp = requests.post(ipc_url, timeout=30.0)  # Just wait for IPC to finish
-            if resp.status_code == 200:
-                print("[supervisor] IPC shutdown completed successfully")
-                # Log force-kill info if any
-                data = resp.json()
-                if data.get("ok"):
-                    stats = data.get("data", {})
-                    if stats.get("force_killed_shells"):
-                        print(f"[supervisor] Force-killed shells (logs will be archived on next startup): {stats['force_killed_shells']}")
-            else:
-                print(f"[supervisor] IPC shutdown returned {resp.status_code}")
-        except Exception as exc:
-            print(f"[supervisor] IPC shutdown request failed: {exc}")
-            # Fallback: kill process group directly
-            print("[supervisor] Falling back to direct process group kill")
-            _kill_process_group(proc.pid, signal.SIGTERM)
-            time.sleep(2.0)
-            if proc.poll() is None:
-                _kill_process_group(proc.pid, signal.SIGKILL)
+            os.kill(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            print("[supervisor] Framework already exited")
+            return
+        
+        # Step 2: Wait for framework to exit (it terminates shells in lifespan)
+        max_wait = 10.0
+        poll_interval = 0.2
+        elapsed = 0.0
+        while elapsed < max_wait:
+            if proc.poll() is not None:
+                print(f"[supervisor] Framework exited gracefully after {elapsed:.1f}s")
+                break
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+        
+        if proc.poll() is None:
+            print(f"[supervisor] Framework didn't exit after {max_wait}s, requesting IPC shutdown")
+            # Framework is hung - use IPC to force cleanup
+            import requests
+            ipc_url = f"http://127.0.0.1:9123/actions/shutdown"
+            try:
+                resp = requests.post(ipc_url, timeout=30.0)
+                if resp.status_code == 200:
+                    print("[supervisor] IPC shutdown completed")
+                    data = resp.json()
+                    if data.get("ok"):
+                        stats = data.get("data", {})
+                        if stats.get("force_killed_shells"):
+                            print(f"[supervisor] Force-killed shells: {stats['force_killed_shells']}")
+                else:
+                    print(f"[supervisor] IPC shutdown returned {resp.status_code}")
+            except Exception as exc:
+                print(f"[supervisor] IPC shutdown request failed: {exc}")
+                print("[supervisor] Falling back to direct process group kill")
+                _kill_process_group(proc.pid, signal.SIGTERM)
+                time.sleep(2.0)
+                if proc.poll() is None:
+                    _kill_process_group(proc.pid, signal.SIGKILL)
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
