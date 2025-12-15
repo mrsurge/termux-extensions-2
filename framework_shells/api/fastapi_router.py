@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Body
+from fastapi.responses import FileResponse
 from typing import List, Optional, Any
 import hmac
+from pathlib import Path
 
 from ..auth import get_secret, derive_api_token
 from ..manager import FrameworkShellManager
@@ -8,13 +10,15 @@ from ..store import RuntimeStore
 
 router = APIRouter()
 
-# Dependency to get manager instance
-# In a real app, this might be a singleton or request-scoped
+# Singleton instance
+_manager_instance: Optional[FrameworkShellManager] = None
+
 async def get_manager() -> FrameworkShellManager:
-    # TODO: Shared instance logic?
-    # For now, create one per request or use a global if initialized
-    # Ideally should be injected
-    return FrameworkShellManager()
+    global _manager_instance
+    if _manager_instance is None:
+        _manager_instance = FrameworkShellManager()
+        # Optionally trigger load? Manager loads lazily on list/get.
+    return _manager_instance
 
 async def require_auth(authorization: str = Header(None)) -> None:
     """Require valid Bearer token for mutating endpoints."""

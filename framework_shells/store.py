@@ -17,23 +17,15 @@ class RuntimeStore:
         # allow a fallback if we want to run without the wrapper script.
         # But per plan, we enforce strict prerequisites.
         if not fingerprint:
-            # Fallback for dev/debug if env var missing but secret present
-            # or raise? Plan says: "Hard prerequisites".
-            # But let's be slightly robust for testing.
-            if not os.getenv("FRAMEWORK_SHELLS_ALLOW_NO_FINGERPRINT"):
-                 pass # Warning or error?
-                 # Actually, run_framework.sh exports it.
-                 # If running via 'fs', we need to compute it or rely on existing files.
-                 # For now, let's assume TE_REPO_FINGERPRINT is set by the environment
-                 # or we compute it on the fly if needed (duplicates logic).
-                 pass
-
-        if not fingerprint:
              # Try to compute it if we are in a recognizable repo
              # This is a bit tricky for a pipx installed package.
              # Let's rely on the env var being set or raise validation error.
              if not os.environ.get("TE_REPO_FINGERPRINT"):
-                  raise RuntimeError("TE_REPO_FINGERPRINT environment variable is required")
+                 # ONE LAST CHANCE: If configured to allow loose mode (e.g. testing)
+                 if os.getenv("FRAMEWORK_SHELLS_ALLOW_NO_FINGERPRINT"):
+                      fingerprint = "standalone_debug"
+                 else:
+                      raise RuntimeError("TE_REPO_FINGERPRINT environment variable is required")
 
         self.root = base / "runtimes" / fingerprint / self.runtime_id
         self.metadata_dir = self.root / "meta"

@@ -110,7 +110,7 @@ ensure_framework_secret() {
   export TE_REPO_FINGERPRINT="$fingerprint"
 }
 
-ensure_framework_secret
+
 
 cleanup_framework_shell_logs() {
   local base_dir="$HOME/.cache/te_framework"
@@ -187,6 +187,8 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 
 cd "$REPO_ROOT"
+
+ensure_framework_secret
 
 cleanup_framework_shell_logs
 

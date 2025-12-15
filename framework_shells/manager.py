@@ -626,6 +626,63 @@ class FrameworkShellManager:
             except Exception:
                 pass
 
+    async def _launch_pipe(self, record: ShellRecord) -> ShellRecord:
+        """Launch shell with live stdin/stdout pipes for bidirectional streaming."""
+        record.uses_pipes = True
+        record.uses_pty = False
+        env = self._prepare_env(record)
+        
+        stdout_path = Path(record.stdout_log)
+        stderr_path = Path(record.stderr_log)
+        
+        # open stderr for logging
+        stderr_fh = await asyncio.to_thread(open, stderr_path, "ab")
+        
+        await self._emit(EventType.SHELL_CREATED, record)
+
+        try:
+            # We use pipes for stdin/stdout, but file for stderr
+            proc = await asyncio.create_subprocess_exec(
+                *record.command,
+                cwd=record.cwd,
+                env=env,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=stderr_fh,
+                start_new_session=True,
+            )
+            
+            record.pid = proc.pid
+            record.status = "running"
+            record.updated_at = time.time()
+            await self._save_record(record)
+            await self._emit(EventType.SHELL_SPAWNED, record)
+            
+            state = PipeState(
+                process=proc,
+                label=record.label,
+                shell_id=record.id,
+            )
+            self._pipes[record.id] = state
+            return record
+            
+        finally:
+            await asyncio.to_thread(stderr_fh.close)
+
+    async def _stop_pipe(self, shell_id: str) -> None:
+        state = self._pipes.pop(shell_id, None)
+        if not state: return
+        state.stop.set()
+        proc = state.process
+        # Close stdin to signal EOF
+        if proc.stdin and not proc.stdin.is_closing():
+            proc.stdin.close()
+            try:
+                await proc.stdin.wait_closed()
+            except Exception:
+                pass
+
+
     # Public methods
     
     async def spawn_shell(
@@ -668,6 +725,30 @@ class FrameworkShellManager:
         )
         if autostart:
             await self._launch_pty(record)
+        else:
+            await self._save_record(record)
+            await self._emit(EventType.SHELL_CREATED, record)
+        return record
+
+    async def spawn_shell_pipe(
+        self,
+        command: Iterable[str],
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+        label: Optional[str] = None,
+        subgroups: Optional[List[str]] = None,
+        ui: Optional[Dict[str, Any]] = None,
+        autostart: bool = True,
+        parent_shell_id: Optional[str] = None,
+    ) -> ShellRecord:
+        record = self._create_record(
+            command, cwd=cwd, env=env, label=label,
+            subgroups=subgroups, ui=ui, autostart=autostart,
+            uses_pty=False, uses_pipes=True,
+            parent_shell_id=parent_shell_id
+        )
+        if autostart:
+            await self._launch_pipe(record)
         else:
             await self._save_record(record)
             await self._emit(EventType.SHELL_CREATED, record)
@@ -736,6 +817,7 @@ class FrameworkShellManager:
         
         # The proxy might stay alive until it sees disconnect, but we can kill it too
         await self._stop_pty(shell_id)
+        await self._stop_pipe(shell_id)
         
         await asyncio.sleep(0.1)
         if not await self._is_pid_alive(rec.pid):

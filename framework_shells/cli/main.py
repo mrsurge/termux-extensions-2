@@ -2,11 +2,23 @@ import argparse
 import asyncio
 import os
 import sys
+import shutil
+import hashlib
 from pathlib import Path
 
 from ..manager import FrameworkShellManager
 from ..spec import load_specs
 from ..orchestrator import Orchestrator
+
+def compute_standalone_fingerprint() -> str:
+    """Compute fingerprint based on current working directory (assuming repo root)."""
+    # Try to find repo root markers
+    cwd = Path.cwd().resolve()
+    # If we are in cli/.. we might be deep.
+    # Simple heuristic: hash the cwd path.
+    # Ideally should match run_framework.sh logic: REPO_ROOT realpath.
+    # Let's assume user runs fs from repo root.
+    return hashlib.sha256(str(cwd).encode()).hexdigest()[:16]
 
 def main():
     parser = argparse.ArgumentParser(description="Framework Shells CLI")
@@ -35,14 +47,13 @@ def main():
         
     # Ensure secret for standalone usage
     if "FRAMEWORK_SHELLS_SECRET" not in os.environ:
-        # Generate a temporary one for this session? 
-        # But that means we can't reconnect later.
-        # We should require it or load from a default file?
-        # The stored secret logic in auth.py requires env var.
-        # Phase 1 established ~/.cache/te_framework/.../secret
-        # We need to source that or warn.
         print("Warning: FRAMEWORK_SHELLS_SECRET not set. Using temporary secret (shells will be lost on exit).")
         os.environ["FRAMEWORK_SHELLS_SECRET"] = "temporary_secret_" + os.urandom(8).hex()
+
+    if "TE_REPO_FINGERPRINT" not in os.environ:
+        fp = compute_standalone_fingerprint()
+        os.environ["TE_REPO_FINGERPRINT"] = fp
+        # print(f"Computed standalone fingerprint: {fp}")
 
     try:
         asyncio.run(run_async(args))
