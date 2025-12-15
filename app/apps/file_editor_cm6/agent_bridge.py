@@ -12,7 +12,7 @@ import json
 import os
 from typing import Dict, List, Optional, Any
 from pathlib import Path
-from app.libs.framework_shells import FrameworkShellManager, get_manager as _manager
+from framework_shells import FrameworkShellManager, get_manager as _manager
 
 def _debug_log(stage: str, message: str) -> None:
     print(f"[AgentDrawer][{stage}] {message}")

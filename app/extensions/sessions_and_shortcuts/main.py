@@ -241,7 +241,7 @@ def get_framework_ui():
 
 async def _list_framework_shells():
     try:
-        from app.libs.framework_shells import get_manager
+        from framework_shells import get_manager
         manager = await get_manager()
         shells = await manager.list_shells()
         return [await manager.describe(s) for s in shells]
@@ -335,15 +335,10 @@ def _build_shell_trees(shells, ipc_processes):
 async def sessions_ws(websocket: WebSocket):
     await websocket.accept()
     
-    # Try to get event bus from framework_shells
-    try:
-        from framework_shells.events import get_event_bus
-        bus = get_event_bus()
-        q = bus.subscribe()
-    except ImportError:
-        # Fallback if package not available or not running with it
-        bus = None
-        q = None
+    # Get event bus from framework_shells
+    from framework_shells.events import get_event_bus
+    bus = get_event_bus()
+    q = bus.subscribe()
 
     try:
         # Initial snapshot
@@ -483,7 +478,7 @@ async def kill_session(sid: str):
     
     # Try to find this PID in framework shells
     try:
-        from app.libs.framework_shells import get_manager
+        from framework_shells import get_manager
         manager = await get_manager()
         shells = await manager.list_shells()
         
@@ -541,7 +536,7 @@ async def kill_process(pid: str, kill_children: bool = Query(False)):
     
     # Try framework shell manager first
     try:
-        from app.libs.framework_shells import get_manager
+        from framework_shells import get_manager
         manager = await get_manager()
         shells = await manager.list_shells()
         

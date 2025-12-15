@@ -88,54 +88,54 @@ class FrameworkShellManager:
     # Adoption and helpers
 
     async def _adopt_orphaned_shells(self) -> None:
+        """Adopt shells from previous runs. Caller must hold the lock."""
         stale_records: List[ShellRecord] = []
         updated = 0
-        async with self._get_lock():
-            async for record in self._aiter_records():
-                alive = bool(record.pid) and await self._is_pid_alive(record.pid)
-                
-                # Special check for dtach: process might be alive even if we aren't attached
-                # But record.pid tracks the actual shell inside dtach.
-                
-                if record.pid and not alive:
-                    exit_code = record.exit_code or await self._collect_exit_code(record.pid)
-                    await self._mark_exited(record, exit_code)
-                    record.pid = None
-                    record.status = "exited"
-                    stale_records.append(record)
-                    continue
-                if not alive and not (record.uses_dtach and record.status == "running"):
-                    # If dead and not dtach (or dtach assumed dead), clean up
-                    stale_records.append(record)
-                    continue
-                
-                if not self.run_id:
-                    continue
-
-                mutated = False
-                if not record.run_id or record.run_id != self.run_id:
-                    record.run_id = self.run_id
-                    mutated = True
-                if record.launcher_pid != self.launcher_pid:
-                    record.launcher_pid = self.launcher_pid
-                    mutated = True
-                
-                if record.uses_dtach and record.id not in self._pty and alive:
-                     # Re-attach logic for dtach
-                     try:
-                         await self._attach_dtach_proxy(record)
-                         mutated = True # Considered adoption action
-                     except Exception:
-                         pass
-
-                if mutated:
-                    record.adopted = True
-                    await self._save_record(record)
-                    updated += 1
+        async for record in self._aiter_records():
+            alive = bool(record.pid) and await self._is_pid_alive(record.pid)
             
-            for record in stale_records:
-                await self._stop_pty(record.id)
-                # Cleanup omitted for safety
+            # Special check for dtach: process might be alive even if we aren't attached
+            # But record.pid tracks the actual shell inside dtach.
+            
+            if record.pid and not alive:
+                exit_code = record.exit_code or await self._collect_exit_code(record.pid)
+                await self._mark_exited(record, exit_code)
+                record.pid = None
+                record.status = "exited"
+                stale_records.append(record)
+                continue
+            if not alive and not (record.uses_dtach and record.status == "running"):
+                # If dead and not dtach (or dtach assumed dead), clean up
+                stale_records.append(record)
+                continue
+            
+            if not self.run_id:
+                continue
+
+            mutated = False
+            if not record.run_id or record.run_id != self.run_id:
+                record.run_id = self.run_id
+                mutated = True
+            if record.launcher_pid != self.launcher_pid:
+                record.launcher_pid = self.launcher_pid
+                mutated = True
+            
+            if record.uses_dtach and record.id not in self._pty and alive:
+                 # Re-attach logic for dtach
+                 try:
+                     await self._attach_dtach_proxy(record)
+                     mutated = True # Considered adoption action
+                 except Exception:
+                     pass
+
+            if mutated:
+                record.adopted = True
+                await self._save_record(record)
+                updated += 1
+        
+        for record in stale_records:
+            await self._stop_pty(record.id)
+            # Cleanup omitted for safety
 
         if updated:
             print(f"[FrameworkShells] Adopted {updated} running shell(s) from previous run")
@@ -823,3 +823,140 @@ class FrameworkShellManager:
         if not await self._is_pid_alive(rec.pid):
              code = await self._collect_exit_code(rec.pid)
              await self._mark_exited(rec, code)
+
+    async def remove_shell(self, shell_id: str, force: bool = False) -> bool:
+        """Terminate shell and remove its metadata/logs."""
+        await self.terminate_shell(shell_id, force=force)
+        
+        # Remove metadata
+        meta_dir = self.metadata_dir / shell_id
+        if meta_dir.exists():
+            await asyncio.to_thread(shutil.rmtree, meta_dir, ignore_errors=True)
+        
+        # Remove logs
+        rec = await self._load_record(shell_id)
+        if rec:
+            for log_path in [rec.stdout_log, rec.stderr_log]:
+                p = Path(log_path)
+                if p.exists():
+                    try:
+                        await asyncio.to_thread(p.unlink)
+                    except Exception:
+                        pass
+        
+        return True
+
+    # ------------------------------------------------------------------
+    # Describe / stats
+
+    LOG_TAIL_BYTES = 4096
+
+    async def describe(
+        self,
+        record: ShellRecord,
+        *,
+        include_logs: bool = False,
+        tail_lines: int = 0,
+    ) -> Dict[str, Any]:
+        """Return a dict with shell payload, stats, and optionally logs."""
+        payload = record.to_payload()
+        payload["stats"] = await self._process_stats(record)
+        if include_logs:
+            payload["logs"] = {
+                "stdout_tail": await self._read_log_tail(Path(record.stdout_log), tail_lines),
+                "stderr_tail": await self._read_log_tail(Path(record.stderr_log), tail_lines),
+            }
+        return payload
+
+    async def _process_stats(self, record: ShellRecord) -> Dict[str, Any]:
+        stats: Dict[str, Any] = {
+            "alive": False,
+            "uptime": None,
+        }
+        if record.pid:
+            alive = await self._is_pid_alive(record.pid)
+            stats["alive"] = alive
+            if alive:
+                stats["uptime"] = max(0.0, time.time() - record.created_at)
+                if psutil:
+                    try:
+                        proc = await asyncio.to_thread(psutil.Process, record.pid)
+                        with proc.oneshot():
+                            stats["cpu_percent"] = proc.cpu_percent(interval=0.0)
+                            stats["memory_rss"] = proc.memory_info().rss
+                            stats["num_threads"] = proc.num_threads()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                else:
+                    try:
+                        ps_output = await asyncio.to_thread(
+                            subprocess.run,
+                            ["ps", "-p", str(record.pid), "-o", "%cpu=,%mem=,rss=,nlwp="],
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
+                        parts = ps_output.stdout.strip().split()
+                        if len(parts) >= 4:
+                            stats["cpu_percent"] = float(parts[0])
+                            stats["memory_rss"] = int(float(parts[2]) * 1024)
+                            stats["num_threads"] = int(parts[3])
+                    except Exception:
+                        pass
+        return stats
+
+    async def _read_log_tail(self, path: Path, lines: int) -> List[str]:
+        if lines <= 0 or not path.exists():
+            return []
+        size = await asyncio.to_thread(path.stat)
+        to_read = min(size.st_size, self.LOG_TAIL_BYTES)
+        async with aiofiles.open(path, "rb") as fh:
+            await fh.seek(-to_read, os.SEEK_END)
+            data = await fh.read()
+            decoded_data = data.decode("utf-8", errors="replace")
+        return decoded_data.splitlines(keepends=True)[-lines:]
+
+    # ------------------------------------------------------------------
+    # PTY I/O methods
+
+    async def subscribe_output(self, shell_id: str) -> AsyncQueue[str]:
+        """Subscribe to PTY output for a shell. Returns an AsyncQueue."""
+        async with self._get_lock():
+            state = self._pty.get(shell_id)
+            if not state:
+                raise KeyError(f"No PTY for shell {shell_id}")
+            q: AsyncQueue[str] = AsyncQueue()
+            state.subscribers.append(q)
+            return q
+
+    async def unsubscribe_output(self, shell_id: str, q: AsyncQueue[str]) -> None:
+        """Unsubscribe from PTY output."""
+        async with self._get_lock():
+            state = self._pty.get(shell_id)
+            if not state:
+                return
+            try:
+                state.subscribers.remove(q)
+            except ValueError:
+                pass
+
+    async def write_to_pty(self, shell_id: str, data: str) -> None:
+        """Write data to a shell's PTY."""
+        async with self._get_lock():
+            state = self._pty.get(shell_id)
+            if not state:
+                raise KeyError(f"No PTY for shell {shell_id}")
+            encoded = data.encode("utf-8")
+            await asyncio.to_thread(os.write, state.master_fd, encoded)
+
+    async def resize_pty(self, shell_id: str, cols: int, rows: int) -> None:
+        """Resize a shell's PTY."""
+        async with self._get_lock():
+            state = self._pty.get(shell_id)
+            if not state:
+                raise KeyError(f"No PTY for shell {shell_id}")
+            winsz = struct.pack("HHHH", max(1, rows), max(1, cols), 0, 0)
+            try:
+                await asyncio.to_thread(fcntl.ioctl, state.master_fd, termios.TIOCSWINSZ, winsz)
+            except Exception:
+                pass

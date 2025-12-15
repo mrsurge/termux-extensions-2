@@ -8,7 +8,7 @@ import time
 import contextlib
 from pathlib import Path
 from typing import Optional
-from app.libs.framework_shells import get_manager as get_framework_shell_manager
+from framework_shells import get_manager as get_framework_shell_manager
 from app.libs import app_lifecycle
 
 # Module-level storage for running apps (replaces Flask's current_app.config)

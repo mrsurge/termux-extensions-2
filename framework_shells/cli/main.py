@@ -12,13 +12,36 @@ from ..orchestrator import Orchestrator
 
 def compute_standalone_fingerprint() -> str:
     """Compute fingerprint based on current working directory (assuming repo root)."""
-    # Try to find repo root markers
     cwd = Path.cwd().resolve()
-    # If we are in cli/.. we might be deep.
-    # Simple heuristic: hash the cwd path.
-    # Ideally should match run_framework.sh logic: REPO_ROOT realpath.
-    # Let's assume user runs fs from repo root.
     return hashlib.sha256(str(cwd).encode()).hexdigest()[:16]
+
+def load_stored_secret(fingerprint: str) -> str | None:
+    """Try to load secret from stored file for this fingerprint."""
+    secret_file = Path.home() / ".cache" / "te_framework" / "runtimes" / fingerprint / "secret"
+    if secret_file.exists():
+        try:
+            return secret_file.read_text().strip()
+        except Exception:
+            pass
+    return None
+
+def setup_environment():
+    """Auto-detect fingerprint and secret if not set."""
+    # Compute fingerprint from cwd if not set
+    if "TE_REPO_FINGERPRINT" not in os.environ:
+        fp = compute_standalone_fingerprint()
+        os.environ["TE_REPO_FINGERPRINT"] = fp
+    else:
+        fp = os.environ["TE_REPO_FINGERPRINT"]
+    
+    # Try to load stored secret if not set
+    if "FRAMEWORK_SHELLS_SECRET" not in os.environ:
+        secret = load_stored_secret(fp)
+        if secret:
+            os.environ["FRAMEWORK_SHELLS_SECRET"] = secret
+        else:
+            print("Warning: No stored secret found. Using temporary secret (shells will be lost on exit).")
+            os.environ["FRAMEWORK_SHELLS_SECRET"] = "temporary_secret_" + os.urandom(8).hex()
 
 def main():
     parser = argparse.ArgumentParser(description="Framework Shells CLI")
@@ -44,16 +67,8 @@ def main():
     if not args.command:
         parser.print_help()
         sys.exit(1)
-        
-    # Ensure secret for standalone usage
-    if "FRAMEWORK_SHELLS_SECRET" not in os.environ:
-        print("Warning: FRAMEWORK_SHELLS_SECRET not set. Using temporary secret (shells will be lost on exit).")
-        os.environ["FRAMEWORK_SHELLS_SECRET"] = "temporary_secret_" + os.urandom(8).hex()
-
-    if "TE_REPO_FINGERPRINT" not in os.environ:
-        fp = compute_standalone_fingerprint()
-        os.environ["TE_REPO_FINGERPRINT"] = fp
-        # print(f"Computed standalone fingerprint: {fp}")
+    
+    setup_environment()
 
     try:
         asyncio.run(run_async(args))

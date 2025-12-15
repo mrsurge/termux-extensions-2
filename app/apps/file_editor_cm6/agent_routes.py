@@ -12,7 +12,7 @@ from fastapi import APIRouter, Request, HTTPException, Body, Query, Depends
 import anyio
 from fastapi.responses import JSONResponse
 from .agent_bridge import get_bridge
-from app.libs.framework_shells import FrameworkShellManager, get_manager
+from framework_shells import FrameworkShellManager, get_manager
 
 bp = APIRouter()
 

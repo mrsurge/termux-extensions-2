@@ -9,16 +9,9 @@
 
 ## Issue 0: Migration incomplete — TE2 still using old system
 
-The new `framework_shells/` package exists but TE2 hasn't been migrated to use it.
+**STATUS: ✅ FIXED** (2025-12-15)
 
-All app code still imports from the old location:
-```python
-from app.libs.framework_shells import get_manager, FrameworkShellManager
-```
-
-One place (`sessions_and_shortcuts/main.py`) has a try/except that attempts to import from the new package, but this fallback pattern contradicts the "break then fix" approach.
-
-**Action:** Fully migrate TE2 to use `framework_shells/` package. No fallbacks.
+All imports migrated from `app.libs.framework_shells` to `framework_shells`. Framework starts successfully with new package.
 
 ---
 
@@ -133,14 +126,18 @@ The call to `ensure_framework_secret` needs to be moved **after** `REPO_ROOT` is
 
 ## Summary
 
-| # | File | Issue | Severity |
-|---|------|-------|----------|
-| 0 | `app/**/*.py` | Migration incomplete — still using `app.libs.framework_shells` | Blocker |
-| 1 | `cli/main.py` | Missing `import shutil` | Crash |
-| 2 | `cli/main.py` | `TE_REPO_FINGERPRINT` not handled | Crash |
-| 3 | `store.py` | Dead code / confusing logic | Cleanup |
-| 4 | `api/fastapi_router.py` | Missing `from pathlib import Path` | Crash |
-| 5 | `api/fastapi_router.py` | Manager not singleton | Broken events/state |
-| 6 | `run_framework.sh` | `ensure_framework_secret()` called before `REPO_ROOT` set | Crash |
+All issues from the original review have been fixed:
+
+| # | Issue | Status |
+|---|-------|--------|
+| 0 | Migration incomplete | ✅ Fixed |
+| 1 | Missing `import shutil` | ✅ Fixed |
+| 2 | `TE_REPO_FINGERPRINT` not handled | ✅ Fixed |
+| 3 | Dead code in store.py | ✅ Cleaned up |
+| 4 | Missing `from pathlib import Path` | ✅ Fixed |
+| 5 | Manager not singleton | ✅ Fixed |
+| 6 | `ensure_framework_secret()` called before `REPO_ROOT` | ✅ Fixed |
+
+**Framework starts successfully with the new `framework_shells/` package.**
 
 —Atlas

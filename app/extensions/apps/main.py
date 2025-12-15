@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException, WebSocket, Body
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from app.libs.app_manager import ensure_app_running
 from app.libs import app_lifecycle
-from app.libs.framework_shells import FrameworkShellManager, get_manager as get_framework_shell_manager
+from framework_shells import FrameworkShellManager, get_manager as get_framework_shell_manager
 from urllib.parse import urlencode
 
 # Avoid circular import - will be accessed dynamically

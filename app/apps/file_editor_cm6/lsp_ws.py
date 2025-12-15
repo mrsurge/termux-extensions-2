@@ -13,7 +13,7 @@ from typing import Dict, Optional
 
 import socketio
 
-from app.libs.framework_shells import get_manager, PipeState
+from framework_shells import get_manager, PipeState
 from .lsp_shell_manager import get_or_spawn_lsp_shell
 
 

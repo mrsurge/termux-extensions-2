@@ -98,8 +98,14 @@ static_dir = os.path.join(os.path.dirname(__file__), 'static')
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-from app.libs.framework_shells import FrameworkShellManager, get_manager
+from framework_shells import FrameworkShellManager, get_manager
+from framework_shells.api.fastapi_router import router as framework_shells_router
+from framework_shells.api.websocket import router as framework_shells_ws_router
 from app.apps.file_editor_cm6.agent_bridge import get_bridge # This has to go... ASAP
+
+# Mount the framework shells API router
+app.include_router(framework_shells_router)
+app.include_router(framework_shells_ws_router)
 
 
 

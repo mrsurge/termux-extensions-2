@@ -14,7 +14,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, Optional
 
-from app.libs.framework_shells import ShellRecord, get_manager
+from framework_shells import ShellRecord, get_manager
 
 
 # --- Command mapping (extend as new servers become available) ---

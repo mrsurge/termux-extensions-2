@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query, Depends
 
-from app.libs.framework_shells import FrameworkShellManager, get_manager
+from framework_shells import FrameworkShellManager, get_manager
 from app.apps.file_editor_cm6 import edit_tracker
 from app.apps.file_editor_cm6.stores import _history_store as _shared_history_store
 from app.apps.file_editor_cm6.project_sidecar import ProjectSidecar
