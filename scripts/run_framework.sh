@@ -80,6 +80,38 @@ generate_run_id_if_needed() {
 
 generate_run_id_if_needed
 
+compute_repo_fingerprint() {
+  local real_root
+  if command -v readlink >/dev/null 2>&1; then
+    real_root="$(readlink -f "$REPO_ROOT" 2>/dev/null)" || true
+  fi
+  if [ -z "${real_root:-}" ]; then
+    real_root="$(python -c "import os; print(os.path.realpath('$REPO_ROOT'))")"
+  fi
+  echo -n "$real_root" | sha256sum | cut -c1-16
+}
+
+ensure_framework_secret() {
+  local fingerprint secret_dir secret_file
+  fingerprint="$(compute_repo_fingerprint)"
+  secret_dir="$HOME/.cache/te_framework/runtimes/$fingerprint"
+  secret_file="$secret_dir/secret"
+  
+  if [ -f "$secret_file" ]; then
+    FRAMEWORK_SHELLS_SECRET="$(cat "$secret_file")"
+  else
+    mkdir -p "$secret_dir"
+    FRAMEWORK_SHELLS_SECRET="$(openssl rand -hex 32)"
+    echo "$FRAMEWORK_SHELLS_SECRET" > "$secret_file"
+    chmod 600 "$secret_file"
+  fi
+  
+  export FRAMEWORK_SHELLS_SECRET
+  export TE_REPO_FINGERPRINT="$fingerprint"
+}
+
+ensure_framework_secret
+
 cleanup_framework_shell_logs() {
   local base_dir="$HOME/.cache/te_framework"
   local logs_dir="$base_dir/logs"

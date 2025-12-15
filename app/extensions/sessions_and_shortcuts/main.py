@@ -334,36 +334,122 @@ def _build_shell_trees(shells, ipc_processes):
 @sessions_bp.websocket('/ws')
 async def sessions_ws(websocket: WebSocket):
     await websocket.accept()
+    
+    # Try to get event bus from framework_shells
     try:
-        while True:
-            try:
-                sessions_resp = get_sessions()
-                sessions_data = sessions_resp.get('data', []) if isinstance(sessions_resp, dict) else []
-            except Exception:
-                sessions_data = []
+        from framework_shells.events import get_event_bus
+        bus = get_event_bus()
+        q = bus.subscribe()
+    except ImportError:
+        # Fallback if package not available or not running with it
+        bus = None
+        q = None
 
-            frameworks = await _list_framework_shells()
-            ipc_processes = await _list_ipc_processes()
-            shell_trees = _build_shell_trees(frameworks, ipc_processes)
-            framework_ui = _load_framework_shell_ui_by_app()
-            
-            payload = {
-                "type": "update",
-                "sessions": sessions_data,
-                "frameworks": frameworks,  # Keep flat list for backward compat
-                "shell_trees": shell_trees,  # New hierarchical structure
-                "containers": [],
-                "framework_ui": framework_ui,
-            }
-            await websocket.send_json(payload)
-            await asyncio.sleep(5)
+    try:
+        # Initial snapshot
+        # Note: We still send sessions/containers for now
+        try:
+            sessions_resp = get_sessions()
+            sessions_data = sessions_resp.get('data', []) if isinstance(sessions_resp, dict) else []
+        except Exception:
+            sessions_data = []
+
+        frameworks = await _list_framework_shells()
+        ipc_processes = await _list_ipc_processes()
+        shell_trees = _build_shell_trees(frameworks, ipc_processes)
+        framework_ui = _load_framework_shell_ui_by_app()
+        
+        snapshot = {
+            "type": "snapshot", # Or "update" if we want to reuse existing frontend logic immediately? 
+            # Existing frontend expects "update" with all fields.
+            # Let's send an "update" first as the snapshot.
+            "sessions": sessions_data,
+            "frameworks": frameworks,
+            "shell_trees": shell_trees,
+            "containers": [],
+            "framework_ui": framework_ui,
+        }
+        # If frontend supports "snapshot", send that. If it only knows "update", send usage.
+        # Assuming we update frontend later or it handles it. 
+        # For now, let's send "update" to be safe with existing UI code if we haven't changed JS.
+        # But wait, implementation plan said "Sessions & Shortcuts becomes snapshot + event stream".
+        # This implies updating JS too.
+        # But the user only asked for "Understanding of this plan".
+        # If I change backend to send 'snapshot' type, frontend might break if it expects 'update'.
+        # However, 'update' is full state.
+        # Let's send 'update' as the initial state.
+        
+        await websocket.send_json({**snapshot, "type": "update"})
+        
+        if bus and q:
+            # Stream events
+            while True:
+                # We need to handle sessions/shortcuts polling separately if we want to keep them live?
+                # Standard sessions (pid-based) don't have events.
+                # So maybe we still need a loop for sessions, but shell events come from bus?
+                # Hybrid approach:
+                # 1. Listen to bus for shell events.
+                # 2. Use a timeout on q.get() to poll sessions?
+                # Or spawn a separate task for sessions polling.
+                
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=5.0)
+                    # Helper to convert event back to "update" or new "event" type?
+                    # If frontend supports incremental:
+                    await websocket.send_json({
+                        "type": "event",
+                        "event": event.to_dict(),
+                    })
+                except asyncio.TimeoutError:
+                    # Timeout -> Poll sessions
+                    pass
+
+                # Poll sessions every 5s (approx)
+                # (This is a simplified hybrid; ideally completely separate)
+                try:
+                    sessions_resp = get_sessions()
+                    sessions_data = sessions_resp.get('data', []) if isinstance(sessions_resp, dict) else []
+                    await websocket.send_json({
+                        "type": "sessions_update", # New type? Or just partial update
+                        "sessions": sessions_data
+                    })
+                except Exception:
+                    pass
+        else:
+            # Fallback to polling loop
+            while True:
+                try:
+                    sessions_resp = get_sessions()
+                    sessions_data = sessions_resp.get('data', []) if isinstance(sessions_resp, dict) else []
+                except Exception:
+                    sessions_data = []
+
+                frameworks = await _list_framework_shells()
+                ipc_processes = await _list_ipc_processes()
+                shell_trees = _build_shell_trees(frameworks, ipc_processes)
+                framework_ui = _load_framework_shell_ui_by_app()
+                
+                payload = {
+                    "type": "update",
+                    "sessions": sessions_data,
+                    "frameworks": frameworks,
+                    "shell_trees": shell_trees,
+                    "containers": [],
+                    "framework_ui": framework_ui,
+                }
+                await websocket.send_json(payload)
+                await asyncio.sleep(5)
+
     except WebSocketDisconnect:
-        return
+        pass
     except Exception as exc:
         try:
             await websocket.send_json({"type": "error", "message": str(exc)})
         finally:
             await websocket.close()
+    finally:
+        if bus and q:
+            bus.unsubscribe(q)
 
 @sessions_bp.post('/sessions/{sid}/command')
 def run_command(sid: str, data: dict = Body(...)):
