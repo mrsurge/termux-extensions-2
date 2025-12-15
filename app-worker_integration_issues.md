@@ -1,12 +1,12 @@
 # Framework Shells Fork — App Worker Integration Plan
 
 **Date:** December 14, 2025  
-**Companion to:** tmp2.md (main fork plan)  
+**Companion to:** framework_shells_execution_plan.md (main execution plan)  
 **Focus:** How apps and their manifests fit into the shellspec ecosystem
 
 ---
 
-## The Gap in tmp2.md
+## The Gap in framework_shells_execution_plan.md
 
 The main plan covers:
 - Secret plumbing & runtime isolation
@@ -399,13 +399,13 @@ def _build_shell_trees_from_records(shells: List[dict]) -> List[dict]:
 
 ---
 
-## Migration Path
+## Implementation Steps
 
 ### Phase 2A: Add App Context to ShellRecord (with Phase 2)
 
 | Change | File | Notes |
 |--------|------|-------|
-| Add `app_id`, `parent_shell_id`, `is_app_worker` | `record.py` | Backward compatible (optional fields) |
+| Add `app_id`, `parent_shell_id`, `is_app_worker` | `record.py` | Additive fields; missing values default/derive on load |
 | Add `derive_app_id()` | `record.py` | Auto-populate on load |
 | Update `_create_record()` | `manager.py` | Set app context |
 
@@ -490,7 +490,7 @@ class ShellRecord:
 | `framework_shells` core | Yes (via `app_id` field) | Yes (emits) | Yes (orchestrator) |
 | `app_manager.py` (TE2) | Yes (spawns workers) | Yes (subscribes) | No |
 | `sessions_and_shortcuts` (TE2) | Yes (UI hints) | Yes (subscribes) | No |
-| `fs` CLI | Optional (`--app` flag) | No | Yes |
+| `fs` CLI | Yes (`--app` flag) | No | Yes |
 | Shellspec YAML | No | No | Yes |
 
 ---
@@ -562,24 +562,12 @@ $ fs ps --app file_editor_cm6
 
 ---
 
-## Backward Compatibility
-
-| Feature | Old Behavior | New Behavior | Compat? |
-|---------|--------------|--------------|---------|
-| Spawn app worker | `spawn_shell()` with label | Same, auto-derives `app_id` | ✅ |
-| Child shell subgroups | `subgroups=["app_id", ...]` | Same, auto-populates `app_id` | ✅ |
-| `framework_shell_ui` in manifest | Loaded by Sessions & Shortcuts | Same, now via `UIHintRegistry` | ✅ |
-| IPC `parent_pid` | Tracked in IPC registry | Also in `ShellRecord.parent_shell_id` | ✅ |
-| Sessions WS polling | 5s interval | Event-driven | ⚠️ UI code update |
-
----
-
 ## Open Questions
 
 1. **Should apps define child shell specs in manifest?**
    - Currently apps spawn shells imperatively in code
    - Could add `manifest.json → shells: [...]` for declarative child shells
-   - Deferred for v2?
+   - If we do it, do it as a hard migration (no parallel systems)
 
 2. **UI hints in standalone mode?**
    - When running without TE2, no app manifests exist
