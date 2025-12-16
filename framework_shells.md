@@ -17,6 +17,7 @@ A standalone Python package for process orchestration with PTY, pipe, and dtach 
 - **Runtime isolation**: Shells are namespaced by repo fingerprint + secret-derived runtime ID
 - **Event bus**: Real-time notifications for shell lifecycle events
 - **Singleton manager**: One manager instance per process, thread-safe
+- **Integration hooks (optional)**: Host apps can observe shell lifecycle events (e.g., for external process registries)
 
 ## Directory Structure
 
@@ -28,6 +29,7 @@ framework_shells/
 ├── store.py             # RuntimeStore - namespaced storage paths
 ├── auth.py              # Secret handling and token derivation
 ├── events.py            # EventBus for shell lifecycle events
+├── hooks.py              # Optional lifecycle hook dataclasses (host integration)
 ├── pty.py               # PTYState and PipeState dataclasses
 ├── spec.py              # YAML spec loader (for declarative shell definitions)
 ├── orchestrator.py      # Spec-based shell orchestration
@@ -108,6 +110,9 @@ from framework_shells import get_manager
 
 mgr = await get_manager()
 
+# Advanced: configure the singleton once (must be consistent per-process)
+# mgr = await get_manager(process_hooks=..., enable_dtach_proxy=False)
+
 # Spawn shells
 record = await mgr.spawn_shell_pty(["bash", "-l", "-i"], label="terminal", cwd="/home/user")
 record = await mgr.spawn_shell_pipe(["pyright-langserver", "--stdio"], label="lsp:python")
@@ -130,6 +135,12 @@ await mgr.unsubscribe_output(shell_id, queue)
 # Lifecycle
 await mgr.terminate_shell(shell_id, force=True)
 await mgr.remove_shell(shell_id, force=True)  # Also removes logs/metadata
+
+# Optional: enumerate running PIDs for external monitoring
+pids = await mgr.list_active_pids()
+
+# Optional: provide lightweight aggregated stats (requires psutil for per-process CPU/RSS)
+stats = await mgr.aggregate_resource_stats()
 ```
 
 ### REST API
@@ -181,6 +192,32 @@ The CLI auto-detects the repo fingerprint from cwd and loads the stored secret.
 | `FRAMEWORK_SHELLS_SECRET` | Secret for runtime ID derivation and API auth |
 | `TE_REPO_FINGERPRINT` | Override auto-computed repo fingerprint |
 | `TE_RUN_ID` | Current framework run ID (for adoption tracking) |
+
+## Integration Hooks (Optional)
+
+`FrameworkShellManager` supports optional host-provided lifecycle hooks via `ShellLifecycleHooks`.
+
+This stays intentionally framework-agnostic: the library does not know about IPC, FastAPI, systemd, etc.
+Hooks are best-effort (errors are swallowed) and may be sync or async.
+
+Common uses:
+- Register/unregister shell PIDs in an external process registry
+- Emit metrics/telemetry for shell start/adopt/exit events
+- Maintain parent/child graphs outside of `framework_shells`
+
+Exposed hook points:
+- `on_shell_running(record)`
+- `on_shell_adopted(record)`
+- `on_shell_exited(record, last_pid)`
+
+## Notes on Detach / Process Groups
+
+Shell processes are launched with `start_new_session=True` for isolation. This means:
+- Killing the host process does not necessarily kill the shells it spawned.
+- Host frameworks should call `terminate_shell()` on shutdown.
+- If a host framework uses an external “last resort” killer, it should either:
+    - scan `framework_shells` runtime metadata and terminate shells, or
+    - ensure shell PIDs are registered with that external supervisor.
 
 ## Runtime Isolation
 

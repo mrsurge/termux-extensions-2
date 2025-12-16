@@ -58,9 +58,10 @@ The framework runs on `http://127.0.0.1:8088` by default.
    - Handles shutdown signals
 
 3. **app/main.py lifespan startup**:
-   - Calls `get_manager()` which triggers shell adoption
+  - Calls `get_manager()` (configured with IPC lifecycle hooks) which triggers shell adoption
    - Orphaned shells from previous runs are adopted
    - Running apps are restored
+  - Adopted/running shell PIDs are (re)registered with IPC
 
 ## Shutdown Flow
 
@@ -83,7 +84,9 @@ The framework runs on `http://127.0.0.1:8088` by default.
 
 5. **IPC cleanup** (only if framework hung):
    - Supervisor calls IPC `/actions/shutdown`
-   - IPC kills any remaining processes
+  - IPC terminates framework shells first (including dtach-backed shells)
+  - IPC terminates registered processes in dependency order (children first, framework last)
+  - IPC logs the shutdown ordering plan (pid/type/label/parent/depth)
 
 6. **Supervisor stops IPC server**
 
@@ -213,10 +216,19 @@ All new code should import directly from `framework_shells`.
 ### Shells surviving restart
 - Dtach shells persist by design
 - Use `fs down` or terminate from UI
+- If the framework hung and IPC shutdown ran, shells should no longer be adopted on next start
 
 ### Orphaned dtach processes
 - Kill manually: `pkill -f dtach`
 - Or use `mgr.terminate_shell(id, force=True)` which removes socket
+
+### IPC shutdown says it killed everything, but shells get adopted
+This used to happen when only the framework PID was registered with IPC. Shells are spawned in new sessions,
+so killing the framework process does not kill the shells.
+
+Current behavior:
+- Framework initializes `framework_shells` with IPC lifecycle hooks so each running/adopted shell PID is registered.
+- IPC shutdown also performs a best-effort `framework_shells` termination pass to catch any shells that were not registered.
 
 ### Auth errors (403)
 - Auth is currently disabled for development
