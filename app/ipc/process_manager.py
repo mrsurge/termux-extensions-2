@@ -165,8 +165,48 @@ class ProcessRegistry:
             if logger:
                 logger.warning(f"IPC shutdown: failed to terminate framework_shells shells: {exc}")
         
-        # Sort: workers and shells before framework (children before parent)
-        sorted_processes = sorted(processes, key=lambda p: 0 if p.type != "framework" else 1)
+        # Sort: children before parents (via parent_pid), and framework last.
+        # NOTE: this registry may contain arbitrary process types; we keep the ordering
+        # generic and stable.
+        by_pid: Dict[int, ProcessRecord] = {p.pid: p for p in processes}
+        depth_cache: Dict[int, int] = {}
+
+        def depth(pid: int, visiting: Optional[set] = None) -> int:
+            if pid in depth_cache:
+                return depth_cache[pid]
+            visiting = visiting or set()
+            if pid in visiting:
+                depth_cache[pid] = 0
+                return 0
+            visiting.add(pid)
+            rec = by_pid.get(pid)
+            if not rec or not rec.parent_pid:
+                depth_cache[pid] = 0
+                return 0
+            parent = by_pid.get(rec.parent_pid)
+            if not parent:
+                depth_cache[pid] = 0
+                return 0
+            d = 1 + depth(parent.pid, visiting)
+            depth_cache[pid] = d
+            return d
+
+        def type_priority(rec: ProcessRecord) -> int:
+            # Framework last; everything else first.
+            return 1 if rec.type == "framework" else 0
+
+        # Lower priority first, deeper (larger depth) first.
+        sorted_processes = sorted(
+            processes,
+            key=lambda rec: (type_priority(rec), -depth(rec.pid), rec.type, rec.pid),
+        )
+
+        if logger:
+            plan = " ".join(
+                f"{rec.pid}:{rec.type}:{(rec.label or '-')}:ppid={rec.parent_pid or '-'}:d={depth(rec.pid)}"
+                for rec in sorted_processes
+            )
+            logger.info("IPC shutdown order: %s", plan)
         
         # Terminate each process sequentially
         for record in sorted_processes:
