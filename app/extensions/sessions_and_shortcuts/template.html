@@ -1,3 +1,4 @@
+<div class="sas-root">
 <div class="section-header">
     <div class="session-tabs">
         <button id="sas-tab-visible" class="session-tab">Interactive Sessions</button>
@@ -12,6 +13,7 @@
     <div id="sessions-framework" class="session-panel active">
         <p class="session-empty" data-role="placeholder">Loading framework shells...</p>
     </div>
+</div>
 </div>
 
 <!-- Modals -->
@@ -35,8 +37,6 @@
             <button onclick="closeModal('rename-modal')" class="modal-btn btn-secondary">Cancel</button>
         </div>
     </div>
-</div>
-
 <style>
     .session-tabs { display: flex; gap: 8px; align-items: center; }
     .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--muted-foreground); margin-right: 6px; }
@@ -272,4 +272,7 @@
     .session .menu .menu-item:hover { background: rgba(255,255,255,0.05); }
     .session .menu .menu-item.destructive { color: var(--destructive); }
     .modal-actions { display: flex; gap: 8px; margin-top: 12px; }
+    /* Edge-to-edge: cancel the framework's extension-content padding for this extension only */
+    .sas-root { margin: -16px; }
+    .sas-root .session.framework { border-radius: 0; margin-left: 0; margin-right: 0; }
 </style>

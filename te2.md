@@ -9,7 +9,17 @@ How the TE2 framework uses the `framework_shells` module for process management.
 scripts/run_framework.sh
 ```
 
-The framework runs on `http://127.0.0.1:8088` by default.
+The framework runs on `http://127.0.0.1:8089` by default.
+
+Ports and sleep mode can be controlled from the entrypoint:
+```bash
+scripts/run_framework.sh --port 8089 --ipc-port 9099
+scripts/run_framework.sh --sleep --port 8089 --ipc-port 9099
+# Wake/sleep (sleep listener is always on :9100)
+curl -X POST http://127.0.0.1:9100/actions/wake
+curl -X POST http://127.0.0.1:9100/actions/sleep
+```
+
 
 ## Architecture
 
@@ -50,8 +60,8 @@ The framework runs on `http://127.0.0.1:8088` by default.
 1. **run_framework.sh**:
    - Computes `TE_REPO_FINGERPRINT` from repo root path
    - Generates/loads `FRAMEWORK_SHELLS_SECRET`
-   - Starts IPC server on port 9123
-   - Starts supervisor
+   - Starts IPC server (`--ipc-port`, default 9099) and a sleep listener on port 9100
+   - Starts supervisor (unless `--sleep`, which leaves the framework stopped until /actions/wake)
 
 2. **supervisor.py**:
    - Starts framework (uvicorn with app/main.py)
@@ -144,6 +154,8 @@ record = await mgr.spawn_shell_pipe(
 )
 ```
 
+**Note on pipe shells:** pipe-backed shells are only usable in the process that spawned them (the live stdin/stdout handles are in-memory). If an app worker restarts, any surviving LSP server process must be terminated and respawned.
+
 ### Sessions & Shortcuts UI
 
 `app/extensions/sessions_and_shortcuts/main.py`:
@@ -161,6 +173,8 @@ bus = get_event_bus()
 queue = bus.subscribe()
 event = await queue.get()
 ```
+
+The framework shell log viewer routes (`/shell-logs/{shell_id}` and `WS /ws/shell-logs/{shell_id}`) are owned by this extension and mounted at the root via the un-prefixed `apps` extension.
 
 ## API Router Mount
 

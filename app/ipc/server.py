@@ -17,7 +17,12 @@ import queue
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Set
+from typing import Any, Dict, Iterable, Optional, Set, List
+
+import signal
+import subprocess
+
+from werkzeug.serving import make_server
 
 import requests
 from flask import Flask, Response, jsonify, request
@@ -302,6 +307,101 @@ def create_app() -> Flask:
 app = create_app()
 
 
+@dataclass
+class SleepState:
+    enabled: bool = False
+    sleep_port: int = 9100
+    supervisor_proc: Optional[subprocess.Popen] = None
+
+
+_SLEEP_STATE = SleepState()
+
+
+def _framework_args_from_env() -> List[str]:
+    raw = os.environ.get("TE_FRAMEWORK_ARGS_JSON")
+    if raw:
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list) and all(isinstance(x, str) for x in data):
+                return data
+        except Exception:
+            pass
+    return []
+
+
+def _framework_running() -> bool:
+    return bool(_SLEEP_STATE.supervisor_proc and _SLEEP_STATE.supervisor_proc.poll() is None)
+
+
+def _start_supervisor() -> Optional[int]:
+    if _framework_running():
+        return _SLEEP_STATE.supervisor_proc.pid
+
+    args = _framework_args_from_env()
+    env = os.environ.copy()
+    env.setdefault("TE_IPC_PERSIST", "1")
+
+    cmd = [env.get("PYTHON_BIN", "python"), "-m", "app.supervisor", *args]
+    try:
+        proc = subprocess.Popen(cmd, env=env, preexec_fn=os.setsid)
+    except Exception as exc:
+        LOGGER.error("failed to start supervisor: %s", exc)
+        return None
+
+    _SLEEP_STATE.supervisor_proc = proc
+    return proc.pid
+
+
+def _stop_supervisor() -> bool:
+    proc = _SLEEP_STATE.supervisor_proc
+    if not proc or proc.poll() is not None:
+        return True
+    try:
+        os.kill(proc.pid, signal.SIGTERM)
+        return True
+    except ProcessLookupError:
+        return True
+    except Exception as exc:
+        LOGGER.error("failed to stop supervisor: %s", exc)
+        return False
+
+
+@app.route("/actions/wake", methods=["POST", "OPTIONS"])
+def wake_framework() -> Any:
+    if request.method == "OPTIONS":
+        return ("", 204)
+    pid = _start_supervisor()
+    if not pid:
+        return jsonify({"ok": False, "error": "failed to start supervisor"}), 500
+    _broadcast({"event": "wake", "status": "started", "supervisor_pid": pid})
+    return jsonify({"ok": True, "data": {"supervisor_pid": pid}})
+
+
+@app.route("/actions/sleep", methods=["POST", "OPTIONS"])
+def sleep_framework() -> Any:
+    if request.method == "OPTIONS":
+        return ("", 204)
+    ok = _stop_supervisor()
+    _broadcast({"event": "sleep", "status": "requested"})
+    return jsonify({"ok": ok})
+
+
+@app.route("/state", methods=["GET"])
+def state() -> Any:
+    return jsonify({
+        "ok": True,
+        "data": {
+            "sleep": bool(_SLEEP_STATE.enabled),
+            "sleep_port": int(_SLEEP_STATE.sleep_port),
+            "framework_running": _framework_running(),
+            "framework_args": _framework_args_from_env(),
+            "ipc_host": os.environ.get("TE_IPC_HOST", "127.0.0.1"),
+            "ipc_port": int(os.environ.get("TE_IPC_PORT", "9099")),
+            "framework_url": os.environ.get("TE_FRAMEWORK_URL"),
+        },
+    })
+
+
 def _init_socketio(app: Flask) -> SocketIO:
     preferred_modes = ["gevent", "eventlet", "threading"]
     last_error: Optional[Exception] = None
@@ -337,9 +437,64 @@ def main() -> None:
     parser.add_argument("--host", default=IPCServerConfig.host)
     parser.add_argument("--port", default=IPCServerConfig.port, type=int)
     parser.add_argument("--log-level", default=IPCServerConfig.log_level)
+    parser.add_argument("--sleep", action="store_true", help="Enable sleep listener (does not auto-start framework)")
+    parser.add_argument("--sleep-port", type=int, default=9100, help="Sleep listener port (default: 9100)")
     args = parser.parse_args()
 
     _setup_logging(args.log_level)
+
+    if args.sleep:
+        _SLEEP_STATE.enabled = True
+        _SLEEP_STATE.sleep_port = int(args.sleep_port)
+
+        sleep_app = Flask("te.ipc.sleep")
+
+        @sleep_app.after_request
+        def _apply_sleep_cors(response):  # type: ignore[override]
+            return _cors_headers(response)
+
+        @sleep_app.route("/health", methods=["GET"])
+        def sleep_health() -> Any:
+            return jsonify({"ok": True, "sleep": True, "framework_running": _framework_running()})
+
+        @sleep_app.route("/actions/wake", methods=["POST", "OPTIONS"])
+        def sleep_wake() -> Any:
+            if request.method == "OPTIONS":
+                return ("", 204)
+            pid = _start_supervisor()
+            if not pid:
+                return jsonify({"ok": False, "error": "failed to start supervisor"}), 500
+            return jsonify({"ok": True, "data": {"supervisor_pid": pid}})
+
+        @sleep_app.route("/actions/sleep", methods=["POST", "OPTIONS"])
+        def sleep_sleep() -> Any:
+            if request.method == "OPTIONS":
+                return ("", 204)
+            ok = _stop_supervisor()
+            return jsonify({"ok": ok})
+
+        @sleep_app.route("/config", methods=["GET"])
+        def sleep_config() -> Any:
+            return jsonify({
+                "ok": True,
+                "data": {
+                    "sleep": True,
+                    "sleep_port": _SLEEP_STATE.sleep_port,
+                    "ipc_host": os.environ.get("TE_IPC_HOST", "127.0.0.1"),
+                    "ipc_port": int(os.environ.get("TE_IPC_PORT", "9099")),
+                    "framework_url": os.environ.get("TE_FRAMEWORK_URL"),
+                    "framework_args": _framework_args_from_env(),
+                },
+            })
+
+        def _run_sleep_listener() -> None:
+            server = make_server(args.host, int(args.sleep_port), sleep_app)
+            server.serve_forever()
+
+        t = threading.Thread(target=_run_sleep_listener, name="ipc-sleep", daemon=True)
+        t.start()
+        LOGGER.info("sleep listener enabled on %s:%s", args.host, args.sleep_port)
+
     LOGGER.info("starting IPC service on %s:%s", args.host, args.port)
     run_kwargs = {
         "host": args.host,

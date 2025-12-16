@@ -3,9 +3,83 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <org.mozilla.geckoview.GeckoView
-        android:id="@+id/geckoView"
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/nativeHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="8dp">
+
+            <Button
+                android:id="@+id/btnHome"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Home" />
+
+            <Button
+                android:id="@+id/btnReload"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Reload" />
+
+            <Button
+                android:id="@+id/btnRecents"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Recents" />
+
+            <Button
+                android:id="@+id/btnLock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Lock" />
+
+            <Button
+                android:id="@+id/btnQuit"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Quit" />
+
+            <Button
+                android:id="@+id/btnConsole"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Console" />
+        </LinearLayout>
+
+        <org.mozilla.geckoview.GeckoView
+            android:id="@+id/geckoView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/consoleOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#CC000000"
+        android:visibility="gone">
+
+        <ScrollView
+            android:id="@+id/consoleScroll"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <TextView
+                android:id="@+id/consoleText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="12dp"
+                android:textColor="#FFFFFF"
+                android:textIsSelectable="true"
+                android:textSize="12sp" />
+        </ScrollView>
+    </FrameLayout>
 
 </FrameLayout>

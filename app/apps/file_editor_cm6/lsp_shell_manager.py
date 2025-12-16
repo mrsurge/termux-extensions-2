@@ -87,14 +87,22 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
     cached_id = _language_shell_ids.get(language_id)
     if cached_id:
         cached = await _get_alive_shell(cached_id)
-        if cached:
+        if cached and mgr.get_pipe_state(cached.id):
             return cached
+        # Cached record exists but we have no live pipe handles (e.g. adopted across restart).
+        _language_shell_ids.pop(language_id, None)
 
     # Fallback to label lookup (covers adopted shells across restarts).
     existing = await mgr.find_shell_by_label(label, status="running")
     if existing:
-        _language_shell_ids[language_id] = existing.id
-        return existing
+        if mgr.get_pipe_state(existing.id):
+            _language_shell_ids[language_id] = existing.id
+            return existing
+        # Pipe shells can't be reused without live handles; terminate and respawn.
+        try:
+            await mgr.terminate_shell(existing.id, force=True)
+        except Exception:
+            pass
 
     # Spawn fresh shell with live pipes for LSP bidirectional communication.
     try:

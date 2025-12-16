@@ -99,7 +99,9 @@ def run(argv: List[str]) -> int:
             print(f"[supervisor] Framework didn't exit after {max_wait}s, requesting IPC shutdown")
             # Framework is hung - use IPC to force cleanup
             import requests
-            ipc_url = f"http://127.0.0.1:9099/actions/shutdown"
+            ipc_host = os.environ.get("TE_IPC_HOST", "127.0.0.1")
+            ipc_port = os.environ.get("TE_IPC_PORT", "9099")
+            ipc_url = f"http://{ipc_host}:{ipc_port}/actions/shutdown"
             try:
                 resp = requests.post(ipc_url, timeout=30.0)
                 if resp.status_code == 200:
@@ -142,7 +144,8 @@ def run(argv: List[str]) -> int:
     # Note: Shell log cleanup handled by startup cycle, not shutdown
     # IPC leaves all logs in place; next startup will archive/clean them
     
-    _stop_ipc_server(signal.SIGTERM)
+    if os.environ.get("TE_IPC_PERSIST") != "1":
+        _stop_ipc_server(signal.SIGTERM)
 
     try:
         if RUN_ID_FILE.exists() and RUN_ID_FILE.read_text(encoding="utf-8").strip() == run_id:

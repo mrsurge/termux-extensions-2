@@ -1430,6 +1430,8 @@ if __name__ == '__main__':
     parser.add_argument('--broadcast', nargs='+', metavar='IP_SUBNET_OR_IFACE',
                         help='Enable broadcasting. Requires args: "all", IPs, subnets, or interfaces')
     parser.add_argument('--list-interfaces', action='store_true', help='Show network interfaces and exit')
+    parser.add_argument('--port', type=int, default=int(os.environ.get('TE_PORT', '8089')),
+                        help='Bind port (default: 8089)')
     args = parser.parse_args()
     
     # Handle --list-interfaces
@@ -1596,7 +1598,7 @@ if __name__ == '__main__':
                     content={"ok": False, "error": "IP validation error"}
                 )
     
-    print(f"--- Starting ASGI Server on {host_ip}:8089 ---")
+    print(f"--- Starting ASGI Server on {host_ip}:{args.port} ---")
     if use_middleware:
         print(f"[main] IP filtering enabled ({len(allowlist) - 2} filters + localhost)")
     else:
@@ -1605,5 +1607,5 @@ if __name__ == '__main__':
     uvicorn.run(
         app,
         host=host_ip,
-        port=8089,
+        port=args.port,
     )

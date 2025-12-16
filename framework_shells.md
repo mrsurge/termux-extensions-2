@@ -72,12 +72,12 @@ class ShellRecord:
 - Full terminal emulation
 - Supports resize, input/output streaming
 - Good for interactive shells
-- Dies when framework restarts
+- **Not re-attachable across manager process restarts** (PTY file descriptors are in-memory)
 
 **Pipes** (`spawn_shell_pipe`):
 - Stdin/stdout/stderr as separate streams
 - Good for LSP servers, daemons
-- Dies when framework restarts
+- **Not re-attachable across manager process restarts** (pipe handles are in-memory)
 
 **Dtach** (`spawn_shell_dtach`):
 - Wraps shell in dtach for persistence
@@ -132,6 +132,9 @@ await mgr.write_to_pty(shell_id, "ls -la\n")
 await mgr.resize_pty(shell_id, cols=120, rows=40)
 await mgr.unsubscribe_output(shell_id, queue)
 
+# Pipe I/O (in-memory only)
+pipe_state = mgr.get_pipe_state(shell_id)
+
 # Lifecycle
 await mgr.terminate_shell(shell_id, force=True)
 await mgr.remove_shell(shell_id, force=True)  # Also removes logs/metadata
@@ -163,7 +166,7 @@ queue = bus.subscribe()
 
 while True:
     event = await queue.get()
-    # event.type: SHELL_CREATED, SHELL_STARTED, SHELL_OUTPUT, SHELL_EXITED
+    # event.type: shell.created, shell.spawned, shell.pty_chunk, shell.exited, ...
     # event.shell_id, event.data, event.timestamp
 ```
 
@@ -192,6 +195,9 @@ The CLI auto-detects the repo fingerprint from cwd and loads the stored secret.
 | `FRAMEWORK_SHELLS_SECRET` | Secret for runtime ID derivation and API auth |
 | `TE_REPO_FINGERPRINT` | Override auto-computed repo fingerprint |
 | `TE_RUN_ID` | Current framework run ID (for adoption tracking) |
+| `TE_PORT` | Framework bind port (default 8089 when using TE2) |
+| `TE_IPC_HOST`, `TE_IPC_PORT` | IPC server address (default 127.0.0.1:9099 when using TE2) |
+
 
 ## Integration Hooks (Optional)
 

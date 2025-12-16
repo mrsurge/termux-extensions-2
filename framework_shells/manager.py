@@ -1002,7 +1002,16 @@ class FrameworkShellManager:
         return decoded_data.splitlines(keepends=True)[-lines:]
 
     # ------------------------------------------------------------------
-    # PTY I/O methods
+    # PTY / pipe I/O methods
+
+    def get_pipe_state(self, shell_id: str) -> Optional[PipeState]:
+        """Return the live PipeState for a running pipe-backed shell, if present.
+
+        Note: pipe shells cannot be re-attached across process restarts, so this
+        will only be available in the process that spawned the pipe shell.
+        """
+        return self._pipes.get(shell_id)
+
 
     async def subscribe_output(self, shell_id: str) -> AsyncQueue[str]:
         """Subscribe to PTY output for a shell. Returns an AsyncQueue."""

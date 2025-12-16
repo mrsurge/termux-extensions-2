@@ -189,103 +189,13 @@ def serve_app_file(app_dir: str, filename: str):
     
     return FileResponse(full_path)
 
-@apps_bp.get("/shell-logs/{shell_id}", response_class=HTMLResponse)
-async def shell_logs_viewer(shell_id: str):
-    """Render log viewer for a framework shell."""
-    template_path = os.path.join(project_root, 'app', 'templates', 'shell_log_viewer.html')
-    async with aiofiles.open(template_path, "r") as f:
-        content = await f.read()
-    content = content.replace("{{ shell_id }}", shell_id)
-    return HTMLResponse(content=content)
-
-@apps_bp.websocket("/ws/shell-logs/{shell_id}")
-async def shell_logs_ws(websocket: WebSocket, shell_id: str):
-    """WebSocket endpoint for tailing framework shell logs (both stdout and stderr)."""
-    await websocket.accept()
-    print(f"[AppsExtension] shell_logs_ws subscribed shell_id={shell_id}")
-    
-    logs_dir = Path.home() / ".cache/te_framework/logs"
-    stdout_path = logs_dir / f"{shell_id}.stdout.log"
-    stderr_path = logs_dir / f"{shell_id}.stderr.log"
-    
-    if not await asyncio.to_thread(stdout_path.exists) and not await asyncio.to_thread(stderr_path.exists):
-        await websocket.send_json({
-            "type": "error",
-            "message": f"No log files found for {shell_id}"
-        })
-        try:
-            await websocket.close()
-        except RuntimeError:
-            pass
-        print(f"[AppsExtension] shell_logs_ws no logs for {shell_id}, closing")
-        return
-    
-    try:
-        # Send initial 200 lines from both logs
-        stdout_lines = []
-        if await asyncio.to_thread(stdout_path.exists):
-            async with aiofiles.open(stdout_path, 'r') as f:
-                stdout_lines = (await f.read()).splitlines()
-        
-        stderr_lines = []
-        if await asyncio.to_thread(stderr_path.exists):
-            async with aiofiles.open(stderr_path, 'r') as f:
-                stderr_lines = (await f.read()).splitlines()
-        
-        stdout_initial = '\n'.join(stdout_lines[-200:])
-        stderr_initial = '\n'.join(stderr_lines[-200:])
-        
-        await websocket.send_json({
-            "type": "initial",
-            "stdout": stdout_initial,
-            "stderr": stderr_initial
-        })
-        print(f"[AppsExtension] shell_logs_ws sent initial payload for {shell_id}")
-        
-        # Track file sizes for tailing
-        stdout_size = (await asyncio.to_thread(stdout_path.stat)).st_size if await asyncio.to_thread(stdout_path.exists) else 0
-        stderr_size = (await asyncio.to_thread(stderr_path.stat)).st_size if await asyncio.to_thread(stderr_path.exists) else 0
-        
-        while True:
-            await asyncio.sleep(1)  # Poll every second
-            
-            # Check stdout
-            if await asyncio.to_thread(stdout_path.exists):
-                current_stdout = (await asyncio.to_thread(stdout_path.stat)).st_size
-                if current_stdout > stdout_size:
-                    async with aiofiles.open(stdout_path, 'r') as f:
-                        await f.seek(stdout_size)
-                        new_content = await f.read()
-                        await websocket.send_json({
-                            "type": "update",
-                            "stream": "stdout",
-                            "data": new_content
-                        })
-                    stdout_size = current_stdout
-                elif current_stdout < stdout_size:
-                    stdout_size = 0
-            
-            # Check stderr
-            if await asyncio.to_thread(stderr_path.exists):
-                current_stderr = (await asyncio.to_thread(stderr_path.stat)).st_size
-                if current_stderr > stderr_size:
-                    async with aiofiles.open(stderr_path, 'r') as f:
-                        await f.seek(stderr_size)
-                        new_content = await f.read()
-                        await websocket.send_json({
-                            "type": "update",
-                            "stream": "stderr",
-                            "data": new_content
-                        })
-                    stderr_size = current_stderr
-                elif current_stderr < stderr_size:
-                    stderr_size = 0
-                    
-    except Exception as e:
-        print(f"Log tail error: {e}")
-    finally:
-        try:
-            await websocket.close()
-        except RuntimeError:
-            # Websocket already closed
-            pass
+# shell log viewer routes are owned by sessions_and_shortcuts ("brain") and mounted here for
+# root-level access (apps extension is un-prefixed).
+# IMPORTANT: do not bind the imported router to a module-level name, otherwise the extension
+# loader may pick it as the "primary" APIRouter and skip apps_bp entirely.
+try:
+    import importlib
+    _sas = importlib.import_module("app.extensions.sessions_and_shortcuts.main")
+    apps_bp.include_router(getattr(_sas, "shell_logs_bp"))
+except Exception as e:
+    print(f"[AppsExtension] Failed to mount shell logs routes: {e}")

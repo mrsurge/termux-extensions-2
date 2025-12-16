@@ -4,10 +4,27 @@ import asyncio
 import json
 import os
 import subprocess
+from pathlib import Path
+
+import aiofiles
 from fastapi import APIRouter, HTTPException, Body, WebSocket, WebSocketDisconnect, Query
+from fastapi.responses import HTMLResponse
+
+
+async def _safe_ws_close(websocket: WebSocket) -> None:
+    try:
+        await websocket.close()
+    except RuntimeError:
+        # Starlette raises if close already sent.
+        pass
+    except Exception:
+        pass
 
 # Create a APIRouter
 sessions_bp = APIRouter()
+
+# Root-mounted router for framework_shells log viewing (mounted via apps extension).
+shell_logs_bp = APIRouter()
 
 # Determine the project root path to find the scripts directory
 # Go up 4 levels: main.py -> sessions_and_shortcuts -> extensions -> app -> project_root
@@ -59,6 +76,94 @@ def run_script(script_name, app_root_path, args=None):
         return result.stdout, None
     except Exception as e:
         return None, str(e)
+
+# --- Root routes (framework_shells log viewer) ---
+
+@shell_logs_bp.get("/shell-logs/{shell_id}", response_class=HTMLResponse)
+async def shell_logs_viewer(shell_id: str):
+    template_path = os.path.join(_project_root, 'app', 'templates', 'shell_log_viewer.html')
+    async with aiofiles.open(template_path, "r", encoding="utf-8", errors="replace") as f:
+        content = await f.read()
+    content = content.replace("{{ shell_id }}", shell_id)
+    return HTMLResponse(content=content)
+
+
+@shell_logs_bp.websocket("/ws/shell-logs/{shell_id}")
+async def shell_logs_ws(websocket: WebSocket, shell_id: str):
+    await websocket.accept()
+
+    try:
+        from framework_shells import get_manager as get_framework_shell_manager
+        mgr = await get_framework_shell_manager()
+        rec = await mgr.get_shell(shell_id)
+    except Exception as e:
+        await websocket.send_json({"type": "error", "message": f"Failed to load shell record: {e}"})
+        await _safe_ws_close(websocket)
+        return
+
+    if not rec:
+        await websocket.send_json({"type": "error", "message": f"Shell not found: {shell_id}"})
+        await _safe_ws_close(websocket)
+        return
+
+    stdout_path = Path(rec.stdout_log)
+    stderr_path = Path(rec.stderr_log)
+
+    if not await asyncio.to_thread(stdout_path.exists) and not await asyncio.to_thread(stderr_path.exists):
+        await websocket.send_json({"type": "error", "message": f"No log files found for {shell_id}"})
+        await _safe_ws_close(websocket)
+        return
+
+    try:
+        stdout_lines = []
+        if await asyncio.to_thread(stdout_path.exists):
+            async with aiofiles.open(stdout_path, 'r', encoding='utf-8', errors='replace') as f:
+                stdout_lines = (await f.read()).splitlines()
+
+        stderr_lines = []
+        if await asyncio.to_thread(stderr_path.exists):
+            async with aiofiles.open(stderr_path, 'r', encoding='utf-8', errors='replace') as f:
+                stderr_lines = (await f.read()).splitlines()
+
+        await websocket.send_json({
+            "type": "initial",
+            "stdout": "\n".join(stdout_lines[-200:]),
+            "stderr": "\n".join(stderr_lines[-200:]),
+        })
+
+        stdout_size = (await asyncio.to_thread(stdout_path.stat)).st_size if await asyncio.to_thread(stdout_path.exists) else 0
+        stderr_size = (await asyncio.to_thread(stderr_path.stat)).st_size if await asyncio.to_thread(stderr_path.exists) else 0
+
+        while True:
+            await asyncio.sleep(1)
+
+            if await asyncio.to_thread(stdout_path.exists):
+                current_stdout = (await asyncio.to_thread(stdout_path.stat)).st_size
+                if current_stdout > stdout_size:
+                    async with aiofiles.open(stdout_path, 'r', encoding='utf-8', errors='replace') as f:
+                        await f.seek(stdout_size)
+                        new_content = await f.read()
+                        await websocket.send_json({"type": "update", "stream": "stdout", "data": new_content})
+                    stdout_size = current_stdout
+                elif current_stdout < stdout_size:
+                    stdout_size = 0
+
+            if await asyncio.to_thread(stderr_path.exists):
+                current_stderr = (await asyncio.to_thread(stderr_path.stat)).st_size
+                if current_stderr > stderr_size:
+                    async with aiofiles.open(stderr_path, 'r', encoding='utf-8', errors='replace') as f:
+                        await f.seek(stderr_size)
+                        new_content = await f.read()
+                        await websocket.send_json({"type": "update", "stream": "stderr", "data": new_content})
+                    stderr_size = current_stderr
+                elif current_stderr < stderr_size:
+                    stderr_size = 0
+
+    except Exception as e:
+        print(f"[sessions_and_shortcuts] Log tail error: {e}")
+    finally:
+        await _safe_ws_close(websocket)
+
 
 # --- API Endpoints for this extension ---
 
@@ -425,8 +530,10 @@ async def sessions_ws(websocket: WebSocket):
         traceback.print_exc()
         try:
             await websocket.send_json({"type": "error", "message": str(exc)})
+        except Exception:
+            pass
         finally:
-            await websocket.close()
+            await _safe_ws_close(websocket)
     finally:
         if bus and q:
             bus.unsubscribe(q)
