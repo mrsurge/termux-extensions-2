@@ -16,6 +16,7 @@ import termios
 import time
 import uuid
 import socket
+import inspect
 from asyncio import Lock as AsyncLock
 from asyncio import Queue as AsyncQueue
 from dataclasses import dataclass, field
@@ -28,6 +29,7 @@ from .store import RuntimeStore
 from .record import ShellRecord
 from .pty import PTYState, PipeState
 from .events import get_event_bus, ShellEvent, EventType
+from .hooks import ShellLifecycleHooks
 
 try:
     import psutil  # type: ignore
@@ -51,6 +53,8 @@ class FrameworkShellManager:
         max_service_shells: Optional[int] = None,
         auth_token: Optional[str] = None, # kept for backward compat if needed
         run_id: Optional[str] = None,
+        enable_dtach_proxy: bool = True,
+        process_hooks: Optional[ShellLifecycleHooks] = None,
     ) -> None:
         self.store = store or RuntimeStore()
         self.metadata_dir = self.store.metadata_dir
@@ -67,6 +71,46 @@ class FrameworkShellManager:
         
         self._event_bus = get_event_bus()
         self._dtach_bin = shutil.which("dtach")
+        self._enable_dtach_proxy = bool(enable_dtach_proxy)
+        self._hooks = process_hooks
+
+    def _fire_hook(self, result: Any) -> None:
+        """Best-effort hook execution; never blocks core flow."""
+        if result is None:
+            return
+        if not inspect.isawaitable(result):
+            return
+        try:
+            asyncio.create_task(result)
+        except Exception:
+            return
+
+    def _run_hook_running(self, record: ShellRecord) -> None:
+        hook = self._hooks.on_shell_running if self._hooks else None
+        if not hook:
+            return
+        try:
+            self._fire_hook(hook(record))
+        except Exception:
+            return
+
+    def _run_hook_adopted(self, record: ShellRecord) -> None:
+        hook = self._hooks.on_shell_adopted if self._hooks else None
+        if not hook:
+            return
+        try:
+            self._fire_hook(hook(record))
+        except Exception:
+            return
+
+    def _run_hook_exited(self, record: ShellRecord, last_pid: Optional[int]) -> None:
+        hook = self._hooks.on_shell_exited if self._hooks else None
+        if not hook:
+            return
+        try:
+            self._fire_hook(hook(record, last_pid))
+        except Exception:
+            return
 
     def _get_lock(self):
         if not hasattr(self, '_lock_instance'):
@@ -120,17 +164,19 @@ class FrameworkShellManager:
                 record.launcher_pid = self.launcher_pid
                 mutated = True
             
-            if record.uses_dtach and record.id not in self._pty and alive:
-                 # Re-attach logic for dtach
-                 try:
-                     await self._attach_dtach_proxy(record)
-                     mutated = True # Considered adoption action
-                 except Exception:
-                     pass
+            if self._enable_dtach_proxy and record.uses_dtach and record.id not in self._pty and alive:
+                # Re-attach logic for dtach
+                try:
+                    await self._attach_dtach_proxy(record)
+                    mutated = True  # Considered adoption action
+                except Exception:
+                    pass
 
             if mutated:
                 record.adopted = True
                 await self._save_record(record)
+                if alive and record.status == "running":
+                    self._run_hook_adopted(record)
                 updated += 1
         
         for record in stale_records:
@@ -362,6 +408,7 @@ class FrameworkShellManager:
             await self._save_record(record)
             
             await self._emit(EventType.SHELL_SPAWNED, record)
+            self._run_hook_running(record)
             return record
         finally:
             await asyncio.to_thread(stdout_fh.close)
@@ -427,6 +474,7 @@ class FrameworkShellManager:
         record.updated_at = time.time()
         await self._save_record(record)
         await self._emit(EventType.SHELL_SPAWNED, record)
+        self._run_hook_running(record)
 
         # Attach proxy
         await self._attach_dtach_proxy(record)
@@ -523,6 +571,7 @@ class FrameworkShellManager:
         await self._save_record(record)
         
         await self._emit(EventType.SHELL_SPAWNED, record)
+        self._run_hook_running(record)
         
         state = PTYState(
             master_fd=master_fd,
@@ -594,12 +643,14 @@ class FrameworkShellManager:
         return True
 
     async def _mark_exited(self, record: ShellRecord, exit_code: Optional[int]) -> None:
+        last_pid = record.pid
         record.pid = None
         record.status = "exited"
         record.exit_code = exit_code
         record.updated_at = time.time()
         await self._save_record(record)
         await self._emit(EventType.SHELL_EXITED, record, exit_code=exit_code)
+        self._run_hook_exited(record, last_pid)
 
     async def _collect_exit_code(self, pid: Optional[int]) -> Optional[int]:
         if not pid: return None
@@ -657,6 +708,7 @@ class FrameworkShellManager:
             record.updated_at = time.time()
             await self._save_record(record)
             await self._emit(EventType.SHELL_SPAWNED, record)
+            self._run_hook_running(record)
             
             state = PipeState(
                 process=proc,

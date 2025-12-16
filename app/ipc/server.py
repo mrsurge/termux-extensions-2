@@ -27,7 +27,7 @@ from .control import FrameworkError, spawn_agent
 from .process_manager import ProcessRegistry
 
 LOGGER = logging.getLogger("te.ipc")
-FRAMEWORK_URL = os.environ.get("TE_FRAMEWORK_URL", "http://127.0.0.1:8088")
+FRAMEWORK_URL = os.environ.get("TE_FRAMEWORK_URL", "http://127.0.0.1:8089")
 FRAMEWORK_TOKEN = os.environ.get("TE_FRAMEWORK_SHELL_TOKEN")
 _REGISTERED_IPC_MODULES: Set[str] = set()
 _APPS_DIR = Path(__file__).resolve().parent.parent / "apps"
@@ -325,7 +325,7 @@ _load_ipc_modules(app, socketio)
 @dataclass
 class IPCServerConfig:
     host: str = "127.0.0.1"
-    port: int = 9123
+    port: int = 9099
     log_level: str = "INFO"
 
 

@@ -208,7 +208,7 @@ fi
 
 IPC_PID_FILE="$HOME/.cache/te_framework/ipc.pid"
 IPC_HOST="${TE_IPC_HOST:-127.0.0.1}"
-IPC_PORT="${TE_IPC_PORT:-9123}"
+IPC_PORT="${TE_IPC_PORT:-9099}"
 
 start_ipc_server() {
   local existing_pid=""
@@ -224,7 +224,7 @@ start_ipc_server() {
 
   local python_bin="${PYTHON_BIN:-python}"
   echo "[run_framework] Starting IPC server on $IPC_HOST:$IPC_PORT"
-  TE_FRAMEWORK_URL="${TE_FRAMEWORK_URL:-http://127.0.0.1:8088}" \
+  TE_FRAMEWORK_URL="${TE_FRAMEWORK_URL:-http://127.0.0.1:8089}" \
   IPC_LOG_PREFIX=1 \
   "$python_bin" -m app.ipc.server --host "$IPC_HOST" --port "$IPC_PORT" &
   TE_IPC_PID=$!

@@ -255,7 +255,7 @@ async def _list_framework_shells():
 async def _list_ipc_processes():
     """Fetch all processes from the IPC registry."""
     import httpx
-    ipc_url = f"http://{os.environ.get('TE_IPC_HOST', '127.0.0.1')}:{os.environ.get('TE_IPC_PORT', '9123')}"
+    ipc_url = f"http://{os.environ.get('TE_IPC_HOST', '127.0.0.1')}:{os.environ.get('TE_IPC_PORT', '9099')}"
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(f"{ipc_url}/processes/list")

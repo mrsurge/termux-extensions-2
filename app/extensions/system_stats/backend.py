@@ -137,6 +137,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 else:
                     print(f"[Stats] Local stats OS error: {e}")
             except Exception as e:
+                err_msg = str(e)
+                if 'Cannot call "send" once a close message has been sent' in err_msg:
+                     # Connection is dead, stop the loop
+                     break
                 print(f"[Stats] Local stats error: {e}")
             
             await asyncio.sleep(1)

@@ -51,13 +51,21 @@ async def lifespan(app_instance):
         parent_pid=os.getppid(),
         metadata={
             "run_id": os.environ.get("TE_RUN_ID"),
-            "port": 8088,
+            "port": 8089,
         }
     )
     if registered:
         print(f"[framework] Registered with IPC (PID {framework_pid})")
     else:
         print(f"[framework] Warning: Failed to register with IPC", file=sys.stderr)
+
+    # Initialize framework_shells early with IPC lifecycle hooks so shell PIDs
+    # are registered (and adoption re-registers as needed).
+    try:
+        from app.ipc.framework_shells_hooks import build_ipc_shell_hooks
+        await get_manager(process_hooks=build_ipc_shell_hooks())
+    except Exception as exc:
+        print(f"[framework] Warning: Failed to init framework_shells IPC hooks: {exc}", file=sys.stderr)
     
     # Startup
     print("--- Loading Settings ---")
@@ -1050,7 +1058,7 @@ def _ipc_host() -> str:
 
 
 def _ipc_port() -> int:
-    return int(os.getenv("TE_IPC_PORT", "9123"))
+    return int(os.getenv("TE_IPC_PORT", "9099"))
 
 
 def _format_host_for_ws(host: str) -> str:
@@ -1588,7 +1596,7 @@ if __name__ == '__main__':
                     content={"ok": False, "error": "IP validation error"}
                 )
     
-    print(f"--- Starting ASGI Server on {host_ip}:8088 ---")
+    print(f"--- Starting ASGI Server on {host_ip}:8089 ---")
     if use_middleware:
         print(f"[main] IP filtering enabled ({len(allowlist) - 2} filters + localhost)")
     else:
@@ -1597,5 +1605,5 @@ if __name__ == '__main__':
     uvicorn.run(
         app,
         host=host_ip,
-        port=8088,
+        port=8089,
     )

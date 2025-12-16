@@ -6,6 +6,7 @@ from .pty import PTYState, PipeState
 from .events import get_event_bus, EventBus, ShellEvent, EventType
 from .store import RuntimeStore
 from .auth import get_secret, derive_api_token, derive_runtime_id
+from .hooks import ShellLifecycleHooks
 
 import asyncio
 from typing import Optional
@@ -13,6 +14,7 @@ from typing import Optional
 # Singleton manager instance
 _manager_instance: Optional[FrameworkShellManager] = None
 _manager_lock: Optional[asyncio.Lock] = None
+_manager_kwargs: Optional[dict] = None
 
 def _get_lock() -> asyncio.Lock:
     global _manager_lock
@@ -20,16 +22,25 @@ def _get_lock() -> asyncio.Lock:
         _manager_lock = asyncio.Lock()
     return _manager_lock
 
-async def get_manager() -> FrameworkShellManager:
-    """Get or create the singleton FrameworkShellManager instance."""
+async def get_manager(**kwargs) -> FrameworkShellManager:
+    """Get or create the singleton FrameworkShellManager instance.
+
+    This is a process-wide singleton. If kwargs are provided after the manager
+    is created, they must match the original creation kwargs.
+    """
     global _manager_instance
+    global _manager_kwargs
     if _manager_instance is not None:
+        if kwargs and _manager_kwargs is not None and kwargs != _manager_kwargs:
+            raise ValueError("FrameworkShellManager singleton already created with different configuration")
         return _manager_instance
     
     async with _get_lock():
         if _manager_instance is None:
-            _manager_instance = FrameworkShellManager()
-            await _manager_instance._adopt_orphaned_shells()
+            _manager_kwargs = dict(kwargs)
+            _manager_instance = FrameworkShellManager(**kwargs)
+            async with _manager_instance._get_lock():
+                await _manager_instance._adopt_orphaned_shells()
     
     return _manager_instance
 
@@ -46,5 +57,6 @@ __all__ = [
     "get_secret",
     "derive_api_token",
     "derive_runtime_id",
+    "ShellLifecycleHooks",
     "get_manager",
 ]

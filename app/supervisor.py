@@ -75,21 +75,7 @@ def run(argv: List[str]) -> int:
         nonlocal shutting_down
         if shutting_down:
             return
-        shutting_down = True
-        print(f"[supervisor] Received signal {signum}; shutting down run {run_id}")
-        
-        # Step 1: Trigger IPC-orchestrated shutdown FIRST.
-        # This ensures the process registry (which knows about all workers/shells)
-        # kills them in dependency order (children first).
-        print("[supervisor] Requesting IPC shutdown-all...")
-        import requests
-        ipc_url = f"http://127.0.0.1:9123/actions/shutdown-all"
-        try:
-            requests.post(ipc_url, timeout=5.0)
-        except Exception as e:
-            print(f"[supervisor] IPC shutdown request failed (ignoring): {e}")
-
-        # Step 2: Send SIGTERM to framework and let it shutdown gracefully
+        # Step 1: Send SIGTERM to framework and let it shutdown gracefully
         # The framework's lifespan shutdown will terminate all framework shells
         print("[supervisor] Sending SIGTERM to framework for graceful shutdown")
         try:
@@ -98,7 +84,7 @@ def run(argv: List[str]) -> int:
             print("[supervisor] Framework already exited")
             return
         
-        # Step 3: Wait for framework to exit (it terminates shells in lifespan)
+        # Step 2: Wait for framework to exit (it terminates shells in lifespan)
         max_wait = 10.0
         poll_interval = 0.2
         elapsed = 0.0
@@ -113,7 +99,7 @@ def run(argv: List[str]) -> int:
             print(f"[supervisor] Framework didn't exit after {max_wait}s, requesting IPC shutdown")
             # Framework is hung - use IPC to force cleanup
             import requests
-            ipc_url = f"http://127.0.0.1:9123/actions/shutdown"
+            ipc_url = f"http://127.0.0.1:9099/actions/shutdown"
             try:
                 resp = requests.post(ipc_url, timeout=30.0)
                 if resp.status_code == 200:
