@@ -251,7 +251,7 @@ function renderFrameworkShells() {
         if (isAppWorker) {
             try {
                 card.dataset.appId = extractAppName(shell.label);
-            } catch (_) {}
+            } catch (_) { }
         }
 
         const stats = shell.stats || {};
@@ -535,16 +535,16 @@ function extractAppName(label) {
 function renderChildProcess(child) {
     const proc = child.process;
     const shell = child.shell;  // May be null if no matching framework shell
-    
+
     const label = proc.label || proc.metadata?.label || 'Process';
     const pid = proc.pid;
     const type = proc.type || 'process';
     const cmdPreview = proc.metadata?.command || '';
-    
+
     // Determine if we have a shell record for richer info
     const hasShell = !!shell;
     const shellId = shell?.id;
-    
+
     return `
         <div class="child-process" data-pid="${pid}">
             <div class="child-header">
@@ -657,15 +657,15 @@ function applyLiveSnapshot(payload) {
 
 function applyShellEvent(payload) {
     if (!payload || !payload.event) return;
-    
+
     const event = payload.event;
     const shellId = event.shell_id;
     const eventType = event.type;
     const shellData = payload.shell;
-    
+
     // Update the shell in STATE.frameworkShells
     const idx = STATE.frameworkShells.findIndex(s => s.id === shellId);
-    
+
     if (eventType === 'shell.removed') {
         // Remove shell from list
         if (idx !== -1) {
@@ -680,7 +680,7 @@ function applyShellEvent(payload) {
             STATE.frameworkShells.push(shellData);
         }
     }
-    
+
     // Re-render framework shells section
     renderFrameworkShells();
 }
@@ -689,13 +689,10 @@ function requestSnapshot() {
     if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
         try {
             liveSocket.send(JSON.stringify({ type: 'refresh' }));
-            return;
         } catch (err) {
             console.warn('Failed to request snapshot over WS', err);
         }
     }
-    // Fallback to HTTP polling if websocket is not ready
-    refreshAll();
 }
 
 function runShortcut(path) {
@@ -844,9 +841,9 @@ function attachEventListeners() {
             const shellId = target.dataset.shell;
             const pid = target.dataset.pid;
             const hasChildren = target.dataset.hasChildren === 'true';
-            
+
             if (shellId) {
-                const msg = hasChildren 
+                const msg = hasChildren
                     ? `Kill this app worker and all its child processes?`
                     : `Stop framework shell ${shellId}?`;
                 if (confirm(msg)) {
@@ -1042,7 +1039,7 @@ export default async function initialize(container, apiRef) {
         try {
             liveSocket = new WebSocket(wsUrl);
             liveSocket.onopen = () => {
-                try { liveSocket.send(JSON.stringify({ type: 'hello' })); } catch (_) {}
+                try { liveSocket.send(JSON.stringify({ type: 'hello' })); } catch (_) { }
             };
             liveSocket.onmessage = (event) => {
                 try {
@@ -1056,8 +1053,8 @@ export default async function initialize(container, apiRef) {
                     } else if (payload.type === 'sessions_update') {
                         // Session-only update (non-framework shells)
                         if (Array.isArray(payload.sessions)) {
-                            STATE.sessions = payload.sessions;
-                            renderSessions();
+                            STATE.visibleSessions = payload.sessions;
+                            renderVisibleSessions();
                         }
                     }
                 } catch (err) {
@@ -1068,7 +1065,7 @@ export default async function initialize(container, apiRef) {
                 reconnectTimer = setTimeout(connectSocket, 1500);
             };
             liveSocket.onerror = () => {
-                try { liveSocket.close(); } catch (_) {}
+                try { liveSocket.close(); } catch (_) { }
             };
         } catch (err) {
             reconnectTimer = setTimeout(connectSocket, 2000);
@@ -1076,6 +1073,4 @@ export default async function initialize(container, apiRef) {
     };
 
     connectSocket();
-    // Fallback: prime UI if WS is slow to connect
-    setTimeout(() => { if (!STATE.visibleSessions.length) refreshAll(); }, 500);
 }

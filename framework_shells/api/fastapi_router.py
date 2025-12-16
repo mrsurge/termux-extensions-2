@@ -57,7 +57,7 @@ async def list_shells(
     mgr: FrameworkShellManager = Depends(get_manager)
 ):
     records = await mgr.list_shells()
-    return {"ok": True, "shells": [r.to_payload() for r in records]}
+    return {"ok": True, "data": [r.to_payload() for r in records]}
 
 @router.get("/api/framework_shells/{shell_id}")
 async def get_shell(
@@ -67,7 +67,7 @@ async def get_shell(
     record = await mgr.get_shell(shell_id)
     if not record:
         raise HTTPException(404, "Shell not found")
-    return {"ok": True, "shell": record.to_payload(include_env=True)}
+    return {"ok": True, "data": record.to_payload(include_env=True)}
 
 @router.post("/api/framework_shells")
 async def find_or_create_shell(
@@ -89,7 +89,7 @@ async def find_or_create_shell(
     if label:
         existing = await mgr.find_shell_by_label(label)
         if existing:
-             return {"ok": True, "shell": existing.to_payload(), "reused": True}
+             return {"ok": True, "data": existing.to_payload(), "reused": True}
 
     if not command:
         raise HTTPException(400, "Command required")
@@ -98,7 +98,7 @@ async def find_or_create_shell(
         command, cwd=cwd, env=env, label=label,
         subgroups=subgroups, ui=ui, autostart=autostart
     )
-    return {"ok": True, "shell": record.to_payload()}
+    return {"ok": True, "data": record.to_payload()}
 
 @router.post('/api/framework_shells/{shell_id}/terminate')
 async def terminate_shell(
