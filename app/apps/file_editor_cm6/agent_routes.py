@@ -13,6 +13,7 @@ import anyio
 from fastapi.responses import JSONResponse
 from .agent_bridge import get_bridge
 from framework_shells import FrameworkShellManager, get_manager
+from .terminal_backend import get_manager_dep
 
 bp = APIRouter()
 
@@ -185,7 +186,7 @@ async def create_agent_session(data: dict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @bp.get('/agent/shell/status')
-async def get_agent_shell_status(mgr: FrameworkShellManager = Depends(get_manager)):
+async def get_agent_shell_status(mgr: FrameworkShellManager = Depends(get_manager_dep)):
     """
     Check if there's an active Codex MCP server shell.
 

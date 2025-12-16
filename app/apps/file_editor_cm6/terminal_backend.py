@@ -14,6 +14,11 @@ from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query, Depends
 
 from framework_shells import FrameworkShellManager, get_manager
+
+
+async def get_manager_dep() -> FrameworkShellManager:
+    return await get_manager()
+
 from app.apps.file_editor_cm6 import edit_tracker
 from app.apps.file_editor_cm6.stores import _history_store as _shared_history_store
 from app.apps.file_editor_cm6.project_sidecar import ProjectSidecar
@@ -421,7 +426,7 @@ async def terminal_resize(shell_id: str, data: dict = Body(...)):
 
 
 @terminal_router.get('/terminal/{shell_id}')
-async def terminal_info(shell_id: str, logs: bool = Query(False), tail: int = Query(200), mgr: FrameworkShellManager = Depends(get_manager)):
+async def terminal_info(shell_id: str, logs: bool = Query(False), tail: int = Query(200), mgr: FrameworkShellManager = Depends(get_manager_dep)):
     """
     Get terminal shell session information.
     
@@ -449,12 +454,26 @@ async def terminal_info(shell_id: str, logs: bool = Query(False), tail: int = Qu
 
 
 @terminal_router.websocket('/ws/terminal/{shell_id}')
-async def terminal_ws(websocket: WebSocket, shell_id: str, mgr: FrameworkShellManager = Depends(get_manager)):
-    """
-    WebSocket endpoint for bidirectional PTY streaming.
+async def terminal_ws(websocket: WebSocket, shell_id: str):
+    """WebSocket endpoint for bidirectional PTY streaming.
+
+    Note: we intentionally avoid `Depends(get_manager)` here because exceptions
+    raised during dependency resolution can reject the websocket handshake
+    (HTTP 403) before we get a chance to accept and report an error.
+
     If shell_id is 'auto', backend will restore or create a shell automatically.
     """
     await websocket.accept()
+
+    try:
+        mgr = await get_manager()
+    except Exception as e:
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+        await websocket.close()
+        return
 
     # Register this websocket for backend-managed project switches.
     async with _active_terminal_lock:
