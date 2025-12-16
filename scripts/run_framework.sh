@@ -236,4 +236,6 @@ start_ipc_server() {
 
 start_ipc_server
 
+trap 'kill "$TE_IPC_PID" 2>/dev/null || true' EXIT INT TERM
+
 exec python -m app.supervisor "${EXTRA_ARGS[@]}"
