@@ -143,6 +143,14 @@
             stderrContainer.textContent = msg.stderr || "";
             stdoutContainer.scrollTop = stdoutContainer.scrollHeight;
             stderrContainer.scrollTop = stderrContainer.scrollHeight;
+          } else if (msg.type === "reset") {
+            if (msg.stream === "stdout") {
+              stdoutContainer.textContent = "";
+              stdoutContainer.scrollTop = stdoutContainer.scrollHeight;
+            } else if (msg.stream === "stderr") {
+              stderrContainer.textContent = "";
+              stderrContainer.scrollTop = stderrContainer.scrollHeight;
+            }
           } else if (msg.type === "update") {
             if (msg.stream === "stdout") {
               stdoutContainer.textContent += msg.data;
@@ -174,4 +182,3 @@
     </script>
   </body>
 </html>
-

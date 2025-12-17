@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import aiofiles
 import fnmatch
-from fastapi import APIRouter, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Form, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from .. import get_manager
@@ -307,7 +307,18 @@ async def _render_dashboard_html() -> str:
     parts.append("</div>")
 
     parts.append('<div class="section">')
-    parts.append('<div class="section-title">Exited <span class="muted">(%d)</span></div>' % len(exited))
+    parts.append('<div class="section-title">')
+    parts.append('Exited <span class="muted">(%d)</span>' % len(exited))
+    parts.append('<div class="shell-actions">')
+    if exited:
+        parts.append(
+            '<form method="post" action="/fws/action/exited/purge" data-fws-ajax="1" '
+            'data-confirm="Purge ALL exited shells (delete their logs + metadata)?">'
+            '<button class="btn btn-small btn-danger" type="submit">Purge Exited</button>'
+            "</form>"
+        )
+    parts.append("</div>")
+    parts.append("</div>")
     if not exited:
         parts.append('<div class="shell-card"><div class="shell-meta">No exited shells.</div></div>')
     else:
@@ -334,7 +345,7 @@ async def _render_dashboard_html() -> str:
             parts.append('<div class="shell-actions">')
             parts.append(f'<a class="btn btn-small" href="/fws/logs/{_escape_html(sid)}">Logs</a>')
             parts.append(
-                f'<form method="post" action="/fws/action/shell/{_escape_html(sid)}/purge">'
+                f'<form method="post" action="/fws/action/shell/{_escape_html(sid)}/purge" data-fws-ajax="1">'
                 f'<button class="btn btn-small" type="submit">Purge</button>'
                 f"</form>"
             )
@@ -374,18 +385,84 @@ async def fws_static(path: str) -> FileResponse:
 async def fws_refresh() -> RedirectResponse:
     return RedirectResponse(url="/fws/", status_code=303)
 
+def _is_ajax(request: Request) -> bool:
+    return (request.headers.get("x-fws-ajax") or "").strip() == "1"
+
+
+async def _truncate_log_file(path: Path, *, logs_root: Path) -> bool:
+    resolved = path.resolve(strict=False)
+    if resolved.suffix != ".log":
+        return False
+    if logs_root != resolved and logs_root not in resolved.parents:
+        return False
+    try:
+        if not resolved.exists() or not resolved.is_file():
+            return False
+        await asyncio.to_thread(lambda: resolved.open("wb").close())
+        return True
+    except Exception:
+        return False
+
+
+@router.post("/fws/action/logs/purge")
+async def fws_purge_logs(request: Request) -> Response:
+    mgr = await get_manager()
+    shells = await mgr.list_shells()
+
+    logs_root = Path(mgr.logs_dir).resolve(strict=False)
+    candidates: List[Path] = []
+    for rec in shells:
+        candidates.append(Path(rec.stdout_log))
+        candidates.append(Path(rec.stderr_log))
+
+    try:
+        candidates.extend(list(Path(mgr.logs_dir).glob("*.log")))
+    except Exception:
+        pass
+
+    seen: set[Path] = set()
+    for path in candidates:
+        resolved = path.resolve(strict=False)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        await _truncate_log_file(resolved, logs_root=logs_root)
+
+    if _is_ajax(request):
+        return Response(status_code=204)
+    return RedirectResponse(url="/fws/", status_code=303)
+
+
+@router.post("/fws/action/exited/purge")
+async def fws_purge_exited(request: Request) -> Response:
+    mgr = await get_manager()
+    shells = await mgr.list_shells()
+    exited = [s for s in shells if (getattr(s, "status", None) or "") == "exited"]
+    for rec in exited:
+        try:
+            await mgr.remove_shell(rec.id, force=True)
+        except Exception:
+            pass
+    if _is_ajax(request):
+        return Response(status_code=204)
+    return RedirectResponse(url="/fws/", status_code=303)
+
 
 @router.post("/fws/action/shell/{shell_id}/terminate")
-async def fws_terminate_shell(shell_id: str) -> RedirectResponse:
+async def fws_terminate_shell(shell_id: str, request: Request) -> Response:
     mgr = await get_manager()
     await mgr.terminate_shell(shell_id, force=True)
+    if _is_ajax(request):
+        return Response(status_code=204)
     return RedirectResponse(url="/fws/", status_code=303)
 
 
 @router.post("/fws/action/shell/{shell_id}/purge")
-async def fws_purge_shell(shell_id: str) -> RedirectResponse:
+async def fws_purge_shell(shell_id: str, request: Request) -> Response:
     mgr = await get_manager()
     await mgr.remove_shell(shell_id, force=True)
+    if _is_ajax(request):
+        return Response(status_code=204)
     return RedirectResponse(url="/fws/", status_code=303)
 
 
@@ -529,6 +606,7 @@ async def fws_logs_ws(websocket: WebSocket, shell_id: str):
                     stdout_size = current
                 elif current < stdout_size:
                     stdout_size = 0
+                    await websocket.send_json({"type": "reset", "stream": "stdout"})
 
             if stderr_path.exists():
                 current = stderr_path.stat().st_size
@@ -540,6 +618,7 @@ async def fws_logs_ws(websocket: WebSocket, shell_id: str):
                     stderr_size = current
                 elif current < stderr_size:
                     stderr_size = 0
+                    await websocket.send_json({"type": "reset", "stream": "stderr"})
 
     except Exception:
         pass

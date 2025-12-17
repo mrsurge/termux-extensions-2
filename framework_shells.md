@@ -33,8 +33,8 @@ framework_shells/
 ├── pty.py               # PTYState and PipeState dataclasses
 ├── process_snapshot.py  # Host-agnostic process snapshot types
 ├── shutdown.py          # Shutdown planner/executor helpers
-├── spec.py              # YAML spec loader (for declarative shell definitions)
-├── orchestrator.py      # Spec-based shell orchestration
+├── shellspec.py         # YAML shellspec loader + template renderer
+├── orchestrator.py      # Shellspec-based orchestration
 ├── cli/
 │   └── main.py          # CLI tool (fs list, fs up, fs down, fs attach)
 └── api/
@@ -98,7 +98,7 @@ class ShellRecord:
 Shells are stored under:
 ```
 ~/.cache/te_framework/runtimes/<repo_fingerprint>/<runtime_id>/
-├── metadata/<shell_id>/meta.json
+├── meta/<shell_id>/meta.json
 ├── logs/<shell_id>.stdout.log
 ├── logs/<shell_id>.stderr.log
 └── sockets/<shell_id>.sock  (dtach only)
@@ -166,6 +166,27 @@ POST   /api/framework_shells/purge_exited    # Purge metadata/logs for all exite
 GET    /api/framework_shells/{id}/replay     # Get stdout log
 ```
 
+## Self-hosted UI (FWS)
+
+When mounted in a FastAPI app, `framework_shells` can self-host a simple dashboard:
+
+- `GET /fws/` dashboard (live-updating via `WS /ws/fws`)
+- `GET /fws/logs/{shell_id}` log viewer (tail + follow via WebSocket)
+
+The dashboard toolbar includes **Truncate Logs**, which truncates all `.stdout.log`/`.stderr.log` files in the current runtime (it does not delete shell records). Exited shells can be fully removed via **Purge Exited** in the Exited section (deletes metadata + logs).
+
+### UI Hints
+
+Shells can carry optional UI metadata via `ShellSpec.ui` / `ShellRecord.ui`. The dashboard currently supports `ui.subgroup_styles` to color subgroup “cards” and accents:
+
+```yaml
+ui:
+  subgroup_styles:
+    lsp:
+      bg: rgba(68, 45, 47, 0.80)
+      border: rgba(168, 85, 247, 0.60)
+```
+
 ### Events
 
 ```python
@@ -194,6 +215,9 @@ python -m framework_shells.cli.main down
 
 # Attach to dtach shell
 python -m framework_shells.cli.main attach <shell_id>
+
+# Show process trees (managed shells + procfs descendants)
+python -m framework_shells.cli.main tree --depth 4
 ```
 
 The CLI auto-detects the repo fingerprint from cwd and loads the stored secret.

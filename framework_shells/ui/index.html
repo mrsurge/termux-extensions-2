@@ -26,6 +26,15 @@
         <input type="hidden" name="scope" value="shells" />
         <button type="submit" class="btn btn-secondary">Stop Shells Only</button>
       </form>
+      <form
+        method="post"
+        action="/fws/action/logs/purge"
+        class="fws-toolbar-form"
+        data-fws-ajax="1"
+        data-confirm="Truncate ALL stdout/stderr logs for this runtime? (Shell records remain.)"
+      >
+        <button type="submit" class="btn btn-secondary">Truncate Logs</button>
+      </form>
       <form method="post" action="/fws/action/refresh" class="fws-toolbar-form">
         <button type="submit" class="btn btn-secondary">Refresh</button>
       </form>
@@ -38,4 +47,3 @@
     <script src="/fws/static/fws.js"></script>
   </body>
 </html>
-

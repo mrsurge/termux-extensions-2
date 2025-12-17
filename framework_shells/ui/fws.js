@@ -2,6 +2,35 @@
   const content = document.getElementById('fws-content');
   const statusEl = document.getElementById('fws-status');
 
+  async function postForm(form) {
+    const method = (form.getAttribute('method') || 'post').toUpperCase();
+    const action = form.getAttribute('action') || window.location.href;
+    const body = new FormData(form);
+
+    try {
+      await fetch(action, {
+        method,
+        body,
+        credentials: 'same-origin',
+        headers: { 'X-FWS-AJAX': '1' },
+      });
+    } catch (err) {
+      // ignore; websocket snapshot loop will reconcile when possible
+    }
+  }
+
+  document.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (!form || !form.matches || !form.matches('form[data-fws-ajax="1"]')) return;
+
+    e.preventDefault();
+
+    const confirmText = form.getAttribute('data-confirm');
+    if (confirmText && !window.confirm(confirmText)) return;
+
+    postForm(form);
+  });
+
   function setStatus(text, connected) {
     if (!statusEl) return;
     statusEl.textContent = text;
@@ -50,4 +79,3 @@
 
   connect();
 })();
-

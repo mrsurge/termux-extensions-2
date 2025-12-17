@@ -51,7 +51,7 @@ curl -X POST http://127.0.0.1:9100/actions/sleep
             ▼                   ▼                   ▼
 ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
 │   App Workers     │ │    Terminals      │ │   LSP Servers     │
-│ (spawn_shell)     │ │ (spawn_shell_dtach│ │ (spawn_shell_pipe)│
+│ (shellspec/orch)  │ │ (spawn_shell_dtach│ │ (spawn_shell_pipe)│
 └───────────────────┘ └───────────────────┘ └───────────────────┘
 ```
 
@@ -107,14 +107,32 @@ curl -X POST http://127.0.0.1:9100/actions/sleep
 `app/libs/app_manager.py`:
 ```python
 from framework_shells import get_manager
+from framework_shells.orchestrator import Orchestrator
+from framework_shells.shellspec import parse_shellspec_ref
 
 mgr = await get_manager()
-record = await mgr.spawn_shell(
-    command,
+orch = Orchestrator(mgr)
+
+# From the app's manifest.json (typically "shellspec/app_worker.yaml#app-worker")
+shellspec_ref = app_manifest["shellspec"]["app_worker"]
+_ref_path, spec_shell_id = parse_shellspec_ref(shellspec_ref)
+record_spec_id = f"app:{app_id}:{spec_shell_id}"
+
+shell = await orch.start_from_ref(
+    shellspec_ref,
+    base_dir=app_dir,
+    ctx={
+        "APP_ID": app_id,
+        "PROJECT_ROOT": project_root,
+        "BACKEND_MODULE_PATH": backend_module_path,
+    },
     label=f"app-worker:{app_id}",
-    cwd=project_root,
-    env={"TE_APP_ID": app_id, ...}
+    record_spec_id=record_spec_id,
+    wait_ready=False,
 )
+
+# Port is provided by shellspec via env var (often using ${free_port})
+port = int(shell.env_overrides["TE_APP_WORKER_PORT"])
 ```
 
 ### Editor Terminals
@@ -168,6 +186,8 @@ TE2’s `sessions_and_shortcuts` extension is now a thin iframe shim that embeds
 Compatibility routes are also provided:
 - `/shell-logs/{shell_id}`
 - `WS /ws/shell-logs/{shell_id}`
+
+The `/fws/` toolbar includes **Truncate Logs**, which truncates all stdout/stderr logs for the current runtime (shell records remain). The Exited section includes **Purge Exited** to delete exited shells’ logs + metadata.
 
 ## API Router Mount
 
@@ -258,28 +278,23 @@ Exited-shell cleanup in the UI uses the framework_shells API:
 - `DELETE /api/framework_shells/{id}` (purge one shell’s metadata/logs)
 - `POST /api/framework_shells/purge_exited` (purge all exited shells)
 
+Truncate-all is available in the `/fws/` toolbar and truncates (does not delete) log files so running shells can continue writing safely.
+
 Framework console output goes to stdout of the `run_framework.sh` process.
 
 ## Shell Grouping & UI Styling
 
-Apps define shell grouping hints in `app/apps/<app_id>/manifest.json`:
+Apps define FWS UI styling in their shellspec YAML (typically `app/apps/<app_id>/shellspec/app_worker.yaml`) under `ui.subgroup_styles`:
 
-```json
-{
-  "id": "file_editor_cm6",
-  "framework_shell_ui": {
-    "subgroup_styles": {
-      "lsp": {
-        "bg": "rgba(68, 45, 47, 0.80)",
-        "border": "rgba(168, 85, 247, 0.60)"
-      },
-      "project:*": {
-        "bg": "rgba(0, 0, 0, 0.88)",
-        "border": "rgba(29, 70, 126, 0.88)"
-      }
-    }
-  }
-}
+```yaml
+ui:
+  subgroup_styles:
+    lsp:
+      bg: rgba(68, 45, 47, 0.80)
+      border: rgba(168, 85, 247, 0.60)
+    project:*:
+      bg: rgba(0, 0, 0, 0.88)
+      border: rgba(29, 70, 126, 0.88)
 ```
 
 When spawning shells, use `subgroups` to associate them with an app:

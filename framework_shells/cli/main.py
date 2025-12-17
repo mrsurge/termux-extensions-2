@@ -5,8 +5,10 @@ import sys
 import shutil
 import hashlib
 from pathlib import Path
+from typing import Any, Dict, List
 
 from ..manager import FrameworkShellManager
+from ..process_snapshot import ProcfsProcessProvider, ProcessSnapshot
 from ..shellspec import load_shellspec
 from ..orchestrator import Orchestrator
 
@@ -63,6 +65,11 @@ def main():
     attach_parser = subparsers.add_parser("attach", help="Attach to a shell (dtach)")
     attach_parser.add_argument("id", help="Shell ID or Label")
 
+    # fs tree
+    tree_parser = subparsers.add_parser("tree", help="Show shell process trees (includes procfs descendants)")
+    tree_parser.add_argument("--all", action="store_true", help="Include exited shells (if pid still known)")
+    tree_parser.add_argument("--depth", type=int, default=8, help="Max procfs discovery depth (default: 8)")
+
     args = parser.parse_args()
     
     if not args.command:
@@ -78,6 +85,77 @@ def main():
 
 async def run_async(args):
     manager = FrameworkShellManager()
+
+    if getattr(args, "command", None) == "tree":
+        depth = int(getattr(args, "depth", 8) or 8)
+        if depth < 1:
+            depth = 1
+        # CLI convenience: allow deeper/shallower procfs scanning.
+        try:
+            manager._procfs_provider = ProcfsProcessProvider(max_depth=depth)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        shells = await manager.list_shells()
+        if not getattr(args, "all", False):
+            shells = [s for s in shells if (getattr(s, "status", None) or "") == "running"]
+
+        described: List[Dict[str, Any]] = []
+        for rec in shells:
+            try:
+                described.append(await manager.describe(rec))
+            except Exception:
+                described.append(rec.to_payload())
+
+        snapshot: ProcessSnapshot = await manager.build_process_snapshot(shells=shells, include_procfs_descendants=True)
+        processes = snapshot.processes
+
+        children_by_parent: Dict[int, List[int]] = {}
+        for pid, proc in processes.items():
+            if proc.parent_pid is None:
+                continue
+            try:
+                children_by_parent.setdefault(int(proc.parent_pid), []).append(int(pid))
+            except Exception:
+                continue
+
+        def backend_for(info: Dict[str, Any]) -> str:
+            if info.get("uses_dtach"):
+                return "dtach"
+            if info.get("uses_pipes"):
+                return "pipe"
+            if info.get("uses_pty"):
+                return "pty"
+            return "proc"
+
+        def render_node(pid: int, *, indent: str, shell_pid_set: set[int]) -> None:
+            proc = processes.get(pid)
+            if not proc:
+                return
+            kind = proc.type or "process"
+            label = proc.label or str(pid)
+            marker = "[shell]" if pid in shell_pid_set else "[proc] "
+            print(f"{indent}{marker} {pid:<6} {kind:<7} {label}")
+
+            kids = children_by_parent.get(pid, [])
+            for child_pid in sorted(kids):
+                # Avoid duplicating shell roots under other shells in the listing.
+                if child_pid in shell_pid_set and child_pid != pid:
+                    continue
+                render_node(child_pid, indent=indent + "  ", shell_pid_set=shell_pid_set)
+
+        shell_pid_set = {int(x.get("pid")) for x in described if x.get("pid")}
+        for info in sorted(described, key=lambda x: (str(x.get("label") or ""), str(x.get("id") or ""))):
+            sid = str(info.get("id") or "")
+            label = str(info.get("label") or sid)
+            status = str(info.get("status") or "")
+            pid = info.get("pid")
+            if not pid:
+                print(f"{sid}  {label}  status={status}  pid=-  backend={backend_for(info)}")
+                continue
+            print(f"{sid}  {label}  status={status}  pid={pid}  backend={backend_for(info)}")
+            render_node(int(pid), indent="  ", shell_pid_set=shell_pid_set)
+        return
     
     if args.command == "up":
         spec_path = Path(args.spec)
@@ -107,7 +185,11 @@ async def run_async(args):
         shells = await manager.list_shells()
         print(f"{'ID':<20} {'SPEC':<14} {'LABEL':<15} {'STATUS':<10} {'PID':<6} {'BACKEND'}")
         for s in shells:
-            backend = "dtach" if getattr(s, "uses_dtach", False) else ("pty" if s.uses_pty else "proc")
+            backend = (
+                "dtach"
+                if getattr(s, "uses_dtach", False)
+                else ("pipe" if getattr(s, "uses_pipes", False) else ("pty" if s.uses_pty else "proc"))
+            )
             print(f"{s.id:<20} {(getattr(s, 'spec_id', None) or '-'): <14} {s.label or '-':<15} {s.status:<10} {s.pid or '-':<6} {backend}")
 
     elif args.command == "down":
