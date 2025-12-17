@@ -57,7 +57,7 @@ def _is_shell_live(info: Dict[str, Any]) -> bool:
     return True
 
 
-_CSS_COLOR_RE = re.compile(r"^[#()0-9a-zA-Z.,%\\s-]+$")
+_CSS_COLOR_RE = re.compile(r"^[#()0-9a-zA-Z.,%\s-]+$")
 
 
 def _safe_css_value(value: Any) -> str:
@@ -172,27 +172,6 @@ async def _render_dashboard_html() -> str:
     exited = [s for s in described if not _is_shell_live(s)]
     subgroup_styles = _collect_subgroup_styles(described)
 
-    app_workers = [s for s in running if str(s.get("label") or "").startswith("app-worker:")]
-    other_running = [s for s in running if s not in app_workers]
-
-    app_id_by_shell_id: Dict[str, str] = {}
-    for s in app_workers:
-        label = str(s.get("label") or "")
-        if ":" in label:
-            app_id_by_shell_id[str(s.get("id"))] = label.split(":", 1)[1]
-
-    # Group "related shells" by umbrella=subgroups[0] (app id).
-    related_by_app: Dict[str, List[Dict[str, Any]]] = {}
-    remaining_other: List[Dict[str, Any]] = []
-    app_ids = set(app_id_by_shell_id.values())
-    for s in other_running:
-        subgroups = s.get("subgroups") if isinstance(s.get("subgroups"), list) else []
-        umbrella = str(subgroups[0]) if len(subgroups) >= 1 else ""
-        if umbrella and umbrella in app_ids:
-            related_by_app.setdefault(umbrella, []).append(s)
-        else:
-            remaining_other.append(s)
-
     parts: List[str] = []
 
     parts.append('<div class="section">')
@@ -201,160 +180,128 @@ async def _render_dashboard_html() -> str:
     if not running:
         parts.append('<div class="shell-card"><div class="shell-meta">No running shells.</div></div>')
     else:
-        # App workers first.
-        for s in app_workers:
-            sid = str(s.get("id") or "")
-            label = str(s.get("label") or sid)
-            pid = s.get("pid")
-            app_id = label.split(":", 1)[1] if ":" in label else ""
-            backend = _shell_backend(s)
+        groups: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+        for s in running:
             subgroups = s.get("subgroups") if isinstance(s.get("subgroups"), list) else []
-            style = _card_style_for_subgroups([str(x) for x in subgroups], subgroup_styles)
-            style_bits: List[str] = []
-            if style.get("bg"):
-                style_bits.append(f"background: {style['bg']};")
-            if style.get("border"):
-                style_bits.append(f"border-color: {style['border']}; border-left: 4px solid {style['border']};")
-            style_attr = f' style="{" ".join(style_bits)}"' if style_bits else ""
+            normalized = [str(x) for x in subgroups if str(x).strip()]
+            umbrella = normalized[0] if len(normalized) >= 1 else "(ungrouped)"
+            subgroup = normalized[1] if len(normalized) >= 2 else "(root)"
+            groups.setdefault(umbrella, {}).setdefault(subgroup, []).append(s)
 
-            parts.append(f'<div class="shell-card app-worker"{style_attr}>')
-            parts.append('<div class="shell-header">')
-            parts.append('<div class="shell-title">%s</div>' % _escape_html(label))
+        def _group_sort_key(name: str) -> Any:
+            return (1, "") if name == "(ungrouped)" else (0, name.lower())
+
+        def _subgroup_sort_key(name: str) -> Any:
+            return (0, "") if name == "app-worker" else (1, name.lower())
+
+        def _shell_sort_key(info: Dict[str, Any]) -> Any:
+            label = str(info.get("label") or "")
+            return (0 if label.startswith("app-worker:") else 1, label.lower(), str(info.get("id") or ""))
+
+        for umbrella in sorted(groups.keys(), key=_group_sort_key):
+            subgroup_map = groups.get(umbrella, {})
+            total_shells = sum(len(v) for v in subgroup_map.values())
+
+            parts.append('<div class="group-card">')
+            parts.append('<div class="group-header">')
+            parts.append('<div class="group-title">%s</div>' % _escape_html(umbrella))
             parts.append('<div class="shell-actions">')
-            parts.append(f'<a class="btn btn-small" href="/fws/logs/{_escape_html(sid)}">Logs</a>')
-            parts.append(
-                f'<form method="post" action="/fws/action/app/{_escape_html(app_id)}/shutdown">'
-                f'<button class="btn btn-small btn-danger" type="submit">Shutdown App</button>'
-                f"</form>"
-                if app_id
-                else ""
-            )
-            parts.append(
-                f'<form method="post" action="/fws/action/shell/{_escape_html(sid)}/terminate">'
-                f'<button class="btn btn-small btn-danger" type="submit">Stop</button>'
-                f"</form>"
-            )
+            if umbrella != "(ungrouped)":
+                parts.append(
+                    f'<form method="post" action="/fws/action/app/{_escape_html(umbrella)}/shutdown">'
+                    f'<button class="btn btn-small btn-danger" type="submit">Shutdown Group</button>'
+                    f"</form>"
+                )
             parts.append("</div>")
             parts.append("</div>")
-
             parts.append(
-                '<div class="shell-meta">PID: %s · ID: %s · Backend: %s</div>'
-                % (_escape_html(pid), _escape_html(sid), _escape_html(backend))
+                '<div class="group-meta">Shells: %s · Subgroups: %s</div>'
+                % (_escape_html(total_shells), _escape_html(len(subgroup_map)))
             )
-            cmd = s.get("command") if isinstance(s.get("command"), list) else []
-            parts.append('<div class="shell-meta">Command: %s</div>' % _escape_html(" ".join(map(str, cmd))))
-            if s.get("cwd"):
-                parts.append('<div class="shell-meta">CWD: %s</div>' % _escape_html(s.get("cwd")))
-            pills = _render_subgroup_pills(subgroups, subgroup_styles)
-            if pills:
-                parts.append(pills)
 
-            # Related shells (soft tree).
-            if app_id and related_by_app.get(app_id):
-                parts.append('<div class="children">')
-                parts.append('<div class="children-title">Related Shells</div>')
-                for rs in sorted(related_by_app.get(app_id, []), key=lambda x: x.get("label") or x.get("id") or ""):
-                    rsid = str(rs.get("id") or "")
-                    rlabel = str(rs.get("label") or rsid)
-                    rpid = rs.get("pid")
-                    rbackend = _shell_backend(rs)
-                    rsubgroups = rs.get("subgroups") if isinstance(rs.get("subgroups"), list) else []
-                    rstyle = _card_style_for_subgroups([str(x) for x in rsubgroups], subgroup_styles)
-                    rstyle_bits: List[str] = []
-                    if rstyle.get("bg"):
-                        rstyle_bits.append(f"background: {rstyle['bg']};")
-                    if rstyle.get("border"):
-                        rstyle_bits.append(
-                            f"border-left: 3px solid {rstyle['border']};"
-                        )
-                    rstyle_attr = f' style="{" ".join(rstyle_bits)}"' if rstyle_bits else ""
-                    parts.append(f'<div class="child-row"{rstyle_attr}>')
+            for subgroup in sorted(subgroup_map.keys(), key=_subgroup_sort_key):
+                style = _subgroup_style_for(subgroup, subgroup_styles)
+                style_bits: List[str] = []
+                if style.get("bg"):
+                    style_bits.append(f"background: {style['bg']};")
+                if style.get("border"):
+                    style_bits.append(f"border-color: {style['border']}; border-left: 4px solid {style['border']};")
+                style_attr = f' style="{" ".join(style_bits)}"' if style_bits else ""
+
+                shells_in_group = sorted(subgroup_map.get(subgroup, []), key=_shell_sort_key)
+                parts.append(f'<div class="subgroup-card"{style_attr}>')
+                parts.append('<div class="subgroup-header">')
+                parts.append('<div class="subgroup-title">%s</div>' % _escape_html(subgroup))
+                parts.append('<div class="subgroup-count muted">(%d)</div>' % len(shells_in_group))
+                parts.append("</div>")
+
+                for s in shells_in_group:
+                    sid = str(s.get("id") or "")
+                    label = str(s.get("label") or sid)
+                    pid = s.get("pid")
+                    backend = _shell_backend(s)
+                    subgroups = s.get("subgroups") if isinstance(s.get("subgroups"), list) else []
+
+                    row_style = _card_style_for_subgroups([str(x) for x in subgroups], subgroup_styles)
+                    row_style_bits: List[str] = []
+                    if row_style.get("bg"):
+                        row_style_bits.append(f"background: {row_style['bg']};")
+                    if row_style.get("border"):
+                        row_style_bits.append(f"border-left: 3px solid {row_style['border']};")
+                    row_style_attr = f' style="{" ".join(row_style_bits)}"' if row_style_bits else ""
+
+                    parts.append(f'<div class="child-row"{row_style_attr}>')
                     parts.append('<div class="child-main">')
-                    parts.append('<div class="child-label">%s</div>' % _escape_html(rlabel))
+                    parts.append('<div class="child-label">%s</div>' % _escape_html(label))
                     parts.append(
                         '<div class="child-meta">PID: %s · ID: %s · %s</div>'
-                        % (_escape_html(rpid), _escape_html(rsid), _escape_html(rbackend))
+                        % (_escape_html(pid), _escape_html(sid), _escape_html(backend))
                     )
-                    pills = _render_subgroup_pills(rsubgroups, subgroup_styles)
+                    cmd = s.get("command") if isinstance(s.get("command"), list) else []
+                    if cmd:
+                        parts.append('<div class="child-meta">Cmd: %s</div>' % _escape_html(" ".join(map(str, cmd))))
+                    pills = _render_subgroup_pills(subgroups, subgroup_styles)
                     if pills:
                         parts.append(pills)
                     parts.append("</div>")
+
                     parts.append('<div class="row">')
-                    parts.append(f'<a class="btn btn-small" href="/fws/logs/{_escape_html(rsid)}">Logs</a>')
+                    parts.append(f'<a class="btn btn-small" href="/fws/logs/{_escape_html(sid)}">Logs</a>')
                     parts.append(
-                        f'<form method="post" action="/fws/action/shell/{_escape_html(rsid)}/terminate">'
+                        f'<form method="post" action="/fws/action/shell/{_escape_html(sid)}/terminate">'
                         f'<button class="btn btn-small btn-danger" type="submit">Stop</button>'
                         f"</form>"
                     )
                     parts.append("</div>")
                     parts.append("</div>")
+
+                    # Hard tree children (pid parent/child).
+                    if pid and int(pid) in children_by_parent:
+                        children = [p for p in children_by_parent.get(int(pid), []) if p.pid not in shell_pid_set]
+                        if children:
+                            parts.append('<div class="children">')
+                            parts.append('<div class="children-title">Child Processes (%d)</div>' % len(children))
+                            for child in sorted(children, key=lambda p: (p.type, p.pid)):
+                                parts.append('<div class="child-row">')
+                                parts.append('<div class="child-main">')
+                                parts.append('<div class="child-label">%s</div>' % _escape_html(child.label or child.pid))
+                                parts.append(
+                                    '<div class="child-meta">PID: %s · %s</div>'
+                                    % (_escape_html(child.pid), _escape_html(child.type))
+                                )
+                                parts.append("</div>")
+                                parts.append('<div class="row">')
+                                parts.append(
+                                    f'<form method="post" action="/fws/action/pid/{_escape_html(child.pid)}/terminate">'
+                                    f'<button class="btn btn-small btn-danger" type="submit">Kill</button>'
+                                    f"</form>"
+                                )
+                                parts.append("</div>")
+                                parts.append("</div>")
+                            parts.append("</div>")
+
                 parts.append("</div>")
 
-            # Hard tree children (pid parent/child).
-            if pid and int(pid) in children_by_parent:
-                children = [p for p in children_by_parent.get(int(pid), []) if p.pid not in shell_pid_set]
-                if children:
-                    parts.append('<div class="children">')
-                    parts.append('<div class="children-title">Child Processes (%d)</div>' % len(children))
-                    for child in sorted(children, key=lambda p: (p.type, p.pid)):
-                        parts.append('<div class="child-row">')
-                        parts.append('<div class="child-main">')
-                        parts.append('<div class="child-label">%s</div>' % _escape_html(child.label or child.pid))
-                        parts.append(
-                            '<div class="child-meta">PID: %s · %s</div>'
-                            % (_escape_html(child.pid), _escape_html(child.type))
-                        )
-                        parts.append("</div>")
-                        parts.append('<div class="row">')
-                        parts.append(
-                            f'<form method="post" action="/fws/action/pid/{_escape_html(child.pid)}/terminate">'
-                            f'<button class="btn btn-small btn-danger" type="submit">Kill</button>'
-                            f"</form>"
-                        )
-                        parts.append("</div>")
-                        parts.append("</div>")
-                    parts.append("</div>")
-
-            parts.append("</div>")
-
-        # Everything else.
-        for s in sorted(remaining_other, key=lambda x: x.get("label") or x.get("id") or ""):
-            sid = str(s.get("id") or "")
-            label = str(s.get("label") or sid)
-            pid = s.get("pid")
-            backend = _shell_backend(s)
-            subgroups = s.get("subgroups") if isinstance(s.get("subgroups"), list) else []
-            style = _card_style_for_subgroups([str(x) for x in subgroups], subgroup_styles)
-            style_bits: List[str] = []
-            if style.get("bg"):
-                style_bits.append(f"background: {style['bg']};")
-            if style.get("border"):
-                style_bits.append(f"border-color: {style['border']}; border-left: 4px solid {style['border']};")
-            style_attr = f' style="{" ".join(style_bits)}"' if style_bits else ""
-
-            parts.append(f'<div class="shell-card"{style_attr}>')
-            parts.append('<div class="shell-header">')
-            parts.append('<div class="shell-title">%s</div>' % _escape_html(label))
-            parts.append('<div class="shell-actions">')
-            parts.append(f'<a class="btn btn-small" href="/fws/logs/{_escape_html(sid)}">Logs</a>')
-            parts.append(
-                f'<form method="post" action="/fws/action/shell/{_escape_html(sid)}/terminate">'
-                f'<button class="btn btn-small btn-danger" type="submit">Stop</button>'
-                f"</form>"
-            )
-            parts.append("</div>")
-            parts.append("</div>")
-            parts.append(
-                '<div class="shell-meta">PID: %s · ID: %s · Backend: %s</div>'
-                % (_escape_html(pid), _escape_html(sid), _escape_html(backend))
-            )
-            cmd = s.get("command") if isinstance(s.get("command"), list) else []
-            parts.append('<div class="shell-meta">Command: %s</div>' % _escape_html(" ".join(map(str, cmd))))
-            if s.get("cwd"):
-                parts.append('<div class="shell-meta">CWD: %s</div>' % _escape_html(s.get("cwd")))
-            pills = _render_subgroup_pills(subgroups, subgroup_styles)
-            if pills:
-                parts.append(pills)
             parts.append("</div>")
 
     parts.append("</div>")

@@ -433,17 +433,29 @@ def exit_ipc() -> Any:
     """
     if request.method == "OPTIONS":
         return ("", 204)
-    ok = _stop_supervisor()
     _broadcast({"event": "exit", "status": "requested"})
 
     # IMPORTANT: Do not exit IPC until shutdown work is done. Otherwise, the
     # supervisor may lose its "last resort" killer, and orphaned shells can
     # survive because they are started with start_new_session=True.
+    ok = True
     try:
         stats = _PROCESS_REGISTRY.shutdown_all(logger=LOGGER)
         _broadcast({"event": "exit", "status": "shutdown_complete", "stats": stats})
     except Exception as exc:
+        ok = False
         _broadcast({"event": "exit", "status": "shutdown_failed", "error": str(exc)})
+
+    # Allow the supervisor (if running) to observe the framework exit before
+    # IPC terminates. This avoids noisy "IPC connection refused" fallback logs.
+    try:
+        proc = _SLEEP_STATE.supervisor_proc
+        if proc and proc.poll() is None:
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and proc.poll() is None:
+                time.sleep(0.1)
+    except Exception:
+        pass
 
     _schedule_process_exit()
     return jsonify({"ok": ok})
@@ -541,11 +553,21 @@ def main() -> None:
         def sleep_exit() -> Any:
             if request.method == "OPTIONS":
                 return ("", 204)
-            ok = _stop_supervisor()
+            ok = True
             try:
                 _PROCESS_REGISTRY.shutdown_all(logger=LOGGER)
             except Exception:
                 LOGGER.exception("sleep_exit: shutdown_all failed")
+                ok = False
+
+            try:
+                proc = _SLEEP_STATE.supervisor_proc
+                if proc and proc.poll() is None:
+                    deadline = time.monotonic() + 2.0
+                    while time.monotonic() < deadline and proc.poll() is None:
+                        time.sleep(0.1)
+            except Exception:
+                pass
             _schedule_process_exit()
             return jsonify({"ok": ok})
 
