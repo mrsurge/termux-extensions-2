@@ -275,7 +275,24 @@ TE_FRAMEWORK_ARGS_JSON_IN="$(python -c 'import json,sys; print(json.dumps(sys.ar
 
 start_ipc_server
 
-trap 'curl -sS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/sleep" >/dev/null 2>&1 || true; kill "$TE_IPC_PID" 2>/dev/null || true' EXIT INT TERM
+shutdown_ipc() {
+  # Let IPC orchestrate shutdown (sleep supervisor) and then exit itself.
+  curl -sS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/exit" >/dev/null 2>&1 || \
+    curl -sS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/sleep" >/dev/null 2>&1 || true
+
+  # Wait briefly for IPC to self-exit; do not kill it unless it's stuck.
+  for _i in $(seq 1 50); do
+    if ! kill -0 "$TE_IPC_PID" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  # Last resort.
+  kill "$TE_IPC_PID" 2>/dev/null || true
+}
+
+trap 'shutdown_ipc' EXIT INT TERM
 
 if [ "$SLEEP_MODE" -eq 0 ]; then
   # Wait for sleep listener to come up, then wake framework.

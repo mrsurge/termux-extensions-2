@@ -3,6 +3,8 @@ package com.termux.extensions
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -23,6 +25,7 @@ import org.json.JSONObject
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebExtension
 
@@ -36,14 +39,25 @@ class MainActivity : AppCompatActivity() {
     private lateinit var consoleScroll: ScrollView
     private lateinit var consoleText: TextView
 
+    private lateinit var btnConsoleBack: Button
+    private lateinit var btnConsoleStart: Button
+    private lateinit var btnConsoleStop: Button
+
     private val httpClient = OkHttpClient()
     private val consoleLines = ArrayDeque<String>(2000)
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private var consoleFlushPending = false
+
+    private var consoleCaptureEnabled: Boolean = false
+    private var consoleExtension: WebExtension? = null
 
     private var frameworkBaseUrl: String = DEFAULT_FRAMEWORK_URL
     private var currentAppId: String = DEFAULT_APP_ID
     private var isLocked: Boolean = false
 
     private var canNavigateBack = false
+
+    private var inAppShell: Boolean = true
 
     private fun dpToPx(dp: Int): Int {
         return TypedValue.applyDimension(
@@ -64,6 +78,10 @@ class MainActivity : AppCompatActivity() {
         consoleText = findViewById(R.id.consoleText)
         consoleText.typeface = Typeface.MONOSPACE
 
+        btnConsoleBack = findViewById(R.id.btnConsoleBack)
+        btnConsoleStart = findViewById(R.id.btnConsoleStart)
+        btnConsoleStop = findViewById(R.id.btnConsoleStop)
+
         findViewById<Button>(R.id.btnHome).setOnClickListener { loadHome() }
         findViewById<Button>(R.id.btnReload).setOnClickListener { if (::geckoSession.isInitialized) geckoSession.reload() }
         findViewById<Button>(R.id.btnRecents).setOnClickListener { showRecents() }
@@ -71,9 +89,21 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnQuit).setOnClickListener { quitCurrentApp() }
         findViewById<Button>(R.id.btnConsole).setOnClickListener { toggleConsoleOverlay() }
 
-        consoleOverlay.setOnClickListener { toggleConsoleOverlay() }
+        btnConsoleBack.setOnClickListener { hideConsoleOverlay() }
+        btnConsoleStart.setOnClickListener { startConsoleCapture() }
+        btnConsoleStop.setOnClickListener { stopConsoleCapture() }
 
-        geckoSession = GeckoSession().apply {
+        // Default: console capture OFF until user enables it.
+        updateConsoleControls()
+
+        // Clicking the dimmed backdrop closes; the panel consumes clicks.
+        consoleOverlay.setOnClickListener { hideConsoleOverlay() }
+        findViewById<View>(R.id.consolePanel).setOnClickListener { /* consume */ }
+
+        // Private mode avoids surprising state restores (e.g. reopening the last app worker URL).
+        geckoSession = GeckoSession(
+            GeckoSessionSettings.Builder().usePrivateMode(true).build()
+        ).apply {
             historyDelegate = object : GeckoSession.HistoryDelegate {
                 override fun onHistoryStateChange(
                     session: GeckoSession,
@@ -275,17 +305,18 @@ class MainActivity : AppCompatActivity() {
 
         geckoView.setSession(geckoSession)
 
-        installConsoleExtension()
         wakeFrameworkAndLoad()
     }
 
     private fun loadHome() {
         if (!::geckoSession.isInitialized) return
+        inAppShell = false
         geckoSession.loadUri(frameworkBaseUrl.trimEnd('/') + "/")
     }
 
     private fun loadApp(appId: String) {
         if (!::geckoSession.isInitialized) return
+        inAppShell = true
         currentAppId = appId
         isLocked = false
         findViewById<Button>(R.id.btnLock).text = "Lock"
@@ -293,6 +324,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showRecents() {
+        if (!::geckoSession.isInitialized) return
+
+        if (inAppShell) {
+            // GeckoView doesn't expose a stable JS-eval API across versions; use a javascript: URI.
+            geckoSession.loadUri(
+                "javascript:(function(){try{if(window.teOpenRecentsModal){window.teOpenRecentsModal();return;}var b=document.getElementById('btn-recents');if(b){b.click();}}catch(e){}})()"
+            )
+            return
+        }
+
+        showNativeRecents()
+    }
+
+    private fun showNativeRecents() {
         Thread {
             try {
                 val url = frameworkBaseUrl.trimEnd('/') + "/api/apps/running"
@@ -371,14 +416,65 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    private fun showConsoleOverlay() {
+        consoleOverlay.visibility = View.VISIBLE
+        consoleScroll.post { consoleScroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    private fun hideConsoleOverlay() {
+        consoleOverlay.visibility = View.GONE
+    }
+
     private fun toggleConsoleOverlay() {
-        consoleOverlay.visibility = if (consoleOverlay.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-        if (consoleOverlay.visibility == View.VISIBLE) {
-            consoleScroll.post { consoleScroll.fullScroll(View.FOCUS_DOWN) }
+        if (consoleOverlay.visibility == View.VISIBLE) hideConsoleOverlay() else showConsoleOverlay()
+    }
+
+    private fun updateConsoleControls() {
+        btnConsoleStart.isEnabled = !consoleCaptureEnabled
+        btnConsoleStop.isEnabled = consoleCaptureEnabled
+    }
+
+    private fun startConsoleCapture() {
+        consoleCaptureEnabled = true
+        updateConsoleControls()
+
+        // Install lazily so console capture isn't running unless requested.
+        if (consoleExtension == null) {
+            installConsoleExtension()
+        } else {
+            try {
+                runtime.webExtensionController.enable(consoleExtension!!, 0)
+            } catch (_: Exception) {
+            }
         }
     }
 
+    private fun stopConsoleCapture() {
+        consoleCaptureEnabled = false
+        updateConsoleControls()
+        try {
+            if (consoleExtension != null) {
+                runtime.webExtensionController.disable(consoleExtension!!, 0)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun scheduleConsoleFlush() {
+        if (consoleFlushPending) return
+        consoleFlushPending = true
+        uiHandler.postDelayed({
+            consoleFlushPending = false
+            consoleText.text = consoleLines.joinToString("\n\n")
+            if (consoleOverlay.visibility == View.VISIBLE) {
+                consoleScroll.post { consoleScroll.fullScroll(View.FOCUS_DOWN) }
+            }
+        }, 100)
+    }
+
     private fun appendConsoleLine(level: String, text: String, url: String?) {
+        if (!consoleCaptureEnabled) return
+
         val line = buildString {
             append('[').append(level).append("] ").append(text)
             if (!url.isNullOrBlank()) {
@@ -389,27 +485,27 @@ class MainActivity : AppCompatActivity() {
             consoleLines.removeFirst()
         }
         consoleLines.addLast(line)
-        runOnUiThread {
-            consoleText.text = consoleLines.joinToString("\n\n")
-            if (consoleOverlay.visibility == View.VISIBLE) {
-                consoleScroll.post { consoleScroll.fullScroll(View.FOCUS_DOWN) }
-            }
-        }
+        scheduleConsoleFlush()
     }
 
     private fun installConsoleExtension() {
+        if (consoleExtension != null) return
+
         val extLocation = "resource://android/assets/console_pipe/"
         runtime.webExtensionController
             .ensureBuiltIn(extLocation, "console_pipe@example.com")
             .accept(
                 { extension ->
                     val ext = extension ?: return@accept
+                    consoleExtension = ext
+
                     val delegate = object : WebExtension.MessageDelegate {
                         override fun onMessage(
                             nativeApp: String,
                             message: Any,
                             sender: WebExtension.MessageSender
                         ): GeckoResult<Any>? {
+                            if (!consoleCaptureEnabled) return null
                             try {
                                 val obj = when (message) {
                                     is JSONObject -> message
@@ -431,6 +527,14 @@ class MainActivity : AppCompatActivity() {
                     }
                     geckoSession.webExtensionController
                         .setMessageDelegate(ext, delegate, "browser")
+
+                    // Ensure enabled if user already pressed Start before install completed.
+                    if (consoleCaptureEnabled) {
+                        try {
+                            runtime.webExtensionController.enable(ext, 0)
+                        } catch (_: Exception) {
+                        }
+                    }
                 },
                 { e -> appendConsoleLine("error", "Extension install failed: ${e?.message ?: "unknown"}", null) }
             )

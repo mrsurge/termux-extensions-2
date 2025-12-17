@@ -329,6 +329,31 @@ def _framework_args_from_env() -> List[str]:
     return []
 
 
+def _framework_port_from_args(args: List[str]) -> Optional[int]:
+    """Extract --port <n> from args (best-effort)."""
+    try:
+        for i, item in enumerate(args):
+            if item == "--port" and i + 1 < len(args):
+                return int(args[i + 1])
+    except Exception:
+        return None
+    return None
+
+
+def _framework_url() -> Optional[str]:
+    """Return framework URL based on current env/args.
+
+    Prefer explicit TE_FRAMEWORK_URL, otherwise derive from framework args (--port).
+    """
+    explicit = os.environ.get("TE_FRAMEWORK_URL")
+    if explicit:
+        return explicit
+    port = _framework_port_from_args(_framework_args_from_env())
+    if port:
+        return f"http://127.0.0.1:{port}"
+    return None
+
+
 def _framework_running() -> bool:
     return bool(_SLEEP_STATE.supervisor_proc and _SLEEP_STATE.supervisor_proc.poll() is None)
 
@@ -386,6 +411,26 @@ def sleep_framework() -> Any:
     return jsonify({"ok": ok})
 
 
+def _schedule_process_exit(delay: float = 0.25) -> None:
+    """Exit IPC after responding to the request."""
+    def _do_exit() -> None:
+        time.sleep(delay)
+        os._exit(0)
+
+    threading.Thread(target=_do_exit, name="ipc-exit", daemon=True).start()
+
+
+@app.route("/actions/exit", methods=["POST", "OPTIONS"])
+def exit_ipc() -> Any:
+    """Ask IPC to sleep framework and then terminate itself."""
+    if request.method == "OPTIONS":
+        return ("", 204)
+    ok = _stop_supervisor()
+    _broadcast({"event": "exit", "status": "requested"})
+    _schedule_process_exit()
+    return jsonify({"ok": ok})
+
+
 @app.route("/state", methods=["GET"])
 def state() -> Any:
     return jsonify({
@@ -397,7 +442,8 @@ def state() -> Any:
             "framework_args": _framework_args_from_env(),
             "ipc_host": os.environ.get("TE_IPC_HOST", "127.0.0.1"),
             "ipc_port": int(os.environ.get("TE_IPC_PORT", "9099")),
-            "framework_url": os.environ.get("TE_FRAMEWORK_URL"),
+            "framework_url": _framework_url(),
+            "framework_port": _framework_port_from_args(_framework_args_from_env()),
         },
     })
 
@@ -473,6 +519,14 @@ def main() -> None:
             ok = _stop_supervisor()
             return jsonify({"ok": ok})
 
+        @sleep_app.route("/actions/exit", methods=["POST", "OPTIONS"])
+        def sleep_exit() -> Any:
+            if request.method == "OPTIONS":
+                return ("", 204)
+            ok = _stop_supervisor()
+            _schedule_process_exit()
+            return jsonify({"ok": ok})
+
         @sleep_app.route("/config", methods=["GET"])
         def sleep_config() -> Any:
             return jsonify({
@@ -482,7 +536,8 @@ def main() -> None:
                     "sleep_port": _SLEEP_STATE.sleep_port,
                     "ipc_host": os.environ.get("TE_IPC_HOST", "127.0.0.1"),
                     "ipc_port": int(os.environ.get("TE_IPC_PORT", "9099")),
-                    "framework_url": os.environ.get("TE_FRAMEWORK_URL"),
+                    "framework_url": _framework_url(),
+                    "framework_port": _framework_port_from_args(_framework_args_from_env()),
                     "framework_args": _framework_args_from_env(),
                 },
             })

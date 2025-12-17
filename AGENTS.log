@@ -51,3 +51,49 @@ commit: (git not used)
 change: android version bump to 1.0.2
 summary: bumped android/app/build.gradle.kts versionName to 1.0.2 and incremented versionCode for upgrade installs.
 files: android/app/build.gradle.kts
+
+---
+commit: (git not used)
+change: reduce GeckoView APK size + debounce console overlay rendering
+summary: gecko debug APK was ~602MB due to 4-ABI universal packaging; restricted gecko flavor to arm64-v8a (APK now ~162MB). Also reduced UI overhead by debouncing console overlay text rebuild to 1 update per 100ms.
+files: android/app/build.gradle.kts, android/app/src/gecko/java/com/termux/extensions/MainActivity.kt
+
+---
+commit: (git not used)
+change: console overlay header + back/start/stop; capture opt-in
+summary: Added a dedicated console overlay header with Back/Start/Stop controls. Console capture is now disabled by default; the WebExtension is installed lazily on Start and disabled on Stop to reduce overhead.
+files: android/app/src/gecko/res/layout/activity_main.xml, android/app/src/gecko/java/com/termux/extensions/MainActivity.kt
+
+---
+commit: (git not used)
+bug: IPC sleep /config could cause GeckoView to fall back to default framework port during testing
+summary: When testing on non-default TE_PORT, GeckoView might hit a dead port if /config wasn't providing an explicit port.
+fix: IPC server now derives framework_port from TE_FRAMEWORK_ARGS_JSON (--port ...) and exposes framework_url/framework_port in both /state and sleep /config.
+files: app/ipc/server.py
+
+---
+commit: (git not used)
+bugs: IPC killed on Ctrl+C; /api/apps/running returned 422
+summary: Ctrl+C previously killed IPC immediately via bash trap, racing shutdown. Also FastAPI Depends(get_manager) treated **kwargs as query param, producing 422.
+fix: Added /actions/exit (sleep listener + main IPC) to sleep supervisor then self-exit; updated run_framework.sh trap to call /actions/exit and wait before last-resort termination; wrapped framework_shells.get_manager with a no-kwargs dependency to fix 422 on /api/apps/running (and lock/quit/unlock).
+files: app/ipc/server.py, scripts/run_framework.sh, app/extensions/apps/main.py
+
+---
+commit: (git not used)
+change: GeckoView MVP fixes (double header, recents, header style)
+summary: Prevented app_shell.html toolbar from reappearing in GeckoView during in-framework navigation, which caused double headers; Recents now triggers the web modal when in an app shell and falls back to native dialog otherwise; native header padding reduced + light-blue background + clipboard icon for console.
+fix: app_shell.html now persists gv-native via sessionStorage and appends gv_native=1 when switching apps from the Recents modal; MainActivity uses private-mode session to avoid state restores and uses javascript: URI to trigger web Recents modal.
+files: app/templates/app_shell.html, android/app/src/gecko/res/layout/activity_main.xml, android/app/src/gecko/java/com/termux/extensions/MainActivity.kt
+
+---
+commit: (git not used)
+change: Enable Kotlin syntax highlighting in Code CM6
+summary: Kotlin files (.kt/.kts) were not mapped to the CodeMirror language name, so CodeMirror stayed in plain text mode.
+fix: Added .kt/.kts -> 'kotlin' in frontend detectLanguageFromFilename, backend initial last-file language selection, and watcher replace_full events.
+files: app/apps/file_editor_cm6/main.js, app/apps/file_editor_cm6/nicegui_editor/editor_app.py, app/apps/file_editor_cm6/core_read.py
+
+---
+commit: (git not used)
+change: Document language SSOT seam + reconnect highlighting issue
+summary: Updated Code CM6 TECHNICAL.md to reflect that language selection is currently applied across multiple layers (host JS, NiceGUI backend, watcher, vendored CM wrapper) and documented the observed mobile reconnect syntax-highlighting seam with mitigation ideas.
+files: docs/apps/code_cm6/TECHNICAL.md

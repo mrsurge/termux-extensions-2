@@ -13,7 +13,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:padding="8dp">
+            android:padding="4dp"
+            android:background="#050C1F">
 
             <Button
                 android:id="@+id/btnHome"
@@ -49,7 +50,7 @@
                 android:id="@+id/btnConsole"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Console" />
+                android:text="⧉" />
         </LinearLayout>
 
         <org.mozilla.geckoview.GeckoView
@@ -66,20 +67,66 @@
         android:background="#CC000000"
         android:visibility="gone">
 
-        <ScrollView
-            android:id="@+id/consoleScroll"
+        <LinearLayout
+            android:id="@+id/consolePanel"
             android:layout_width="match_parent"
-            android:layout_height="match_parent">
+            android:layout_height="match_parent"
+            android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/consoleText"
+            <LinearLayout
+                android:id="@+id/consoleHeader"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:padding="12dp"
-                android:textColor="#FFFFFF"
-                android:textIsSelectable="true"
-                android:textSize="12sp" />
-        </ScrollView>
+                android:orientation="horizontal"
+                android:padding="8dp">
+
+                <Button
+                    android:id="@+id/btnConsoleBack"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Back" />
+
+                <TextView
+                    android:id="@+id/consoleTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center_vertical"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="Console"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnConsoleStart"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Start" />
+
+                <Button
+                    android:id="@+id/btnConsoleStop"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Stop" />
+            </LinearLayout>
+
+            <ScrollView
+                android:id="@+id/consoleScroll"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <TextView
+                    android:id="@+id/consoleText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="12dp"
+                    android:textColor="#FFFFFF"
+                    android:textIsSelectable="true"
+                    android:textSize="12sp" />
+            </ScrollView>
+        </LinearLayout>
     </FrameLayout>
 
 </FrameLayout>

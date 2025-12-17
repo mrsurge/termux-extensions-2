@@ -554,43 +554,29 @@ const diffGutter = gutter({
 
 ### 4.3 Dynamic Language Detection
 
-**File:** `codemirror.js` lines 260-315
+**Reality check (SSOT seam):** Language selection is currently applied in multiple layers:
 
-Maps file extensions → CM6 language modes:
+- **Frontend host UI:** `app/apps/file_editor_cm6/main.js` (`detectLanguageFromFilename`) maps file extension → CodeMirror language name and sends it to the NiceGUI iframe via `POST editor/set_content`.
+- **NiceGUI iframe backend:** `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` chooses an `initial_language` when restoring the last file (page load) and applies the requested language on `set_content` via `editor.set_language(...)`.
+- **File watcher pipeline:** `app/apps/file_editor_cm6/core_read.py` emits `replace_full` events that include a `language` field (used when external FS changes push content into the editor).
+- **Vendored CodeMirror wrapper:** `app/static/vendor/nicegui/elements/codemirror/codemirror.js` is responsible for the actual CodeMirror **language extension** reconfiguration and also maintains a separate indent-size map.
 
-```javascript
-const LANGUAGE_INDENT_MAP = {
-  javascript: { mode: 'javascript', indent: 2 },
-  typescript: { mode: 'typescript', indent: 2 },
-  python: { mode: 'python', indent: 4 },
-  html: { mode: 'html', indent: 2 },
-  css: { mode: 'css', indent: 2 },
-  // ... 40+ more languages
-};
+Because those mappings are not yet centralized, adding a language often requires updating 2–3 places (Kotlin `.kt/.kts` is a recent example).
 
-async setLanguage(ext) {
-  const config = LANGUAGE_INDENT_MAP[ext] || { mode: 'text', indent: 4 };
-  
-  // Reconfigure language mode
-  this.editor.dispatch({
-    effects: this.languageCompartment.reconfigure(
-      CM[config.mode] ? [CM[config.mode]()] : []
-    )
-  });
-  
-  // Reconfigure indent unit
-  this.editor.dispatch({
-    effects: this.indentUnitCompartment.reconfigure(
-      CM.indentUnit.of(' '.repeat(config.indent))
-    )
-  });
-}
-```
+#### Indent sizing (vendored CodeMirror)
 
-This ensures:
-- JavaScript/TypeScript/HTML use **2-space indents**
-- Python/C/Java use **4-space indents**
-- Indentation guides align correctly with actual indentation
+**File:** `codemirror.js` (vendored NiceGUI) – `LANGUAGE_INDENT_MAP`
+
+This map controls **indentUnit** (2-space vs 4-space) and is applied alongside language changes.
+
+#### Known mobile issue: syntax highlighting not reapplying after reconnect
+
+On mobile, the NiceGUI WebSocket can disconnect/reconnect more aggressively. In some reconnect paths, CodeMirror may not reliably re-run the same "set language" reconfiguration that happens during a clean page load.
+
+Mitigation options (future work):
+- Treat reconnect as a full "rehydration" and explicitly re-apply language (and other editor compartments) after the client considers itself reconnected.
+- Use a wake-lock / foreground keepalive policy on mobile.
+- Force-refresh the NiceGUI iframe when reconnect occurs (preferred only if state restoration remains correct).
 
 ---
 
