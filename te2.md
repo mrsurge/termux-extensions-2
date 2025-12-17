@@ -104,6 +104,21 @@ curl -X POST http://127.0.0.1:9100/actions/sleep
 
 ### App Workers
 
+TE2 treats app workers as **shellspec-defined shells**. Each app should ship a shellspec file describing how to launch its app worker, and the app manifest should reference it.
+
+**Convention:**
+- `app/apps/<app_id>/shellspec/app_worker.yaml` defines shell `app-worker`
+- `app/apps/<app_id>/manifest.json` includes:
+  ```json
+  {
+    "shellspec": {
+      "app_worker": "shellspec/app_worker.yaml#app-worker"
+    }
+  }
+  ```
+
+`app/libs/app_manager.py` uses this ref (with a fallback to `shellspec/app_worker.yaml#app-worker` if present) and renders templates like `${free_port}` / `${ctx:APP_ID}` before spawning the worker via `Orchestrator`.
+
 `app/libs/app_manager.py`:
 ```python
 from framework_shells import get_manager
@@ -173,6 +188,8 @@ record = await mgr.spawn_shell_pipe(
 ```
 
 **Note on pipe shells:** pipe-backed shells are only usable in the process that spawned them (the live stdin/stdout handles are in-memory). If an app worker restarts, any surviving LSP server process must be terminated and respawned.
+
+Code CM6’s frontend is stateless and will reconnect often; the `/lsp` bridge keeps a long-lived backend session and short-circuits repeat JSON-RPC `initialize` to avoid spawning extra TypeScript `tsserver` child processes on reload.
 
 ### Sessions & Shortcuts UI
 
@@ -244,6 +261,14 @@ All new code should import directly from `framework_shells`.
 - Check `python -m framework_shells.cli.main list`
 - Verify `FRAMEWORK_SHELLS_SECRET` and `TE_REPO_FINGERPRINT` match
 
+### “Why do I see extra processes under an LSP shell?”
+Use `python -m framework_shells.cli.main tree --depth 4` to show procfs-discovered descendants (e.g. `node tsserver.js` children under `lsp:javascript`).
+
+### `[JOB_PUMP] Missed event for untracked job ...`
+This message comes from Code CM6’s explorer websocket job pump, not `framework_shells`.
+
+The TE2 job registry is global (shared across apps), so consumers should only forward jobs they explicitly track for the current project/session and ignore the rest.
+
 ### Shells surviving restart
 - Dtach shells persist by design
 - Use `fs down` or terminate from UI
@@ -310,4 +335,4 @@ await mgr.spawn_shell_dtach(
 - First element (`file_editor_cm6`) = umbrella (matches app worker)
 - Second element (`project:myproject`) = subgroup (matches `project:*` pattern)
 
-The sessions UI groups these shells under their parent app worker with the defined colors.
+The FWS UI (`/fws/`) groups these shells under their parent app worker with the defined colors.

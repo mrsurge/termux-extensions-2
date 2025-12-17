@@ -187,6 +187,58 @@ ui:
       border: rgba(168, 85, 247, 0.60)
 ```
 
+## Shellspec Convention (Recommended)
+
+`framework_shells` is framework-agnostic, but the intended integration pattern is:
+
+- Describe host-run processes as `ShellSpec` (YAML).
+- Start shells via `Orchestrator` (from a spec or spec ref).
+- Keep optional UI hints in the shellspec under `ui` (not host-specific code).
+
+### Per-app Shellspec Layout
+
+A common layout is to keep shellspecs next to an app/module:
+
+```
+app/apps/<app_id>/
+└── shellspec/
+    └── app_worker.yaml
+```
+
+Example minimal spec (TE2-style, but generic):
+
+```yaml
+version: "1"
+shells:
+  app-worker:
+    backend: proc
+    cwd: ${ctx:PROJECT_ROOT}
+    command:
+      - python
+      - -m
+      - app.libs.app_worker
+      - --app-id
+      - ${ctx:APP_ID}
+      - --port
+      - ${free_port}
+      - --backend-module
+      - ${ctx:BACKEND_MODULE_PATH}
+    env:
+      TE_APP_ID: ${ctx:APP_ID}
+      TE_APP_WORKER_PORT: ${free_port}
+```
+
+Then start it from a shellspec ref (`<path>#<id>`) with a render context:
+
+```python
+shell = await Orchestrator(mgr).start_from_ref(
+    "shellspec/app_worker.yaml#app-worker",
+    base_dir=app_dir,
+    ctx={"APP_ID": app_id, "PROJECT_ROOT": project_root, "BACKEND_MODULE_PATH": backend_module_path},
+    label=f"app-worker:{app_id}",
+)
+```
+
 ### Events
 
 ```python
