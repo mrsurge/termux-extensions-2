@@ -166,44 +166,36 @@ class ProcessRegistry:
                 logger.warning(f"IPC shutdown: failed to terminate framework_shells shells: {exc}")
         
         # Sort: children before parents (via parent_pid), and framework last.
-        # NOTE: this registry may contain arbitrary process types; we keep the ordering
-        # generic and stable.
-        by_pid: Dict[int, ProcessRecord] = {p.pid: p for p in processes}
-        depth_cache: Dict[int, int] = {}
+        # NOTE: ordering is delegated to framework_shells (host-agnostic planner).
+        try:
+            from framework_shells.process_snapshot import ProcessRecord as FwsProcessRecord
+            from framework_shells.shutdown import ShutdownPolicy, plan_shutdown
 
-        def depth(pid: int, visiting: Optional[set] = None) -> int:
-            if pid in depth_cache:
-                return depth_cache[pid]
-            visiting = visiting or set()
-            if pid in visiting:
-                depth_cache[pid] = 0
-                return 0
-            visiting.add(pid)
-            rec = by_pid.get(pid)
-            if not rec or not rec.parent_pid:
-                depth_cache[pid] = 0
-                return 0
-            parent = by_pid.get(rec.parent_pid)
-            if not parent:
-                depth_cache[pid] = 0
-                return 0
-            d = 1 + depth(parent.pid, visiting)
-            depth_cache[pid] = d
-            return d
+            policy = ShutdownPolicy(types_last=["framework"])
+            planned = plan_shutdown(
+                [
+                    FwsProcessRecord(
+                        pid=rec.pid,
+                        parent_pid=rec.parent_pid,
+                        type=rec.type,
+                        label=rec.label,
+                        metadata=dict(rec.metadata or {}),
+                        shell_id=(rec.metadata or {}).get("shell_id") if isinstance(rec.metadata, dict) else None,
+                    )
+                    for rec in processes
+                ],
+                policy=policy,
+            )
 
-        def type_priority(rec: ProcessRecord) -> int:
-            # Framework last; everything else first.
-            return 1 if rec.type == "framework" else 0
-
-        # Lower priority first, deeper (larger depth) first.
-        sorted_processes = sorted(
-            processes,
-            key=lambda rec: (type_priority(rec), -depth(rec.pid), rec.type, rec.pid),
-        )
+            by_pid: Dict[int, ProcessRecord] = {p.pid: p for p in processes}
+            sorted_processes = [by_pid[p.pid] for p in planned if p.pid in by_pid]
+        except Exception:
+            # Fallback: stable ordering without depth planning
+            sorted_processes = sorted(processes, key=lambda rec: (rec.type == "framework", rec.type, rec.pid))
 
         if logger:
             plan = " ".join(
-                f"{rec.pid}:{rec.type}:{(rec.label or '-')}:ppid={rec.parent_pid or '-'}:d={depth(rec.pid)}"
+                f"{rec.pid}:{rec.type}:{(rec.label or '-')}:ppid={rec.parent_pid or '-'}"
                 for rec in sorted_processes
             )
             logger.info("IPC shutdown order: %s", plan)
@@ -282,4 +274,3 @@ class ProcessRegistry:
             logger.info(f"IPC shutdown complete: {stats['terminated']} total")
         
         return stats
-

@@ -29,15 +29,23 @@ framework_shells/
 ├── store.py             # RuntimeStore - namespaced storage paths
 ├── auth.py              # Secret handling and token derivation
 ├── events.py            # EventBus for shell lifecycle events
-├── hooks.py              # Optional lifecycle hook dataclasses (host integration)
+├── hooks.py             # Optional lifecycle hook dataclasses (host integration)
 ├── pty.py               # PTYState and PipeState dataclasses
+├── process_snapshot.py  # Host-agnostic process snapshot types
+├── shutdown.py          # Shutdown planner/executor helpers
 ├── spec.py              # YAML spec loader (for declarative shell definitions)
 ├── orchestrator.py      # Spec-based shell orchestration
 ├── cli/
 │   └── main.py          # CLI tool (fs list, fs up, fs down, fs attach)
 └── api/
     ├── fastapi_router.py   # REST API endpoints
-    └── websocket.py        # WebSocket endpoints for PTY streaming
+    ├── fws_ui.py           # Self-hosted dashboard + logs (/fws, /ws/fws)
+    └── websocket.py        # WebSocket endpoints for shell events
+├── ui/
+│   ├── index.html          # Dashboard page
+│   ├── fws.css             # Dashboard styles
+│   ├── fws.js              # Minimal dashboard websocket client
+│   └── logs.html           # Log viewer page
 ```
 
 ## Core Concepts
@@ -149,11 +157,13 @@ stats = await mgr.aggregate_resource_stats()
 ### REST API
 
 ```
-GET  /api/framework_shells              # List all shells
-POST /api/framework_shells              # Create shell
-GET  /api/framework_shells/{id}         # Get shell details
-POST /api/framework_shells/{id}/action  # Terminate, etc.
-GET  /api/framework_shells/{id}/replay  # Get stdout log
+GET    /api/framework_shells                 # List all shells
+POST   /api/framework_shells                 # Create shell
+GET    /api/framework_shells/{id}            # Get shell details
+POST   /api/framework_shells/{id}/action     # Terminate, etc.
+DELETE /api/framework_shells/{id}            # Purge metadata/logs (Exited-shell cleanup)
+POST   /api/framework_shells/purge_exited    # Purge metadata/logs for all exited shells
+GET    /api/framework_shells/{id}/replay     # Get stdout log
 ```
 
 ### Events

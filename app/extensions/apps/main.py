@@ -193,13 +193,4 @@ def serve_app_file(app_dir: str, filename: str):
     
     return FileResponse(full_path)
 
-# shell log viewer routes are owned by sessions_and_shortcuts ("brain") and mounted here for
-# root-level access (apps extension is un-prefixed).
-# IMPORTANT: do not bind the imported router to a module-level name, otherwise the extension
-# loader may pick it as the "primary" APIRouter and skip apps_bp entirely.
-try:
-    import importlib
-    _sas = importlib.import_module("app.extensions.sessions_and_shortcuts.main")
-    apps_bp.include_router(getattr(_sas, "shell_logs_bp"))
-except Exception as e:
-    print(f"[AppsExtension] Failed to mount shell logs routes: {e}")
+# Shell log viewer routes are now hosted by the framework_shells module under `/fws/`.

@@ -158,23 +158,16 @@ record = await mgr.spawn_shell_pipe(
 
 ### Sessions & Shortcuts UI
 
-`app/extensions/sessions_and_shortcuts/main.py`:
-```python
-from framework_shells import get_manager
-from framework_shells.events import get_event_bus
+The framework shells dashboard is now hosted by the `framework_shells` module itself at:
 
-# List shells for display
-mgr = await get_manager()
-shells = await mgr.list_shells()
-frameworks = [await mgr.describe(s) for s in shells]
+- `/fws/` (UI)
+- `/fws/logs/{shell_id}` + `WS /ws/fws/logs/{shell_id}` (log viewer)
 
-# Subscribe to events for live updates
-bus = get_event_bus()
-queue = bus.subscribe()
-event = await queue.get()
-```
+TE2’s `sessions_and_shortcuts` extension is now a thin iframe shim that embeds `/fws/`.
 
-The framework shell log viewer routes (`/shell-logs/{shell_id}` and `WS /ws/shell-logs/{shell_id}`) are owned by this extension and mounted at the root via the un-prefixed `apps` extension.
+Compatibility routes are also provided:
+- `/shell-logs/{shell_id}`
+- `WS /ws/shell-logs/{shell_id}`
 
 ## API Router Mount
 
@@ -182,9 +175,11 @@ The framework shell log viewer routes (`/shell-logs/{shell_id}` and `WS /ws/shel
 ```python
 from framework_shells.api.fastapi_router import router as framework_shells_router
 from framework_shells.api.websocket import router as framework_shells_ws_router
+from framework_shells.api.fws_ui import router as fws_ui_router
 
 app.include_router(framework_shells_router)
 app.include_router(framework_shells_ws_router)
+app.include_router(fws_ui_router)
 ```
 
 This provides:
@@ -192,7 +187,9 @@ This provides:
 - `POST /api/framework_shells` - Create shell
 - `GET /api/framework_shells/{id}` - Get shell
 - `POST /api/framework_shells/{id}/action` - Terminate, etc.
-- `WS /ws/framework_shells/{id}` - PTY streaming
+- `WS /ws/events` - Shell lifecycle event stream
+- `GET /fws/` - Framework shells dashboard (HTML)
+- `WS /ws/fws` - Dashboard live updates (HTML snapshots)
 
 ## Compatibility Shim
 
@@ -256,6 +253,10 @@ Shell logs are stored at:
 ├── <shell_id>.stdout.log
 └── <shell_id>.stderr.log
 ```
+
+Exited-shell cleanup in the UI uses the framework_shells API:
+- `DELETE /api/framework_shells/{id}` (purge one shell’s metadata/logs)
+- `POST /api/framework_shells/purge_exited` (purge all exited shells)
 
 Framework console output goes to stdout of the `run_framework.sh` process.
 

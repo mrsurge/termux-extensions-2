@@ -30,6 +30,13 @@ from .record import ShellRecord
 from .pty import PTYState, PipeState
 from .events import get_event_bus, ShellEvent, EventType
 from .hooks import ShellLifecycleHooks
+from .process_snapshot import (
+    ExternalProcessProvider,
+    ProcfsProcessProvider,
+    ProcessRecord,
+    ProcessSnapshot,
+    collect_external_processes,
+)
 
 try:
     import psutil  # type: ignore
@@ -55,6 +62,8 @@ class FrameworkShellManager:
         run_id: Optional[str] = None,
         enable_dtach_proxy: bool = True,
         process_hooks: Optional[ShellLifecycleHooks] = None,
+        external_process_provider: Optional[ExternalProcessProvider] = None,
+        enable_procfs_process_discovery: bool = True,
     ) -> None:
         self.store = store or RuntimeStore()
         self.metadata_dir = self.store.metadata_dir
@@ -73,6 +82,69 @@ class FrameworkShellManager:
         self._dtach_bin = shutil.which("dtach")
         self._enable_dtach_proxy = bool(enable_dtach_proxy)
         self._hooks = process_hooks
+        self.external_process_provider = external_process_provider
+        self._procfs_provider = ProcfsProcessProvider() if enable_procfs_process_discovery else None
+
+    async def build_process_snapshot(
+        self,
+        *,
+        shells: Optional[List[ShellRecord]] = None,
+        include_procfs_descendants: bool = True,
+    ) -> ProcessSnapshot:
+        """Build a best-effort process snapshot for UI and shutdown planning.
+
+        The snapshot is intentionally host-agnostic. If a host provides an
+        `external_process_provider`, those processes are merged in. A procfs
+        provider may also be used to discover descendants of managed shells so
+        standalone usage still has a tree.
+
+        Merge priority (highest wins on PID collisions):
+          1) managed shells
+          2) host-provided external process provider
+          3) procfs-derived process discovery
+        """
+        shells = shells or await self.list_shells()
+        root_pids = [rec.pid for rec in shells if rec.pid and rec.status == "running"]
+
+        procfs: List[ProcessRecord] = []
+        if include_procfs_descendants and self._procfs_provider:
+            try:
+                procfs = await asyncio.to_thread(self._procfs_provider.list_processes, root_pids=root_pids)
+            except Exception:
+                procfs = []
+
+        external: List[ProcessRecord] = []
+        if self.external_process_provider:
+            try:
+                external = await collect_external_processes(self.external_process_provider, root_pids=root_pids)
+            except Exception:
+                external = []
+
+        processes: Dict[int, ProcessRecord] = {}
+        for rec in procfs:
+            processes[rec.pid] = rec
+        for rec in external:
+            processes[rec.pid] = rec
+
+        for shell in shells:
+            if not shell.pid:
+                continue
+            processes[shell.pid] = ProcessRecord(
+                pid=shell.pid,
+                parent_pid=shell.launcher_pid,
+                type="shell",
+                label=shell.label or shell.id,
+                metadata={
+                    "shell_id": shell.id,
+                    "run_id": shell.run_id,
+                    "uses_dtach": bool(getattr(shell, "uses_dtach", False)),
+                    "uses_pipes": bool(getattr(shell, "uses_pipes", False)),
+                    "uses_pty": bool(getattr(shell, "uses_pty", False)),
+                },
+                shell_id=shell.id,
+            )
+
+        return ProcessSnapshot(captured_at=time.time(), processes=processes)
 
     def _fire_hook(self, result: Any) -> None:
         """Best-effort hook execution; never blocks core flow."""

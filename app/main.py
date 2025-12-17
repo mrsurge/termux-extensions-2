@@ -63,7 +63,11 @@ async def lifespan(app_instance):
     # are registered (and adoption re-registers as needed).
     try:
         from app.ipc.framework_shells_hooks import build_ipc_shell_hooks
-        await get_manager(process_hooks=build_ipc_shell_hooks())
+        from app.ipc.fws_process_provider import IpcProcessProvider
+        await get_manager(
+            process_hooks=build_ipc_shell_hooks(),
+            external_process_provider=IpcProcessProvider(),
+        )
     except Exception as exc:
         print(f"[framework] Warning: Failed to init framework_shells IPC hooks: {exc}", file=sys.stderr)
     
@@ -127,11 +131,13 @@ if os.path.exists(static_dir):
 from framework_shells import FrameworkShellManager, get_manager
 from framework_shells.api.fastapi_router import router as framework_shells_router
 from framework_shells.api.websocket import router as framework_shells_ws_router
+from framework_shells.api.fws_ui import router as fws_ui_router
 from app.apps.file_editor_cm6.agent_bridge import get_bridge # This has to go... ASAP
 
 # Mount the framework shells API router
 app.include_router(framework_shells_router)
 app.include_router(framework_shells_ws_router)
+app.include_router(fws_ui_router)
 
 
 

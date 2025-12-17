@@ -97,3 +97,15 @@ commit: (git not used)
 change: Document language SSOT seam + reconnect highlighting issue
 summary: Updated Code CM6 TECHNICAL.md to reflect that language selection is currently applied across multiple layers (host JS, NiceGUI backend, watcher, vendored CM wrapper) and documented the observed mobile reconnect syntax-highlighting seam with mitigation ideas.
 files: docs/apps/code_cm6/TECHNICAL.md
+
+---
+commit: (git not used)
+change: Fix exited shell log purge (HTTP 405) + add clear-all
+summary: Exited-shell log cleanup attempted DELETE /api/framework_shells/{id} but API lacked a DELETE route. Added DELETE route backed by FrameworkShellManager.remove_shell and added a bulk purge_exited endpoint; updated Sessions & Shortcuts UI to support Purge All Exited.
+files: framework_shells/api/fastapi_router.py, app/extensions/sessions_and_shortcuts/main.js, app/extensions/sessions_and_shortcuts/template.html
+
+---
+commit: (git not used)
+change: Update root docs for purge + sleep/ports
+summary: Audited te2.md and framework_shells.md; added missing framework_shells REST endpoints for shell log/metadata purge (DELETE /api/framework_shells/{id}, POST /api/framework_shells/purge_exited) and documented how Exited-shell cleanup uses them.
+files: framework_shells.md, te2.md

@@ -7,6 +7,8 @@ from .events import get_event_bus, EventBus, ShellEvent, EventType
 from .store import RuntimeStore
 from .auth import get_secret, derive_api_token, derive_runtime_id
 from .hooks import ShellLifecycleHooks
+from .process_snapshot import ProcessRecord, ProcessSnapshot, ExternalProcessProvider, ProcfsProcessProvider
+from .shutdown import ShutdownPolicy, plan_shutdown, shutdown_snapshot
 
 import asyncio
 from typing import Optional
@@ -58,5 +60,12 @@ __all__ = [
     "derive_api_token",
     "derive_runtime_id",
     "ShellLifecycleHooks",
+    "ProcessRecord",
+    "ProcessSnapshot",
+    "ExternalProcessProvider",
+    "ProcfsProcessProvider",
+    "ShutdownPolicy",
+    "plan_shutdown",
+    "shutdown_snapshot",
     "get_manager",
 ]

@@ -7,18 +7,14 @@ from pathlib import Path
 from ..auth import get_secret, derive_api_token
 from ..manager import FrameworkShellManager
 from ..store import RuntimeStore
+from .. import get_manager as get_shared_manager
 
 router = APIRouter()
 
-# Singleton instance
-_manager_instance: Optional[FrameworkShellManager] = None
 
-async def get_manager() -> FrameworkShellManager:
-    global _manager_instance
-    if _manager_instance is None:
-        _manager_instance = FrameworkShellManager()
-        # Optionally trigger load? Manager loads lazily on list/get.
-    return _manager_instance
+async def get_manager_dep() -> FrameworkShellManager:
+    # Always use the package-level singleton so hosts can configure hooks/providers once.
+    return await get_shared_manager()
 
 async def require_auth(
     authorization: str = Header(None),
@@ -54,7 +50,7 @@ async def require_auth(
 
 @router.get("/api/framework_shells")
 async def list_shells(
-    mgr: FrameworkShellManager = Depends(get_manager)
+    mgr: FrameworkShellManager = Depends(get_manager_dep)
 ):
     records = await mgr.list_shells()
     return {"ok": True, "data": [r.to_payload() for r in records]}
@@ -62,7 +58,7 @@ async def list_shells(
 @router.get("/api/framework_shells/{shell_id}")
 async def get_shell(
     shell_id: str,
-    mgr: FrameworkShellManager = Depends(get_manager)
+    mgr: FrameworkShellManager = Depends(get_manager_dep)
 ):
     record = await mgr.get_shell(shell_id)
     if not record:
@@ -73,7 +69,7 @@ async def get_shell(
 async def find_or_create_shell(
     payload: dict = Body(...),
     authorization: str = Header(None), # Verify explicit param vs dependency
-    mgr: FrameworkShellManager = Depends(get_manager),
+    mgr: FrameworkShellManager = Depends(get_manager_dep),
     _: None = Depends(require_auth)
 ):
     # This matches the existing TE2 find_or_create semantics
@@ -103,7 +99,7 @@ async def find_or_create_shell(
 @router.post('/api/framework_shells/{shell_id}/terminate')
 async def terminate_shell(
     shell_id: str,
-    mgr: FrameworkShellManager = Depends(get_manager),
+    mgr: FrameworkShellManager = Depends(get_manager_dep),
     _: None = Depends(require_auth)
 ):
     await mgr.terminate_shell(shell_id)
@@ -113,7 +109,7 @@ async def terminate_shell(
 async def shell_action(
     shell_id: str,
     payload: dict = Body(...),
-    mgr: FrameworkShellManager = Depends(get_manager),
+    mgr: FrameworkShellManager = Depends(get_manager_dep),
     _: None = Depends(require_auth)
 ):
     """Handle shell actions (terminate, etc.)."""
@@ -125,12 +121,49 @@ async def shell_action(
     else:
         raise HTTPException(400, f"Unknown action: {action}")
 
+
+@router.delete('/api/framework_shells/{shell_id}')
+async def remove_shell(
+    shell_id: str,
+    force: bool = Query(False),
+    mgr: FrameworkShellManager = Depends(get_manager_dep),
+    _: None = Depends(require_auth),
+):
+    """Purge a shell's metadata and logs.
+
+    The Sessions & Shortcuts "Exited shells" UI uses this to delete old logs.
+    """
+    ok = await mgr.remove_shell(shell_id, force=force)
+    if not ok:
+        raise HTTPException(404, "Shell not found")
+    return {"ok": True}
+
+
+@router.post('/api/framework_shells/purge_exited')
+async def purge_exited_shells(
+    mgr: FrameworkShellManager = Depends(get_manager_dep),
+    _: None = Depends(require_auth),
+):
+    """Purge metadata/logs for all exited shells."""
+    records = await mgr.list_shells()
+    exited = [r for r in records if (getattr(r, 'status', None) or '') == 'exited']
+    errors: list[str] = []
+    purged = 0
+    for rec in exited:
+        try:
+            await mgr.remove_shell(rec.id, force=True)
+            purged += 1
+        except Exception as exc:
+            errors.append(f"{rec.id}: {exc}")
+    return {"ok": True, "data": {"purged": purged, "errors": errors}}
+
+
 from fastapi.responses import FileResponse
 
 @router.get("/api/framework_shells/{shell_id}/replay")
 async def replay_log(
     shell_id: str,
-    mgr: FrameworkShellManager = Depends(get_manager)
+    mgr: FrameworkShellManager = Depends(get_manager_dep)
 ):
     """Serve the stdout log for a shell."""
     record = await mgr.get_shell(shell_id)
