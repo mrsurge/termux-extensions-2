@@ -7,7 +7,7 @@ import hashlib
 from pathlib import Path
 
 from ..manager import FrameworkShellManager
-from ..spec import load_specs
+from ..shellspec import load_shellspec
 from ..orchestrator import Orchestrator
 
 def compute_standalone_fingerprint() -> str:
@@ -56,7 +56,8 @@ def main():
     list_parser = subparsers.add_parser("list", help="List running shells")
     
     # fs down
-    down_parser = subparsers.add_parser("down", help="Terminate all shells")
+    down_parser = subparsers.add_parser("down", help="Terminate shells")
+    down_parser.add_argument("spec", nargs="?", help="Optional spec file/dir; if provided, only those specs are terminated")
     
     # fs attach [id]
     attach_parser = subparsers.add_parser("attach", help="Attach to a shell (dtach)")
@@ -85,7 +86,8 @@ async def run_async(args):
             sys.exit(1)
             
         print(f"Loading specs from {spec_path}...")
-        specs = load_specs(spec_path)
+        specs_map = load_shellspec(spec_path)
+        specs = list(specs_map.values())
         orch = Orchestrator(manager)
         await orch.apply(specs, prune=args.prune)
         print(f"Applied {len(specs)} specs.")
@@ -103,14 +105,22 @@ async def run_async(args):
 
     elif args.command == "list":
         shells = await manager.list_shells()
-        print(f"{'ID':<20} {'LABEL':<15} {'STATUS':<10} {'PID':<6} {'BACKEND'}")
+        print(f"{'ID':<20} {'SPEC':<14} {'LABEL':<15} {'STATUS':<10} {'PID':<6} {'BACKEND'}")
         for s in shells:
             backend = "dtach" if getattr(s, "uses_dtach", False) else ("pty" if s.uses_pty else "proc")
-            print(f"{s.id:<20} {s.label or '-':<15} {s.status:<10} {s.pid or '-':<6} {backend}")
+            print(f"{s.id:<20} {(getattr(s, 'spec_id', None) or '-'): <14} {s.label or '-':<15} {s.status:<10} {s.pid or '-':<6} {backend}")
 
     elif args.command == "down":
+        spec_ids = None
+        if getattr(args, "spec", None):
+            spec_path = Path(args.spec)
+            specs_map = load_shellspec(spec_path)
+            spec_ids = set(specs_map.keys())
+
         shells = await manager.list_shells()
         for s in shells:
+            if spec_ids is not None and getattr(s, "spec_id", None) not in spec_ids:
+                continue
             print(f"Terminating {s.id}...")
             await manager.terminate_shell(s.id)
             

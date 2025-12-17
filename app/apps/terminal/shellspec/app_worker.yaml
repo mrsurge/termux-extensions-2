@@ -1,0 +1,33 @@
+version: "1"
+
+shells:
+  app-worker:
+    backend: proc
+    cwd: ${ctx:PROJECT_ROOT}
+    ui:
+      subgroup_styles:
+        shell:
+          bg: rgb(100, 10, 2)
+          border: rgb(207, 10, 2)
+    command:
+      - python
+      - -m
+      - app.libs.app_worker
+      - --app-id
+      - ${ctx:APP_ID}
+      - --port
+      - ${free_port}
+      - --backend-module
+      - ${ctx:BACKEND_MODULE_PATH}
+    env:
+      PYTHONPATH: ${env:PYTHONPATH}:${ctx:PROJECT_ROOT}
+      TE_APP_ID: ${ctx:APP_ID}
+      TE_APP_WORKER_PORT: ${free_port}
+    subgroups:
+      - ${ctx:APP_ID}
+      - app-worker
+    readiness:
+      type: tcp_port
+      host: 127.0.0.1
+      port: ${free_port}
+      timeout: 10

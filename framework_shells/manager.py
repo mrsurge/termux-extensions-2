@@ -328,6 +328,17 @@ class FrameworkShellManager:
                 data = json.loads(content)
         except Exception:
             return None
+
+        # Verify signature using on-disk payload (forward-compatible with added fields).
+        try:
+            from .auth import derive_runtime_id, verify_record
+
+            if data.get("runtime_id") != derive_runtime_id(self.store.secret):
+                return None
+            if not verify_record(self.store.secret, data):
+                return None
+        except Exception:
+            return None
         
         try:
             def get_list(k): return data.get(k) if isinstance(data.get(k), list) else []
@@ -348,6 +359,7 @@ class FrameworkShellManager:
                 autostart=bool(data.get("autostart", False)),
                 stdout_log=data.get("stdout_log", str(self.logs_dir / f'{data.get("id", shell_id)}.stdout.log')),
                 stderr_log=data.get("stderr_log", str(self.logs_dir / f'{data.get("id", shell_id)}.stderr.log')),
+                spec_id=data.get("spec_id"),
                 exit_code=data.get("exit_code"),
                 run_id=data.get("run_id"),
                 launcher_pid=data.get("launcher_pid"),
@@ -361,9 +373,6 @@ class FrameworkShellManager:
                 parent_shell_id=data.get("parent_shell_id"),
                 is_app_worker=bool(data.get("is_app_worker", False)),
             )
-
-            if not record.verify(self.store.secret):
-                return None
             return record
         except Exception:
             return None
@@ -412,6 +421,7 @@ class FrameworkShellManager:
         cwd: Optional[str],
         env: Optional[Dict[str, str]],
         label: Optional[str],
+        spec_id: Optional[str] = None,
         subgroups: Optional[List[str]] = None,
         ui: Optional[Dict[str, Any]] = None,
         autostart: bool,
@@ -441,6 +451,7 @@ class FrameworkShellManager:
             autostart=autostart,
             stdout_log=str(self.logs_dir / f"{shell_id}.stdout.log"),
             stderr_log=str(self.logs_dir / f"{shell_id}.stderr.log"),
+            spec_id=spec_id,
             exit_code=None,
             run_id=self.run_id,
             launcher_pid=self.launcher_pid,
@@ -815,13 +826,14 @@ class FrameworkShellManager:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         label: Optional[str] = None,
+        spec_id: Optional[str] = None,
         subgroups: Optional[List[str]] = None,
         ui: Optional[Dict[str, Any]] = None,
         autostart: bool = True,
     ) -> ShellRecord:
         record = self._create_record(
             command, cwd=cwd, env=env, label=label,
-            subgroups=subgroups, ui=ui, autostart=autostart,
+            spec_id=spec_id, subgroups=subgroups, ui=ui, autostart=autostart,
             uses_pty=False
         )
         if autostart:
@@ -837,6 +849,7 @@ class FrameworkShellManager:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         label: Optional[str] = None,
+        spec_id: Optional[str] = None,
         subgroups: Optional[List[str]] = None,
         ui: Optional[Dict[str, Any]] = None,
         autostart: bool = True,
@@ -844,7 +857,7 @@ class FrameworkShellManager:
     ) -> ShellRecord:
         record = self._create_record(
             command, cwd=cwd, env=env, label=label,
-            subgroups=subgroups, ui=ui, autostart=autostart,
+            spec_id=spec_id, subgroups=subgroups, ui=ui, autostart=autostart,
             uses_pty=True, parent_shell_id=parent_shell_id
         )
         if autostart:
@@ -860,6 +873,7 @@ class FrameworkShellManager:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         label: Optional[str] = None,
+        spec_id: Optional[str] = None,
         subgroups: Optional[List[str]] = None,
         ui: Optional[Dict[str, Any]] = None,
         autostart: bool = True,
@@ -867,7 +881,7 @@ class FrameworkShellManager:
     ) -> ShellRecord:
         record = self._create_record(
             command, cwd=cwd, env=env, label=label,
-            subgroups=subgroups, ui=ui, autostart=autostart,
+            spec_id=spec_id, subgroups=subgroups, ui=ui, autostart=autostart,
             uses_pty=False, uses_pipes=True,
             parent_shell_id=parent_shell_id
         )
@@ -884,6 +898,7 @@ class FrameworkShellManager:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         label: Optional[str] = None,
+        spec_id: Optional[str] = None,
         subgroups: Optional[List[str]] = None,
         ui: Optional[Dict[str, Any]] = None,
         autostart: bool = True,
@@ -891,7 +906,7 @@ class FrameworkShellManager:
     ) -> ShellRecord:
         record = self._create_record(
             command, cwd=cwd, env=env, label=label,
-            subgroups=subgroups, ui=ui, autostart=autostart,
+            spec_id=spec_id, subgroups=subgroups, ui=ui, autostart=autostart,
             uses_pty=True,
             uses_dtach=True, 
             parent_shell_id=parent_shell_id

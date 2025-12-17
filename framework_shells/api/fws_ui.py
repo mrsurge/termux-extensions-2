@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import os
+import re
 import signal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiofiles
+import fnmatch
 from fastapi import APIRouter, Form, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
@@ -55,6 +57,95 @@ def _is_shell_live(info: Dict[str, Any]) -> bool:
     return True
 
 
+_CSS_COLOR_RE = re.compile(r"^[#()0-9a-zA-Z.,%\\s-]+$")
+
+
+def _safe_css_value(value: Any) -> str:
+    s = "" if value is None else str(value).strip()
+    if not s:
+        return ""
+    if not _CSS_COLOR_RE.match(s):
+        return ""
+    return s
+
+
+def _collect_subgroup_styles(shells: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
+    merged: Dict[str, Dict[str, str]] = {}
+    for info in shells:
+        ui = info.get("ui")
+        if not isinstance(ui, dict):
+            continue
+        raw = ui.get("subgroup_styles") or ui.get("subgroupStyles")
+        if not isinstance(raw, dict):
+            continue
+        for key, style in raw.items():
+            if not isinstance(style, dict):
+                continue
+            bg = _safe_css_value(style.get("bg") or style.get("background"))
+            border = _safe_css_value(style.get("border") or style.get("border_color") or style.get("borderColor"))
+            color = _safe_css_value(style.get("color") or style.get("fg") or style.get("foreground"))
+            normalized: Dict[str, str] = {}
+            if bg:
+                normalized["bg"] = bg
+            if border:
+                normalized["border"] = border
+            if color:
+                normalized["color"] = color
+            if normalized:
+                merged[str(key)] = normalized
+    return merged
+
+
+def _subgroup_style_for(name: str, styles: Dict[str, Dict[str, str]]) -> Dict[str, str]:
+    if not name:
+        return {}
+    if name in styles:
+        return styles.get(name, {})
+    best_key: Optional[str] = None
+    for pattern in styles.keys():
+        if pattern == name:
+            best_key = pattern
+            break
+        if any(ch in pattern for ch in "*?[]") and fnmatch.fnmatchcase(name, pattern):
+            if best_key is None or len(pattern) > len(best_key):
+                best_key = pattern
+    if best_key is None:
+        return {}
+    return styles.get(best_key, {})
+
+
+def _card_style_for_subgroups(subgroups: List[str], styles: Dict[str, Dict[str, str]]) -> Dict[str, str]:
+    if not subgroups:
+        return {}
+    preferred = list(subgroups[1:]) + list(subgroups[:1])
+    for subgroup in preferred:
+        style = _subgroup_style_for(str(subgroup), styles)
+        if style:
+            return style
+    return {}
+
+
+def _render_subgroup_pills(subgroups: List[Any], styles: Dict[str, Dict[str, str]]) -> str:
+    pills: List[str] = []
+    for raw in subgroups:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        style = _subgroup_style_for(name, styles)
+        css_bits: List[str] = []
+        if style.get("bg"):
+            css_bits.append(f"background: {style['bg']};")
+        if style.get("border"):
+            css_bits.append(f"border-color: {style['border']};")
+        if style.get("color"):
+            css_bits.append(f"color: {style['color']};")
+        style_attr = f' style="{" ".join(css_bits)}"' if css_bits else ""
+        pills.append(f'<span class="pill"{style_attr}>{_escape_html(name)}</span>')
+    if not pills:
+        return ""
+    return '<div class="row">' + "".join(pills) + "</div>"
+
+
 async def _render_dashboard_html() -> str:
     mgr = await get_manager()
     shells = await mgr.list_shells()
@@ -79,6 +170,7 @@ async def _render_dashboard_html() -> str:
 
     running = [s for s in described if _is_shell_live(s)]
     exited = [s for s in described if not _is_shell_live(s)]
+    subgroup_styles = _collect_subgroup_styles(described)
 
     app_workers = [s for s in running if str(s.get("label") or "").startswith("app-worker:")]
     other_running = [s for s in running if s not in app_workers]
@@ -116,8 +208,16 @@ async def _render_dashboard_html() -> str:
             pid = s.get("pid")
             app_id = label.split(":", 1)[1] if ":" in label else ""
             backend = _shell_backend(s)
+            subgroups = s.get("subgroups") if isinstance(s.get("subgroups"), list) else []
+            style = _card_style_for_subgroups([str(x) for x in subgroups], subgroup_styles)
+            style_bits: List[str] = []
+            if style.get("bg"):
+                style_bits.append(f"background: {style['bg']};")
+            if style.get("border"):
+                style_bits.append(f"border-color: {style['border']}; border-left: 4px solid {style['border']};")
+            style_attr = f' style="{" ".join(style_bits)}"' if style_bits else ""
 
-            parts.append('<div class="shell-card app-worker">')
+            parts.append(f'<div class="shell-card app-worker"{style_attr}>')
             parts.append('<div class="shell-header">')
             parts.append('<div class="shell-title">%s</div>' % _escape_html(label))
             parts.append('<div class="shell-actions">')
@@ -145,6 +245,9 @@ async def _render_dashboard_html() -> str:
             parts.append('<div class="shell-meta">Command: %s</div>' % _escape_html(" ".join(map(str, cmd))))
             if s.get("cwd"):
                 parts.append('<div class="shell-meta">CWD: %s</div>' % _escape_html(s.get("cwd")))
+            pills = _render_subgroup_pills(subgroups, subgroup_styles)
+            if pills:
+                parts.append(pills)
 
             # Related shells (soft tree).
             if app_id and related_by_app.get(app_id):
@@ -155,13 +258,26 @@ async def _render_dashboard_html() -> str:
                     rlabel = str(rs.get("label") or rsid)
                     rpid = rs.get("pid")
                     rbackend = _shell_backend(rs)
-                    parts.append('<div class="child-row">')
+                    rsubgroups = rs.get("subgroups") if isinstance(rs.get("subgroups"), list) else []
+                    rstyle = _card_style_for_subgroups([str(x) for x in rsubgroups], subgroup_styles)
+                    rstyle_bits: List[str] = []
+                    if rstyle.get("bg"):
+                        rstyle_bits.append(f"background: {rstyle['bg']};")
+                    if rstyle.get("border"):
+                        rstyle_bits.append(
+                            f"border-left: 3px solid {rstyle['border']};"
+                        )
+                    rstyle_attr = f' style="{" ".join(rstyle_bits)}"' if rstyle_bits else ""
+                    parts.append(f'<div class="child-row"{rstyle_attr}>')
                     parts.append('<div class="child-main">')
                     parts.append('<div class="child-label">%s</div>' % _escape_html(rlabel))
                     parts.append(
                         '<div class="child-meta">PID: %s · ID: %s · %s</div>'
                         % (_escape_html(rpid), _escape_html(rsid), _escape_html(rbackend))
                     )
+                    pills = _render_subgroup_pills(rsubgroups, subgroup_styles)
+                    if pills:
+                        parts.append(pills)
                     parts.append("</div>")
                     parts.append('<div class="row">')
                     parts.append(f'<a class="btn btn-small" href="/fws/logs/{_escape_html(rsid)}">Logs</a>')
@@ -207,8 +323,16 @@ async def _render_dashboard_html() -> str:
             label = str(s.get("label") or sid)
             pid = s.get("pid")
             backend = _shell_backend(s)
+            subgroups = s.get("subgroups") if isinstance(s.get("subgroups"), list) else []
+            style = _card_style_for_subgroups([str(x) for x in subgroups], subgroup_styles)
+            style_bits: List[str] = []
+            if style.get("bg"):
+                style_bits.append(f"background: {style['bg']};")
+            if style.get("border"):
+                style_bits.append(f"border-color: {style['border']}; border-left: 4px solid {style['border']};")
+            style_attr = f' style="{" ".join(style_bits)}"' if style_bits else ""
 
-            parts.append('<div class="shell-card">')
+            parts.append(f'<div class="shell-card"{style_attr}>')
             parts.append('<div class="shell-header">')
             parts.append('<div class="shell-title">%s</div>' % _escape_html(label))
             parts.append('<div class="shell-actions">')
@@ -228,6 +352,9 @@ async def _render_dashboard_html() -> str:
             parts.append('<div class="shell-meta">Command: %s</div>' % _escape_html(" ".join(map(str, cmd))))
             if s.get("cwd"):
                 parts.append('<div class="shell-meta">CWD: %s</div>' % _escape_html(s.get("cwd")))
+            pills = _render_subgroup_pills(subgroups, subgroup_styles)
+            if pills:
+                parts.append(pills)
             parts.append("</div>")
 
     parts.append("</div>")
@@ -242,11 +369,19 @@ async def _render_dashboard_html() -> str:
             label = str(s.get("label") or sid)
             status = str(s.get("status") or "exited")
             exit_code = s.get("exit_code")
+            subgroups = s.get("subgroups") if isinstance(s.get("subgroups"), list) else []
+            style = _card_style_for_subgroups([str(x) for x in subgroups], subgroup_styles)
+            style_bits: List[str] = []
+            if style.get("bg"):
+                style_bits.append(f"background: {style['bg']};")
+            if style.get("border"):
+                style_bits.append(f"border-color: {style['border']}; border-left: 4px solid {style['border']};")
+            style_attr = f' style="{" ".join(style_bits)}"' if style_bits else ""
             meta = status
             if exit_code is not None:
                 meta += f" · exit: {exit_code}"
 
-            parts.append('<div class="shell-card">')
+            parts.append(f'<div class="shell-card"{style_attr}>')
             parts.append('<div class="shell-header">')
             parts.append('<div class="shell-title">%s</div>' % _escape_html(label))
             parts.append('<div class="shell-actions">')
@@ -260,6 +395,9 @@ async def _render_dashboard_html() -> str:
             parts.append("</div>")
             parts.append('<div class="shell-meta">%s</div>' % _escape_html(meta))
             parts.append('<div class="shell-meta">ID: %s</div>' % _escape_html(sid))
+            pills = _render_subgroup_pills(subgroups, subgroup_styles)
+            if pills:
+                parts.append(pills)
             parts.append("</div>")
     parts.append("</div>")
 

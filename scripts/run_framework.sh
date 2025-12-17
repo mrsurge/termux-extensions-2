@@ -277,8 +277,8 @@ start_ipc_server
 
 shutdown_ipc() {
   # Let IPC orchestrate shutdown (sleep supervisor) and then exit itself.
-  curl -sS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/exit" >/dev/null 2>&1 || \
-    curl -sS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/sleep" >/dev/null 2>&1 || true
+  curl -fsS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/exit" >/dev/null 2>&1 || \
+    curl -fsS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/sleep" >/dev/null 2>&1 || true
 
   # Wait briefly for IPC to self-exit; do not kill it unless it's stuck.
   for _i in $(seq 1 50); do
@@ -315,8 +315,7 @@ while kill -0 "$TE_IPC_PID" 2>/dev/null; do
   IFS= read -rsn1 -t 0.2 key || true
   if [ "${key}" = $'\x13' ]; then
     echo "[run_framework] Ctrl+S -> /actions/sleep"
-    curl -sS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/sleep" >/dev/null || true
+    curl -fsS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/sleep" >/dev/null || true
   fi
   sleep 0.05
 done
-

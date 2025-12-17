@@ -9,6 +9,7 @@ from .auth import get_secret, derive_api_token, derive_runtime_id
 from .hooks import ShellLifecycleHooks
 from .process_snapshot import ProcessRecord, ProcessSnapshot, ExternalProcessProvider, ProcfsProcessProvider
 from .shutdown import ShutdownPolicy, plan_shutdown, shutdown_snapshot
+from .shellspec import ShellSpec, ReadinessProbe, RestartPolicy, load_shellspec, render_shellspec
 
 import asyncio
 from typing import Optional
@@ -67,5 +68,10 @@ __all__ = [
     "ShutdownPolicy",
     "plan_shutdown",
     "shutdown_snapshot",
+    "ShellSpec",
+    "ReadinessProbe",
+    "RestartPolicy",
+    "load_shellspec",
+    "render_shellspec",
     "get_manager",
 ]

@@ -18,6 +18,7 @@ class ShellRecord:
     autostart: bool
     stdout_log: str
     stderr_log: str
+    spec_id: Optional[str] = None
     exit_code: Optional[int] = None
     subgroups: List[str] = field(default_factory=list)
     ui: Dict[str, Any] = field(default_factory=dict)
@@ -61,6 +62,7 @@ class ShellRecord:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
+            "spec_id": self.spec_id,
             "command": self.command,
             "label": self.label,
             "subgroups": self.subgroups,
@@ -91,6 +93,7 @@ class ShellRecord:
     def to_payload(self, *, include_env: bool = False) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "id": self.id,
+            "spec_id": self.spec_id,
             "command": list(self.command),
             "label": self.label,
             "subgroups": list(self.subgroups or []),

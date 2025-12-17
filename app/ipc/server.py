@@ -15,6 +15,7 @@ import logging
 import os
 import queue
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Set, List
@@ -36,6 +37,8 @@ FRAMEWORK_URL = os.environ.get("TE_FRAMEWORK_URL", "http://127.0.0.1:8089")
 FRAMEWORK_TOKEN = os.environ.get("TE_FRAMEWORK_SHELL_TOKEN")
 _REGISTERED_IPC_MODULES: Set[str] = set()
 _APPS_DIR = Path(__file__).resolve().parent.parent / "apps"
+
+_PROCESS_REGISTRY = ProcessRegistry()
 
 _listeners_lock = threading.Lock()
 _listeners: Set[queue.Queue] = set()
@@ -126,7 +129,7 @@ def create_app() -> Flask:
     app = Flask(__name__)
     
     # Create global process registry
-    process_registry = ProcessRegistry()
+    process_registry = _PROCESS_REGISTRY
 
     @app.after_request
     def _apply_cors(response):  # type: ignore[override]
@@ -422,11 +425,26 @@ def _schedule_process_exit(delay: float = 0.25) -> None:
 
 @app.route("/actions/exit", methods=["POST", "OPTIONS"])
 def exit_ipc() -> Any:
-    """Ask IPC to sleep framework and then terminate itself."""
+    """Ask IPC to stop the framework tree and then terminate itself.
+
+    This is intended to be the definitive "exit" action when running under
+    `scripts/run_framework.sh`: kill framework shells + registered processes
+    in a deterministic order, then exit IPC.
+    """
     if request.method == "OPTIONS":
         return ("", 204)
     ok = _stop_supervisor()
     _broadcast({"event": "exit", "status": "requested"})
+
+    # IMPORTANT: Do not exit IPC until shutdown work is done. Otherwise, the
+    # supervisor may lose its "last resort" killer, and orphaned shells can
+    # survive because they are started with start_new_session=True.
+    try:
+        stats = _PROCESS_REGISTRY.shutdown_all(logger=LOGGER)
+        _broadcast({"event": "exit", "status": "shutdown_complete", "stats": stats})
+    except Exception as exc:
+        _broadcast({"event": "exit", "status": "shutdown_failed", "error": str(exc)})
+
     _schedule_process_exit()
     return jsonify({"ok": ok})
 
@@ -524,6 +542,10 @@ def main() -> None:
             if request.method == "OPTIONS":
                 return ("", 204)
             ok = _stop_supervisor()
+            try:
+                _PROCESS_REGISTRY.shutdown_all(logger=LOGGER)
+            except Exception:
+                LOGGER.exception("sleep_exit: shutdown_all failed")
             _schedule_process_exit()
             return jsonify({"ok": ok})
 
