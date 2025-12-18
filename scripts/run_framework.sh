@@ -126,6 +126,8 @@ ensure_framework_secret() {
   
   export FRAMEWORK_SHELLS_SECRET
   export FRAMEWORK_SHELLS_REPO_FINGERPRINT="$fingerprint"
+  # TE2 keeps framework shells state under the te_framework cache root.
+  export FRAMEWORK_SHELLS_BASE_DIR="$HOME/.cache/te_framework"
 }
 
 

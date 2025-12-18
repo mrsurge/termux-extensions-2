@@ -17,9 +17,18 @@ def compute_standalone_fingerprint() -> str:
     cwd = Path.cwd().resolve()
     return hashlib.sha256(str(cwd).encode()).hexdigest()[:16]
 
+def _default_base_dir() -> Path:
+    return Path.home() / ".cache" / "framework_shells"
+
+def get_base_dir() -> Path:
+    base_dir = os.environ.get("FRAMEWORK_SHELLS_BASE_DIR")
+    if base_dir:
+        return Path(os.path.expanduser(base_dir)).resolve()
+    return _default_base_dir()
+
 def load_stored_secret(fingerprint: str) -> str | None:
     """Try to load secret from stored file for this fingerprint."""
-    secret_file = Path.home() / ".cache" / "te_framework" / "runtimes" / fingerprint / "secret"
+    secret_file = get_base_dir() / "runtimes" / fingerprint / "secret"
     if secret_file.exists():
         try:
             return secret_file.read_text().strip()

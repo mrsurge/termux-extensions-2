@@ -26,6 +26,7 @@ The stable “surface” for the runtime secret is `scripts/run_framework.sh`:
 
 - It creates/loads `~/.cache/te_framework/runtimes/<fingerprint>/secret`
 - Exports `FRAMEWORK_SHELLS_SECRET` (used to derive the runtime namespace and API tokens)
+- Exports `FRAMEWORK_SHELLS_BASE_DIR=~/.cache/te_framework` so `framework_shells` stores runtime data under the TE2 cache root
 
 ### TE2 Environment Variables (FWS Integration)
 

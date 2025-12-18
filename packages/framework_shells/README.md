@@ -97,7 +97,7 @@ class ShellRecord:
 
 Shells are stored under:
 ```
-~/.cache/te_framework/runtimes/<repo_fingerprint>/<runtime_id>/
+~/.cache/framework_shells/runtimes/<repo_fingerprint>/<runtime_id>/
 ├── meta/<shell_id>/meta.json
 ├── logs/<shell_id>.stdout.log
 ├── logs/<shell_id>.stderr.log
@@ -280,6 +280,7 @@ The CLI auto-detects the repo fingerprint from cwd and loads the stored secret.
 |----------|-------------|
 | `FRAMEWORK_SHELLS_SECRET` | Secret for runtime ID derivation and API auth |
 | `FRAMEWORK_SHELLS_REPO_FINGERPRINT` | Override auto-computed repo fingerprint |
+| `FRAMEWORK_SHELLS_BASE_DIR` | Override storage base dir (default `~/.cache/framework_shells`) |
 
 ## Secret & Fingerprint Surface
 
@@ -287,20 +288,14 @@ The CLI auto-detects the repo fingerprint from cwd and loads the stored secret.
 
 - `FRAMEWORK_SHELLS_REPO_FINGERPRINT`: repo-scoped namespace (defaults to a SHA256 of `cwd` if unset)
 - `FRAMEWORK_SHELLS_SECRET`: secret used to derive the `runtime_id` (and API tokens when auth is enabled)
-
-### TE2 (Reference)
-
-TE2’s `scripts/run_framework.sh` is the canonical place where the secret is created/loaded and exported:
-
-- Secret file path: `~/.cache/te_framework/runtimes/<fingerprint>/secret`
-- If present, it is loaded; otherwise it is generated and written, then exported as `FRAMEWORK_SHELLS_SECRET`.
+- `FRAMEWORK_SHELLS_BASE_DIR`: optional override for the on-disk storage root (defaults to `~/.cache/framework_shells`)
 
 ### Standalone / CLI
 
-The CLI tries to be usable outside TE2:
+The CLI tries to be usable standalone:
 
 - If `FRAMEWORK_SHELLS_REPO_FINGERPRINT` is missing, it computes one from `cwd` (and sets the env var).
-- If `FRAMEWORK_SHELLS_SECRET` is missing, it tries to load the same stored secret file under the computed fingerprint.
+- If `FRAMEWORK_SHELLS_SECRET` is missing, it tries to load the stored secret file under the computed fingerprint.
 - If no stored secret exists, it falls back to a temporary secret (good for one-off runs, but you won’t be able to recover/attach to that runtime after restart).
 
 
@@ -335,7 +330,7 @@ Shell processes are launched with `start_new_session=True` for isolation. This m
 The secret's primary purpose is **runtime isolation** - it derives the `runtime_id` that namespaces shell storage:
 
 ```
-~/.cache/te_framework/runtimes/<repo_fingerprint>/<runtime_id>/
+~/.cache/framework_shells/runtimes/<repo_fingerprint>/<runtime_id>/
 ```
 
 Two instances with different secrets won't see each other's shells, even if running from the same repo. This enables running multiple clones on different ports without interference.
