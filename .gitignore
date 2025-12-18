@@ -6,3 +6,6 @@ conv.chat
 #.agent/
 node_modules/
 android/
+
+# Python packaging
+*.egg-info/

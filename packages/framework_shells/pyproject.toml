@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "framework_shells"
+version = "0.0.0"
+description = "Framework-agnostic process orchestration with PTY, pipe, and dtach backends."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "fastapi",
+  "aiofiles",
+  "pyyaml",
+]
+
+[project.scripts]
+fws = "framework_shells.cli.main:main"
+fs = "framework_shells.cli.main:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
