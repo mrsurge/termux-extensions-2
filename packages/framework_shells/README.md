@@ -175,26 +175,7 @@ When mounted in a FastAPI app, `framework_shells` can self-host a simple dashboa
 
 The dashboard toolbar includes **Truncate Logs**, which truncates all `.stdout.log`/`.stderr.log` files in the current runtime (it does not delete shell records). Exited shells can be fully removed via **Purge Exited** in the Exited section (deletes metadata + logs).
 
-### UI Hints
-
-Shells can carry optional UI metadata via `ShellSpec.ui` / `ShellRecord.ui`.
-
-The dashboard currently supports `ui.subgroup_styles`: a mapping from subgroup name (or a glob pattern like `project:*` / `lsp:*`) to simple style properties for the subgroup “card”.
-
-Notes:
-- Patterns use `fnmatch` wildcards (`*`, `?`, `[]`).
-- If multiple patterns match a subgroup, the most-specific (longest) pattern wins.
-
-```yaml
-ui:
-  subgroup_styles:
-    lsp:
-      bg: rgba(68, 45, 47, 0.80)
-      border: rgba(168, 85, 247, 0.60)
-    project:*:
-      bg: rgba(0, 0, 0, 0.88)
-      border: rgba(29, 70, 126, 0.88)
-```
+UI styling and grouping metadata is carried on each shell record via `ShellSpec.ui` / `ShellRecord.ui` (see Shellspec below).
 
 ## Shellspec Convention (Recommended)
 
@@ -203,6 +184,27 @@ ui:
 - Describe host-run processes as `ShellSpec` (YAML).
 - Start shells via `Orchestrator` (from a spec or spec ref).
 - Keep optional UI hints in the shellspec under `ui` (not host-specific code).
+
+### Shellspec Format
+
+A shellspec YAML file is a mapping of **shell type id → shell definition**:
+
+```yaml
+version: "1"
+shells:
+  <shell_type_id>:
+    command: ["bash", "-lc", "echo hello"]
+```
+
+### UI Hints (`shellspec.ui`)
+
+Shells can carry optional UI metadata via `ShellSpec.ui` / `ShellRecord.ui`.
+
+The dashboard currently supports `ui.subgroup_styles`: a mapping from subgroup name (or a glob pattern like `project:*` / `lsp:*`) to simple style properties for the subgroup “card”.
+
+Notes:
+- Patterns use `fnmatch` wildcards (`*`, `?`, `[]`).
+- If multiple patterns match a subgroup, the most-specific (longest) pattern wins.
 
 ### Per-app Shellspec Layout
 
@@ -214,7 +216,7 @@ app/apps/<app_id>/
     └── app_worker.yaml
 ```
 
-Example minimal spec:
+Example shellspec with env, subgroups, and UI styling:
 
 ```yaml
 version: "1"
@@ -222,6 +224,15 @@ shells:
   worker:
     backend: proc
     cwd: ${ctx:PROJECT_ROOT}
+    subgroups: ["worker", "project:${ctx:APP_ID}"]
+    ui:
+      subgroup_styles:
+        worker:
+          bg: rgba(68, 45, 47, 0.80)
+          border: rgba(168, 85, 247, 0.60)
+        project:*:
+          bg: rgba(0, 0, 0, 0.88)
+          border: rgba(29, 70, 126, 0.88)
     command:
       - python
       - -m
