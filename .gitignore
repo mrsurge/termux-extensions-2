@@ -9,3 +9,6 @@ android/
 
 # Python packaging
 *.egg-info/
+
+# Scratch clones
+.tmp_fws_repo/
