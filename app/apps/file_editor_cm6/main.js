@@ -2971,7 +2971,7 @@ async function main() {
   const fileFromUrl = params.get('file');
   const restoredPath = serverState.lastFile;
   const restoredSha = serverState.lastFileSha256 || null;
-  
+
   // Sync host bookkeeping with backend SSOT - the iframe already loaded the file
   if (restoredPath) {
     currentPath = restoredPath;
@@ -2982,10 +2982,29 @@ async function main() {
     setText(''); // NiceGUI iframe owns the real buffer
     updatePathDisplay();
     syncSessionPath();
-    
+
+    // Ensure explorer knows the active file even on a cold refresh (the iframe
+    // may have already restored it without calling openFile()).
+    try {
+      if (typeof window.__explorerBusDispatch === 'function') {
+        const projectRoot = serverState?.activeProject || cachedProjectRoot || null;
+        const rootAbs = projectRoot
+          ? toAbsolute(projectRoot, null, HOME_DIR).replace(/\/+$/, '')
+          : null;
+        const resolved = toAbsolute(restoredPath, null, HOME_DIR);
+        let rel = null;
+        if (rootAbs && resolved.startsWith(rootAbs + '/')) {
+          rel = resolved.slice(rootAbs.length + 1);
+        }
+        window.__explorerBusDispatch('explorer:activeFile', { rel });
+      }
+    } catch (e) {
+      // Ignore explorer notification errors.
+    }
+
     // Open WebSocket for file watching
     openWebSocket(restoredPath);
-    
+
     console.log('[BOOT] Synced with backend SSOT:', restoredPath);
   }
 

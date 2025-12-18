@@ -508,12 +508,29 @@ class ExplorerDispatcher:
         # 6. Active file (HistoryStore session_state SSOT)
         try:
             state = _history_store.get_session_state() or {}
+            # Prefer the active project from session_state / HistoryStore since
+            # explorer_helper.get_project_root() can briefly be the default (~)
+            # during cold reconnects.
+            active_project = state.get("activeProject") or _history_store.get_active_project()
+            project_root_for_active = (
+                str(active_project) if isinstance(active_project, str) and active_project.strip() else str(self.project_root)
+            )
+
             current_path = state.get("currentPath")
             rel: Optional[str] = None
             if isinstance(current_path, str) and current_path.strip():
-                candidate = abs_to_rel(current_path, str(self.project_root))
+                candidate = abs_to_rel(current_path, project_root_for_active)
                 if candidate and candidate != ".":
                     rel = candidate
+
+            # Fallback: use per-project last_file (sidecar-backed), which is more
+            # resilient if session_state isn't shared across server workers.
+            if not rel:
+                last_file = _history_store.get_last_file(project_root_for_active)
+                if isinstance(last_file, str) and last_file.strip():
+                    candidate = abs_to_rel(last_file, project_root_for_active)
+                    if candidate and candidate != ".":
+                        rel = candidate
             await self.emit_personal("explorer:activeFile", {"rel": rel})
         except Exception as e:
             logger.warning(f"Failed to load active file: {e}")
