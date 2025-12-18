@@ -24,6 +24,7 @@ let gitButtons = null;
 let explorerMenuBtn = null;
 let explorerMenuDropdown = null;
 let explorerMenuStickyHeadersItem = null;
+let explorerMenuScrollActiveItem = null;
 
 const UI_PREF_KEY_EXPLORER_STICKY_HEADERS = 'explorerStickyHeaders';
 let explorerStickyHeadersEnabled = null; // boolean | null (unknown until prefs arrive)
@@ -38,6 +39,100 @@ const uiState = {
   gitStatus: null,
   reviewEntries: [],
 };
+
+let renderedProjectPath = null;
+
+// Currently opened document (relative to project root), if known.
+let activeFileRel = null;
+
+function setActiveFileRel(nextRel) {
+  activeFileRel = typeof nextRel === 'string' && nextRel.trim() ? nextRel : null;
+  applyActiveFileMarker();
+}
+
+function applyActiveFileMarker() {
+  if (!treeElement) {
+    treeElement = document.getElementById('fe-file-tree');
+  }
+  const root = treeElement;
+  if (!root) return;
+
+  root
+    .querySelectorAll('li.fe-tree-node.fe-active-file')
+    .forEach((li) => li.classList.remove('fe-active-file'));
+
+  if (!activeFileRel) return;
+
+  // Prefer a fast selector when CSS.escape exists, otherwise fall back to scanning.
+  try {
+    const esc = window.CSS && CSS.escape ? CSS.escape(activeFileRel) : null;
+    if (esc) {
+      const node = root.querySelector(
+        `li.fe-tree-node[data-kind="file"][data-rel="${esc}"]`,
+      );
+      if (node) node.classList.add('fe-active-file');
+      return;
+    }
+  } catch {
+    // ignore selector errors and fall back to scanning
+  }
+
+  const nodes = root.querySelectorAll('li.fe-tree-node[data-kind="file"]');
+  for (const li of nodes) {
+    if ((li.dataset.rel || '') === activeFileRel) {
+      li.classList.add('fe-active-file');
+      break;
+    }
+  }
+}
+
+async function scrollToActiveFile() {
+  if (!activeFileRel) {
+    toast('No opened file to reveal');
+    return;
+  }
+  if (!treeElement) {
+    treeElement = document.getElementById('fe-file-tree');
+  }
+  if (!treeElement) return;
+
+  try {
+    await expandToFile(activeFileRel);
+  } catch (err) {
+    toast('Failed to expand tree');
+    return;
+  }
+
+  applyActiveFileMarker();
+
+  // Try to locate the node after expansion/listing.
+  let node = null;
+  try {
+    const esc = window.CSS && CSS.escape ? CSS.escape(activeFileRel) : null;
+    if (esc) {
+      node = treeElement.querySelector(
+        `li.fe-tree-node[data-kind="file"][data-rel="${esc}"]`,
+      );
+    }
+  } catch {
+    node = null;
+  }
+  if (!node) {
+    const nodes = treeElement.querySelectorAll('li.fe-tree-node[data-kind="file"]');
+    for (const li of nodes) {
+      if ((li.dataset.rel || '') === activeFileRel) {
+        node = li;
+        break;
+      }
+    }
+  }
+
+  if (!node) {
+    toast('Opened file is not visible in the tree');
+    return;
+  }
+  node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
 
 function setCheckableMenuItem(el, checked) {
   if (!el) return;
@@ -891,6 +986,7 @@ function renderExplorerTree() {
   const el = treeElement;
   if (!el) return;
 
+  renderedProjectPath = uiState.projectPath || null;
   clearElement(el);
 
   const rootLi = document.createElement('li');
@@ -1240,9 +1336,14 @@ function handleExplorerEvent(type, payload) {
       // When the active project changes, refresh diff base from backend
       // so both footer and overlay selectors stay in sync with HistoryStore.
       initDiffBaseFromBackend();
+      setActiveFileRel(null);
       // Reset open directories tracking for new project
       openDirectories.clear();
       openDirsInitialized = false;
+      break;
+    }
+    case 'explorer:activeFile': {
+      setActiveFileRel(payload && typeof payload.rel === 'string' ? payload.rel : null);
       break;
     }
     case 'explorer:setOpenDirs': {
@@ -1261,8 +1362,20 @@ function handleExplorerEvent(type, payload) {
 
       if (cwd === '.' || cwd === '') {
         // Root snapshot
-        renderExplorerTree();
-        const rootLi = treeElement.querySelector('li.fe-tree-node.fe-tree-root');
+        const sameProject =
+          !!renderedProjectPath &&
+          !!uiState.projectPath &&
+          renderedProjectPath === uiState.projectPath;
+        let rootLi = treeElement.querySelector('li.fe-tree-node.fe-tree-root');
+        if (!rootLi || !sameProject) {
+          renderExplorerTree();
+          rootLi = treeElement.querySelector('li.fe-tree-node.fe-tree-root');
+        } else {
+          const label = rootLi.querySelector(':scope > .fe-tree-text');
+          if (label) {
+            label.textContent = basename(uiState.projectPath || '') || 'Project';
+          }
+        }
         if (!rootLi) break;
         let childList = rootLi.querySelector(':scope > ul.fe-tree');
         if (!childList) {
@@ -1307,6 +1420,7 @@ function handleExplorerEvent(type, payload) {
       
       // Notify any pending expandToPath requests that this directory is ready
       _notifyDirListComplete(cwd);
+      applyActiveFileMarker();
       break;
     }
     case 'explorer:setTree': {
@@ -1665,6 +1779,9 @@ export async function initExplorerUI() {
   explorerMenuStickyHeadersItem = document.getElementById(
     'fe-mi-explorer-sticky-headers',
   );
+  explorerMenuScrollActiveItem = document.getElementById(
+    'fe-mi-explorer-scroll-active',
+  );
   const btnNewProject = document.getElementById('fe-new-project');
   const btnOpenProject = document.getElementById('fe-open-project');
   treeElement = document.getElementById('fe-file-tree');
@@ -1764,6 +1881,14 @@ export async function initExplorerUI() {
         key: UI_PREF_KEY_EXPLORER_STICKY_HEADERS,
         value: !explorerStickyHeadersEnabled,
       });
+    });
+  }
+
+  if (explorerMenuScrollActiveItem) {
+    explorerMenuScrollActiveItem.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      closeExplorerMenu();
+      await scrollToActiveFile();
     });
   }
 

@@ -504,6 +504,19 @@ class ExplorerDispatcher:
             await self.emit_personal("explorer:setOpenDirs", {"dirs": open_dirs})
         except Exception as e:
             logger.warning(f"Failed to load open directories: {e}")
+
+        # 6. Active file (HistoryStore session_state SSOT)
+        try:
+            state = _history_store.get_session_state() or {}
+            current_path = state.get("currentPath")
+            rel: Optional[str] = None
+            if isinstance(current_path, str) and current_path.strip():
+                candidate = abs_to_rel(current_path, str(self.project_root))
+                if candidate and candidate != ".":
+                    rel = candidate
+            await self.emit_personal("explorer:activeFile", {"rel": rel})
+        except Exception as e:
+            logger.warning(f"Failed to load active file: {e}")
     
     async def _pump_job_events(self):
         """Background task to forward job updates to this client."""

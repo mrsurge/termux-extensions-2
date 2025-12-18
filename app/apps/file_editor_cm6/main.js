@@ -1723,6 +1723,23 @@ async function openFile(path, options = {}) {
     syncSessionPath();
     statusEl.textContent = "";
 
+    // Notify explorer of the active file (fast-path; backend seeds from HistoryStore on connect).
+    try {
+      if (typeof window.__explorerBusDispatch === 'function') {
+        const projectRoot = projectState.activeProject || cachedProjectRoot || null;
+        const rootAbs = projectRoot
+          ? toAbsolute(projectRoot, null, HOME_DIR).replace(/\/+$/, '')
+          : null;
+        let rel = null;
+        if (rootAbs && resolved.startsWith(rootAbs + '/')) {
+          rel = resolved.slice(rootAbs.length + 1);
+        }
+        window.__explorerBusDispatch('explorer:activeFile', { rel });
+      }
+    } catch (e) {
+      // Ignore explorer notification errors.
+    }
+
     // Open WebSocket for this file
     openWebSocket(resolved);
     diffController.setContext({ path: resolved, sha: lastSha256 });

@@ -10,6 +10,7 @@
   --explorer-card-hover: #1c2540;
   --explorer-header-z: 1050;
   --explorer-header-menu-z: 1100;
+  --explorer-active-file-accent: #facc15;
 }
 
 /* Drawer container - positioned off-screen by default */
@@ -196,6 +197,19 @@
   margin-left: 0;
   align-items: center;
   position: relative;  /* For ::after pseudo-element positioning */
+}
+
+.fe-tree-node.fe-active-file[data-kind="file"]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px; /* overlap the 1px card border without changing layout */
+  height: 2px;
+  background: var(--explorer-active-file-accent);
+  pointer-events: none;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 1px;
 }
 
 /* Make nested ul span the full width */
