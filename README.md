@@ -24,8 +24,11 @@ An integrated developement environment & complete with
    - You can run on your desktop and mobile seperately and use all the intergrated git featrures to push changes in tandem.
 4. Fully Featured
    -
+   - Python and TS/js LSP's built in... more to come soon
+   - Sticky scroll scopes
    - Fully integrated project exporer/ agent chat / terminal
    - Terminal included can be used interchangably in desktop or mobile from either. No SSH.  (Keep it on your personal LAN if you run it in this way.)
+   - Run and debug code... right inside your own native Termux environment.
    - VS Code - Code-OSS Code-Server Feature parity
    - CM6 Backend with all the bells and whistles
    - Feels native on mobile... no selection jank
