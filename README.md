@@ -19,10 +19,10 @@ An integrated developement environment & complete with
   <img width="1913" height="1014" alt="Screenshot From 2025-11-24 22-22-14" src="https://github.com/user-attachments/assets/80fed2e0-2f2e-462f-969d-bc90b7150316" />
 
 
-3. Fully `git` integrated
+2. Fully `git` integrated
    -
    - You can run on your desktop and mobile seperately and use all the intergrated git featrures to push changes in tandem.
-4. Fully Featured
+3. Fully Featured
    -
    - Python and TS/js LSP's built in... more to come soon
    - Sticky scroll scopes
@@ -44,7 +44,7 @@ An integrated developement environment & complete with
 <img width="225" height="500" alt="Screenshot_20251213-235218 Termux Extensions" src="https://github.com/user-attachments/assets/4b348858-1938-4ae5-9157-61369a74e2f2" />
 
 
-5. Drafting system
+6. Drafting system
    -
 <img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/mrsurge/termux-extensions-2/blob/main/docs/pngs/Screenshot_20251203-003428.Termux%20Extensions.png?raw=true" /> <img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/mrsurge/termux-extensions-2/blob/main/docs/pngs/Screenshot_20251203-004535.Termux%20Extensions.png?raw=true" /> <img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/mrsurge/termux-extensions-2/blob/main/docs/pngs/Screenshot_20251203-004043.Termux%20Extensions.png?raw=true" />
 
