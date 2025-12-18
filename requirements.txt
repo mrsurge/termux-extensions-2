@@ -14,3 +14,4 @@ libarchive
 aiofiles>=23.0.0
 watchdog
 git-python
+pyright
