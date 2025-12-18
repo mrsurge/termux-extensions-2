@@ -20,3 +20,4 @@ android/
 # External worktrees (not part of TE2 repo)
 worktrees/
 pip-venv-amd64/
+packages/

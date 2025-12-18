@@ -69,6 +69,7 @@ WebSocket-driven file tree with real-time updates, search, git status badges, an
 - **Context Menus:** File/folder operations (rename, delete, copy, move, create, make executable)
 - **Select Mode:** Batch operations on multiple files (copy, move, delete, stage/unstage)
 - **Recent Files:** Quick access to recently opened files with project-scoped history
+- **Active File Marker:** Highlights the currently opened file in the tree; explorer menu action “Scroll to opened file” jumps to it.
 - **Sticky Scopes (Monaco-ish):** Open directories dock into a stacked “scope” header while scrolling, with push-up/pull-down animation; tap a sticky scope to collapse it (⋮ menu still works).
 - **Responsive Layout:** Mobile-friendly drawer with swipe gestures and keyboard navigation
 - **Git Actions:** Init repo, stage/unstage, restore file, branch operations directly from explorer

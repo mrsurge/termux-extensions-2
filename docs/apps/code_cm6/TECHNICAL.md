@@ -996,6 +996,7 @@ The explorer underwent a major architectural refactor from REST/fetch to WebSock
 | | `review:save` | Save draft files |
 | | `review:discard` | Discard drafts |
 | **Server → Client** | `explorer:setList` | Directory contents |
+| | `explorer:activeFile` | Current opened file (for highlight / scroll-to) |
 | | `explorer:updateDecorations` | Draft status update |
 | | `explorer:updateGitStatus` | Git status update |
 | | `git:status` | Full git status |
@@ -1197,6 +1198,16 @@ explorer:setList (from file creation, etc.):
 3. Prevents regression where broadcast would collapse open dirs
 ```
 
+### 8.5.1a Active File Tracking (Explorer)
+
+**Added:** 2025-12-18
+
+The explorer can highlight and scroll to the file that is currently opened in the editor.
+
+- **Backend SSOT:** On connect, the server emits `explorer:activeFile` (personal message) derived from `HistoryStore.session_state.currentPath` (preferred) with a fallback to the per-project `last_file`.
+- **Frontend UX:** `explorer.js` marks the matching DOM node with `.fe-active-file` and provides an explorer menu action (“Scroll to opened file”) that expands ancestors and calls `scrollIntoView({ block: "center", behavior: "smooth" })`.
+- **Non-invasive:** This action does not open the file or force editor focus; it only navigates the explorer tree.
+
 ### 8.5.2 Sticky Scopes (Monaco-ish Docked Folders)
 
 **Added:** 2025-12-13
@@ -1214,6 +1225,7 @@ The explorer includes a *frontend-only* sticky-scroll overlay that docks the ope
 - **Geometry-based animation:** Push-up / pull-down is computed via DOM rects and applied as `transform: translateY(...)` per sticky slot.
 - **Menu preservation:** Sticky rows are non-interactive except for their ⋮ menu button (`pointer-events` is enabled only for the button).
 - **Sticky click behavior:** Clicking a sticky row collapses that directory in the underlying tree and scrolls so the collapsed row lands where the sticky header was (“magic” alignment).
+- **Visual polish (fixed):** Sticky stack underlay background is taken from the parent scope and the bottom slot gets the proper border treatment to avoid outline glitches.
 
 **Important Edge Case (fixed):**
 Originally, push-up collision used the “next sibling directory” as the boundary. This breaks when the active/open directory is the **last directory** in a scope (e.g., only files follow), because the push boundary never arrives and the stack can flicker/oscillate.
@@ -1256,6 +1268,11 @@ def list_dir(rel: str = '.') -> dict:
 2. **By Content:** ripgrep or Python fallback
 3. **By Changes:** Git diff with inline hunks
 4. **Review:** Draft files with diff preview
+
+**Search by Name (backend):**
+- Prefer `git ls-files -co --exclude-standard` when the project is a git repo (fast + respects excludes).
+- Fallback to `os.walk` executed via `asyncio.to_thread(...)` to avoid blocking the event loop.
+- Applies ignore patterns for dot-directories and heavy paths (e.g. `node_modules/`, `pip-venv-*`, etc.).
 
 **Search by Changes** fetches full diff data once, then filters client-side:
 
