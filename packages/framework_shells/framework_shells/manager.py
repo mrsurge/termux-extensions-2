@@ -58,7 +58,6 @@ class FrameworkShellManager:
         store: Optional[RuntimeStore] = None,
         max_app_shells: Optional[int] = None,
         max_service_shells: Optional[int] = None,
-        auth_token: Optional[str] = None, # kept for backward compat if needed
         run_id: Optional[str] = None,
         enable_dtach_proxy: bool = True,
         process_hooks: Optional[ShellLifecycleHooks] = None,
@@ -72,7 +71,7 @@ class FrameworkShellManager:
         
         self.max_app_shells = max_app_shells if max_app_shells is not None else 5
         self.max_service_shells = max_service_shells if max_service_shells is not None else 5
-        self.run_id = run_id or os.getenv("TE_RUN_ID")
+        self.run_id = run_id
         self.launcher_pid = os.getpid()
         self.started_at = time.time()
         self._pty: Dict[str, PTYState] = {}
@@ -405,13 +404,7 @@ class FrameworkShellManager:
 
     def _prepare_env(self, record: ShellRecord) -> Dict[str, str]:
         env = os.environ.copy()
-        run_id = record.run_id or os.environ.get("TE_RUN_ID", "")
-        if run_id: env.setdefault("TE_RUN_ID", run_id)
         env.update(record.env_overrides)
-        env.setdefault("TE_SESSION_TYPE", "framework")
-        env.setdefault("TE_FRAMEWORK_SHELL_ID", record.id)
-        if record.uses_dtach:
-            env["TE_FRAMEWORK_DTACH"] = "1"
         return env
 
     def _create_record(
@@ -620,7 +613,6 @@ class FrameworkShellManager:
         master_fd, slave_fd = await asyncio.to_thread(pty.openpty)
         envp = self._prepare_env(record)
         envp.setdefault("TERM", "xterm-256color")
-        envp.setdefault("TE_TTY", "pty")
         
         try:
             attrs = termios.tcgetattr(slave_fd)

@@ -65,6 +65,7 @@ async def lifespan(app_instance):
         from app.ipc.framework_shells_hooks import build_ipc_shell_hooks
         from app.ipc.fws_process_provider import IpcProcessProvider
         await get_manager(
+            run_id=os.environ.get("TE_RUN_ID"),
             process_hooks=build_ipc_shell_hooks(),
             external_process_provider=IpcProcessProvider(),
         )

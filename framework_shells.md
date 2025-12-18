@@ -280,9 +280,6 @@ The CLI auto-detects the repo fingerprint from cwd and loads the stored secret.
 |----------|-------------|
 | `FRAMEWORK_SHELLS_SECRET` | Secret for runtime ID derivation and API auth |
 | `FRAMEWORK_SHELLS_REPO_FINGERPRINT` | Override auto-computed repo fingerprint |
-| `TE_RUN_ID` | Current framework run ID (for adoption tracking) |
-| `TE_PORT` | Framework bind port (default 8089 when using TE2) |
-| `TE_IPC_HOST`, `TE_IPC_PORT` | IPC server address (default 127.0.0.1:9099 when using TE2) |
 
 ## Secret & Fingerprint Surface
 
@@ -349,4 +346,7 @@ Mutating API endpoints can require authentication via:
 - `X-Framework-Key` header (frontend uses this)
 - `Authorization: Bearer <token>` header
 
-Token is derived from `FRAMEWORK_SHELLS_SECRET`. If `TE_FRAMEWORK_SHELL_TOKEN` env var is not set, auth is disabled (dev mode).
+Token is derived from `FRAMEWORK_SHELLS_SECRET`.
+
+- If `FRAMEWORK_SHELLS_SECRET` is unset/empty, auth is disabled (dev mode).
+- If `FRAMEWORK_SHELLS_SECRET` is set, mutating endpoints require a valid token.

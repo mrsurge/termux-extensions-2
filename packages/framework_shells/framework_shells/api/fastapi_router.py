@@ -23,7 +23,7 @@ async def require_auth(
     """Require valid Bearer token or X-Framework-Key for mutating endpoints."""
     secret = get_secret()
     
-    # If no secret configured, skip auth (dev mode / legacy behavior)
+    # If no secret configured, skip auth (dev mode)
     if not secret:
         return
     
@@ -39,10 +39,6 @@ async def require_auth(
     
     # No token provided - skip auth if no token required
     if not token:
-        # Legacy behavior: if TE_FRAMEWORK_SHELL_TOKEN not set, allow unauthenticated
-        import os
-        if not os.environ.get("TE_FRAMEWORK_SHELL_TOKEN"):
-            return
         raise HTTPException(403, "Missing auth token (X-Framework-Key or Authorization header)")
     
     if not hmac.compare_digest(token, expected):
@@ -72,7 +68,6 @@ async def find_or_create_shell(
     mgr: FrameworkShellManager = Depends(get_manager_dep),
     _: None = Depends(require_auth)
 ):
-    # This matches the existing TE2 find_or_create semantics
     command = payload.get("command")
     cwd = payload.get("cwd")
     env = payload.get("env")

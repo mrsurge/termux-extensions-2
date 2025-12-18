@@ -27,6 +27,16 @@ The stable “surface” for the runtime secret is `scripts/run_framework.sh`:
 - It creates/loads `~/.cache/te_framework/runtimes/<fingerprint>/secret`
 - Exports `FRAMEWORK_SHELLS_SECRET` (used to derive the runtime namespace and API tokens)
 
+### TE2 Environment Variables (FWS Integration)
+
+These are TE2-only knobs used by TE2’s scripts/apps; `framework_shells` itself does not read or inject `TE_*` variables.
+
+| Variable | Description |
+|----------|-------------|
+| `TE_RUN_ID` | Current framework run ID (TE2 app/IPC correlation) |
+| `TE_PORT` | Framework bind port (default 8089) |
+| `TE_IPC_HOST`, `TE_IPC_PORT` | IPC server address (default 127.0.0.1:9099) |
+
 
 ## Architecture
 
@@ -294,8 +304,8 @@ Current behavior:
 - IPC shutdown also performs a best-effort `framework_shells` termination pass to catch any shells that were not registered.
 
 ### Auth errors (403)
-- Auth is currently disabled for development
-- If enabled in future, set `TE_FRAMEWORK_SHELL_TOKEN` env var
+- Mutating FWS endpoints require a token derived from `FRAMEWORK_SHELLS_SECRET`.
+- If you see 403s, verify `FRAMEWORK_SHELLS_SECRET` and `FRAMEWORK_SHELLS_REPO_FINGERPRINT` match what the framework exported.
 
 ## Logs
 
