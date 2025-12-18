@@ -1,8 +1,15 @@
 from pathlib import Path
 from typing import Optional
 import os
+import hashlib
 
 from .auth import get_secret, derive_runtime_id
+
+
+def _compute_fingerprint_from_cwd() -> str:
+    cwd = Path.cwd().resolve()
+    return hashlib.sha256(str(cwd).encode("utf-8")).hexdigest()[:16]
+
 
 class RuntimeStore:
     """Namespaced storage paths for a framework runtime."""
@@ -12,20 +19,13 @@ class RuntimeStore:
         self.runtime_id = derive_runtime_id(self.secret)
         
         base = base_dir or Path.home() / ".cache" / "te_framework"
-        fingerprint = os.environ.get("TE_REPO_FINGERPRINT")
-        # In standalone CLI usage, fingerprint might need to be computed or
-        # allow a fallback if we want to run without the wrapper script.
-        # But per plan, we enforce strict prerequisites.
+        fingerprint = os.environ.get("FRAMEWORK_SHELLS_REPO_FINGERPRINT")
         if not fingerprint:
-             # Try to compute it if we are in a recognizable repo
-             # This is a bit tricky for a pipx installed package.
-             # Let's rely on the env var being set or raise validation error.
-             if not os.environ.get("TE_REPO_FINGERPRINT"):
-                 # ONE LAST CHANCE: If configured to allow loose mode (e.g. testing)
-                 if os.getenv("FRAMEWORK_SHELLS_ALLOW_NO_FINGERPRINT"):
-                      fingerprint = "standalone_debug"
-                 else:
-                      raise RuntimeError("TE_REPO_FINGERPRINT environment variable is required")
+            if os.getenv("FRAMEWORK_SHELLS_ALLOW_NO_FINGERPRINT"):
+                fingerprint = "standalone_debug"
+            else:
+                fingerprint = _compute_fingerprint_from_cwd()
+                os.environ["FRAMEWORK_SHELLS_REPO_FINGERPRINT"] = fingerprint
 
         self.root = base / "runtimes" / fingerprint / self.runtime_id
         self.metadata_dir = self.root / "meta"

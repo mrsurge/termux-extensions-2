@@ -125,7 +125,7 @@ ensure_framework_secret() {
   fi
   
   export FRAMEWORK_SHELLS_SECRET
-  export TE_REPO_FINGERPRINT="$fingerprint"
+  export FRAMEWORK_SHELLS_REPO_FINGERPRINT="$fingerprint"
 }
 
 

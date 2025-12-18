@@ -279,10 +279,32 @@ The CLI auto-detects the repo fingerprint from cwd and loads the stored secret.
 | Variable | Description |
 |----------|-------------|
 | `FRAMEWORK_SHELLS_SECRET` | Secret for runtime ID derivation and API auth |
-| `TE_REPO_FINGERPRINT` | Override auto-computed repo fingerprint |
+| `FRAMEWORK_SHELLS_REPO_FINGERPRINT` | Override auto-computed repo fingerprint |
 | `TE_RUN_ID` | Current framework run ID (for adoption tracking) |
 | `TE_PORT` | Framework bind port (default 8089 when using TE2) |
 | `TE_IPC_HOST`, `TE_IPC_PORT` | IPC server address (default 127.0.0.1:9099 when using TE2) |
+
+## Secret & Fingerprint Surface
+
+`framework_shells` has two key inputs that define where it stores metadata/logs and which shells belong to the current runtime:
+
+- `FRAMEWORK_SHELLS_REPO_FINGERPRINT`: repo-scoped namespace (defaults to a SHA256 of `cwd` if unset)
+- `FRAMEWORK_SHELLS_SECRET`: secret used to derive the `runtime_id` (and API tokens when auth is enabled)
+
+### TE2 (Reference)
+
+TE2’s `scripts/run_framework.sh` is the canonical place where the secret is created/loaded and exported:
+
+- Secret file path: `~/.cache/te_framework/runtimes/<fingerprint>/secret`
+- If present, it is loaded; otherwise it is generated and written, then exported as `FRAMEWORK_SHELLS_SECRET`.
+
+### Standalone / CLI
+
+The CLI tries to be usable outside TE2:
+
+- If `FRAMEWORK_SHELLS_REPO_FINGERPRINT` is missing, it computes one from `cwd` (and sets the env var).
+- If `FRAMEWORK_SHELLS_SECRET` is missing, it tries to load the same stored secret file under the computed fingerprint.
+- If no stored secret exists, it falls back to a temporary secret (good for one-off runs, but you won’t be able to recover/attach to that runtime after restart).
 
 
 ## Integration Hooks (Optional)

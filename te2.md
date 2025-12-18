@@ -20,6 +20,13 @@ curl -X POST http://127.0.0.1:9100/actions/wake
 curl -X POST http://127.0.0.1:9100/actions/sleep
 ```
 
+### Secret Surface (TE2)
+
+The stable “surface” for the runtime secret is `scripts/run_framework.sh`:
+
+- It creates/loads `~/.cache/te_framework/runtimes/<fingerprint>/secret`
+- Exports `FRAMEWORK_SHELLS_SECRET` (used to derive the runtime namespace and API tokens)
+
 
 ## Architecture
 
@@ -27,7 +34,7 @@ curl -X POST http://127.0.0.1:9100/actions/sleep
 ┌─────────────────────────────────────────────────────────────────┐
 │                         run_framework.sh                         │
 │  - Sets FRAMEWORK_SHELLS_SECRET                                 │
-│  - Sets TE_REPO_FINGERPRINT                                     │
+│  - Sets FRAMEWORK_SHELLS_REPO_FINGERPRINT                       │
 │  - Starts IPC server                                            │
 │  - Starts supervisor                                            │
 └─────────────────────────────────────────────────────────────────┘
@@ -58,7 +65,7 @@ curl -X POST http://127.0.0.1:9100/actions/sleep
 ## Startup Flow
 
 1. **run_framework.sh**:
-   - Computes `TE_REPO_FINGERPRINT` from repo root path
+   - Computes `FRAMEWORK_SHELLS_REPO_FINGERPRINT` from repo root path
    - Generates/loads `FRAMEWORK_SHELLS_SECRET`
    - Starts IPC server (`--ipc-port`, default 9099) and a sleep listener on port 9100
    - Starts supervisor (unless `--sleep`, which leaves the framework stopped until /actions/wake)
@@ -259,7 +266,7 @@ All new code should import directly from `framework_shells`.
 
 ### Shells not showing in UI
 - Check `python -m framework_shells.cli.main list`
-- Verify `FRAMEWORK_SHELLS_SECRET` and `TE_REPO_FINGERPRINT` match
+- Verify `FRAMEWORK_SHELLS_SECRET` and `FRAMEWORK_SHELLS_REPO_FINGERPRINT` match
 
 ### “Why do I see extra processes under an LSP shell?”
 Use `python -m framework_shells.cli.main tree --depth 4` to show procfs-discovered descendants (e.g. `node tsserver.js` children under `lsp:javascript`).

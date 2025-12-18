@@ -21,10 +21,3 @@ class PipeState:
     label: Optional[str] = None
     shell_id: Optional[str] = None
     stop: asyncio.Event = field(default_factory=asyncio.Event)
-
-@dataclass
-class DTachState:
-    """State for dtach-backed shells (Phase 4)."""
-    socket_path: str # defined as str or Path, sticking to str/Path adaptable
-    # To be fully implemented in Phase 4
-    pass

@@ -36,8 +36,7 @@ async def _background_cleanup():
             app_ttl_seconds = int(app_ttl_seconds)
         else:
             app_ttl_seconds = DEFAULT_APP_TTL_SECONDS
-        
-        print(f"[AppLifecycle] Cleanup tick {tick}: tracking {len(_running_apps)} app(s)")
+
         async with _get_lock():
             now = time.time()
             stale_apps = []
@@ -48,7 +47,10 @@ async def _background_cleanup():
                         stale_apps.append(shell_id)
             
             if stale_apps:
-                print(f"[AppLifecycle] Cleaning up {len(stale_apps)} stale app(s) (TTL: {app_ttl_seconds}s)...")
+                print(
+                    f"[AppLifecycle] Cleanup tick {tick}: cleaning up {len(stale_apps)} stale app(s) "
+                    f"(tracking {len(_running_apps)}; TTL: {app_ttl_seconds}s)..."
+                )
                 for shell_id in stale_apps:
                     await terminate_app(manager, shell_id)
 

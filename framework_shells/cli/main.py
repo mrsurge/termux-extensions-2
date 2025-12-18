@@ -30,11 +30,11 @@ def load_stored_secret(fingerprint: str) -> str | None:
 def setup_environment():
     """Auto-detect fingerprint and secret if not set."""
     # Compute fingerprint from cwd if not set
-    if "TE_REPO_FINGERPRINT" not in os.environ:
+    if "FRAMEWORK_SHELLS_REPO_FINGERPRINT" not in os.environ:
         fp = compute_standalone_fingerprint()
-        os.environ["TE_REPO_FINGERPRINT"] = fp
+        os.environ["FRAMEWORK_SHELLS_REPO_FINGERPRINT"] = fp
     else:
-        fp = os.environ["TE_REPO_FINGERPRINT"]
+        fp = os.environ["FRAMEWORK_SHELLS_REPO_FINGERPRINT"]
     
     # Try to load stored secret if not set
     if "FRAMEWORK_SHELLS_SECRET" not in os.environ:
@@ -42,7 +42,10 @@ def setup_environment():
         if secret:
             os.environ["FRAMEWORK_SHELLS_SECRET"] = secret
         else:
-            print("Warning: No stored secret found. Using temporary secret (shells will be lost on exit).")
+            print(
+                "Warning: No stored secret found. Using a temporary secret "
+                "(dtach shells may keep running, but you won't be able to recover/attach to this runtime after restart)."
+            )
             os.environ["FRAMEWORK_SHELLS_SECRET"] = "temporary_secret_" + os.urandom(8).hex()
 
 def main():
