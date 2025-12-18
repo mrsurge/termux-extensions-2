@@ -1611,6 +1611,23 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
+    case 'error': {
+      const message =
+        payload && typeof payload.error === 'string'
+          ? payload.error
+          : 'Unknown error';
+
+      // If the search overlay is active, prefer surfacing the error there
+      // (otherwise users can get stuck on "Searching…").
+      if (searchOverlayVisible && searchLoading) {
+        searchLoading = false;
+        searchError = message;
+        renderSearchOverlay();
+      } else {
+        toast(message);
+      }
+      break;
+    }
     case 'review:setEntries': {
       uiState.reviewEntries = payload && Array.isArray(payload.entries) ? payload.entries : [];
       if (searchMode === 'review') {

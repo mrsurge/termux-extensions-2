@@ -57,6 +57,7 @@ from .draft_diff_helper import compute_draft_diff
 from .core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
 from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
+from .explorer import search as explorer_search
 
 IGNORE_PATTERNS = [
     '.git', '__pycache__', 'node_modules', '.venv', 'venv',
@@ -78,39 +79,7 @@ STATUS_TEXT_MAP = {
 
 async def _search_by_name(root: Path, query: str) -> dict:
     """Search files/folders by name."""
-    results = []
-    query_lower = query.lower()
-    count = 0
-    max_results = 500
-    
-    def should_ignore(path: Path) -> bool:
-        for part in path.parts:
-            if part in IGNORE_PATTERNS or part.startswith('.'):
-                return True
-        return False
-    
-    # Walk directory
-    for item in root.rglob('*'):
-        if count >= max_results:
-            break
-        if should_ignore(item.relative_to(root)):
-            continue
-        if query_lower in item.name.lower():
-            results.append({
-                "path": str(item),
-                "rel": str(item.relative_to(root)),
-                "type": "dir" if item.is_dir() else "file",
-                "name": item.name
-            })
-            count += 1
-    
-    return {
-        "mode": "name",
-        "query": query,
-        "results": results,
-        "truncated": count >= max_results,
-        "count": count
-    }
+    return await explorer_search.search_by_name(root, query)
 
 async def _search_by_content(root: Path, query: str) -> dict:
     """Search file contents using ripgrep or fallback."""

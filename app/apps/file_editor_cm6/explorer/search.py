@@ -1,6 +1,8 @@
 
 import asyncio
 import json
+import os
+import fnmatch
 import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -19,6 +21,9 @@ IGNORE_PATTERNS = [
     '.git', '__pycache__', 'node_modules', '.venv', 'venv',
     '.pytest_cache', '.mypy_cache', '.tox', 'dist', 'build',
     '*.egg-info', '.DS_Store'
+]
+IGNORE_GLOBS = [
+    'pip-venv-*',
 ]
 CHANGE_RESULT_LIMIT = 40
 STATUS_TEXT_MAP = {
@@ -80,36 +85,171 @@ def _status_meta_from_code(code: str) -> tuple[str, str]:
 
 async def search_by_name(root: Path, query: str) -> dict:
     """Search files/folders by name."""
-    results = []
-    query_lower = query.lower()
-    count = 0
+    query_lower = (query or '').lower().strip()
     max_results = 500
-    
-    def should_ignore(path: Path) -> bool:
-        for part in path.parts:
-            if part in IGNORE_PATTERNS or part.startswith('.'):
+
+    def should_ignore_rel(rel: str) -> bool:
+        # Fast path: ignore dot segments + known heavy dirs.
+        parts = Path(rel).parts
+        for part in parts:
+            if not part:
+                continue
+            if part.startswith('.'):
                 return True
+            if part in IGNORE_PATTERNS:
+                return True
+            for pat in IGNORE_PATTERNS:
+                if '*' in pat and fnmatch.fnmatch(part, pat):
+                    return True
+            for pat in IGNORE_GLOBS:
+                if fnmatch.fnmatch(part, pat):
+                    return True
         return False
-    
-    for item in root.rglob('*'):
-        if count >= max_results:
-            break
-        if should_ignore(item.relative_to(root)):
-            continue
-        if query_lower in item.name.lower():
-            results.append({
-                "path": str(item),
-                "rel": str(item.relative_to(root)),
-                "type": "dir" if item.is_dir() else "file",
-                "name": item.name
-            })
-            count += 1
+
+    def matches_name(rel: str) -> bool:
+        name = Path(rel).name.lower()
+        return query_lower in name
+
+    def pack_result(rel: str, is_dir: bool) -> dict:
+        return {
+            "path": str((root / rel).resolve()),
+            "rel": rel,
+            "type": "dir" if is_dir else "file",
+            "name": Path(rel).name,
+        }
+
+    def run_filesystem_walk() -> dict:
+        results: list[dict] = []
+        count = 0
+
+        def onerror(_err):
+            # Ignore unreadable dirs/files; we don't want search to fail hard.
+            return
+
+        for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False, onerror=onerror):
+            if count >= max_results:
+                break
+
+            try:
+                rel_dir = str(Path(dirpath).relative_to(root))
+            except Exception:
+                continue
+            if rel_dir == '.':
+                rel_dir = ''
+            if rel_dir and should_ignore_rel(rel_dir):
+                dirnames[:] = []
+                continue
+
+            # Prune ignored directories early.
+            pruned = []
+            for d in dirnames:
+                rel = str(Path(rel_dir, d)) if rel_dir else d
+                if should_ignore_rel(rel):
+                    continue
+                pruned.append(d)
+            dirnames[:] = pruned
+
+            # Match directories (from this level).
+            for d in dirnames:
+                if count >= max_results:
+                    break
+                rel = str(Path(rel_dir, d)) if rel_dir else d
+                if matches_name(rel):
+                    results.append(pack_result(rel, True))
+                    count += 1
+
+            # Match files.
+            for f in filenames:
+                if count >= max_results:
+                    break
+                rel = str(Path(rel_dir, f)) if rel_dir else f
+                if should_ignore_rel(rel):
+                    continue
+                if matches_name(rel):
+                    results.append(pack_result(rel, False))
+                    count += 1
+
+        return {"results": results, "count": count, "truncated": count >= max_results}
+
+    async def run_git_ls_files() -> Optional[dict]:
+        # If we're in a git repo, this is much faster and respects excludes.
+        try:
+            if not is_git_repository(root):
+                return None
+        except Exception:
+            return None
+
+        cmd = ['git', '-C', str(root), 'ls-files', '-co', '--exclude-standard', '-z']
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _stderr = await proc.communicate()
+        except Exception:
+            return None
+        if proc.returncode != 0:
+            return None
+
+        results: list[dict] = []
+        count = 0
+        seen_dirs: set[str] = set()
+
+        # Files (and derived directories).
+        for raw in stdout.split(b'\0'):
+            if count >= max_results:
+                break
+            if not raw:
+                continue
+            rel = raw.decode('utf-8', errors='ignore').replace('\\', '/')
+            rel = rel.strip('/')
+            if not rel or should_ignore_rel(rel):
+                continue
+
+            # Derived directories first so searching for "app" finds "app/" even
+            # if no file named "app" exists.
+            p = Path(rel)
+            parent = p.parent
+            if parent and str(parent) not in ('.', ''):
+                accum = []
+                for part in parent.parts:
+                    accum.append(part)
+                    drel = str(Path(*accum))
+                    if drel in seen_dirs or should_ignore_rel(drel):
+                        continue
+                    seen_dirs.add(drel)
+                    if matches_name(drel):
+                        results.append(pack_result(drel, True))
+                        count += 1
+                        if count >= max_results:
+                            break
+
+            if count >= max_results:
+                break
+            if matches_name(rel):
+                results.append(pack_result(rel, False))
+                count += 1
+
+        return {"results": results, "count": count, "truncated": count >= max_results}
+
+    # Avoid blocking the server event loop (Termux devices can be slow).
+    git_res = await run_git_ls_files()
+    if git_res is None:
+        fs_res = await asyncio.to_thread(run_filesystem_walk)
+        results = fs_res["results"]
+        count = fs_res["count"]
+        truncated = fs_res["truncated"]
+    else:
+        results = git_res["results"]
+        count = git_res["count"]
+        truncated = git_res["truncated"]
     
     return {
         "mode": "name",
         "query": query,
         "results": results,
-        "truncated": count >= max_results,
+        "truncated": truncated,
         "count": count
     }
 
