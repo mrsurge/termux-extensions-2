@@ -5,7 +5,7 @@ import sys
 import shutil
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..manager import FrameworkShellManager
 from ..process_snapshot import ProcfsProcessProvider, ProcessSnapshot
@@ -57,6 +57,18 @@ def setup_environment():
             )
             os.environ["FRAMEWORK_SHELLS_SECRET"] = "temporary_secret_" + os.urandom(8).hex()
 
+def _parse_env_kv(pairs: Optional[List[str]]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for item in pairs or []:
+        if "=" not in item:
+            raise ValueError(f"Invalid --env value {item!r} (expected KEY=VALUE)")
+        k, v = item.split("=", 1)
+        k = k.strip()
+        if not k:
+            raise ValueError(f"Invalid --env value {item!r} (empty KEY)")
+        out[k] = v
+    return out
+
 def main():
     parser = argparse.ArgumentParser(description="Framework Shells CLI")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
@@ -76,6 +88,16 @@ def main():
     # fs attach [id]
     attach_parser = subparsers.add_parser("attach", help="Attach to a shell (dtach)")
     attach_parser.add_argument("id", help="Shell ID or Label")
+
+    # fs run -- <command...>
+    run_parser = subparsers.add_parser("run", help="Spawn a one-off shell without a shellspec")
+    run_parser.add_argument("--backend", choices=["proc", "pty", "pipe", "dtach"], default="proc", help="Backend (default: proc)")
+    run_parser.add_argument("--label", default=None, help="Optional shell label")
+    run_parser.add_argument("--cwd", default=None, help="Working directory")
+    run_parser.add_argument("--env", action="append", default=None, help="Environment override KEY=VALUE (repeatable)")
+    run_parser.add_argument("--subgroup", action="append", default=None, help="Subgroup tag (repeatable)")
+    run_parser.add_argument("--no-start", action="store_true", help="Create record only (do not start process)")
+    run_parser.add_argument("cmd", nargs=argparse.REMAINDER, help="Command to run (prefix with --)")
 
     # fs tree
     tree_parser = subparsers.add_parser("tree", help="Show shell process trees (includes procfs descendants)")
@@ -97,6 +119,30 @@ def main():
 
 async def run_async(args):
     manager = FrameworkShellManager()
+
+    if getattr(args, "command", None) == "run":
+        cmd = list(getattr(args, "cmd", []) or [])
+        if cmd and cmd[0] == "--":
+            cmd = cmd[1:]
+        if not cmd:
+            raise SystemExit("fws run requires a command. Example: fws run --backend pty -- bash -l -i")
+
+        env = _parse_env_kv(getattr(args, "env", None))
+        subgroups = [str(x) for x in (getattr(args, "subgroup", None) or []) if str(x).strip()]
+        autostart = not bool(getattr(args, "no_start", False))
+        backend = getattr(args, "backend", "proc")
+
+        if backend == "pty":
+            rec = await manager.spawn_shell_pty(cmd, cwd=getattr(args, "cwd", None), env=env, label=getattr(args, "label", None), subgroups=subgroups, autostart=autostart)
+        elif backend == "pipe":
+            rec = await manager.spawn_shell_pipe(cmd, cwd=getattr(args, "cwd", None), env=env, label=getattr(args, "label", None), subgroups=subgroups, autostart=autostart)
+        elif backend == "dtach":
+            rec = await manager.spawn_shell_dtach(cmd, cwd=getattr(args, "cwd", None), env=env, label=getattr(args, "label", None), subgroups=subgroups, autostart=autostart)
+        else:
+            rec = await manager.spawn_shell(cmd, cwd=getattr(args, "cwd", None), env=env, label=getattr(args, "label", None), subgroups=subgroups, autostart=autostart)
+
+        print(rec.id)
+        return
 
     if getattr(args, "command", None) == "tree":
         depth = int(getattr(args, "depth", 8) or 8)

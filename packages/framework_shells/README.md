@@ -177,7 +177,13 @@ The dashboard toolbar includes **Truncate Logs**, which truncates all `.stdout.l
 
 ### UI Hints
 
-Shells can carry optional UI metadata via `ShellSpec.ui` / `ShellRecord.ui`. The dashboard currently supports `ui.subgroup_styles` to color subgroup “cards” and accents:
+Shells can carry optional UI metadata via `ShellSpec.ui` / `ShellRecord.ui`.
+
+The dashboard currently supports `ui.subgroup_styles`: a mapping from subgroup name (or a glob pattern like `project:*` / `lsp:*`) to simple style properties for the subgroup “card”.
+
+Notes:
+- Patterns use `fnmatch` wildcards (`*`, `?`, `[]`).
+- If multiple patterns match a subgroup, the most-specific (longest) pattern wins.
 
 ```yaml
 ui:
@@ -185,6 +191,9 @@ ui:
     lsp:
       bg: rgba(68, 45, 47, 0.80)
       border: rgba(168, 85, 247, 0.60)
+    project:*:
+      bg: rgba(0, 0, 0, 0.88)
+      border: rgba(29, 70, 126, 0.88)
 ```
 
 ## Shellspec Convention (Recommended)
@@ -205,37 +214,38 @@ app/apps/<app_id>/
     └── app_worker.yaml
 ```
 
-Example minimal spec (TE2-style, but generic):
+Example minimal spec:
 
 ```yaml
 version: "1"
 shells:
-  app-worker:
+  worker:
     backend: proc
     cwd: ${ctx:PROJECT_ROOT}
     command:
       - python
       - -m
-      - app.libs.app_worker
-      - --app-id
-      - ${ctx:APP_ID}
+      - your_module.worker
+      - --project
+      - ${ctx:PROJECT_ROOT}
       - --port
       - ${free_port}
-      - --backend-module
-      - ${ctx:BACKEND_MODULE_PATH}
     env:
-      TE_APP_ID: ${ctx:APP_ID}
-      TE_APP_WORKER_PORT: ${free_port}
+      APP_ID: ${ctx:APP_ID}
+      PORT: ${free_port}
+      LOG_LEVEL: info
+      FEATURE_FLAG_X: "1"
+      DATABASE_URL: ${env:DATABASE_URL}
 ```
 
 Then start it from a shellspec ref (`<path>#<id>`) with a render context:
 
 ```python
 shell = await Orchestrator(mgr).start_from_ref(
-    "shellspec/app_worker.yaml#app-worker",
+    "shellspec/app_worker.yaml#worker",
     base_dir=app_dir,
-    ctx={"APP_ID": app_id, "PROJECT_ROOT": project_root, "BACKEND_MODULE_PATH": backend_module_path},
-    label=f"app-worker:{app_id}",
+    ctx={"APP_ID": app_id, "PROJECT_ROOT": project_root},
+    label=f"worker:{app_id}",
 )
 ```
 
@@ -261,6 +271,9 @@ python -m framework_shells.cli.main list
 
 # Apply spec file
 python -m framework_shells.cli.main up shells.yaml
+
+# Spawn a one-off shell without a spec
+fws run --backend pty --label demo --env FOO=bar --env PORT=1234 -- bash -l -i
 
 # Terminate all shells
 python -m framework_shells.cli.main down
