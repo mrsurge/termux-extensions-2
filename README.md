@@ -92,6 +92,7 @@ sudo apt install python3-venv
 python3 -m venv te-venv
 source te-venv/bin/activate
 pip install -r requirements.txt
+pip install "framework-shells @ git+https://github.com/mrsurge/framework-shells@main" # framework shells module is now part of a different repo.
 ./scripts/run_framework.sh
 ```
 **Subsequent runs:**
@@ -105,6 +106,7 @@ pkg upgrade -y ; apt install git -y
 git clone https://github.com/mrsurge/termux-extensions-2.git
 cd termux-extensions-2
 pip install -r requirements.txt
+pip install "framework-shells @ git+https://github.com/mrsurge/framework-shells@main" # framework shells module is now part of a different repo.
 ./scripts/run_framework.sh
 ```
 **Subsequent runs:**
