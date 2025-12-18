@@ -14,4 +14,8 @@ android/
 .tmp_fws_repo/
 .tmp_fws_repo2/
 
+.tmp_fws_repo4/
 .tmp_fws_repo3/
+
+# External worktrees (not part of TE2 repo)
+worktrees/
