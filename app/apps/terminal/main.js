@@ -65,6 +65,23 @@ export default function initTerminalApp(root, api, host) {
     }
   }
 
+  function refocusTerm() {
+    try { state.term && state.term.focus(); } catch (_) {}
+  }
+
+  function softKey(handler) {
+    return (ev) => {
+      // On mobile, <button> taps can steal focus and collapse the virtual keyboard.
+      // Prevent default + refocus xterm to keep the keyboard up.
+      try {
+        ev.preventDefault();
+        ev.stopPropagation();
+      } catch (_) {}
+      try { handler(); } catch (_) {}
+      refocusTerm();
+    };
+  }
+
   function toggleCtrl() {
     state.ctrlActive = !state.ctrlActive;
     if (ui.keyCtrl) ui.keyCtrl.classList.toggle('toggle', state.ctrlActive);
@@ -190,6 +207,11 @@ export default function initTerminalApp(root, api, host) {
     term.open(ui.termContainer);
     term.focus();
     state.term = term;
+    // If the user taps anywhere in the terminal container, always re-focus the terminal
+    // (helps keep mobile keyboard open after interacting with other UI).
+    if (ui.termContainer) {
+      ui.termContainer.addEventListener('pointerdown', () => refocusTerm(), { passive: true });
+    }
 
     // Load and apply fit addon
     try {
@@ -300,13 +322,14 @@ export default function initTerminalApp(root, api, host) {
   if (ui.drawerOverlay) ui.drawerOverlay.addEventListener('click', closeDrawer);
 
   // Soft-keys events
-  if (ui.keyCtrl) ui.keyCtrl.addEventListener('click', toggleCtrl);
-  if (ui.keyTab) ui.keyTab.addEventListener('click', () => sendSeq('\t'));
-  if (ui.keyEsc) ui.keyEsc.addEventListener('click', () => sendSeq('\x1b'));
-  if (ui.keyLeft) ui.keyLeft.addEventListener('click', () => sendSeq('\x1b[D'));
-  if (ui.keyRight) ui.keyRight.addEventListener('click', () => sendSeq('\x1b[C'));
-  if (ui.keyUp) ui.keyUp.addEventListener('click', () => sendSeq('\x1b[A'));
-  if (ui.keyDown) ui.keyDown.addEventListener('click', () => sendSeq('\x1b[B'));
+  // Use pointerdown (not click) to reduce focus churn on mobile browsers.
+  if (ui.keyCtrl) ui.keyCtrl.addEventListener('pointerdown', softKey(toggleCtrl), { passive: false });
+  if (ui.keyTab) ui.keyTab.addEventListener('pointerdown', softKey(() => sendSeq('\t')), { passive: false });
+  if (ui.keyEsc) ui.keyEsc.addEventListener('pointerdown', softKey(() => sendSeq('\x1b')), { passive: false });
+  if (ui.keyLeft) ui.keyLeft.addEventListener('pointerdown', softKey(() => sendSeq('\x1b[D')), { passive: false });
+  if (ui.keyRight) ui.keyRight.addEventListener('pointerdown', softKey(() => sendSeq('\x1b[C')), { passive: false });
+  if (ui.keyUp) ui.keyUp.addEventListener('pointerdown', softKey(() => sendSeq('\x1b[A')), { passive: false });
+  if (ui.keyDown) ui.keyDown.addEventListener('pointerdown', softKey(() => sendSeq('\x1b[B')), { passive: false });
 
   // Initial load: show list view only
   setMode('list');

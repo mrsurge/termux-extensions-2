@@ -37,11 +37,48 @@
   .drawer-open #ta-drawer-overlay { display: block; }
   .ta-list-scroll { max-height: calc(100vh - 120px); overflow: auto; }
   /* Keys toolbar */
-  #ta-keys { display: flex; gap: 6px; margin: 6px 0; }
+  #ta-keys { display: flex; gap: 6px; margin: 0; padding: 8px 10px calc(env(safe-area-inset-bottom, 0px) + 8px); border-top: 1px solid var(--border); background: var(--card); }
   #ta-keys .kbtn { font-size: 0.85em; padding: 4px 8px; border: 1px solid var(--border); background: var(--secondary); color: var(--foreground); border-radius: 6px; }
   #ta-keys .kbtn.toggle { background: var(--accent); color: var(--primary-foreground); }
+  #ta-keys .kbtn { touch-action: manipulation; user-select: none; }
+  #ta-keys .kbtn:focus { outline: none; }
+
+  /* Edge-to-edge terminal layout */
+  .terminal-app {
+    height: 100%;
+    min-height: 100%;
+    width: 100%;
+    overflow: hidden;
+    overscroll-behavior: contain;
+  }
+
+  #ta-terminal-container {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    background: var(--background);
+  }
+
+  #ta-shell-header {
+    margin: 0 !important;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--card);
+  }
+
+  #ta-term {
+    flex: 1 1 auto;
+    min-height: 0;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    background: var(--background);
+  }
 </style>
-<div class="terminal-app" style="display:flex; flex-direction:column; gap:12px;">
+<div class="terminal-app" style="display:flex; flex-direction:column; gap:0;">
 <div id="ta-list-container" class="ta-list-container">
     <div class="section-header">
       <h3 class="section-title">Terminal App</h3>
@@ -56,8 +93,8 @@
     </div>
   </div>
 
-<div id="ta-terminal-container" style="border:1px solid var(--border); border-radius:6px; background:var(--card); padding:8px; min-height:40vh;">
-    <div id="ta-shell-header" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+<div id="ta-terminal-container" style="min-height:40vh;">
+    <div id="ta-shell-header" style="display:flex; align-items:center; gap:8px;">
       <button id="ta-btn-menu" class="app-btn">&#9776;</button>
       <span id="ta-shell-title" style="font-weight:600;">No shell selected</span>
       <span id="ta-shell-status" style="color:var(--muted-foreground);"></span>
@@ -67,16 +104,16 @@
       <button id="ta-btn-remove" class="app-btn">Remove</button>
     </div>
 
-    <div id="ta-term" style="flex:1 1 auto; border:1px solid var(--border); border-radius:6px; background:var(--background); padding:6px; overflow:hidden;"></div>
+    <div id="ta-term" style="flex:1 1 auto; overflow:hidden;"></div>
 
     <div id="ta-keys">
-      <button id="k-ctrl" class="kbtn">Ctrl</button>
-      <button id="k-tab" class="kbtn">Tab</button>
-      <button id="k-esc" class="kbtn">Esc</button>
-      <button id="k-left" class="kbtn">&#8592;</button>
-      <button id="k-up" class="kbtn">&#8593;</button>
-      <button id="k-down" class="kbtn">&#8595;</button>
-      <button id="k-right" class="kbtn">&#8594;</button>
+      <button id="k-ctrl" class="kbtn" type="button" tabindex="-1">Ctrl</button>
+      <button id="k-tab" class="kbtn" type="button" tabindex="-1">Tab</button>
+      <button id="k-esc" class="kbtn" type="button" tabindex="-1">Esc</button>
+      <button id="k-left" class="kbtn" type="button" tabindex="-1">&#8592;</button>
+      <button id="k-up" class="kbtn" type="button" tabindex="-1">&#8593;</button>
+      <button id="k-down" class="kbtn" type="button" tabindex="-1">&#8595;</button>
+      <button id="k-right" class="kbtn" type="button" tabindex="-1">&#8594;</button>
     </div>
   </div>
   <div id="ta-drawer-overlay"></div>

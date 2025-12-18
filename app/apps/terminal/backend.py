@@ -61,7 +61,7 @@ async def list_shells() -> Any:
 
 @terminal_bp.post("/shells")
 async def create_shell(payload: dict = Body(...)) -> Any:
-    """Spawn a new PTY-backed interactive shell as a framework shell.
+    """Spawn a new interactive shell as a framework shell.
 
     Body (JSON): { shell?: string[], cwd?: string }
     """
@@ -75,13 +75,14 @@ async def create_shell(payload: dict = Body(...)) -> Any:
     m = await mgr()
     label = f"terminal-app:{await _next_terminal_sequence(m)}"
     try:
-        record = await m.spawn_shell_pty(
+        # Use dtach-backed terminals (matches Code CM6 terminal behavior):
+        # - better mobile UX consistency
+        # - persistence across worker restarts
+        record = await m.spawn_shell_dtach(
             shell_cmd,
             cwd=cwd,
-            env={},
             label=label,
             subgroups=["terminal", "shell"],
-            autostart=True,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to spawn shell: {exc}")
