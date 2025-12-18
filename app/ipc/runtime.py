@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List
 
 IPC_MODULE = "app.ipc.server"
-DEFAULT_PORT = 9123
+DEFAULT_PORT = 9099
 
 
 def ipc_command(extra_args: List[str] | None = None) -> List[str]:

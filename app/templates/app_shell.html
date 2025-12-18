@@ -31,6 +31,7 @@
         body { background-color: var(--background); color: var(--foreground); font-family: 'Inter', sans-serif; }
         .app-shell { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
         .app-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--card); position: sticky; top: 0; z-index: 5; }
+        html.gv-native .app-toolbar { display: none; }
         .app-title { font-weight: 600; margin-left: 6px; color: var(--foreground); font-size: 0.95rem; max-width: 45vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .spacer { flex: 1; }
         .app-btn { background: var(--secondary); color: var(--foreground); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
@@ -151,6 +152,34 @@
         }
 
     </style>
+    <script>
+    // GeckoView: persist gv-native mode across navigation so we never show two headers.
+    (function () {
+        let enabled = false;
+        try {
+            const p = new URLSearchParams(location.search);
+            if (p.get('gv_native') === '1') {
+                enabled = true;
+                sessionStorage.setItem('te_gv_native', '1');
+            } else if (sessionStorage.getItem('te_gv_native') === '1') {
+                enabled = true;
+            }
+        } catch (e) {}
+
+        if (enabled) {
+            document.documentElement.classList.add('gv-native');
+            try { console.log('[app_shell] gv-native enabled'); } catch (e) {}
+        }
+    })();
+
+    // Called by GeckoView native header to open the existing web Recents modal if present.
+    window.teOpenRecentsModal = function () {
+        const btn = document.getElementById('btn-recents');
+        if (!btn) return false;
+        btn.click();
+        return true;
+    };
+    </script>
 </head>
 <body>
     <div class="app-shell">
@@ -188,9 +217,11 @@
     // Framework toolbar height tracking - expose as CSS variable for all apps
     function updateFrameworkToolbarHeight() {
         const toolbar = document.querySelector('.app-toolbar');
-        if (toolbar) {
+        if (toolbar && !document.documentElement.classList.contains('gv-native')) {
             const height = toolbar.offsetHeight;
             document.documentElement.style.setProperty('--framework-toolbar-height', `${height}px`);
+        } else {
+            document.documentElement.style.setProperty('--framework-toolbar-height', `0px`);
         }
     }
     
@@ -405,11 +436,22 @@
                             card.style.position = 'relative'; // For positioning the quit button
 
                             // Add main click listener for app switching
+                            const withGvNative = (url) => {
+                                try {
+                                    if (!document.documentElement.classList.contains('gv-native')) return url;
+                                    const u = new URL(url, location.origin);
+                                    u.searchParams.set('gv_native', '1');
+                                    return u.pathname + u.search;
+                                } catch (e) {
+                                    return url;
+                                }
+                            };
+
                             card.addEventListener('click', () => {
                                 const targetAppId = card.dataset.appId;
                                 if (targetAppId) {
                                     recentsModal.style.display = 'none';
-                                    window.location.href = `/app/${targetAppId}`;
+                                    window.location.href = withGvNative(`/app/${targetAppId}`);
                                 }
                             });
 

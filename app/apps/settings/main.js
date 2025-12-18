@@ -5,7 +5,7 @@ const SHELL_DELETE_ENDPOINT = (id) => `/api/framework_shells/${id}`;
 const SHUTDOWN_ENDPOINT = '/api/framework/runtime/shutdown';
 const SETTINGS_ENDPOINT = '/api/settings';
 const EXTENSIONS_ENDPOINT = '/api/extensions';
-const IPC_PORT_DEFAULT = parseInt(window.__TE_IPC_PORT__ || '9123', 10);
+const IPC_PORT_DEFAULT = parseInt(window.__TE_IPC_PORT__ || '9099', 10);
 const IPC_HOST = window.__TE_IPC_HOST__ || window.location.hostname || '127.0.0.1';
 const IPC_BASE_URL = `${window.location.protocol}//${IPC_HOST}:${IPC_PORT_DEFAULT}`;
 
@@ -379,10 +379,10 @@ export default function init(root, _api, host) {
   }
 
   root.querySelector('[data-action="refresh-metrics"]')?.addEventListener('click', () => {
-    loadMetrics().catch(() => {});
+    loadMetrics().catch(() => { });
   });
   root.querySelector('[data-action="refresh-shells"]')?.addEventListener('click', () => {
-    loadShells().catch(() => {});
+    loadShells().catch(() => { });
   });
   root.querySelector('[data-action="store-token"]')?.addEventListener('click', () => {
     persistToken(tokenInput?.value || '');
@@ -393,13 +393,13 @@ export default function init(root, _api, host) {
     if (host?.toast) host.toast('Framework token cleared', 2000);
   });
   root.querySelector('[data-action="shutdown"]')?.addEventListener('click', () => {
-    shutdownSupervisor().catch(() => {});
+    shutdownSupervisor().catch(() => { });
   });
   root.querySelector('[data-action="ipc-shutdown"]')?.addEventListener('click', () => {
-    triggerIpcShutdown().catch(() => {});
+    triggerIpcShutdown().catch(() => { });
   });
   reloadExtensionsBtn?.addEventListener('click', () => {
-    loadExtensions().catch(() => {});
+    loadExtensions().catch(() => { });
   });
   saveExtensionOrderBtn?.addEventListener('click', async () => {
     if (!extensionOrderContainer) return;
@@ -421,39 +421,39 @@ export default function init(root, _api, host) {
 
     const patch = {};
     if (Number.isInteger(maxServiceShells) && maxServiceShells > 0) {
-        patch.TE_MAX_SERVICE_SHELLS = maxServiceShells;
+      patch.TE_MAX_SERVICE_SHELLS = maxServiceShells;
     }
     if (Number.isInteger(maxAppShells) && maxAppShells > 0) {
-        patch.TE_MAX_APP_SHELLS = maxAppShells;
+      patch.TE_MAX_APP_SHELLS = maxAppShells;
     }
     if (Number.isInteger(appTtlMinutes) && appTtlMinutes >= 0) {
-        patch.APP_TTL_SECONDS = appTtlMinutes * 60;
+      patch.APP_TTL_SECONDS = appTtlMinutes * 60;
     }
 
     try {
-        await persistSettingsPatch(patch);
-        if (host?.toast) host.toast('Lifecycle settings saved', 2000);
+      await persistSettingsPatch(patch);
+      if (host?.toast) host.toast('Lifecycle settings saved', 2000);
     } catch (err) {
-        console.error('Failed to save lifecycle settings', err);
-        if (host?.toast) host.toast('Failed to save settings', 3000);
+      console.error('Failed to save lifecycle settings', err);
+      if (host?.toast) host.toast('Failed to save settings', 3000);
     }
   });
 
   async function loadAndRenderAll() {
-    await loadMetrics().catch(() => {});
-    await loadShells().catch(() => {});
-    await loadExtensions().catch(() => {});
+    await loadMetrics().catch(() => { });
+    await loadShells().catch(() => { });
+    await loadExtensions().catch(() => { });
 
     const settings = await ensureSettings();
     if (maxServiceShellsInput) {
-        maxServiceShellsInput.value = settings.TE_MAX_SERVICE_SHELLS || '5';
+      maxServiceShellsInput.value = settings.TE_MAX_SERVICE_SHELLS || '5';
     }
     if (maxAppShellsInput) {
-        maxAppShellsInput.value = settings.TE_MAX_APP_SHELLS || '5';
+      maxAppShellsInput.value = settings.TE_MAX_APP_SHELLS || '5';
     }
     if (appTtlInput) {
-        const ttlSeconds = settings.APP_TTL_SECONDS || 1800;
-        appTtlInput.value = Math.floor(ttlSeconds / 60);
+      const ttlSeconds = settings.APP_TTL_SECONDS || 1800;
+      appTtlInput.value = Math.floor(ttlSeconds / 60);
     }
   }
 

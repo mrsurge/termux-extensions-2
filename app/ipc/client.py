@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
-IPC_URL = f"http://{os.environ.get('TE_IPC_HOST', '127.0.0.1')}:{os.environ.get('TE_IPC_PORT', '9123')}"
+IPC_URL = f"http://{os.environ.get('TE_IPC_HOST', '127.0.0.1')}:{os.environ.get('TE_IPC_PORT', '9099')}"
 
 
 def register_process(

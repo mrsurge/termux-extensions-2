@@ -51,13 +51,25 @@ async def lifespan(app_instance):
         parent_pid=os.getppid(),
         metadata={
             "run_id": os.environ.get("TE_RUN_ID"),
-            "port": 8088,
+            "port": 8089,
         }
     )
     if registered:
         print(f"[framework] Registered with IPC (PID {framework_pid})")
     else:
         print(f"[framework] Warning: Failed to register with IPC", file=sys.stderr)
+
+    # Initialize framework_shells early with IPC lifecycle hooks so shell PIDs
+    # are registered (and adoption re-registers as needed).
+    try:
+        from app.ipc.framework_shells_hooks import build_ipc_shell_hooks
+        from app.ipc.fws_process_provider import IpcProcessProvider
+        await get_manager(
+            process_hooks=build_ipc_shell_hooks(),
+            external_process_provider=IpcProcessProvider(),
+        )
+    except Exception as exc:
+        print(f"[framework] Warning: Failed to init framework_shells IPC hooks: {exc}", file=sys.stderr)
     
     # Startup
     print("--- Loading Settings ---")
@@ -84,9 +96,27 @@ async def lifespan(app_instance):
 
     yield
 
-    # Note: Don't unregister here - IPC server is busy in shutdown_all() and can't process the request
-    # IPC will clean the registry after killing all processes
-    print("--- Shutting down: IPC will handle process termination ---")
+    # Terminate all framework shells before exiting
+    # This runs when framework receives SIGTERM from supervisor
+    print("--- Terminating framework shells ---")
+    terminated_count = 0
+    try:
+        mgr = await get_manager()
+        shells = await mgr.list_shells()
+        for shell in shells:
+            if shell.status != "running":
+                continue
+            try:
+                await mgr.terminate_shell(shell.id, force=True)
+                terminated_count += 1
+                print(f"  Terminated: {shell.id} ({shell.label or 'unlabeled'})")
+            except Exception as e:
+                print(f"  Failed to terminate {shell.id}: {e}")
+        print(f"--- Terminated {terminated_count} framework shell(s) ---")
+    except Exception as e:
+        print(f"  Error during shell termination: {e}")
+    
+    print("--- Framework shutdown complete ---")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -98,8 +128,16 @@ static_dir = os.path.join(os.path.dirname(__file__), 'static')
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-from app.libs.framework_shells import FrameworkShellManager, get_manager
+from framework_shells import FrameworkShellManager, get_manager
+from framework_shells.api.fastapi_router import router as framework_shells_router
+from framework_shells.api.websocket import router as framework_shells_ws_router
+from framework_shells.api.fws_ui import router as fws_ui_router
 from app.apps.file_editor_cm6.agent_bridge import get_bridge # This has to go... ASAP
+
+# Mount the framework shells API router
+app.include_router(framework_shells_router)
+app.include_router(framework_shells_ws_router)
+app.include_router(fws_ui_router)
 
 
 
@@ -1026,7 +1064,7 @@ def _ipc_host() -> str:
 
 
 def _ipc_port() -> int:
-    return int(os.getenv("TE_IPC_PORT", "9123"))
+    return int(os.getenv("TE_IPC_PORT", "9099"))
 
 
 def _format_host_for_ws(host: str) -> str:
@@ -1398,6 +1436,8 @@ if __name__ == '__main__':
     parser.add_argument('--broadcast', nargs='+', metavar='IP_SUBNET_OR_IFACE',
                         help='Enable broadcasting. Requires args: "all", IPs, subnets, or interfaces')
     parser.add_argument('--list-interfaces', action='store_true', help='Show network interfaces and exit')
+    parser.add_argument('--port', type=int, default=int(os.environ.get('TE_PORT', '8089')),
+                        help='Bind port (default: 8089)')
     args = parser.parse_args()
     
     # Handle --list-interfaces
@@ -1564,7 +1604,7 @@ if __name__ == '__main__':
                     content={"ok": False, "error": "IP validation error"}
                 )
     
-    print(f"--- Starting ASGI Server on {host_ip}:8088 ---")
+    print(f"--- Starting ASGI Server on {host_ip}:{args.port} ---")
     if use_middleware:
         print(f"[main] IP filtering enabled ({len(allowlist) - 2} filters + localhost)")
     else:
@@ -1573,5 +1613,5 @@ if __name__ == '__main__':
     uvicorn.run(
         app,
         host=host_ip,
-        port=8088,
+        port=args.port,
     )

@@ -8,7 +8,9 @@ import time
 import contextlib
 from pathlib import Path
 from typing import Optional
-from app.libs.framework_shells import get_manager as get_framework_shell_manager
+from framework_shells import get_manager as get_framework_shell_manager
+from framework_shells.orchestrator import Orchestrator
+from framework_shells.shellspec import parse_shellspec_data, parse_shellspec_ref
 from app.libs import app_lifecycle
 
 # Module-level storage for running apps (replaces Flask's current_app.config)
@@ -24,6 +26,22 @@ def _parse_port(value) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _resolve_app_worker_shellspec_ref(app_manifest: dict, app_dir: Path) -> tuple[Optional[str], Optional[dict]]:
+    shellspec_cfg = app_manifest.get("shellspec")
+    if isinstance(shellspec_cfg, dict):
+        ref = shellspec_cfg.get("app_worker") or shellspec_cfg.get("worker")
+        if isinstance(ref, str) and ref.strip():
+            return ref.strip(), None
+        if isinstance(ref, dict):
+            return None, ref
+
+    default_path = app_dir / "shellspec" / "app_worker.yaml"
+    if default_path.exists():
+        return "shellspec/app_worker.yaml#app-worker", None
+
+    return None, None
 
 
 async def _register_running_app(app_id: str, shell_id: str, port: int, *, nicegui: bool = False) -> None:
@@ -264,20 +282,58 @@ async def ensure_app_running(app_id):
         # No backend, nothing to start
         return {"message": "No backend to start"}
 
-    port = find_free_port()
-    env["TE_APP_WORKER_PORT"] = str(port)
-    backend_module_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'apps', app_manifest['_dir'], backend_module)
-    command = [
-        "python",
-        "-m",
-        "app.libs.app_worker",
-        "--app-id", app_id,
-        "--port", str(port),
-        "--backend-module", backend_module_path
-    ]
-
     manager = await get_framework_shell_manager()
-    shell = await manager.spawn_shell(command, label=f"app-worker:{app_id}", cwd=project_root, env=env, ui=framework_shell_ui)
+    orch = Orchestrator(manager)
+
+    backend_module_path = os.path.abspath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "apps", app_manifest["_dir"], backend_module)
+    )
+    app_dir = Path(backend_module_path).resolve().parent
+
+    shellspec_ref, shellspec_inline = _resolve_app_worker_shellspec_ref(app_manifest, app_dir)
+    if not shellspec_ref and not shellspec_inline:
+        raise RuntimeError(
+            f"App '{app_id}' is missing shellspec for app worker (expected manifest.shellspec.app_worker or {app_dir}/shellspec/app_worker.yaml)"
+        )
+
+    ctx = {
+        "APP_ID": app_id,
+        "PROJECT_ROOT": project_root,
+        "BACKEND_MODULE_PATH": backend_module_path,
+    }
+
+    if shellspec_ref:
+        _ref_path, spec_shell_id = parse_shellspec_ref(shellspec_ref)
+        if not spec_shell_id:
+            raise RuntimeError(f"shellspec ref '{shellspec_ref}' must include '#<id>' for app workers")
+        record_spec_id = f"app:{app_id}:{spec_shell_id}"
+        shell = await orch.start_from_ref(
+            shellspec_ref,
+            base_dir=app_dir,
+            ctx=ctx,
+            label=f"app-worker:{app_id}",
+            record_spec_id=record_spec_id,
+            ui=framework_shell_ui,
+            wait_ready=False,
+        )
+    else:
+        specs_map = parse_shellspec_data(shellspec_inline, default_id="app-worker")
+        if not specs_map:
+            raise RuntimeError(f"Invalid inline shellspec for app '{app_id}'")
+        spec = specs_map.get("app-worker") or next(iter(specs_map.values()))
+        record_spec_id = f"app:{app_id}:{spec.id}"
+        shell = await orch.start_spec(
+            spec,
+            ctx=ctx,
+            label=f"app-worker:{app_id}",
+            record_spec_id=record_spec_id,
+            ui=framework_shell_ui,
+            wait_ready=False,
+        )
+
+    port = _parse_port(shell.env_overrides.get("TE_APP_WORKER_PORT"))
+    if port is None:
+        raise RuntimeError(f"App worker shellspec did not set TE_APP_WORKER_PORT for app '{app_id}'")
 
     # Wait a moment and check if the shell is still alive
     await asyncio.sleep(1.5)

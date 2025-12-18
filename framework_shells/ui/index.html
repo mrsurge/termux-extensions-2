@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Framework Shells</title>
+    <link rel="stylesheet" href="/fws/static/fws.css" />
+  </head>
+  <body>
+    <div class="fws-header">
+      <div class="fws-header-left">
+        <div class="fws-title">Framework Shells</div>
+        <div class="fws-subtitle">Dashboard</div>
+      </div>
+      <div class="fws-header-right">
+        <div class="fws-status disconnected" id="fws-status">Connecting...</div>
+      </div>
+    </div>
+
+    <div class="fws-toolbar">
+      <form method="post" action="/fws/action/shutdown" class="fws-toolbar-form">
+        <input type="hidden" name="scope" value="tree" />
+        <button type="submit" class="btn btn-danger">Shutdown Tree</button>
+      </form>
+      <form method="post" action="/fws/action/shutdown" class="fws-toolbar-form">
+        <input type="hidden" name="scope" value="shells" />
+        <button type="submit" class="btn btn-secondary">Stop Shells Only</button>
+      </form>
+      <form
+        method="post"
+        action="/fws/action/logs/purge"
+        class="fws-toolbar-form"
+        data-fws-ajax="1"
+        data-confirm="Truncate ALL stdout/stderr logs for this runtime? (Shell records remain.)"
+      >
+        <button type="submit" class="btn btn-secondary">Truncate Logs</button>
+      </form>
+      <form method="post" action="/fws/action/refresh" class="fws-toolbar-form">
+        <button type="submit" class="btn btn-secondary">Refresh</button>
+      </form>
+    </div>
+
+    <div class="fws-content" id="fws-content">
+      <div class="fws-loading">Loading...</div>
+    </div>
+
+    <script src="/fws/static/fws.js"></script>
+  </body>
+</html>

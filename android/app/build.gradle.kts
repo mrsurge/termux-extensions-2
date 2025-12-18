@@ -11,8 +11,8 @@ android {
         applicationId = "com.termux.extensions"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["sharedUserIdValue"] = "com.termux.extensions.base"
@@ -32,6 +32,12 @@ android {
             applicationIdSuffix = ".gecko"
             versionNameSuffix = "-gecko"
             manifestPlaceholders["sharedUserIdValue"] = "com.termux.extensions.gecko"
+
+            // GeckoView APKs are huge when built as universal APKs.
+            // Restrict this flavor to arm64-v8a for now.
+            ndk {
+                abiFilters += setOf("arm64-v8a")
+            }
         }
     }
 

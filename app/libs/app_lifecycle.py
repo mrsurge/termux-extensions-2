@@ -23,7 +23,7 @@ CLEANUP_INTERVAL_SECONDS = 60  # 1 minute
 
 async def _background_cleanup():
     """Periodically checks for and terminates old, unlocked apps."""
-    from app.libs.framework_shells import get_manager as get_framework_shell_manager
+    from framework_shells import get_manager as get_framework_shell_manager
     from app.main import get_setting
 
     tick = 0

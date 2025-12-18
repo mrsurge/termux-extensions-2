@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shell Logs - {{ shell_id }}</title>
+    <style>
+      :root {
+        --background: hsl(224, 71%, 4%);
+        --foreground: hsl(213, 31%, 91%);
+        --border: hsl(216, 34%, 17%);
+        --primary: hsl(217, 91%, 60%);
+        --card: hsl(224, 71%, 7%);
+        --success: hsl(142, 76%, 36%);
+        --destructive: hsl(0, 84%, 60%);
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        background: var(--background);
+        color: var(--foreground);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+      }
+      .header {
+        background: var(--card);
+        border-bottom: 1px solid var(--border);
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-shrink: 0;
+      }
+      .header h1 {
+        font-size: 1rem;
+        font-weight: 700;
+        color: var(--primary);
+      }
+      .header .shell-id {
+        font-size: 0.85rem;
+        opacity: 0.75;
+      }
+      .status {
+        font-size: 0.8rem;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgba(34, 197, 94, 0.15);
+        color: var(--success);
+        border: 1px solid rgba(34, 197, 94, 0.25);
+      }
+      .status.disconnected {
+        background: rgba(239, 68, 68, 0.15);
+        color: var(--destructive);
+        border-color: rgba(239, 68, 68, 0.25);
+      }
+      .logs-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .log-pane {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .log-pane-header {
+        background: var(--card);
+        border-bottom: 1px solid var(--border);
+        padding: 8px 16px;
+        font-size: 0.9rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .log-pane-header.stdout { color: var(--success); }
+      .log-pane-header.stderr { color: var(--destructive); }
+      .log-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        background: var(--background);
+        user-select: text;
+      }
+      .loading {
+        color: var(--primary);
+        text-align: center;
+        padding: 20px;
+      }
+      .log-pane + .log-pane {
+        border-top: 2px solid var(--border);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div>
+        <h1>Shell Logs</h1>
+        <div class="shell-id">{{ shell_id }}</div>
+      </div>
+      <div class="status" id="status">Connecting...</div>
+    </div>
+
+    <div class="logs-container">
+      <div class="log-pane">
+        <div class="log-pane-header stdout">STDOUT</div>
+        <pre class="log-content" id="stdout-container"><div class="loading">Connecting...</div></pre>
+      </div>
+
+      <div class="log-pane">
+        <div class="log-pane-header stderr">STDERR</div>
+        <pre class="log-content" id="stderr-container"><div class="loading">Connecting...</div></pre>
+      </div>
+    </div>
+
+    <script>
+      const shellId = "{{ shell_id }}";
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${location.host}/ws/fws/logs/${shellId}`);
+      const stdoutContainer = document.getElementById("stdout-container");
+      const stderrContainer = document.getElementById("stderr-container");
+      const status = document.getElementById("status");
+
+      ws.onopen = () => {
+        status.textContent = "Connected";
+        status.classList.remove("disconnected");
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+
+          if (msg.type === "initial") {
+            stdoutContainer.textContent = msg.stdout || "";
+            stderrContainer.textContent = msg.stderr || "";
+            stdoutContainer.scrollTop = stdoutContainer.scrollHeight;
+            stderrContainer.scrollTop = stderrContainer.scrollHeight;
+          } else if (msg.type === "reset") {
+            if (msg.stream === "stdout") {
+              stdoutContainer.textContent = "";
+              stdoutContainer.scrollTop = stdoutContainer.scrollHeight;
+            } else if (msg.stream === "stderr") {
+              stderrContainer.textContent = "";
+              stderrContainer.scrollTop = stderrContainer.scrollHeight;
+            }
+          } else if (msg.type === "update") {
+            if (msg.stream === "stdout") {
+              stdoutContainer.textContent += msg.data;
+              stdoutContainer.scrollTop = stdoutContainer.scrollHeight;
+            } else if (msg.stream === "stderr") {
+              stderrContainer.textContent += msg.data;
+              stderrContainer.scrollTop = stderrContainer.scrollHeight;
+            }
+          } else if (msg.type === "error") {
+            stdoutContainer.textContent = msg.message;
+            stderrContainer.textContent = msg.message;
+          }
+        } catch (err) {
+          // ignore
+        }
+      };
+
+      ws.onerror = () => {
+        status.textContent = "Error";
+        status.classList.add("disconnected");
+      };
+
+      ws.onclose = () => {
+        stdoutContainer.textContent += "\n\n[Connection closed]";
+        stderrContainer.textContent += "\n\n[Connection closed]";
+        status.textContent = "Disconnected";
+        status.classList.add("disconnected");
+      };
+    </script>
+  </body>
+</html>

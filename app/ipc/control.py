@@ -7,7 +7,7 @@ from typing import Any, Dict
 
 import requests
 
-FRAMEWORK_URL = os.environ.get("TE_FRAMEWORK_URL", "http://127.0.0.1:8088").rstrip("/")
+FRAMEWORK_URL = os.environ.get("TE_FRAMEWORK_URL", "http://127.0.0.1:8089").rstrip("/")
 FRAMEWORK_TOKEN = os.environ.get("TE_FRAMEWORK_SHELL_TOKEN")
 
 

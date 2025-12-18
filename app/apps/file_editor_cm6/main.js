@@ -708,6 +708,7 @@ function detectLanguageFromFilename(filename) {
     html: 'html', htm: 'html',
     md: 'markdown', markdown: 'markdown',
     py: 'python', pyw: 'python',
+    kt: 'kotlin', kts: 'kotlin',
     sh: 'shell', bash: 'shell', zsh: 'shell',
     ksh: 'shell', csh: 'shell', tcsh: 'shell',
     xml: 'xml', svg: 'xml',

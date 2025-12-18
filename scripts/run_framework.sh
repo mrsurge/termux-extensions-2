@@ -40,9 +40,27 @@ print(run_id)
 PY
 }
 
+FRAMEWORK_PORT="${TE_PORT:-8089}"
+IPC_PORT_OVERRIDE=""
+SLEEP_MODE=0
+
 EXTRA_ARGS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --port)
+      shift
+      FRAMEWORK_PORT="$1"
+      shift
+      ;;
+    --ipc-port)
+      shift
+      IPC_PORT_OVERRIDE="$1"
+      shift
+      ;;
+    --sleep)
+      SLEEP_MODE=1
+      shift
+      ;;
     --broadcast)
       shift
       EXTRA_ARGS+=("--broadcast")
@@ -79,6 +97,38 @@ generate_run_id_if_needed() {
 }
 
 generate_run_id_if_needed
+
+compute_repo_fingerprint() {
+  local real_root
+  if command -v readlink >/dev/null 2>&1; then
+    real_root="$(readlink -f "$REPO_ROOT" 2>/dev/null)" || true
+  fi
+  if [ -z "${real_root:-}" ]; then
+    real_root="$(python -c "import os; print(os.path.realpath('$REPO_ROOT'))")"
+  fi
+  echo -n "$real_root" | sha256sum | cut -c1-16
+}
+
+ensure_framework_secret() {
+  local fingerprint secret_dir secret_file
+  fingerprint="$(compute_repo_fingerprint)"
+  secret_dir="$HOME/.cache/te_framework/runtimes/$fingerprint"
+  secret_file="$secret_dir/secret"
+  
+  if [ -f "$secret_file" ]; then
+    FRAMEWORK_SHELLS_SECRET="$(cat "$secret_file")"
+  else
+    mkdir -p "$secret_dir"
+    FRAMEWORK_SHELLS_SECRET="$(openssl rand -hex 32)"
+    echo "$FRAMEWORK_SHELLS_SECRET" > "$secret_file"
+    chmod 600 "$secret_file"
+  fi
+  
+  export FRAMEWORK_SHELLS_SECRET
+  export TE_REPO_FINGERPRINT="$fingerprint"
+}
+
+
 
 cleanup_framework_shell_logs() {
   local base_dir="$HOME/.cache/te_framework"
@@ -156,6 +206,8 @@ fi
 
 cd "$REPO_ROOT"
 
+ensure_framework_secret
+
 cleanup_framework_shell_logs
 
 # Clean up stale python cache files
@@ -174,7 +226,12 @@ fi
 
 IPC_PID_FILE="$HOME/.cache/te_framework/ipc.pid"
 IPC_HOST="${TE_IPC_HOST:-127.0.0.1}"
-IPC_PORT="${TE_IPC_PORT:-9123}"
+IPC_PORT="${IPC_PORT_OVERRIDE:-${TE_IPC_PORT:-9099}}"
+SLEEP_PORT=9100
+
+export TE_IPC_HOST="$IPC_HOST"
+export TE_IPC_PORT="$IPC_PORT"
+export TE_PORT="$FRAMEWORK_PORT"
 
 start_ipc_server() {
   local existing_pid=""
@@ -189,10 +246,22 @@ start_ipc_server() {
   fi
 
   local python_bin="${PYTHON_BIN:-python}"
-  echo "[run_framework] Starting IPC server on $IPC_HOST:$IPC_PORT"
-  TE_FRAMEWORK_URL="${TE_FRAMEWORK_URL:-http://127.0.0.1:8088}" \
+  echo "[run_framework] Starting IPC server on $IPC_HOST:$IPC_PORT (sleep listener :$SLEEP_PORT)"
+
+  # Pass framework args (including framework port) down into IPC sleep mode so it can wake the framework.
+  export TE_FRAMEWORK_ARGS_JSON
+  TE_FRAMEWORK_ARGS_JSON="$(
+    python - <<PY
+import json, os, sys
+args = json.loads(os.environ.get("TE_FRAMEWORK_ARGS_JSON_IN", "[]"))
+print(json.dumps(args))
+PY
+  )"
+
+  TE_FRAMEWORK_URL="${TE_FRAMEWORK_URL:-http://127.0.0.1:${FRAMEWORK_PORT}}" \
+  TE_IPC_PERSIST=1 \
   IPC_LOG_PREFIX=1 \
-  "$python_bin" -m app.ipc.server --host "$IPC_HOST" --port "$IPC_PORT" &
+  "$python_bin" -m app.ipc.server --host "$IPC_HOST" --port "$IPC_PORT" --sleep --sleep-port "$SLEEP_PORT" &
   TE_IPC_PID=$!
   export TE_IPC_PID
   mkdir -p "$(dirname "$IPC_PID_FILE")"
@@ -200,6 +269,53 @@ start_ipc_server() {
   echo "[run_framework] IPC server pid $TE_IPC_PID"
 }
 
+# Prepare args list for IPC to use when waking the framework.
+export TE_FRAMEWORK_ARGS_JSON_IN
+TE_FRAMEWORK_ARGS_JSON_IN="$(python -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${EXTRA_ARGS[@]}" --port "$FRAMEWORK_PORT")"
+
 start_ipc_server
 
-exec python -m app.supervisor "${EXTRA_ARGS[@]}"
+shutdown_ipc() {
+  # Let IPC orchestrate shutdown (sleep supervisor) and then exit itself.
+  curl -fsS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/exit" >/dev/null 2>&1 || \
+    curl -fsS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/sleep" >/dev/null 2>&1 || true
+
+  # Wait briefly for IPC to self-exit; do not kill it unless it's stuck.
+  for _i in $(seq 1 50); do
+    if ! kill -0 "$TE_IPC_PID" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  # Last resort.
+  kill "$TE_IPC_PID" 2>/dev/null || true
+}
+
+trap 'shutdown_ipc' EXIT INT TERM
+
+if [ "$SLEEP_MODE" -eq 0 ]; then
+  # Wait for sleep listener to come up, then wake framework.
+  for _i in $(seq 1 50); do
+    if curl -sS "http://${IPC_HOST}:${SLEEP_PORT}/health" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.1
+  done
+  echo "[run_framework] Waking framework via sleep listener"
+  curl -sS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/wake" >/dev/null || true
+else
+  echo "[run_framework] Sleep mode: framework not started (wake via http://${IPC_HOST}:${SLEEP_PORT}/actions/wake)"
+fi
+
+# Ctrl+S triggers sleep (stop framework, keep IPC alive).
+# Note: Ctrl+S may be intercepted by terminal flow control depending on stty settings.
+while kill -0 "$TE_IPC_PID" 2>/dev/null; do
+  key=""
+  IFS= read -rsn1 -t 0.2 key || true
+  if [ "${key}" = $'\x13' ]; then
+    echo "[run_framework] Ctrl+S -> /actions/sleep"
+    curl -fsS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/sleep" >/dev/null || true
+  fi
+  sleep 0.05
+done

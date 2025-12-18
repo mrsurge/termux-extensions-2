@@ -469,6 +469,12 @@ class ExplorerDispatcher:
         # Subscribe to job updates and forward relevant ones to this client
         try:
             from app.libs.jobs import manager as job_manager
+            # Seed job tracking from the project sidecar (jobs started in previous client sessions).
+            try:
+                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
+                self._tracked_job_ids.update(sidecar.list_tracked_jobs())
+            except Exception:
+                pass
             self._job_queue = Queue()
             self._job_listener = job_manager.add_listener(self._job_queue, job_ids=None)
             self._job_pump_task = asyncio.create_task(self._pump_job_events())
@@ -532,8 +538,21 @@ class ExplorerDispatcher:
                                 await self.broadcast_git_status()
                                 await self.handle_explorer_refresh({}, None)
                     else:
-                        # Race condition: job emitted before we tracked it
-                        logger.warning(f"[JOB_PUMP] Missed event for untracked job {job_id} ({job_type})")
+                        # Unrelated job updates are expected because the job registry is global.
+                        # Only log when the job looks like one we should be tracking (sidecar / session mismatch).
+                        if job_id and isinstance(job_id, str):
+                            try:
+                                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
+                                tracked = set(sidecar.list_tracked_jobs())
+                            except Exception:
+                                tracked = set()
+
+                            if job_id in tracked:
+                                # Track it now (e.g. app restarted between job creation and listener init).
+                                self._tracked_job_ids.add(job_id)
+                                await self.emit_personal("job:progress", job_data)
+                            else:
+                                logger.debug(f"[JOB_PUMP] Ignoring untracked job {job_id} ({job_type})")
                         
             except Empty:
                 continue

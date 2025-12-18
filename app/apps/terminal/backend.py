@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Body, Query, WebSocket
 
 # Reuse the core framework shells manager/config
-from app.libs.framework_shells import get_manager as _manager
+from framework_shells import get_manager as _manager
 
 terminal_bp = APIRouter()
 

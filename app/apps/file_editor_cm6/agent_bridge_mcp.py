@@ -12,7 +12,7 @@ import json
 import os
 from typing import Dict, List, Optional, Any
 from pathlib import Path
-from app.libs.framework_shells import get_manager as _manager
+from framework_shells import get_manager as _manager
 
 
 class CodexAdapter:

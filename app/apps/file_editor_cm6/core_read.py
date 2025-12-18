@@ -268,6 +268,7 @@ def _do_handle_fs_event(raw_event):
         lang = "plaintext"
         if path.endswith('.py'): lang = 'python'
         if path.endswith('.js'): lang = 'javascript'
+        if path.endswith(('.kt', '.kts')): lang = 'kotlin'
         
         _emit_event({
             "type": "replace_full",

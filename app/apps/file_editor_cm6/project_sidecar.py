@@ -307,6 +307,16 @@ class ProjectSidecar:
     def clear_tracked_jobs(self) -> None:
         self._data["tracked_jobs"] = []
 
+    def list_tracked_jobs(self) -> List[str]:
+        jobs = self._data.get("tracked_jobs") or []
+        if not isinstance(jobs, list):
+            return []
+        out: List[str] = []
+        for job_id in jobs:
+            if isinstance(job_id, str) and job_id:
+                out.append(job_id)
+        return out
+
     @property
     def last_boot_at(self) -> Optional[str]:
         return self._data.get("last_boot_at")

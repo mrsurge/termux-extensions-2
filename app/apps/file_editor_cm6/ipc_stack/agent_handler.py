@@ -24,7 +24,7 @@ from app.apps.file_editor_cm6.conversation_utils import build_transcript
 from .protocol import CodexAdapter
 
 LOGGER = logging.getLogger("te.ipc.agent_drawer")
-FRAMEWORK_URL = os.getenv("TE_FRAMEWORK_URL", "http://127.0.0.1:8088").rstrip("/")
+FRAMEWORK_URL = os.getenv("TE_FRAMEWORK_URL", "http://127.0.0.1:8089").rstrip("/")
 FRAMEWORK_TOKEN = os.getenv("TE_FRAMEWORK_SHELL_TOKEN")
 
 _state_lock = threading.RLock()

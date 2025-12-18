@@ -12,8 +12,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Body, Query
 
-from app.libs.framework_shells import FrameworkShellManager
-from app.libs.framework_shells import get_manager as get_framework_shell_manager
+from framework_shells import FrameworkShellManager
+from framework_shells import get_manager as get_framework_shell_manager
 
 aria_downloader_bp = APIRouter()
 

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import os
 import signal
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+import asyncio
 
 
 @dataclass
@@ -113,42 +116,110 @@ class ProcessRegistry:
         
         if logger:
             logger.info(f"IPC shutdown: {len(processes)} processes to terminate")
-        
+
         stats = {
             "total": len(processes),
             "terminated": 0,
             "clean_exits": 0,
             "force_killed": 0,
             "errors": [],
-            "force_killed_shells": [],  # Shell IDs that were force-killed (preserve logs)
+            "force_killed_shells": [],
+            "framework_shells": {
+                "attempted": 0,
+                "terminated": 0,
+                "errors": [],
+            },
         }
+
+        # Phase 0: terminate framework_shells-managed shells.
+        # IMPORTANT: these are NOT necessarily registered in IPC, and they are spawned
+        # with start_new_session=True (so killing the framework PID does NOT kill them).
+        try:
+            from framework_shells import FrameworkShellManager
+
+            async def _terminate_framework_shells() -> None:
+                mgr = FrameworkShellManager(enable_dtach_proxy=False)
+                shells = await mgr.list_shells()
+                for shell in shells:
+                    if getattr(shell, "status", None) != "running":
+                        continue
+                    stats["framework_shells"]["attempted"] += 1
+                    try:
+                        await mgr.terminate_shell(shell.id, force=True)
+                        stats["framework_shells"]["terminated"] += 1
+                    except Exception as exc:
+                        stats["framework_shells"]["errors"].append(f"{shell.id}: {exc}")
+
+            if logger:
+                logger.info("IPC shutdown: terminating framework_shells shells")
+            asyncio.run(_terminate_framework_shells())
+            if logger:
+                logger.info(
+                    "IPC shutdown: framework_shells terminated %d/%d",
+                    stats["framework_shells"]["terminated"],
+                    stats["framework_shells"]["attempted"],
+                )
+        except Exception as exc:
+            # Best effort: IPC should still try to kill registered processes.
+            stats["framework_shells"]["errors"].append(str(exc))
+            if logger:
+                logger.warning(f"IPC shutdown: failed to terminate framework_shells shells: {exc}")
         
-        # Sort: workers and shells before framework (children before parent)
-        sorted_processes = sorted(processes, key=lambda p: 0 if p.type != "framework" else 1)
+        # Sort: children before parents (via parent_pid), and framework last.
+        # NOTE: ordering is delegated to framework_shells (host-agnostic planner).
+        try:
+            from framework_shells.process_snapshot import ProcessRecord as FwsProcessRecord
+            from framework_shells.shutdown import ShutdownPolicy, plan_shutdown
+
+            policy = ShutdownPolicy(types_last=["framework"])
+            planned = plan_shutdown(
+                [
+                    FwsProcessRecord(
+                        pid=rec.pid,
+                        parent_pid=rec.parent_pid,
+                        type=rec.type,
+                        label=rec.label,
+                        metadata=dict(rec.metadata or {}),
+                        shell_id=(rec.metadata or {}).get("shell_id") if isinstance(rec.metadata, dict) else None,
+                    )
+                    for rec in processes
+                ],
+                policy=policy,
+            )
+
+            by_pid: Dict[int, ProcessRecord] = {p.pid: p for p in processes}
+            sorted_processes = [by_pid[p.pid] for p in planned if p.pid in by_pid]
+        except Exception:
+            # Fallback: stable ordering without depth planning
+            sorted_processes = sorted(processes, key=lambda rec: (rec.type == "framework", rec.type, rec.pid))
+
+        if logger:
+            plan = " ".join(
+                f"{rec.pid}:{rec.type}:{(rec.label or '-')}:ppid={rec.parent_pid or '-'}"
+                for rec in sorted_processes
+            )
+            logger.info("IPC shutdown order: %s", plan)
         
         # Terminate each process sequentially
         for record in sorted_processes:
             if logger:
                 logger.info(f"Terminating {record.type} pid={record.pid} label={record.label}")
             
-            # Send SIGTERM
+            # Attempt termination
             try:
+                # Standard kill for registered processes.
                 os.kill(record.pid, signal.SIGTERM)
             except ProcessLookupError:
-                if logger:
-                    logger.info(f"Process {record.pid} already gone")
-                with self._lock:
-                    self._processes.pop(record.pid, None)
-                continue
+                # Already gone
+                pass
             except Exception as exc:
                 stats["errors"].append(f"PID {record.pid}: {exc}")
                 if logger:
-                    logger.error(f"Failed to SIGTERM pid={record.pid}: {exc}")
-                continue
+                    logger.error(f"Failed to terminate pid={record.pid}: {exc}")
+                # Continue to verification loop anyway
             
             # Wait for process to exit (poll with timeout)
-            # Note: Process may become a zombie before being reaped - that's still "exited"
-            max_wait = 2.0  # Maximum 2 seconds
+            max_wait = 2.0
             poll_interval = 0.1
             elapsed = 0.0
             process_exited = False
@@ -157,58 +228,37 @@ class ProcessRegistry:
                 time.sleep(poll_interval)
                 elapsed += poll_interval
                 
-                # Check if process is gone OR is a zombie (effectively exited)
                 try:
-                    # Read process state from /proc
-                    stat_file = f"/proc/{record.pid}/stat"
-                    with open(stat_file, 'r') as f:
+                    # Check if process is gone from /proc
+                    # Note: We rely on os.kill(0) or /proc check
+                    os.kill(record.pid, 0)
+                    
+                    # If os.kill succeeds, process exists. Check for zombie.
+                    with open(f"/proc/{record.pid}/stat", 'r') as f:
                         stat = f.read()
-                    # State is 3rd field: R=running, S=sleeping, Z=zombie, etc.
                     state = stat.split()[2]
-                    
                     if state == 'Z':
-                        # Process is zombie - it has exited, parent just hasn't reaped it yet
                         process_exited = True
-                        if logger:
-                            logger.debug(f"Process {record.pid} is zombie (clean exit)")
                         break
-                    # else: still actually running, keep waiting
-                    
-                except (FileNotFoundError, IndexError, ValueError):
-                    # /proc entry gone = process fully reaped
+                except (ProcessLookupError, FileNotFoundError, IndexError, ValueError):
                     process_exited = True
                     break
-                except Exception as exc:
-                    # Unexpected error - assume still running to be safe
-                    if logger:
-                        logger.warning(f"Failed to check state for {record.pid}: {exc}")
+                except Exception:
+                    pass
             
             # Check final status
             if process_exited:
-                # Exited cleanly
                 if logger:
-                    logger.info(f"Process {record.pid} terminated cleanly (after {elapsed:.2f}s)")
+                    logger.info(f"Process {record.pid} terminated cleanly")
                 stats["clean_exits"] += 1
-                
-                # Note: Shell logs are left alone during shutdown
-                # Startup cycle will handle all log housekeeping
             else:
-                # Still alive after max_wait - force kill
+                # Force kill if still alive
                 if logger:
-                    logger.warning(f"Process {record.pid} didn't exit after {max_wait}s, sending SIGKILL")
+                    logger.warning(f"Process {record.pid} didn't exit, sending SIGKILL")
                 try:
                     os.kill(record.pid, signal.SIGKILL)
                     stats["force_killed"] += 1
-                    
-                    # Track shell_id for log preservation
-                    if "shell_id" in record.metadata:
-                        stats["force_killed_shells"].append(record.metadata["shell_id"])
-                        if logger:
-                            logger.info(f"Marked shell {record.metadata['shell_id']} for log preservation")
                 except ProcessLookupError:
-                    # Exited between our check and SIGKILL
-                    if logger:
-                        logger.info(f"Process {record.pid} exited just before SIGKILL")
                     stats["clean_exits"] += 1
             
             # Remove from registry
@@ -221,9 +271,6 @@ class ProcessRegistry:
             self._shutdown_in_progress = False
         
         if logger:
-            logger.info(f"IPC shutdown complete: {stats['terminated']} total ({stats['clean_exits']} clean, {stats['force_killed']} killed)")
-            if stats["force_killed_shells"]:
-                logger.info(f"Preserved logs for force-killed shells: {stats['force_killed_shells']}")
+            logger.info(f"IPC shutdown complete: {stats['terminated']} total")
         
         return stats
-

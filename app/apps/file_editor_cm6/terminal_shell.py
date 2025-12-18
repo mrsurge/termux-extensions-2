@@ -4,7 +4,7 @@ import os
 import hashlib
 from pathlib import Path
 
-from app.libs.framework_shells import get_manager as _manager
+from framework_shells import get_manager as _manager
 
 
 def _terminal_subgroups(project_path: str | None) -> list[str]:
@@ -73,9 +73,14 @@ async def create_editor_shell(cwd=None, shell_cmd=None, project_path: str | None
     
     label = _terminal_label(project_path, sequence=sequence)
 
-    # Create PTY-backed shell using spawn_shell_pty
+    # Check if a shell with this label already exists and is running
+    existing = await mgr.find_shell_by_label(label, status="running")
+    if existing:
+        return await mgr.describe(existing)
+
+    # Create dtach-backed shell for persistence
     subgroups = _terminal_subgroups(project_path)
-    rec = await mgr.spawn_shell_pty(
+    rec = await mgr.spawn_shell_dtach(
         shell_cmd,
         label=label,
         subgroups=subgroups,

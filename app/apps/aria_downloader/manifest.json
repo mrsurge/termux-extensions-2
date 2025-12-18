@@ -5,10 +5,8 @@
   "version": "0.0.1",
   "description": "Placeholder UI for managing aria2 downloads.",
   "author": "Gemini",
-  "framework_shell_ui": {
-    "subgroup_styles": {
-      "aria2": { "bg": "rgba(34, 197, 94, 0.10)", "border": "rgba(34, 197, 94, 0.22)" }
-    }
+  "shellspec": {
+    "app_worker": "shellspec/app_worker.yaml#app-worker"
   },
   "entrypoints": {
     "backend_blueprint": "main.py",
