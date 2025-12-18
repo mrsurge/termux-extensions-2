@@ -138,6 +138,9 @@ export function initExplorerStickyScopes({
   const CROSS_SCOPE_GAP_PX = 10;
   // Small hysteresis to prevent rapid "scope-flapping" during push transitions.
   const KEY_STABILITY_FRAMES = 2;
+  // Extra space so the bottom-most slot can render a subtle downward shadow
+  // without being clipped by the sticky overlay container.
+  const BOTTOM_SHADOW_PAD_PX = 8;
 
   function scheduleUpdate() {
     if (disposed) return;
@@ -374,6 +377,11 @@ export function initExplorerStickyScopes({
       const srcLi = stickySourceLis[depth];
       if (!slotEl || !srcLi || !underlayEl) continue;
 
+      slotEl.classList.toggle(
+        'fe-sticky-scope-slot-bottom',
+        depth === stickySourceLis.length - 1,
+      );
+
       let push = 0;
       const nextInfo = findNextTreeNodeAfterSubtree(srcLi);
       if (nextInfo?.node) {
@@ -481,7 +489,7 @@ export function initExplorerStickyScopes({
 
     // Set fixed geometry first; render can rely on rowStepPx.
     const contentHeight = chain.length * rowStepPx;
-    container.style.height = `${PADDING_TOP + contentHeight}px`;
+    container.style.height = `${PADDING_TOP + contentHeight + BOTTOM_SHADOW_PAD_PX}px`;
 
     const sameIdentityChain =
       key === lastKey &&

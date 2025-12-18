@@ -152,6 +152,11 @@
   flex: none;
 }
 
+.fe-sticky-scope-slot.fe-sticky-scope-slot-bottom {
+  /* Subtle separation between the sticky stack and the scrolling tree below. */
+  box-shadow: 0 6px 10px -10px rgba(0, 0, 0, 0.85);
+}
+
 .fe-sticky-scope-underlay {
   position: absolute;
   top: 0;
