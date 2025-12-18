@@ -299,16 +299,26 @@ export function initExplorerStickyScopes({
     underlayEl.style.top = '0px';
     underlayEl.style.zIndex = `${slotZ - 1}`;
 
-    // Fill the slot with the source row's computed background so rounded
-    // corners don't reveal the overlay underlay (can look like "ears" when
-    // git status backgrounds/gradients apply).
+    // Ensure slots stay transparent; the underlay provides the "container"
+    // background behind rounded corners.
+    slotEl.style.backgroundColor = '';
+    slotEl.style.backgroundImage = '';
+
+    // Underlay background should match the *parent* scope's background so
+    // nested sticky cards reveal the same color as the real nested tree.
+    const parentLi = depth > 0 ? stickySourceLis[depth - 1] : null;
     try {
-      const cs = window.getComputedStyle(srcLi);
-      slotEl.style.backgroundColor = cs.backgroundColor || '';
-      slotEl.style.backgroundImage = cs.backgroundImage || '';
+      if (parentLi) {
+        const cs = window.getComputedStyle(parentLi);
+        underlayEl.style.backgroundColor = cs.backgroundColor || '';
+        underlayEl.style.backgroundImage = cs.backgroundImage || '';
+      } else {
+        underlayEl.style.backgroundColor = '';
+        underlayEl.style.backgroundImage = '';
+      }
     } catch {
-      slotEl.style.backgroundColor = '';
-      slotEl.style.backgroundImage = '';
+      underlayEl.style.backgroundColor = '';
+      underlayEl.style.backgroundImage = '';
     }
 
     copyExplorerVisualClasses(srcLi, rowEl);
@@ -389,10 +399,13 @@ export function initExplorerStickyScopes({
       const srcLi = stickySourceLis[depth];
       if (!slotEl || !srcLi || !underlayEl) continue;
 
-      slotEl.classList.toggle(
-        'fe-sticky-scope-slot-bottom',
-        depth === stickySourceLis.length - 1,
-      );
+      const isBottomSlot = depth === stickySourceLis.length - 1;
+      slotEl.classList.toggle('fe-sticky-scope-slot-bottom', isBottomSlot);
+      // Slight overlap to hide 1px seams between the docked overlay and the
+      // scrolling tree border outline.
+      slotEl.style.height = `${rowStepPx + (isBottomSlot ? 1 : 0)}px`;
+      const rowEl = stickyRows[depth];
+      if (rowEl) rowEl.style.height = isBottomSlot ? '100%' : '';
 
       let push = 0;
       const nextInfo = findNextTreeNodeAfterSubtree(srcLi);

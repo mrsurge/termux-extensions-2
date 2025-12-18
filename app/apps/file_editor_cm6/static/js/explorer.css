@@ -170,7 +170,7 @@
 .fe-tree li.fe-sticky-scope {
   cursor: default;
   user-select: none;
-  background: transparent;
+  box-sizing: border-box;
   border-bottom: none;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
