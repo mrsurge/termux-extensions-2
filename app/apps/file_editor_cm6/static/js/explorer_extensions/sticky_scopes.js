@@ -299,6 +299,18 @@ export function initExplorerStickyScopes({
     underlayEl.style.top = '0px';
     underlayEl.style.zIndex = `${slotZ - 1}`;
 
+    // Fill the slot with the source row's computed background so rounded
+    // corners don't reveal the overlay underlay (can look like "ears" when
+    // git status backgrounds/gradients apply).
+    try {
+      const cs = window.getComputedStyle(srcLi);
+      slotEl.style.backgroundColor = cs.backgroundColor || '';
+      slotEl.style.backgroundImage = cs.backgroundImage || '';
+    } catch {
+      slotEl.style.backgroundColor = '';
+      slotEl.style.backgroundImage = '';
+    }
+
     copyExplorerVisualClasses(srcLi, rowEl);
     rowEl.dataset.kind = 'dir';
     rowEl.dataset.rel = rel;
