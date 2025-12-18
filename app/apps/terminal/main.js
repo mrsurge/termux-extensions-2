@@ -13,6 +13,8 @@ export default function initTerminalApp(root, api, host) {
     btnStop: root.querySelector('#ta-btn-stop'),
     btnKill: root.querySelector('#ta-btn-kill'),
     btnRemove: root.querySelector('#ta-btn-remove'),
+    zoomOut: root.querySelector('#ta-zoom-out'),
+    zoomIn: root.querySelector('#ta-zoom-in'),
     title: root.querySelector('#ta-shell-title'),
     status: root.querySelector('#ta-shell-status'),
     termContainer: root.querySelector('#ta-term'),
@@ -30,11 +32,59 @@ export default function initTerminalApp(root, api, host) {
     activeId: null,
     ws: null,
     term: null,
+    fitAddon: null,
+    doFit: null,
+    resizeObserver: null,
     mode: 'list',
     ctrlActive: false,
   };
 
   const INITIAL_TAIL = 2000; // lines to preload from persisted log on (re)select
+  const FONT_SIZE_MIN = 10;
+  const FONT_SIZE_MAX = 28;
+  const FONT_SIZE_STEP = 1;
+  const FONT_SIZE_STORAGE_KEY = 'te2_terminal_app_font_size';
+
+  function getStoredFontSize() {
+    try {
+      const raw = localStorage.getItem(FONT_SIZE_STORAGE_KEY);
+      const n = Number(raw);
+      if (Number.isFinite(n) && n > 0) return n;
+    } catch (_) {}
+    return 12;
+  }
+
+  function getCurrentFontSize() {
+    try {
+      const size = state.term?.options?.fontSize;
+      if (typeof size === 'number' && Number.isFinite(size)) return size;
+    } catch (_) {}
+    return getStoredFontSize();
+  }
+
+  function applyFontSize(size) {
+    if (!state.term) return;
+    const clamped = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(size)));
+
+    try {
+      state.term.options.fontSize = clamped;
+    } catch (err) {
+      try {
+        state.term.setOption?.('fontSize', clamped);
+      } catch (_) {}
+    }
+
+    try { localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(clamped)); } catch (_) {}
+
+    if (ui.zoomOut) ui.zoomOut.title = `Zoom out (${clamped}px)`;
+    if (ui.zoomIn) ui.zoomIn.title = `Zoom in (${clamped}px)`;
+
+    if (state.doFit) {
+      setTimeout(() => {
+        try { state.doFit && state.doFit(); } catch (_) {}
+      }, 0);
+    }
+  }
 
   function setMode(mode) {
     state.mode = mode;
@@ -134,6 +184,10 @@ export default function initTerminalApp(root, api, host) {
     state.ws = null;
     try { state.term && state.term.dispose(); } catch (_) {}
     state.term = null;
+    state.fitAddon = null;
+    state.doFit = null;
+    try { state.resizeObserver && state.resizeObserver.disconnect(); } catch (_) {}
+    state.resizeObserver = null;
     ui.termContainer.innerHTML = '';
   }
 
@@ -201,7 +255,7 @@ export default function initTerminalApp(root, api, host) {
       cursorBlink: true,
       scrollback: 5000,
       fontFamily: 'JetBrains Mono, monospace',
-      fontSize: 12,
+      fontSize: getStoredFontSize(),
       theme: { background: '#0b1020' }
     });
     term.open(ui.termContainer);
@@ -219,13 +273,43 @@ export default function initTerminalApp(root, api, host) {
       const fitAddon = new FitCtor();
       term.loadAddon(fitAddon);
       const doFit = () => { try { fitAddon.fit(); } catch (_) {} };
+      state.fitAddon = fitAddon;
+      state.doFit = doFit;
       doFit();
       window.addEventListener('resize', doFit);
       // re-fit after initial log priming and after drawer transitions
       setTimeout(doFit, 50);
+      setTimeout(doFit, 250);
+
+      // Fonts can load after xterm initializes (JetBrains Mono in particular).
+      // If fit ran before font metrics were correct, xterm will compute too few cols,
+      // leading to a "narrow" terminal with unused space on the right.
+      try {
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(() => { try { doFit(); } catch (_) {} });
+        }
+      } catch (_) {}
+
+      // Also fit whenever the terminal container is resized (keyboard open, orientation change, etc).
+      try {
+        if (typeof ResizeObserver !== 'undefined' && ui.termContainer) {
+          state.resizeObserver = new ResizeObserver(() => {
+            try { doFit(); } catch (_) {}
+          });
+          state.resizeObserver.observe(ui.termContainer);
+        }
+      } catch (_) {}
     } catch (e) {
       console.warn('Fit addon unavailable:', e);
     }
+
+    // Keep backend PTY size in sync with viewport changes and font changes.
+    term.onResize(({ cols, rows }) => {
+      api.post(`shells/${id}/resize`, { cols, rows }).catch(() => {});
+    });
+
+    // Seed zoom tooltips based on current/stored font size.
+    applyFontSize(getCurrentFontSize());
 
 
     // Preload persisted log tail so history survives refresh/reopen
@@ -252,7 +336,10 @@ export default function initTerminalApp(root, api, host) {
     };
     ws.onmessage = (evt) => {
       const data = typeof evt.data === 'string' ? evt.data : '';
-      term.write(data);
+      // Normalize newlines so prompts/output return to column 0.
+      // (dtach/PTY streams sometimes contain bare LF without CR.)
+      const normalized = data.replace(/\r?\n/g, '\r\n');
+      term.write(normalized);
     };
 
     term.onData((data) => {
@@ -271,8 +358,12 @@ export default function initTerminalApp(root, api, host) {
       }
     });
 
-    // Optional: request a small resize to initialize rows/cols
-    try { await api.post(`shells/${id}/resize`, { cols: 80, rows: 24 }); } catch (_) {}
+    // Send an initial resize based on fitted dimensions (if available).
+    try {
+      if (term?.cols && term?.rows) {
+        await api.post(`shells/${id}/resize`, { cols: term.cols, rows: term.rows });
+      }
+    } catch (_) {}
   }
 
   async function doAction(action) {
@@ -320,6 +411,10 @@ export default function initTerminalApp(root, api, host) {
   ui.btnRemove.addEventListener('click', removeShell);
   if (ui.btnMenu) ui.btnMenu.addEventListener('click', openDrawer);
   if (ui.drawerOverlay) ui.drawerOverlay.addEventListener('click', closeDrawer);
+
+  // Zoom controls (use pointerdown to avoid stealing focus on mobile).
+  if (ui.zoomOut) ui.zoomOut.addEventListener('pointerdown', softKey(() => applyFontSize(getCurrentFontSize() - FONT_SIZE_STEP)), { passive: false });
+  if (ui.zoomIn) ui.zoomIn.addEventListener('pointerdown', softKey(() => applyFontSize(getCurrentFontSize() + FONT_SIZE_STEP)), { passive: false });
 
   // Soft-keys events
   // Use pointerdown (not click) to reduce focus churn on mobile browsers.
