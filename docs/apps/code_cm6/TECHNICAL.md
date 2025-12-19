@@ -135,7 +135,7 @@ Each app worker:
 
 The framework provides shared infrastructure:
 - **IPC Server** (`app/ipc/server.py`) - Process registry, orchestrated shutdown
-- **Shell Manager** (`app/libs/framework_shells.py`) - Unified PTY management
+- **Shell Manager** (`framework-shells` package; `app/libs/framework_shells.py` is a shim) - Unified process/PTY management
 - **State Store** (`~/.cache/termux_extensions/state_store.json`) - Cross-app state
 - **Settings** (`~/.cache/termux_extensions/settings.json`) - Framework preferences
 - **WebSocket Multiplexing** - Routes messages to correct app worker
@@ -393,33 +393,39 @@ treeContainer.addEventListener('click', (e) => {
 
 **File:** `app/apps/file_editor_cm6/static/js/terminal.js` (13000+ characters)
 
-Wraps **xterm.js** with PTY WebSocket streaming:
+Wraps **xterm.js** with PTY WebSocket streaming (mobile-friendly reconnect + fit/resize sync):
 
 ```javascript
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
+// xterm.js is loaded dynamically from /static/vendor/xterm.
+// The WS endpoint is proxied through the main framework:
+//   /ws/app/file_editor_cm6/terminal/auto
+//
+// Control messages are JSON (shell_id, shell_list, error).
+// PTY output is streamed as raw text chunks.
 
-const term = new Terminal({
-  cursorBlink: true,
-  fontSize: 14,
-  theme: { background: '#1e1e1e' }
-});
+const ws = new ReconnectingWebSocket(`${proto}//${location.host}/ws/app/file_editor_cm6/terminal/auto`);
 
-const fitAddon = new FitAddon();
-term.loadAddon(fitAddon);
-term.open(document.getElementById('terminal-container'));
-
-// PTY WebSocket
-const ws = new WebSocket('ws://localhost:5000/api/app/file_editor_cm6/ws/terminal');
 ws.onmessage = (event) => {
-  const msg = JSON.parse(event.data);
-  if (msg.type === 'output') term.write(msg.data);
+  try {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'shell_id') {
+      shellId = msg.shell_id;
+      // Important: once shellId is known, immediately fit + POST resize
+      // (and retry briefly) so the PTY winsize stays in sync on first attach.
+      fitAddon.fit();
+      postResizeWithRetry(shellId, term.cols, term.rows);
+      return;
+    }
+  } catch (_) {}
+
+  term.write(event.data);
 };
 
-// User input → PTY
-term.onData((data) => {
-  ws.send(JSON.stringify({ type: 'input', data }));
+term.onResize(({ cols, rows }) => {
+  if (shellId) postResizeWithRetry(shellId, cols, rows);
 });
+
+term.onData((data) => ws.send(data));
 ```
 
 ### 3.4 Iframe Message Bus
@@ -1319,51 +1325,50 @@ Before diving into terminal and agent integration, it's critical to understand *
 
 ### What Framework Shells Is
 
-Framework Shells (`app/libs/framework_shells.py`) is a unified process lifecycle manager for **all long-lived background processes** in Termux Extensions 2. It provides:
+Framework Shells is provided by the external **`framework-shells`** Python package (with `app/libs/framework_shells.py` acting as a compatibility shim for legacy imports).
+It is the unified process lifecycle/orchestration layer for **all long-lived background processes** in Termux Extensions 2.
 
 **Core Capabilities:**
 - PTY support for interactive shells (terminal emulation)
-- STDIO support for daemons (MCP servers, aria2, etc.)
-- Log capture to `~/.cache/te_framework/logs/`
-- Orphan adoption on framework restart
-- Graceful shutdown (SIGTERM → 2s grace → SIGKILL)
-- Resource monitoring (CPU, memory, threads via psutil)
-- Label-based discovery for shared services
+- Pipe/STDIO support for daemons (LSP servers, JSON-RPC servers, etc.)
+- `dtach` backend for persistent/reattachable shells
+- Disk-backed metadata + stdout/stderr logs (namespaced per runtime)
+- Orphan adoption on restart (within the same runtime namespace)
+- Optional lifecycle hooks (TE2 uses IPC hooks to track PIDs)
+- Resource stats (CPU/RSS/threads; `psutil` optional)
+- Label/subgroup metadata for discovery + UI grouping
 
 ### Shell Types
 
-**Type 1: PTY Shells** (`uses_pty=True`)
+**Type 1: PTY shells** (`uses_pty=True`)
 - Interactive terminals (bash, zsh, fish)
 - Full ANSI escape code support
-- WebSocket streaming to xterm.js
-- Resize handling (SIGWINCH)
+- Output streaming via `subscribe_output()` (apps forward this over WebSockets)
+- Resize via `resize_pty()` (TIOCSWINSZ)
 
-Example: Code CM6 terminal drawer spawns:
+Example: Code CM6 terminal drawer uses **dtach** for persistence:
 ```python
-shell = await manager.spawn_shell_pty(
-    command=['bash'],
-    label='code-editor-terminal',
-    cwd=project_root
+rec = await mgr.spawn_shell_dtach(
+    ["bash", "-l", "-i"],
+    label="code-editor-terminal:<project>",
+    cwd=project_root,
+    subgroups=["file_editor_cm6", "terminal"],
 )
-# Returns shell_id → stored in HistoryStore
-# WebSocket connects to /api/framework_shells/<id>/ws
 ```
 
-**Type 2: STDIO Shells** (`uses_pty=False`)
-- Service daemons (MCP servers, aria2, language servers)
-- JSON-RPC over stdin/stdout
-- No terminal emulation needed
+**Type 2: Pipe shells** (`uses_pipes=True`)
+- Stdin/stdout processes (LSP servers, daemons)
+- Suitable for JSON-RPC over stdin/stdout
+- Note: pipe handles are in-memory (not re-attachable across process restarts)
 
-Example: Code CM6 agent drawer spawns:
+Example: Code CM6 LSP servers are pipe shells:
 ```python
-shell = await manager.spawn_shell(
-    command=['codex', 'mcp-server'],
-    label='codex mcp-server',
-    uses_pty=False
+rec = await mgr.spawn_shell_pipe(
+    ["pyright-langserver", "--stdio"],
+    label="lsp:python",
+    subgroups=["file_editor_cm6", "lsp"],
+    cwd=project_root,
 )
-# Multiple conversations multiplex through this one shell
-# Backend writes JSON-RPC to shell.stdin
-# Backend reads JSON-RPC from shell.stdout
 ```
 
 ### Why Code CM6 Needs Framework Shells
@@ -1401,10 +1406,10 @@ shell = find_shell_by_label('codex mcp-server') or \
 ### Lifecycle Management
 
 **Startup (Framework Boot):**
-1. Framework Shells scans `~/.cache/te_framework/meta/*.json`
+1. Framework Shells initializes its runtime namespace using environment variables set by TE2 (see below)
 2. Checks if PIDs from previous run still alive
 3. Adopts living processes, marks dead ones as exited
-4. Archives old logs to `preserved_logs/`
+4. Exposes shell listing + actions via REST and broadcasts lifecycle events via WebSocket
 
 **Shutdown (Ctrl+C):**
 1. IPC server receives shutdown request
@@ -1414,8 +1419,32 @@ shell = find_shell_by_label('codex mcp-server') or \
    - Poll 2 seconds for clean exit
    - If still alive: SIGKILL (force kill)
    - Track force-killed shells → logs preserved
-4. Logs moved to `preserved_logs/logs_{timestamp}/`
+4. TE2 archives old logs under `~/.cache/te_framework/preserved_logs/logs_<timestamp>/`
 5. Old archives (>7 days) deleted on next boot
+
+### Runtime Namespacing (TE2)
+
+TE2 sets these environment variables in `scripts/run_framework.sh` so all shells are isolated per repo and per secret:
+
+- `FRAMEWORK_SHELLS_SECRET` (required) → derives the runtime namespace
+- `FRAMEWORK_SHELLS_REPO_FINGERPRINT` → stable fingerprint for the repo root path
+- `FRAMEWORK_SHELLS_BASE_DIR=~/.cache/te_framework` → stores runtime metadata/logs under the TE2 cache root
+
+### Observability (REST + WS + Dashboard)
+
+The framework mounts the package routers in `app/main.py`:
+
+- REST: `/api/framework_shells`
+- WS lifecycle stream: `/ws/events`
+- Dashboard UI: `/fws/`
+
+This feature is integrated into the TE2 framework under the `Sessions and Shortcuts` extension, which is now just an `iframe` shim of `http://<framework-ip>/fws/`
+
+### Resize Reliability (SIGWINCH)
+
+Some interactive programs cache the terminal width and rely on `SIGWINCH` to refresh after a resize. TE2 enables best-effort `SIGWINCH` delivery after `resize_pty()` via:
+
+- `FRAMEWORK_SHELLS_SIGWINCH_ON_RESIZE=1` (enabled by default in this repo at framework startup)
 
 ### Label-Based Discovery
 
@@ -1435,17 +1464,14 @@ aria2 = find_shell_by_label('aria2-rpc')  # Finds existing shell
 ### Integration Points in Code CM6
 
 **Terminal Drawer:**
-- Calls `/api/framework_shells/spawn_pty` (via terminal_backend.py)
-- Stores shell_id in HistoryStore
-- Connects WebSocket to `/api/framework_shells/<id>/ws`
-- xterm.js renders PTY output, sends input back
+- Uses `spawn_shell_dtach()` with project-scoped labels (persistence across reloads)
+- Code CM6 worker provides the PTY streaming WebSocket (`/ws/app/file_editor_cm6/terminal/auto`)
+- xterm.js renders output and sends input; backend forwards via `subscribe_output()` + `write_to_pty()`
 
 **AI Agent Drawer:**
 - Checks for `label='codex mcp-server'` shell
-- Spawns if missing (STDIO shell, no PTY)
-- Writes JSON-RPC requests to shell.stdin
-- Reads JSON-RPC responses from shell.stdout
-- All conversations share single MCP server instance
+- Spawns if missing (shell process managed by framework shells)
+- Uses label-based discovery so multiple conversations can share one server instance
 
 ---
 
@@ -1606,95 +1632,65 @@ import app.libs.git_service  # noqa: F401 - registers handlers
 
 ## 9. Terminal Integration
 
-### 9.1 Framework Shell Manager
+### 9.1 Framework Shells (External Package)
 
-Code CM6 delegates PTY management to **Termux Extensions 2 Framework Shell Manager**:
+Code CM6 delegates PTY management to the external **`framework-shells`** package (dtach-backed shells + adoption + logs).
+The Code CM6 worker owns the terminal UX and speaks to `framework-shells` via the shared singleton manager.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ Terminal Drawer (xterm.js)                               │
+│ Terminal Drawer (xterm.js + FitAddon)                    │
 └───────────────┬──────────────────────────────────────────┘
-                │ WebSocket: /ws/terminal
+                │ WS: /ws/app/file_editor_cm6/terminal/auto
 ┌───────────────▼──────────────────────────────────────────┐
-│ terminal_backend.py (Code CM6)                           │
-│  - Session lifecycle (create, destroy, resize)           │
-│  - CWD synchronization with project root                 │
-│  - Orphan cleanup (remove stale sessions)                │
+│ terminal_backend.py (Code CM6 app worker)                │
+│  - Auto shell selection per active project               │
+│  - WebSocket PTY stream (output + input)                 │
+│  - REST resize endpoint (/terminal/<id>/resize)          │
 └───────────────┬──────────────────────────────────────────┘
-                │ IPC calls
+                │ Python API (singleton manager)
 ┌───────────────▼──────────────────────────────────────────┐
-│ framework_shells.py (Framework)                          │
-│  - PTY spawning (pty.fork)                               │
-│  - Output streaming (async read loop)                    │
-│  - Session registry (shells dict)                        │
+│ framework_shells (package)                               │
+│  - spawn_shell_dtach() + dtach attach proxy              │
+│  - PTY output subscriptions + log capture                │
+│  - resize_pty() → TIOCSWINSZ (+ SIGWINCH when enabled)   │
 └───────────────┬──────────────────────────────────────────┘
-                │ PTY
+                │ PTY ↔ dtach session
 ┌───────────────▼──────────────────────────────────────────┐
-│ Shell Process (bash/zsh/fish)                            │
+│ Shell Process (bash -l -i)                               │
 └──────────────────────────────────────────────────────────┘
 ```
 
-### 9.2 Session Persistence
+### 9.2 Shell Identity, Persistence, and CWD
 
-**File:** `app/apps/file_editor_cm6/terminal_backend.py`
+Code CM6 terminals are dtach-backed so the session can persist across reloads and reattach cleanly.
+Shell identity is project-scoped:
 
-```python
-@terminal_router.get('/terminal/shell-id')
-async def get_terminal_shell_id():
-    history_store = get_history_store()
-    mgr = await get_manager()
-    
-    # Get stored shell ID
-    shell_id = history_store.get_terminal_shell_id()
-    
-    # Clean up orphans (other shells with same label)
-    shells = await mgr.list_shells()
-    orphans = [s for s in shells if s.label == 'code-editor-terminal' and s.id != shell_id]
-    for orphan in orphans:
-        await mgr.terminate_shell(orphan.id)
-    
-    # Verify stored shell still exists
-    if shell_id:
-        rec = await mgr.get_shell(shell_id)
-        if not rec or rec.status != 'running':
-            # Stale ID - clear it
-            history_store.set_terminal_shell_id(None)
-            shell_id = None
-    
-    return {'shellId': shell_id}
-```
+- The **active project** is tracked in the history store.
+- The **active terminal shell id** is stored per project (sidecar/history).
+- The shell is spawned with `cwd=project_root`, so the terminal starts in the correct directory without a frontend `cd` shim.
 
-### 9.3 CWD Synchronization
+On WebSocket connect to `.../terminal/auto`, the backend:
+1. Finds the saved shell id for the current project.
+2. Validates it still exists and is running.
+3. Otherwise spawns a new dtach-backed shell and saves its id.
+4. Sends a control message: `{"type":"shell_id","shell_id":"..."}` so the frontend can sync UI + resize.
 
-When project changes, terminal CWD must update:
+### 9.3 Resize Reliability (Prevent Wrap/Overwrite Glitches)
 
-```python
-@app.post('/project/open')
-async def project_open(data: dict):
-    project_path = Path(data['path'])
-    
-    # Update project root
-    set_project_root(project_path)
-    _history_store.set_active_project(project_path)
-    
-    # Notify terminal to change CWD
-    # (Frontend listens for project-change event and sends `cd <path>`)
-    
-    return {'success': True}
-```
+The terminal UI has two sources of truth for width:
+- **xterm.js cols/rows** (computed from pixels via FitAddon + font metrics)
+- **PTY winsize** (kernel TTY size used by readline/TUIs)
 
-**Frontend:**
-```javascript
-socket.on('project-changed', async (data) => {
-  // Send cd command to terminal
-  if (terminalShellId) {
-    terminalWs.send(JSON.stringify({
-      type: 'input',
-      data: `cd ${data.projectRoot}\n`
-    }));
-  }
-});
-```
+If these fall out of sync (especially on mobile, or during dtach attach races), you can see the classic symptom:
+text wraps, then later *overwrites/overlaps* because the interactive program is still using an old column count.
+
+Fix strategy used here:
+
+- Frontend posts `/api/app/file_editor_cm6/terminal/<shell_id>/resize` on `term.onResize`.
+- When the backend sends the `shell_id` control message, the frontend immediately does a `fit()` and **re-sends resize (with short retries)** to cover the initial-attach race.
+- `framework-shells` can optionally deliver best-effort `SIGWINCH` after `resize_pty()` so readline/TUIs reliably refresh their cached width.
+  In TE2 this is enabled via `FRAMEWORK_SHELLS_SIGWINCH_ON_RESIZE=1` during framework startup.
 
 ---
 
@@ -3069,19 +3065,25 @@ function showCardMenu(button, entry) {
 | 2025-11-20 | Terminal Root & Cleanup | ~100 | 1 hour |
 | 2025-11-21 | Diff Base Architecture | ~200 | 3 hours |
 | 2025-11-21 | Search by Changes | ~400 | 4 hours |
+| 2025-12-19 | Terminal Resize Reliability (SIGWINCH + first-attach resize retry) | ~140 | 1 hour |
 
 **Total:** ~4400 lines changed, ~42 hours development time over 10 days
 
 ---
 
 **Document Complete**  
-**Version:** 1.2  
-**Last Updated:** 2025-12-01  
+**Version:** 1.3  
+**Last Updated:** 2025-12-19  
 **Next Review:** When major features added or architecture changes
 
 ---
 
 ## Changelog
+
+### v1.3 (2025-12-19)
+- Updated terminal documentation to reflect external `framework-shells` package, current WS/REST endpoints, and dtach-backed persistence.
+- Documented resize reliability fixes (first-attach resize retry + optional SIGWINCH-on-resize) to prevent wrap/overwrite glitches on mobile.
+- Dex - TE2 team (2025-12-19 13:35 CST)
 
 ### v1.2 (2025-12-01)
 - **Section 8 rewritten:** Complete explorer architecture documentation reflecting WebSocket refactor

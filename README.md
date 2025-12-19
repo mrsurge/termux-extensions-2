@@ -94,6 +94,7 @@ source te-venv/bin/activate
 pip install -r requirements.txt
 pip install "framework-shells @ git+https://github.com/mrsurge/framework-shells@main" # framework shells module is now part of a different repo.
 npm install -g typescript-language-server typescript
+sudo apt install dtach -y
 ./scripts/run_framework.sh
 ```
 **Subsequent runs:**
@@ -109,6 +110,7 @@ cd termux-extensions-2
 pip install -r requirements.txt
 pip install "framework-shells @ git+https://github.com/mrsurge/framework-shells@main" # framework shells module is now part of a different repo.
 npm install -g typescript-language-server typescript # will be vendored soon
+pkg install dtach -y
 ./scripts/run_framework.sh
 ```
 **Subsequent runs:**
@@ -154,7 +156,7 @@ Running without arguments denies all external connections.
 ./scripts/run_framework.sh
 ```
 
-Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another device on LAN).
+Browse to `http://localhost:8089` (or `http://<device-ip>:8089` from another device on LAN).
 
 ## Back to AI Generated Read-Me 
 
@@ -173,7 +175,7 @@ Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another dev
 ┌─────▼──────────┐   ┌─────▼─────────────┐
 │ IPC Server     │   │ Framework (Main)  │
 │ (Flask/sync)   │◄──┤ (FastAPI/async)   │
-│ :9123          │   │ :8088             │
+│ :9123          │   │ :8089             │
 │                │   │                   │
 │ - Process reg  │   │ - App launcher    │
 │ - Shutdown seq │   │ - WebSocket proxy │
@@ -253,8 +255,8 @@ When user presses Ctrl+C or sends SIGTERM to supervisor:
 The platform implements the **code-server pattern** - disk-backed state with stateless UI clients:
 
 **Single Backend, Multiple Clients:**
-- Desktop browser at `http://192.168.1.100:8088`
-- Mobile browser at `http://localhost:8088`
+- Desktop browser at `http://192.168.1.100:8089`
+- Mobile browser at `http://localhost:8089`
 - Both see same state (files, preferences, terminals)
 
 **How It Works:**
@@ -325,7 +327,7 @@ No CRDT, no OT, no sync protocol. Just **last write wins** with SHA-based confli
 
 On mobile browsers (Chrome, Edge, Firefox):
 
-1. Open `http://localhost:8088` or `http://<device-ip>:8088`
+1. Open `http://localhost:8089` or `http://<device-ip>:8089`
 2. Browser menu → "Install app" or "Add to Home screen"
 3. Launch from home screen icon for full-screen experience
 
