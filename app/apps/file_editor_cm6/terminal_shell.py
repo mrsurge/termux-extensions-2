@@ -2,6 +2,7 @@
 
 import os
 import hashlib
+import signal
 from pathlib import Path
 
 from framework_shells import get_manager as _manager
@@ -122,6 +123,38 @@ async def resize_editor_shell(shell_id, cols, rows):
     mgr = await _manager()
     try:
         await mgr.resize_pty(shell_id, cols, rows)
+
+        # Ensure dtach attach proxy + interactive shells observe the resize.
+        # Without SIGWINCH reaching the "front" process, readline can keep an
+        # old column count and you'll see wrap/overwrite glitches in xterm.
+        try:
+            proxy_pid = None
+            pty_state = getattr(mgr, "_pty", {}).get(shell_id) if hasattr(mgr, "_pty") else None
+            if pty_state is not None:
+                proxy_pid = getattr(pty_state, "proxy_pid", None)
+            if proxy_pid:
+                try:
+                    os.killpg(os.getpgid(proxy_pid), signal.SIGWINCH)
+                except Exception:
+                    try:
+                        os.kill(proxy_pid, signal.SIGWINCH)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        try:
+            rec = await mgr.get_shell(shell_id)
+        except Exception:
+            rec = None
+        if rec and getattr(rec, "pid", None):
+            try:
+                os.killpg(os.getpgid(rec.pid), signal.SIGWINCH)
+            except Exception:
+                try:
+                    os.kill(rec.pid, signal.SIGWINCH)
+                except Exception:
+                    pass
         return True
     except Exception:
         return False

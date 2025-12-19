@@ -39,6 +39,8 @@ export default function initTerminalApp(root, api, host) {
     doFit: null,
     fitRaf: null,
     fitFramesRemaining: 0,
+    resizeSyncTimer: null,
+    lastResizeSent: null,
     resizeObserver: null,
     mode: 'list',
     ctrlActive: false,
@@ -266,6 +268,12 @@ export default function initTerminalApp(root, api, host) {
       ui.status.textContent = 'connected';
       host.toast && host.toast('Connected');
       requestFit(6);
+      // Ensure the PTY has a winsize after the dtach attach proxy is live.
+      try {
+        if (state.term?.cols && state.term?.rows) {
+          scheduleResizeSync(desired, state.term.cols, state.term.rows, { force: true });
+        }
+      } catch (_) {}
     };
 
     ws.onclose = () => {
@@ -290,6 +298,11 @@ export default function initTerminalApp(root, api, host) {
   function disposeSession() {
     state.wsDesiredId = null;
     clearWsReconnectTimer();
+    if (state.resizeSyncTimer) {
+      try { clearTimeout(state.resizeSyncTimer); } catch (_) {}
+      state.resizeSyncTimer = null;
+    }
+    state.lastResizeSent = null;
     try { state.ws && state.ws.close(); } catch (_) {}
     state.ws = null;
     try { state.term && state.term.dispose(); } catch (_) {}
@@ -417,9 +430,41 @@ export default function initTerminalApp(root, api, host) {
       ui.termContainer.addEventListener('pointerdown', () => refocusTerm(), { passive: true });
     }
 
+    function scheduleResizeSync(shellId, cols, rows, opts = {}) {
+      if (!shellId) return;
+      const c = Math.max(1, Number(cols) || 0);
+      const r = Math.max(1, Number(rows) || 0);
+      if (!c || !r) return;
+
+      const key = `${shellId}:${c}x${r}`;
+      if (!opts.force && state.lastResizeSent === key) return;
+      state.lastResizeSent = key;
+
+      if (state.resizeSyncTimer) {
+        try { clearTimeout(state.resizeSyncTimer); } catch (_) {}
+        state.resizeSyncTimer = null;
+      }
+
+      let attempts = 0;
+      const tryOnce = async () => {
+        attempts += 1;
+        try {
+          await api.post(`shells/${shellId}/resize`, { cols: c, rows: r });
+          return;
+        } catch (_) {
+          if (attempts >= 12) return;
+          // If the dtach attach proxy isn't ready yet, retries usually succeed shortly after.
+          const delay = Math.min(1500, 80 * attempts);
+          state.resizeSyncTimer = setTimeout(tryOnce, delay);
+        }
+      };
+
+      void tryOnce();
+    }
+
     // Keep backend PTY size in sync with viewport changes and font changes.
     term.onResize(({ cols, rows }) => {
-      api.post(`shells/${id}/resize`, { cols, rows }).catch(() => {});
+      scheduleResizeSync(id, cols, rows);
     });
 
     // Load and apply fit addon
@@ -482,7 +527,7 @@ export default function initTerminalApp(root, api, host) {
     // Send an initial resize based on fitted dimensions (if available).
     try {
       if (term?.cols && term?.rows) {
-        await api.post(`shells/${id}/resize`, { cols: term.cols, rows: term.rows });
+        scheduleResizeSync(id, term.cols, term.rows, { force: true });
       }
     } catch (_) {}
   }

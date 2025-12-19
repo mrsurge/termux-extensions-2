@@ -215,12 +215,11 @@ Browse to `http://localhost:8088` (or `http://<device-ip>:8088` from another dev
 - Registered with IPC for lifecycle tracking
 - Spawn on-demand when user clicks app card
 
-**Framework Shells** (`app/libs/framework_shells.py`)
-- Unified process management for long-lived services
-- PTY support for interactive terminals
-- Log capture to `~/.cache/te_framework/logs/`
-- Adoption of orphaned processes on restart
-- Resource monitoring (CPU, memory, threads via psutil)
+**Framework Shells** (`framework-shells` package; `app/libs/framework_shells.py` is a compatibility shim)
+- Unified process management for long-lived services (PTY, pipes, dtach-backed persistence)
+- Disk-backed metadata/logs with runtime isolation under `~/.cache/framework_shells/runtimes/...`
+- Adoption of orphaned shells on restart (within the same runtime namespace)
+- Resource monitoring (CPU, memory, threads; `psutil` optional)
 
 ---
 
@@ -372,8 +371,9 @@ The editor demonstrates the platform's convergence capabilities - multiple brows
 Framework shells provide lifecycle management for any long-lived process:
 
 **Shell Types:**
-- **PTY shells** (`uses_pty=True`): Interactive terminals with full ANSI support
-- **STDIO shells** (`uses_pty=False`): Daemons, servers, background services
+- **PTY shells** (`uses_pty=True`): Interactive terminals with ANSI support
+- **Pipe shells** (`uses_pipes=True`): stdin/stdout processes (LSP servers, daemons)
+- **Dtach shells** (`uses_dtach=True`): PTY shells wrapped in `dtach` for persistence/reattach
 
 **Use Cases:**
 - Terminal sessions in app drawers
@@ -385,17 +385,25 @@ Framework shells provide lifecycle management for any long-lived process:
 
 **Management:**
 - Label-based discovery (multiple apps can share one shell)
-- Automatic log capture and rotation
+- Automatic log capture (stdout/stderr persisted to disk)
 - Health monitoring (CPU, memory, threads via psutil)
 - Graceful termination with force-kill fallback
-- Orphan adoption on framework restart
+- Orphan adoption on framework restart (within the same runtime namespace)
 
-**API:**
-- `GET /api/framework_shells` - List all shells with stats
-- `POST /api/framework_shells` - Spawn new shell
-- `POST /api/framework_shells/<id>/action` - Stop/kill/restart
-- `POST /api/framework_shells/<id>/write` - Write to PTY (interactive shells)
-- `WS /api/framework_shells/<id>/ws` - Bidirectional PTY stream
+**Resize reliability:**
+- `FRAMEWORK_SHELLS_SIGWINCH_ON_RESIZE=1` (enabled by default in this repo) sends best-effort `SIGWINCH` after PTY resize so readline/TUIs keep column counts in sync (prevents wrap/overwrite glitches).
+
+**API (framework_shells package):**
+- `GET /api/framework_shells` - List shells with stats
+- `GET /api/framework_shells/<id>` - Shell details
+- `POST /api/framework_shells` - Spawn a shell
+- `POST /api/framework_shells/<id>/terminate` - Terminate (force optional)
+- `POST /api/framework_shells/<id>/action` - Action helper (terminate/kill/etc.)
+- `DELETE /api/framework_shells/<id>` - Purge metadata/logs
+- `POST /api/framework_shells/purge_exited` - Purge exited shells
+- `GET /api/framework_shells/<id>/replay` - Replay stdout log tail
+- `WS /ws/events` - Shell lifecycle event stream
+- `GET /fws/` - Self-hosted dashboard (live shell list + logs)
 
 ---
 
@@ -443,7 +451,7 @@ termux-extensions-2/
 │   ├── ipc/                 # IPC server (Flask/sync)
 │   ├── libs/                # Shared libraries
 │   │   ├── app_worker.py    # App worker spawner
-│   │   ├── framework_shells.py  # Shell manager
+│   │   ├── framework_shells.py  # Compatibility shim (external package is `framework-shells`)
 │   │   └── state_store.py   # Persistent state
 │   ├── templates/           # HTML templates
 │   │   └── app_shell.html   # App container UI

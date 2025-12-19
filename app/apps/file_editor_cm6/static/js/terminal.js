@@ -393,6 +393,36 @@ export function createTerminalDrawer(options = {}) {
           const isNewShell = receivedShellId !== lastShellId;
           shellId = receivedShellId;
           console.log('Received shell ID from server:', shellId);
+
+          // Ensure the backend PTY winsize is synced as soon as we have a real shell id.
+          // On first open the dtach attach proxy can come up slightly after fit/resize,
+          // so we retry resize a few times to avoid wrap/overwrite glitches.
+          try {
+            if (fitAddon && term && isOpen) {
+              try { fitAddon.fit(); } catch (_) {}
+            }
+            if (term && term.cols && term.rows) {
+              const cols = term.cols;
+              const rows = term.rows;
+              let attempts = 0;
+              const tryResize = async () => {
+                attempts += 1;
+                try {
+                  await fetch(`/api/app/file_editor_cm6/terminal/${shellId}/resize`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cols, rows }),
+                  });
+                  return;
+                } catch (_) {
+                  if (attempts >= 12) return;
+                  const delay = Math.min(1500, 80 * attempts);
+                  setTimeout(() => { void tryResize(); }, delay);
+                }
+              };
+              void tryResize();
+            }
+          } catch (_) {}
           
           if (isNewShell) {
             // Backend switched us to a different shell (e.g., project change).

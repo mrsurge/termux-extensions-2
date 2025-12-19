@@ -59,6 +59,11 @@ async def lifespan(app_instance):
     else:
         print(f"[framework] Warning: Failed to register with IPC", file=sys.stderr)
 
+    # Enable SIGWINCH-on-resize for framework_shells by default.
+    # This helps interactive shells (readline/TUIs) stay in sync with xterm's
+    # computed cols/rows, especially for dtach-backed PTYs.
+    os.environ.setdefault("FRAMEWORK_SHELLS_SIGWINCH_ON_RESIZE", "1")
+
     # Initialize framework_shells early with IPC lifecycle hooks so shell PIDs
     # are registered (and adoption re-registers as needed).
     try:
