@@ -31,9 +31,14 @@ export default function initTerminalApp(root, api, host) {
     shells: [],
     activeId: null,
     ws: null,
+    wsReconnectTimer: null,
+    wsReconnectAttempts: 0,
+    wsDesiredId: null,
     term: null,
     fitAddon: null,
     doFit: null,
+    fitRaf: null,
+    fitFramesRemaining: 0,
     resizeObserver: null,
     mode: 'list',
     ctrlActive: false,
@@ -44,6 +49,37 @@ export default function initTerminalApp(root, api, host) {
   const FONT_SIZE_MAX = 28;
   const FONT_SIZE_STEP = 1;
   const FONT_SIZE_STORAGE_KEY = 'te2_terminal_app_font_size';
+
+  function requestFit(frames = 8) {
+    if (!state.term || !state.fitAddon || !state.doFit) return;
+    state.fitFramesRemaining = Math.max(state.fitFramesRemaining, Math.max(1, Number(frames) || 1));
+    if (state.fitRaf) return;
+
+    const step = () => {
+      state.fitRaf = null;
+      if (!state.term || !state.fitAddon || !state.doFit) return;
+      try { state.doFit(); } catch (_) {}
+      state.fitFramesRemaining = Math.max(0, state.fitFramesRemaining - 1);
+      if (state.fitFramesRemaining > 0) {
+        state.fitRaf = requestAnimationFrame(step);
+      }
+    };
+
+    state.fitRaf = requestAnimationFrame(step);
+  }
+
+  async function ensureFontLoaded(fontFamily, timeoutMs = 900) {
+    const fam = String(fontFamily || '').trim();
+    if (!fam) return;
+    if (!document.fonts || typeof document.fonts.load !== 'function') return;
+
+    try {
+      await Promise.race([
+        document.fonts.load(`12px "${fam}"`),
+        new Promise(resolve => setTimeout(resolve, Math.max(0, Number(timeoutMs) || 0))),
+      ]);
+    } catch (_) {}
+  }
 
   function getStoredFontSize() {
     try {
@@ -79,11 +115,7 @@ export default function initTerminalApp(root, api, host) {
     if (ui.zoomOut) ui.zoomOut.title = `Zoom out (${clamped}px)`;
     if (ui.zoomIn) ui.zoomIn.title = `Zoom in (${clamped}px)`;
 
-    if (state.doFit) {
-      setTimeout(() => {
-        try { state.doFit && state.doFit(); } catch (_) {}
-      }, 0);
-    }
+    requestFit(6);
   }
 
   function setMode(mode) {
@@ -179,13 +211,96 @@ export default function initTerminalApp(root, api, host) {
     return `${proto}//${location.host}/ws/app/terminal/terminal/${id}`;
   }
 
+  function clearWsReconnectTimer() {
+    if (!state.wsReconnectTimer) return;
+    try { clearTimeout(state.wsReconnectTimer); } catch (_) {}
+    state.wsReconnectTimer = null;
+  }
+
+  function getWsBackoffDelayMs(attempt) {
+    const n = Math.max(1, Number(attempt) || 1);
+    const base = 450;
+    const max = 5000;
+    const delay = Math.min(max, Math.round(base * Math.pow(1.45, n - 1)));
+    return Math.max(150, delay);
+  }
+
+  function scheduleWsReconnect(reason) {
+    if (!state.wsDesiredId) return;
+    if (state.activeId !== state.wsDesiredId) return;
+    if (document.hidden) return; // try again on visibilitychange
+    if (state.ws && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING)) return;
+    if (state.wsReconnectTimer) return;
+
+    state.wsReconnectAttempts = Math.max(0, Number(state.wsReconnectAttempts) || 0) + 1;
+    const delay = getWsBackoffDelayMs(state.wsReconnectAttempts);
+
+    ui.status.textContent = `reconnecting… (${delay}ms)`;
+    state.wsReconnectTimer = setTimeout(() => {
+      state.wsReconnectTimer = null;
+      if (!state.wsDesiredId || state.activeId !== state.wsDesiredId) return;
+      if (document.hidden) return;
+      connectWs(state.wsDesiredId);
+    }, delay);
+  }
+
+  function connectWs(id) {
+    const desired = String(id || '').trim();
+    if (!desired) return;
+
+    clearWsReconnectTimer();
+
+    const existing = state.ws;
+    if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    try { existing && existing.close(); } catch (_) {}
+    state.ws = null;
+
+    const ws = new WebSocket(wsUrlFor(desired));
+    state.ws = ws;
+
+    ws.onopen = () => {
+      state.wsReconnectAttempts = 0;
+      ui.status.textContent = 'connected';
+      host.toast && host.toast('Connected');
+      requestFit(6);
+    };
+
+    ws.onclose = () => {
+      if (state.ws === ws) state.ws = null;
+      ui.status.textContent = 'disconnected';
+      host.toast && host.toast('Disconnected');
+      scheduleWsReconnect('close');
+    };
+
+    ws.onerror = () => {
+      ui.status.textContent = 'socket error';
+      host.toast && host.toast('WebSocket error');
+    };
+
+    ws.onmessage = (evt) => {
+      const data = typeof evt.data === 'string' ? evt.data : '';
+      // Let xterm handle CR/LF semantics (convertEol handles bare LF as CRLF).
+      state.term && state.term.write(data);
+    };
+  }
+
   function disposeSession() {
+    state.wsDesiredId = null;
+    clearWsReconnectTimer();
     try { state.ws && state.ws.close(); } catch (_) {}
     state.ws = null;
     try { state.term && state.term.dispose(); } catch (_) {}
     state.term = null;
     state.fitAddon = null;
     state.doFit = null;
+    if (state.fitRaf) {
+      try { cancelAnimationFrame(state.fitRaf); } catch (_) {}
+      state.fitRaf = null;
+    }
+    state.fitFramesRemaining = 0;
     try { state.resizeObserver && state.resizeObserver.disconnect(); } catch (_) {}
     state.resizeObserver = null;
     ui.termContainer.innerHTML = '';
@@ -239,6 +354,36 @@ export default function initTerminalApp(root, api, host) {
     });
   }
 
+  function installGlobalViewportHandlers() {
+    if (installGlobalViewportHandlers._installed) return;
+    installGlobalViewportHandlers._installed = true;
+
+    window.addEventListener('resize', () => requestFit(8), { passive: true });
+
+    // Mobile keyboards/orientation changes often resize the visual viewport without firing a full window resize.
+    try {
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => requestFit(10), { passive: true });
+        window.visualViewport.addEventListener('scroll', () => requestFit(4), { passive: true });
+      }
+    } catch (_) {}
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) return;
+      requestFit(10);
+      if (state.wsDesiredId && !state.ws) {
+        connectWs(state.wsDesiredId);
+      } else if (state.wsDesiredId && state.ws && state.ws.readyState === WebSocket.CLOSED) {
+        connectWs(state.wsDesiredId);
+      }
+    });
+
+    window.addEventListener('online', () => {
+      if (!state.wsDesiredId) return;
+      connectWs(state.wsDesiredId);
+    }, { passive: true });
+  }
+
   async function selectShell(id) {
     state.activeId = id;
     const rec = findRec(id);
@@ -248,13 +393,18 @@ export default function initTerminalApp(root, api, host) {
     closeDrawer();
     disposeSession();
 
+    installGlobalViewportHandlers();
+
+    // Ensure the mono font is available before xterm measures cell size.
+    await ensureFontLoaded('JetBrains Mono', 900);
+
     // Create xterm
     const TerminalCtor = await ensureXterm();
     const term = new TerminalCtor({
       convertEol: true,
       cursorBlink: true,
       scrollback: 5000,
-      fontFamily: 'JetBrains Mono, monospace',
+      fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
       fontSize: getStoredFontSize(),
       theme: { background: '#0b1020' }
     });
@@ -267,6 +417,11 @@ export default function initTerminalApp(root, api, host) {
       ui.termContainer.addEventListener('pointerdown', () => refocusTerm(), { passive: true });
     }
 
+    // Keep backend PTY size in sync with viewport changes and font changes.
+    term.onResize(({ cols, rows }) => {
+      api.post(`shells/${id}/resize`, { cols, rows }).catch(() => {});
+    });
+
     // Load and apply fit addon
     try {
       const FitCtor = await ensureFitAddon();
@@ -275,26 +430,13 @@ export default function initTerminalApp(root, api, host) {
       const doFit = () => { try { fitAddon.fit(); } catch (_) {} };
       state.fitAddon = fitAddon;
       state.doFit = doFit;
-      doFit();
-      window.addEventListener('resize', doFit);
-      // re-fit after initial log priming and after drawer transitions
-      setTimeout(doFit, 50);
-      setTimeout(doFit, 250);
-
-      // Fonts can load after xterm initializes (JetBrains Mono in particular).
-      // If fit ran before font metrics were correct, xterm will compute too few cols,
-      // leading to a "narrow" terminal with unused space on the right.
-      try {
-        if (document.fonts && document.fonts.ready) {
-          document.fonts.ready.then(() => { try { doFit(); } catch (_) {} });
-        }
-      } catch (_) {}
+      requestFit(18);
 
       // Also fit whenever the terminal container is resized (keyboard open, orientation change, etc).
       try {
         if (typeof ResizeObserver !== 'undefined' && ui.termContainer) {
           state.resizeObserver = new ResizeObserver(() => {
-            try { doFit(); } catch (_) {}
+            requestFit(8);
           });
           state.resizeObserver.observe(ui.termContainer);
         }
@@ -302,11 +444,6 @@ export default function initTerminalApp(root, api, host) {
     } catch (e) {
       console.warn('Fit addon unavailable:', e);
     }
-
-    // Keep backend PTY size in sync with viewport changes and font changes.
-    term.onResize(({ cols, rows }) => {
-      api.post(`shells/${id}/resize`, { cols, rows }).catch(() => {});
-    });
 
     // Seed zoom tooltips based on current/stored font size.
     applyFontSize(getCurrentFontSize());
@@ -321,26 +458,9 @@ export default function initTerminalApp(root, api, host) {
       }
     } catch (_) {}
 
-    // Connect WebSocket
-    const ws = new WebSocket(wsUrlFor(id));
-    state.ws = ws;
-
-    ws.onopen = () => {
-      host.toast && host.toast('Connected');
-    };
-    ws.onclose = () => {
-      host.toast && host.toast('Disconnected');
-    };
-    ws.onerror = () => {
-      host.toast && host.toast('WebSocket error');
-    };
-    ws.onmessage = (evt) => {
-      const data = typeof evt.data === 'string' ? evt.data : '';
-      // Normalize newlines so prompts/output return to column 0.
-      // (dtach/PTY streams sometimes contain bare LF without CR.)
-      const normalized = data.replace(/\r?\n/g, '\r\n');
-      term.write(normalized);
-    };
+    // Connect WebSocket (auto-reconnect when mobile switches apps)
+    state.wsDesiredId = id;
+    connectWs(id);
 
     term.onData((data) => {
       let payload = data;
@@ -353,6 +473,7 @@ export default function initTerminalApp(root, api, host) {
           if (ui.keyCtrl) ui.keyCtrl.classList.remove('toggle');
         }
       }
+      const ws = state.ws;
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(payload);
       }

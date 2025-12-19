@@ -5,6 +5,7 @@ import shlex
 import asyncio
 import shutil
 import re
+import signal
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Body, Query, WebSocket
@@ -136,6 +137,42 @@ async def resize_shell(shell_id: str, payload: dict = Body(...)) -> Any:
     try:
         m = await mgr()
         await m.resize_pty(shell_id, cols, rows)
+
+        # Help interactive shells (readline) notice size changes.
+        # In dtach mode, the interactive "front" of the session is often the
+        # dtach attach proxy process; if it misses SIGWINCH, its notion of cols
+        # can diverge from xterm's, causing wrap/overwrite glitches.
+        try:
+            rec = await m.get_shell(shell_id)
+        except Exception:
+            rec = None
+
+        # Prefer signalling the dtach proxy (if present), since it's the process
+        # directly attached to the resized PTY master.
+        try:
+            proxy_pid = None
+            pty_state = getattr(m, "_pty", {}).get(shell_id) if hasattr(m, "_pty") else None
+            if pty_state is not None:
+                proxy_pid = getattr(pty_state, "proxy_pid", None)
+            if proxy_pid:
+                try:
+                    os.killpg(os.getpgid(proxy_pid), signal.SIGWINCH)
+                except Exception:
+                    try:
+                        os.kill(proxy_pid, signal.SIGWINCH)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        if rec and rec.pid:
+            try:
+                os.killpg(os.getpgid(rec.pid), signal.SIGWINCH)
+            except Exception:
+                try:
+                    os.kill(rec.pid, signal.SIGWINCH)
+                except Exception:
+                    pass
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Resize failed: {e}")
     return {"ok": True, "data": {"id": shell_id, "cols": cols, "rows": rows}}
