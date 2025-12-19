@@ -158,6 +158,8 @@ Running without arguments denies all external connections.
 
 Browse to `http://localhost:8089` (or `http://<device-ip>:8089` from another device on LAN).
 
+>Note: --port flag can be used to set custom framework url port
+
 ## Back to AI Generated Read-Me 
 
 ## Architecture Overview
