@@ -204,11 +204,39 @@ export function createTerminalDrawer(options = {}) {
 
       close.addEventListener('click', async (ev) => {
         ev.stopPropagation();
+        const closingActive = s.id === activeId;
         try {
           await fetch(`/api/app/file_editor_cm6/terminal/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
         } catch (err) {
           console.warn('Failed to close terminal shell:', err);
         } finally {
+          // If there are still live shells, keep the drawer open and ensure
+          // backend "active" points to a live shell so reconnect doesn't spawn
+          // a new one. If no live shells remain, close the drawer and prevent
+          // auto-reconnect from creating a new shell.
+          const data = await fetchShellList();
+          const shells = data?.shells || [];
+          const liveShells = shells.filter((sh) => !isShellExited(sh));
+
+          if (liveShells.length === 0) {
+            try {
+              closeAndDisconnect();
+            } catch (_) {}
+            return;
+          }
+
+          const backendActive = data?.active_shell_id || null;
+          const backendActiveIsLive = !!(backendActive && liveShells.some((sh) => sh.id === backendActive));
+          const nextLiveId = backendActiveIsLive ? backendActive : (liveShells[0]?.id || null);
+
+          if (nextLiveId && (closingActive || !backendActiveIsLive)) {
+            try {
+              await fetch(`/api/app/file_editor_cm6/terminal/shells/${encodeURIComponent(nextLiveId)}/activate`, { method: 'POST' });
+            } catch (err) {
+              console.warn('Failed to activate fallback terminal shell:', err);
+            }
+          }
+
           await refreshShellMenu();
         }
       });

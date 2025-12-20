@@ -15,10 +15,24 @@ class SocketIOTransport {
   constructor(namespace, languageId, projectRoot) {
     this.socket = null;
     this.onMessage = null;
+    this._readyResolve = null;
+    this._readyReject = null;
+    this.ready = new Promise((resolve, reject) => {
+      this._readyResolve = resolve;
+      this._readyReject = reject;
+    });
+
+    this._lspInitResolve = null;
+    this._lspInitReject = null;
+    this.lspInitialized = new Promise((resolve, reject) => {
+      this._lspInitResolve = resolve;
+      this._lspInitReject = reject;
+    });
 
     try {
       if (!_io) {
         console.warn('[LSP] socket.io client (io) is not available in this context or parent window');
+        this._readyReject?.(new Error('socket.io client not available'));
         return;
       }
 
@@ -37,6 +51,7 @@ class SocketIOTransport {
       this.socket.on('connect', () => {
         try {
           console.log('[LSP] Socket.IO connected, sending initialize...');
+          this._readyResolve?.();
           this.socket.emit('initialize', {
             languageId: languageId,
             projectRoot: projectRoot,
@@ -46,8 +61,19 @@ class SocketIOTransport {
         }
       });
 
+      // Backend ack that the shell is spawned and ready to accept LSP JSON-RPC.
+      this.socket.on('lsp_initialized', (data) => {
+        try {
+          console.log('[LSP] Backend reported lsp_initialized:', data);
+          this._lspInitResolve?.(data);
+        } catch (err) {
+          console.warn('[LSP] Error handling lsp_initialized:', err);
+        }
+      });
+
       this.socket.on('connect_error', (err) => {
         console.error('[LSP] Socket.IO connect_error:', err);
+        this._readyReject?.(err);
       });
 
       this.socket.on('error', (err) => {
@@ -60,6 +86,7 @@ class SocketIOTransport {
     } catch (err) {
       console.warn('[LSP] Failed to initialize SocketIOTransport:', err);
       this.socket = null;
+      this._readyReject?.(err);
     }
   }
 
@@ -747,160 +774,203 @@ export default {
 
       this.lspTransport = transport;
 
-      try {
-        // Add extension to request hierarchical DocumentSymbol (with children) instead of flat SymbolInformation
-        // This is required for nested sticky scroll to work correctly
-        const hierarchicalSymbolCapability = {
-          clientCapabilities: {
-            textDocument: {
-              documentSymbol: {
-                hierarchicalDocumentSymbolSupport: true,
-                symbolKind: {
-                  valueSet: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26]
-                },
-                labelSupport: true
-              }
-            }
-          }
-        };
-        
-        this.lspClient = new LSPClient({
-          rootUri: 'file://' + projectRoot,
-          workspaceFolders: [{ name: 'root', uri: 'file://' + projectRoot }],
-          extensions: [hierarchicalSymbolCapability],
-        });
-      } catch (err) {
-        console.error('[LSP] Failed to create LanguageServerClient:', err);
-        transport.close();
-        this.lspTransport = null;
-        this.lspClient = null;
-        return;
-      }
+      // Prevent older async connect attempts from racing.
+      const connectNonce = (this._lspConnectNonce = (this._lspConnectNonce || 0) + 1);
 
-      // Create a Transport adapter that @codemirror/lsp-client expects
-      // It needs: send(message: string), subscribe(handler), unsubscribe(handler)
-      // NOTE: @codemirror/lsp-client expects JSON STRINGS, but Socket.IO auto-parses JSON.
-      // So we need to: stringify server responses before passing to handler,
-      // and parse outgoing messages if they're strings (Socket.IO will re-stringify).
-      // NOTE: Event names use underscores to match Python AsyncNamespace on_* handlers
-      const cmTransport = {
-        send: (message) => {
-          if (transport.socket) {
-            // message is a JSON string from lsp-client; parse it so Socket.IO can serialize it
-            let payload = message;
-            try {
-              if (typeof message === 'string') {
-                payload = JSON.parse(message);
-              }
-            } catch (e) {
-              // If parsing fails, send as-is
-            }
-            transport.socket.emit('lsp_client_to_server', payload);
-          }
-        },
-        subscribe: (handler) => {
-          transport.onMessage = handler;
-          if (transport.socket) {
-            transport.socket.on('lsp_server_to_client', (data) => {
-              if (handler) {
-                // data is already an object from Socket.IO; stringify for lsp-client
-                let msg = data;
-                if (typeof data !== 'string') {
-                  try {
-                    msg = JSON.stringify(data);
-                  } catch (e) {
-                    console.warn('[LSP] Failed to stringify server message:', e);
-                    return;
-                  }
-                }
-                handler(msg);
-              }
-            });
-          }
-        },
-        unsubscribe: (handler) => {
-          transport.onMessage = null;
-          if (transport.socket) {
-            transport.socket.off('lsp_server_to_client');
-          }
-        },
-      };
-
-      // Connect the client to the server - this initiates the LSP handshake
-      try {
-        console.log('[LSP] Connecting client to transport...');
-        this.lspClient.connect(cmTransport);
-      } catch (err) {
-        console.error('[LSP] Failed to connect LSPClient:', err);
-        transport.close();
-        this.lspTransport = null;
-        this.lspClient = null;
-        return;
-      }
-
-      // Store connection info for document symbol requests
-      // Use the provided file path or construct from project root
-      this._lspFileUri = filePath ? ('file://' + filePath) : ('file://' + projectRoot + '/untitled');
-      this._lspLanguageId = languageId;
-
-      // Install LSP extension into its own compartment
-      if (!this.lspCompartment) {
-        this.lspCompartment = new CM.Compartment();
-      }
-
-      // Note: LSPClient.plugin() creates the extension and triggers didOpen
-      // We need to pass the file URI and language ID
-      try {
-        const lspExtension = this.lspClient.plugin(this._lspFileUri, languageId);
-        this.editor.dispatch({
-          effects: [
-            this.lspCompartment.reconfigure([lspExtension]),
-          ],
-        });
-      } catch (err) {
-        console.error('[LSP] Failed to install LSP extension:', err);
-      }
-
-      console.log(`[LSP] Connected to ${languageId} (projectRoot=${projectRoot})`);
-
-      // Wait for initialization then send didOpen and request document symbols
-      this.lspClient.initializing.then(async () => {
-        console.log('[LSP] Client initialized');
-        
-        // Open the file with the LSP client's workspace
-        // This sends textDocument/didOpen with the current document content
-        console.log(`[LSP] Opening file ${this._lspFileUri} with workspace`);
-        
+      // Defer the actual LSP JSON-RPC handshake until the backend confirms the shell is ready.
+      (async () => {
         try {
-          // Use workspace.openFile which sends didOpen notification
-          if (this.lspClient.workspace && typeof this.lspClient.workspace.openFile === 'function') {
-            this.lspClient.workspace.openFile(this._lspFileUri, this._lspLanguageId, this.editor);
-            console.log('[LSP] File opened via workspace.openFile');
-          } else {
-            // Fallback: send notification directly
-            this.lspClient.notification('textDocument/didOpen', {
-              textDocument: {
-                uri: this._lspFileUri,
-                languageId: this._lspLanguageId,
-                version: 1,
-                text: this.editor.state.doc.toString()
-              }
-            });
-            console.log('[LSP] File opened via notification');
-          }
+          await transport.ready;
         } catch (err) {
-          console.warn('[LSP] didOpen failed:', err);
+          console.warn('[LSP] Socket.IO did not become ready:', err);
+          return;
         }
-        
-        // Give server time to process the file before requesting symbols
-        // Use longer delay on initial load to allow server warm-up
-        setTimeout(() => {
-          console.log('[LSP] Requesting symbols after didOpen...');
-          this.requestDocumentSymbols();
-        }, 1000);
-      }).catch((err) => {
-        console.warn('[LSP] Client initialization failed:', err);
-      });
+
+        if (this._lspConnectNonce !== connectNonce) return;
+
+        // Wait for backend "lsp_initialized" (shell spawned + pipe bridge active).
+        const waitForInit = (ms) => new Promise((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error('lsp_initialized timeout')), ms);
+          transport.lspInitialized.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+        });
+
+        let initOk = false;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (this._lspConnectNonce !== connectNonce) return;
+          try {
+            await waitForInit(15000 + attempt * 5000);
+            initOk = true;
+            break;
+          } catch (err) {
+            console.warn('[LSP] Waiting for lsp_initialized failed, retrying initialize...', err);
+            try {
+              transport.socket?.emit('initialize', { languageId, projectRoot });
+            } catch { }
+          }
+        }
+
+        if (!initOk) {
+          console.warn('[LSP] Backend never reported lsp_initialized; aborting LSP connect');
+          return;
+        }
+
+        if (this._lspConnectNonce !== connectNonce) return;
+
+        try {
+          // Add extension to request hierarchical DocumentSymbol (with children) instead of flat SymbolInformation
+          // This is required for nested sticky scroll to work correctly
+          const hierarchicalSymbolCapability = {
+            clientCapabilities: {
+              textDocument: {
+                documentSymbol: {
+                  hierarchicalDocumentSymbolSupport: true,
+                  symbolKind: {
+                    valueSet: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26]
+                  },
+                  labelSupport: true
+                }
+              }
+            }
+          };
+
+          this.lspClient = new LSPClient({
+            rootUri: 'file://' + projectRoot,
+            workspaceFolders: [{ name: 'root', uri: 'file://' + projectRoot }],
+            extensions: [hierarchicalSymbolCapability],
+          });
+        } catch (err) {
+          console.error('[LSP] Failed to create LanguageServerClient:', err);
+          transport.close();
+          this.lspTransport = null;
+          this.lspClient = null;
+          return;
+        }
+
+        // Create a Transport adapter that @codemirror/lsp-client expects
+        // It needs: send(message: string), subscribe(handler), unsubscribe(handler)
+        // NOTE: @codemirror/lsp-client expects JSON STRINGS, but Socket.IO auto-parses JSON.
+        // So we need to: stringify server responses before passing to handler,
+        // and parse outgoing messages if they're strings (Socket.IO will re-stringify).
+        // NOTE: Event names use underscores to match Python AsyncNamespace on_* handlers
+        const cmTransport = {
+          send: (message) => {
+            if (transport.socket) {
+              // message is a JSON string from lsp-client; parse it so Socket.IO can serialize it
+              let payload = message;
+              try {
+                if (typeof message === 'string') {
+                  payload = JSON.parse(message);
+                }
+              } catch (e) {
+                // If parsing fails, send as-is
+              }
+              transport.socket.emit('lsp_client_to_server', payload);
+            }
+          },
+          subscribe: (handler) => {
+            transport.onMessage = handler;
+            if (transport.socket) {
+              transport.socket.on('lsp_server_to_client', (data) => {
+                if (handler) {
+                  // data is already an object from Socket.IO; stringify for lsp-client
+                  let msg = data;
+                  if (typeof data !== 'string') {
+                    try {
+                      msg = JSON.stringify(data);
+                    } catch (e) {
+                      console.warn('[LSP] Failed to stringify server message:', e);
+                      return;
+                    }
+                  }
+                  handler(msg);
+                }
+              });
+            }
+          },
+          unsubscribe: (handler) => {
+            transport.onMessage = null;
+            if (transport.socket) {
+              transport.socket.off('lsp_server_to_client');
+            }
+          },
+        };
+
+        // Connect the client to the server - this initiates the LSP handshake
+        try {
+          console.log('[LSP] Connecting client to transport...');
+          this.lspClient.connect(cmTransport);
+        } catch (err) {
+          console.error('[LSP] Failed to connect LSPClient:', err);
+          transport.close();
+          this.lspTransport = null;
+          this.lspClient = null;
+          return;
+        }
+
+        // Store connection info for document symbol requests
+        // Use the provided file path or construct from project root
+        this._lspFileUri = filePath ? ('file://' + filePath) : ('file://' + projectRoot + '/untitled');
+        this._lspLanguageId = languageId;
+
+        // Install LSP extension into its own compartment
+        if (!this.lspCompartment) {
+          this.lspCompartment = new CM.Compartment();
+        }
+
+        // Note: LSPClient.plugin() creates the extension and triggers didOpen
+        // We need to pass the file URI and language ID
+        try {
+          const lspExtension = this.lspClient.plugin(this._lspFileUri, languageId);
+          this.editor.dispatch({
+            effects: [
+              this.lspCompartment.reconfigure([lspExtension]),
+            ],
+          });
+        } catch (err) {
+          console.error('[LSP] Failed to install LSP extension:', err);
+        }
+
+        console.log(`[LSP] Connected to ${languageId} (projectRoot=${projectRoot})`);
+
+        // Wait for initialization then send didOpen and request document symbols
+        this.lspClient.initializing.then(async () => {
+          console.log('[LSP] Client initialized');
+
+          // Open the file with the LSP client's workspace
+          // This sends textDocument/didOpen with the current document content
+          console.log(`[LSP] Opening file ${this._lspFileUri} with workspace`);
+
+          try {
+            // Use workspace.openFile which sends didOpen notification
+            if (this.lspClient.workspace && typeof this.lspClient.workspace.openFile === 'function') {
+              this.lspClient.workspace.openFile(this._lspFileUri, this._lspLanguageId, this.editor);
+              console.log('[LSP] File opened via workspace.openFile');
+            } else {
+              // Fallback: send notification directly
+              this.lspClient.notification('textDocument/didOpen', {
+                textDocument: {
+                  uri: this._lspFileUri,
+                  languageId: this._lspLanguageId,
+                  version: 1,
+                  text: this.editor.state.doc.toString()
+                }
+              });
+              console.log('[LSP] File opened via notification');
+            }
+          } catch (err) {
+            console.warn('[LSP] didOpen failed:', err);
+          }
+
+          // Give server time to process the file before requesting symbols
+          // Use longer delay on initial load to allow server warm-up
+          setTimeout(() => {
+            console.log('[LSP] Requesting symbols after didOpen...');
+            this.requestDocumentSymbols();
+          }, 1000);
+        }).catch((err) => {
+          console.warn('[LSP] Client initialization failed:', err);
+        });
+      })();
 
       // Set up debounced symbol refresh on document changes
       if (!this._symbolRefreshDebounce) {
@@ -1378,7 +1448,7 @@ export default {
             if (this.timeout) clearTimeout(this.timeout);
             this.timeout = setTimeout(() => {
               wrapper.classList.remove('cm-scrolling');
-            }, 1500); // Keep visible for 1.5s after scroll stops
+            }, 630); // Keep visible for .63 after scroll stops
           }
 
           destroy() {

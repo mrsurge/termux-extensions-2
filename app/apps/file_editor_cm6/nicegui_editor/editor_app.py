@@ -70,6 +70,16 @@ LSP_LANGUAGE_MAP = {
     '.ts': 'typescript',
     '.mts': 'typescript',
     '.tsx': 'typescriptreact',
+    '.c': 'c',
+    '.h': 'cpp',
+    '.cc': 'cpp',
+    '.cpp': 'cpp',
+    '.cxx': 'cpp',
+    '.hpp': 'cpp',
+    '.hh': 'cpp',
+    '.hxx': 'cpp',
+    '.kt': 'kotlin',
+    '.kts': 'kotlin',
     '.go': 'go',
     '.rs': 'rust',
 }
@@ -621,6 +631,8 @@ async def editor_page():
             if last_file.endswith(('.py', '.pyw')): initial_language = 'python'
             elif last_file.endswith('.js'): initial_language = 'javascript'
             elif last_file.endswith('.ts'): initial_language = 'typescript'
+            elif last_file.endswith('.c'): initial_language = 'c'
+            elif last_file.endswith(('.h', '.cc', '.cpp', '.cxx', '.hpp', '.hh', '.hxx')): initial_language = 'cpp'
             elif last_file.endswith(('.kt', '.kts')): initial_language = 'kotlin'
             elif last_file.endswith(('.html', '.htm')): initial_language = 'html'
             elif last_file.endswith('.css'): initial_language = 'css'

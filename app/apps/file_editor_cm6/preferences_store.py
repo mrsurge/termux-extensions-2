@@ -29,6 +29,10 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "stickyScroll": False,  # Added: 2025-12-03 by vectorArc - TE2 Team
     # LSP integration toggle (backend-only; no UI yet)
     "enableLsp": False,
+    # Optional: path to JetBrains Kotlin LSP entrypoint (kotlin-lsp.sh)
+    "kotlinLspPath": "",
+    # Kotlin LSP run-mode knobs (useful on Termux/Android where file watching can be restricted)
+    "kotlinLspIsolatedDocuments": True,
 }
 
 DEFAULT_UI_PREFS: Dict[str, Any] = {

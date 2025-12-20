@@ -584,6 +584,44 @@ Mitigation options (future work):
 - Use a wake-lock / foreground keepalive policy on mobile.
 - Force-refresh the NiceGUI iframe when reconnect occurs (preferred only if state restoration remains correct).
 
+### 4.4 LSP Bridge (DocumentSymbols → Sticky Scroll)
+
+**Added:** 2025-12-08 (Kotlin LSP support: 2025-12-20)
+
+Code CM6 can connect the CM6 iframe to a backend Language Server Protocol (LSP) process (stdin/stdout JSON-RPC) and use `textDocument/documentSymbol` to drive the Monaco-style **sticky scroll** scope overlay.
+
+**Files:**
+- Frontend (iframe): `app/static/vendor/nicegui/elements/codemirror/codemirror.js` (`connectLSP`, `requestDocumentSymbols`, `handleDocumentSymbols`, sticky scroll plugin consumes `cmComponent.lspSymbols`)
+- Backend (Socket.IO bridge): `app/apps/file_editor_cm6/lsp_ws.py`
+- LSP process lifecycle: `app/apps/file_editor_cm6/lsp_shell_manager.py`
+- Connect/disconnect policy + language mapping: `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+- Full MVP writeup (historical): `notes/2025-12-11_STICKY-S-LSP_WORKING_MVP.md`
+
+**Key behaviors:**
+- **Preference gate:** `editor.enableLsp` (default false) must be enabled to connect LSP on file open.
+- **Sticky scroll source:** If LSP `documentSymbol` data is present, sticky scroll uses it; otherwise it falls back to Lezer parsing / fold heuristics.
+- **Session model:** The `/lsp` Socket.IO namespace is stateless on the client; the backend keeps a long-lived per-(language, projectRoot) bridge session and can short-circuit repeat `initialize` calls on reconnects.
+
+#### Kotlin LSP (JetBrains kotlin-lsp)
+
+The JetBrains Kotlin LSP distribution is large (~600MB). The recommended approach is to vendor it under the repo at:
+- `app/static/vendor/lsp_servers/kotlin-lsp/kotlin-lsp.sh` (plus its `lib/` directory)
+
+You can override discovery via:
+- `editor.kotlinLspPath` (absolute path to `kotlin-lsp.sh`)
+- `TE2_KOTLIN_LSP_SH` / `KOTLIN_LSP_SH` (absolute path)
+- `TE2_KOTLIN_LSP_HOME` / `KOTLIN_LSP_HOME` (directory containing `kotlin-lsp.sh` + `lib/`)
+
+**Termux install (example):**
+```bash
+pkg install openjdk-25 unzip
+scripts/vendor_kotlin_lsp.sh 0.253.10629
+```
+
+Then set:
+- `editor.enableLsp=true`
+- (optional) `editor.kotlinLspPath=...` if you installed Kotlin LSP somewhere else
+
 ---
 
 ## 5. File Watcher System
