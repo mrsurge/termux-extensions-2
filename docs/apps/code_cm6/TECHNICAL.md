@@ -621,6 +621,15 @@ pkg install unzip glibc-runner
 scripts/vendor_kotlin_lsp.sh https://download-cdn.jetbrains.com/kotlin-lsp/261.13587.0/kotlin-lsp-261.13587.0-linux-aarch64.zip
 ```
 
+**Ubuntu / desktop Linux install (example):**
+```bash
+sudo apt-get install -y unzip curl
+# Pick the zip that matches your CPU architecture:
+#   x86_64  -> linux-x64
+#   aarch64 -> linux-aarch64
+scripts/vendor_kotlin_lsp.sh https://download-cdn.jetbrains.com/kotlin-lsp/261.13587.0/kotlin-lsp-261.13587.0-linux-x64.zip
+```
+
 Then set:
 - `editor.enableLsp=true`
 - (optional) `editor.kotlinLspPath=...` if you installed Kotlin LSP somewhere else

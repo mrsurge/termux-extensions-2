@@ -35,15 +35,23 @@ mkdir -p "$UNPACKED"
 echo "[kotlin-lsp vendor] Extracting"
 unzip -q "$ZIP" -d "$UNPACKED"
 
+# Some Kotlin LSP zips unpack into a top-level directory (e.g. kotlin-lsp-<ver>/).
+# Others have kotlin-lsp.sh at the archive root. Locate the script and treat its
+# parent directory as the distro root.
+SOURCE_DIR="$UNPACKED"
 if [ ! -f "${UNPACKED}/kotlin-lsp.sh" ]; then
-  echo "[kotlin-lsp vendor] ERROR: kotlin-lsp.sh not found in archive" >&2
-  exit 1
+  FOUND="$(find "$UNPACKED" -maxdepth 4 -type f -name kotlin-lsp.sh 2>/dev/null | head -n 1 || true)"
+  if [ -z "$FOUND" ]; then
+    echo "[kotlin-lsp vendor] ERROR: kotlin-lsp.sh not found in archive" >&2
+    exit 1
+  fi
+  SOURCE_DIR="$(cd "$(dirname "$FOUND")" && pwd)"
 fi
 
 echo "[kotlin-lsp vendor] Installing into ${DEST}"
 rm -rf "$DEST"
 mkdir -p "$DEST"
-cp -R "${UNPACKED}/." "$DEST/"
+cp -R "${SOURCE_DIR}/." "$DEST/"
 
 # Don't rely on the executable bit (we run via bash), but set it if possible.
 chmod +x "${DEST}/kotlin-lsp.sh" 2>/dev/null || true

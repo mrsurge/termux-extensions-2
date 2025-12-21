@@ -575,6 +575,8 @@ export default {
       lspSymbols: [],
       // Sticky scroll plugin instance handle (set by plugin constructor when enabled)
       _stickyScrollPlugin: null,
+      // Autocompletion override compartment (used for non-LSP fallbacks)
+      completionCompartment: null,
       isMobileLayout: false,
     };
   },
@@ -647,9 +649,10 @@ export default {
         this.editor.dispatch({
           effects: [
             this.languageConfig.reconfigure([]),
-            this.indentUnitCompartment.reconfigure(CM.indentUnit.of('    '))
+            this.indentUnitCompartment.reconfigure(CM.indentUnit.of('    ')),
           ]
         });
+        this.applyCompletionFallback();
         return;
       }
 
@@ -671,7 +674,90 @@ export default {
             this.indentUnitCompartment.reconfigure(CM.indentUnit.of(indentString))
           ]
         });
+        this.applyCompletionFallback();
       });
+    },
+    // Provide a light-weight autocomplete fallback for languages where we may be
+    // running without LSP (or where the language mode doesn't provide rich data).
+    //
+    // IMPORTANT: When an LSP client is connected, we do NOT install an override,
+    // because it can suppress LSP completion providers.
+    applyCompletionFallback() {
+      if (!this.editor) return;
+
+      if (!this.completionCompartment) {
+        // Installed in setupExtensions(); if we missed it for any reason,
+        // bail without breaking the editor.
+        return;
+      }
+
+      // If LSP is active, don't override completion sources.
+      if (this.lspClient) {
+        try {
+          this.editor.dispatch({ effects: this.completionCompartment.reconfigure([]) });
+        } catch {}
+        return;
+      }
+
+      const lang = (this.language || '').toLowerCase().trim();
+      const autocompletion = CM && typeof CM.autocompletion === 'function' ? CM.autocompletion : null;
+      if (!autocompletion) return;
+
+      const completeFromList = (CM && typeof CM.completeFromList === 'function') ? CM.completeFromList : null;
+      const completeAnyWord = (CM && typeof CM.completeAnyWord === 'function') ? CM.completeAnyWord : null;
+
+      const keywordLists = {
+        kotlin: [
+          'package','import','class','interface','object','fun','val','var','typealias',
+          'data','sealed','enum','annotation','companion','init',
+          'public','private','protected','internal',
+          'override','open','final','abstract',
+          'suspend','inline','noinline','crossinline','tailrec','operator','infix',
+          'const','lateinit',
+          'if','else','when','for','while','do','return','break','continue',
+          'try','catch','finally','throw',
+          'is','in','as','this','super',
+          'null','true','false',
+        ],
+        c: [
+          'auto','break','case','char','const','continue','default','do','double','else','enum',
+          'extern','float','for','goto','if','inline','int','long','register','restrict','return',
+          'short','signed','sizeof','static','struct','switch','typedef','union','unsigned','void',
+          'volatile','while',
+        ],
+        cpp: [
+          'alignas','alignof','and','and_eq','asm','auto','bitand','bitor','bool','break','case','catch',
+          'char','char8_t','char16_t','char32_t','class','concept','const','consteval','constexpr','constinit',
+          'const_cast','continue','co_await','co_return','co_yield','decltype','default','delete','do','double',
+          'dynamic_cast','else','enum','explicit','export','extern','false','float','for','friend','goto','if',
+          'inline','int','long','mutable','namespace','new','noexcept','not','not_eq','nullptr','operator','or',
+          'or_eq','private','protected','public','register','reinterpret_cast','requires','return','short',
+          'signed','sizeof','static','static_assert','static_cast','struct','switch','template','this','thread_local',
+          'throw','true','try','typedef','typeid','typename','union','unsigned','using','virtual','void','volatile',
+          'wchar_t','while','xor','xor_eq','override','final',
+        ],
+      };
+
+      let keywords = null;
+      if (lang === 'kotlin') keywords = keywordLists.kotlin;
+      else if (lang === 'c') keywords = keywordLists.c;
+      else if (lang === 'cpp' || lang === 'c++') keywords = keywordLists.cpp;
+
+      const sources = [];
+      if (keywords && completeFromList) {
+        sources.push(completeFromList(keywords));
+      }
+      if (completeAnyWord) {
+        sources.push(completeAnyWord);
+      }
+
+      // Only apply an override when we actually have something to add.
+      const ext = sources.length ? autocompletion({ override: sources }) : [];
+      try {
+        this.editor.dispatch({ effects: this.completionCompartment.reconfigure(ext ? [ext] : []) });
+      } catch (err) {
+        console.warn('[CodeMirror] applyCompletionFallback failed:', err);
+      }
     },
     async getThemes() {
       if (!this.editor) await this.editorPromise;
@@ -846,6 +932,9 @@ export default {
           return;
         }
 
+        // LSP is now active; remove any non-LSP completion overrides.
+        try { this.applyCompletionFallback(); } catch { }
+
         // Create a Transport adapter that @codemirror/lsp-client expects
         // It needs: send(message: string), subscribe(handler), unsubscribe(handler)
         // NOTE: @codemirror/lsp-client expects JSON STRINGS, but Socket.IO auto-parses JSON.
@@ -1014,6 +1103,8 @@ export default {
 
       // Clear LSP-driven symbols when disconnecting
       this.lspSymbols = [];
+      // Restore non-LSP completion fallbacks (if any).
+      try { this.applyCompletionFallback(); } catch { }
       try {
         if (this._stickyScrollPlugin && typeof this._stickyScrollPlugin.updateStickyHeader === 'function') {
           this._stickyScrollPlugin.updateStickyHeader(true);
@@ -1466,6 +1557,7 @@ export default {
       this.readOnlyCompartment = new CM.Compartment();
       this.fontSizeCompartment = new CM.Compartment();
       this.gutterClassCompartment = new CM.Compartment();
+      this.completionCompartment = new CM.Compartment();
 
       const initialFontScale = clampFontScale(this.fontScale);
       const initialFontTheme = buildFontScaleTheme(initialFontScale);
@@ -1494,6 +1586,7 @@ export default {
         this.colorPickerCompartment.of([]), // Color picker toggle
         this.readOnlyCompartment.of([]),     // Read-only mode toggle
         this.gutterClassCompartment.of([]), // Gutter line classes
+        this.completionCompartment.of([]), // Completion override (non-LSP fallbacks)
         // Apply styling to ALL gutters for deletion widgets (fixes fold gutter tinting)
         (CM.gutterWidgetClass ? CM.gutterWidgetClass.of((view, widget, block) => {
           if (widget instanceof RemovedLineWidget) {
@@ -1893,6 +1986,115 @@ export default {
           stack.push(sec);
         }
         return stack;
+      };
+
+      // Kotlin scope fallback (brace-based) for legacy stream mode.
+      // Kotlin in this bundle is provided via legacy clike StreamLanguage, so
+      // there is no Lezer syntax tree available. When LSP documentSymbols are
+      // missing/unavailable, we provide a lightweight heuristic based on braces.
+      const stripKotlinLineForBraces = (text) => {
+        if (!text) return "";
+        // Remove line comments first.
+        let s = String(text).replace(/\/\/.*$/, '');
+        // Remove basic quoted strings to avoid counting braces inside them.
+        // (Not perfect for triple-quoted strings, but good enough as a fallback.)
+        s = s.replace(/\"([^\"\\]|\\.)*\"/g, '""');
+        s = s.replace(/'([^'\\]|\\.)*'/g, "''");
+        return s;
+      };
+
+      const collectKotlinScopesByBraces = (doc) => {
+        const scopes = [];
+        const stack = []; // {startLine, openDepth, depth, name, rawText}
+        let braceDepth = 0;
+
+        const scopeNameForLine = (text) => {
+          const t = text.trim();
+          // class/interface/object/enum class
+          let m = t.match(/\b(enum\s+class|class|interface|object)\s+([A-Za-z_]\w*)/);
+          if (m) return m[2];
+          // fun (handles modifiers crudely)
+          m = t.match(/\bfun\s+([A-Za-z_]\w*)\s*\(/);
+          if (m) return m[1];
+          return null;
+        };
+
+        for (let lineNo = 1; lineNo <= doc.lines; lineNo++) {
+          const lineText = doc.line(lineNo).text || '';
+          const cleaned = stripKotlinLineForBraces(lineText);
+
+          // Detect a scope header line that opens a block on the same line.
+          // If the opening brace is on the next line, this heuristic won't capture it.
+          if (cleaned.includes('{')) {
+            const name = scopeNameForLine(cleaned);
+            if (name) {
+              stack.push({
+                startLine: lineNo,
+                openDepth: braceDepth + 1,
+                depth: braceDepth,
+                name,
+                rawText: lineText,
+              });
+            }
+          }
+
+          // Update braceDepth for this line.
+          let opens = 0, closes = 0;
+          for (let i = 0; i < cleaned.length; i++) {
+            const ch = cleaned[i];
+            if (ch === '{') opens++;
+            else if (ch === '}') closes++;
+          }
+          braceDepth = Math.max(0, braceDepth + opens - closes);
+
+          // Close any scopes whose brace depth is no longer active.
+          while (stack.length && braceDepth < stack[stack.length - 1].openDepth) {
+            const scope = stack.pop();
+            scopes.push({
+              startLine: scope.startLine,
+              endLine: lineNo,
+              depth: scope.depth,
+              name: scope.name,
+              rawText: scope.rawText,
+            });
+          }
+        }
+
+        // Close any remaining scopes to end-of-doc.
+        while (stack.length) {
+          const scope = stack.pop();
+          scopes.push({
+            startLine: scope.startLine,
+            endLine: doc.lines,
+            depth: scope.depth,
+            name: scope.name,
+            rawText: scope.rawText,
+          });
+        }
+
+        return scopes;
+      };
+
+      const kotlinPathAt = (scopes, refLine) => {
+        const candidates = (scopes || []).filter((s) =>
+          s && typeof s.startLine === 'number' && typeof s.endLine === 'number' &&
+          refLine > s.startLine && refLine <= s.endLine
+        );
+        candidates.sort((a, b) => (a.depth - b.depth) || (a.startLine - b.startLine));
+
+        // Build a proper nesting path (increasing depth, within parent ranges).
+        const path = [];
+        for (const s of candidates) {
+          if (!path.length) {
+            path.push(s);
+            continue;
+          }
+          const prev = path[path.length - 1];
+          if (s.startLine >= prev.startLine && s.endLine <= prev.endLine && s.depth >= prev.depth) {
+            path.push(s);
+          }
+        }
+        return path;
       };
 
       // Generic fold-based section helpers (work for other/unknown langs)
@@ -2561,6 +2763,7 @@ export default {
           const isTypeScript = langName === 'typescript' || langName === 'typescriptreact';
           const isJSLike = isJavaScript || isTypeScript;
           const isMarkdown = langName === 'markdown' || langName === 'md' || langName === 'gfm';
+          const isKotlin = langName === 'kotlin';
 
           // ---------------------------------------------------------------------------
           // 1) Compute reference line below the current overlay
@@ -2864,6 +3067,53 @@ export default {
               }
               
               return scopeObj;
+            });
+          } else if (isKotlin) {
+            // Kotlin fallback: brace-based scopes (no Lezer tree for legacy stream mode)
+            const kotlinScopes = collectKotlinScopesByBraces(state.doc);
+            const path = kotlinPathAt(kotlinScopes, refLine);
+            const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
+
+            let cumulativeHeight = 0;
+            candidateScopes = path.map((sec, pathIdx) => {
+              const depth = pathIdx;
+              const startLine = sec.startLine;
+              const endLine = sec.endLine;
+
+              const lineText = state.doc.line(startLine).text;
+              const indentMatch = lineText.match(/^([ \t]*)/);
+              const indentRaw = indentMatch ? indentMatch[1] : '';
+              const indentSpaces = indentRaw.replace(/\t/g, '    ').length;
+              const indentDepth = Math.floor(indentSpaces / indentSize);
+
+              let cachedHeight = 1;
+              let offset;
+
+              if (wrappingEnabled) {
+                const key = `${depth}:${startLine}`;
+                cachedHeight = this.scopeHeights.get(key) || 1;
+                offset = -(cumulativeHeight + 1);
+                cumulativeHeight += cachedHeight;
+              } else {
+                offset = -(depth + 1);
+              }
+
+              const triggerLine = startLine + offset;
+              const endTriggerLine = Math.max(startLine, endLine - 1);
+
+              return {
+                node: null,
+                depth,
+                startLine,
+                endLine,
+                text: sec.name || lineText,
+                rawText: lineText,
+                triggerLine,
+                endTriggerLine,
+                indentDepth,
+                indentSpaces,
+                height: cachedHeight,
+              };
             });
           } else {
             const tree = CM.ensureSyntaxTree(state, state.doc.length, 200) || CM.syntaxTree(state);
