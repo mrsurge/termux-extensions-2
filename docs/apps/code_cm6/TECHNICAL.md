@@ -586,7 +586,7 @@ Mitigation options (future work):
 
 ### 4.4 LSP Bridge (DocumentSymbols → Sticky Scroll)
 
-**Added:** 2025-12-08 (Kotlin LSP support: 2025-12-20)
+**Added:** 2025-12-08 (Kotlin + clangd support: 2025-12-20)
 
 Code CM6 can connect the CM6 iframe to a backend Language Server Protocol (LSP) process (stdin/stdout JSON-RPC) and use `textDocument/documentSymbol` to drive the Monaco-style **sticky scroll** scope overlay.
 
@@ -601,6 +601,8 @@ Code CM6 can connect the CM6 iframe to a backend Language Server Protocol (LSP) 
 - **Preference gate:** `editor.enableLsp` (default false) must be enabled to connect LSP on file open.
 - **Sticky scroll source:** If LSP `documentSymbol` data is present, sticky scroll uses it; otherwise it falls back to Lezer parsing / fold heuristics.
 - **Session model:** The `/lsp` Socket.IO namespace is stateless on the client; the backend keeps a long-lived per-(language, projectRoot) bridge session and can short-circuit repeat `initialize` calls on reconnects.
+- **Handshake sequencing:** The frontend defers `@codemirror/lsp-client` handshake until the backend emits `lsp_initialized` (shell spawned + pipe bridge active) to avoid first-load races on slow servers.
+- **Crash/exit recovery:** If an LSP process is manually exited or crashes, the next `initialize` call detects the dead shell/pipe session and respawns a new LSP server automatically.
 
 #### Kotlin LSP (JetBrains kotlin-lsp)
 
@@ -614,13 +616,28 @@ You can override discovery via:
 
 **Termux install (example):**
 ```bash
-pkg install openjdk-25 unzip
-scripts/vendor_kotlin_lsp.sh 0.253.10629
+pkg install unzip glibc-runner
+# Prefer the platform zip on Android (bundled JRE).
+scripts/vendor_kotlin_lsp.sh https://download-cdn.jetbrains.com/kotlin-lsp/261.13587.0/kotlin-lsp-261.13587.0-linux-aarch64.zip
 ```
 
 Then set:
 - `editor.enableLsp=true`
 - (optional) `editor.kotlinLspPath=...` if you installed Kotlin LSP somewhere else
+
+**Termux runtime notes (Android):**
+- The platform zip bundles a glibc-linked JRE; Code CM6 launches it via `grun` (glibc-runner) on Android.
+- Temp/cache directories are redirected under `~/.cache/te2_kotlin_lsp/` (no `/tmp` assumptions).
+- Kotlin LSP is run in `--stdio` mode (single-client).
+- Some devices require SELinux permissive for Kotlin LSP file watching; Code CM6 currently attempts `sudo -n setenforce 0` on Android if `sudo` is available before launching Kotlin LSP. (UI gating/ack is planned.)
+- Optional run mode knob: `editor.kotlinLspIsolatedDocuments` (default true on Android) adds `--isolated-documents` to reduce workspace-wide coupling.
+
+#### C/C++ LSP (clangd)
+
+Code CM6 supports C-family sticky scroll scopes via `clangd`:
+- `clangd` is expected to be available on PATH (Termux provides it; no vendoring required).
+- Extension mapping (examples): `.c` → `c`, `.cpp/.cc/.cxx/.h/.hpp/...` → `cpp`
+- The backend spawns `clangd` as a pipe shell and uses `textDocument/documentSymbol` the same way as Python/TypeScript/Kotlin.
 
 ---
 
@@ -1729,6 +1746,27 @@ Fix strategy used here:
 - When the backend sends the `shell_id` control message, the frontend immediately does a `fit()` and **re-sends resize (with short retries)** to cover the initial-attach race.
 - `framework-shells` can optionally deliver best-effort `SIGWINCH` after `resize_pty()` so readline/TUIs reliably refresh their cached width.
   In TE2 this is enabled via `FRAMEWORK_SHELLS_SIGWINCH_ON_RESIZE=1` during framework startup.
+
+### 9.4 Run Active File (▶)
+
+The toolbar “Play” button dispatches the active file into the project terminal.
+
+Frontend:
+- Button: `#run-active-file-btn` in `app/apps/file_editor_cm6/template.html`
+- Enable/disable policy: `RUNNABLE_EXTENSIONS` in `app/apps/file_editor_cm6/main.js`
+
+Backend:
+- Endpoint: `POST /api/app/file_editor_cm6/terminal/run_active_file` in `app/apps/file_editor_cm6/terminal_backend.py`
+- Dispatch model: the backend writes a single shell command line into the dtach-backed PTY (`write_to_pty`).
+
+Supported today:
+- Python: `.py`, `.pyw` (runs `python3 <file>`)
+- Shell scripts: `.sh`, `.bash`, `.zsh` (runs `bash|zsh <file>`)
+- C/C++: `.c`, `.cc`, `.cpp`, `.cxx` (compiles then executes)
+  - Output location: `<file_dir>/.te2_build/<stem>.out`
+  - Compiler selection: `.c` → `gcc`, C++ sources → `g++`
+
+Note: this is intentionally a simple “single-file compile+run” path; makefile/cmake integration is future work.
 
 ---
 

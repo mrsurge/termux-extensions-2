@@ -754,7 +754,7 @@ const FONT_SCALE_PRESETS = {
   large: 1.0     // 115% user-facing (back to browser default)
 };
 
-const RUNNABLE_EXTENSIONS = new Set(['.py', '.pyw', '.sh', '.bash', '.zsh']);
+const RUNNABLE_EXTENSIONS = new Set(['.py', '.pyw', '.sh', '.bash', '.zsh', '.c', '.cc', '.cpp', '.cxx']);
 
 function applyFontScale(scale) {
   // This function applies the selected font scale to the UI.
@@ -1550,7 +1550,7 @@ function updateRunButtonState() {
   if (!runActiveBtn) return;
   const runnable = Boolean(currentPath && currentPathExists && isRunnableFile(currentPath));
   runActiveBtn.disabled = !runnable;
-  runActiveBtn.title = runnable ? 'Run active file in terminal' : 'Open a Python or shell script to enable running';
+  runActiveBtn.title = runnable ? 'Run active file in terminal' : 'Open a Python, shell, or C/C++ source file to enable running';
 }
 
 function updatePathDisplay() {
@@ -1941,7 +1941,7 @@ async function saveFile() {
 async function runCurrentFile() {
   const runnable = currentPath && currentPathExists && isRunnableFile(currentPath);
   if (!runnable) {
-    host.toast('Open a Python or shell script to run it in the terminal');
+    host.toast('Open a Python, shell, or C/C++ source file to run it in the terminal');
     return;
   }
 

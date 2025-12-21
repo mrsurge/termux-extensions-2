@@ -86,6 +86,121 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         self.session_ready: Dict[str, asyncio.Event] = {}
         import sys
         print(f"[LSP WS] Namespace initialized: {namespace}", file=sys.stderr, flush=True)
+
+    async def _is_session_healthy(self, session: dict) -> bool:
+        """Return True if the session's shell + pipe process are still alive.
+
+        Users can manually exit LSP servers (or they can crash). In that case we
+        must respawn on the next initialize rather than keeping a dead session
+        around forever.
+        """
+
+        if not session or session.get("dead"):
+            return False
+
+        shell_id = session.get("shell_id")
+        if not shell_id:
+            return False
+
+        try:
+            mgr = await get_manager()
+        except Exception:
+            return False
+
+        try:
+            rec = await mgr.get_shell(shell_id)
+        except Exception:
+            rec = None
+
+        if not rec or rec.status != "running" or not rec.pid:
+            return False
+
+        pipe_state = mgr.get_pipe_state(shell_id)
+        if not pipe_state or not getattr(pipe_state, "process", None):
+            return False
+
+        proc = pipe_state.process
+        # asyncio subprocess: returncode is None while running
+        try:
+            if getattr(proc, "returncode", None) is not None:
+                return False
+        except Exception:
+            # If we can't read returncode, assume it's unhealthy.
+            return False
+
+        return True
+
+    async def _teardown_session(self, key: Tuple[str, str], session: Optional[dict]) -> None:
+        if not session:
+            return
+
+        # Mark dead immediately so concurrent calls don't reuse it.
+        session["dead"] = True
+
+        try:
+            pipe_state = session.get("pipe_state")
+            if pipe_state and getattr(pipe_state, "stop", None):
+                pipe_state.stop.set()
+        except Exception:
+            pass
+
+        try:
+            task = session.get("reader_task")
+            if task:
+                task.cancel()
+        except Exception:
+            pass
+
+        shell_id = session.get("shell_id")
+        if shell_id:
+            try:
+                mgr = await get_manager()
+                await mgr.terminate_shell(shell_id, force=True)
+            except Exception:
+                pass
+
+        try:
+            self.backend_sessions.pop(key, None)
+        except Exception:
+            pass
+
+    async def _ensure_backend_session(self, language_id: str, project_root: str) -> Optional[dict]:
+        """Get or create a healthy backend session for (language, project_root)."""
+
+        key = (str(language_id), str(project_root))
+        session = self.backend_sessions.get(key)
+        if session is not None:
+            if await self._is_session_healthy(session):
+                return session
+            # Stale/crashed session: tear down and respawn.
+            await self._teardown_session(key, session)
+            session = None
+
+        shell = await get_or_spawn_lsp_shell(language_id, Path(project_root))
+        if not shell:
+            return None
+
+        mgr = await get_manager()
+        pipe_state = mgr.get_pipe_state(shell.id)
+        if not pipe_state:
+            return None
+
+        session = {
+            "language_id": str(language_id),
+            "project_root": str(project_root),
+            "shell_id": shell.id,
+            "pipe_state": pipe_state,
+            "parser": LSPFrameParser(),
+            "reader_task": None,
+            "current_sid": None,
+            "init_request_id": None,
+            "init_result_template": None,  # cached initialize response (without id rewrite)
+            "initialized": False,
+            "dead": False,
+        }
+        session["reader_task"] = asyncio.create_task(self._bridge_backend_output(key))
+        self.backend_sessions[key] = session
+        return session
     
     async def on_connect(self, sid, environ):
         import sys
@@ -122,34 +237,10 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         key = (str(language_id), str(project_root))
         self.sid_to_key[sid] = key
 
-        session = self.backend_sessions.get(key)
+        session = await self._ensure_backend_session(language_id, project_root)
         if session is None:
-            # Spawn or get existing LSP shell
-            shell = await get_or_spawn_lsp_shell(language_id, Path(project_root))
-            if not shell:
-                await self.emit("lsp:error", {"error": f"Failed to spawn LSP for {language_id}"}, to=sid)
-                return
-
-            mgr = await get_manager()
-            pipe_state = mgr.get_pipe_state(shell.id)
-            if not pipe_state:
-                await self.emit("lsp:error", {"error": "LSP shell has no pipe state"}, to=sid)
-                return
-
-            session = {
-                "language_id": str(language_id),
-                "project_root": str(project_root),
-                "shell_id": shell.id,
-                "pipe_state": pipe_state,
-                "parser": LSPFrameParser(),
-                "reader_task": None,
-                "current_sid": None,
-                "init_request_id": None,
-                "init_result_template": None,  # cached initialize response (without id rewrite)
-                "initialized": False,
-            }
-            session["reader_task"] = asyncio.create_task(self._bridge_backend_output(key))
-            self.backend_sessions[key] = session
+            await self.emit("lsp:error", {"error": f"Failed to spawn LSP for {language_id}"}, to=sid)
+            return
 
         # Single-attached-client policy: steal attachment on reconnect.
         session["current_sid"] = sid
@@ -246,6 +337,10 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
             print(f"[LSP WS] Wrote {len(body)} bytes to shell", file=sys.stderr, flush=True)
         except Exception as e:
             print(f"[LSP WS] Write error: {e}", file=sys.stderr, flush=True)
+            try:
+                session["dead"] = True
+            except Exception:
+                pass
     
     async def _bridge_backend_output(self, key: Tuple[str, str]):
         """Read from backend stdout forever; deliver to current sid (session broker)."""
@@ -273,6 +368,10 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                 if not chunk:
                     # EOF
                     print(f"[LSP WS] EOF on {key}", file=sys.stderr, flush=True)
+                    try:
+                        session["dead"] = True
+                    except Exception:
+                        pass
                     break
                 
                 print(f"[LSP WS] Read {len(chunk)} bytes from LSP server", file=sys.stderr, flush=True)
@@ -301,5 +400,11 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
             pass
         except Exception as e:
             print(f"[LSP WS] Reader error: {e}", file=sys.stderr, flush=True)
+            try:
+                session = self.backend_sessions.get(key)
+                if session:
+                    session["dead"] = True
+            except Exception:
+                pass
     
     # Note: on_disconnect is defined earlier in the class

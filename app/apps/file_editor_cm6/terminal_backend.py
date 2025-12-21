@@ -9,6 +9,7 @@ import asyncio
 import json
 import shlex
 import re
+import shutil
 from pathlib import Path
 from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query, Depends
@@ -33,6 +34,28 @@ terminal_router = APIRouter()
 # Track active terminal websocket clients so the backend can force a reconnect on project switch.
 _active_terminal_sockets: Dict[WebSocket, Optional[str]] = {}
 _active_terminal_lock = asyncio.Lock()
+_shell_create_locks: Dict[str, asyncio.Lock] = {}
+
+
+def _shell_lock_key(project_path: Optional[str], fallback: str) -> str:
+    """Compute a stable key for coordinating shell creation.
+
+    We want to ensure that concurrent code-paths (WS auto-connect and REST actions
+    like 'run active file') don't create two shells in a race.
+    """
+
+    key = (project_path or "").strip()
+    if key:
+        return f"project:{key}"
+    return f"fallback:{fallback}"
+
+
+def _get_shell_create_lock(key: str) -> asyncio.Lock:
+    lock = _shell_create_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _shell_create_locks[key] = lock
+    return lock
 
 
 async def close_active_terminal_sockets(reason: str = "project switch") -> None:
@@ -132,6 +155,65 @@ RUNNABLE_COMMANDS = {
     ".bash": ["bash"],
     ".zsh": ["zsh"],
 }
+
+_C_EXTS = {".c"}
+_CPP_EXTS = {".cc", ".cpp", ".cxx"}
+
+
+def _is_c_family_source(ext: str) -> bool:
+    return ext in _C_EXTS or ext in _CPP_EXTS
+
+
+def _compiler_for_ext(ext: str) -> str:
+    if ext in _C_EXTS:
+        return "gcc"
+    return "g++"
+
+
+async def _ensure_terminal_shell(
+    *,
+    project_path: Optional[str],
+    preferred_cwd: str,
+    mgr: FrameworkShellManager,
+    history_store,
+) -> str:
+    """Return a running terminal shell id, creating one if needed.
+
+    This is guarded by a per-project lock to avoid a race where the terminal WS
+    auto-connect creates a shell at the same time as a REST handler (e.g. run
+    active file) tries to create one.
+    """
+
+    lock_key = _shell_lock_key(project_path, preferred_cwd)
+    lock = _get_shell_create_lock(lock_key)
+
+    async with lock:
+        shell_id = history_store.get_terminal_shell_id(project_path)
+        if shell_id:
+            try:
+                rec = await mgr.get_shell(shell_id)
+            except Exception:
+                rec = None
+            if rec and rec.status == "running" and rec.pid:
+                return shell_id
+            history_store.set_terminal_shell_id(None, project_path)
+            shell_id = None
+
+        cwd = preferred_cwd if preferred_cwd and Path(preferred_cwd).is_dir() else str(Path.home())
+        try:
+            sidecar = ProjectSidecar.load_or_create(project_path) if project_path else None
+        except Exception:
+            sidecar = None
+
+        if sidecar and project_path:
+            seq = await _next_sequence_for_project(project_path, sidecar, mgr)
+        else:
+            seq = 1
+
+        shell_info = await create_editor_shell(cwd=cwd, project_path=project_path, sequence=seq)
+        shell_id = shell_info["id"]
+        history_store.set_terminal_shell_id(shell_id, project_path)
+        return shell_id
 
 
 async def _next_sequence_for_project(
@@ -317,35 +399,61 @@ async def run_active_file():
 
     path_obj = Path(current_file).expanduser().resolve(strict=False)
     ext = path_obj.suffix.lower()
-    runner = RUNNABLE_COMMANDS.get(ext)
-    if not runner:
-        raise HTTPException(status_code=400, detail="Only Python and shell scripts can be executed")
 
     workdir = str(path_obj.parent)
-    cmd_tokens = runner + [str(path_obj)]
-    command_preview = " ".join(shlex.quote(part) for part in cmd_tokens)
+
+    # Python + shell scripts (direct execution)
+    runner = RUNNABLE_COMMANDS.get(ext)
+    if runner:
+        cmd_tokens = runner + [str(path_obj)]
+        command_preview = " ".join(shlex.quote(part) for part in cmd_tokens)
+    # C/C++: compile then execute produced binary
+    elif _is_c_family_source(ext):
+        compiler = _compiler_for_ext(ext)
+        compiler_path = shutil.which(compiler)
+        if not compiler_path:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing compiler '{compiler}' on PATH (install a Termux compiler toolchain)",
+            )
+
+        # Build output next to the file (repo-local, predictable), but keep it out of the source tree proper.
+        # Future: allow configurable build dir and/or makefile support.
+        out_dir = path_obj.parent / ".te2_build"
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to create build dir: {e}")
+
+        out_path = out_dir / f"{path_obj.stem}.out"
+
+        # Use relative source path (basename) after cd, so clangd/gcc can resolve local includes naturally.
+        src_name = path_obj.name
+        compile_tokens = [
+            compiler,
+            "-O0",
+            "-g",
+            src_name,
+            "-o",
+            str(out_path),
+        ]
+        compile_cmd = " ".join(shlex.quote(part) for part in compile_tokens)
+        run_cmd = shlex.quote(str(out_path))
+        command_preview = f"cd {shlex.quote(workdir)} && {compile_cmd} && {run_cmd}"
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Only Python, shell scripts, and C/C++ source files can be executed",
+        )
 
     mgr = await get_manager()
-    shell_id = history_store.get_terminal_shell_id(project_path)
-    if shell_id:
-        rec = await mgr.get_shell(shell_id)
-        if not rec or rec.status != "running" or not rec.pid:
-            history_store.set_terminal_shell_id(None, project_path)
-            shell_id = None
-
-    if not shell_id:
-        preferred_cwd = project_path if project_path and Path(project_path).is_dir() else workdir
-        try:
-            sidecar = ProjectSidecar.load_or_create(project_path) if project_path else None
-        except Exception:
-            sidecar = None
-        if sidecar and project_path:
-            seq = await _next_sequence_for_project(project_path, sidecar, mgr)
-        else:
-            seq = 1
-        shell_info = await create_editor_shell(cwd=preferred_cwd, project_path=project_path, sequence=seq)
-        shell_id = shell_info["id"]
-        history_store.set_terminal_shell_id(shell_id, project_path)
+    preferred_cwd = project_path if project_path and Path(project_path).is_dir() else workdir
+    shell_id = await _ensure_terminal_shell(
+        project_path=project_path,
+        preferred_cwd=preferred_cwd,
+        mgr=mgr,
+        history_store=history_store,
+    )
 
     try:
         await mgr.write_to_pty(shell_id, command_preview + "\n")
@@ -504,23 +612,16 @@ async def terminal_ws(websocket: WebSocket, shell_id: str):
         
         # Create new shell if needed - DIRECT AWAIT
         if not saved_shell_id:
-            # Use active project path if available, fallback to home
             project_path = shell_project_path
             cwd = project_path if project_path and Path(project_path).is_dir() else str(Path.home())
-            try:
-                sidecar = ProjectSidecar.load_or_create(project_path) if project_path else None
-            except Exception:
-                sidecar = None
-            if sidecar and project_path:
-                seq = await _next_sequence_for_project(project_path, sidecar, mgr)
-            else:
-                seq = 1
-            print(f"[Terminal WS] Creating new terminal shell (cwd={cwd})")
-            shell_rec = await create_editor_shell(cwd=cwd, project_path=project_path, sequence=seq)
-            shell_id = shell_rec['id']
-            print(f"[Terminal WS] New shell created: {shell_id}")
-            history_store.set_terminal_shell_id(shell_id, project_path)
-            print(f"[Terminal WS] Saved shell ID to history store")
+            print(f"[Terminal WS] Ensuring terminal shell exists (cwd={cwd})")
+            shell_id = await _ensure_terminal_shell(
+                project_path=project_path,
+                preferred_cwd=cwd,
+                mgr=mgr,
+                history_store=history_store,
+            )
+            print(f"[Terminal WS] Using shell: {shell_id}")
         
         # Send shell ID to client
         print(f"[Terminal WS] Sending shell_id to client: {shell_id}")

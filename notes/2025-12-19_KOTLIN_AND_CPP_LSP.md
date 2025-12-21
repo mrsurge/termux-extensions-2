@@ -150,6 +150,12 @@ All in:
 
 This materially improves “first open” reliability for slow-start servers (Kotlin LSP in particular).
 
+### 3.3 Exit/crash recovery (respawn)
+
+All LSP servers (kotlin/clangd/pyright/typescript-language-server) can be manually exited by the user or crash.
+The backend `/lsp` bridge tracks session health; if the cached per-(language, projectRoot) session is dead, the
+next client `initialize` respawns a fresh shell and re-establishes the pipe bridge automatically.
+
 ---
 
 ## 4) Sticky scroll: where symbols go and how they’re used
@@ -168,24 +174,40 @@ Implementation details and MVP background:
 
 ## 5) C++ LSP (stub for next session)
 
-### 5.1 Goal
+### 5.1 Status (as of 2025-12-20)
+
+✅ **Working basic integration** using Termux-packaged `clangd` over stdio.
+
+What’s done:
+- Extension → languageId mapping for C/C++ headers/sources
+- `clangd` spawned as a Framework Shell (pipe-backed) and bridged over stdio
+- Sticky scroll scopes come from `textDocument/documentSymbol` via clangd
+
+Files:
+- Extension mapping + last-file language selection: `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+- LSP spawn command mapping: `app/apps/file_editor_cm6/lsp_shell_manager.py`
+
+How to verify quickly:
+- Set `editor.enableLsp=true`
+- Open a `.c` or `.cpp`/`.h` file
+- Confirm a running Framework Shell exists with label `lsp:c` or `lsp:cpp`
+
+### 5.2 Goal (next)
 
 Add a C/C++ LSP (likely `clangd`) that provides:
 - `documentSymbol` for sticky scroll scopes
 - `foldingRange` for fold gutter twisties (and later LSP-driven folding)
 
-### 5.2 Planned approach (not implemented yet)
+### 5.3 Planned follow-ups (not implemented yet)
 
-- Vendor C++ LSP server under `app/static/vendor/` (align with Kotlin vendoring)
-- Add language id mapping for `.c/.h/.cpp/.hpp/...` to a supported LSP language id
-- Add a `lsp_shell_manager.py` command mapping entry for `cpp` (and `c`)
-- Ensure `--stdio` bridge works identically (Framework Shell pipe)
-- Confirm `documentSymbol` is returned and drives sticky scroll
+- Wire `textDocument/foldingRange` into the fold gutter (clangd supports it).
+- Decide how to handle compilation databases:
+  - `compile_commands.json` discovery
+  - `--compile-commands-dir` defaults vs UI/prefs
+- Consider enabling background index and where index/caches should live on Termux.
 
 Open questions for implementation:
-- Termux packages vs vendored binaries for `clangd`
-- How to pass compilation database (`compile_commands.json`) / project root inference
-- Per-repo caching + indexing directory policy (similar to Kotlin `--system-path`)
+- Per-project configuration surface (likely preferences + sidecar).
 
 ---
 
@@ -222,4 +244,3 @@ When Kotlin LSP is enabled and not behaving:
 4. Confirm symbols are received:
    - `[LSP] Received N document symbols`
 5. If Android: confirm `sudo` exists and is configured, otherwise the `setenforce` step is a no-op.
-

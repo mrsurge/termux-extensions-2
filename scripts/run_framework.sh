@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+ORIG_ARGS=("$@")
+
 usage() {
   cat <<'EOF'
 Usage: run_framework.sh [OPTIONS]
@@ -28,6 +30,86 @@ Examples:
 Note: Localhost (127.0.0.1) is always allowed.
       Interfaces with /32 netmask are skipped (Tailscale, etc).
 EOF
+}
+
+_maybe_autoupdate_framework_shells() {
+  # Auto-update the external framework_shells package from GitHub main.
+  #
+  # WARNING: This trades reproducibility for convenience. It is intended for
+  # rapid iteration on-device. Set TE2_DISABLE_FWS_AUTOUPDATE=1 to disable.
+  if [ "${TE2_DISABLE_FWS_AUTOUPDATE:-}" = "1" ]; then
+    return 0
+  fi
+
+  # Prevent infinite restart loops.
+  if [ "${TE2_FWS_AUTOUPDATED_ONCE:-}" = "1" ]; then
+    return 0
+  fi
+
+  local python_bin="${PYTHON_BIN:-python}"
+  if ! command -v "$python_bin" >/dev/null 2>&1; then
+    echo "[run_framework] WARNING: python not found; skipping framework-shells auto-update" >&2
+    return 0
+  fi
+
+  if ! command -v git >/dev/null 2>&1; then
+    echo "[run_framework] WARNING: git not found; skipping framework-shells auto-update" >&2
+    return 0
+  fi
+
+  # Resolve remote HEAD commit for the main branch.
+  local remote_commit=""
+  remote_commit="$(git ls-remote https://github.com/mrsurge/framework-shells main 2>/dev/null | awk 'NR==1 {print $1}')"
+  if [ -z "$remote_commit" ]; then
+    echo "[run_framework] WARNING: failed to resolve framework-shells remote commit; skipping auto-update" >&2
+    return 0
+  fi
+
+  # Resolve installed commit (for VCS installs) from dist-info direct_url.json.
+  local installed_commit=""
+  installed_commit="$(
+    "$python_bin" - <<'PY' 2>/dev/null || true
+import json
+from importlib import metadata
+
+try:
+    dist = metadata.distribution("framework-shells")
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+direct = None
+try:
+    direct = dist.read_text("direct_url.json")
+except Exception:
+    direct = None
+
+if not direct:
+    print("")
+    raise SystemExit(0)
+
+try:
+    data = json.loads(direct)
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+commit = ((data.get("vcs_info") or {}).get("commit_id") or "").strip()
+print(commit)
+PY
+  )"
+
+  if [ -n "$installed_commit" ] && [ "$installed_commit" = "$remote_commit" ]; then
+    return 0
+  fi
+
+  echo "[run_framework] Updating framework-shells (installed=${installed_commit:-none} remote=${remote_commit})"
+  # Use pip from the same interpreter.
+  "$python_bin" -m pip install -U "framework-shells @ git+https://github.com/mrsurge/framework-shells@main"
+
+  # Restart this script once so newly installed package is used by IPC/framework processes.
+  export TE2_FWS_AUTOUPDATED_ONCE=1
+  exec "$0" "${ORIG_ARGS[@]}"
 }
 
 generate_run_id() {
@@ -209,6 +291,8 @@ fi
 cd "$REPO_ROOT"
 
 ensure_framework_secret
+
+_maybe_autoupdate_framework_shells
 
 cleanup_framework_shell_logs
 
