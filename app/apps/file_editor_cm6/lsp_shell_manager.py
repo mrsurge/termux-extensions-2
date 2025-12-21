@@ -10,6 +10,7 @@ an in-memory cache of shell IDs.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import shlex
 import shutil
@@ -151,6 +152,17 @@ def _kotlin_lsp_java_bin(kotlin_lsp_sh: str) -> Optional[str]:
     return None
 
 
+def _kotlin_cache_root(project_root: Path) -> Path:
+    """Per-project Kotlin LSP cache root to avoid cross-workspace contention."""
+
+    try:
+        root_str = str(project_root.expanduser().resolve(strict=False))
+    except Exception:
+        root_str = str(project_root)
+    digest = hashlib.sha1(root_str.encode("utf-8")).hexdigest()[:12]
+    return Path.home() / ".cache" / "te2_kotlin_lsp" / digest
+
+
 def _resolve_grun() -> Optional[str]:
     for name in ("grun", "glibc-runner"):
         found = shutil.which(name)
@@ -231,32 +243,32 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
         except Exception:
             pass
 
+        is_android = _is_termux_android()
         grun = _resolve_grun()
-        java_bin = _kotlin_lsp_java_bin(resolved_binary)
 
-        # On Termux/Android we need to run the bundled glibc JRE via glibc-runner.
-        # On non-Android platforms, run the vendor script directly (no grun).
-        if _is_termux_android() and grun and java_bin:
-            base_dir = _kotlin_lsp_base_dir(resolved_binary)
-            lib_dir = base_dir / "lib"
-            try:
-                jars = sorted(str(p) for p in lib_dir.glob("*.jar") if p.is_file())
-            except Exception:
-                jars = []
-            if not jars:
-                print(f"[LSP shells] Kotlin LSP: no jars found under {lib_dir}")
-                return None
+        # Prefer bundled JRE when present (stable across distros/JDK versions).
+        java_bin = _kotlin_lsp_java_bin(resolved_binary) or shutil.which("java")
+
+        # Prefer direct Java launch (lets us control cache dirs + system-path on all platforms).
+        base_dir = _kotlin_lsp_base_dir(resolved_binary)
+        lib_dir = base_dir / "lib"
+        try:
+            jars = sorted(str(p) for p in lib_dir.glob("*.jar") if p.is_file())
+        except Exception:
+            jars = []
+
+        if java_bin and jars:
             classpath = ":".join(jars)
 
-            # Cache paths must be writable on Termux (no /tmp).
-            cache_root = Path.home() / ".cache" / "te2_kotlin_lsp"
+            # Cache paths must be writable; keep them per-project to avoid collisions
+            # when multiple workspaces are open (or when servers restart).
+            cache_root = _kotlin_cache_root(project_root)
             tmp_dir = cache_root / "tmp"
             system_dir = cache_root / "idea-system"
             config_dir = cache_root / "idea-config"
             lsp_system_dir = cache_root / "kotlin-lsp-system"
-            for d in (tmp_dir, system_dir, config_dir):
+            for d in (tmp_dir, system_dir, config_dir, lsp_system_dir):
                 d.mkdir(parents=True, exist_ok=True)
-            lsp_system_dir.mkdir(parents=True, exist_ok=True)
 
             # Ensure executable bit in case unzip didn't preserve it.
             try:
@@ -264,7 +276,6 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
             except Exception:
                 pass
 
-            # Use wildcard classpath without shell expansion (argv-based exec).
             # Keep the opens list aligned with JetBrains launcher scripts.
             add_opens = [
                 "--add-opens", "java.base/java.io=ALL-UNNAMED",
@@ -293,9 +304,7 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
                 "--add-opens", "jdk.jdi/com.sun.tools.jdi=ALL-UNNAMED",
             ]
 
-            kotlin_args = [
-                grun,
-                java_bin,
+            java_argv = [
                 f"-Djava.io.tmpdir={tmp_dir}",
                 f"-Didea.system.path={system_dir}",
                 f"-Didea.config.path={config_dir}",
@@ -314,26 +323,33 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
                 *cmd[1:],
             ]
 
-            # Android-only SELinux step. Use `sudo -n` to avoid hanging on password prompts.
-            # UI opt-in happens when the user enables LSP; once enabled, Kotlin LSP auto-applies this workaround.
-            joined = " ".join(shlex.quote(x) for x in kotlin_args)
-            prelude = (
-                "if uname -a 2>/dev/null | grep -qi Android; then "
-                "if command -v sudo >/dev/null 2>&1; then sudo -n setenforce 0 >/dev/null 2>&1 || true; fi; "
-                "fi; "
-            )
-            full_cmd = ["bash", "-lc", prelude + "exec " + joined]
+            if is_android and grun and _kotlin_lsp_java_bin(resolved_binary):
+                kotlin_args = [grun, java_bin, *java_argv]
+
+                # Android-only SELinux step. Use `sudo -n` to avoid hanging on password prompts.
+                # UI opt-in happens when the user enables LSP; once enabled, Kotlin LSP auto-applies this workaround.
+                joined = " ".join(shlex.quote(x) for x in kotlin_args)
+                prelude = (
+                    "if uname -a 2>/dev/null | grep -qi Android; then "
+                    "if command -v sudo >/dev/null 2>&1; then sudo -n setenforce 0 >/dev/null 2>&1 || true; fi; "
+                    "fi; "
+                )
+                full_cmd = ["bash", "-lc", prelude + "exec " + joined]
+            else:
+                # Desktop Linux/macOS (and Termux when not using bundled java): run java directly.
+                full_cmd = [java_bin, *java_argv]
         else:
-            if _is_termux_android():
+            if is_android:
                 if not grun:
                     print("[LSP shells] Kotlin LSP: glibc-runner (grun) not found; launch will fail on Termux")
-                if not java_bin:
+                if not _kotlin_lsp_java_bin(resolved_binary):
                     print("[LSP shells] Kotlin LSP: no bundled jre/ found; vendor the platform zip (linux-aarch64)")
-                # Best-effort fallback (will generally fail on Termux for official distro).
-                full_cmd = ["bash", resolved_binary, *cmd[1:]]
-            else:
-                # On desktop Linux/macOS: just run the vendor script directly.
-                full_cmd = [resolved_binary, "--stdio", *cmd[1:]]
+            if not jars:
+                print(f"[LSP shells] Kotlin LSP: no jars found under {lib_dir}")
+            if not java_bin:
+                print("[LSP shells] Kotlin LSP: java not found (no bundled JRE and no system java on PATH)")
+            # Final fallback: run the vendor script directly.
+            full_cmd = [resolved_binary, "--stdio", *cmd[1:]]
     else:
         full_cmd = [resolved_binary, *cmd[1:]]
 

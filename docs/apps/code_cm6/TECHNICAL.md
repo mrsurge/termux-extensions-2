@@ -636,7 +636,7 @@ Then set:
 
 **Termux runtime notes (Android):**
 - The platform zip bundles a glibc-linked JRE; Code CM6 launches it via `grun` (glibc-runner) on Android.
-- Temp/cache directories are redirected under `~/.cache/te2_kotlin_lsp/` (no `/tmp` assumptions).
+- Temp/cache directories are redirected under `~/.cache/te2_kotlin_lsp/<project-hash>/` (no `/tmp` assumptions, and avoids cross-workspace cache collisions).
 - Kotlin LSP is run in `--stdio` mode (single-client).
 - Some devices require SELinux permissive for Kotlin LSP file watching; Code CM6 currently attempts `sudo -n setenforce 0` on Android if `sudo` is available before launching Kotlin LSP. (UI gating/ack is planned.)
 - Optional run mode knob: `editor.kotlinLspIsolatedDocuments` (default true on Android) adds `--isolated-documents` to reduce workspace-wide coupling.

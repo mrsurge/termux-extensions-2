@@ -79,11 +79,11 @@ Behavior:
 
 The Kotlin LSP / IntelliJ platform stack assumes writable temp/cache locations.
 
-On Termux/Android, `/tmp` is not reliable, so we set:
-- `-Djava.io.tmpdir=~/.cache/te2_kotlin_lsp/tmp`
-- `-Didea.system.path=~/.cache/te2_kotlin_lsp/idea-system`
-- `-Didea.config.path=~/.cache/te2_kotlin_lsp/idea-config`
-- Kotlin LSP `--system-path ~/.cache/te2_kotlin_lsp/kotlin-lsp-system`
+On Termux/Android, `/tmp` is not reliable, so we set per-project cache dirs:
+- `-Djava.io.tmpdir=~/.cache/te2_kotlin_lsp/<project-hash>/tmp`
+- `-Didea.system.path=~/.cache/te2_kotlin_lsp/<project-hash>/idea-system`
+- `-Didea.config.path=~/.cache/te2_kotlin_lsp/<project-hash>/idea-config`
+- Kotlin LSP `--system-path ~/.cache/te2_kotlin_lsp/<project-hash>/kotlin-lsp-system`
 
 All created before spawning in `lsp_shell_manager.py`.
 

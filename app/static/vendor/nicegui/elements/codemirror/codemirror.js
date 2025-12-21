@@ -919,10 +919,21 @@ export default {
             }
           };
 
+          // @codemirror/lsp-client default request timeout is 3s, which is too short for
+          // heavier servers (notably JetBrains Kotlin LSP on first startup).
+          const isTermuxAndroidPath = (p) => typeof p === 'string' && p.startsWith('/data/data/com.termux/');
+          const isKotlin = (String(languageId || '').toLowerCase() === 'kotlin');
+          const isAndroid = isTermuxAndroidPath(projectRoot) || isTermuxAndroidPath(filePath);
+          // Kotlin LSP can take a long time to answer the *first* initialize on mobile.
+          // If it times out, the backend may still receive and cache the eventual response.
+          const lspTimeoutMs = isKotlin ? (isAndroid ? 180000 : 60000) : 10000;
+          console.log(`[LSP] Client timeout=${lspTimeoutMs}ms (languageId=${languageId}, android=${isAndroid})`);
+
           this.lspClient = new LSPClient({
             rootUri: 'file://' + projectRoot,
             workspaceFolders: [{ name: 'root', uri: 'file://' + projectRoot }],
             extensions: [hierarchicalSymbolCapability],
+            timeout: lspTimeoutMs,
           });
         } catch (err) {
           console.error('[LSP] Failed to create LanguageServerClient:', err);
@@ -1024,6 +1035,9 @@ export default {
         // Wait for initialization then send didOpen and request document symbols
         this.lspClient.initializing.then(async () => {
           console.log('[LSP] Client initialized');
+          try {
+            if (this._lspInitRetryCount) this._lspInitRetryCount = 0;
+          } catch { }
 
           // Open the file with the LSP client's workspace
           // This sends textDocument/didOpen with the current document content
@@ -1058,6 +1072,23 @@ export default {
           }, 1000);
         }).catch((err) => {
           console.warn('[LSP] Client initialization failed:', err);
+
+          // Kotlin-only: one retry helps in cases where the first initialize
+          // times out but the server eventually responds (backend caches it),
+          // so a second connect succeeds immediately.
+          try {
+            const isKotlin = (String(languageId || '').toLowerCase() === 'kotlin');
+            this._lspInitRetryCount = this._lspInitRetryCount || 0;
+            if (isKotlin && this._lspInitRetryCount < 1 && this._lspConnectNonce === connectNonce) {
+              this._lspInitRetryCount++;
+              console.log('[LSP] Kotlin initialize failed; retrying connect once...');
+              setTimeout(() => {
+                if (this._lspConnectNonce !== connectNonce) return;
+                try { this.disconnectLSP(); } catch { }
+                try { this.connectLSP({ languageId, projectRoot, filePath }); } catch { }
+              }, 1500);
+            }
+          } catch { }
         });
       })();
 

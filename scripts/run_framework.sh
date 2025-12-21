@@ -194,7 +194,7 @@ compute_repo_fingerprint() {
 ensure_framework_secret() {
   local fingerprint secret_dir secret_file
   fingerprint="$(compute_repo_fingerprint)"
-  secret_dir="$HOME/.cache/te_framework/runtimes/$fingerprint"
+  secret_dir="$HOME/.cache/framework_shells/runtimes/$fingerprint"
   secret_file="$secret_dir/secret"
   
   if [ -f "$secret_file" ]; then
@@ -208,8 +208,7 @@ ensure_framework_secret() {
   
   export FRAMEWORK_SHELLS_SECRET
   export FRAMEWORK_SHELLS_REPO_FINGERPRINT="$fingerprint"
-  # TE2 keeps framework shells state under the te_framework cache root.
-  export FRAMEWORK_SHELLS_BASE_DIR="$HOME/.cache/te_framework"
+  export FRAMEWORK_SHELLS_BASE_DIR="$HOME/.cache/framework_shells"
 }
 
 
