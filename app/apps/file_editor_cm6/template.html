@@ -1551,9 +1551,68 @@
     letter-spacing: 0.05em;
   }
 
+  /* Top banner prompt (e.g., new project LSP setup) */
+  .fe-top-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    z-index: 310;
+    transform: translateY(-110%);
+    transition: transform 180ms ease;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .fe-top-banner.show {
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .fe-top-banner-card {
+    margin: 10px;
+    width: min(900px, calc(100vw - 20px));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid var(--border, #333);
+    border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  .fe-top-banner-text {
+    font-size: 0.85rem;
+    color: var(--foreground, #e5e7eb);
+    line-height: 1.35;
+  }
+
+  .fe-top-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
 </style>
 
 <div class="fe-root">
+  <!-- New Project / No Sidecar Prompt -->
+  <div id="fe-lsp-setup-banner" class="fe-top-banner" aria-hidden="true">
+    <div class="fe-top-banner-card">
+      <div id="fe-lsp-setup-banner-text" class="fe-top-banner-text">
+        This project is new. Configure Language Servers (LSP) for sticky scroll scopes and future diagnostics?
+      </div>
+      <div class="fe-top-banner-actions">
+        <button id="fe-lsp-setup-banner-yes" class="fe-btn fe-btn-primary" type="button">Yes</button>
+        <button id="fe-lsp-setup-banner-no" class="fe-btn" type="button">No</button>
+      </div>
+    </div>
+  </div>
+
   <aside id="fe-drawer" class="fe-drawer">
     <header class="fe-drawer-head">
       <span id="fe-project-label"></span>

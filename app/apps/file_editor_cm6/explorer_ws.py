@@ -4,6 +4,7 @@ import logging
 from contextlib import suppress
 from typing import Dict, Any, List, Optional
 from fastapi import WebSocket, WebSocketDisconnect
+from pathlib import Path
 
 from queue import Queue, Empty
 
@@ -52,6 +53,25 @@ from .explorer import search, review
 
 # Logger setup
 logger = logging.getLogger(__name__)
+
+
+def abs_to_rel(abs_path: str, project_root: str) -> Optional[str]:
+    """Convert an absolute path into a project-root-relative path (best-effort)."""
+
+    if not isinstance(abs_path, str) or not abs_path.strip():
+        return None
+    if not isinstance(project_root, str) or not project_root.strip():
+        return None
+
+    try:
+        abs_p = Path(abs_path).expanduser().resolve(strict=False)
+        root_p = Path(project_root).expanduser().resolve(strict=False)
+        if abs_p == root_p:
+            return "."
+        rel = abs_p.relative_to(root_p)
+        return str(rel)
+    except Exception:
+        return None
 
 
 class SocketIOSocketShim:
@@ -276,7 +296,7 @@ from threading import Timer
 _explorer_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
-async def reset_project_session(new_project_path: str) -> None:
+async def reset_project_session(new_project_path: str) -> bool:
     """Set the active project on explicit project switch.
 
     This is called from explorer flows (open/create/clone) whenever the user
@@ -301,7 +321,8 @@ async def reset_project_session(new_project_path: str) -> None:
     # Update active project in the history store (SSOT for active project)
     _history_store.set_active_project(normalized_path)
 
-    # Ensure sidecar exists for the project (lazy create)
+    # Ensure sidecar exists for the project (lazy create) and report whether it was new.
+    was_new_sidecar = not ProjectSidecar.sidecar_exists(normalized_path)
     sidecar = ProjectSidecar.load_or_create(normalized_path)
     # NOTE: We intentionally do NOT clear session_cache or tracked_jobs here.
     # Drafts and jobs persist across project switches.
@@ -314,6 +335,8 @@ async def reset_project_session(new_project_path: str) -> None:
         await close_active_terminal_sockets()
     except Exception:
         pass
+
+    return was_new_sidecar
 
 # Debounce explorer refreshes to avoid flooding
 _explorer_refresh_timers: Dict[str, Timer] = {}
@@ -538,6 +561,8 @@ class ExplorerDispatcher:
         #     init_watcher(self.project_root)
         # ------------------------------------------------
         
+        was_new_sidecar = not ProjectSidecar.sidecar_exists(str(self.project_root))
+
         # Register connection with current project
         await manager.accept_and_register(self.websocket, str(self.project_root))
         
@@ -559,7 +584,7 @@ class ExplorerDispatcher:
         
         # Send initial state snapshots
         # 1. Project Info
-        await self.emit_personal("project:setActive", {"path": str(self.project_root)})
+        await self.emit_personal("project:setActive", {"path": str(self.project_root), "new_sidecar": was_new_sidecar})
         # 1.5 UI Preferences (PreferenceStore-backed)
         try:
             prefs = _preferences_store.get_preferences()
@@ -1133,13 +1158,13 @@ class ExplorerDispatcher:
 
         new_root = set_project_root(path)
         # Persist active project + reset per-project session state
-        await reset_project_session(str(new_root))
+        was_new_sidecar = await reset_project_session(str(new_root))
         self.project_root = new_root
         
         # Register to new
         manager.register_existing(self.websocket, str(new_root))
         
-        await self.emit_personal("project:opened", {"path": str(new_root)}, msg_id)
+        await self.emit_personal("project:opened", {"path": str(new_root), "new_sidecar": was_new_sidecar}, msg_id)
         # Trigger full refresh for this client
         await self.handle_explorer_refresh({}, msg_id)
 
@@ -1195,13 +1220,13 @@ class ExplorerDispatcher:
             new_root = set_project_root(str(target))
             init_watcher(new_root)  # Start watching the new directory
             # Persist active project + reset per-project session state
-            await reset_project_session(str(new_root))
+            was_new_sidecar = await reset_project_session(str(new_root))
             self.project_root = new_root
             
             manager.register_existing(self.websocket, str(new_root))
             
             # Emit project opened so frontend knows
-            await self.emit_personal("project:opened", {"path": str(new_root)}, None)
+            await self.emit_personal("project:opened", {"path": str(new_root), "new_sidecar": was_new_sidecar}, None)
             
             # Step 3: Start the clone job
             job_params = {

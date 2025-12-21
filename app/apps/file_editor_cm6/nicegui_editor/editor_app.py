@@ -158,29 +158,25 @@ def _should_use_lsp(project_root: Path | None, language_id: str) -> bool:
     For now this is driven by a simple editor preference flag. In the future
     this can consult per-project configuration (see tmp7_PROJECT_LSP_CONFIG.md).
     """
-    try:
-        prefs = _preferences_store.get_preferences().get('editor', {})
-    except Exception:
+    if project_root is None:
         return False
 
-    # Explicit opt-in; default to disabled until the feature bakes
-    if not bool(prefs.get('enableLsp', False)):
+    project_path = str(project_root)
+    if not _history_store.get_lsp_enabled(project_path):
         return False
 
-    # Per-server selection (global for now; later: per-project via history store).
-    # Map language_id -> server flag.
-    server_flag = None
+    server_id = None
     if language_id == "python":
-        server_flag = "enableLspPyright"
+        server_id = "pyright"
     elif language_id in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
-        server_flag = "enableLspTypescript"
+        server_id = "typescript"
     elif language_id in ("c", "cpp"):
-        server_flag = "enableLspClangd"
+        server_id = "clangd"
     elif language_id == "kotlin":
-        server_flag = "enableLspKotlin"
+        server_id = "kotlin"
 
-    if server_flag:
-        return bool(prefs.get(server_flag, True))
+    if server_id:
+        return _history_store.get_lsp_server_enabled(project_path, server_id)
 
     return True
 
@@ -1516,6 +1512,19 @@ def _get_view_state_dict() -> dict:
     """Helper to get current view state from preferences (single source of truth)."""
     prefs = _preferences_store.get_preferences()
     editor_prefs = prefs.get('editor', {})
+    lsp_state = {
+        "enableLsp": False,
+        "enableLspPyright": True,
+        "enableLspTypescript": True,
+        "enableLspClangd": True,
+        "enableLspKotlin": True,
+    }
+    try:
+        project_path = _history_store.get_active_project() or str(get_project_root())
+        if project_path:
+            lsp_state = _history_store.get_lsp_state_payload(project_path)
+    except Exception:
+        pass
     return {
         "showLineNumbers": editor_prefs.get('showLineNumbers'),
         "showSyntax": editor_prefs.get('showSyntax'),
@@ -1534,11 +1543,7 @@ def _get_view_state_dict() -> dict:
         "showMinimap": editor_prefs.get('showMinimap'),
         "showDraftDiffs": editor_prefs.get('showDraftDiffs'),
         "stickyScroll": editor_prefs.get('stickyScroll'),  # Added: 2025-12-03 by vectorArc - TE2 Team
-        "enableLsp": editor_prefs.get('enableLsp'),  # Added: 2025-12-08 - LSP integration toggle
-        "enableLspPyright": editor_prefs.get('enableLspPyright'),
-        "enableLspTypescript": editor_prefs.get('enableLspTypescript'),
-        "enableLspClangd": editor_prefs.get('enableLspClangd'),
-        "enableLspKotlin": editor_prefs.get('enableLspKotlin'),
+        **lsp_state,
     }
 
 
@@ -1565,10 +1570,13 @@ async def update_preference(data: dict = Body(...)):
     if not editor:
         raise HTTPException(status_code=404, detail="Editor not initialized")
     
-    # Validate key is in DEFAULT_EDITOR_PREFS
-    from app.apps.file_editor_cm6.preferences_store import DEFAULT_EDITOR_PREFS
-    if key not in DEFAULT_EDITOR_PREFS:
-        raise HTTPException(status_code=400, detail=f"Invalid preference key: {key}")
+    # Validate key. Most preferences are editor-scoped in PreferencesStore, but
+    # LSP enablement is project-scoped (sidecar SSOT via HistoryStore facade).
+    LSP_KEYS = {'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'}
+    if key not in LSP_KEYS:
+        from app.apps.file_editor_cm6.preferences_store import DEFAULT_EDITOR_PREFS
+        if key not in DEFAULT_EDITOR_PREFS:
+            raise HTTPException(status_code=400, detail=f"Invalid preference key: {key}")
     
     # Apply to editor immediately based on key; persist only after success
     try:
@@ -1618,13 +1626,9 @@ async def update_preference(data: dict = Body(...)):
         elif key == 'stickyScroll':
             # Added: 2025-12-03 by vectorArc - TE2 Team
             editor.set_sticky_scroll(bool(value))
-        elif key == 'enableLsp':
-            # Added: 2025-12-08 - LSP integration toggle
-            # Runtime behavior is applied after persistence so _should_use_lsp reads the updated SSOT.
-            pass
-        elif key in ('enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'):
-            # Per-server selection (global for now).
-            # Runtime behavior is applied after persistence so _should_use_lsp reads the updated SSOT.
+        elif key in ('enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'):
+            # LSP preferences are project-scoped (sidecar SSOT via HistoryStore facade).
+            # Persist + apply after success below.
             pass
         elif key == 'showInlineDiffs':
             pass  # handled after preference persistence via _refresh_active_diffs
@@ -1664,21 +1668,38 @@ async def update_preference(data: dict = Body(...)):
             pass
         
         editor.update()
-        _preferences_store.update_preferences(editor={key: value})
 
-        # Apply LSP connect/disconnect after persistence so the SSOT is consistent.
-        if key == 'enableLsp' or key in ('enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'):
+        if key in ('enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'):
+            project_path = _history_store.get_active_project() or str(get_project_root())
+            if not project_path:
+                raise HTTPException(status_code=400, detail="No active project for LSP preference")
+            if key == 'enableLsp':
+                if not _history_store.set_lsp_enabled(project_path, bool(value)):
+                    raise RuntimeError("Failed to persist LSP enablement")
+            else:
+                server_map = {
+                    'enableLspPyright': 'pyright',
+                    'enableLspTypescript': 'typescript',
+                    'enableLspClangd': 'clangd',
+                    'enableLspKotlin': 'kotlin',
+                }
+                server_id = server_map.get(key)
+                if server_id:
+                    if not _history_store.set_lsp_server_enabled(project_path, server_id, bool(value)):
+                        raise RuntimeError("Failed to persist LSP server enablement")
+
+            # Apply LSP connect/disconnect after persistence so the SSOT is consistent.
             try:
                 current_file = get_current_file()
-                project_path = _history_store.get_active_project() or str(get_project_root())
-                if current_file and project_path:
+                if current_file:
                     _maybe_connect_lsp(editor, Path(current_file), Path(project_path))
                 else:
-                    # No active doc: if global gate turned off, ensure disconnect.
                     if key == 'enableLsp' and not bool(value):
                         editor.disconnect_lsp()
             except Exception as exc:
                 print(f"[PREFERENCE] LSP reconnect after {key} failed: {exc}", file=sys.stderr)
+        else:
+            _preferences_store.update_preferences(editor={key: value})
         
         if key in ('showInlineDiffs', 'showDraftDiffs', 'autoSave'):
             _refresh_active_diffs()

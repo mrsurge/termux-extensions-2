@@ -401,6 +401,33 @@ async def api_start_lsp(payload: dict = Body(...)):
     return {"ok": True, "data": {"serverId": server_id, "started": started}}
 
 
+@file_editor_cm6_bp.post("/api/lsp/stop")
+async def api_stop_lsp(payload: dict = Body(...)):
+    """Manually stop an LSP server (terminates its Framework Shell processes)."""
+
+    server_id = (payload.get("serverId") or "").strip().lower()
+    if not server_id:
+        raise HTTPException(status_code=400, detail="serverId is required")
+
+    server_languages = {
+        "pyright": ["python"],
+        "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+        "clangd": ["c", "cpp"],
+        "kotlin": ["kotlin"],
+    }
+    language_ids = server_languages.get(server_id)
+    if not language_ids:
+        raise HTTPException(status_code=400, detail=f"Unknown serverId: {server_id}")
+
+    for language_id in language_ids:
+        try:
+            await shutdown_lsp_shell(language_id)
+        except Exception:
+            pass
+
+    return {"ok": True, "data": {"serverId": server_id}}
+
+
 @file_editor_cm6_bp.get("/api/lsp/debug/cache")
 async def api_list_lsp_cache():
     snapshot = await list_lsp_shells()

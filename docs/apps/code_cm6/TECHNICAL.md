@@ -3,7 +3,7 @@
 **Architecture Philosophy:** Code CM6 implements the code-server pattern - disk-backed state with ephemeral UI clients. Multiple devices (desktop, mobile, vim) converge on the same backend without sync logic.
 
 **Document Version:** 1.3  
-**Last Updated:** 2025-12-13  
+**Last Updated:** 2025-12-21  
 **Target Audience:** Framework contributors, extension developers, and technical users
 
 This document provides a comprehensive technical overview of Code CM6's internal architecture, focusing on the frameworks, patterns, and implementation details that make the editor function.
@@ -598,11 +598,15 @@ Code CM6 can connect the CM6 iframe to a backend Language Server Protocol (LSP) 
 - Full MVP writeup (historical): `notes/2025-12-11_STICKY-S-LSP_WORKING_MVP.md`
 
 **Key behaviors:**
-- **Preference gate:** `editor.enableLsp` (default false) must be enabled to connect LSP on file open.
+- **Project-scoped gate (SSOT):** LSP enablement is stored in the **ProjectSidecar** (per project root) under `lsp.enabled` (default false). There is no fallback to PreferencesStore for LSP toggles.
+- **Per-server toggles:** `lsp.servers.{pyright|typescript|clangd|kotlin}` are also stored per-project (default true) so the master toggle behaves like a blanket opt-in but servers can be selectively disabled.
+- **UI control surface:** The host modal (`Language Servers…`) reflects the sidecar state and can start/stop servers manually (`POST /api/lsp/start`, `POST /api/lsp/stop`) for pre-warming or cleanup.
 - **Sticky scroll source:** If LSP `documentSymbol` data is present, sticky scroll uses it; otherwise it falls back to Lezer parsing / fold heuristics.
 - **Session model:** The `/lsp` Socket.IO namespace is stateless on the client; the backend keeps a long-lived per-(language, projectRoot) bridge session and can short-circuit repeat `initialize` calls on reconnects.
 - **Handshake sequencing:** The frontend defers `@codemirror/lsp-client` handshake until the backend emits `lsp_initialized` (shell spawned + pipe bridge active) to avoid first-load races on slow servers.
 - **Crash/exit recovery:** If an LSP process is manually exited or crashes, the next `initialize` call detects the dead shell/pipe session and respawns a new LSP server automatically.
+- **Running-state indicator (websocket):** The Language Servers modal receives `lsp:status` snapshots over the explorer websocket bus and uses that to render Start/Stop button state without polling.
+- **New-project prompt:** When a project is first opened/created/cloned and a sidecar is created, the explorer emits `new_sidecar: true` and the host UI shows a top-banner prompt (20s) offering to open the Language Servers modal.
 
 #### Kotlin LSP (JetBrains kotlin-lsp)
 
@@ -630,9 +634,9 @@ sudo apt-get install -y unzip curl
 scripts/vendor_kotlin_lsp.sh https://download-cdn.jetbrains.com/kotlin-lsp/261.13587.0/kotlin-lsp-261.13587.0-linux-x64.zip
 ```
 
-Then set:
-- `editor.enableLsp=true`
-- (optional) `editor.kotlinLspPath=...` if you installed Kotlin LSP somewhere else
+Then:
+- Enable LSP for the project via the host **Language Servers** modal (stores to the project sidecar).
+- (optional) set `editor.kotlinLspPath=...` if you installed Kotlin LSP somewhere else
 
 **Termux runtime notes (Android):**
 - The platform zip bundles a glibc-linked JRE; Code CM6 launches it via `grun` (glibc-runner) on Android.

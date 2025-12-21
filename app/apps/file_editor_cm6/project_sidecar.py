@@ -89,6 +89,13 @@ class ProjectSidecar:
         hash_key = hashlib.sha1(normalized.encode("utf-8")).hexdigest()
         return _sidecar_root() / f"{hash_key}.json"
 
+    @staticmethod
+    def sidecar_exists(project_path: str) -> bool:
+        try:
+            return ProjectSidecar.get_sidecar_path(project_path).exists()
+        except Exception:
+            return False
+
     @classmethod
     def load_or_create(cls, project_path: str) -> "ProjectSidecar":
         """Return a cached instance for project_path, creating if needed."""
@@ -130,6 +137,18 @@ class ProjectSidecar:
             "terminal_shell_cap": 5,
             # Optional per-shell titles (fs-id -> short label) for terminal dropdown.
             "terminal_shell_titles": {},
+            # LSP configuration (project-scoped SSOT).
+            # Note: server toggles default to true so "enableLsp" behaves like a blanket opt-in
+            # until per-server selection is explicitly changed by the user.
+            "lsp": {
+                "enabled": False,
+                "servers": {
+                    "pyright": True,
+                    "typescript": True,
+                    "clangd": True,
+                    "kotlin": True,
+                },
+            },
         }
 
     # --------------------------------------------------------------------- #
@@ -611,6 +630,58 @@ class ProjectSidecar:
         titles[sid] = text
         self._data["terminal_shell_titles"] = titles
         return text
+
+    # --------------------------------------------------------------------- #
+    # LSP configuration API (project-scoped SSOT)
+    # --------------------------------------------------------------------- #
+
+    def _ensure_lsp_schema(self) -> dict:
+        lsp = self._data.get("lsp")
+        if not isinstance(lsp, dict):
+            lsp = {"enabled": False, "servers": {}}
+        lsp.setdefault("enabled", False)
+        servers = lsp.get("servers")
+        if not isinstance(servers, dict):
+            servers = {}
+        for key, default in (("pyright", True), ("typescript", True), ("clangd", True), ("kotlin", True)):
+            servers.setdefault(key, default)
+        lsp["servers"] = servers
+        self._data["lsp"] = lsp
+        return lsp
+
+    def get_lsp_enabled(self) -> bool:
+        lsp = self._ensure_lsp_schema()
+        return bool(lsp.get("enabled", False))
+
+    def set_lsp_enabled(self, enabled: bool) -> bool:
+        lsp = self._ensure_lsp_schema()
+        lsp["enabled"] = bool(enabled)
+        self._data["lsp"] = lsp
+        return bool(lsp["enabled"])
+
+    def get_lsp_server_enabled(self, server_id: str) -> bool:
+        lsp = self._ensure_lsp_schema()
+        servers = lsp.get("servers") or {}
+        return bool(servers.get(str(server_id), True))
+
+    def set_lsp_server_enabled(self, server_id: str, enabled: bool) -> bool:
+        lsp = self._ensure_lsp_schema()
+        servers = lsp.get("servers") or {}
+        servers[str(server_id)] = bool(enabled)
+        lsp["servers"] = servers
+        self._data["lsp"] = lsp
+        return bool(servers[str(server_id)])
+
+    def get_lsp_state_payload(self) -> dict:
+        lsp = self._ensure_lsp_schema()
+        servers = lsp.get("servers") or {}
+        return {
+            "enableLsp": bool(lsp.get("enabled", False)),
+            "enableLspPyright": bool(servers.get("pyright", True)),
+            "enableLspTypescript": bool(servers.get("typescript", True)),
+            "enableLspClangd": bool(servers.get("clangd", True)),
+            "enableLspKotlin": bool(servers.get("kotlin", True)),
+        }
 
 
 def clear_project_state(project_path: str) -> bool:

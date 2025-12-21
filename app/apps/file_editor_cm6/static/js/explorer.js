@@ -1320,8 +1320,12 @@ function refreshOpenDirectoriesAfterGit() {
 function handleExplorerEvent(type, payload) {
   if (type === 'lsp:status') {
     try {
+      const next = payload || {};
       if (typeof window.__cm6HandleLspStatus === 'function') {
-        window.__cm6HandleLspStatus(payload || {});
+        window.__cm6HandleLspStatus(next);
+      } else {
+        // Host (main.js) may not have installed its handler yet; keep last snapshot for replay.
+        window.__cm6PendingLspStatus = next;
       }
     } catch (err) {
       console.warn('[Explorer] lsp:status handler failed', err);
@@ -1350,6 +1354,17 @@ function handleExplorerEvent(type, payload) {
       // Reset open directories tracking for new project
       openDirectories.clear();
       openDirsInitialized = false;
+
+      // New-project prompt: if backend reports this is a newly-created sidecar, offer LSP setup.
+      try {
+        if (payload && payload.new_sidecar) {
+          if (typeof window.__cm6PromptLspSetup === 'function') {
+            window.__cm6PromptLspSetup({ projectPath: uiState.projectPath });
+          } else {
+            window.__cm6PendingLspSetupPrompt = { projectPath: uiState.projectPath };
+          }
+        }
+      } catch (_) {}
       break;
     }
     case 'explorer:activeFile': {
@@ -1637,6 +1652,17 @@ function handleExplorerEvent(type, payload) {
           }
         }
       }
+
+      // New-project prompt: show once when a project is first opened/cloned/created.
+      try {
+        if (payload && payload.new_sidecar) {
+          if (typeof window.__cm6PromptLspSetup === 'function') {
+            window.__cm6PromptLspSetup({ projectPath: uiState.projectPath });
+          } else {
+            window.__cm6PendingLspSetupPrompt = { projectPath: uiState.projectPath };
+          }
+        }
+      } catch (_) {}
       break;
     }
     case 'git:status': {

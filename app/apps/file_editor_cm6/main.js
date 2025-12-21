@@ -2451,6 +2451,13 @@ const lspModal = {
   startKotlin: document.getElementById('lsp-start-kotlin'),
 };
 
+const lspSetupBanner = {
+  root: document.getElementById('fe-lsp-setup-banner'),
+  text: document.getElementById('fe-lsp-setup-banner-text'),
+  yesBtn: document.getElementById('fe-lsp-setup-banner-yes'),
+  noBtn: document.getElementById('fe-lsp-setup-banner-no'),
+};
+
 const LSP_SERVER_PREF_KEYS = {
   pyright: 'enableLspPyright',
   typescript: 'enableLspTypescript',
@@ -2458,10 +2465,46 @@ const LSP_SERVER_PREF_KEYS = {
   kotlin: 'enableLspKotlin',
 };
 
+window.__cm6LastLspStatus = window.__cm6LastLspStatus || null;
+let _lspSetupBannerTimer = null;
+const _lspSetupPromptedProjects = new Set();
+
 function _lspGetServerEnabled(state, serverId) {
   const key = LSP_SERVER_PREF_KEYS[serverId];
   if (!key) return true;
   return Boolean(state?.[key] ?? true);
+}
+
+function _setLastLspStatus(payload) {
+  const servers = payload && payload.servers ? payload.servers : {};
+  window.__cm6LastLspStatus = {
+    servers: {
+      pyright: { running: Boolean(servers?.pyright?.running) },
+      typescript: { running: Boolean(servers?.typescript?.running) },
+      clangd: { running: Boolean(servers?.clangd?.running) },
+      kotlin: { running: Boolean(servers?.kotlin?.running) },
+    },
+  };
+}
+
+function _deriveLspStatusFromCache(cache) {
+  const isRunning = (payload) => payload && payload.status === 'running' && payload.pid;
+  const byLang = cache && cache.data ? cache.data : {};
+  return {
+    servers: {
+      pyright: { running: Boolean(isRunning(byLang.python)) },
+      typescript: {
+        running: Boolean(
+          isRunning(byLang.typescript) ||
+          isRunning(byLang.javascript) ||
+          isRunning(byLang.typescriptreact) ||
+          isRunning(byLang.javascriptreact),
+        ),
+      },
+      clangd: { running: Boolean(isRunning(byLang.c) || isRunning(byLang.cpp)) },
+      kotlin: { running: Boolean(isRunning(byLang.kotlin)) },
+    },
+  };
 }
 
 function updateLspModalUI(state) {
@@ -2491,78 +2534,68 @@ function updateLspModalUI(state) {
       toggleBtn.textContent = enabled ? 'On' : 'Off';
       toggleBtn.classList.toggle('enabled', enabled);
     }
-    if (startBtn) {
-      // Start buttons only work when global LSP is enabled and this server is enabled.
-      const allowed = isEnabled && enabled;
-      startBtn.disabled = !allowed;
-      if (!allowed) {
-        startBtn.textContent = 'Start';
-      }
-    }
+    // Start/Stop buttons are updated in a second pass so they can reflect running state.
+    if (startBtn) startBtn.disabled = false;
   };
 
   applyRow('pyright', perServer.pyright, lspModal.statusPyright, lspModal.togglePyright, lspModal.startPyright);
   applyRow('typescript', perServer.typescript, lspModal.statusTypescript, lspModal.toggleTypescript, lspModal.startTypescript);
   applyRow('clangd', perServer.clangd, lspModal.statusClangd, lspModal.toggleClangd, lspModal.startClangd);
   applyRow('kotlin', perServer.kotlin, lspModal.statusKotlin, lspModal.toggleKotlin, lspModal.startKotlin);
+
+  _applyLspActionButtons(state);
 }
 
-function _applyLspRunningState(cache) {
-  const isRunning = (payload) => payload && payload.status === 'running' && payload.pid;
-  const byLang = cache && cache.data ? cache.data : {};
+function _applyLspActionButtons(state) {
+  if (!lspModal.root) return;
 
-  const running = {
-    pyright: isRunning(byLang.python),
-    typescript: Boolean(isRunning(byLang.typescript) || isRunning(byLang.javascript) || isRunning(byLang.typescriptreact) || isRunning(byLang.javascriptreact)),
-    clangd: Boolean(isRunning(byLang.c) || isRunning(byLang.cpp)),
-    kotlin: isRunning(byLang.kotlin),
-  };
+  const globalEnabled = Boolean(state?.enableLsp);
+  const status = window.__cm6LastLspStatus && window.__cm6LastLspStatus.servers ? window.__cm6LastLspStatus : { servers: {} };
 
-  const applyStart = (btn, isUp) => {
+  const apply = (serverId, btn) => {
     if (!btn) return;
-    if (btn.disabled) return; // respect global/per-server gating
-    if (isUp) {
-      btn.textContent = 'Running';
-      btn.disabled = true;
-    } else {
-      btn.textContent = 'Start';
-    }
-  };
-
-  applyStart(lspModal.startPyright, running.pyright);
-  applyStart(lspModal.startTypescript, running.typescript);
-  applyStart(lspModal.startClangd, running.clangd);
-  applyStart(lspModal.startKotlin, running.kotlin);
-}
-
-function _applyLspRunningStateFromWs(payload) {
-  const servers = payload && payload.servers ? payload.servers : {};
-  const applyStart = (btn, serverId) => {
-    if (!btn) return;
-    if (btn.disabled) return; // respect global/per-server gating
-    const running = Boolean(servers?.[serverId]?.running);
+    const running = Boolean(status?.servers?.[serverId]?.running);
     if (running) {
-      btn.textContent = 'Running';
-      btn.disabled = true;
-    } else {
-      btn.textContent = 'Start';
+      // Allow stop even if preferences are off; user needs an escape hatch.
+      btn.textContent = 'Stop';
+      btn.disabled = false;
+      btn.dataset.lspAction = 'stop';
+      return;
     }
+
+    const serverEnabled = _lspGetServerEnabled(state, serverId);
+    const allowed = globalEnabled && serverEnabled;
+    btn.textContent = 'Start';
+    btn.disabled = !allowed;
+    btn.dataset.lspAction = 'start';
   };
 
-  applyStart(lspModal.startPyright, 'pyright');
-  applyStart(lspModal.startTypescript, 'typescript');
-  applyStart(lspModal.startClangd, 'clangd');
-  applyStart(lspModal.startKotlin, 'kotlin');
+  apply('pyright', lspModal.startPyright);
+  apply('typescript', lspModal.startTypescript);
+  apply('clangd', lspModal.startClangd);
+  apply('kotlin', lspModal.startKotlin);
 }
 
 // Explorer Socket.IO (shared bus) can push lsp:status events to keep the modal in sync.
 window.__cm6HandleLspStatus = (payload) => {
   try {
-    _applyLspRunningStateFromWs(payload || {});
+    _setLastLspStatus(payload || {});
+    // Best-effort: keep modal updated even if it's open already.
+    if (typeof editorViewState === 'object' && editorViewState) {
+      _applyLspActionButtons(editorViewState);
+    }
   } catch (err) {
     console.warn('[LSP Modal] Failed to apply lsp:status', err);
   }
 };
+
+// If explorer delivered an early status snapshot before main.js installed the handler, replay it now.
+try {
+  if (window.__cm6PendingLspStatus) {
+    window.__cm6HandleLspStatus(window.__cm6PendingLspStatus);
+    delete window.__cm6PendingLspStatus;
+  }
+} catch (_) { }
 
 function hideLspModal() {
   if (!lspModal.root) return;
@@ -2580,10 +2613,11 @@ async function showLspModal() {
   const state = await fetchEditorState();
   updateLspModalUI(state);
 
-  // Update running status (best-effort).
+  // Update running status (best-effort) if websocket status hasn't arrived yet.
   try {
     const cache = await apiGet('api/lsp/debug/cache');
-    _applyLspRunningState(cache);
+    _setLastLspStatus(_deriveLspStatusFromCache(cache));
+    _applyLspActionButtons(editorViewState);
   } catch { }
   
   lspModal.root.classList.add('show');
@@ -2639,27 +2673,59 @@ async function _toggleLspServer(serverId) {
   updateLspModalUI(editorViewState);
 }
 
-async function _startLspServer(serverId) {
-  const state = await fetchEditorState();
-  if (!state?.enableLsp) {
-    host.toast('Enable LSP first');
-    return;
+async function _startStopLspServer(serverId) {
+  const status = window.__cm6LastLspStatus && window.__cm6LastLspStatus.servers ? window.__cm6LastLspStatus : { servers: {} };
+  const isRunning = Boolean(status?.servers?.[serverId]?.running);
+  const btnMap = {
+    pyright: lspModal.startPyright,
+    typescript: lspModal.startTypescript,
+    clangd: lspModal.startClangd,
+    kotlin: lspModal.startKotlin,
+  };
+  const btn = btnMap[serverId];
+
+  if (isRunning) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Stopping…'; }
+    try {
+      const resp = await apiPost('api/lsp/stop', { serverId });
+      if (resp?.ok === false) host.toast(resp?.error || 'Failed to stop LSP');
+      else host.toast(`Stopping ${serverId}…`, 1500);
+    } catch (err) {
+      console.error('[LSP Modal] stop failed:', err);
+      host.toast(err?.message || 'Failed to stop LSP');
+    }
+  } else {
+    const state = await fetchEditorState();
+    if (!state?.enableLsp) {
+      host.toast('Enable LSP first');
+      updateLspModalUI(editorViewState);
+      return;
+    }
+    const prefKey = LSP_SERVER_PREF_KEYS[serverId];
+    if (prefKey && !(state?.[prefKey] ?? true)) {
+      host.toast('This server is disabled');
+      updateLspModalUI(editorViewState);
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+    try {
+      const resp = await apiPost('api/lsp/start', { serverId });
+      if (resp?.ok === false) host.toast(resp?.error || 'Failed to start LSP');
+      else host.toast(`Starting ${serverId}…`, 1500);
+    } catch (err) {
+      console.error('[LSP Modal] start failed:', err);
+      host.toast(err?.message || 'Failed to start LSP');
+    }
   }
-  const prefKey = LSP_SERVER_PREF_KEYS[serverId];
-  if (prefKey && !(state?.[prefKey] ?? true)) {
-    host.toast('This server is disabled');
-    return;
-  }
-  const resp = await apiPost('api/lsp/start', { serverId });
-  if (resp?.ok === false) {
-    host.toast(resp?.error || 'Failed to start LSP');
-    return;
-  }
-  host.toast(`Starting ${serverId}…`, 1500);
+
+  // Best-effort immediate refresh (websocket is the source of truth).
   try {
     const cache = await apiGet('api/lsp/debug/cache');
-    _applyLspRunningState(cache);
+    _setLastLspStatus(_deriveLspStatusFromCache(cache));
   } catch { }
+  if (typeof editorViewState === 'object' && editorViewState) {
+    _applyLspActionButtons(editorViewState);
+  }
 }
 
 if (lspModal.togglePyright) lspModal.togglePyright.addEventListener('click', () => _toggleLspServer('pyright'));
@@ -2667,10 +2733,68 @@ if (lspModal.toggleTypescript) lspModal.toggleTypescript.addEventListener('click
 if (lspModal.toggleClangd) lspModal.toggleClangd.addEventListener('click', () => _toggleLspServer('clangd'));
 if (lspModal.toggleKotlin) lspModal.toggleKotlin.addEventListener('click', () => _toggleLspServer('kotlin'));
 
-if (lspModal.startPyright) lspModal.startPyright.addEventListener('click', () => _startLspServer('pyright'));
-if (lspModal.startTypescript) lspModal.startTypescript.addEventListener('click', () => _startLspServer('typescript'));
-if (lspModal.startClangd) lspModal.startClangd.addEventListener('click', () => _startLspServer('clangd'));
-if (lspModal.startKotlin) lspModal.startKotlin.addEventListener('click', () => _startLspServer('kotlin'));
+if (lspModal.startPyright) lspModal.startPyright.addEventListener('click', () => _startStopLspServer('pyright'));
+if (lspModal.startTypescript) lspModal.startTypescript.addEventListener('click', () => _startStopLspServer('typescript'));
+if (lspModal.startClangd) lspModal.startClangd.addEventListener('click', () => _startStopLspServer('clangd'));
+if (lspModal.startKotlin) lspModal.startKotlin.addEventListener('click', () => _startStopLspServer('kotlin'));
+
+function _hideLspSetupBanner() {
+  if (!lspSetupBanner.root) return;
+  if (_lspSetupBannerTimer) {
+    clearTimeout(_lspSetupBannerTimer);
+    _lspSetupBannerTimer = null;
+  }
+  lspSetupBanner.root.classList.remove('show');
+  lspSetupBanner.root.setAttribute('aria-hidden', 'true');
+}
+
+function _showLspSetupBanner(projectPath) {
+  if (!lspSetupBanner.root) return;
+  const key = String(projectPath || '');
+  if (!key) return;
+  if (_lspSetupPromptedProjects.has(key)) return;
+  _lspSetupPromptedProjects.add(key);
+
+  if (lspSetupBanner.text) {
+    const label = basename(key) || key;
+    lspSetupBanner.text.textContent =
+      `Project "${label}" is new. Configure Language Servers (LSP) for sticky scroll scopes and future diagnostics?`;
+  }
+
+  lspSetupBanner.root.classList.add('show');
+  lspSetupBanner.root.setAttribute('aria-hidden', 'false');
+
+  if (_lspSetupBannerTimer) clearTimeout(_lspSetupBannerTimer);
+  _lspSetupBannerTimer = setTimeout(() => _hideLspSetupBanner(), 20000);
+}
+
+window.__cm6PromptLspSetup = (arg) => {
+  try {
+    const projectPath =
+      typeof arg === 'string'
+        ? arg
+        : arg && typeof arg.projectPath === 'string'
+          ? arg.projectPath
+          : '';
+    if (projectPath) _showLspSetupBanner(projectPath);
+  } catch (_) { }
+};
+
+if (lspSetupBanner.noBtn) lspSetupBanner.noBtn.addEventListener('click', _hideLspSetupBanner);
+if (lspSetupBanner.yesBtn) {
+  lspSetupBanner.yesBtn.addEventListener('click', async () => {
+    _hideLspSetupBanner();
+    await showLspModal();
+  });
+}
+
+// Replay any prompt queued before main.js installed the handler.
+try {
+  if (window.__cm6PendingLspSetupPrompt) {
+    window.__cm6PromptLspSetup(window.__cm6PendingLspSetupPrompt);
+    delete window.__cm6PendingLspSetupPrompt;
+  }
+} catch (_) { }
 
 // ---------- Picker helpers (shared modal provided by framework) ----------
 function pickerAvailable() {

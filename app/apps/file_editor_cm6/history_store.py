@@ -115,6 +115,84 @@ class HistoryStore:
         except Exception:
             return project_path.strip()
 
+    # ----- project sidecar helpers (SSOT) ------------------------------------
+
+    def get_project_sidecar(self, project_path: str) -> Optional[ProjectSidecar]:
+        """Return the ProjectSidecar for a project path (best-effort)."""
+
+        if not project_path:
+            return None
+        normalized = self._normalize_project_path(project_path)
+        try:
+            return ProjectSidecar.load_or_create(normalized)
+        except Exception:
+            return None
+
+    # ----- LSP configuration (project-scoped SSOT via sidecar) ----------------
+
+    def get_lsp_enabled(self, project_path: str) -> bool:
+        sidecar = self.get_project_sidecar(project_path)
+        if not sidecar:
+            return False
+        try:
+            return bool(sidecar.get_lsp_enabled())
+        except Exception:
+            return False
+
+    def set_lsp_enabled(self, project_path: str, enabled: bool) -> bool:
+        sidecar = self.get_project_sidecar(project_path)
+        if not sidecar:
+            return False
+        try:
+            sidecar.set_lsp_enabled(bool(enabled))
+            sidecar.save()
+            return True
+        except Exception:
+            return False
+
+    def get_lsp_server_enabled(self, project_path: str, server_id: str) -> bool:
+        sidecar = self.get_project_sidecar(project_path)
+        if not sidecar:
+            return True
+        try:
+            return bool(sidecar.get_lsp_server_enabled(server_id))
+        except Exception:
+            return True
+
+    def set_lsp_server_enabled(self, project_path: str, server_id: str, enabled: bool) -> bool:
+        sidecar = self.get_project_sidecar(project_path)
+        if not sidecar:
+            return False
+        try:
+            sidecar.set_lsp_server_enabled(server_id, bool(enabled))
+            sidecar.save()
+            return True
+        except Exception:
+            return False
+
+    def get_lsp_state_payload(self, project_path: str) -> dict:
+        """Return the view_state payload fields for the LSP modal."""
+
+        sidecar = self.get_project_sidecar(project_path)
+        if not sidecar:
+            return {
+                "enableLsp": False,
+                "enableLspPyright": True,
+                "enableLspTypescript": True,
+                "enableLspClangd": True,
+                "enableLspKotlin": True,
+            }
+        try:
+            return dict(sidecar.get_lsp_state_payload())
+        except Exception:
+            return {
+                "enableLsp": False,
+                "enableLspPyright": True,
+                "enableLspTypescript": True,
+                "enableLspClangd": True,
+                "enableLspKotlin": True,
+            }
+
     def _touch_project_locked(self, path: str) -> Dict[str, object]:
         # path is assumed to be normalized by caller
         projects: Dict[str, Dict[str, object]] = self._data.setdefault("projects", {})
