@@ -80,6 +80,8 @@ class ConnectionManager:
         # Map: websocket -> project_path (for cleanup)
         self.ws_project_map: Dict[WebSocket, str] = {}
         self.pulse_task: Optional[asyncio.Task] = None
+        self.lsp_status_task: Optional[asyncio.Task] = None
+        self._last_lsp_status: Dict[str, dict] = {}
 
     async def accept_and_register(self, websocket: WebSocket, project_path: str):
         # Some shims (Socket.IO) don't need accept; provide no-op if missing
@@ -102,6 +104,7 @@ class ConnectionManager:
         
         if was_empty:
             self.start_pulse()
+            self.start_lsp_status()
             # Start watcher for the project (using SSOT active project)
             try:
                 from .core_read import init_watcher
@@ -125,6 +128,7 @@ class ConnectionManager:
         # Check if no connections remain globally
         if not any(self.active_connections.values()):
             self.stop_pulse()
+            self.stop_lsp_status()
             # Stop watcher to save resources
             try:
                 from .core_read import stop_watcher
@@ -146,6 +150,21 @@ class ConnectionManager:
             self.pulse_task = None
             logger.info("[PULSE] Heart monitor stopped")
 
+    def start_lsp_status(self):
+        """Start LSP status broadcaster task (Socket.IO + WS clients)."""
+        if self.lsp_status_task is None or self.lsp_status_task.done():
+            loop = asyncio.get_event_loop()
+            self.lsp_status_task = loop.create_task(self._lsp_status_loop())
+            logger.info("[LSP_STATUS] Broadcaster started")
+
+    def stop_lsp_status(self):
+        """Stop the LSP status broadcaster task."""
+        if self.lsp_status_task:
+            self.lsp_status_task.cancel()
+            self.lsp_status_task = None
+            self._last_lsp_status = {}
+            logger.info("[LSP_STATUS] Broadcaster stopped")
+
     async def _pulse_loop(self):
         """Periodically ping clients to ensure they are alive and keep connection active."""
         try:
@@ -161,6 +180,63 @@ class ConnectionManager:
             pass
         except Exception as e:
             logger.error(f"[PULSE] Error in pulse loop: {e}")
+
+    async def _lsp_status_loop(self):
+        """Poll Framework Shells for LSP status and broadcast on change.
+
+        This keeps the Language Servers modal "Start" buttons in sync without polling HTTP.
+        """
+
+        from framework_shells import get_manager
+
+        server_groups = {
+            "pyright": ["python"],
+            "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+            "clangd": ["c", "cpp"],
+            "kotlin": ["kotlin"],
+        }
+
+        async def _is_running(mgr, language_id: str) -> bool:
+            try:
+                rec = await mgr.find_shell_by_label(f"lsp:{language_id}", status="running")
+                return bool(rec and rec.pid and rec.status == "running")
+            except Exception:
+                return False
+
+        try:
+            while True:
+                await asyncio.sleep(1.0)
+                if not any(self.active_connections.values()):
+                    break
+
+                try:
+                    mgr = await get_manager()
+                except Exception:
+                    continue
+
+                # Build a per-project status object. LSP shells are scoped per project root in Code CM6,
+                # but the label naming is per-language; as a pragmatic approximation, we broadcast a
+                # single status snapshot to each project that currently has connections.
+                snapshot = {"servers": {}}
+                for server_id, langs in server_groups.items():
+                    running = False
+                    for lang in langs:
+                        if await _is_running(mgr, lang):
+                            running = True
+                            break
+                    snapshot["servers"][server_id] = {"running": running}
+
+                # Broadcast to all connected projects, but only when the payload changes.
+                for project_path in list(self.active_connections.keys()):
+                    last = self._last_lsp_status.get(project_path)
+                    if last == snapshot:
+                        continue
+                    self._last_lsp_status[project_path] = snapshot
+                    await self.broadcast(project_path, {"type": "lsp:status", "payload": snapshot})
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning(f"[LSP_STATUS] loop error: {e}")
     
     def get_connection_count(self, project_path: str) -> int:
         """Returns the number of active connections for a project."""

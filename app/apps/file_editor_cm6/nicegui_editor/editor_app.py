@@ -164,7 +164,25 @@ def _should_use_lsp(project_root: Path | None, language_id: str) -> bool:
         return False
 
     # Explicit opt-in; default to disabled until the feature bakes
-    return bool(prefs.get('enableLsp', False))
+    if not bool(prefs.get('enableLsp', False)):
+        return False
+
+    # Per-server selection (global for now; later: per-project via history store).
+    # Map language_id -> server flag.
+    server_flag = None
+    if language_id == "python":
+        server_flag = "enableLspPyright"
+    elif language_id in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
+        server_flag = "enableLspTypescript"
+    elif language_id in ("c", "cpp"):
+        server_flag = "enableLspClangd"
+    elif language_id == "kotlin":
+        server_flag = "enableLspKotlin"
+
+    if server_flag:
+        return bool(prefs.get(server_flag, True))
+
+    return True
 
 
 def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None) -> None:
@@ -1517,6 +1535,10 @@ def _get_view_state_dict() -> dict:
         "showDraftDiffs": editor_prefs.get('showDraftDiffs'),
         "stickyScroll": editor_prefs.get('stickyScroll'),  # Added: 2025-12-03 by vectorArc - TE2 Team
         "enableLsp": editor_prefs.get('enableLsp'),  # Added: 2025-12-08 - LSP integration toggle
+        "enableLspPyright": editor_prefs.get('enableLspPyright'),
+        "enableLspTypescript": editor_prefs.get('enableLspTypescript'),
+        "enableLspClangd": editor_prefs.get('enableLspClangd'),
+        "enableLspKotlin": editor_prefs.get('enableLspKotlin'),
     }
 
 
@@ -1598,16 +1620,12 @@ async def update_preference(data: dict = Body(...)):
             editor.set_sticky_scroll(bool(value))
         elif key == 'enableLsp':
             # Added: 2025-12-08 - LSP integration toggle
-            # When toggling LSP, reconnect or disconnect as needed
-            if value:
-                # Will connect on next file open; for current file, trigger reconnect
-                current_file = get_current_file()
-                project_path = _history_store.get_active_project() or str(get_project_root())
-                if current_file and project_path:
-                    _maybe_connect_lsp(editor, Path(current_file), Path(project_path))
-            else:
-                # Disconnect any active LSP connection
-                editor.disconnect_lsp()
+            # Runtime behavior is applied after persistence so _should_use_lsp reads the updated SSOT.
+            pass
+        elif key in ('enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'):
+            # Per-server selection (global for now).
+            # Runtime behavior is applied after persistence so _should_use_lsp reads the updated SSOT.
+            pass
         elif key == 'showInlineDiffs':
             pass  # handled after preference persistence via _refresh_active_diffs
         elif key == 'showDraftDiffs':
@@ -1647,6 +1665,20 @@ async def update_preference(data: dict = Body(...)):
         
         editor.update()
         _preferences_store.update_preferences(editor={key: value})
+
+        # Apply LSP connect/disconnect after persistence so the SSOT is consistent.
+        if key == 'enableLsp' or key in ('enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'):
+            try:
+                current_file = get_current_file()
+                project_path = _history_store.get_active_project() or str(get_project_root())
+                if current_file and project_path:
+                    _maybe_connect_lsp(editor, Path(current_file), Path(project_path))
+                else:
+                    # No active doc: if global gate turned off, ensure disconnect.
+                    if key == 'enableLsp' and not bool(value):
+                        editor.disconnect_lsp()
+            except Exception as exc:
+                print(f"[PREFERENCE] LSP reconnect after {key} failed: {exc}", file=sys.stderr)
         
         if key in ('showInlineDiffs', 'showDraftDiffs', 'autoSave'):
             _refresh_active_diffs()

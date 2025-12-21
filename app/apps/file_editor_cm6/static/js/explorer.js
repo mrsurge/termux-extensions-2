@@ -1318,6 +1318,16 @@ function refreshOpenDirectoriesAfterGit() {
 }
 
 function handleExplorerEvent(type, payload) {
+  if (type === 'lsp:status') {
+    try {
+      if (typeof window.__cm6HandleLspStatus === 'function') {
+        window.__cm6HandleLspStatus(payload || {});
+      }
+    } catch (err) {
+      console.warn('[Explorer] lsp:status handler failed', err);
+    }
+    return;
+  }
   switch (type) {
     case 'prefs:setUi': {
       const ui =

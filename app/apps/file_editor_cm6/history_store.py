@@ -16,6 +16,18 @@ MAX_RECENT_PROJECTS = 12
 MAX_RECENT_FILES = 12
 
 
+_HISTORY_DEBUG = os.getenv("TE2_HISTORY_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _history_debug(msg: str) -> None:
+    if not _HISTORY_DEBUG:
+        return
+    try:
+        print(msg)
+    except Exception:
+        pass
+
+
 def _utc_timestamp() -> str:
     return datetime.utcnow().isoformat() + "Z"
 
@@ -536,7 +548,7 @@ class HistoryStore:
         normalized_project = self._normalize_project_path(project_path)
         value = (ref or 'HEAD').strip() or 'HEAD'
         timestamp = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
-        print(f"[{timestamp}] [HistoryStore] set_diff_base project={normalized_project!r} ref={value!r}", flush=True)
+        _history_debug(f"[{timestamp}] [HistoryStore] set_diff_base project={normalized_project!r} ref={value!r}")
 
         # Persist diff base in the per-project sidecar first.
         try:
@@ -562,9 +574,8 @@ class HistoryStore:
         try:
             sidecar = ProjectSidecar.load_or_create(normalized_project)
             val = (sidecar.get_diff_base() or 'HEAD').strip() or 'HEAD'
-            print(
-                f"[{timestamp}] [HistoryStore] get_diff_base (sidecar) found {val!r} for {normalized_project!r}",
-                flush=True,
+            _history_debug(
+                f"[{timestamp}] [HistoryStore] get_diff_base (sidecar) found {val!r} for {normalized_project!r}"
             )
             return val
         except Exception:
@@ -575,16 +586,10 @@ class HistoryStore:
             projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
             entry = projects.get(normalized_project)
             if not entry:
-                print(
-                    f"[{timestamp}] [HistoryStore] get_diff_base entry NOT FOUND for {normalized_project!r}",
-                    flush=True,
-                )
+                _history_debug(f"[{timestamp}] [HistoryStore] get_diff_base entry NOT FOUND for {normalized_project!r}")
                 return 'HEAD'
             val = (entry.get("diff_base") or 'HEAD').strip() or 'HEAD'
-            print(
-                f"[{timestamp}] [HistoryStore] get_diff_base (history) found {val!r} for {normalized_project!r}",
-                flush=True,
-            )
+            _history_debug(f"[{timestamp}] [HistoryStore] get_diff_base (history) found {val!r} for {normalized_project!r}")
             return val
 
     def set_project_origin(self, project_path: str, origin: Optional[str]) -> None:

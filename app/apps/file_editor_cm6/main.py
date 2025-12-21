@@ -363,6 +363,44 @@ async def api_shutdown_lsp(payload: dict = Body(...)):
     return {"ok": True}
 
 
+@file_editor_cm6_bp.post("/api/lsp/start")
+async def api_start_lsp(payload: dict = Body(...)):
+    """Manually start an LSP server (as Framework Shell pipe processes).
+
+    This is used by the Language Servers modal to pre-warm servers before a file is opened.
+    """
+
+    server_id = (payload.get("serverId") or "").strip().lower()
+    if not server_id:
+        raise HTTPException(status_code=400, detail="serverId is required")
+
+    # Map UI server IDs to the language IDs used by the backend bridge.
+    server_languages = {
+        "pyright": ["python"],
+        "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+        "clangd": ["c", "cpp"],
+        "kotlin": ["kotlin"],
+    }
+    language_ids = server_languages.get(server_id)
+    if not language_ids:
+        raise HTTPException(status_code=400, detail=f"Unknown serverId: {server_id}")
+
+    project_root = payload.get("projectRoot") or (_history_store.get_active_project() or str(get_project_root()))
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    started: list[dict] = []
+    for language_id in language_ids:
+        record = await get_or_spawn_lsp_shell(language_id, Path(project_root))
+        if record:
+            started.append({"languageId": language_id, "shellId": record.id})
+
+    if not started:
+        return JSONResponse({"ok": False, "error": "Failed to start server (missing binary?)"}, status_code=424)
+
+    return {"ok": True, "data": {"serverId": server_id, "started": started}}
+
+
 @file_editor_cm6_bp.get("/api/lsp/debug/cache")
 async def api_list_lsp_cache():
     snapshot = await list_lsp_shells()

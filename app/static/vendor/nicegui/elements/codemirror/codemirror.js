@@ -818,6 +818,12 @@ export default {
         console.warn('[CodeMirror] Failed to notify parent', err);
       }
     },
+    emitLspStatus(state, payload) {
+      try {
+        const data = Object.assign({ state: state }, payload || {});
+        this.notifyParent('cm6-lsp-status', data);
+      } catch { }
+    },
     // Establish LSP connection using Socket.IO transport and @codemirror/lsp-client
     // NOTE: Python run_method sends {languageId, projectRoot, filePath} as single dict argument
     connectLSP(options) {
@@ -835,6 +841,7 @@ export default {
       }
 
       console.log(`[LSP] connectLSP called: languageId=${languageId}, projectRoot=${projectRoot}, filePath=${filePath}`);
+      try { this.emitLspStatus('connecting', { languageId, projectRoot, filePath }); } catch { }
 
       if (!this.editor) {
         console.warn('[LSP] connectLSP called before editor is ready');
@@ -897,8 +904,10 @@ export default {
 
         if (!initOk) {
           console.warn('[LSP] Backend never reported lsp_initialized; aborting LSP connect');
+          try { this.emitLspStatus('error', { languageId, projectRoot, filePath, error: 'backend initialize timeout' }); } catch { }
           return;
         }
+        try { this.emitLspStatus('backend_ready', { languageId, projectRoot, filePath }); } catch { }
 
         if (this._lspConnectNonce !== connectNonce) return;
 
@@ -937,6 +946,7 @@ export default {
           });
         } catch (err) {
           console.error('[LSP] Failed to create LanguageServerClient:', err);
+          try { this.emitLspStatus('error', { languageId, projectRoot, filePath, error: String(err?.message || err) }); } catch { }
           transport.close();
           this.lspTransport = null;
           this.lspClient = null;
@@ -999,8 +1009,10 @@ export default {
         try {
           console.log('[LSP] Connecting client to transport...');
           this.lspClient.connect(cmTransport);
+          try { this.emitLspStatus('initializing', { languageId, projectRoot, filePath }); } catch { }
         } catch (err) {
           console.error('[LSP] Failed to connect LSPClient:', err);
+          try { this.emitLspStatus('error', { languageId, projectRoot, filePath, error: String(err?.message || err) }); } catch { }
           transport.close();
           this.lspTransport = null;
           this.lspClient = null;
@@ -1035,6 +1047,7 @@ export default {
         // Wait for initialization then send didOpen and request document symbols
         this.lspClient.initializing.then(async () => {
           console.log('[LSP] Client initialized');
+          try { this.emitLspStatus('ready', { languageId, projectRoot, filePath }); } catch { }
           try {
             if (this._lspInitRetryCount) this._lspInitRetryCount = 0;
           } catch { }
@@ -1072,6 +1085,7 @@ export default {
           }, 1000);
         }).catch((err) => {
           console.warn('[LSP] Client initialization failed:', err);
+          try { this.emitLspStatus('error', { languageId, projectRoot, filePath, error: String(err?.message || err) }); } catch { }
 
           // Kotlin-only: one retry helps in cases where the first initialize
           // times out but the server eventually responds (backend caches it),
@@ -1136,6 +1150,7 @@ export default {
       this.lspSymbols = [];
       // Restore non-LSP completion fallbacks (if any).
       try { this.applyCompletionFallback(); } catch { }
+      try { this.emitLspStatus('disconnected', { languageId: this._lspLanguageId || '' }); } catch { }
       try {
         if (this._stickyScrollPlugin && typeof this._stickyScrollPlugin.updateStickyHeader === 'function') {
           this._stickyScrollPlugin.updateStickyHeader(true);

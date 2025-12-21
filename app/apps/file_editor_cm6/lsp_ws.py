@@ -8,6 +8,8 @@ Uses the "Piggyback" strategy to attach /lsp namespace to existing NiceGUI Socke
 
 import asyncio
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -15,6 +17,24 @@ import socketio
 
 from framework_shells import get_manager, PipeState
 from .lsp_shell_manager import get_or_spawn_lsp_shell
+
+
+_LSP_DEBUG = os.getenv("TE2_LSP_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _lsp_debug(msg: str) -> None:
+    if _LSP_DEBUG:
+        try:
+            print(msg, file=sys.stderr)
+        except Exception:
+            pass
+
+
+def _lsp_error(msg: str) -> None:
+    try:
+        print(msg, file=sys.stderr)
+    except Exception:
+        pass
 
 
 class LSPFrameParser:
@@ -84,8 +104,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         # Pending messages per sid while initialization wiring is happening.
         self.pending_messages: Dict[str, list] = {}
         self.session_ready: Dict[str, asyncio.Event] = {}
-        import sys
-        print(f"[LSP WS] Namespace initialized: {namespace}", file=sys.stderr, flush=True)
+        _lsp_debug(f"[LSP WS] Namespace initialized: {namespace}")
 
     async def _is_session_healthy(self, session: dict) -> bool:
         """Return True if the session's shell + pipe process are still alive.
@@ -203,14 +222,12 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         return session
     
     async def on_connect(self, sid, environ):
-        import sys
-        print(f"[LSP WS] Client connected: {sid}", file=sys.stderr, flush=True)
+        _lsp_debug(f"[LSP WS] Client connected: {sid}")
         self.pending_messages[sid] = []
         self.session_ready[sid] = asyncio.Event()
     
     async def on_disconnect(self, sid):
-        import sys
-        print(f"[LSP WS] Client disconnected: {sid}", file=sys.stderr, flush=True)
+        _lsp_debug(f"[LSP WS] Client disconnected: {sid}")
         key = self.sid_to_key.pop(sid, None)
         if key is not None:
             session = self.backend_sessions.get(key)
@@ -222,8 +239,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
     
     async def on_initialize(self, sid, data):
         """Client sends: { languageId: 'python', projectRoot: '/path/to/project' }"""
-        import sys
-        print(f"[LSP WS] on_initialize called: sid={sid} data={data}", file=sys.stderr, flush=True)
+        _lsp_debug(f"[LSP WS] on_initialize called: sid={sid} data={data}")
         
         language_id = data.get("languageId")
         project_root = data.get("projectRoot", ".")
@@ -232,7 +248,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
             await self.emit("lsp:error", {"error": "Missing languageId"}, to=sid)
             return
         
-        print(f"[LSP WS] Initialize: {sid} lang={language_id} root={project_root}")
+        _lsp_debug(f"[LSP WS] Initialize: {sid} lang={language_id} root={project_root}")
 
         key = (str(language_id), str(project_root))
         self.sid_to_key[sid] = key
@@ -250,7 +266,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
 
         pending = self.pending_messages.get(sid, [])
         if pending:
-            print(f"[LSP WS] Processing {len(pending)} pending messages for {sid}", file=sys.stderr, flush=True)
+            _lsp_debug(f"[LSP WS] Processing {len(pending)} pending messages for {sid}")
             for msg in pending:
                 await self._handle_client_message(sid, msg)
             self.pending_messages[sid] = []
@@ -259,13 +275,12 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
     
     async def on_lsp_client_to_server(self, sid, message):
         """Receive JSON LSP message from client, forward to shell stdin."""
-        import sys
-        print(f"[LSP WS] on_lsp_client_to_server: sid={sid} msg={str(message)[:200]}", file=sys.stderr, flush=True)
+        _lsp_debug(f"[LSP WS] on_lsp_client_to_server: sid={sid} msg={str(message)[:200]}")
 
         key = self.sid_to_key.get(sid)
         session = self.backend_sessions.get(key) if key else None
         if not session:
-            print(f"[LSP WS] Session not ready, queuing message for {sid}", file=sys.stderr, flush=True)
+            _lsp_debug(f"[LSP WS] Session not ready, queuing message for {sid}")
             if sid in self.pending_messages:
                 self.pending_messages[sid].append(message)
             return
@@ -274,7 +289,6 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
 
     async def _handle_client_message(self, sid: str, message: dict) -> None:
         """Apply broker rules, then forward (or short-circuit)."""
-        import sys
         key = self.sid_to_key.get(sid)
         session = self.backend_sessions.get(key) if key else None
         if not session:
@@ -288,7 +302,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
             method = message.get("method")
             if method == "initialize":
                 if session.get("initialized") and session.get("init_result_template") is not None:
-                    print(f"[LSP WS] Short-circuit initialize for sid={sid}", file=sys.stderr, flush=True)
+                    _lsp_debug(f"[LSP WS] Short-circuit initialize for sid={sid}")
                     await self._emit_initialize_response(sid, message.get("id"), session.get("init_result_template"))
                     return
                 if session.get("init_request_id") is None and message.get("id") is not None:
@@ -316,7 +330,6 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
 
     async def _forward_to_backend(self, sid: str, message: dict):
         """Forward a single LSP message to the backend stdin."""
-        import sys
         key = self.sid_to_key.get(sid)
         session = self.backend_sessions.get(key) if key else None
         if not session:
@@ -324,7 +337,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         
         pipe_state = session.get("pipe_state")
         if not pipe_state or not pipe_state.process or not pipe_state.process.stdin:
-            print(f"[LSP WS] No pipe state or stdin for session {sid}", file=sys.stderr, flush=True)
+            _lsp_error(f"[LSP WS] No pipe state or stdin for session {sid}")
             return
         
         # Add LSP framing (Content-Length header)
@@ -334,9 +347,8 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         try:
             pipe_state.process.stdin.write(header + body)
             await pipe_state.process.stdin.drain()
-            print(f"[LSP WS] Wrote {len(body)} bytes to shell", file=sys.stderr, flush=True)
         except Exception as e:
-            print(f"[LSP WS] Write error: {e}", file=sys.stderr, flush=True)
+            _lsp_error(f"[LSP WS] Write error: {e}")
             try:
                 session["dead"] = True
             except Exception:
@@ -344,8 +356,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
     
     async def _bridge_backend_output(self, key: Tuple[str, str]):
         """Read from backend stdout forever; deliver to current sid (session broker)."""
-        import sys
-        print(f"[LSP WS] Starting backend output bridge for {key}", file=sys.stderr, flush=True)
+        _lsp_debug(f"[LSP WS] Starting backend output bridge for {key}")
         session = self.backend_sessions.get(key)
         if not session:
             return
@@ -357,7 +368,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         try:
             while not pipe_state.stop.is_set():
                 if proc.stdout is None:
-                    print(f"[LSP WS] No stdout for {key}", file=sys.stderr, flush=True)
+                    _lsp_error(f"[LSP WS] No stdout for {key}")
                     break
                 
                 try:
@@ -367,14 +378,23 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                 
                 if not chunk:
                     # EOF
-                    print(f"[LSP WS] EOF on {key}", file=sys.stderr, flush=True)
+                    _lsp_error(f"[LSP WS] EOF on {key}")
                     try:
                         session["dead"] = True
                     except Exception:
                         pass
                     break
-                
-                print(f"[LSP WS] Read {len(chunk)} bytes from LSP server", file=sys.stderr, flush=True)
+
+                # When the server is fully initialized but currently not attached to a client,
+                # avoid JSON parsing overhead. We still drain stdout to prevent backpressure.
+                if not _LSP_DEBUG and session.get("initialized") and not session.get("current_sid"):
+                    # Best-effort: discard any partial buffered state.
+                    try:
+                        parser.buffer = b""
+                    except Exception:
+                        pass
+                    continue
+
                 for msg in parser.feed(chunk):
                     # Cache initialize response (so reconnecting stateless clients can be short-circuited).
                     try:
@@ -394,12 +414,11 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                     current_sid = session.get("current_sid")
                     if not current_sid:
                         continue
-                    print(f"[LSP WS] Sending to client: {str(msg)[:200]}...", file=sys.stderr, flush=True)
                     await self.emit("lsp_server_to_client", msg, to=current_sid)
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            print(f"[LSP WS] Reader error: {e}", file=sys.stderr, flush=True)
+            _lsp_error(f"[LSP WS] Reader error: {e}")
             try:
                 session = self.backend_sessions.get(key)
                 if session:

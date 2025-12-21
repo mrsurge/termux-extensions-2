@@ -486,6 +486,22 @@
     100% { background-color: transparent; }
   }
 
+  /* LSP spinner (host UI, driven by iframe postMessage) */
+  .fe-lsp-spinner {
+    width: 14px;
+    height: 14px;
+    display: inline-block;
+    border-radius: 9999px;
+    border: 2px solid rgba(156, 163, 175, 0.35);
+    border-top-color: rgba(156, 163, 175, 0.95);
+    box-sizing: border-box;
+    animation: fe-lsp-spin 0.9s linear infinite;
+  }
+  @keyframes fe-lsp-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
   /* Terminal drawer styles */
   .terminal-drawer {
     position: fixed;
@@ -1451,6 +1467,17 @@
     align-items: center;
     gap: 8px;
   }
+  .lsp-server-status .lsp-toggle-btn {
+    padding: 6px 10px;
+    font-size: 0.78rem;
+    border-radius: 6px;
+    min-width: 44px;
+  }
+  .lsp-server-status .fe-btn {
+    padding: 6px 10px;
+    font-size: 0.78rem;
+    border-radius: 6px;
+  }
 
   .lsp-status-dot {
     width: 8px;
@@ -1585,6 +1612,7 @@
     <div class="fe-menu" style="position: relative; margin-left: auto; display: flex; gap: 0.35rem; align-items: center;">
       <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
+      <span id="fe-lsp-spinner" class="fe-lsp-spinner" title="Language server starting…" aria-hidden="true" style="display: none;"></span>
       <div style="position: relative;">
         <button id="recent-files-btn" class="fe-btn" style="margin: 0;" disabled>Recents ▾</button>
         <div id="recent-files-dd" class="fe-dropdown"></div>
@@ -1853,7 +1881,9 @@
       <div class="lsp-global-toggle">
         <div class="lsp-global-info">
           <div class="lsp-global-title">Enable LSP Integration</div>
-          <div class="lsp-global-desc">Language servers provide intelligent code features like symbol navigation</div>
+          <div class="lsp-global-desc">
+            When enabled, opening a supported file will start its language server in a Framework Shell (used for sticky scroll scopes today, and diagnostics/completions later).
+          </div>
         </div>
         <button class="lsp-toggle-btn" id="lsp-global-toggle-btn">Enable</button>
       </div>
@@ -1869,6 +1899,8 @@
           </div>
           <div class="lsp-server-status">
             <span class="lsp-status-dot" id="lsp-status-pyright"></span>
+            <button class="lsp-toggle-btn" id="lsp-toggle-pyright">On</button>
+            <button class="fe-btn" id="lsp-start-pyright">Start</button>
           </div>
         </div>
         <!-- TypeScript Language Server -->
@@ -1879,6 +1911,32 @@
           </div>
           <div class="lsp-server-status">
             <span class="lsp-status-dot" id="lsp-status-typescript"></span>
+            <button class="lsp-toggle-btn" id="lsp-toggle-typescript">On</button>
+            <button class="fe-btn" id="lsp-start-typescript">Start</button>
+          </div>
+        </div>
+        <!-- clangd -->
+        <div class="lsp-server-item" data-server="clangd">
+          <div class="lsp-server-info">
+            <div class="lsp-server-name">clangd</div>
+            <div class="lsp-server-langs">.c, .h, .cc, .cpp, .cxx, .hpp — C &amp; C++ (Termux/Ubuntu package)</div>
+          </div>
+          <div class="lsp-server-status">
+            <span class="lsp-status-dot" id="lsp-status-clangd"></span>
+            <button class="lsp-toggle-btn" id="lsp-toggle-clangd">On</button>
+            <button class="fe-btn" id="lsp-start-clangd">Start</button>
+          </div>
+        </div>
+        <!-- Kotlin LSP -->
+        <div class="lsp-server-item" data-server="kotlin">
+          <div class="lsp-server-info">
+            <div class="lsp-server-name">Kotlin LSP (JetBrains)</div>
+            <div class="lsp-server-langs">.kt, .kts — Kotlin (vendored)</div>
+          </div>
+          <div class="lsp-server-status">
+            <span class="lsp-status-dot" id="lsp-status-kotlin"></span>
+            <button class="lsp-toggle-btn" id="lsp-toggle-kotlin">On</button>
+            <button class="fe-btn" id="lsp-start-kotlin">Start</button>
           </div>
         </div>
       </div>

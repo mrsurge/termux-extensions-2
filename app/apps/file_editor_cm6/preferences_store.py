@@ -29,6 +29,12 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "stickyScroll": False,  # Added: 2025-12-03 by vectorArc - TE2 Team
     # LSP integration toggle (backend-only; no UI yet)
     "enableLsp": False,
+    # Per-server selection (still global for now; per-project comes later).
+    # Defaults to ON so behavior matches legacy "blanket enable" when enableLsp=true.
+    "enableLspPyright": True,
+    "enableLspTypescript": True,
+    "enableLspClangd": True,
+    "enableLspKotlin": True,
     # Optional: path to JetBrains Kotlin LSP entrypoint (kotlin-lsp.sh)
     "kotlinLspPath": "",
     # Kotlin LSP run-mode knobs (useful on Termux/Android where file watching can be restricted)
