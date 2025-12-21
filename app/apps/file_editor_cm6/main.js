@@ -2533,6 +2533,8 @@ function updateLspModalUI(state) {
     if (toggleBtn) {
       toggleBtn.textContent = enabled ? 'On' : 'Off';
       toggleBtn.classList.toggle('enabled', enabled);
+      // Per-server settings are only editable when the LSP feature is enabled.
+      toggleBtn.disabled = !isEnabled;
     }
     // Start/Stop buttons are updated in a second pass so they can reflect running state.
     if (startBtn) startBtn.disabled = false;
@@ -2555,16 +2557,25 @@ function _applyLspActionButtons(state) {
   const apply = (serverId, btn) => {
     if (!btn) return;
     const running = Boolean(status?.servers?.[serverId]?.running);
+    if (!globalEnabled) {
+      // If the feature is disabled, all actions are disabled (but we still reflect running state).
+      btn.classList.remove('fe-btn-danger');
+      btn.textContent = running ? 'Running' : 'Start';
+      btn.disabled = true;
+      btn.dataset.lspAction = '';
+      return;
+    }
     if (running) {
-      // Allow stop even if preferences are off; user needs an escape hatch.
       btn.textContent = 'Stop';
       btn.disabled = false;
       btn.dataset.lspAction = 'stop';
+      btn.classList.add('fe-btn-danger');
       return;
     }
 
     const serverEnabled = _lspGetServerEnabled(state, serverId);
     const allowed = globalEnabled && serverEnabled;
+    btn.classList.remove('fe-btn-danger');
     btn.textContent = 'Start';
     btn.disabled = !allowed;
     btn.dataset.lspAction = 'start';
@@ -2613,11 +2624,16 @@ async function showLspModal() {
   const state = await fetchEditorState();
   updateLspModalUI(state);
 
-  // Update running status (best-effort) if websocket status hasn't arrived yet.
+  // Request a websocket-driven snapshot so the modal reflects real running state on open.
   try {
-    const cache = await apiGet('api/lsp/debug/cache');
-    _setLastLspStatus(_deriveLspStatusFromCache(cache));
-    _applyLspActionButtons(editorViewState);
+    if (typeof window.__explorerBusSend === 'function') {
+      window.__explorerBusSend('lsp:status', { reason: 'modal_open' });
+    } else {
+      // Fallback: pipe-cache snapshot (may be empty if shells were adopted/restarted).
+      const cache = await apiGet('api/lsp/debug/cache');
+      _setLastLspStatus(_deriveLspStatusFromCache(cache));
+      _applyLspActionButtons(editorViewState);
+    }
   } catch { }
   
   lspModal.root.classList.add('show');

@@ -1514,10 +1514,10 @@ def _get_view_state_dict() -> dict:
     editor_prefs = prefs.get('editor', {})
     lsp_state = {
         "enableLsp": False,
-        "enableLspPyright": True,
-        "enableLspTypescript": True,
-        "enableLspClangd": True,
-        "enableLspKotlin": True,
+        "enableLspPyright": False,
+        "enableLspTypescript": False,
+        "enableLspClangd": False,
+        "enableLspKotlin": False,
     }
     try:
         project_path = _history_store.get_active_project() or str(get_project_root())

@@ -437,6 +437,41 @@ async def api_list_lsp_cache():
     }
 
 
+@file_editor_cm6_bp.get("/api/lsp/status")
+async def api_lsp_status():
+    """Return current LSP running status as seen by Framework Shells (label lookup).
+
+    This is used by the Language Servers modal to reflect real running state when opened,
+    even if the in-process LSP pipe cache is empty.
+    """
+
+    from framework_shells import get_manager
+
+    mgr = await get_manager()
+
+    async def _is_running(language_id: str) -> bool:
+        try:
+            rec = await mgr.find_shell_by_label(f"lsp:{language_id}", status="running")
+            return bool(rec and rec.pid and rec.status == "running")
+        except Exception:
+            return False
+
+    async def _any_running(language_ids: list[str]) -> bool:
+        for lang in language_ids:
+            if await _is_running(lang):
+                return True
+        return False
+
+    servers = {
+        "pyright": {"running": await _any_running(["python"])},
+        "typescript": {"running": await _any_running(["typescript", "typescriptreact", "javascript", "javascriptreact"])},
+        "clangd": {"running": await _any_running(["c", "cpp"])},
+        "kotlin": {"running": await _any_running(["kotlin"])},
+    }
+
+    return {"ok": True, "data": {"servers": servers}}
+
+
 # # Register agent routes and WebSocket handler
 from .agent_routes import bp as agent_routes_bp
 file_editor_cm6_bp.include_router(agent_routes_bp)

@@ -138,15 +138,13 @@ class ProjectSidecar:
             # Optional per-shell titles (fs-id -> short label) for terminal dropdown.
             "terminal_shell_titles": {},
             # LSP configuration (project-scoped SSOT).
-            # Note: server toggles default to true so "enableLsp" behaves like a blanket opt-in
-            # until per-server selection is explicitly changed by the user.
             "lsp": {
                 "enabled": False,
                 "servers": {
-                    "pyright": True,
-                    "typescript": True,
-                    "clangd": True,
-                    "kotlin": True,
+                    "pyright": False,
+                    "typescript": False,
+                    "clangd": False,
+                    "kotlin": False,
                 },
             },
         }
@@ -643,7 +641,7 @@ class ProjectSidecar:
         servers = lsp.get("servers")
         if not isinstance(servers, dict):
             servers = {}
-        for key, default in (("pyright", True), ("typescript", True), ("clangd", True), ("kotlin", True)):
+        for key, default in (("pyright", False), ("typescript", False), ("clangd", False), ("kotlin", False)):
             servers.setdefault(key, default)
         lsp["servers"] = servers
         self._data["lsp"] = lsp
@@ -662,7 +660,7 @@ class ProjectSidecar:
     def get_lsp_server_enabled(self, server_id: str) -> bool:
         lsp = self._ensure_lsp_schema()
         servers = lsp.get("servers") or {}
-        return bool(servers.get(str(server_id), True))
+        return bool(servers.get(str(server_id), False))
 
     def set_lsp_server_enabled(self, server_id: str, enabled: bool) -> bool:
         lsp = self._ensure_lsp_schema()
@@ -677,10 +675,10 @@ class ProjectSidecar:
         servers = lsp.get("servers") or {}
         return {
             "enableLsp": bool(lsp.get("enabled", False)),
-            "enableLspPyright": bool(servers.get("pyright", True)),
-            "enableLspTypescript": bool(servers.get("typescript", True)),
-            "enableLspClangd": bool(servers.get("clangd", True)),
-            "enableLspKotlin": bool(servers.get("kotlin", True)),
+            "enableLspPyright": bool(servers.get("pyright", False)),
+            "enableLspTypescript": bool(servers.get("typescript", False)),
+            "enableLspClangd": bool(servers.get("clangd", False)),
+            "enableLspKotlin": bool(servers.get("kotlin", False)),
         }
 
 

@@ -854,6 +854,51 @@ class ExplorerDispatcher:
         except Exception as e:
             logger.warning(f"Failed to save open directories: {e}")
 
+    async def handle_lsp_status(self, payload: dict, msg_id: str):
+        """Return a point-in-time LSP status snapshot (via Framework Shells labels).
+
+        The Language Servers modal calls this when opened so buttons reflect the real
+        running state immediately, without relying on periodic broadcasts.
+        """
+
+        from framework_shells import get_manager
+
+        server_groups = {
+            "pyright": ["python"],
+            "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+            "clangd": ["c", "cpp"],
+            "kotlin": ["kotlin"],
+        }
+
+        async def _is_running(mgr, language_id: str) -> bool:
+            try:
+                rec = await mgr.find_shell_by_label(f"lsp:{language_id}", status="running")
+                return bool(rec and rec.pid and rec.status == "running")
+            except Exception:
+                return False
+
+        try:
+            mgr = await get_manager()
+        except Exception as e:
+            return await self.send_error(f"Failed to query shell manager: {e}", msg_id)
+
+        snapshot = {"servers": {}}
+        for server_id, langs in server_groups.items():
+            running = False
+            for lang in langs:
+                if await _is_running(mgr, lang):
+                    running = True
+                    break
+            snapshot["servers"][server_id] = {"running": running}
+
+        # Prime last snapshot for this project so background broadcasts won't lag.
+        try:
+            manager._last_lsp_status[str(self.project_root)] = snapshot
+        except Exception:
+            pass
+
+        await self.emit_personal("lsp:status", snapshot, msg_id)
+
     async def handle_prefs_updateUi(self, payload: dict, msg_id: str):
         """Update a single UI preference key via PreferenceStore (backend owns defaults)."""
         key = payload.get("key")

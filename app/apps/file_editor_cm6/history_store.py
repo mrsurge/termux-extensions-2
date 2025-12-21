@@ -153,11 +153,11 @@ class HistoryStore:
     def get_lsp_server_enabled(self, project_path: str, server_id: str) -> bool:
         sidecar = self.get_project_sidecar(project_path)
         if not sidecar:
-            return True
+            return False
         try:
             return bool(sidecar.get_lsp_server_enabled(server_id))
         except Exception:
-            return True
+            return False
 
     def set_lsp_server_enabled(self, project_path: str, server_id: str, enabled: bool) -> bool:
         sidecar = self.get_project_sidecar(project_path)
@@ -177,20 +177,20 @@ class HistoryStore:
         if not sidecar:
             return {
                 "enableLsp": False,
-                "enableLspPyright": True,
-                "enableLspTypescript": True,
-                "enableLspClangd": True,
-                "enableLspKotlin": True,
+                "enableLspPyright": False,
+                "enableLspTypescript": False,
+                "enableLspClangd": False,
+                "enableLspKotlin": False,
             }
         try:
             return dict(sidecar.get_lsp_state_payload())
         except Exception:
             return {
                 "enableLsp": False,
-                "enableLspPyright": True,
-                "enableLspTypescript": True,
-                "enableLspClangd": True,
-                "enableLspKotlin": True,
+                "enableLspPyright": False,
+                "enableLspTypescript": False,
+                "enableLspClangd": False,
+                "enableLspKotlin": False,
             }
 
     def _touch_project_locked(self, path: str) -> Dict[str, object]:
