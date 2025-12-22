@@ -302,12 +302,12 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
   const lineDecorations = new Map();
   const deletionWidgets = [];
 
-  for (const hunk of hunks) {
-    let newLine = Math.max(1, hunk.newStart || 1);
-    let oldLine = Math.max(1, hunk.oldStart || 1);
+	  for (const hunk of hunks) {
+	    let newLine = Math.max(1, hunk.newStart || 1);
+	    let oldLine = Math.max(1, hunk.oldStart || 1);
 
-    for (const line of hunk.lines || []) {
-      const kind = line.type;
+	    for (const line of hunk.lines || []) {
+	      const kind = line.type;
       if (kind === 'add') {
         lineDecorations.set(newLine, { decoration: lineAddedDeco, markerKind: '+', isAdd: true });
         newLine += 1;
@@ -318,17 +318,28 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
         lineDecorations.set(newLine, { decoration: lineContextDeco, markerKind: '│' });
         newLine += 1;
         oldLine += 1;
-      } else if (kind === 'del' || kind === 'del-draft') {
-        deletionWidgets.push({
-          line: newLine > 0 ? newLine : 1,
-          text: line.text || '',
-          originalLine: oldLine,
-          isDraft: (kind === 'del-draft')
-        });
-        oldLine += 1;
-      }
-    }
-  }
+	      } else if (kind === 'del' || kind === 'del-draft') {
+	        // Defensive normalization: some upstream producers may accidentally pack
+	        // multiple deleted lines into a single `text` field (containing '\n').
+	        // The CM6 widget gutter can only attach one line-number marker per widget
+	        // block, so we MUST split into one widget per deleted line to preserve
+	        // "one deleted line number per deleted line" behavior.
+	        const isDraft = (kind === 'del-draft');
+	        const raw = (line.text ?? '');
+	        const parts = String(raw).split(/\r?\n/);
+	        for (const part of parts) {
+	          // Keep empty strings as legitimate blank deleted lines.
+	          deletionWidgets.push({
+	            line: newLine > 0 ? newLine : 1,
+	            text: part,
+	            originalLine: oldLine,
+	            isDraft,
+	          });
+	          oldLine += 1;
+	        }
+	      }
+	    }
+	  }
 
   deletionWidgets.sort((a, b) => a.line - b.line);
 
@@ -352,16 +363,16 @@ function buildDiffDecorations(view, hunks, CM, getWordWrap) {
     }
 
     // Widgets AT the line
-    while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line === lineNum) {
-      const widget = deletionWidgets[widgetIndex];
-      builder.add(lineInfo.from, lineInfo.from, Decoration.widget({
-        side: -1,
-        block: true,
-        widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine, widget.isDraft),
-        diffKind: 'delete',
-      }));
-      widgetIndex++;
-    }
+	    while (widgetIndex < deletionWidgets.length && deletionWidgets[widgetIndex].line === lineNum) {
+	      const widget = deletionWidgets[widgetIndex];
+	      builder.add(lineInfo.from, lineInfo.from, Decoration.widget({
+	        side: -1,
+	        block: true,
+	        widget: new RemovedLineWidget(widget.text, wordWrap, widget.originalLine, widget.isDraft),
+	        diffKind: widget.isDraft ? 'delete-draft' : 'delete',
+	      }));
+	      widgetIndex++;
+	    }
 
     const entry = lineDecorations.get(lineNum);
     if (entry) {
