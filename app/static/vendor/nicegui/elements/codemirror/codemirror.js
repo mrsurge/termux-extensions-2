@@ -589,6 +589,8 @@ export default {
       // Autocompletion override compartment (used for non-LSP fallbacks)
       completionCompartment: null,
       isMobileLayout: false,
+      // Issues overlay state (LSP diagnostics-driven)
+      issuesOverlayVisible: false,
     };
   },
   beforeDestroy() {
@@ -600,6 +602,13 @@ export default {
     } catch (err) {
       console.warn('[LSP] Error during beforeDestroy disconnect:', err);
     }
+    try {
+      if (typeof this._teardownIssuesOverlay === 'function') {
+        this._teardownIssuesOverlay();
+      }
+    } catch (err) {
+      console.warn('[Issues] Error during beforeDestroy teardown:', err);
+    }
   },
   beforeUnmount() {
     // Best-effort LSP cleanup for Vue 3 lifecycle
@@ -610,8 +619,384 @@ export default {
     } catch (err) {
       console.warn('[LSP] Error during beforeUnmount disconnect:', err);
     }
+    try {
+      if (typeof this._teardownIssuesOverlay === 'function') {
+        this._teardownIssuesOverlay();
+      }
+    } catch (err) {
+      console.warn('[Issues] Error during beforeUnmount teardown:', err);
+    }
   },
   methods: {
+    // -------------------------------------------------------------------
+    // Issues Overlay (Diagnostics)
+    // -------------------------------------------------------------------
+    _isTermuxAndroidPath(p) {
+      return typeof p === 'string' && p.startsWith('/data/data/com.termux/');
+    },
+    _issuesSeverityBucket(sev) {
+      // LSP DiagnosticSeverity: 1=Error, 2=Warning, 3=Information, 4=Hint
+      if (sev === 1) return 'error';
+      if (sev === 2) return 'warning';
+      // Semantics-first: bucket info/hint as warnings (can be refined later)
+      if (sev === 3 || sev === 4) return 'warning';
+      return 'warning';
+    },
+    _issuesSig(diag) {
+      try {
+        const source = diag?.source || '';
+        const code = (diag && diag.code != null) ? String(diag.code) : '';
+        const sev = (diag && diag.severity != null) ? String(diag.severity) : '';
+        const msg = diag?.message || '';
+        return `${source}|${code}|${sev}|${msg}`;
+      } catch {
+        return String(diag?.message || '');
+      }
+    },
+    _ensureIssuesState() {
+      if (!this._issues) {
+        this._issues = {
+          byUri: new Map(), // uri -> { rawDiagnostics, filteredDiagnostics, flat, counts, activeIndex, suppressed }
+          currentUri: null,
+        };
+      }
+      return this._issues;
+    },
+    _ensureIssuesOverlayDom() {
+      if (this._issuesOverlayEl || !this.editor) return;
+
+      const el = document.createElement('div');
+      el.className = 'cm-issuesOverlay';
+      el.style.display = 'none';
+      el.addEventListener('click', (e) => {
+        // Prevent clicks from bubbling to CM and stealing focus unless user taps a control.
+        e.stopPropagation();
+      });
+
+      // We want the overlay to share the CM editor theme scope, so keep it inside view.dom.
+      this.editor.dom.appendChild(el);
+      this._issuesOverlayEl = el;
+
+      const position = () => {
+        try {
+          if (!this._issuesOverlayEl) return;
+          const rect = this.editor.scrollDOM.getBoundingClientRect();
+          // Keep it aligned with the editor scroll area; leave a small inset.
+          const inset = 8;
+          const width = Math.max(200, rect.width - inset * 2);
+          this._issuesOverlayEl.style.left = `${rect.left + inset}px`;
+          this._issuesOverlayEl.style.width = `${width}px`;
+          this._issuesOverlayEl.style.bottom = `${inset}px`;
+        } catch { }
+      };
+
+      this._issuesOverlayPositioner = position;
+      try {
+        window.addEventListener('resize', position);
+        this.editor.scrollDOM.addEventListener('scroll', position, { passive: true });
+      } catch { }
+      position();
+    },
+    _teardownIssuesOverlay() {
+      try {
+        if (this._handleIssuesCmdFromHostBound) {
+          window.removeEventListener('message', this._handleIssuesCmdFromHostBound);
+        }
+      } catch { }
+      try {
+        if (this._issuesOverlayPositioner) {
+          window.removeEventListener('resize', this._issuesOverlayPositioner);
+        }
+      } catch { }
+      try {
+        if (this.editor && this._issuesOverlayPositioner) {
+          this.editor.scrollDOM.removeEventListener('scroll', this._issuesOverlayPositioner);
+        }
+      } catch { }
+      try {
+        if (this._issuesOverlayEl && this._issuesOverlayEl.parentNode) {
+          this._issuesOverlayEl.parentNode.removeChild(this._issuesOverlayEl);
+        }
+      } catch { }
+      this._issuesOverlayEl = null;
+      this._issuesOverlayPositioner = null;
+      this._handleIssuesCmdFromHostBound = null;
+    },
+    _renderIssuesOverlay() {
+      const state = this._ensureIssuesState();
+      this._ensureIssuesOverlayDom();
+      if (!this._issuesOverlayEl) return;
+
+      const uri = state.currentUri;
+      const entry = uri ? state.byUri.get(uri) : null;
+
+      if (!this.issuesOverlayVisible) {
+        this._issuesOverlayEl.style.display = 'none';
+        return;
+      }
+
+      const total = entry?.flat?.length || 0;
+      if (!uri || !entry || total === 0) {
+        this._issuesOverlayEl.innerHTML = `
+          <div class="cm-issuesOverlay-header">
+            <div class="cm-issuesOverlay-title">Issues</div>
+            <button class="cm-issuesOverlay-close" title="Close">✕</button>
+          </div>
+          <div class="cm-issuesOverlay-empty">No issues</div>
+        `;
+        this._issuesOverlayEl.style.display = '';
+        const close = this._issuesOverlayEl.querySelector('.cm-issuesOverlay-close');
+        if (close) close.onclick = () => { this.issuesOverlayVisible = false; this._renderIssuesOverlay(); this._emitIssuesState(); };
+        return;
+      }
+
+      const idx = Math.max(0, Math.min(entry.activeIndex || 0, total - 1));
+      entry.activeIndex = idx;
+      const issue = entry.flat[idx];
+      const lineNo = issue.startLine;
+
+      // Group all issues on this same line for the overlay body
+      const lineIssues = entry.flat.filter((it) => it.startLine === lineNo);
+
+      // Build the "replica line" with squiggle spans
+      let lineText = '';
+      try {
+        lineText = this.editor.state.doc.line(lineNo).text;
+      } catch { }
+
+      const escapeHtml = (s) => {
+        const div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+      };
+
+      const markers = [];
+      for (const it of lineIssues) {
+        const from = Math.max(0, it.startChar);
+        const to = Math.max(from + 1, it.endChar);
+        markers.push({ from, to, severity: it.bucket });
+      }
+      markers.sort((a, b) => (a.from - b.from) || (b.to - a.to));
+
+      let out = '';
+      let cursor = 0;
+      for (const m of markers) {
+        if (m.from > cursor) out += escapeHtml(lineText.slice(cursor, m.from));
+        const seg = lineText.slice(m.from, Math.min(lineText.length, m.to));
+        const cls = m.severity === 'error' ? 'cm-lintRange cm-lintRange-error' : 'cm-lintRange cm-lintRange-warning';
+        out += `<span class="${cls}">${escapeHtml(seg || ' ')}</span>`;
+        cursor = Math.max(cursor, m.to);
+      }
+      if (cursor < lineText.length) out += escapeHtml(lineText.slice(cursor));
+
+      const header = `
+        <div class="cm-issuesOverlay-header">
+          <div class="cm-issuesOverlay-title">Issues</div>
+          <div class="cm-issuesOverlay-nav">
+            <button class="cm-issuesOverlay-prev" title="Previous">‹</button>
+            <div class="cm-issuesOverlay-pos">${idx + 1}/${total}</div>
+            <button class="cm-issuesOverlay-next" title="Next">›</button>
+          </div>
+          <button class="cm-issuesOverlay-close" title="Close">✕</button>
+        </div>
+      `;
+
+      const replica = `
+        <div class="cm-issuesOverlay-line">
+          <div class="cm-issuesOverlay-lineNo">${lineNo}</div>
+          <div class="cm-issuesOverlay-lineText">${out || '&nbsp;'}</div>
+        </div>
+      `;
+
+      const rows = lineIssues.map((it) => {
+        const colorClass = it.bucket === 'error' ? 'error' : 'warning';
+        const msg = escapeHtml(it.message || '');
+        const source = escapeHtml(it.source || '');
+        const code = escapeHtml(it.code || '');
+        const meta = [source, code].filter(Boolean).join(' ');
+        return `
+          <div class="cm-issuesOverlay-item ${colorClass}" data-sig="${escapeHtml(it.sig)}">
+            <div class="cm-issuesOverlay-sev">${it.bucket === 'error' ? 'Error' : 'Warning'}</div>
+            <div class="cm-issuesOverlay-msg">
+              <div class="cm-issuesOverlay-msgText">${msg}</div>
+              ${meta ? `<div class="cm-issuesOverlay-meta">${meta}</div>` : ''}
+            </div>
+            <button class="cm-issuesOverlay-dismiss" title="Dismiss">✕</button>
+          </div>
+        `;
+      }).join('');
+
+      this._issuesOverlayEl.innerHTML = header + replica + `<div class="cm-issuesOverlay-items">${rows}</div>`;
+      this._issuesOverlayEl.style.display = '';
+
+      const close = this._issuesOverlayEl.querySelector('.cm-issuesOverlay-close');
+      const prev = this._issuesOverlayEl.querySelector('.cm-issuesOverlay-prev');
+      const next = this._issuesOverlayEl.querySelector('.cm-issuesOverlay-next');
+      if (close) close.onclick = () => { this.issuesOverlayVisible = false; this._renderIssuesOverlay(); this._emitIssuesState(); };
+      if (prev) prev.onclick = () => this._issuesNavigate(-1);
+      if (next) next.onclick = () => this._issuesNavigate(1);
+
+      this._issuesOverlayEl.querySelectorAll('.cm-issuesOverlay-dismiss').forEach((btn) => {
+        btn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const item = btn.closest('.cm-issuesOverlay-item');
+          const sig = item?.dataset?.sig;
+          if (sig) this._issuesDismiss(sig);
+        };
+      });
+
+      try { this._issuesOverlayPositioner?.(); } catch { }
+    },
+    _issuesDismiss(sig) {
+      const state = this._ensureIssuesState();
+      const uri = state.currentUri;
+      if (!uri) return;
+      const entry = state.byUri.get(uri);
+      if (!entry) return;
+      entry.suppressed.add(sig);
+      // Re-filter on next render
+      this._recomputeIssuesForUri(uri);
+      this._renderIssuesOverlay();
+      this._emitIssuesState();
+    },
+    _issuesNavigate(delta) {
+      const state = this._ensureIssuesState();
+      const uri = state.currentUri;
+      if (!uri) return;
+      const entry = state.byUri.get(uri);
+      if (!entry || !entry.flat || entry.flat.length === 0) return;
+
+      const total = entry.flat.length;
+      const nextIdx = Math.max(0, Math.min((entry.activeIndex || 0) + delta, total - 1));
+      entry.activeIndex = nextIdx;
+      const issue = entry.flat[nextIdx];
+      this._jumpToIssue(issue);
+      this._renderIssuesOverlay();
+      this._emitIssuesState();
+    },
+    _jumpToIssue(issue) {
+      if (!issue || !this.editor) return;
+      try {
+        const doc = this.editor.state.doc;
+        const line = doc.line(issue.startLine);
+        const pos = Math.max(line.from, Math.min(line.to, line.from + issue.startChar));
+        const effects = [];
+        if (CM?.EditorView?.scrollIntoView) {
+          effects.push(CM.EditorView.scrollIntoView(pos, { y: 'center' }));
+        }
+        this.editor.dispatch({
+          selection: { anchor: pos, head: pos },
+          effects: effects.length ? effects : undefined,
+        });
+      } catch { }
+    },
+    _recomputeIssuesForUri(uri) {
+      const state = this._ensureIssuesState();
+      const entry = state.byUri.get(uri);
+      if (!entry) return;
+
+      const suppressed = entry.suppressed || new Set();
+      const raw = Array.isArray(entry.rawDiagnostics) ? entry.rawDiagnostics : [];
+      const filtered = raw.filter((d) => !suppressed.has(this._issuesSig(d)));
+      entry.filteredDiagnostics = filtered;
+
+      const flat = [];
+      let errors = 0;
+      let warnings = 0;
+      for (const d of filtered) {
+        const bucket = this._issuesSeverityBucket(d?.severity);
+        if (bucket === 'error') errors++;
+        else warnings++;
+        const startLine = (d?.range?.start?.line ?? 0) + 1;
+        const startChar = (d?.range?.start?.character ?? 0);
+        const endChar = (d?.range?.end?.character ?? startChar + 1);
+        flat.push({
+          bucket,
+          message: d?.message || '',
+          source: d?.source || '',
+          code: (d && d.code != null) ? String(d.code) : '',
+          sig: this._issuesSig(d),
+          startLine,
+          startChar,
+          endChar,
+        });
+      }
+
+      const sevScore = (b) => (b === 'error' ? 0 : 1);
+      flat.sort((a, b) => (sevScore(a.bucket) - sevScore(b.bucket)) || (a.startLine - b.startLine) || (a.startChar - b.startChar));
+
+      entry.flat = flat;
+      entry.counts = { errors, warnings };
+      if (entry.activeIndex == null) entry.activeIndex = 0;
+      if (entry.activeIndex >= flat.length) entry.activeIndex = Math.max(0, flat.length - 1);
+    },
+    _emitIssuesState() {
+      const state = this._ensureIssuesState();
+      const uri = state.currentUri;
+      const entry = uri ? state.byUri.get(uri) : null;
+      const counts = entry?.counts || { errors: 0, warnings: 0 };
+      const total = entry?.flat?.length || 0;
+      const activeIndex = entry?.activeIndex || 0;
+      try {
+        this.notifyParent('cm6-issues-state', {
+          uri,
+          errors: counts.errors || 0,
+          warnings: counts.warnings || 0,
+          total,
+          activeIndex,
+          overlayVisible: !!this.issuesOverlayVisible,
+        });
+      } catch { }
+    },
+    handlePublishDiagnostics(params) {
+      const state = this._ensureIssuesState();
+      const uri = params?.uri;
+      if (typeof uri !== 'string' || !uri) return;
+      const diagnostics = Array.isArray(params?.diagnostics) ? params.diagnostics : [];
+
+      let entry = state.byUri.get(uri);
+      if (!entry) {
+        entry = {
+          rawDiagnostics: [],
+          filteredDiagnostics: [],
+          flat: [],
+          counts: { errors: 0, warnings: 0 },
+          activeIndex: 0,
+          suppressed: new Set(),
+        };
+        state.byUri.set(uri, entry);
+      }
+
+      entry.rawDiagnostics = diagnostics;
+      this._recomputeIssuesForUri(uri);
+
+      // If this diagnostics update is for the currently open file, update overlay + host chrome.
+      if (state.currentUri === uri) {
+        this._renderIssuesOverlay();
+        this._emitIssuesState();
+      }
+    },
+    _handleIssuesCmdFromHost(event) {
+      try {
+        if (!event || !event.data) return;
+        if (window.parent && window.parent !== window && event.source && event.source !== window.parent) return;
+        if (event.data.type !== 'issues_cmd') return;
+        const payload = event.data.data || {};
+        const action = payload.action;
+        if (action === 'toggle') {
+          this.issuesOverlayVisible = !this.issuesOverlayVisible;
+          this._renderIssuesOverlay();
+          this._emitIssuesState();
+        } else if (action === 'next') {
+          this.issuesOverlayVisible = true;
+          this._issuesNavigate(1);
+        } else if (action === 'prev') {
+          this.issuesOverlayVisible = true;
+          this._issuesNavigate(-1);
+        }
+      } catch { }
+    },
     updateMinimapState() {
       if (!this.showMinimap) {
         this.applyMinimapMode('off');
@@ -949,10 +1334,19 @@ export default {
           const lspTimeoutMs = isKotlin ? (isAndroid ? 180000 : 60000) : 10000;
           console.log(`[LSP] Client timeout=${lspTimeoutMs}ms (languageId=${languageId}, android=${isAndroid})`);
 
+          const lspExtensions = [];
+          try {
+            if (typeof CM.languageServerExtensions === 'function') {
+              lspExtensions.push(...CM.languageServerExtensions());
+            }
+          } catch (err) {
+            console.warn('[LSP] Failed to load languageServerExtensions:', err);
+          }
+
           this.lspClient = new LSPClient({
             rootUri: 'file://' + projectRoot,
             workspaceFolders: [{ name: 'root', uri: 'file://' + projectRoot }],
-            extensions: [hierarchicalSymbolCapability],
+            extensions: [hierarchicalSymbolCapability, ...lspExtensions],
             timeout: lspTimeoutMs,
           });
         } catch (err) {
@@ -993,6 +1387,14 @@ export default {
             if (transport.socket) {
               transport.socket.on('lsp_server_to_client', (data) => {
                 if (handler) {
+                  // Tap into publishDiagnostics for the Issues Overlay state.
+                  try {
+                    if (data && typeof data === 'object' && data.method === 'textDocument/publishDiagnostics') {
+                      this.handlePublishDiagnostics(data.params || {});
+                    }
+                  } catch (err) {
+                    console.warn('[Issues] Failed to handle publishDiagnostics:', err);
+                  }
                   // data is already an object from Socket.IO; stringify for lsp-client
                   let msg = data;
                   if (typeof data !== 'string') {
@@ -1034,6 +1436,23 @@ export default {
         // Use the provided file path or construct from project root
         this._lspFileUri = filePath ? ('file://' + filePath) : ('file://' + projectRoot + '/untitled');
         this._lspLanguageId = languageId;
+        // Track current URI for the Issues Overlay
+        try {
+          const st = this._ensureIssuesState();
+          st.currentUri = this._lspFileUri;
+          // Ensure entry exists so host sees 0/0 counts immediately.
+          if (!st.byUri.get(this._lspFileUri)) {
+            st.byUri.set(this._lspFileUri, {
+              rawDiagnostics: [],
+              filteredDiagnostics: [],
+              flat: [],
+              counts: { errors: 0, warnings: 0 },
+              activeIndex: 0,
+              suppressed: new Set(),
+            });
+          }
+          this._emitIssuesState();
+        } catch { }
 
         // Install LSP extension into its own compartment
         if (!this.lspCompartment) {
@@ -1656,6 +2075,122 @@ export default {
           ".cm-scroller": { overflow: "auto" },
         }),
       ];
+
+      // Issues overlay theme (iframe-owned diagnostics UI)
+      try {
+        const issuesTheme = CM.EditorView.baseTheme({
+          ".cm-issuesOverlay": {
+            position: "fixed",
+            zIndex: "320",
+            maxHeight: "40vh",
+            overflow: "auto",
+            borderRadius: "10px",
+            border: "1px solid rgba(255,255,255,0.10)",
+            background: "rgba(10, 14, 20, 0.95)",
+            backdropFilter: "blur(10px)",
+            boxShadow: "0 10px 18px rgba(0,0,0,0.45)",
+            fontFamily: '"EditorMono", "JetBrains Mono", monospace',
+          },
+          ".cm-issuesOverlay-header": {
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "10px 10px 6px 10px",
+            borderBottom: "1px solid rgba(255,255,255,0.08)",
+            position: "sticky",
+            top: "0",
+            background: "rgba(10, 14, 20, 0.95)",
+          },
+          ".cm-issuesOverlay-title": {
+            fontWeight: "600",
+            opacity: "0.9",
+          },
+          ".cm-issuesOverlay-nav": {
+            marginLeft: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+          },
+          ".cm-issuesOverlay-pos": {
+            opacity: "0.75",
+            fontSize: "12px",
+          },
+          ".cm-issuesOverlay-header button": {
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(255,255,255,0.06)",
+            color: "inherit",
+            borderRadius: "8px",
+            padding: "4px 8px",
+          },
+          ".cm-issuesOverlay-empty": {
+            padding: "12px 10px",
+            opacity: "0.75",
+          },
+          ".cm-issuesOverlay-line": {
+            display: "grid",
+            gridTemplateColumns: "52px 1fr",
+            gap: "10px",
+            padding: "10px",
+            borderBottom: "1px solid rgba(255,255,255,0.08)",
+          },
+          ".cm-issuesOverlay-lineNo": {
+            opacity: "0.65",
+            textAlign: "right",
+          },
+          ".cm-issuesOverlay-lineText": {
+            whiteSpace: "pre",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          },
+          ".cm-issuesOverlay-items": {
+            padding: "8px 10px 12px 10px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+          },
+          ".cm-issuesOverlay-item": {
+            display: "grid",
+            gridTemplateColumns: "76px 1fr 34px",
+            gap: "10px",
+            alignItems: "start",
+            padding: "8px 8px",
+            borderRadius: "10px",
+            border: "1px solid rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.04)",
+          },
+          ".cm-issuesOverlay-item.error": {
+            borderColor: "rgba(239, 68, 68, 0.45)",
+          },
+          ".cm-issuesOverlay-item.warning": {
+            borderColor: "rgba(234, 179, 8, 0.40)",
+          },
+          ".cm-issuesOverlay-sev": {
+            fontSize: "12px",
+            fontWeight: "700",
+            opacity: "0.9",
+          },
+          ".cm-issuesOverlay-item.error .cm-issuesOverlay-sev": {
+            color: "#ef4444",
+          },
+          ".cm-issuesOverlay-item.warning .cm-issuesOverlay-sev": {
+            color: "#eab308",
+          },
+          ".cm-issuesOverlay-msgText": {
+            fontSize: "13px",
+            lineHeight: "1.25",
+          },
+          ".cm-issuesOverlay-meta": {
+            fontSize: "11px",
+            opacity: "0.7",
+            marginTop: "3px",
+          },
+          ".cm-issuesOverlay-dismiss": {
+            marginLeft: "auto",
+            padding: "4px 8px",
+          },
+        });
+        extensions.push(issuesTheme);
+      } catch { }
 
       if (this.highlightWhitespace) extensions.push([CM.highlightWhitespace()]);
       if (searchExtension) extensions.push(searchExtension());
@@ -3923,5 +4458,16 @@ export default {
 
     // Apply initial minimap state (now diffField exists for minimap to reference)
     this.updateMinimapState();
+
+    // Issues overlay: install host command listener and bootstrap DOM.
+    try {
+      this._handleIssuesCmdFromHostBound = (e) => this._handleIssuesCmdFromHost(e);
+      window.addEventListener('message', this._handleIssuesCmdFromHostBound);
+      this._ensureIssuesOverlayDom();
+      this._renderIssuesOverlay();
+      this._emitIssuesState();
+    } catch (err) {
+      console.warn('[Issues] Failed to initialize issues overlay:', err);
+    }
   },
 };

@@ -311,6 +311,13 @@
   }
 
   .fe-toolbar { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
+  .fe-file-name { display: flex; align-items: center; gap: 10px; }
+  .fe-issues { display: inline-flex; align-items: center; gap: 6px; }
+  .fe-issues-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; opacity: 0.9; }
+  .fe-issues-dot { display: inline-flex; min-width: 16px; padding: 2px 6px; border-radius: 999px; font-weight: 700; line-height: 1; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); }
+  .fe-issues-dot.error { color: #ef4444; border-color: rgba(239,68,68,0.45); }
+  .fe-issues-dot.warning { color: #eab308; border-color: rgba(234,179,8,0.40); }
+  .fe-btn.fe-icon-btn[disabled] { opacity: 0.45; }
   .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
   .fe-file-name { font-size: 0.70rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; display: flex; align-items: center; gap: 0.35rem; width: 100%; min-width: 0; }
   #fe-file-name { display: block; flex: 1 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1663,11 +1670,18 @@
   <div class="resize-handle resize-handle--explorer" data-panel="explorer"></div>
 
   <div class="fe-toolbar">
-    <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer">☰</button>
-    <div class="fe-title-block">
-      <div class="fe-file-name"><span id="fe-file-name" title="Current file">Untitled</span></div>
-      <div id="fe-file-path" class="fe-file-path" title="Current path">No file open</div>
-    </div>
+	    <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer">☰</button>
+	    <div class="fe-title-block">
+	      <div class="fe-file-name">
+	        <span id="fe-file-name" title="Current file">Untitled</span>
+	        <span class="fe-issues">
+	          <button id="fe-issues-toggle" class="fe-btn fe-icon-btn" title="Toggle issues overlay" aria-label="Toggle issues overlay" disabled>💡</button>
+	          <button id="fe-issues-prev" class="fe-btn fe-icon-btn" title="Previous issue" aria-label="Previous issue" disabled>‹</button>
+	          <button id="fe-issues-next" class="fe-btn fe-icon-btn" title="Next issue" aria-label="Next issue" disabled>›</button>
+	          <span id="fe-issues-badges" class="fe-issues-badge" aria-live="polite"></span>
+	        </span>
+	      </div>
+	    </div>
 
     <div class="fe-menu" style="position: relative; margin-left: auto; display: flex; gap: 0.35rem; align-items: center;">
       <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>

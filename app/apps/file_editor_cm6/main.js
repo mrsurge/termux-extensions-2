@@ -364,7 +364,10 @@ const agentComposer = requireEl('#agent-input');
 
 // Title/status & chrome
 const fileNameEl = requireEl('#fe-file-name');
-const filePathEl = requireEl('#fe-file-path');
+const issuesToggleBtn = requireEl('#fe-issues-toggle');
+const issuesPrevBtn = requireEl('#fe-issues-prev');
+const issuesNextBtn = requireEl('#fe-issues-next');
+const issuesBadgesEl = requireEl('#fe-issues-badges');
 const statusEl = requireEl('#fe-status');
 const editTrackerStatusEl = requireEl('#edit-tracker-status');
 
@@ -386,7 +389,6 @@ const recentFilesBtn = requireEl('#recent-files-btn');
 const recentFilesDD  = requireEl('#recent-files-dd');
 const runActiveBtn   = requireEl('#run-active-file-btn');
 const MAX_FILENAME_DISPLAY = 34;
-const MAX_FILEPATH_DISPLAY = 43;
 
 function formatFileNameDisplay(name) {
   if (!name) return '';
@@ -396,19 +398,34 @@ function formatFileNameDisplay(name) {
   return `${name.slice(0, keepStart)}…${name.slice(-keepEnd)}`;
 }
 
-function formatFilePathDisplay(path) {
-  if (!path) return '';
-  if (path.length <= MAX_FILEPATH_DISPLAY) return path;
-  const keepStart = Math.max(6, Math.floor((MAX_FILEPATH_DISPLAY - 1) * 0.6));
-  const keepEnd = Math.max(4, MAX_FILEPATH_DISPLAY - keepStart - 1);
-  return `${path.slice(0, keepStart)}…${path.slice(-keepEnd)}`;
-}
 
 function setToolbarFileName(rawName) {
   const safe = rawName || '';
   fileNameEl.textContent = formatFileNameDisplay(safe);
   fileNameEl.title = safe;
 }
+
+function setIssuesButtonsEnabled(enabled) {
+  issuesToggleBtn.disabled = !enabled;
+  if (!enabled) {
+    issuesPrevBtn.disabled = true;
+    issuesNextBtn.disabled = true;
+    issuesBadgesEl.textContent = '';
+  }
+}
+
+function sendIssuesCmd(action) {
+  try {
+    if (!editorFrame || !editorFrame.contentWindow) return;
+    editorFrame.contentWindow.postMessage({ type: 'issues_cmd', data: { action } }, '*');
+  } catch (err) {
+    console.warn('[Issues] Failed to postMessage to iframe:', err);
+  }
+}
+
+issuesToggleBtn.addEventListener('click', () => sendIssuesCmd('toggle'));
+issuesPrevBtn.addEventListener('click', () => sendIssuesCmd('prev'));
+issuesNextBtn.addEventListener('click', () => sendIssuesCmd('next'));
 const miNew       = requireEl('#mi-new');
 const miOpen      = requireEl('#mi-open');
 const miSave      = requireEl('#mi-save');
@@ -987,6 +1004,25 @@ window.addEventListener('message', (event) => {
         console.warn('Failed to persist scroll state:', err);
       }
     }, CURSOR_STATE_DEBOUNCE);
+  } else if (event.data.type === 'cm6-issues-state') {
+    const payload = event.data.data || {};
+    const errors = Number(payload.errors || 0);
+    const warnings = Number(payload.warnings || 0);
+    const total = Number(payload.total || 0);
+
+    // Toggle button is only meaningful when a file is open.
+    issuesToggleBtn.disabled = !currentPath;
+    issuesPrevBtn.disabled = !(total > 0);
+    issuesNextBtn.disabled = !(total > 0);
+
+    if (errors <= 0 && warnings <= 0) {
+      issuesBadgesEl.textContent = '';
+    } else {
+      const parts = [];
+      if (errors > 0) parts.push(`<span class="fe-issues-dot error">${errors}</span>`);
+      if (warnings > 0) parts.push(`<span class="fe-issues-dot warning">${warnings}</span>`);
+      issuesBadgesEl.innerHTML = parts.join('');
+    }
   } else if (event.data.type === 'cm6-editor-focus') {
     // Any interaction inside the iframe editor should close open chrome menus
     try {
@@ -1650,16 +1686,14 @@ function updatePathDisplay() {
   if (!currentPath) {
     setToolbarFileName('Untitled');
     if (badge) setIndicatorInactive(badge);
-    filePathEl.textContent = 'No file open';
-    filePathEl.title = '';
+    setIssuesButtonsEnabled(false);
     updateRunButtonState();
     return;
   }
   const abs = toAbsolute(currentPath, null, HOME_DIR);
   setToolbarFileName(basename(abs));
   if (badge) setIndicatorInactive(badge); // Reset to grey default
-  filePathEl.textContent = formatFilePathDisplay(formatDisplayDirectory(abs));
-  filePathEl.title = abs;
+  setIssuesButtonsEnabled(true);
   updateRunButtonState();
 }
 
@@ -3345,8 +3379,7 @@ async function main() {
   if (!serverState || !serverState.activeProject || !serverState.activeProjectExists) {
     statusEl.textContent = serverState?.activeProjectMessage || 'Select a project to begin.';
     setToolbarFileName('No file');
-    filePathEl.textContent = '';
-    filePathEl.title = '';
+    setIssuesButtonsEnabled(false);
     return;
   }
 
