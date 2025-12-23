@@ -112,6 +112,199 @@ class SocketIOTransport {
   }
 }
 
+// ---------------------------------------------------------------------------
+// LSP Request Broker
+//
+// Manages LSP request coalescing to prevent flooding the server/bridge.
+// Features:
+// - Per-method debouncing (different delays for different request types)
+// - Max-1-in-flight per method (new requests replace pending ones)
+// - Stale response detection via nonces
+// - Request instrumentation counters for debugging
+// ---------------------------------------------------------------------------
+class LSPRequestBroker {
+  constructor() {
+    // In-flight request tracking: method -> { nonce, promise }
+    this._inFlight = new Map();
+    // Pending (debounced) requests: method -> { nonce, timeoutId, resolve, reject, params }
+    this._pending = new Map();
+    // Request nonce counter
+    this._nonceCounter = 0;
+    // Debounce delays per method (ms)
+    this._debounceDelays = {
+      'textDocument/documentSymbol': 800,
+      'textDocument/hover': 150,
+      'textDocument/completion': 100,
+      // Default for unknown methods
+      '_default': 50,
+    };
+    // Instrumentation counters
+    this.stats = {
+      requestsSent: 0,
+      requestsDropped: 0,
+      requestsCoalesced: 0,
+      responsesReceived: 0,
+      responsesStale: 0,
+    };
+  }
+
+  /**
+   * Request with coalescing. Returns a promise that resolves with the response
+   * or rejects on error. If a newer request supersedes this one, the promise
+   * will reject with { stale: true }.
+   */
+  async request(lspClient, method, params) {
+    if (!lspClient) {
+      return Promise.reject(new Error('LSP client not available'));
+    }
+
+    const nonce = ++this._nonceCounter;
+    const delay = this._debounceDelays[method] ?? this._debounceDelays['_default'];
+
+    // If there's already a pending (debounced) request for this method, cancel it
+    const existing = this._pending.get(method);
+    if (existing) {
+      clearTimeout(existing.timeoutId);
+      existing.reject({ stale: true, coalesced: true });
+      this.stats.requestsCoalesced++;
+      this._pending.delete(method);
+    }
+
+    // If there's an in-flight request, mark it as superseded (response will be ignored)
+    // but don't cancel the actual network request - let it complete
+    const inFlight = this._inFlight.get(method);
+    if (inFlight) {
+      // The in-flight request's nonce is now stale; when it returns,
+      // we'll compare nonces and discard if it doesn't match
+      this.stats.requestsDropped++;
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(async () => {
+        this._pending.delete(method);
+
+        // Record this request as in-flight
+        const requestPromise = this._executeRequest(lspClient, method, params, nonce);
+        this._inFlight.set(method, { nonce, promise: requestPromise });
+
+        try {
+          const result = await requestPromise;
+          // Check if this response is still current
+          const current = this._inFlight.get(method);
+          if (current && current.nonce === nonce) {
+            this._inFlight.delete(method);
+            this.stats.responsesReceived++;
+            resolve(result);
+          } else {
+            // Response arrived but a newer request has superseded it
+            this.stats.responsesStale++;
+            reject({ stale: true });
+          }
+        } catch (err) {
+          const current = this._inFlight.get(method);
+          if (current && current.nonce === nonce) {
+            this._inFlight.delete(method);
+          }
+          reject(err);
+        }
+      }, delay);
+
+      this._pending.set(method, { nonce, timeoutId, resolve, reject, params });
+    });
+  }
+
+  async _executeRequest(lspClient, method, params, nonce) {
+    this.stats.requestsSent++;
+    console.log(`[LSP Broker] Sending ${method} (nonce=${nonce})`);
+    return lspClient.request(method, params);
+  }
+
+  /**
+   * Immediately send a request without debouncing (for critical requests like didChange).
+   * Still tracks in-flight status for the method.
+   */
+  async requestImmediate(lspClient, method, params) {
+    if (!lspClient) {
+      return Promise.reject(new Error('LSP client not available'));
+    }
+
+    const nonce = ++this._nonceCounter;
+
+    // Cancel any pending debounced request for this method
+    const existing = this._pending.get(method);
+    if (existing) {
+      clearTimeout(existing.timeoutId);
+      existing.reject({ stale: true, coalesced: true });
+      this.stats.requestsCoalesced++;
+      this._pending.delete(method);
+    }
+
+    this._inFlight.set(method, { nonce, promise: null });
+    this.stats.requestsSent++;
+
+    try {
+      const result = await lspClient.request(method, params);
+      const current = this._inFlight.get(method);
+      if (current && current.nonce === nonce) {
+        this._inFlight.delete(method);
+        this.stats.responsesReceived++;
+        return result;
+      } else {
+        this.stats.responsesStale++;
+        throw { stale: true };
+      }
+    } catch (err) {
+      const current = this._inFlight.get(method);
+      if (current && current.nonce === nonce) {
+        this._inFlight.delete(method);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Check if a request for the given method is currently in-flight.
+   */
+  isInFlight(method) {
+    return this._inFlight.has(method);
+  }
+
+  /**
+   * Cancel all pending requests (e.g., on disconnect).
+   */
+  cancelAll() {
+    for (const [method, pending] of this._pending) {
+      clearTimeout(pending.timeoutId);
+      pending.reject({ cancelled: true });
+    }
+    this._pending.clear();
+    this._inFlight.clear();
+  }
+
+  /**
+   * Get instrumentation stats.
+   */
+  getStats() {
+    return { ...this.stats };
+  }
+
+  /**
+   * Reset instrumentation stats.
+   */
+  resetStats() {
+    this.stats = {
+      requestsSent: 0,
+      requestsDropped: 0,
+      requestsCoalesced: 0,
+      responsesReceived: 0,
+      responsesStale: 0,
+    };
+  }
+}
+
+// Global broker instance (shared across component instances)
+const lspBroker = new LSPRequestBroker();
+
 const searchExtension = typeof CM.search === 'function' ? CM.search : null;
 const searchKeymap = Array.isArray(CM.searchKeymap) ? CM.searchKeymap : null;
 const highlightSelectionMatches = typeof CM.highlightSelectionMatches === 'function' ? CM.highlightSelectionMatches : null;
@@ -591,6 +784,11 @@ export default {
       isMobileLayout: false,
       // Issues overlay state (LSP diagnostics-driven)
       issuesOverlayVisible: false,
+      // LSP document version counter (for didChange notifications)
+      _lspDocumentVersion: 1,
+      // LSP instrumentation counters
+      _lspDidChangeCount: 0,
+      _lspDiagnosticsCount: 0,
     };
   },
   beforeDestroy() {
@@ -660,7 +858,19 @@ export default {
           currentUri: null,
         };
       }
+      if (!this._issuesPendingSquigglesByUri) {
+        this._issuesPendingSquigglesByUri = new Map(); // uri -> diagnostics[]
+      }
       return this._issues;
+    },
+    _flushPendingSquiggles(uri) {
+      try {
+        if (!uri || !this._issuesPendingSquigglesByUri || !this._issuesSquiggleEffect || !this.editor) return;
+        const pending = this._issuesPendingSquigglesByUri.get(uri);
+        if (!pending) return;
+        this._issuesPendingSquigglesByUri.delete(uri);
+        this.applyIssueSquiggles(pending, uri);
+      } catch { }
     },
     _ensureIssuesOverlayDom() {
       if (this._issuesOverlayEl || !this.editor) return;
@@ -981,7 +1191,7 @@ export default {
         // Apply squiggle decorations directly (do not rely on CM's lint plumbing,
         // which can drop diagnostics due to version/file mapping mismatches).
         try {
-          this.applyIssueSquiggles(entry.filteredDiagnostics || []);
+          this.applyIssueSquiggles(entry.filteredDiagnostics || [], uri);
         } catch (err) {
           console.warn('[Issues] Failed to apply squiggles:', err);
         }
@@ -989,9 +1199,19 @@ export default {
         this._emitIssuesState();
       }
     },
-    applyIssueSquiggles(diagnostics) {
-      if (!this.editor || !this._issuesSquiggleEffect) return;
+    applyIssueSquiggles(diagnostics, uri = null) {
       const diags = Array.isArray(diagnostics) ? diagnostics : [];
+      const targetUri = uri || (this._issues?.currentUri || null);
+
+      // If the editor/effect isn't ready yet (rare timing), queue and apply later.
+      if (!this.editor || !this._issuesSquiggleEffect) {
+        try {
+          if (targetUri && this._issuesPendingSquigglesByUri) {
+            this._issuesPendingSquigglesByUri.set(targetUri, diags);
+          }
+        } catch { }
+        return;
+      }
       try {
         this.editor.dispatch({
           effects: this._issuesSquiggleEffect.of(diags),
@@ -1278,6 +1498,9 @@ export default {
         this.disconnectLSP();
       }
 
+      // Reset document version counter for new connection
+      this._lspDocumentVersion = 1;
+
       const transport = new SocketIOTransport('/lsp', languageId, projectRoot);
       if (!transport || !transport.socket) {
         console.warn('[LSP] SocketIOTransport not initialized; aborting LSP connect');
@@ -1410,6 +1633,15 @@ export default {
               } catch (e) {
                 // If parsing fails, send as-is
               }
+              // Instrumentation: track all outgoing didChange notifications (from any source)
+              if (payload && payload.method === 'textDocument/didChange') {
+                this._lspDidChangeSentCount = (this._lspDidChangeSentCount || 0) + 1;
+                // Log every 5th to reduce noise but still show activity
+                if (this._lspDidChangeSentCount % 5 === 1) {
+                  const version = payload.params?.textDocument?.version || '?';
+                  console.log(`[LSP Stats] didChange → server: #${this._lspDidChangeSentCount}, v=${version}`);
+                }
+              }
               transport.socket.emit('lsp_client_to_server', payload);
             }
           },
@@ -1421,6 +1653,10 @@ export default {
                   // Tap into publishDiagnostics for the Issues Overlay state.
                   try {
                     if (data && typeof data === 'object' && data.method === 'textDocument/publishDiagnostics') {
+                      // Instrumentation: track publishDiagnostics arrivals
+                      this._lspDiagnosticsCount = (this._lspDiagnosticsCount || 0) + 1;
+                      const diagCount = Array.isArray(data.params?.diagnostics) ? data.params.diagnostics.length : 0;
+                      console.log(`[LSP Stats] publishDiagnostics received: #${this._lspDiagnosticsCount}, ${diagCount} issues`);
                       this.handlePublishDiagnostics(data.params || {});
                     }
                   } catch (err) {
@@ -1485,7 +1721,8 @@ export default {
           this._emitIssuesState();
           try {
             const entry = st.byUri.get(this._lspFileUri);
-            this.applyIssueSquiggles(entry?.filteredDiagnostics || []);
+            this.applyIssueSquiggles(entry?.filteredDiagnostics || [], this._lspFileUri);
+            this._flushPendingSquiggles(this._lspFileUri);
           } catch { }
         } catch { }
 
@@ -1572,14 +1809,19 @@ export default {
       })();
 
       // Set up debounced symbol refresh on document changes
+      // Note: The broker adds its own 800ms debounce, so we use a shorter delay here
+      // to allow the broker to coalesce rapid requests effectively
       if (!this._symbolRefreshDebounce) {
         this._symbolRefreshDebounce = this._debounce(() => {
           this.requestDocumentSymbols();
-        }, 1000);
+        }, 300);
       }
     },
 
     disconnectLSP() {
+      // Cancel any pending broker requests
+      lspBroker.cancelAll();
+      
       // Dispose client (should close transport) and clear compartment
       try {
         if (this.lspClient && typeof this.lspClient.dispose === 'function') {
@@ -1695,12 +1937,16 @@ export default {
       }
 
       try {
-        console.log(`[LSP] Requesting document symbols for ${this._lspFileUri}`);
-        const symbols = await this.lspClient.request('textDocument/documentSymbol', {
+        // Use the broker for coalesced, debounced requests
+        const symbols = await lspBroker.request(this.lspClient, 'textDocument/documentSymbol', {
           textDocument: { uri: this._lspFileUri }
         });
         this.handleDocumentSymbols(symbols);
       } catch (err) {
+        // Silently ignore stale/coalesced responses - this is expected behavior
+        if (err && (err.stale || err.coalesced)) {
+          return;
+        }
         // Don't spam errors if the server doesn't support documentSymbol
         if (err && err.code === -32601) {
           console.log('[LSP] Server does not support textDocument/documentSymbol');
@@ -1713,6 +1959,35 @@ export default {
           console.warn('[LSP] Failed to request document symbols:', err);
         }
       }
+    },
+
+    // Get LSP broker stats for debugging
+    getLspBrokerStats() {
+      return lspBroker.getStats();
+    },
+
+    // Reset LSP broker stats
+    resetLspBrokerStats() {
+      lspBroker.resetStats();
+    },
+
+    // Get all LSP stats (broker + transport counters)
+    getLspStats() {
+      return {
+        broker: lspBroker.getStats(),
+        didChangeExplicit: this._lspDidChangeCount || 0,
+        didChangeSentTotal: this._lspDidChangeSentCount || 0,
+        diagnosticsReceived: this._lspDiagnosticsCount || 0,
+        documentVersion: this._lspDocumentVersion || 1,
+      };
+    },
+
+    // Reset all LSP stats
+    resetLspStats() {
+      lspBroker.resetStats();
+      this._lspDidChangeCount = 0;
+      this._lspDidChangeSentCount = 0;
+      this._lspDiagnosticsCount = 0;
     },
 
     // Debounce utility for throttling repeated calls
@@ -2009,6 +2284,7 @@ export default {
         class {
           constructor() {
             this.debounceTimer = null;
+            this.lspDebounceTimer = null;
           }
           update(update) {
             if (!update.docChanged) return;
@@ -2018,6 +2294,37 @@ export default {
             if (self._symbolRefreshDebounce) {
               self._symbolRefreshDebounce();
             }
+
+            // Send LSP didChange notification (debounced)
+            // This ensures the LSP server gets document updates even if
+            // @codemirror/lsp-client's auto-sync isn't working correctly
+            if (this.lspDebounceTimer) {
+              clearTimeout(this.lspDebounceTimer);
+            }
+            this.lspDebounceTimer = setTimeout(() => {
+              this.lspDebounceTimer = null;
+              if (self.lspClient && self._lspFileUri && self.lspClient.connected) {
+                try {
+                  // Use component-level version counter for consistency
+                  self._lspDocumentVersion = (self._lspDocumentVersion || 1) + 1;
+                  const content = update.state.doc.toString();
+                  self.lspClient.notification('textDocument/didChange', {
+                    textDocument: {
+                      uri: self._lspFileUri,
+                      version: self._lspDocumentVersion,
+                    },
+                    contentChanges: [{ text: content }],
+                  });
+                  // Track for instrumentation
+                  self._lspDidChangeCount = (self._lspDidChangeCount || 0) + 1;
+                  if (self._lspDidChangeCount % 10 === 1) {
+                    console.log(`[LSP Stats] didChange sent (explicit): ${self._lspDidChangeCount}, version=${self._lspDocumentVersion}`);
+                  }
+                } catch (err) {
+                  console.warn('[LSP] Failed to send didChange:', err);
+                }
+              }
+            }, 150); // 150ms debounce for didChange
 
             if (this.debounceTimer) {
               clearTimeout(this.debounceTimer);
@@ -2138,6 +2445,10 @@ export default {
         const build = (state, diags) => {
           const builder = new RangeSetBuilder();
           const arr = Array.isArray(diags) ? diags : [];
+
+          // RangeSetBuilder requires ranges to be added in sorted order.
+          // Some servers (notably Kotlin) may emit diagnostics unsorted.
+          const ranges = [];
           for (const d of arr) {
             const sev = d?.severity;
             const bucket = (sev === 1) ? 'error' : (sev === 2 ? 'warning' : (sev === 3 || sev === 4 ? 'warning' : 'warning'));
@@ -2159,9 +2470,15 @@ export default {
               } catch { }
             }
             if (to > from) {
-              builder.add(from, to, Decoration.mark({ class: cls }));
+              ranges.push({ from, to, cls });
             }
           }
+
+          ranges.sort((a, b) => (a.from - b.from) || (a.to - b.to) || (a.cls < b.cls ? -1 : (a.cls > b.cls ? 1 : 0)));
+          for (const r of ranges) {
+            builder.add(r.from, r.to, Decoration.mark({ class: r.cls }));
+          }
+
           return builder.finish();
         };
 
@@ -4504,7 +4821,7 @@ export default {
     },
     // ============================================================================
   },
-  async mounted() {
+    async mounted() {
     // This is used to prevent emitting the value we just received from the server.
     this.emitting = true;
 
@@ -4606,6 +4923,9 @@ export default {
       this._ensureIssuesOverlayDom();
       this._renderIssuesOverlay();
       this._emitIssuesState();
+      try {
+        this._flushPendingSquiggles(this._issues?.currentUri || null);
+      } catch { }
     } catch (err) {
       console.warn('[Issues] Failed to initialize issues overlay:', err);
     }
