@@ -6,16 +6,31 @@ set -euo pipefail
 #   app/static/vendor/lsp_servers/kotlin-lsp/
 #
 # Usage:
-#   scripts/vendor_kotlin_lsp.sh                               # default version
-#   scripts/vendor_kotlin_lsp.sh 0.253.10629                   # explicit version
-#   scripts/vendor_kotlin_lsp.sh https://.../kotlin-lsp-....zip # explicit URL (recommended for platform zips)
+#   scripts/vendor_kotlin_lsp.sh                               # auto-detect platform
+#   scripts/vendor_kotlin_lsp.sh https://.../kotlin-lsp-....zip # explicit URL override
 
-ARG="${1:-0.253.10629}"
+VERSION="261.13587.0"
+
+# Auto-detect platform
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64|amd64)
+    PLATFORM="linux-x64"
+    ;;
+  aarch64|arm64)
+    PLATFORM="linux-aarch64"
+    ;;
+  *)
+    echo "[kotlin-lsp vendor] ERROR: Unsupported architecture: $ARCH" >&2
+    exit 1
+    ;;
+esac
+
+ARG="${1:-}"
 if [[ "$ARG" == http*://* ]]; then
   URL="$ARG"
 else
-  VERSION="$ARG"
-  URL="https://download-cdn.jetbrains.com/kotlin-lsp/${VERSION}/kotlin-${VERSION}.zip"
+  URL="https://download-cdn.jetbrains.com/kotlin-lsp/${VERSION}/kotlin-lsp-${VERSION}-${PLATFORM}.zip"
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -28,6 +43,7 @@ trap cleanup EXIT
 ZIP="${TMP}/kotlin-lsp.zip"
 UNPACKED="${TMP}/unpacked"
 
+echo "[kotlin-lsp vendor] Platform: $PLATFORM ($ARCH)"
 echo "[kotlin-lsp vendor] Downloading ${URL}"
 curl -L --fail --retry 5 --retry-delay 2 -o "$ZIP" "$URL"
 
