@@ -2029,12 +2029,17 @@ export default {
       
       // HARDCODED STUB: Kotlin uses android/ subdirectory
       // TODO: Replace with HistoryStore lookup for per-project LSP workspace config
-      if (langId === 'kotlin') {
-        const androidRoot = projectRoot + '/android';
-        return {
-          rootUri: 'file://' + androidRoot,
-          workspaceFolders: [{ name: 'android', uri: 'file://' + androidRoot }],
-        };
+      if (langId === 'kotlin' && filePath) {
+        // Find the nearest android/ directory in the file path
+        // e.g., /home/user/project/android/app/src/Main.kt -> /home/user/project/android
+        const androidIdx = filePath.lastIndexOf('/android/');
+        if (androidIdx !== -1) {
+          const androidRoot = filePath.substring(0, androidIdx + '/android'.length);
+          return {
+            rootUri: 'file://' + androidRoot,
+            workspaceFolders: [{ name: 'android', uri: 'file://' + androidRoot }],
+          };
+        }
       }
       
       // No override - use default projectRoot
