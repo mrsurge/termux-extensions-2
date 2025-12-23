@@ -1779,6 +1779,28 @@ export default {
             console.warn('[LSP] didOpen failed:', err);
           }
 
+          // Nudge: Send a didChange after didOpen to trigger diagnostics refresh.
+          // This handles the reload race condition where the server already has
+          // the file open and won't re-emit diagnostics on didOpen alone.
+          setTimeout(() => {
+            if (this.lspClient && this.lspClient.connected && this._lspFileUri) {
+              try {
+                this._lspDocumentVersion = (this._lspDocumentVersion || 1) + 1;
+                const content = this.editor.state.doc.toString();
+                this.lspClient.notification('textDocument/didChange', {
+                  textDocument: {
+                    uri: this._lspFileUri,
+                    version: this._lspDocumentVersion,
+                  },
+                  contentChanges: [{ text: content }],
+                });
+                console.log(`[LSP] Sent diagnostics nudge (didChange v=${this._lspDocumentVersion})`);
+              } catch (err) {
+                console.warn('[LSP] Diagnostics nudge failed:', err);
+              }
+            }
+          }, 500);
+
           // Give server time to process the file before requesting symbols
           // Use longer delay on initial load to allow server warm-up
           setTimeout(() => {
