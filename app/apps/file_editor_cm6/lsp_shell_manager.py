@@ -233,7 +233,10 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
     # also assume a writable /tmp. For the platform zip (bundled jre/), run the
     # bundled java via glibc-runner (ld.so) and provide idea/tmp paths.
     if language_id == "kotlin":
-        kotlin_isolated_documents_default = _is_termux_android()
+        # NOTE: --isolated-documents disables project-wide analysis, which means
+        # no diagnostics (publishDiagnostics). Disabled by default to enable diagnostics.
+        # On Android, this may cause slower startup but is required for error checking.
+        kotlin_isolated_documents_default = False  # Was: _is_termux_android()
         kotlin_isolated_documents = kotlin_isolated_documents_default
         try:
             from app.apps.file_editor_cm6.stores import _preferences_store  # local import avoids cycles

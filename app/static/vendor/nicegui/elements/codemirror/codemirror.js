@@ -133,6 +133,7 @@ class LSPRequestBroker {
     // Debounce delays per method (ms)
     this._debounceDelays = {
       'textDocument/documentSymbol': 800,
+      'textDocument/diagnostic': 600,
       'textDocument/hover': 150,
       'textDocument/completion': 100,
       // Default for unknown methods
@@ -1170,6 +1171,10 @@ export default {
       if (typeof uri !== 'string' || !uri) return;
       const diagnostics = Array.isArray(params?.diagnostics) ? params.diagnostics : [];
 
+      // Debug: log URI comparison for diagnostics
+      const uriMatch = state.currentUri === uri;
+      console.log(`[Issues] publishDiagnostics: incoming=${uri} current=${state.currentUri} match=${uriMatch} count=${diagnostics.length}`);
+
       let entry = state.byUri.get(uri);
       if (!entry) {
         entry = {
@@ -1187,7 +1192,12 @@ export default {
       this._recomputeIssuesForUri(uri);
 
       // If this diagnostics update is for the currently open file, update overlay + host chrome.
-      if (state.currentUri === uri) {
+      // Also try URI normalization for servers that return different URI formats (e.g., Kotlin)
+      const normalizedIncoming = uri.replace(/^file:\/\/\//, 'file://').replace(/^file:\/([^/])/, 'file:///$1');
+      const normalizedCurrent = (state.currentUri || '').replace(/^file:\/\/\//, 'file://').replace(/^file:\/([^/])/, 'file:///$1');
+      const isMatch = (state.currentUri === uri) || (normalizedIncoming === normalizedCurrent);
+      
+      if (isMatch) {
         // Apply squiggle decorations directly (do not rely on CM's lint plumbing,
         // which can drop diagnostics due to version/file mapping mismatches).
         try {
@@ -1197,6 +1207,8 @@ export default {
         }
         this._renderIssuesOverlay();
         this._emitIssuesState();
+      } else {
+        console.log(`[Issues] URI mismatch - skipping overlay update. normalized: incoming=${normalizedIncoming} current=${normalizedCurrent}`);
       }
     },
     applyIssueSquiggles(diagnostics, uri = null) {
@@ -1597,9 +1609,22 @@ export default {
             console.warn('[LSP] Diagnostics extensions not found in bundle; squiggles will not render');
           }
 
+          // Determine effective workspace root for LSP
+          // STUB: Will be replaced with HistoryStore singleton lookup
+          // For now, hardcode Kotlin to use android/ subdirectory
+          let effectiveRootUri = 'file://' + projectRoot;
+          let effectiveWorkspaceFolders = [{ name: 'root', uri: 'file://' + projectRoot }];
+          
+          const lspWorkspaceOverrides = this._getLspWorkspaceOverrides(languageId, projectRoot, filePath);
+          if (lspWorkspaceOverrides) {
+            effectiveRootUri = lspWorkspaceOverrides.rootUri;
+            effectiveWorkspaceFolders = lspWorkspaceOverrides.workspaceFolders;
+            console.log(`[LSP] Using workspace override for ${languageId}: ${effectiveRootUri}`);
+          }
+
           this.lspClient = new LSPClient({
-            rootUri: 'file://' + projectRoot,
-            workspaceFolders: [{ name: 'root', uri: 'file://' + projectRoot }],
+            rootUri: effectiveRootUri,
+            workspaceFolders: effectiveWorkspaceFolders,
             extensions: [hierarchicalSymbolCapability, ...lspExtensions],
             timeout: lspTimeoutMs,
           });
@@ -1807,6 +1832,12 @@ export default {
             console.log('[LSP] Requesting symbols after didOpen...');
             this.requestDocumentSymbols();
           }, 1000);
+
+          // For Kotlin: request pull diagnostics after server has processed the file
+          // (Kotlin LSP uses pull-based diagnostics, not push)
+          setTimeout(() => {
+            this.requestPullDiagnostics();
+          }, 1500);
         }).catch((err) => {
           console.warn('[LSP] Client initialization failed:', err);
           try { this.emitLspStatus('error', { languageId, projectRoot, filePath, error: String(err?.message || err) }); } catch { }
@@ -1837,6 +1868,13 @@ export default {
         this._symbolRefreshDebounce = this._debounce(() => {
           this.requestDocumentSymbols();
         }, 300);
+      }
+
+      // Set up debounced pull diagnostics refresh for Kotlin
+      if (!this._pullDiagnosticsDebounce) {
+        this._pullDiagnosticsDebounce = this._debounce(() => {
+          this.requestPullDiagnostics();
+        }, 500);
       }
     },
 
@@ -1979,6 +2017,91 @@ export default {
           setTimeout(() => this.requestDocumentSymbols(retryCount + 1), delay);
         } else {
           console.warn('[LSP] Failed to request document symbols:', err);
+        }
+      }
+    },
+
+    // Get LSP workspace root overrides for specific languages
+    // STUB: This will eventually be backed by HistoryStore singleton
+    // Returns { rootUri, workspaceFolders } or null for no override
+    _getLspWorkspaceOverrides(languageId, projectRoot, filePath) {
+      const langId = (languageId || '').toLowerCase();
+      
+      // HARDCODED STUB: Kotlin uses android/ subdirectory
+      // TODO: Replace with HistoryStore lookup for per-project LSP workspace config
+      if (langId === 'kotlin') {
+        const androidRoot = projectRoot + '/android';
+        return {
+          rootUri: 'file://' + androidRoot,
+          workspaceFolders: [{ name: 'android', uri: 'file://' + androidRoot }],
+        };
+      }
+      
+      // No override - use default projectRoot
+      return null;
+    },
+
+    // Request pull-based diagnostics (for servers like Kotlin LSP that don't push)
+    async requestPullDiagnostics() {
+      if (!this.lspClient || !this._lspFileUri) {
+        return;
+      }
+
+      // Only use pull diagnostics for Kotlin (other servers use push)
+      const langId = (this._lspLanguageId || '').toLowerCase();
+      if (langId !== 'kotlin') {
+        return;
+      }
+
+      if (!this.lspClient.connected) {
+        console.log('[LSP] Client not connected, skipping pull diagnostics');
+        return;
+      }
+
+      try {
+        await this.lspClient.initializing;
+      } catch (err) {
+        console.warn('[LSP] Client initialization failed:', err);
+        return;
+      }
+
+      try {
+        console.log(`[LSP] Requesting pull diagnostics for ${this._lspFileUri}`);
+        const result = await lspBroker.request(this.lspClient, 'textDocument/diagnostic', {
+          textDocument: { uri: this._lspFileUri }
+        });
+
+        // Handle the response - can be DocumentDiagnosticReport (full or unchanged)
+        // Full: { kind: 'full', items: [...diagnostics], resultId?: string }
+        // Unchanged: { kind: 'unchanged', resultId: string }
+        if (result && result.kind === 'full' && Array.isArray(result.items)) {
+          console.log(`[LSP] Pull diagnostics received: ${result.items.length} items`);
+          // Convert to publishDiagnostics format and feed into existing pipeline
+          this.handlePublishDiagnostics({
+            uri: this._lspFileUri,
+            diagnostics: result.items,
+          });
+        } else if (result && result.kind === 'unchanged') {
+          console.log('[LSP] Pull diagnostics unchanged');
+        } else {
+          console.log('[LSP] Pull diagnostics response:', result);
+          // Try to handle as direct diagnostics array (some servers may return differently)
+          if (Array.isArray(result)) {
+            this.handlePublishDiagnostics({
+              uri: this._lspFileUri,
+              diagnostics: result,
+            });
+          }
+        }
+      } catch (err) {
+        if (err && (err.stale || err.coalesced)) {
+          return;
+        }
+        // Server may not support pull diagnostics (-32601 = method not found)
+        if (err && err.code === -32601) {
+          console.log('[LSP] Server does not support textDocument/diagnostic (pull diagnostics)');
+        } else {
+          console.warn('[LSP] Failed to request pull diagnostics:', err);
         }
       }
     },
@@ -2341,6 +2464,10 @@ export default {
                   self._lspDidChangeCount = (self._lspDidChangeCount || 0) + 1;
                   if (self._lspDidChangeCount % 10 === 1) {
                     console.log(`[LSP Stats] didChange sent (explicit): ${self._lspDidChangeCount}, version=${self._lspDocumentVersion}`);
+                  }
+                  // For Kotlin: trigger pull diagnostics after didChange
+                  if (self._pullDiagnosticsDebounce) {
+                    self._pullDiagnosticsDebounce();
                   }
                 } catch (err) {
                   console.warn('[LSP] Failed to send didChange:', err);

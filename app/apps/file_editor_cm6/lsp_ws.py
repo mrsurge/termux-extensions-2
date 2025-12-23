@@ -555,6 +555,16 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                     except Exception:
                         pass
 
+                    # Log publishDiagnostics for debugging
+                    try:
+                        if isinstance(msg, dict) and msg.get("method") == "textDocument/publishDiagnostics":
+                            params = msg.get("params") or {}
+                            diag_uri = params.get("uri", "?")
+                            diag_count = len(params.get("diagnostics") or [])
+                            _lsp_error(f"[LSP WS] publishDiagnostics uri={diag_uri} count={diag_count}")
+                    except Exception:
+                        pass
+
                     current_sid = session.get("current_sid")
                     if not current_sid:
                         continue
