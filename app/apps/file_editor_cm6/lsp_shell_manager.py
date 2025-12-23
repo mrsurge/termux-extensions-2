@@ -287,6 +287,7 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
                 "--add-opens", "java.base/sun.nio.fs=ALL-UNNAMED",
                 "--add-opens", "java.base/sun.security.ssl=ALL-UNNAMED",
                 "--add-opens", "java.base/sun.security.util=ALL-UNNAMED",
+                "--add-opens", "java.desktop/java.awt=ALL-UNNAMED",
                 "--add-opens", "java.management/sun.management=ALL-UNNAMED",
                 "--add-opens", "jdk.attach/sun.tools.attach=ALL-UNNAMED",
                 "--add-opens", "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
