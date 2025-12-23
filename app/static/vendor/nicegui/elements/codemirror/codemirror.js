@@ -783,7 +783,7 @@ export default {
       for (const m of markers) {
         if (m.from > cursor) out += escapeHtml(lineText.slice(cursor, m.from));
         const seg = lineText.slice(m.from, Math.min(lineText.length, m.to));
-        const cls = m.severity === 'error' ? 'cm-lintRange cm-lintRange-error' : 'cm-lintRange cm-lintRange-warning';
+        const cls = m.severity === 'error' ? 'cm-issuesRange cm-issuesRange-error' : 'cm-issuesRange cm-issuesRange-warning';
         out += `<span class="${cls}">${escapeHtml(seg || ' ')}</span>`;
         cursor = Math.max(cursor, m.to);
       }
@@ -857,6 +857,11 @@ export default {
       entry.suppressed.add(sig);
       // Re-filter on next render
       this._recomputeIssuesForUri(uri);
+      try {
+        if (state.currentUri === uri) {
+          this.applyIssueSquiggles(entry.filteredDiagnostics || []);
+        }
+      } catch { }
       this._renderIssuesOverlay();
       this._emitIssuesState();
     },
@@ -973,8 +978,26 @@ export default {
 
       // If this diagnostics update is for the currently open file, update overlay + host chrome.
       if (state.currentUri === uri) {
+        // Apply squiggle decorations directly (do not rely on CM's lint plumbing,
+        // which can drop diagnostics due to version/file mapping mismatches).
+        try {
+          this.applyIssueSquiggles(entry.filteredDiagnostics || []);
+        } catch (err) {
+          console.warn('[Issues] Failed to apply squiggles:', err);
+        }
         this._renderIssuesOverlay();
         this._emitIssuesState();
+      }
+    },
+    applyIssueSquiggles(diagnostics) {
+      if (!this.editor || !this._issuesSquiggleEffect) return;
+      const diags = Array.isArray(diagnostics) ? diagnostics : [];
+      try {
+        this.editor.dispatch({
+          effects: this._issuesSquiggleEffect.of(diags),
+        });
+      } catch (err) {
+        console.warn('[Issues] Squiggle dispatch failed:', err);
       }
     },
     _handleIssuesCmdFromHost(event) {
@@ -1339,8 +1362,16 @@ export default {
             if (typeof CM.languageServerExtensions === 'function') {
               lspExtensions.push(...CM.languageServerExtensions());
             }
+            // Some bundles don’t re-export languageServerExtensions, but do export serverDiagnostics.
+            // Diagnostics are required for squiggles; add them explicitly if needed.
+            if (!lspExtensions.length && typeof CM.serverDiagnostics === 'function') {
+              lspExtensions.push(CM.serverDiagnostics());
+            }
           } catch (err) {
             console.warn('[LSP] Failed to load languageServerExtensions:', err);
+          }
+          if (!lspExtensions.length) {
+            console.warn('[LSP] Diagnostics extensions not found in bundle; squiggles will not render');
           }
 
           this.lspClient = new LSPClient({
@@ -1452,6 +1483,10 @@ export default {
             });
           }
           this._emitIssuesState();
+          try {
+            const entry = st.byUri.get(this._lspFileUri);
+            this.applyIssueSquiggles(entry?.filteredDiagnostics || []);
+          } catch { }
         } catch { }
 
         // Install LSP extension into its own compartment
@@ -2075,6 +2110,111 @@ export default {
           ".cm-scroller": { overflow: "auto" },
         }),
       ];
+
+      // -------------------------------------------------------------------
+      // Issues squiggles (diagnostics-driven) — custom StateField pipeline.
+      //
+      // We intentionally do NOT rely solely on CM's built-in `serverDiagnostics()`
+      // because it can ignore publishDiagnostics when version/file mapping
+      // doesn't match what the LSP server emits. Our overlay uses the raw LSP
+      // payload, so squiggles must follow the same ground truth.
+      // -------------------------------------------------------------------
+      try {
+        const { StateEffect, StateField, RangeSetBuilder, Decoration, EditorView } = CM;
+
+        this._issuesSquiggleEffect = StateEffect.define();
+
+        const toDocPos = (state, line0, ch0) => {
+          try {
+            const lineNo = Math.max(1, Math.min(state.doc.lines, (Number(line0) || 0) + 1));
+            const line = state.doc.line(lineNo);
+            const col = Math.max(0, Number(ch0) || 0);
+            return Math.max(line.from, Math.min(line.to, line.from + col));
+          } catch {
+            return 0;
+          }
+        };
+
+        const build = (state, diags) => {
+          const builder = new RangeSetBuilder();
+          const arr = Array.isArray(diags) ? diags : [];
+          for (const d of arr) {
+            const sev = d?.severity;
+            const bucket = (sev === 1) ? 'error' : (sev === 2 ? 'warning' : (sev === 3 || sev === 4 ? 'warning' : 'warning'));
+            const cls = bucket === 'error' ? 'cm-issuesRange cm-issuesRange-error' : 'cm-issuesRange cm-issuesRange-warning';
+
+            const start = d?.range?.start || {};
+            const end = d?.range?.end || {};
+            let from = toDocPos(state, start.line, start.character);
+            let to = toDocPos(state, end.line, end.character);
+
+            if (to < from) {
+              const tmp = from; from = to; to = tmp;
+            }
+            // Zero-length diagnostics: underline at least one char if possible.
+            if (to === from) {
+              try {
+                const line = state.doc.lineAt(from);
+                if (from < line.to) to = from + 1;
+              } catch { }
+            }
+            if (to > from) {
+              builder.add(from, to, Decoration.mark({ class: cls }));
+            }
+          }
+          return builder.finish();
+        };
+
+        const field = StateField.define({
+          create(state) {
+            return Decoration.none;
+          },
+          update(value, tr) {
+            // Keep squiggles roughly aligned through edits until refreshed by LSP.
+            try {
+              if (tr.docChanged && value && typeof value.map === 'function') {
+                value = value.map(tr.changes);
+              }
+            } catch { }
+            for (const ef of tr.effects) {
+              if (ef.is(self._issuesSquiggleEffect)) {
+                try {
+                  value = build(tr.state, ef.value);
+                } catch {
+                  value = Decoration.none;
+                }
+              }
+            }
+            return value;
+          },
+          provide: (f) => EditorView.decorations.from(f),
+        });
+
+        extensions.push(field);
+      } catch (err) {
+        console.warn('[Issues] Failed to install squiggle field:', err);
+      }
+
+      // Squiggle styling (don’t rely on @codemirror/lint theme being active).
+      // We style our own classes so decorations remain visible even when the
+      // lint extension isn't installed.
+      try {
+        const squiggleTheme = CM.EditorView.baseTheme({
+          ".cm-issuesRange": {
+            textDecorationLine: "underline",
+            textDecorationStyle: "wavy",
+            textUnderlineOffset: "1px",
+            textDecorationThickness: "1px",
+          },
+          ".cm-issuesRange-error": {
+            textDecorationColor: "#d11",
+          },
+          ".cm-issuesRange-warning": {
+            textDecorationColor: "orange",
+          },
+        });
+        extensions.push(squiggleTheme);
+      } catch { }
 
       // Issues overlay theme (iframe-owned diagnostics UI)
       try {
