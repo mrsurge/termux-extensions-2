@@ -233,19 +233,6 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
     # also assume a writable /tmp. For the platform zip (bundled jre/), run the
     # bundled java via glibc-runner (ld.so) and provide idea/tmp paths.
     if language_id == "kotlin":
-        # NOTE: --isolated-documents disables project-wide analysis, which means
-        # no diagnostics (publishDiagnostics). Disabled by default to enable diagnostics.
-        # On Android, this may cause slower startup but is required for error checking.
-        kotlin_isolated_documents_default = False  # Was: _is_termux_android()
-        kotlin_isolated_documents = kotlin_isolated_documents_default
-        try:
-            from app.apps.file_editor_cm6.stores import _preferences_store  # local import avoids cycles
-
-            prefs = _preferences_store.get_preferences().get("editor", {})
-            kotlin_isolated_documents = bool(prefs.get("kotlinLspIsolatedDocuments", kotlin_isolated_documents_default))
-        except Exception:
-            pass
-
         is_android = _is_termux_android()
         grun = _resolve_grun()
 
@@ -320,9 +307,6 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
                 "--stdio",
                 "--system-path",
                 str(lsp_system_dir),
-                # JetBrains Kotlin LSP: stdio mode is single-client only.
-                # (Socket/server mode supports multiclient, but Code CM6 uses stdio pipes.)
-                *(["--isolated-documents"] if kotlin_isolated_documents else []),
                 *cmd[1:],
             ]
 
