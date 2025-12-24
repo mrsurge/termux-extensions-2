@@ -23,4 +23,5 @@ pip-venv-amd64/
 packages/
 framework-shells/
 app/static/vendor/lsp_servers/kotlin-lsp/
+app/static/vendor/ignored/
 .tmp/
