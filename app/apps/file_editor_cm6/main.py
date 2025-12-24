@@ -503,7 +503,7 @@ async def serve_static(file_path: str):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(file)
 
-# Register terminal routes
+# Register terminal routes, (and give me a new reason to make a commit)
 from .terminal_backend import terminal_router
 file_editor_cm6_bp.include_router(terminal_router)
 file_editor_cm6_bp.add_api_websocket_route("/ws/agent", agent_websocket)
