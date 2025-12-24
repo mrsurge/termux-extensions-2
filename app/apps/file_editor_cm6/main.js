@@ -426,6 +426,201 @@ function sendIssuesCmd(action) {
 issuesToggleBtn.addEventListener('click', () => sendIssuesCmd('toggle'));
 issuesPrevBtn.addEventListener('click', () => sendIssuesCmd('prev'));
 issuesNextBtn.addEventListener('click', () => sendIssuesCmd('next'));
+
+function _basenameNoExt(p) {
+  const b = basename(p || '');
+  if (!b) return 'untitled';
+  const idx = b.lastIndexOf('.');
+  if (idx <= 0) return b;
+  return b.slice(0, idx);
+}
+
+function _extNoDot(p) {
+  const b = basename(p || '');
+  const idx = b.lastIndexOf('.');
+  if (idx === -1 || idx === b.length - 1) return '';
+  return b.slice(idx + 1);
+}
+
+function _safeFilePart(s) {
+  const text = String(s || '').trim();
+  if (!text) return '';
+  return text.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function buildDefaultDiagnosticsFilename(absPath, projectRoot) {
+  const file = String(absPath || '').trim();
+  const pr = String(projectRoot || '').trim().replace(/\/+$/, '');
+
+  // Prefer project-relative path (stable, readable, and avoids HOME_DIR confusion).
+  let rel = '';
+  if (pr && file && file.startsWith(pr + '/')) {
+    rel = file.slice(pr.length + 1);
+  }
+
+  const dotted = (rel || basename(file) || 'untitled')
+    .split('/')
+    .filter(Boolean)
+    .map(_safeFilePart)
+    .filter(Boolean)
+    .join('.');
+
+  return `${dotted || 'untitled'}.json`;
+}
+
+function _issuesDumpRequestOnce() {
+  const requestId = `issues_dump_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timeoutMs = 10000;
+    const t = setTimeout(() => {
+      cleanup();
+      reject(new Error('Issues dump timed out'));
+    }, timeoutMs);
+
+    const onMessage = (event) => {
+      try {
+        if (!event || !event.data) return;
+        if (editorFrame && editorFrame.contentWindow && event.source && event.source !== editorFrame.contentWindow) return;
+        if (event.data.type !== 'cm6-issues-dump') return;
+        const payload = event.data.data || {};
+        if (payload.requestId !== requestId) return;
+        cleanup();
+        resolve(payload.dump || null);
+      } catch (err) {
+        cleanup();
+        reject(err);
+      }
+    };
+
+    const cleanup = () => {
+      clearTimeout(t);
+      window.removeEventListener('message', onMessage);
+    };
+
+    window.addEventListener('message', onMessage);
+    try {
+      if (!editorFrame || !editorFrame.contentWindow) throw new Error('Editor iframe not ready');
+      editorFrame.contentWindow.postMessage({ type: 'issues_cmd', data: { action: 'dump', requestId } }, '*');
+    } catch (err) {
+      cleanup();
+      reject(err);
+    }
+  });
+}
+
+async function _ensureDiagnosticsDir(projectRootAbs) {
+  const projectRoot = String(projectRootAbs || '').replace(/\/+$/, '');
+  if (!projectRoot) return { ok: false, dir: '' };
+  const target = `${projectRoot}/.diagnostics`;
+
+  const exists = async () => {
+    try {
+      const params = new URLSearchParams({ path: target, hidden: '1', root: 'system' });
+      const resp = await fetch(`/api/browse?${params.toString()}`, { cache: 'no-store' });
+      if (!resp.ok) return false;
+      const json = await resp.json().catch(() => ({}));
+      return Boolean(json && json.ok);
+    } catch {
+      return false;
+    }
+  };
+
+  if (await exists()) return { ok: true, dir: target };
+
+  const yes = window.confirm('This will create a new directory called .diagnostics in your project root. Is this ok?');
+  if (!yes) return { ok: false, dir: projectRoot };
+
+  try {
+    const resp = await apiPost('explorer/mkdir', { parent_rel: '.', name: '.diagnostics' });
+    if (resp?.ok === false) throw new Error(resp?.error || 'mkdir failed');
+  } catch (err) {
+    host.toast(err?.message || 'Failed to create .diagnostics');
+    return { ok: false, dir: projectRoot };
+  }
+
+  return { ok: true, dir: target };
+}
+
+async function writeTextFileInProject(absPath, content) {
+  const opId = `op_diag_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const payload = {
+    path: absPath,
+    content: String(content ?? ''),
+    client_id: clientId,
+    op_id: opId,
+  };
+  const res = await apiPost('write', payload);
+  if (res?.ok === false) {
+    throw new Error(res?.error || 'Write failed');
+  }
+  return res;
+}
+
+async function exportDiagnosticsToFile() {
+  if (!currentPath) {
+    host.toast('Open a file first');
+    return;
+  }
+  if (!cachedProjectRoot) {
+    host.toast('No active project root');
+    return;
+  }
+
+  let dump = null;
+  try {
+    dump = await _issuesDumpRequestOnce();
+  } catch (err) {
+    console.error('[Diagnostics Export] Failed to request dump:', err);
+    host.toast(err?.message || 'Failed to gather diagnostics');
+    return;
+  }
+
+  const projectRoot = String(cachedProjectRoot || '').replace(/\/+$/, '');
+  const defaultDirRes = await _ensureDiagnosticsDir(projectRoot);
+  const startDir = defaultDirRes.dir || projectRoot;
+  const defaultName = buildDefaultDiagnosticsFilename(currentPath, projectRoot);
+
+  if (!pickerAvailable()) { host.toast('File picker unavailable'); return; }
+
+  let choice = null;
+  try {
+    choice = await window.teFilePicker.saveFile({
+      title: 'Export Diagnostics',
+      startPath: startDir,
+      filename: defaultName,
+      selectLabel: 'Save',
+    });
+  } catch (e) {
+    if (e && e.message === 'cancelled') return;
+    host.toast(e?.message || 'Export cancelled');
+    return;
+  }
+  if (!choice || !choice.path) return;
+
+  const targetAbs = toAbsolute(choice.path, null, HOME_DIR);
+  if (!(targetAbs === projectRoot || targetAbs.startsWith(projectRoot + '/'))) {
+    host.toast('Export path must be inside the project root');
+    return;
+  }
+  if (choice.existed && !window.confirm('File exists. Overwrite?')) return;
+
+  const payload = {
+    exported_at: new Date().toISOString(),
+    project_root: projectRoot,
+    file_path: currentPath,
+    dump: dump || {},
+  };
+  const text = JSON.stringify(payload, null, 2) + '\n';
+
+  try {
+    await writeTextFileInProject(targetAbs, text);
+    host.toast(`Diagnostics exported: ${basename(targetAbs)}`);
+  } catch (err) {
+    console.error('[Diagnostics Export] Write failed:', err);
+    host.toast(err?.message || 'Failed to write diagnostics file');
+  }
+}
+
 const miNew       = requireEl('#mi-new');
 const miOpen      = requireEl('#mi-open');
 const miSave      = requireEl('#mi-save');
@@ -458,6 +653,7 @@ const miTrackEdits   = requireEl('#mi-track-edits');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
 const miLanguageServers = requireEl('#mi-language-servers');  // Added: 2025-12-08 - LSP settings modal
+const miExportDiagnostics = requireEl('#mi-export-diagnostics');
 
 initVirtualKeyboardAdjustments({
   root,
@@ -2483,6 +2679,10 @@ const lspModal = {
   startTypescript: document.getElementById('lsp-start-typescript'),
   startClangd: document.getElementById('lsp-start-clangd'),
   startKotlin: document.getElementById('lsp-start-kotlin'),
+  rootRelPyright: document.getElementById('lsp-rootrel-pyright'),
+  rootRelTypescript: document.getElementById('lsp-rootrel-typescript'),
+  rootRelClangd: document.getElementById('lsp-rootrel-clangd'),
+  rootRelKotlin: document.getElementById('lsp-rootrel-kotlin'),
 };
 
 const lspSetupBanner = {
@@ -2498,6 +2698,19 @@ const LSP_SERVER_PREF_KEYS = {
   clangd: 'enableLspClangd',
   kotlin: 'enableLspKotlin',
 };
+
+const LSP_SERVER_ROOTREL_KEYS = {
+  pyright: 'lspRootRelPyright',
+  typescript: 'lspRootRelTypescript',
+  clangd: 'lspRootRelClangd',
+  kotlin: 'lspRootRelKotlin',
+};
+
+function _lspGetServerRootRel(state, serverId) {
+  const key = LSP_SERVER_ROOTREL_KEYS[serverId];
+  if (!key) return '';
+  return String(state?.[key] ?? '');
+}
 
 window.__cm6LastLspStatus = window.__cm6LastLspStatus || null;
 let _lspSetupBannerTimer = null;
@@ -2559,6 +2772,28 @@ function updateLspModalUI(state) {
     kotlin: _lspGetServerEnabled(state, 'kotlin'),
   };
 
+  // Root override inputs are editable only when the feature is enabled.
+  try {
+    if (lspModal.rootRelPyright) {
+      lspModal.rootRelPyright.value = _lspGetServerRootRel(state, 'pyright');
+      lspModal.rootRelPyright.disabled = !isEnabled;
+    }
+    if (lspModal.rootRelTypescript) {
+      lspModal.rootRelTypescript.value = _lspGetServerRootRel(state, 'typescript');
+      lspModal.rootRelTypescript.disabled = !isEnabled;
+    }
+    if (lspModal.rootRelClangd) {
+      lspModal.rootRelClangd.value = _lspGetServerRootRel(state, 'clangd');
+      lspModal.rootRelClangd.disabled = !isEnabled;
+    }
+    if (lspModal.rootRelKotlin) {
+      lspModal.rootRelKotlin.value = _lspGetServerRootRel(state, 'kotlin');
+      lspModal.rootRelKotlin.disabled = !isEnabled;
+    }
+  } catch (err) {
+    console.warn('[LSP Modal] Failed to apply rootrel inputs', err);
+  }
+
   const applyRow = (serverId, enabled, dot, toggleBtn, startBtn) => {
     if (dot) {
       dot.classList.toggle('enabled', enabled);
@@ -2580,6 +2815,19 @@ function updateLspModalUI(state) {
   applyRow('kotlin', perServer.kotlin, lspModal.statusKotlin, lspModal.toggleKotlin, lspModal.startKotlin);
 
   _applyLspActionButtons(state);
+}
+
+async function _updateLspRootRel(serverId, value) {
+  const key = LSP_SERVER_ROOTREL_KEYS[serverId];
+  if (!key) return;
+  const next = String(value ?? '').trim();
+  const ok = await updatePreference(key, next);
+  if (!ok) {
+    host.toast('Failed to update LSP project root');
+    return;
+  }
+  updateLspModalUI(editorViewState);
+  host.toast('LSP project root updated (server will restart on next open/start)', 2500);
 }
 
 function _applyLspActionButtons(state) {
@@ -2787,6 +3035,11 @@ if (lspModal.startPyright) lspModal.startPyright.addEventListener('click', () =>
 if (lspModal.startTypescript) lspModal.startTypescript.addEventListener('click', () => _startStopLspServer('typescript'));
 if (lspModal.startClangd) lspModal.startClangd.addEventListener('click', () => _startStopLspServer('clangd'));
 if (lspModal.startKotlin) lspModal.startKotlin.addEventListener('click', () => _startStopLspServer('kotlin'));
+
+if (lspModal.rootRelPyright) lspModal.rootRelPyright.addEventListener('change', (e) => _updateLspRootRel('pyright', e?.target?.value));
+if (lspModal.rootRelTypescript) lspModal.rootRelTypescript.addEventListener('change', (e) => _updateLspRootRel('typescript', e?.target?.value));
+if (lspModal.rootRelClangd) lspModal.rootRelClangd.addEventListener('change', (e) => _updateLspRootRel('clangd', e?.target?.value));
+if (lspModal.rootRelKotlin) lspModal.rootRelKotlin.addEventListener('change', (e) => _updateLspRootRel('kotlin', e?.target?.value));
 
 function _hideLspSetupBanner() {
   if (!lspSetupBanner.root) return;
@@ -2999,6 +3252,10 @@ bindMenuToggle(miDebugProjects, () => {
 // Language Servers modal - Added: 2025-12-08
 bindMenuToggle(miLanguageServers, () => {
   showLspModal();
+});
+
+bindMenuToggle(miExportDiagnostics, () => {
+  exportDiagnosticsToFile();
 });
 
 bindMenuToggle(miUndo, () => { if (view && undo) undo(view); });

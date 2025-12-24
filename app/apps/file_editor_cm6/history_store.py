@@ -170,6 +170,62 @@ class HistoryStore:
         except Exception:
             return False
 
+    def get_lsp_server_root_rel(self, project_path: str, server_id: str) -> str:
+        sidecar = self.get_project_sidecar(project_path)
+        if not sidecar:
+            return ""
+        try:
+            return str(sidecar.get_lsp_server_root_rel(server_id) or "")
+        except Exception:
+            return ""
+
+    def set_lsp_server_root_rel(self, project_path: str, server_id: str, root_rel: str) -> bool:
+        sidecar = self.get_project_sidecar(project_path)
+        if not sidecar:
+            return False
+
+        # Normalize and validate. Root overrides are project-relative and must
+        # stay within the project root.
+        try:
+            text = str(root_rel).strip() if root_rel is not None else ""
+        except Exception:
+            text = ""
+
+        # Empty means "use project root".
+        if not text or text == ".":
+            try:
+                sidecar.set_lsp_server_root_rel(server_id, "")
+                sidecar.save()
+                return True
+            except Exception:
+                return False
+
+        if text.startswith("/") or text.startswith("~"):
+            return False
+
+        try:
+            project_root = Path(self._normalize_project_path(project_path)).expanduser().resolve(strict=False)
+        except Exception:
+            project_root = Path(project_path).expanduser()
+
+        candidate = (project_root / text).expanduser().resolve(strict=False)
+        try:
+            candidate.relative_to(project_root)
+        except Exception:
+            return False
+
+        if not candidate.exists() or not candidate.is_dir():
+            return False
+
+        # Store normalized relative string (no trailing slash).
+        rel = str(candidate.relative_to(project_root)).strip().rstrip("/")
+        try:
+            sidecar.set_lsp_server_root_rel(server_id, rel)
+            sidecar.save()
+            return True
+        except Exception:
+            return False
+
     def get_lsp_state_payload(self, project_path: str) -> dict:
         """Return the view_state payload fields for the LSP modal."""
 
@@ -181,6 +237,10 @@ class HistoryStore:
                 "enableLspTypescript": False,
                 "enableLspClangd": False,
                 "enableLspKotlin": False,
+                "lspRootRelPyright": "",
+                "lspRootRelTypescript": "",
+                "lspRootRelClangd": "",
+                "lspRootRelKotlin": "",
             }
         try:
             return dict(sidecar.get_lsp_state_payload())
@@ -191,6 +251,10 @@ class HistoryStore:
                 "enableLspTypescript": False,
                 "enableLspClangd": False,
                 "enableLspKotlin": False,
+                "lspRootRelPyright": "",
+                "lspRootRelTypescript": "",
+                "lspRootRelClangd": "",
+                "lspRootRelKotlin": "",
             }
 
     def _touch_project_locked(self, path: str) -> Dict[str, object]:

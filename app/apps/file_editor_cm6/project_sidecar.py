@@ -636,7 +636,7 @@ class ProjectSidecar:
     def _ensure_lsp_schema(self) -> dict:
         lsp = self._data.get("lsp")
         if not isinstance(lsp, dict):
-            lsp = {"enabled": False, "servers": {}}
+            lsp = {"enabled": False, "servers": {}, "roots": {}}
         lsp.setdefault("enabled", False)
         servers = lsp.get("servers")
         if not isinstance(servers, dict):
@@ -644,6 +644,15 @@ class ProjectSidecar:
         for key, default in (("pyright", False), ("typescript", False), ("clangd", False), ("kotlin", False)):
             servers.setdefault(key, default)
         lsp["servers"] = servers
+
+        roots = lsp.get("roots")
+        if not isinstance(roots, dict):
+            roots = {}
+        for key in ("pyright", "typescript", "clangd", "kotlin"):
+            val = roots.get(key)
+            roots[key] = str(val).strip() if val else ""
+        lsp["roots"] = roots
+
         self._data["lsp"] = lsp
         return lsp
 
@@ -670,15 +679,36 @@ class ProjectSidecar:
         self._data["lsp"] = lsp
         return bool(servers[str(server_id)])
 
+    def get_lsp_server_root_rel(self, server_id: str) -> str:
+        lsp = self._ensure_lsp_schema()
+        roots = lsp.get("roots") or {}
+        val = roots.get(str(server_id))
+        text = str(val).strip() if val else ""
+        return text
+
+    def set_lsp_server_root_rel(self, server_id: str, root_rel: str) -> str:
+        lsp = self._ensure_lsp_schema()
+        roots = lsp.get("roots") or {}
+        text = str(root_rel).strip() if root_rel else ""
+        roots[str(server_id)] = text
+        lsp["roots"] = roots
+        self._data["lsp"] = lsp
+        return text
+
     def get_lsp_state_payload(self) -> dict:
         lsp = self._ensure_lsp_schema()
         servers = lsp.get("servers") or {}
+        roots = lsp.get("roots") or {}
         return {
             "enableLsp": bool(lsp.get("enabled", False)),
             "enableLspPyright": bool(servers.get("pyright", False)),
             "enableLspTypescript": bool(servers.get("typescript", False)),
             "enableLspClangd": bool(servers.get("clangd", False)),
             "enableLspKotlin": bool(servers.get("kotlin", False)),
+            "lspRootRelPyright": str(roots.get("pyright") or ""),
+            "lspRootRelTypescript": str(roots.get("typescript") or ""),
+            "lspRootRelClangd": str(roots.get("clangd") or ""),
+            "lspRootRelKotlin": str(roots.get("kotlin") or ""),
         }
 
 

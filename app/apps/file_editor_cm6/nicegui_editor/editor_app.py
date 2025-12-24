@@ -216,11 +216,34 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
             print(f"[LSP] Failed to disconnect LSP when disabled for {file_path}: {exc}", file=sys.stderr)
         return
 
+    # Allow per-server project-root override (project-scoped via sidecar SSOT).
+    effective_project_root = project_root
+    try:
+        project_path = str(project_root)
+        server_id = None
+        if language_id == "python":
+            server_id = "pyright"
+        elif language_id in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
+            server_id = "typescript"
+        elif language_id in ("c", "cpp"):
+            server_id = "clangd"
+        elif language_id == "kotlin":
+            server_id = "kotlin"
+
+        if server_id:
+            rel_root = _history_store.get_lsp_server_root_rel(project_path, server_id)
+            if rel_root:
+                candidate = (project_root / rel_root).expanduser().resolve(strict=False)
+                if candidate.exists() and candidate.is_dir():
+                    effective_project_root = candidate
+    except Exception:
+        effective_project_root = project_root
+
     # At this point we want LSP active for this document
-    print(f"[LSP] Triggering connect_lsp: {language_id} / {project_root} / {file_path}", file=sys.stderr)
+    print(f"[LSP] Triggering connect_lsp: {language_id} / {effective_project_root} / {file_path}", file=sys.stderr)
     try:
         if hasattr(editor, 'connect_lsp'):
-            editor.connect_lsp(language_id, str(project_root), str(file_path))
+            editor.connect_lsp(language_id, str(effective_project_root), str(file_path))
         else:
             print("[LSP] connect_lsp() not available on editor; bundle may be outdated", file=sys.stderr)
     except Exception as exc:
@@ -1571,8 +1594,11 @@ async def update_preference(data: dict = Body(...)):
         raise HTTPException(status_code=404, detail="Editor not initialized")
     
     # Validate key. Most preferences are editor-scoped in PreferencesStore, but
-    # LSP enablement is project-scoped (sidecar SSOT via HistoryStore facade).
-    LSP_KEYS = {'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'}
+    # LSP config is project-scoped (sidecar SSOT via HistoryStore facade).
+    LSP_KEYS = {
+        'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin',
+        'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin',
+    }
     if key not in LSP_KEYS:
         from app.apps.file_editor_cm6.preferences_store import DEFAULT_EDITOR_PREFS
         if key not in DEFAULT_EDITOR_PREFS:
@@ -1626,7 +1652,10 @@ async def update_preference(data: dict = Body(...)):
         elif key == 'stickyScroll':
             # Added: 2025-12-03 by vectorArc - TE2 Team
             editor.set_sticky_scroll(bool(value))
-        elif key in ('enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'):
+        elif key in (
+            'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin',
+            'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin',
+        ):
             # LSP preferences are project-scoped (sidecar SSOT via HistoryStore facade).
             # Persist + apply after success below.
             pass
@@ -1669,14 +1698,17 @@ async def update_preference(data: dict = Body(...)):
         
         editor.update()
 
-        if key in ('enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'):
+        if key in (
+            'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin',
+            'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin',
+        ):
             project_path = _history_store.get_active_project() or str(get_project_root())
             if not project_path:
                 raise HTTPException(status_code=400, detail="No active project for LSP preference")
             if key == 'enableLsp':
                 if not _history_store.set_lsp_enabled(project_path, bool(value)):
                     raise RuntimeError("Failed to persist LSP enablement")
-            else:
+            elif key in ('enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'):
                 server_map = {
                     'enableLspPyright': 'pyright',
                     'enableLspTypescript': 'typescript',
@@ -1687,15 +1719,67 @@ async def update_preference(data: dict = Body(...)):
                 if server_id:
                     if not _history_store.set_lsp_server_enabled(project_path, server_id, bool(value)):
                         raise RuntimeError("Failed to persist LSP server enablement")
+            else:
+                root_map = {
+                    'lspRootRelPyright': 'pyright',
+                    'lspRootRelTypescript': 'typescript',
+                    'lspRootRelClangd': 'clangd',
+                    'lspRootRelKotlin': 'kotlin',
+                }
+                server_id = root_map.get(key)
+                if not server_id:
+                    raise RuntimeError("Unknown LSP root override key")
+
+                # Root overrides are strings. Empty/"." means "use project root".
+                try:
+                    root_rel = str(value).strip() if value is not None else ""
+                except Exception:
+                    root_rel = ""
+
+                if not _history_store.set_lsp_server_root_rel(project_path, server_id, root_rel):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid LSP project root: must be a relative directory within the project",
+                    )
+
+                # If the server is running, shut it down. Do NOT auto-restart; it
+                # restarts when a supported file is entered or when manually started.
+                from app.apps.file_editor_cm6.lsp_shell_manager import shutdown_lsp_shell
+
+                server_languages = {
+                    "pyright": ["python"],
+                    "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+                    "clangd": ["c", "cpp"],
+                    "kotlin": ["kotlin"],
+                }
+                for lang in server_languages.get(server_id, []):
+                    try:
+                        await shutdown_lsp_shell(lang)
+                    except Exception:
+                        pass
+
+                # If the active document uses this server, disconnect the client now.
+                try:
+                    current_file = get_current_file()
+                    if current_file:
+                        current_lang = LSP_LANGUAGE_MAP.get(Path(current_file).suffix)
+                        if current_lang in server_languages.get(server_id, []):
+                            editor.disconnect_lsp()
+                except Exception:
+                    pass
 
             # Apply LSP connect/disconnect after persistence so the SSOT is consistent.
+            # Root changes intentionally do NOT auto-restart; they take effect on next entry/manual start.
             try:
-                current_file = get_current_file()
-                if current_file:
-                    _maybe_connect_lsp(editor, Path(current_file), Path(project_path))
+                if key.startswith('lspRootRel'):
+                    pass
                 else:
-                    if key == 'enableLsp' and not bool(value):
-                        editor.disconnect_lsp()
+                    current_file = get_current_file()
+                    if current_file:
+                        _maybe_connect_lsp(editor, Path(current_file), Path(project_path))
+                    else:
+                        if key == 'enableLsp' and not bool(value):
+                            editor.disconnect_lsp()
             except Exception as exc:
                 print(f"[PREFERENCE] LSP reconnect after {key} failed: {exc}", file=sys.stderr)
         else:

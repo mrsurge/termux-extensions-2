@@ -1249,6 +1249,26 @@ export default {
         } else if (action === 'prev') {
           this.issuesOverlayVisible = true;
           this._issuesNavigate(-1);
+        } else if (action === 'dump') {
+          const requestId = payload.requestId || null;
+          const state = this._ensureIssuesState();
+          const uri = state.currentUri;
+          const entry = uri ? state.byUri.get(uri) : null;
+          const dump = {
+            exported_at: new Date().toISOString(),
+            uri: uri || '',
+            lsp_language_id: this._lspLanguageId || '',
+            lsp_file_uri: this._lspFileUri || '',
+            counts: entry?.counts || { errors: 0, warnings: 0 },
+            total: entry?.flat?.length || 0,
+            activeIndex: entry?.activeIndex || 0,
+            rawDiagnostics: entry?.rawDiagnostics || [],
+            filteredDiagnostics: entry?.filteredDiagnostics || [],
+            flat: entry?.flat || [],
+            suppressed: Array.from(entry?.suppressed || []),
+            lsp_stats: (typeof this.getLspStats === 'function') ? this.getLspStats() : {},
+          };
+          this.notifyParent('cm6-issues-dump', { requestId, dump });
         }
       } catch { }
     },
@@ -1871,10 +1891,11 @@ export default {
       }
 
       // Set up debounced pull diagnostics refresh for Kotlin
+      // Use longer delay (1500ms) to ensure didChange is processed first
       if (!this._pullDiagnosticsDebounce) {
         this._pullDiagnosticsDebounce = this._debounce(() => {
           this.requestPullDiagnostics();
-        }, 500);
+        }, 1500);
       }
     },
 
@@ -2022,27 +2043,11 @@ export default {
     },
 
     // Get LSP workspace root overrides for specific languages
-    // STUB: This will eventually be backed by HistoryStore singleton
+    // NOTE: Code CM6 now passes an effective projectRoot from the backend
+    // (project-scoped SSOT via HistoryStore), so we do not hardcode per-language
+    // workspace root overrides here.
     // Returns { rootUri, workspaceFolders } or null for no override
     _getLspWorkspaceOverrides(languageId, projectRoot, filePath) {
-      const langId = (languageId || '').toLowerCase();
-      
-      // HARDCODED STUB: Kotlin uses android/ subdirectory
-      // TODO: Replace with HistoryStore lookup for per-project LSP workspace config
-      if (langId === 'kotlin' && filePath) {
-        // Find the nearest android/ directory in the file path
-        // e.g., /home/user/project/android/app/src/Main.kt -> /home/user/project/android
-        const androidIdx = filePath.lastIndexOf('/android/');
-        if (androidIdx !== -1) {
-          const androidRoot = filePath.substring(0, androidIdx + '/android'.length);
-          return {
-            rootUri: 'file://' + androidRoot,
-            workspaceFolders: [{ name: 'android', uri: 'file://' + androidRoot }],
-          };
-        }
-      }
-      
-      // No override - use default projectRoot
       return null;
     },
 
@@ -2075,6 +2080,9 @@ export default {
         const result = await lspBroker.request(this.lspClient, 'textDocument/diagnostic', {
           textDocument: { uri: this._lspFileUri }
         });
+
+        // DEBUG: Log full response
+        console.log('[LSP] Pull diagnostics raw response:', JSON.stringify(result, null, 2));
 
         // Handle the response - can be DocumentDiagnosticReport (full or unchanged)
         // Full: { kind: 'full', items: [...diagnostics], resultId?: string }

@@ -365,11 +365,23 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
         except Exception:
             pass
 
+    # Build environment for LSP process
+    # Include Android SDK paths for Kotlin/Android projects
+    lsp_env = None
+    if language_id == "kotlin":
+        lsp_env = dict(os.environ)
+        # Ensure ANDROID_HOME is set (preferred by Gradle/Android tools)
+        android_sdk = os.getenv("ANDROID_SDK_ROOT") or os.getenv("ANDROID_HOME")
+        if android_sdk:
+            lsp_env["ANDROID_HOME"] = android_sdk
+            lsp_env["ANDROID_SDK_ROOT"] = android_sdk
+
     # Spawn fresh shell with live pipes for LSP bidirectional communication.
     try:
         record = await mgr.spawn_shell_pipe(
             full_cmd,
             cwd=str(project_root),
+            env=lsp_env,
             label=label,
             subgroups=["file_editor_cm6", "lsp"],
             autostart=True,

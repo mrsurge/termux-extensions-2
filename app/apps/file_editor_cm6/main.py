@@ -389,9 +389,26 @@ async def api_start_lsp(payload: dict = Body(...)):
     if not project_root:
         raise HTTPException(status_code=400, detail="No active project root")
 
+    # Apply per-server root override (project-scoped via sidecar SSOT).
+    effective_root = project_root
+    try:
+        root_map = {
+            "pyright": _history_store.get_lsp_server_root_rel(project_root, "pyright"),
+            "typescript": _history_store.get_lsp_server_root_rel(project_root, "typescript"),
+            "clangd": _history_store.get_lsp_server_root_rel(project_root, "clangd"),
+            "kotlin": _history_store.get_lsp_server_root_rel(project_root, "kotlin"),
+        }
+        rel = root_map.get(server_id) or ""
+        if rel:
+            candidate = (Path(project_root) / rel).expanduser().resolve(strict=False)
+            if candidate.exists() and candidate.is_dir():
+                effective_root = str(candidate)
+    except Exception:
+        effective_root = project_root
+
     started: list[dict] = []
     for language_id in language_ids:
-        record = await get_or_spawn_lsp_shell(language_id, Path(project_root))
+        record = await get_or_spawn_lsp_shell(language_id, Path(effective_root))
         if record:
             started.append({"languageId": language_id, "shellId": record.id})
 
