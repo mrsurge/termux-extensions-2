@@ -22,11 +22,15 @@ import java.nio.file.Path
  */
 object GradleOutputParser {
     
-    // Kotlin compiler error: e: /path/to/File.kt:42:15: message
-    private val KOTLIN_ERROR_PATTERN = Regex("""^e:\s+(.+):(\d+):(\d+):\s+(.+)$""")
+    // Kotlin compiler error formats:
+    //   Modern (Gradle 8+): e: file:///path/to/File.kt:42:15 message
+    //   Legacy:             e: /path/to/File.kt:42:15: message
+    private val KOTLIN_ERROR_PATTERN = Regex("""^e:\s+(?:file://)?(.+):(\d+):(\d+):?\s+(.+)$""")
     
-    // Kotlin compiler warning: w: /path/to/File.kt:10:1: message
-    private val KOTLIN_WARNING_PATTERN = Regex("""^w:\s+(.+):(\d+):(\d+):\s+(.+)$""")
+    // Kotlin compiler warning formats:
+    //   Modern (Gradle 8+): w: file:///path/to/File.kt:10:1 message
+    //   Legacy:             w: /path/to/File.kt:10:1: message
+    private val KOTLIN_WARNING_PATTERN = Regex("""^w:\s+(?:file://)?(.+):(\d+):(\d+):?\s+(.+)$""")
     
     // AAPT2 error: ERROR: /path:line: AAPT: message
     // or: /path:line: error: message

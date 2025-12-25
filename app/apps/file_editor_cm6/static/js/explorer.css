@@ -449,10 +449,10 @@
 .fe-tree-node[data-kind="dir"].fe-dir-has-untracked.fe-dir-has-staged {
   background: linear-gradient(
     135deg,
-    rgba(59, 130, 246, 0.18) 0%,
-    rgba(59, 130, 246, 0.12) 40%,
-    rgba(52, 211, 153, 0.12) 60%,
-    rgba(52, 211, 153, 0.18) 100%
+    rgba(15, 49, 101, 1.0) 0%,
+    rgba(10, 52, 89, 1.0) 40%,
+    rgba(5, 55, 57, 1.0) 60%,
+    rgba(0, 58, 43, 1.0) 100%
   );
 }
 

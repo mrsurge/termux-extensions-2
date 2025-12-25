@@ -152,6 +152,10 @@ class AndroidDiagnosticsService(
         
         LOG.info("Build #$buildId completed in ${result.durationMs}ms, exit=${result.exitCode}")
         
+        // Log raw output for debugging (first 500 chars)
+        val outputPreview = result.output.take(500).replace("\n", "\\n")
+        LOG.info("Gradle output preview: $outputPreview")
+        
         // Parse diagnostics
         val diagnostics = GradleOutputParser.parse(result.output)
         

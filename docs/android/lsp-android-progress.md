@@ -2,7 +2,7 @@
 
 **Project:** Android Pseudo-LSP for TE2 Code CM6
 **Started:** 2024-12-24
-**Last Updated:** 2024-12-24
+**Last Updated:** 2024-12-25
 
 ---
 
@@ -14,7 +14,7 @@ Building an Android-capable LSP that delegates semantic analysis to Gradle/AGP i
 
 ## Phase 0: POC — Proof of Concept
 
-### ✅ Completed (2024-12-24)
+### ✅ Completed (2024-12-24 / 2024-12-25)
 
 #### Setup & Research
 - [x] Read and understood planning documents:
@@ -47,11 +47,12 @@ Building an Android-capable LSP that delegates semantic analysis to Gradle/AGP i
 - [x] Created `server/src/main/kotlin/org/javacs/kt/gradle/` package
 
 - [x] Implemented `GradleOutputParser.kt`:
-  - Parses kotlinc error/warning patterns: `e: /path:line:col: message`
+  - Parses kotlinc error/warning patterns: `e: file:///path:line:col message`
   - Parses aapt2 error/warning patterns
   - Parses javac error/warning patterns
   - Shadow workspace path remapping support
   - Extracts failed task names for debugging
+  - **Fixed regex for Gradle 8.x output format** (modern `file://` URI prefix, space before message)
 
 - [x] Implemented `GradleCompiler.kt`:
   - Runs Gradle tasks in subprocess
@@ -68,21 +69,54 @@ Building an Android-capable LSP that delegates semantic analysis to Gradle/AGP i
   - Build ID tracking for superseding stale results
   - Connects to LanguageClient for diagnostics emission
 
+- [x] **Gutted `KotlinLanguageServer.kt` for Android-only mode:**
+  - Removed all fwcd Kotlin compiler integration
+  - Removed completion, hover, go-to-definition, etc.
+  - Only keeps TextDocumentSync for diagnostics
+  - Delegates entirely to `AndroidDiagnosticsService`
+  - Parses `initializationOptions` for module/variant (supports `JsonObject`)
+  - Reports as "Android Kotlin LSP" v0.1.0-android
+
+- [x] Created `AndroidTextDocumentService` and `AndroidWorkspaceService`:
+  - Minimal implementations that delegate to AndroidDiagnosticsService
+  - All non-diagnostic LSP methods return empty results
+
+- [x] Updated `Main.kt`:
+  - Always logs to stderr for debugging
+  - Cleaner startup flow
+
 - [x] Verified all new code compiles with fwcd project
 
-### ⏳ In Progress
+#### End-to-End Testing
+- [x] **POC VERIFIED WORKING:**
+  - Server starts and responds to `initialize`
+  - `didOpen` triggers Gradle compile (`:app:compileGeckoDebugKotlin`)
+  - Errors parsed from Gradle output
+  - `publishDiagnostics` emitted with correct line/column/message
+  - `initializationOptions` respected for module/variant selection
 
-#### Wire into LSP Server
-- [ ] Modify `KotlinTextDocumentService.kt` to use `AndroidDiagnosticsService`
-- [ ] Add Android project detection (is this a Gradle Android project?)
-- [ ] Add configuration for module/variant selection
+**Test output:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "textDocument/publishDiagnostics",
+  "params": {
+    "uri": "file:///...android/app/src/main/java/com/termux/extensions/NativeBridge.kt",
+    "diagnostics": [{
+      "range": {"start": {"line": 10, "character": 20}, "end": {"line": 10, "character": 30}},
+      "severity": 1,
+      "source": "kotlinc",
+      "message": "Unresolved reference: undefinedVariable"
+    }]
+  }
+}
+```
 
-### 📋 TODO (POC)
+### 📋 TODO (POC Remaining)
 
-- [ ] Test with real Android project (`./android/` — GeckoView app)
 - [ ] Create shellspec entry: `shellspec/android_build.yaml`
 - [ ] Wire into `lsp_shell_manager.py` as `kotlin-android` language ID
-- [ ] Verify diagnostics flow to Code CM6 Issues Overlay
+- [ ] Test end-to-end in Code CM6 (diagnostics appear in Issues Overlay)
 
 ---
 
@@ -90,11 +124,12 @@ Building an Android-capable LSP that delegates semantic analysis to Gradle/AGP i
 
 ### 📋 TODO
 
-- [ ] Shadow workspace v1 (persistent .gradle/build caches)
+- [ ] Shadow workspace v1 (for diagnostics on unsaved changes)
+- [ ] Persistent .gradle/build caches across compiles
 - [ ] Incremental file change tracking
 - [ ] Build panel UI in Code CM6
 - [ ] Play button dropdown with Android modes
-- [ ] Debounced diagnostics (10s idle trigger)
+- [ ] Debounced diagnostics (10s idle trigger) — *currently 2s, may need tuning*
 
 ---
 
@@ -117,6 +152,10 @@ Building an Android-capable LSP that delegates semantic analysis to Gradle/AGP i
 1. **LSP plumbing is done** — stdio transport, message parsing, request routing
 2. **Kotlin/JVM** — runs on Termux
 3. **We're NOT using its semantic analysis** — we replace it with Gradle
+
+### Why gut it completely?
+
+The official JetBrains Kotlin LSP handles non-Android Kotlin fine. This fork is **Android-only** — it doesn't need completion, hover, go-to-definition, etc. Those features would require the full Kotlin compiler which doesn't understand Android.
 
 ### Why Gradle for semantics?
 
@@ -152,6 +191,8 @@ On Termux, we need:
 | File | Change |
 |------|--------|
 | `gradle.properties` | Changed `javaVersion=11` → `javaVersion=21` |
+| `server/src/main/kotlin/org/javacs/kt/KotlinLanguageServer.kt` | **Gutted** — Android-only, delegates to AndroidDiagnosticsService |
+| `server/src/main/kotlin/org/javacs/kt/Main.kt` | Always log to stderr |
 
 ### TE2 Files
 
@@ -160,6 +201,13 @@ On Termux, we need:
 | `docs/android/fwcd_kotlin_lsp_fork_strategy.md` | Fork architecture documentation |
 | `docs/android/lsp-android-progress.md` | This progress tracker |
 | `.gitignore` | Added `app/static/vendor/ignored/` |
+
+### Built Artifacts
+
+| Location | Description |
+|----------|-------------|
+| `app/static/vendor/ignored/kotlin-language-server/server/build/distributions/server.zip` | Distribution zip (~85MB) |
+| `/data/data/com.termux/files/home/kls-test/server/` | Extracted test installation |
 
 ---
 
@@ -175,7 +223,7 @@ Located at `./android/` (gitignored):
 
 ## Session Log
 
-### 2024-12-24
+### 2024-12-24 (Session 1)
 
 - Initial session: research, clone, build, implement core Gradle integration
 - Duration: ~45 minutes
@@ -184,3 +232,15 @@ Located at `./android/` (gitignored):
   - 3 new Kotlin files implementing Gradle → LSP diagnostics bridge
   - Architecture documentation
   - This progress tracker
+
+### 2024-12-25 (Session 2)
+
+- Continued session: gut KLS, fix parser, end-to-end testing
+- Duration: ~2 hours
+- Key outputs:
+  - **KotlinLanguageServer.kt completely rewritten** for Android-only mode
+  - Fixed GradleOutputParser regex for Gradle 8.x `file://` URI format
+  - Added debug logging throughout
+  - Fixed initializationOptions parsing (JsonObject vs Map)
+  - **POC VERIFIED:** Full diagnostics pipeline working
+  - Updated battle plan and progress tracker

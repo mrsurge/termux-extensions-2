@@ -25,20 +25,21 @@ class Args {
 }
 
 fun main(argv: Array<String>) {
-    // Redirect java.util.logging calls (e.g. from LSP4J)
+    // Always log to stderr for debugging
+    LOG.connectStdioBackend()
     LOG.connectJULFrontend()
 
     val args = Args().also { JCommander.newBuilder().addObject(it).build().parse(*argv) }
     val (inStream, outStream) = args.tcpClientPort?.let {
         // Launch as TCP Client
-        LOG.connectStdioBackend()
         tcpConnectToClient(args.tcpClientHost, it)
     } ?: args.tcpServerPort?.let {
         // Launch as TCP Server
-        LOG.connectStdioBackend()
         tcpStartServer(it)
     } ?: Pair(System.`in`, System.out)
 
+    LOG.info("Android Kotlin LSP starting...")
+    
     val server = KotlinLanguageServer()
     val threads = Executors.newSingleThreadExecutor { Thread(it, "client") }
     val launcher = LSPLauncher.createServerLauncher(server, ExitingInputStream(inStream), outStream, threads) { it }
