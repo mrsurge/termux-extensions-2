@@ -5,6 +5,7 @@ import sys
 import os
 import hashlib
 import time
+import asyncio
 from pathlib import Path
 from typing import Optional
 import anyio
@@ -35,6 +36,9 @@ _current_watcher_token = None # Track active watcher subscription
 _edit_tracker_subscription = None
 _cache_persist_timer = None
 _cache_persist_debounce_ms = 1000  # 1 second debounce
+
+# Sprint B: per-URI throttle for TE2 draft diagnostics publishing.
+_android_draft_diag_sig: dict[str, str] = {}
 
 # --- Constants ---
 THEME_MAP = {
@@ -1958,6 +1962,68 @@ async def save_current_file(data: dict = Body(...)):
                 ok = await send_android_did_save_for_path(project_root=effective_project_root, abs_path=Path(current_file))
                 if not ok:
                     print(f"[LSP SAVE HOOK] didSave injection failed path={current_file}", file=sys.stderr)
+
+            # Sprint A: persist TE2-side Android sidecar (dependency model skeleton + fingerprints).
+            try:
+                base_project_path = str(base_project_root)
+                if _history_store.get_lsp_enabled(base_project_path) and _history_store.get_lsp_server_enabled(base_project_path, "kotlin-android"):
+                    from app.apps.file_editor_cm6.android_lang.android_lsp_bridge import update_android_sidecar_for_project
+
+                    async def _update_android_sidecar_bg() -> None:
+                        try:
+                            # 1) Update Sprint A sidecar (disk)
+                            sidecar_path = await anyio.to_thread.run_sync(
+                                lambda: update_android_sidecar_for_project(
+                                    project_root=base_project_root,
+                                    effective_project_root=effective_project_root,
+                                )
+                            )
+
+                            # 2) Sprint B: publish conservative draft diagnostics (WARNING-level)
+                            if not current_file:
+                                return
+                            if Path(current_file).suffix not in ('.kt', '.kts'):
+                                return
+
+                            from app.apps.file_editor_cm6.android_lang.draft_diagnostics import build_draft_diagnostics
+                            from ..lsp_ws import publish_draft_diagnostics_to_client
+
+                            uri = f"file://{current_file}"
+
+                            def _load_sidecar_json() -> dict:
+                                try:
+                                    if sidecar_path and Path(sidecar_path).exists():
+                                        return json.loads(Path(sidecar_path).read_text(encoding='utf-8'))
+                                except Exception:
+                                    return {}
+                                return {}
+
+                            te2_sidecar = await anyio.to_thread.run_sync(_load_sidecar_json)
+                            diags = build_draft_diagnostics(te2_sidecar=te2_sidecar or {}, uri=uri)
+
+                            dep = (te2_sidecar or {}).get('dependencyModel') or {}
+                            android_jar = ((dep.get('androidSdk') or {}).get('androidJar') or '')
+                            java_home = ((dep.get('jvm') or {}).get('javaHome') or '')
+                            sync_fp = (te2_sidecar or {}).get('syncFingerprint') or ''
+
+                            sig = f"{sync_fp}|aj={bool(android_jar)}|jh={bool(java_home)}|n={len(diags)}"
+                            sig_key = f"{effective_project_root}::{uri}"
+                            if _android_draft_diag_sig.get(sig_key) == sig:
+                                return
+                            _android_draft_diag_sig[sig_key] = sig
+
+                            await publish_draft_diagnostics_to_client(
+                                language_id='kotlin-android',
+                                project_root=effective_project_root,
+                                uri=uri,
+                                draft_diagnostics=diags,
+                            )
+                        except Exception as exc:
+                            print(f"[ANDROID SIDECAR] update/publish failed: {exc}", file=sys.stderr)
+
+                    asyncio.create_task(_update_android_sidecar_bg())
+            except Exception:
+                pass
         except Exception as e:
             print(f"[LSP SAVE HOOK] exception: {e}", file=sys.stderr)
 

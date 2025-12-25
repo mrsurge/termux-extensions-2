@@ -18,6 +18,8 @@ from typing import Any, Dict, Optional, Tuple
 
 import socketio
 
+_LSP_NAMESPACE_INSTANCE: Optional["LSPSocketIONamespace"] = None
+
 from framework_shells import get_manager, PipeState
 from .lsp_shell_manager import get_or_spawn_lsp_shell
 from .project_sidecar import ProjectSidecar
@@ -145,6 +147,73 @@ def _fs_fingerprint(project_root: Path, *, max_files: int = 5000) -> str:
 
 def _compute_repo_fingerprint(project_root: Path) -> str:
     return _git_fingerprint(project_root) or _fs_fingerprint(project_root)
+
+
+async def publish_draft_diagnostics_to_client(
+    *,
+    language_id: str,
+    project_root: Path,
+    uri: str,
+    draft_diagnostics: list[dict],
+) -> bool:
+    """Publish TE2-generated draft diagnostics without clobbering backend diagnostics.
+
+    CM6 overwrites diagnostics per-URI on each publish. To avoid wiping Gradle-backed
+    diagnostics, merge draft diagnostics with the last diagnostics received from
+    the backend for that URI.
+    """
+
+    ns = _LSP_NAMESPACE_INSTANCE
+    if ns is None:
+        return False
+
+    key = (str(language_id), str(project_root))
+    session = ns.backend_sessions.get(key)
+    if not session:
+        return False
+
+    sid = session.get("current_sid")
+    if not sid:
+        return False
+
+    base = []
+    try:
+        cache = session.get("diagnostics_by_uri")
+        if isinstance(cache, dict):
+            base = cache.get(uri) or []
+    except Exception:
+        base = []
+
+    try:
+        base_no_draft = [
+            d
+            for d in (base if isinstance(base, list) else [])
+            if (d or {}).get("source") != "te2-android:draft"
+        ]
+    except Exception:
+        base_no_draft = base if isinstance(base, list) else []
+
+    merged = base_no_draft + (draft_diagnostics if isinstance(draft_diagnostics, list) else [])
+
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "textDocument/publishDiagnostics",
+        "params": {"uri": uri, "diagnostics": merged},
+    }
+
+    try:
+        await ns.emit("lsp_server_to_client", payload, to=sid)
+        try:
+            cache = session.get("diagnostics_by_uri")
+            if not isinstance(cache, dict):
+                cache = {}
+                session["diagnostics_by_uri"] = cache
+            cache[uri] = merged
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
 
 
 async def send_lsp_notification(
@@ -368,6 +437,8 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
     
     def __init__(self, namespace="/lsp"):
         super().__init__(namespace)
+        global _LSP_NAMESPACE_INSTANCE
+        _LSP_NAMESPACE_INSTANCE = self
         # sid -> key (language_id, project_root)
         self.sid_to_key: Dict[str, Tuple[str, str]] = {}
 
@@ -500,6 +571,8 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
             # Whether we've forwarded the post-initialize "initialized" notification to the backend.
             # Some servers (notably pyright) may not fully serve requests until they receive it.
             "backend_initialized_notified": False,
+            # Latest diagnostics forwarded from backend (per URI), used for safe TE2-side merges.
+            "diagnostics_by_uri": {},
             "dead": False,
         }
         # Important: publish session before spawning the bridge task. The bridge
@@ -884,13 +957,23 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                     except Exception:
                         pass
 
-                    # Log publishDiagnostics for debugging
+                    # Log + cache publishDiagnostics for debugging + safe TE2-side merges.
                     try:
                         if isinstance(msg, dict) and msg.get("method") == "textDocument/publishDiagnostics":
                             params = msg.get("params") or {}
                             diag_uri = params.get("uri", "?")
-                            diag_count = len(params.get("diagnostics") or [])
+                            diags = params.get("diagnostics") or []
+                            diag_count = len(diags)
                             _lsp_error(f"[LSP WS] publishDiagnostics uri={diag_uri} count={diag_count}")
+                            try:
+                                cache = session.get("diagnostics_by_uri")
+                                if not isinstance(cache, dict):
+                                    cache = {}
+                                    session["diagnostics_by_uri"] = cache
+                                if isinstance(diag_uri, str) and diag_uri:
+                                    cache[diag_uri] = list(diags) if isinstance(diags, list) else []
+                            except Exception:
+                                pass
                     except Exception:
                         pass
 

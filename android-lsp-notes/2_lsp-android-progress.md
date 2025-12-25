@@ -2,7 +2,7 @@
 
 **Project:** Android Pseudo-LSP for TE2 Code CM6
 **Started:** 2024-12-24
-**Last Updated:** 2024-12-25
+**Last Updated:** 2025-12-25
 
 ---
 
@@ -14,7 +14,7 @@ Building an Android-capable LSP that delegates semantic analysis to Gradle/AGP i
 
 ## Phase 0: POC — Proof of Concept
 
-### ✅ Completed (2024-12-24 / 2024-12-25)
+### ✅ Completed (2024-12-24 / 2025-12-25)
 
 #### Setup & Research
 - [x] Read and understood planning documents:
@@ -68,6 +68,13 @@ Building an Android-capable LSP that delegates semantic analysis to Gradle/AGP i
   - Handles didOpen/didChange/didSave/didClose
   - Build ID tracking for superseding stale results
   - Connects to LanguageClient for diagnostics emission
+  - **TE2-aware state gating:** consumes `workspace/didChangeConfiguration` (`te2Android.repoFingerprint`, `dirtyFiles`)
+  - **Compile policy:** no compile on typing; compile on save (unless fingerprint unchanged → replay cached)
+  - **Persistent cache:** Android sidecar JSON stored under `${cacheRoot}/${lspProjectId}/sidecar.json`
+  - **Cache replay:**
+    - on LSP start when fingerprint matches
+    - on `didOpen` for the opened URI (supports mid-flight page refresh)
+  - **Explicit empties:** persists `uri: []` entries for previously-dirty files that disappear from current Gradle output
 
 - [x] **Gutted `KotlinLanguageServer.kt` for Android-only mode:**
   - Removed all fwcd Kotlin compiler integration
@@ -79,6 +86,7 @@ Building an Android-capable LSP that delegates semantic analysis to Gradle/AGP i
 
 - [x] Created `AndroidTextDocumentService` and `AndroidWorkspaceService`:
   - Minimal implementations that delegate to AndroidDiagnosticsService
+  - **WorkspaceService now consumes didChangeConfiguration** to accept TE2 fingerprint state
   - All non-diagnostic LSP methods return empty results
 
 - [x] Updated `Main.kt`:
@@ -90,10 +98,16 @@ Building an Android-capable LSP that delegates semantic analysis to Gradle/AGP i
 #### End-to-End Testing
 - [x] **POC VERIFIED WORKING:**
   - Server starts and responds to `initialize`
-  - `didOpen` triggers Gradle compile (`:app:compileGeckoDebugKotlin`)
+  - `initialize` injects/consumes:
+    - `module`, `variant`
+    - `lspProjectId` (stable project identifier)
+    - `cacheRoot` (TE2-controlled cache root)
+  - Gradle compile triggers:
+    - initial compile on first open when no cache exists
+    - subsequent compiles on save when repo fingerprint changes
   - Errors parsed from Gradle output
   - `publishDiagnostics` emitted with correct line/column/message
-  - `initializationOptions` respected for module/variant selection
+  - **Cache replay works on refresh:** cached diags re-emit on `didOpen` for the opened file
 
 **Test output:**
 ```json
@@ -124,12 +138,14 @@ Building an Android-capable LSP that delegates semantic analysis to Gradle/AGP i
 - [x] Fix variant detection (inject `module=app, variant=GeckoDebug` via lsp_ws.py)
 - [x] **Test end-to-end in Code CM6 — SQUIGGLES APPEAR! ✅**
 
-## ✅ POC COMPLETE (2024-12-25)
+## ✅ POC COMPLETE (2025-12-25)
 
 The Android Kotlin LSP is fully integrated with Code CM6:
 - Diagnostics flow from Gradle → LSP → Socket.IO → CodeMirror
 - Squiggle underlines render on error lines
 - Issues Overlay shows error count and messages
+- **Persistent diagnostics cache** survives page refreshes and can be replayed instantly
+- **Save-triggered compile** is reliable even though the iframe LSP client does not send `didSave`
 
 ---
 
@@ -197,7 +213,8 @@ On Termux, we need:
 |------|---------|
 | `server/src/main/kotlin/org/javacs/kt/gradle/GradleOutputParser.kt` | Parse Gradle output for diagnostics |
 | `server/src/main/kotlin/org/javacs/kt/gradle/GradleCompiler.kt` | Run Gradle tasks, capture output |
-| `server/src/main/kotlin/org/javacs/kt/gradle/AndroidDiagnosticsService.kt` | Manage diagnostics lifecycle |
+| `server/src/main/kotlin/org/javacs/kt/gradle/AndroidDiagnosticsService.kt` | Manage diagnostics lifecycle (TE2 state + cache) |
+| `server/src/main/kotlin/org/javacs/kt/gradle/AndroidSidecar.kt` | Persistent diagnostics cache (`sidecar.json`) |
 
 ### Modified Files (in fork)
 
@@ -218,7 +235,10 @@ On Termux, we need:
 | `app/apps/file_editor_cm6/lsp_shell_manager.py` | Added `_spawn_android_kotlin_lsp()` via Orchestrator |
 | `app/apps/file_editor_cm6/template.html` | Added Android Kotlin LSP row to Language Servers modal |
 | `app/apps/file_editor_cm6/main.js` | Wired up Android Kotlin LSP toggle/start/rootRel handlers |
-| `app/apps/file_editor_cm6/project_sidecar.py` | Added `kotlin-android` to LSP schema |
+| `app/apps/file_editor_cm6/project_sidecar.py` | Added `kotlin-android` to LSP schema; added `lsp.project_id` + dump_raw helper |
+| `app/apps/file_editor_cm6/lsp_ws.py` | Injects init options (`lspProjectId`, `cacheRoot`); sends repo fingerprints; server-side didSave injection; serialized pipe writes |
+| `app/apps/file_editor_cm6/main.py` | Debug endpoints (`/history/raw`, `/project/sidecar/raw`, `/debug/state/raw`); didSave injection on legacy `/write` path; rootRel-aware fingerprinting |
+| `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` | didSave injection on iframe `/save` path; rootRel-aware fingerprinting |
 
 ### Built Artifacts
 
@@ -268,3 +288,30 @@ Located at `./android/` (gitignored):
   - Added API endpoints in main.py (start/stop/status)
   - Fixed variant injection in lsp_ws.py (GeckoDebug for product flavors)
   - **POC COMPLETE:** Squiggles appear in Code CM6! ✅
+
+### 2025-12-25 (Session 3)
+
+- Continued session: make Android Kotlin LSP "fast" (cache + fingerprint gating) and correct save triggers
+- Key outputs:
+  - Added `lsp.project_id` (stable per-project identifier) in ProjectSidecar
+  - Added debug endpoints:
+    - `GET /history/raw`
+    - `GET /project/sidecar/raw`
+    - `GET /debug/state/raw`
+  - `lsp_ws.py` improvements:
+    - inject `initializationOptions.lspProjectId` + `cacheRoot`
+    - compute short repo fingerprint (20 hex chars)
+      - git mode: `HEAD + status + diff` (diff included so repeated saves change fingerprint)
+      - fallback mode: filesystem manifest hash
+    - send `workspace/didChangeConfiguration` to Android LSP with `{repoFingerprint, dirtyFiles}`
+    - add per-shell stdin write lock to prevent interleaved frames
+  - Android Kotlin LSP improvements:
+    - consumes didChangeConfiguration (TE2 state)
+    - caches diagnostics in `${cacheRoot}/${lspProjectId}/sidecar.json`
+    - replays cached diagnostics on start (fingerprint match)
+    - replays cached diagnostics per-URI on `didOpen` (supports mid-flight refresh)
+    - persists explicit empty diagnostics entries for previously-dirty files that are now clean
+    - compile triggers: on open only if no cache; on save if fingerprint changed
+  - Server-side save trigger (critical): iframe LSP client does not send `didSave`
+    - Inject `workspace/didChangeConfiguration` + `textDocument/didSave` on save endpoints
+    - RootRel-aware: fingerprint must be computed from the same effective project root as `connect_lsp`
