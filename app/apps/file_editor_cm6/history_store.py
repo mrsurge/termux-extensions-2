@@ -357,11 +357,20 @@ class HistoryStore:
         with self._lock:
             entry = self._touch_project_locked(normalized)
             self._save_locked()
-            return {
-                "path": normalized,
-                "label": entry["label"],
-                "opened_at": entry["opened_at"],
-            }
+
+        # Blanket invariant: every opened project gets an lspProjectId.
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized)
+            sidecar.get_or_create_lsp_project_id()
+            sidecar.save()
+        except Exception:
+            pass
+
+        return {
+            "path": normalized,
+            "label": entry["label"],
+            "opened_at": entry["opened_at"],
+        }
 
     def touch_file(self, project_path: str, file_path: str) -> Dict[str, object]:
         normalized_project = self._normalize_project_path(project_path)
@@ -426,6 +435,16 @@ class HistoryStore:
     def list_projects(self) -> List[Dict[str, object]]:
         with self._lock:
             return list(self._data.get("recent_projects", []))
+
+    def dump_raw(self) -> Dict[str, Any]:
+        """Return the raw in-memory history store state (debug endpoint helper)."""
+        with self._lock:
+            data = self._data
+        try:
+            return json.loads(json.dumps(data, ensure_ascii=False, default=str))
+        except Exception:
+            # Best-effort fallback; callers should treat this as debug-only.
+            return {"error": "failed_to_dump", "repr": repr(data)}
 
     def list_files(self, project_path: str) -> List[Dict[str, object]]:
         """List recent files for a project — sidecar is SSOT with lazy migration."""
@@ -532,7 +551,17 @@ class HistoryStore:
                 self._touch_project_locked(normalized)
             self._data["active_project"] = normalized
             self._save_locked()
-            return normalized
+
+        # Blanket invariant: every opened project gets an lspProjectId.
+        if normalized:
+            try:
+                sidecar = ProjectSidecar.load_or_create(normalized)
+                sidecar.get_or_create_lsp_project_id()
+                sidecar.save()
+            except Exception:
+                pass
+
+        return normalized
 
     def get_active_project(self) -> Optional[str]:
         with self._lock:

@@ -7,8 +7,10 @@ Uses the "Piggyback" strategy to attach /lsp namespace to existing NiceGUI Socke
 """
 
 import asyncio
+import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -18,6 +20,17 @@ import socketio
 
 from framework_shells import get_manager, PipeState
 from .lsp_shell_manager import get_or_spawn_lsp_shell
+from .project_sidecar import ProjectSidecar
+
+_PIPE_WRITE_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
+def _get_pipe_lock(shell_id: str) -> asyncio.Lock:
+    lock = _PIPE_WRITE_LOCKS.get(shell_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _PIPE_WRITE_LOCKS[shell_id] = lock
+    return lock
 
 
 _LSP_DEBUG = os.getenv("TE2_LSP_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -36,6 +49,212 @@ def _lsp_error(msg: str) -> None:
         print(msg, file=sys.stderr)
     except Exception:
         pass
+
+
+def _git_fingerprint(project_root: Path) -> Optional[str]:
+    git_dir = project_root / ".git"
+    if not git_dir.exists():
+        return None
+
+    try:
+        head = subprocess.run(
+            ["git", "--no-pager", "rev-parse", "HEAD"],
+            cwd=str(project_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+            text=True,
+        ).stdout.strip()
+
+        status = subprocess.run(
+            ["git", "--no-pager", "status", "--porcelain=v1", "-z"],
+            cwd=str(project_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        ).stdout
+
+        # Include diff content so successive saves change the fingerprint even when porcelain lines don't.
+        diff = subprocess.run(
+            ["git", "--no-pager", "diff", "--no-color"],
+            cwd=str(project_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        ).stdout
+
+        payload = (
+            ("HEAD=" + head + "\n").encode("utf-8")
+            + b"STATUS\0" + status
+            + b"DIFF\0" + diff
+        )
+        # Short, stable id for comparisons/logs.
+        return hashlib.sha256(payload).hexdigest()[:20]
+    except Exception:
+        return None
+
+
+def _fs_fingerprint(project_root: Path, *, max_files: int = 5000) -> str:
+    # Cheap-ish fallback when no git repo exists.
+    exts = {".kt", ".java", ".xml", ".gradle", ".kts", ".properties"}
+    pinned = {
+        "settings.gradle",
+        "settings.gradle.kts",
+        "build.gradle",
+        "build.gradle.kts",
+        "gradle.properties",
+        "gradle/wrapper/gradle-wrapper.properties",
+    }
+
+    items: list[str] = []
+
+    for rel in sorted(pinned):
+        p = project_root / rel
+        try:
+            st = p.stat()
+        except Exception:
+            continue
+        items.append(f"{rel}|{st.st_mtime_ns}|{st.st_size}")
+
+    count = 0
+    for root, _dirs, files in os.walk(project_root):
+        for name in files:
+            if count >= max_files:
+                break
+            p = Path(root) / name
+            try:
+                rel = str(p.relative_to(project_root))
+            except Exception:
+                continue
+            if rel in pinned:
+                continue
+            if p.suffix.lower() not in exts:
+                continue
+            try:
+                st = p.stat()
+            except Exception:
+                continue
+            items.append(f"{rel}|{st.st_mtime_ns}|{st.st_size}")
+            count += 1
+        if count >= max_files:
+            break
+
+    items.sort()
+    return hashlib.sha256("\n".join(items).encode("utf-8")).hexdigest()[:20]
+
+
+def _compute_repo_fingerprint(project_root: Path) -> str:
+    return _git_fingerprint(project_root) or _fs_fingerprint(project_root)
+
+
+async def send_lsp_notification(
+    *,
+    language_id: str,
+    project_root: Path,
+    message: dict,
+    spawn_if_missing: bool = False,
+) -> bool:
+    """Send a single JSON-RPC notification to a running LSP backend.
+
+    This bypasses the iframe client entirely (useful for server-side hooks like /write).
+    """
+
+    mgr = await get_manager()
+
+    rec = await mgr.find_shell_by_label(f"lsp:{language_id}", status="running")
+    if not rec and spawn_if_missing:
+        rec = await get_or_spawn_lsp_shell(str(language_id), project_root)
+
+    if not rec:
+        try:
+            _lsp_error(f"[LSP SAVE HOOK] no running shell for {language_id}")
+        except Exception:
+            pass
+        return False
+
+    pipe_state = mgr.get_pipe_state(rec.id)
+    if not pipe_state or not getattr(pipe_state, "process", None) or not getattr(pipe_state.process, "stdin", None):
+        try:
+            _lsp_error(f"[LSP SAVE HOOK] missing pipe_state for shell={rec.id}")
+        except Exception:
+            pass
+        return False
+
+    lock = _get_pipe_lock(rec.id)
+    async with lock:
+        try:
+            # Add LSP framing (Content-Length header)
+            body = json.dumps(message).encode("utf-8")
+            header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+            pipe_state.process.stdin.write(header + body)
+            await pipe_state.process.stdin.drain()
+            return True
+        except Exception:
+            return False
+
+
+async def send_android_did_save_for_path(*, project_root: Path, abs_path: Path) -> bool:
+    """On successful save, push te2Android state + didSave into kotlin-android LSP."""
+
+    try:
+        repo_fp = await asyncio.to_thread(_compute_repo_fingerprint, project_root)
+    except Exception:
+        repo_fp = None
+
+    dirty_files: list[str] = []
+    try:
+        sidecar = ProjectSidecar.load_or_create(str(project_root))
+        for entry in sidecar.list_project_drafts():
+            fp = entry.get("file_path")
+            if fp:
+                dirty_files.append(str(fp))
+    except Exception:
+        pass
+
+    settings_msg = {
+        "jsonrpc": "2.0",
+        "method": "workspace/didChangeConfiguration",
+        "params": {
+            "settings": {
+                "te2Android": {
+                    "repoFingerprint": repo_fp,
+                    "dirtyFiles": dirty_files,
+                    "updatedAt": int(time.time() * 1000),
+                }
+            }
+        },
+    }
+
+    uri = f"file://{str(abs_path)}"
+    did_save_msg = {
+        "jsonrpc": "2.0",
+        "method": "textDocument/didSave",
+        "params": {
+            "textDocument": {
+                "uri": uri,
+            }
+        },
+    }
+
+    ok1 = await send_lsp_notification(
+        language_id="kotlin-android",
+        project_root=project_root,
+        message=settings_msg,
+        spawn_if_missing=False,
+    )
+    ok2 = await send_lsp_notification(
+        language_id="kotlin-android",
+        project_root=project_root,
+        message=did_save_msg,
+        spawn_if_missing=False,
+    )
+
+    try:
+        _lsp_error(f"[LSP SAVE HOOK] sent settings={ok1} didSave={ok2} uri={uri}")
+    except Exception:
+        pass
+
+    return bool(ok1 and ok2)
 
 
 class LSPFrameParser:
@@ -93,6 +312,59 @@ class LSPFrameParser:
 
 class LSPSocketIONamespace(socketio.AsyncNamespace):
     """Socket.IO namespace for LSP communication."""
+
+    async def _send_android_state(self, sid: str, *, force: bool = False) -> None:
+        key = self.sid_to_key.get(sid)
+        session = self.backend_sessions.get(key) if key else None
+        if not session or session.get("language_id") != "kotlin-android":
+            return
+
+        now = time.time()
+        last = float(session.get("android_state_last_sent") or 0.0)
+        if not force and (now - last) < 1.0:
+            return
+
+        project_root_raw = str(session.get("project_root") or "").strip()
+        if not project_root_raw:
+            return
+
+        try:
+            project_root = Path(project_root_raw)
+        except Exception:
+            return
+
+        try:
+            repo_fp = await asyncio.to_thread(_compute_repo_fingerprint, project_root)
+        except Exception:
+            return
+
+        dirty_files: list[str] = []
+        try:
+            sidecar = ProjectSidecar.load_or_create(project_root_raw)
+            # Drafts in ProjectSidecar session_cache are SSOT for "dirty".
+            for entry in sidecar.list_project_drafts():
+                fp = entry.get("file_path")
+                if fp:
+                    dirty_files.append(str(fp))
+        except Exception:
+            pass
+
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "te2Android": {
+                        "repoFingerprint": repo_fp,
+                        "dirtyFiles": dirty_files,
+                        "updatedAt": int(now * 1000),
+                    }
+                }
+            },
+        }
+
+        await self._forward_to_backend(sid, payload)
+        session["android_state_last_sent"] = now
     
     def __init__(self, namespace="/lsp"):
         super().__init__(namespace)
@@ -362,6 +634,13 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                     _lsp_error(f"[LSP WS] didOpen sid={sid} uri={uri} lang={lang}")
                 except Exception:
                     pass
+
+                # For Android Kotlin LSP, push current repo/dirty state on open.
+                try:
+                    if session.get("language_id") == "kotlin-android":
+                        await self._send_android_state(sid, force=False)
+                except Exception:
+                    pass
             if method == "initialize":
                 if session.get("initialized") and session.get("init_result_template") is not None:
                     _lsp_debug(f"[LSP WS] Short-circuit initialize for sid={sid}")
@@ -373,15 +652,48 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                 if session.get("language_id") == "kotlin-android":
                     params = message.setdefault("params", {})
                     init_opts = params.setdefault("initializationOptions", {})
+
                     # Default to GeckoDebug variant (most common for Termux Android dev)
                     init_opts.setdefault("module", "app")
                     init_opts.setdefault("variant", "GeckoDebug")
+
+                    # Stable per-project id (SSOT: ProjectSidecar.lsp.project_id)
+                    try:
+                        project_root = str(session.get("project_root") or "")
+                        if project_root:
+                            sidecar = ProjectSidecar.load_or_create(project_root)
+                            pid = sidecar.get_or_create_lsp_project_id()
+                            try:
+                                sidecar.save()
+                            except Exception:
+                                pass
+                            init_opts.setdefault("lspProjectId", pid)
+                    except Exception:
+                        pass
+
+                    # TE2-controlled cache root (LSP will own per-project caches under this root)
+                    try:
+                        cache_root = (os.getenv("TE2_ANDROID_LSP_CACHE_ROOT") or "").strip()
+                        if not cache_root:
+                            cache_root = str(Path.home() / ".cache" / "te2_android_lsp")
+                        init_opts.setdefault("cacheRoot", cache_root)
+                    except Exception:
+                        pass
+
                     _lsp_debug(f"[LSP WS] Injected Android initializationOptions: {init_opts}")
             elif method == "initialized":
                 # Only forward the first "initialized" per backend session.
                 if session.get("backend_initialized_notified"):
                     return
                 session["backend_initialized_notified"] = True
+            elif method == "textDocument/didSave":
+                # For Android Kotlin LSP, push current repo/dirty state before save-driven compile logic.
+                try:
+                    if session.get("language_id") == "kotlin-android":
+                        _lsp_error(f"[LSP WS] didSave -> sending te2Android state sid={sid}")
+                        await self._send_android_state(sid, force=True)
+                except Exception:
+                    pass
             elif method in ("shutdown", "exit"):
                 return
 
@@ -458,24 +770,33 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         body = json.dumps(message).encode("utf-8")
         header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
         
-        try:
-            pipe_state.process.stdin.write(header + body)
-            await pipe_state.process.stdin.drain()
-            # Confirm writes for key methods; helps distinguish "never wrote" vs "no response".
+        lock = _get_pipe_lock(session.get("shell_id") or "")
+        async with lock:
             try:
-                if isinstance(message, dict):
-                    m = message.get("method")
-                    mid = message.get("id")
-                    if m in ("initialize", "initialized", "textDocument/didOpen", "textDocument/documentSymbol"):
-                        _lsp_error(f"[LSP WS] wrote method={m} id={mid} bytes={len(body)} sid={sid}")
-            except Exception:
-                pass
-        except Exception as e:
-            _lsp_error(f"[LSP WS] Write error: {e}")
-            try:
-                session["dead"] = True
-            except Exception:
-                pass
+                pipe_state.process.stdin.write(header + body)
+                await pipe_state.process.stdin.drain()
+                # Confirm writes for key methods; helps distinguish "never wrote" vs "no response".
+                try:
+                    if isinstance(message, dict):
+                        m = message.get("method")
+                        mid = message.get("id")
+                        if m in (
+                            "initialize",
+                            "initialized",
+                            "textDocument/didOpen",
+                            "textDocument/didSave",
+                            "workspace/didChangeConfiguration",
+                            "textDocument/documentSymbol",
+                        ):
+                            _lsp_error(f"[LSP WS] wrote method={m} id={mid} bytes={len(body)} sid={sid}")
+                except Exception:
+                    pass
+            except Exception as e:
+                _lsp_error(f"[LSP WS] Write error: {e}")
+                try:
+                    session["dead"] = True
+                except Exception:
+                    pass
     
     async def _bridge_backend_output(self, key: Tuple[str, str]):
         """Read from backend stdout forever; deliver to current sid (session broker)."""

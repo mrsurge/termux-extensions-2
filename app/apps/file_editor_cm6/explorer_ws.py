@@ -324,6 +324,7 @@ async def reset_project_session(new_project_path: str) -> bool:
     # Ensure sidecar exists for the project (lazy create) and report whether it was new.
     was_new_sidecar = not ProjectSidecar.sidecar_exists(normalized_path)
     sidecar = ProjectSidecar.load_or_create(normalized_path)
+    sidecar.get_or_create_lsp_project_id()
     # NOTE: We intentionally do NOT clear session_cache or tracked_jobs here.
     # Drafts and jobs persist across project switches.
     sidecar.save()

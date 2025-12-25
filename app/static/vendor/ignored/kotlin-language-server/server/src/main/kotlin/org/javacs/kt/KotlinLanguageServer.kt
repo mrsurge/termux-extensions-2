@@ -36,7 +36,7 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
     private lateinit var projectRoot: Path
     private lateinit var androidDiagnostics: AndroidDiagnosticsService
     private val textDocumentService = AndroidTextDocumentService(this)
-    private val workspaceService = AndroidWorkspaceService()
+    private val workspaceService = AndroidWorkspaceService(this)
     
     companion object {
         val VERSION: String = "0.1.0-android"
@@ -78,24 +78,33 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
         
         val module: String
         val variant: String
-        
+        val lspProjectId: String
+        val cacheRoot: String
+
         when (options) {
             is Map<*, *> -> {
                 module = options["module"]?.toString() ?: "app"
                 variant = options["variant"]?.toString() ?: "Debug"
+                lspProjectId = options["lspProjectId"]?.toString() ?: ""
+                cacheRoot = options["cacheRoot"]?.toString() ?: ""
             }
             is com.google.gson.JsonObject -> {
                 module = options.get("module")?.asString ?: "app"
                 variant = options.get("variant")?.asString ?: "Debug"
+                lspProjectId = options.get("lspProjectId")?.asString ?: ""
+                cacheRoot = options.get("cacheRoot")?.asString ?: ""
             }
             else -> {
                 module = "app"
                 variant = "Debug"
+                lspProjectId = ""
+                cacheRoot = ""
             }
         }
         
         LOG.info("Android config: module=$module, variant=$variant")
-        
+        LOG.info("Android cache: lspProjectId=$lspProjectId, cacheRoot=$cacheRoot")
+
         // Initialize Android diagnostics service
         androidDiagnostics = AndroidDiagnosticsService(
             projectRoot,
@@ -106,6 +115,17 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
             )
         )
         androidDiagnostics.connect(client)
+
+        // Cache config (TE2 passes these via initializationOptions)
+        if (lspProjectId.isNotBlank() && cacheRoot.isNotBlank()) {
+            try {
+                androidDiagnostics.configureSidecar(lspProjectId, Paths.get(cacheRoot))
+            } catch (e: Exception) {
+                LOG.warn("Failed to configure sidecar: ${e.message}")
+            }
+        } else {
+            LOG.info("No sidecar configured (missing lspProjectId/cacheRoot)")
+        }
         
         // Minimal capabilities - only diagnostics
         val capabilities = ServerCapabilities().apply {
@@ -121,6 +141,10 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware, Closeable {
     
     override fun initialized(params: InitializedParams?) {
         LOG.info("Client initialized, ready for diagnostics")
+        try {
+            androidDiagnostics.maybeReplayCachedDiagnostics()
+        } catch (_: Exception) {
+        }
     }
 
     override fun shutdown(): CompletableFuture<Any> {
@@ -202,12 +226,47 @@ class AndroidTextDocumentService(
 /**
  * Minimal WorkspaceService - mostly no-ops for Android LSP.
  */
-class AndroidWorkspaceService : WorkspaceService {
+class AndroidWorkspaceService(
+    private val server: KotlinLanguageServer,
+) : WorkspaceService {
     override fun didChangeConfiguration(params: DidChangeConfigurationParams) {
-        LOG.debug("didChangeConfiguration (ignored)")
+        val settings = params.settings
+        try {
+            val (repoFingerprint, dirtyFiles) = AndroidWorkspaceSettings.extractTe2Android(settings)
+            LOG.info("TE2 didChangeConfiguration: repoFingerprint=${repoFingerprint ?: "<null>"} dirtyFiles=${dirtyFiles.size}")
+            server.getAndroidDiagnostics().updateTe2State(repoFingerprint, dirtyFiles)
+        } catch (e: Exception) {
+            LOG.debug("didChangeConfiguration parse failed: ${e.message}")
+        }
     }
-    
+
     override fun didChangeWatchedFiles(params: DidChangeWatchedFilesParams) {
         LOG.debug("didChangeWatchedFiles (ignored)")
+    }
+}
+
+object AndroidWorkspaceSettings {
+    fun extractTe2Android(settings: Any?): Pair<String?, List<String>> {
+        if (settings == null) return Pair(null, emptyList())
+
+        // Expected shape: { te2Android: { repoFingerprint: string, dirtyFiles: [] } }
+        if (settings is Map<*, *>) {
+            val te2 = settings["te2Android"]
+            if (te2 is Map<*, *>) {
+                val fp = te2["repoFingerprint"]?.toString()?.trim().orEmpty().ifBlank { null }
+                val df = (te2["dirtyFiles"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                return Pair(fp, df)
+            }
+        }
+
+        if (settings is com.google.gson.JsonObject) {
+            val te2 = settings.getAsJsonObject("te2Android")
+            val fp = te2?.get("repoFingerprint")?.asString?.trim().orEmpty().ifBlank { null }
+            val arr = te2?.getAsJsonArray("dirtyFiles")
+            val df = arr?.mapNotNull { it?.asString } ?: emptyList()
+            return Pair(fp, df)
+        }
+
+        return Pair(null, emptyList())
     }
 }

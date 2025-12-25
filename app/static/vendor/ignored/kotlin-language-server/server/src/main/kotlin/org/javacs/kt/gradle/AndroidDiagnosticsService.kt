@@ -1,11 +1,13 @@
 package org.javacs.kt.gradle
 
 import org.eclipse.lsp4j.*
+import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.services.LanguageClient
 import org.javacs.kt.LOG
 import org.javacs.kt.util.AsyncExecutor
 import org.javacs.kt.util.Debouncer
 import java.net.URI
+import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
@@ -61,6 +63,16 @@ class AndroidDiagnosticsService(
     // Build state tracking
     private var lastBuildId = 0
     private var currentBuildId = 0
+
+    // TE2-provided state (via workspace/didChangeConfiguration)
+    @Volatile private var te2RepoFingerprint: String? = null
+    @Volatile private var te2DirtyFiles: List<String> = emptyList()
+    @Volatile private var lastReplayFingerprint: String? = null
+
+    // Sidecar caching (optional)
+    private var sidecarPath: Path? = null
+    private var sidecarProjectId: String? = null
+    private var sidecar: AndroidSidecarV1? = null
     
     data class OpenFileState(
         val uri: URI,
@@ -72,21 +84,75 @@ class AndroidDiagnosticsService(
         this.client = client
         LOG.info("AndroidDiagnosticsService connected to client")
     }
+
+    fun updateTe2State(repoFingerprint: String?, dirtyFiles: List<String>) {
+        te2RepoFingerprint = repoFingerprint?.trim()?.ifBlank { null }
+        te2DirtyFiles = dirtyFiles
+        LOG.debug("TE2 state updated: repoFingerprint=${te2RepoFingerprint} dirtyFiles=${te2DirtyFiles.size}")
+
+        // Opportunistic cache replay when we first learn the repo fingerprint.
+        val fp = te2RepoFingerprint
+        if (!fp.isNullOrBlank() && fp != lastReplayFingerprint) {
+            lastReplayFingerprint = fp
+            maybeReplayCachedDiagnostics()
+        }
+    }
+
+    fun configureSidecar(lspProjectId: String, cacheRoot: Path) {
+        sidecarProjectId = lspProjectId
+        val projectDir = cacheRoot.resolve(lspProjectId)
+        Files.createDirectories(projectDir)
+        sidecarPath = projectDir.resolve("sidecar.json")
+        sidecar = sidecarPath?.let { AndroidSidecarIO.load(it) }
+        LOG.info("Sidecar configured: id=$lspProjectId path=$sidecarPath loaded=${sidecar != null}")
+    }
+
+    fun maybeReplayCachedDiagnostics() {
+        val fp = te2RepoFingerprint
+        val sc = sidecar
+        if (fp.isNullOrBlank() || sc == null) return
+        if (sc.lastKnownRepoFingerprint != fp) return
+        if (sc.diagnosticsByUri.isEmpty()) return
+        LOG.info("Replaying cached diagnostics (fingerprint match)")
+        replayCached(sc, provenance = "cached")
+    }
     
     fun didOpen(uri: URI, version: Int) {
         openFiles[uri] = OpenFileState(uri, version, isDirty = false)
         LOG.info("Opened: $uri")
-        
-        // Trigger initial diagnostics
-        scheduleCompile()
+
+        // Mid-flight page refreshes create a new client, but the same LSP backend.
+        // Re-emit cached diagnostics for the specific opened file so the new client gets squiggles.
+        try {
+            val fp = te2RepoFingerprint
+            val sc = sidecar
+            if (!fp.isNullOrBlank() && sc != null && sc.lastKnownRepoFingerprint == fp) {
+                val cached = sc.diagnosticsByUri[uri.toString()]
+                if (cached != null) {
+                    val diags = cached.map { cd ->
+                        val d = cd.toLspDiagnostic()
+                        d.code = Either.forLeft("cached")
+                        d
+                    }
+                    publishDiagnostics(uri, diags)
+                    return
+                }
+            }
+        } catch (_: Exception) {
+        }
+
+        // If we have no cached diagnostics yet for this project, run an initial compile.
+        val sc = sidecar
+        if (sc == null || sc.diagnosticsByUri.isEmpty()) {
+            scheduleCompile()
+        }
     }
     
     fun didChange(uri: URI, version: Int) {
         openFiles[uri] = OpenFileState(uri, version, isDirty = true)
         LOG.debug("Changed: $uri v$version")
-        
-        // Debounce compilation
-        scheduleCompile()
+
+        // Never compile on change; TE2 is responsible for repo/dirty tracking + save triggers.
     }
     
     fun didSave(uri: URI) {
@@ -94,8 +160,21 @@ class AndroidDiagnosticsService(
             openFiles[uri] = state.copy(isDirty = false)
         }
         LOG.info("Saved: $uri")
-        
-        // Compile immediately on save
+
+        val fp = te2RepoFingerprint
+        val sc = sidecar
+        LOG.info(
+            "didSave decision: fp=${fp ?: "<null>"} sidecarFp=${sc?.lastKnownRepoFingerprint ?: "<null>"} " +
+                "sidecarHas=${sc?.diagnosticsByUri?.size ?: 0}"
+        )
+        if (!fp.isNullOrBlank() && sc != null && sc.lastKnownRepoFingerprint == fp && sc.diagnosticsByUri.isNotEmpty()) {
+            LOG.info("Repo fingerprint unchanged; replaying cached diagnostics")
+            replayCached(sc, provenance = "cached")
+            return
+        }
+
+        LOG.info("Repo fingerprint changed/missing cache; compiling")
+        // Compile immediately on save (authoritative diagnostics)
         compileNow()
     }
     
@@ -158,15 +237,58 @@ class AndroidDiagnosticsService(
         
         // Parse diagnostics
         val diagnostics = GradleOutputParser.parse(result.output)
-        
+
         // Group by file
         val byFile = diagnostics.groupBy({ it.first }, { it.second })
-        
-        // Publish diagnostics for files with errors
-        for ((uri, diags) in byFile) {
+
+        // Publish diagnostics for files with errors (tag provenance)
+        for ((uri, diags0) in byFile) {
+            val diags = diags0.map { d ->
+                d.code = Either.forLeft("gradle")
+                d
+            }
             publishDiagnostics(uri, diags)
         }
-        
+
+        // Persist sidecar (keyed by lspProjectId) if configured
+        try {
+            val path = sidecarPath
+            val pid = sidecarProjectId
+            if (path != null && !pid.isNullOrBlank()) {
+                // Keep explicit empty entries for files that previously had diagnostics but are now clean.
+                val previous = sidecar?.diagnosticsByUri?.keys ?: emptySet()
+
+                val current: Map<String, List<CachedDiagnostic>> = byFile.entries.associate { (uri, diags0) ->
+                    val diags = diags0.map { d ->
+                        d.code = Either.forLeft("gradle")
+                        d
+                    }
+                    uri.toString() to diags.map { it.toCached() }
+                }
+
+                val withEmpties = LinkedHashMap<String, List<CachedDiagnostic>>()
+                withEmpties.putAll(current)
+                for (uriStr in previous) {
+                    if (!withEmpties.containsKey(uriStr)) {
+                        withEmpties[uriStr] = emptyList()
+                    }
+                }
+
+                val fp = te2RepoFingerprint
+                val newSidecar = AndroidSidecarV1(
+                    lspProjectId = pid,
+                    projectRoot = projectRoot.toString(),
+                    lastKnownRepoFingerprint = fp,
+                    updatedAtMs = System.currentTimeMillis(),
+                    diagnosticsByUri = withEmpties,
+                )
+                AndroidSidecarIO.save(path, newSidecar)
+                sidecar = newSidecar
+            }
+        } catch (e: Exception) {
+            LOG.warn("Failed to persist sidecar: ${e.message}")
+        }
+
         // Clear diagnostics for open files that had errors before but don't now
         val filesWithErrors = byFile.keys
         for (uri in lastDiagnostics.keys) {
@@ -174,12 +296,12 @@ class AndroidDiagnosticsService(
                 clearDiagnostics(uri)
             }
         }
-        
+
         // Log summary
         val errors = diagnostics.count { it.second.severity == DiagnosticSeverity.Error }
         val warnings = diagnostics.count { it.second.severity == DiagnosticSeverity.Warning }
         LOG.info("Diagnostics: $errors errors, $warnings warnings in ${byFile.size} files")
-        
+
         lastBuildId = buildId
     }
     
@@ -187,6 +309,32 @@ class AndroidDiagnosticsService(
         lastDiagnostics[uri] = diagnostics
         client.publishDiagnostics(PublishDiagnosticsParams(uri.toString(), diagnostics))
         LOG.debug("Published ${diagnostics.size} diagnostics for $uri")
+    }
+
+    private fun replayCached(sc: AndroidSidecarV1, provenance: String) {
+        val byUri = sc.diagnosticsByUri
+
+        // Publish cached diagnostics for all known URIs.
+        for ((uriStr, cached) in byUri) {
+            try {
+                val uri = URI.create(uriStr)
+                val diags = cached.map { cd ->
+                    val d = cd.toLspDiagnostic()
+                    d.code = Either.forLeft(provenance)
+                    d
+                }
+                publishDiagnostics(uri, diags)
+            } catch (_: Exception) {
+            }
+        }
+
+        // Clear any previously published diagnostics not present in cache.
+        val present = byUri.keys.toSet()
+        for (uri in lastDiagnostics.keys) {
+            if (uri.toString() !in present) {
+                clearDiagnostics(uri)
+            }
+        }
     }
     
     private fun clearDiagnostics(uri: URI) {

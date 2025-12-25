@@ -918,6 +918,28 @@ async def write_file_route(data: dict = Body(...)):
         mark_git_cache_dirty(project_root)
         invalidate_diff_cache(project_root, str(rel_path))
 
+        # Notify kotlin-android LSP that a real disk save occurred.
+        # IMPORTANT: use the same effective project root (rootRel override) that connect_lsp uses.
+        try:
+            from .lsp_ws import send_android_did_save_for_path
+
+            base_project_root = Path(_history_store.get_active_project() or str(project_root))
+            effective_project_root = base_project_root
+            try:
+                rel_root = _history_store.get_lsp_server_root_rel(str(base_project_root), "kotlin-android")
+                if rel_root:
+                    candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
+                    if candidate.exists() and candidate.is_dir():
+                        effective_project_root = candidate
+            except Exception:
+                effective_project_root = base_project_root
+
+            ok = await send_android_did_save_for_path(project_root=effective_project_root, abs_path=target_path)
+            if not ok:
+                print(f"[LSP SAVE HOOK] didSave injection failed path={target_path}", file=sys.stderr)
+        except Exception as e:
+            print(f"[LSP SAVE HOOK] exception: {e}", file=sys.stderr)
+
         return {
             "ok": True,
             "data": {
@@ -2012,6 +2034,43 @@ def get_recent_files():
                 "exists": bool(entry_path and Path(entry_path).is_file()),
             })
         return {"ok": True, "data": files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@file_editor_cm6_bp.get('/history/raw')
+def get_history_raw():
+    """Return raw HistoryStore state (debug)."""
+    try:
+        return {"ok": True, "data": _history_store.dump_raw()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@file_editor_cm6_bp.get('/project/sidecar/raw')
+def get_project_sidecar_raw():
+    """Return raw ProjectSidecar state for the active project (debug)."""
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    try:
+        sidecar = ProjectSidecar.load_or_create(str(project_root))
+        return {"ok": True, "data": sidecar.dump_raw()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@file_editor_cm6_bp.get('/debug/state/raw')
+def get_debug_state_raw():
+    """Return raw history + raw sidecar for the active project (debug)."""
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    try:
+        sidecar = ProjectSidecar.load_or_create(str(project_root))
+        return {
+            "ok": True,
+            "data": {
+                "history": _history_store.dump_raw(),
+                "sidecar": sidecar.dump_raw(),
+            },
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

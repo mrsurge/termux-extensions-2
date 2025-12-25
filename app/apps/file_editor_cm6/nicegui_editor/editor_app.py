@@ -1936,6 +1936,31 @@ async def save_current_file(data: dict = Body(...)):
     base_snapshot = get_current_file_sha256()
     try:
         file_meta = await _write_editor_buffer_to_disk(client_id=client_id, op_id=op_id)
+
+        # Notify kotlin-android LSP that a real disk save occurred (iframe save path).
+        # IMPORTANT: use the same effective project root (rootRel override) that connect_lsp uses,
+        # otherwise repoFingerprint won't match the LSP sidecar and cache replay will fail.
+        try:
+            from ..lsp_ws import send_android_did_save_for_path
+
+            base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
+            effective_project_root = base_project_root
+            try:
+                rel_root = _history_store.get_lsp_server_root_rel(str(base_project_root), "kotlin-android")
+                if rel_root:
+                    candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
+                    if candidate.exists() and candidate.is_dir():
+                        effective_project_root = candidate
+            except Exception:
+                effective_project_root = base_project_root
+
+            if current_file:
+                ok = await send_android_did_save_for_path(project_root=effective_project_root, abs_path=Path(current_file))
+                if not ok:
+                    print(f"[LSP SAVE HOOK] didSave injection failed path={current_file}", file=sys.stderr)
+        except Exception as e:
+            print(f"[LSP SAVE HOOK] exception: {e}", file=sys.stderr)
+
         return {"ok": True, "data": file_meta}
     except SaveValidationError as e:
         return {"ok": False, "error": e.message}

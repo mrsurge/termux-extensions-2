@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import secrets
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -198,6 +199,13 @@ class ProjectSidecar:
         finally:
             if tmp_path is not None and tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
+
+    def dump_raw(self) -> Dict[str, Any]:
+        """Return the raw in-memory sidecar state (debug endpoint helper)."""
+        try:
+            return json.loads(json.dumps(self._data, ensure_ascii=False, default=str))
+        except Exception:
+            return {"error": "failed_to_dump", "repr": repr(self._data)}
 
     # --------------------------------------------------------------------- #
     # Session counter API
@@ -638,6 +646,7 @@ class ProjectSidecar:
         if not isinstance(lsp, dict):
             lsp = {"enabled": False, "servers": {}, "roots": {}}
         lsp.setdefault("enabled", False)
+        lsp.setdefault("project_id", "")
         servers = lsp.get("servers")
         if not isinstance(servers, dict):
             servers = {}
@@ -655,6 +664,24 @@ class ProjectSidecar:
 
         self._data["lsp"] = lsp
         return lsp
+
+    def get_or_create_lsp_project_id(self) -> str:
+        lsp = self._ensure_lsp_schema()
+        val = lsp.get("project_id")
+        text = str(val).strip() if val else ""
+        if text:
+            return text
+        # 8 hex chars (32 bits) is plenty for per-user/per-device project IDs.
+        pid = secrets.token_hex(4)
+        lsp["project_id"] = pid
+        self._data["lsp"] = lsp
+        return pid
+
+    def get_lsp_project_id(self) -> Optional[str]:
+        lsp = self._ensure_lsp_schema()
+        val = lsp.get("project_id")
+        text = str(val).strip() if val else ""
+        return text or None
 
     def get_lsp_enabled(self) -> bool:
         lsp = self._ensure_lsp_schema()
