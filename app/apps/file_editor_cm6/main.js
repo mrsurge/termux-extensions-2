@@ -2671,18 +2671,22 @@ const lspModal = {
   statusTypescript: document.getElementById('lsp-status-typescript'),
   statusClangd: document.getElementById('lsp-status-clangd'),
   statusKotlin: document.getElementById('lsp-status-kotlin'),
+  statusKotlinAndroid: document.getElementById('lsp-status-kotlin-android'),
   togglePyright: document.getElementById('lsp-toggle-pyright'),
   toggleTypescript: document.getElementById('lsp-toggle-typescript'),
   toggleClangd: document.getElementById('lsp-toggle-clangd'),
   toggleKotlin: document.getElementById('lsp-toggle-kotlin'),
+  toggleKotlinAndroid: document.getElementById('lsp-toggle-kotlin-android'),
   startPyright: document.getElementById('lsp-start-pyright'),
   startTypescript: document.getElementById('lsp-start-typescript'),
   startClangd: document.getElementById('lsp-start-clangd'),
   startKotlin: document.getElementById('lsp-start-kotlin'),
+  startKotlinAndroid: document.getElementById('lsp-start-kotlin-android'),
   rootRelPyright: document.getElementById('lsp-rootrel-pyright'),
   rootRelTypescript: document.getElementById('lsp-rootrel-typescript'),
   rootRelClangd: document.getElementById('lsp-rootrel-clangd'),
   rootRelKotlin: document.getElementById('lsp-rootrel-kotlin'),
+  rootRelKotlinAndroid: document.getElementById('lsp-rootrel-kotlin-android'),
 };
 
 const lspSetupBanner = {
@@ -2697,6 +2701,7 @@ const LSP_SERVER_PREF_KEYS = {
   typescript: 'enableLspTypescript',
   clangd: 'enableLspClangd',
   kotlin: 'enableLspKotlin',
+  'kotlin-android': 'enableLspKotlinAndroid',
 };
 
 const LSP_SERVER_ROOTREL_KEYS = {
@@ -2704,6 +2709,7 @@ const LSP_SERVER_ROOTREL_KEYS = {
   typescript: 'lspRootRelTypescript',
   clangd: 'lspRootRelClangd',
   kotlin: 'lspRootRelKotlin',
+  'kotlin-android': 'lspRootRelKotlinAndroid',
 };
 
 function _lspGetServerRootRel(state, serverId) {
@@ -2770,6 +2776,7 @@ function updateLspModalUI(state) {
     typescript: _lspGetServerEnabled(state, 'typescript'),
     clangd: _lspGetServerEnabled(state, 'clangd'),
     kotlin: _lspGetServerEnabled(state, 'kotlin'),
+    'kotlin-android': _lspGetServerEnabled(state, 'kotlin-android'),
   };
 
   // Root override inputs are editable only when the feature is enabled.
@@ -2789,6 +2796,10 @@ function updateLspModalUI(state) {
     if (lspModal.rootRelKotlin) {
       lspModal.rootRelKotlin.value = _lspGetServerRootRel(state, 'kotlin');
       lspModal.rootRelKotlin.disabled = !isEnabled;
+    }
+    if (lspModal.rootRelKotlinAndroid) {
+      lspModal.rootRelKotlinAndroid.value = _lspGetServerRootRel(state, 'kotlin-android');
+      lspModal.rootRelKotlinAndroid.disabled = !isEnabled;
     }
   } catch (err) {
     console.warn('[LSP Modal] Failed to apply rootrel inputs', err);
@@ -2813,6 +2824,7 @@ function updateLspModalUI(state) {
   applyRow('typescript', perServer.typescript, lspModal.statusTypescript, lspModal.toggleTypescript, lspModal.startTypescript);
   applyRow('clangd', perServer.clangd, lspModal.statusClangd, lspModal.toggleClangd, lspModal.startClangd);
   applyRow('kotlin', perServer.kotlin, lspModal.statusKotlin, lspModal.toggleKotlin, lspModal.startKotlin);
+  applyRow('kotlin-android', perServer['kotlin-android'], lspModal.statusKotlinAndroid, lspModal.toggleKotlinAndroid, lspModal.startKotlinAndroid);
 
   _applyLspActionButtons(state);
 }
@@ -2867,6 +2879,7 @@ function _applyLspActionButtons(state) {
   apply('typescript', lspModal.startTypescript);
   apply('clangd', lspModal.startClangd);
   apply('kotlin', lspModal.startKotlin);
+  apply('kotlin-android', lspModal.startKotlinAndroid);
 }
 
 // Explorer Socket.IO (shared bus) can push lsp:status events to keep the modal in sync.
@@ -2979,6 +2992,7 @@ async function _startStopLspServer(serverId) {
     typescript: lspModal.startTypescript,
     clangd: lspModal.startClangd,
     kotlin: lspModal.startKotlin,
+    'kotlin-android': lspModal.startKotlinAndroid,
   };
   const btn = btnMap[serverId];
 
@@ -3030,16 +3044,19 @@ if (lspModal.togglePyright) lspModal.togglePyright.addEventListener('click', () 
 if (lspModal.toggleTypescript) lspModal.toggleTypescript.addEventListener('click', () => _toggleLspServer('typescript'));
 if (lspModal.toggleClangd) lspModal.toggleClangd.addEventListener('click', () => _toggleLspServer('clangd'));
 if (lspModal.toggleKotlin) lspModal.toggleKotlin.addEventListener('click', () => _toggleLspServer('kotlin'));
+if (lspModal.toggleKotlinAndroid) lspModal.toggleKotlinAndroid.addEventListener('click', () => _toggleLspServer('kotlin-android'));
 
 if (lspModal.startPyright) lspModal.startPyright.addEventListener('click', () => _startStopLspServer('pyright'));
 if (lspModal.startTypescript) lspModal.startTypescript.addEventListener('click', () => _startStopLspServer('typescript'));
 if (lspModal.startClangd) lspModal.startClangd.addEventListener('click', () => _startStopLspServer('clangd'));
 if (lspModal.startKotlin) lspModal.startKotlin.addEventListener('click', () => _startStopLspServer('kotlin'));
+if (lspModal.startKotlinAndroid) lspModal.startKotlinAndroid.addEventListener('click', () => _startStopLspServer('kotlin-android'));
 
 if (lspModal.rootRelPyright) lspModal.rootRelPyright.addEventListener('change', (e) => _updateLspRootRel('pyright', e?.target?.value));
 if (lspModal.rootRelTypescript) lspModal.rootRelTypescript.addEventListener('change', (e) => _updateLspRootRel('typescript', e?.target?.value));
 if (lspModal.rootRelClangd) lspModal.rootRelClangd.addEventListener('change', (e) => _updateLspRootRel('clangd', e?.target?.value));
 if (lspModal.rootRelKotlin) lspModal.rootRelKotlin.addEventListener('change', (e) => _updateLspRootRel('kotlin', e?.target?.value));
+if (lspModal.rootRelKotlinAndroid) lspModal.rootRelKotlinAndroid.addEventListener('change', (e) => _updateLspRootRel('kotlin-android', e?.target?.value));
 
 function _hideLspSetupBanner() {
   if (!lspSetupBanner.root) return;

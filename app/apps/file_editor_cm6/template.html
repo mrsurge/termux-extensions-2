@@ -2058,6 +2058,23 @@
             <button class="fe-btn" id="lsp-start-kotlin">Start</button>
           </div>
         </div>
+
+        <!-- Android Kotlin LSP (Gradle-backed diagnostics) -->
+        <div class="lsp-server-item" data-server="kotlin-android">
+          <div class="lsp-server-info">
+            <div class="lsp-server-name">Android Kotlin LSP (Gradle)</div>
+            <div class="lsp-server-langs">.kt — Android diagnostics via Gradle compile</div>
+            <div class="lsp-server-config">
+              <label for="lsp-rootrel-kotlin-android">Project root (relative)</label>
+              <input id="lsp-rootrel-kotlin-android" class="lsp-rootrel-input" type="text" placeholder="e.g. android/" autocomplete="off" autocapitalize="off" spellcheck="false" />
+            </div>
+          </div>
+          <div class="lsp-server-status">
+            <span class="lsp-status-dot" id="lsp-status-kotlin-android"></span>
+            <button class="lsp-toggle-btn" id="lsp-toggle-kotlin-android">On</button>
+            <button class="fe-btn" id="lsp-start-kotlin-android">Start</button>
+          </div>
+        </div>
       </div>
 
       <p style="margin-top: 16px; font-size: 0.75rem; color: var(--muted-foreground, #9ca3af);">

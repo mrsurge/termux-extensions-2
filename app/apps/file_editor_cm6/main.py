@@ -380,6 +380,7 @@ async def api_start_lsp(payload: dict = Body(...)):
         "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
         "clangd": ["c", "cpp"],
         "kotlin": ["kotlin"],
+        "kotlin-android": ["kotlin-android"],
     }
     language_ids = server_languages.get(server_id)
     if not language_ids:
@@ -397,6 +398,7 @@ async def api_start_lsp(payload: dict = Body(...)):
             "typescript": _history_store.get_lsp_server_root_rel(project_root, "typescript"),
             "clangd": _history_store.get_lsp_server_root_rel(project_root, "clangd"),
             "kotlin": _history_store.get_lsp_server_root_rel(project_root, "kotlin"),
+            "kotlin-android": _history_store.get_lsp_server_root_rel(project_root, "kotlin-android"),
         }
         rel = root_map.get(server_id) or ""
         if rel:
@@ -431,6 +433,7 @@ async def api_stop_lsp(payload: dict = Body(...)):
         "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
         "clangd": ["c", "cpp"],
         "kotlin": ["kotlin"],
+        "kotlin-android": ["kotlin-android"],
     }
     language_ids = server_languages.get(server_id)
     if not language_ids:
@@ -484,6 +487,7 @@ async def api_lsp_status():
         "typescript": {"running": await _any_running(["typescript", "typescriptreact", "javascript", "javascriptreact"])},
         "clangd": {"running": await _any_running(["c", "cpp"])},
         "kotlin": {"running": await _any_running(["kotlin"])},
+        "kotlin-android": {"running": await _any_running(["kotlin-android"])},
     }
 
     return {"ok": True, "data": {"servers": servers}}

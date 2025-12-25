@@ -369,6 +369,14 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                     return
                 if session.get("init_request_id") is None and message.get("id") is not None:
                     session["init_request_id"] = message.get("id")
+                # Inject Android-specific initializationOptions for kotlin-android LSP
+                if session.get("language_id") == "kotlin-android":
+                    params = message.setdefault("params", {})
+                    init_opts = params.setdefault("initializationOptions", {})
+                    # Default to GeckoDebug variant (most common for Termux Android dev)
+                    init_opts.setdefault("module", "app")
+                    init_opts.setdefault("variant", "GeckoDebug")
+                    _lsp_debug(f"[LSP WS] Injected Android initializationOptions: {init_opts}")
             elif method == "initialized":
                 # Only forward the first "initialized" per backend session.
                 if session.get("backend_initialized_notified"):

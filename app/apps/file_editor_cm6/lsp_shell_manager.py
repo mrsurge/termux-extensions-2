@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from framework_shells import ShellRecord, get_manager
+from framework_shells.orchestrator import Orchestrator
 
 
 # --- Command mapping (extend as new servers become available) ---
@@ -33,10 +34,17 @@ LSP_COMMANDS: Dict[str, list[str]] = {
     "c": ["clangd"],
     "cpp": ["clangd"],
     # TODO: add go (gopls), rust (rust-analyzer) when ready.
+    # NOTE: "kotlin-android" is handled separately via shellspec (see _spawn_android_kotlin_lsp)
 }
 
 # Vendor bin directory (npm-installed servers live here when vendored)
 VENDOR_BIN = Path(__file__).parents[2] / "static" / "vendor" / "lsp_servers" / "node_modules" / ".bin"
+
+# Android Kotlin LSP vendor path (app/static/vendor/lsp_servers/android-kotlin-lsp/)
+ANDROID_KOTLIN_LSP_BIN = Path(__file__).parents[2] / "static" / "vendor" / "lsp_servers" / "android-kotlin-lsp" / "server" / "bin" / "kotlin-language-server"
+
+# Shellspec directory for this app
+SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
 
 
 # Minimal in-memory tracking; avoids persisting state outside manager.
@@ -208,14 +216,84 @@ async def _get_alive_shell(shell_id: str) -> Optional[ShellRecord]:
     return None
 
 
+async def _spawn_android_kotlin_lsp(project_root: Path) -> Optional[ShellRecord]:
+    """Spawn Android Kotlin LSP via shellspec.
+    
+    This LSP delegates diagnostics to Gradle compilation instead of using
+    the Kotlin compiler directly. It only provides diagnostics, not
+    completion/hover/go-to-definition.
+    """
+    
+    # Check if the Android LSP binary exists
+    if not ANDROID_KOTLIN_LSP_BIN.exists():
+        print(f"[LSP shells] Android Kotlin LSP not found at: {ANDROID_KOTLIN_LSP_BIN}")
+        print("[LSP shells] Build it with: cd app/static/vendor/ignored/kotlin-language-server && ./gradlew :server:distZip")
+        return None
+    
+    mgr = await get_manager()
+    orch = Orchestrator(mgr)
+    
+    project_hash = hashlib.sha1(str(project_root).encode()).hexdigest()[:8]
+    label = _label("kotlin-android")
+    
+    # Check for existing running shell
+    cached_id = _language_shell_ids.get("kotlin-android")
+    if cached_id:
+        cached = await _get_alive_shell(cached_id)
+        if cached and mgr.get_pipe_state(cached.id):
+            return cached
+        _language_shell_ids.pop("kotlin-android", None)
+    
+    # Check by label
+    existing = await mgr.find_shell_by_label(label, status="running")
+    if existing:
+        if mgr.get_pipe_state(existing.id):
+            _language_shell_ids["kotlin-android"] = existing.id
+            return existing
+        # Stale - terminate and respawn
+        try:
+            await mgr.terminate_shell(existing.id, force=True)
+        except Exception:
+            pass
+    
+    # Spawn via shellspec
+    try:
+        shell = await orch.start_from_ref(
+            "android_lsp.yaml#android-kotlin-lsp",
+            base_dir=SHELLSPEC_DIR,
+            ctx={
+                "PROJECT_ROOT": str(project_root),
+                "PROJECT_HASH": project_hash,
+                "ANDROID_LSP_BIN": str(ANDROID_KOTLIN_LSP_BIN),
+            },
+            label=label,
+        )
+    except Exception as exc:
+        print(f"[LSP shells] Failed to spawn Android Kotlin LSP: {exc}")
+        return None
+    
+    _language_shell_ids["kotlin-android"] = shell.id
+    global _active_language_id
+    _active_language_id = "kotlin-android"
+    return shell
+
+
 async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Optional[ShellRecord]:
     """Fetch existing shell by language or spawn a new one.
 
     Returns None if the language isn't supported or required binary is missing.
     """
 
+    print(f"[LSP shells] get_or_spawn_lsp_shell called: language_id={language_id}, project_root={project_root}")
+
+    # Handle Android Kotlin LSP via shellspec (separate from regular Kotlin LSP)
+    if language_id == "kotlin-android":
+        print(f"[LSP shells] Routing to Android Kotlin LSP spawn")
+        return await _spawn_android_kotlin_lsp(project_root)
+
     cmd = LSP_COMMANDS.get(language_id)
     if not cmd:
+        print(f"[LSP shells] No command mapping for language_id={language_id}")
         return None
 
     resolved_binary = _resolve_binary(cmd[0])

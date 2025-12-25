@@ -641,14 +641,14 @@ class ProjectSidecar:
         servers = lsp.get("servers")
         if not isinstance(servers, dict):
             servers = {}
-        for key, default in (("pyright", False), ("typescript", False), ("clangd", False), ("kotlin", False)):
+        for key, default in (("pyright", False), ("typescript", False), ("clangd", False), ("kotlin", False), ("kotlin-android", False)):
             servers.setdefault(key, default)
         lsp["servers"] = servers
 
         roots = lsp.get("roots")
         if not isinstance(roots, dict):
             roots = {}
-        for key in ("pyright", "typescript", "clangd", "kotlin"):
+        for key in ("pyright", "typescript", "clangd", "kotlin", "kotlin-android"):
             val = roots.get(key)
             roots[key] = str(val).strip() if val else ""
         lsp["roots"] = roots
@@ -705,10 +705,12 @@ class ProjectSidecar:
             "enableLspTypescript": bool(servers.get("typescript", False)),
             "enableLspClangd": bool(servers.get("clangd", False)),
             "enableLspKotlin": bool(servers.get("kotlin", False)),
+            "enableLspKotlinAndroid": bool(servers.get("kotlin-android", False)),
             "lspRootRelPyright": str(roots.get("pyright") or ""),
             "lspRootRelTypescript": str(roots.get("typescript") or ""),
             "lspRootRelClangd": str(roots.get("clangd") or ""),
             "lspRootRelKotlin": str(roots.get("kotlin") or ""),
+            "lspRootRelKotlinAndroid": str(roots.get("kotlin-android") or ""),
         }
 
 

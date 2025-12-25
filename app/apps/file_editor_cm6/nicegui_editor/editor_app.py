@@ -174,6 +174,8 @@ def _should_use_lsp(project_root: Path | None, language_id: str) -> bool:
         server_id = "clangd"
     elif language_id == "kotlin":
         server_id = "kotlin"
+    elif language_id == "kotlin-android":
+        server_id = "kotlin-android"
 
     if server_id:
         return _history_store.get_lsp_server_enabled(project_path, server_id)
@@ -206,6 +208,17 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
             print(f"[LSP] Failed to disconnect LSP for unsupported type {file_path}: {exc}", file=sys.stderr)
         return
 
+    # Special case: Kotlin files can use Android LSP instead of regular Kotlin LSP
+    # if enableLspKotlinAndroid is set for this project.
+    if language_id == "kotlin":
+        try:
+            project_path = str(project_root)
+            if _history_store.get_lsp_server_enabled(project_path, "kotlin-android"):
+                language_id = "kotlin-android"
+                print(f"[LSP] Using Android Kotlin LSP for {file_path}", file=sys.stderr)
+        except Exception:
+            pass
+
     if not _should_use_lsp(project_root, language_id):
         # Preference gate disabled: disconnect if previously connected
         print(f"[LSP] Preference gate disabled for {language_id}", file=sys.stderr)
@@ -229,6 +242,8 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
             server_id = "clangd"
         elif language_id == "kotlin":
             server_id = "kotlin"
+        elif language_id == "kotlin-android":
+            server_id = "kotlin-android"
 
         if server_id:
             rel_root = _history_store.get_lsp_server_root_rel(project_path, server_id)
@@ -1541,6 +1556,7 @@ def _get_view_state_dict() -> dict:
         "enableLspTypescript": False,
         "enableLspClangd": False,
         "enableLspKotlin": False,
+        "enableLspKotlinAndroid": False,
     }
     try:
         project_path = _history_store.get_active_project() or str(get_project_root())
@@ -1596,8 +1612,8 @@ async def update_preference(data: dict = Body(...)):
     # Validate key. Most preferences are editor-scoped in PreferencesStore, but
     # LSP config is project-scoped (sidecar SSOT via HistoryStore facade).
     LSP_KEYS = {
-        'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin',
-        'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin',
+        'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
+        'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
     }
     if key not in LSP_KEYS:
         from app.apps.file_editor_cm6.preferences_store import DEFAULT_EDITOR_PREFS
@@ -1653,8 +1669,8 @@ async def update_preference(data: dict = Body(...)):
             # Added: 2025-12-03 by vectorArc - TE2 Team
             editor.set_sticky_scroll(bool(value))
         elif key in (
-            'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin',
-            'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin',
+            'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
+            'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
         ):
             # LSP preferences are project-scoped (sidecar SSOT via HistoryStore facade).
             # Persist + apply after success below.
@@ -1699,8 +1715,8 @@ async def update_preference(data: dict = Body(...)):
         editor.update()
 
         if key in (
-            'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin',
-            'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin',
+            'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
+            'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
         ):
             project_path = _history_store.get_active_project() or str(get_project_root())
             if not project_path:
@@ -1708,12 +1724,13 @@ async def update_preference(data: dict = Body(...)):
             if key == 'enableLsp':
                 if not _history_store.set_lsp_enabled(project_path, bool(value)):
                     raise RuntimeError("Failed to persist LSP enablement")
-            elif key in ('enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin'):
+            elif key in ('enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid'):
                 server_map = {
                     'enableLspPyright': 'pyright',
                     'enableLspTypescript': 'typescript',
                     'enableLspClangd': 'clangd',
                     'enableLspKotlin': 'kotlin',
+                    'enableLspKotlinAndroid': 'kotlin-android',
                 }
                 server_id = server_map.get(key)
                 if server_id:
@@ -1725,6 +1742,7 @@ async def update_preference(data: dict = Body(...)):
                     'lspRootRelTypescript': 'typescript',
                     'lspRootRelClangd': 'clangd',
                     'lspRootRelKotlin': 'kotlin',
+                    'lspRootRelKotlinAndroid': 'kotlin-android',
                 }
                 server_id = root_map.get(key)
                 if not server_id:

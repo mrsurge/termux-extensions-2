@@ -237,10 +237,12 @@ class HistoryStore:
                 "enableLspTypescript": False,
                 "enableLspClangd": False,
                 "enableLspKotlin": False,
+                "enableLspKotlinAndroid": False,
                 "lspRootRelPyright": "",
                 "lspRootRelTypescript": "",
                 "lspRootRelClangd": "",
                 "lspRootRelKotlin": "",
+                "lspRootRelKotlinAndroid": "",
             }
         try:
             return dict(sidecar.get_lsp_state_payload())
@@ -251,10 +253,12 @@ class HistoryStore:
                 "enableLspTypescript": False,
                 "enableLspClangd": False,
                 "enableLspKotlin": False,
+                "enableLspKotlinAndroid": False,
                 "lspRootRelPyright": "",
                 "lspRootRelTypescript": "",
                 "lspRootRelClangd": "",
                 "lspRootRelKotlin": "",
+                "lspRootRelKotlinAndroid": "",
             }
 
     def _touch_project_locked(self, path: str) -> Dict[str, object]:
