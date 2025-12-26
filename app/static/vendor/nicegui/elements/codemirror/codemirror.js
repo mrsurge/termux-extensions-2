@@ -1113,7 +1113,9 @@ export default {
       if (!entry) return;
 
       const suppressed = entry.suppressed || new Set();
-      const raw = Array.isArray(entry.rawDiagnostics) ? entry.rawDiagnostics : [];
+      const raw = []
+        .concat(Array.isArray(entry.rawDiagnostics) ? entry.rawDiagnostics : [])
+        .concat(Array.isArray(entry.localDiagnostics) ? entry.localDiagnostics : []);
       const filtered = raw.filter((d) => !suppressed.has(this._issuesSig(d)));
       entry.filteredDiagnostics = filtered;
 
@@ -1179,6 +1181,7 @@ export default {
       if (!entry) {
         entry = {
           rawDiagnostics: [],
+          localDiagnostics: [],
           filteredDiagnostics: [],
           flat: [],
           counts: { errors: 0, warnings: 0 },
@@ -1210,6 +1213,37 @@ export default {
       } else {
         console.log(`[Issues] URI mismatch - skipping overlay update. normalized: incoming=${normalizedIncoming} current=${normalizedCurrent}`);
       }
+    },
+    setLocalDiagnosticsForUri(uri, diagnostics) {
+      try {
+        const state = this._ensureIssuesState();
+        if (typeof uri !== 'string' || !uri) return;
+        const diags = Array.isArray(diagnostics) ? diagnostics : [];
+
+        let entry = state.byUri.get(uri);
+        if (!entry) {
+          entry = {
+            rawDiagnostics: [],
+            localDiagnostics: [],
+            filteredDiagnostics: [],
+            flat: [],
+            counts: { errors: 0, warnings: 0 },
+            activeIndex: 0,
+            suppressed: new Set(),
+          };
+          state.byUri.set(uri, entry);
+        }
+
+        entry.localDiagnostics = diags;
+        this._recomputeIssuesForUri(uri);
+
+        const isMatch = (state.currentUri === uri);
+        if (isMatch) {
+          this.applyIssueSquiggles(entry.filteredDiagnostics || [], uri);
+          this._renderIssuesOverlay();
+          this._emitIssuesState();
+        }
+      } catch { }
     },
     applyIssueSquiggles(diagnostics, uri = null) {
       const diags = Array.isArray(diagnostics) ? diagnostics : [];
@@ -1756,6 +1790,7 @@ export default {
           if (!st.byUri.get(this._lspFileUri)) {
             st.byUri.set(this._lspFileUri, {
               rawDiagnostics: [],
+              localDiagnostics: [],
               filteredDiagnostics: [],
               flat: [],
               counts: { errors: 0, warnings: 0 },
@@ -2529,6 +2564,64 @@ export default {
         }
       );
 
+      // Lezer-based local syntax diagnostics (cached per-URI in issues map).
+      const lezerDiagnosticsPlugin = CM.ViewPlugin.fromClass(
+        class {
+          constructor() {
+            this.timer = null;
+          }
+          update(update) {
+            if (!update.docChanged) return;
+            if (this.timer) clearTimeout(this.timer);
+            this.timer = setTimeout(() => {
+              this.timer = null;
+              try {
+                const st = self._ensureIssuesState();
+                const uri = st?.currentUri || self._lspFileUri;
+                if (!uri) return;
+
+                const state = update.state;
+                const tree = CM.ensureSyntaxTree(state, state.doc.length, 200) || CM.syntaxTree(state);
+                if (!tree || typeof tree.iterate !== 'function') {
+                  self.setLocalDiagnosticsForUri(uri, []);
+                  return;
+                }
+
+                const out = [];
+                const max = 50;
+                const toLspPos = (pos) => {
+                  const line = state.doc.lineAt(pos);
+                  return { line: Math.max(0, (line.number || 1) - 1), character: Math.max(0, pos - line.from) };
+                };
+
+                tree.iterate({
+                  enter: (node) => {
+                    try {
+                      if (out.length >= max) return;
+                      if (!node?.type?.isError) return;
+                      const from = Math.max(0, node.from);
+                      const to = Math.max(from + 1, node.to);
+                      out.push({
+                        range: { start: toLspPos(from), end: toLspPos(to) },
+                        severity: 2,
+                        source: 'cm6-lezer',
+                        code: 'SYNTAX_ERROR',
+                        message: 'Syntax error (local parser)',
+                      });
+                    } catch { }
+                  }
+                });
+
+                self.setLocalDiagnosticsForUri(uri, out);
+              } catch { }
+            }, 200);
+          }
+          destroy() {
+            if (this.timer) clearTimeout(this.timer);
+          }
+        }
+      );
+
       // Create compartment for dynamic indent unit (before extensions array)
       this.indentUnitCompartment = new CM.Compartment();
 
@@ -2553,6 +2646,7 @@ export default {
         CM.basicSetup,
         changeSender,
         scrollActivityPlugin, // Add the scroll listener
+        lezerDiagnosticsPlugin,
         // Enables the Tab key to indent the current lines https://codemirror.net/examples/tab/
         CM.keymap.of([CM.indentWithTab]),
         // Sets indentation https://codemirror.net/docs/ref/#language.indentUnit

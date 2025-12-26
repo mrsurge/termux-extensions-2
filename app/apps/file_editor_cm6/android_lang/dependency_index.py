@@ -118,8 +118,18 @@ def build_dependency_index(
     }
 
 
-def ensure_compiled_dependency_index(*, sidecar_path: Path, te2_sidecar: dict, effective_project_root: Path) -> dict:
-    """Ensure te2_sidecar has a usable dependencyIndex (best-effort, cached by syncFingerprint)."""
+def ensure_compiled_dependency_index(
+    *,
+    sidecar_path: Path,
+    te2_sidecar: dict,
+    effective_project_root: Path,
+    allow_gradle_resolve: bool = True,
+) -> dict:
+    """Ensure te2_sidecar has a usable dependencyIndex (best-effort, cached by syncFingerprint).
+
+    When allow_gradle_resolve is False, we do not spawn Gradle; we only index any
+    already-known artifacts plus android.jar/R.jar pointers.
+    """
 
     try:
         sync_fp = str((te2_sidecar or {}).get("syncFingerprint") or "")
@@ -136,7 +146,7 @@ def ensure_compiled_dependency_index(*, sidecar_path: Path, te2_sidecar: dict, e
             resolved = []
 
         # If we don't have resolved artifacts yet, try to fetch them via gradle (bounded).
-        if not resolved:
+        if not resolved and allow_gradle_resolve:
             try:
                 from app.apps.file_editor_cm6.android_lang.gradle_resolve import resolve_artifacts_via_gradle
 

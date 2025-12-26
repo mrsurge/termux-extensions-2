@@ -40,6 +40,14 @@ _cache_persist_debounce_ms = 1000  # 1 second debounce
 # Sprint B: per-URI throttle for TE2 draft diagnostics publishing.
 _android_draft_diag_sig: dict[str, str] = {}
 
+# Sprint E: in-memory cache for TE2 draft diagnostics replay.
+# key: "<effective_project_root>::<uri>" -> (cache_key, diagnostics)
+_android_draft_diag_cache: dict[str, tuple[str, list[dict]]] = {}
+
+# Sprint E: guard expensive dependency index builds (no Gradle spam on every keystroke).
+# key: "<effective_project_root>::<syncFingerprint>" -> started_at_ms
+_android_dep_index_build_inflight: dict[str, int] = {}
+
 # Sprint D: per-project lock for Android sync to prevent concurrent stomping.
 _android_sync_locks: dict[str, asyncio.Lock] = {}
 
@@ -590,15 +598,63 @@ def _persist_to_cache_debounced():
                                 return {}
 
                             te2_sidecar = await anyio.to_thread.run_sync(_load_sidecar)
-                            te2_sidecar = await anyio.to_thread.run_sync(
-                                lambda: ensure_compiled_dependency_index(
-                                    sidecar_path=Path(sidecar_path),
-                                    te2_sidecar=te2_sidecar or {},
-                                    effective_project_root=effective_project_root,
-                                )
-                            )
 
-                            diags = build_draft_diagnostics(te2_sidecar=te2_sidecar or {}, uri=uri, content=current_content)
+                            # Compute cache key (draft content + sync/index version).
+                            sync_fp = str((te2_sidecar or {}).get('syncFingerprint') or '')
+                            idx = (te2_sidecar or {}).get('dependencyIndex') or {}
+                            idx_built = str(idx.get('builtAtMs') or '') if isinstance(idx, dict) else ''
+                            cache_key = f"{sync_fp}|{idx_built}|{current_hash}"
+
+                            cached = _android_draft_diag_cache.get(sig_key)
+                            if cached and cached[0] == cache_key:
+                                diags = cached[1]
+                            else:
+                                # Do NOT spawn Gradle here; build partial index only.
+                                te2_sidecar = await anyio.to_thread.run_sync(
+                                    lambda: ensure_compiled_dependency_index(
+                                        sidecar_path=Path(sidecar_path),
+                                        te2_sidecar=te2_sidecar or {},
+                                        effective_project_root=effective_project_root,
+                                        allow_gradle_resolve=False,
+                                    )
+                                )
+
+                                diags = build_draft_diagnostics(te2_sidecar=te2_sidecar or {}, uri=uri, content=current_content)
+                                _android_draft_diag_cache[sig_key] = (cache_key, diags)
+
+                                # If no dependency index yet, kick off one build per syncFingerprint.
+                                try:
+                                    idx2 = (te2_sidecar or {}).get('dependencyIndex') or {}
+                                    has_index = isinstance(idx2, dict) and bool(idx2.get('classes'))
+                                    if not has_index:
+                                        build_key = f"{effective_project_root}::{sync_fp}"
+                                        now_ms = int(time.time() * 1000)
+                                        started = _android_dep_index_build_inflight.get(build_key)
+                                        if not started or (now_ms - int(started)) > 30_000:
+                                            _android_dep_index_build_inflight[build_key] = now_ms
+
+                                            async def _build_index_bg() -> None:
+                                                try:
+                                                    sidecar2 = await anyio.to_thread.run_sync(_load_sidecar)
+                                                    await anyio.to_thread.run_sync(
+                                                        lambda: ensure_compiled_dependency_index(
+                                                            sidecar_path=Path(sidecar_path),
+                                                            te2_sidecar=sidecar2 or {},
+                                                            effective_project_root=effective_project_root,
+                                                            allow_gradle_resolve=True,
+                                                        )
+                                                    )
+                                                except Exception:
+                                                    pass
+                                                finally:
+                                                    try:
+                                                        _android_dep_index_build_inflight.pop(build_key, None)
+                                                    except Exception:
+                                                        pass
+
+                                            asyncio.create_task(_build_index_bg())
+                                except Exception:
+                                    pass
 
                             await publish_draft_diagnostics_to_client(
                                 language_id='kotlin-android',
@@ -2154,6 +2210,28 @@ async def android_sync_project(data: dict = Body(...)):
                     effective_project_root=effective_project_root,
                 )
             )
+
+            # Sprint E: build dependency index once on explicit sync (may spawn Gradle).
+            try:
+                from app.apps.file_editor_cm6.android_lang.dependency_index import ensure_compiled_dependency_index
+
+                def _load_sidecar_json() -> dict:
+                    try:
+                        return json.loads(Path(sidecar_path).read_text(encoding='utf-8'))
+                    except Exception:
+                        return {}
+
+                te2_sidecar = await anyio.to_thread.run_sync(_load_sidecar_json)
+                await anyio.to_thread.run_sync(
+                    lambda: ensure_compiled_dependency_index(
+                        sidecar_path=Path(sidecar_path),
+                        te2_sidecar=te2_sidecar or {},
+                        effective_project_root=effective_project_root,
+                        allow_gradle_resolve=True,
+                    )
+                )
+            except Exception:
+                pass
             
             # 4) Compute repo fingerprint for LSP notification
             from ..lsp_ws import send_lsp_notification, _compute_repo_fingerprint
