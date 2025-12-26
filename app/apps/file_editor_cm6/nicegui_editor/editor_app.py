@@ -273,7 +273,12 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
     print(f"[LSP] Triggering connect_lsp: {language_id} / {effective_project_root} / {file_path}", file=sys.stderr)
     try:
         if hasattr(editor, 'connect_lsp'):
-            editor.connect_lsp(language_id, str(effective_project_root), str(file_path))
+            editor.connect_lsp({
+                'languageId': language_id,
+                'projectRoot': str(effective_project_root),
+                'filePath': str(file_path),
+                'baseProjectRoot': str(project_root),
+            })
         else:
             print("[LSP] connect_lsp() not available on editor; bundle may be outdated", file=sys.stderr)
     except Exception as exc:
@@ -583,9 +588,15 @@ def _persist_to_cache_debounced():
                             sidecar_path = resolve_te2_android_sidecar_path(project_root=base_project_root)
                             if not sidecar_path.exists():
                                 sidecar_path = await anyio.to_thread.run_sync(
-                                    lambda: update_android_sidecar_for_project(
-                                        project_root=base_project_root,
-                                        effective_project_root=effective_project_root,
+                                    lambda: (
+                                        lambda _cfg: update_android_sidecar_for_project(
+                                            project_root=base_project_root,
+                                            effective_project_root=effective_project_root,
+                                            module=str((_cfg or {}).get('module') or 'app'),
+                                            variant=str((_cfg or {}).get('variant') or 'GeckoDebug'),
+                                        )
+                                    )(
+                                        (_history_store.get_project_sidecar(base_project_path).get_lsp_kotlin_android_config() if _history_store.get_project_sidecar(base_project_path) else {})
                                     )
                                 )
 
@@ -994,6 +1005,74 @@ async def editor_page():
                 if initial_path and project_path:
                     project_root_path = Path(project_path).expanduser()
                     _maybe_connect_lsp(editor, Path(initial_path), project_root_path)
+
+                    # Sprint E: On page load (stateless iframe), publish cached draft diagnostics
+                    # immediately for the open file (do not wait for first keystroke).
+                    async def _publish_android_draft_on_open_bg() -> None:
+                        try:
+                            if Path(initial_path).suffix not in ('.kt', '.kts'):
+                                return
+                            base_project_root = Path(project_path).expanduser()
+                            base_project_path = str(base_project_root)
+                            if not (_history_store.get_lsp_enabled(base_project_path) and _history_store.get_lsp_server_enabled(base_project_path, 'kotlin-android')):
+                                return
+
+                            # Match connect_lsp() effective project root.
+                            effective_project_root = base_project_root
+                            try:
+                                rel_root = _history_store.get_lsp_server_root_rel(base_project_path, 'kotlin-android')
+                                if rel_root:
+                                    candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
+                                    if candidate.exists() and candidate.is_dir():
+                                        effective_project_root = candidate
+                            except Exception:
+                                effective_project_root = base_project_root
+
+                            from app.apps.file_editor_cm6.android_lang.android_sidecar import resolve_te2_android_sidecar_path
+                            from app.apps.file_editor_cm6.android_lang.dependency_index import ensure_compiled_dependency_index
+                            from app.apps.file_editor_cm6.android_lang.draft_diagnostics import build_draft_diagnostics
+                            from ..lsp_ws import publish_draft_diagnostics_to_client
+
+                            uri = f"file://{initial_path}"
+                            sidecar_path = resolve_te2_android_sidecar_path(project_root=base_project_root)
+
+                            def _load_sidecar() -> dict:
+                                try:
+                                    if sidecar_path.exists():
+                                        return json.loads(sidecar_path.read_text(encoding='utf-8'))
+                                except Exception:
+                                    return {}
+                                return {}
+
+                            te2_sidecar = await anyio.to_thread.run_sync(_load_sidecar)
+                            te2_sidecar = await anyio.to_thread.run_sync(
+                                lambda: ensure_compiled_dependency_index(
+                                    sidecar_path=sidecar_path,
+                                    te2_sidecar=te2_sidecar or {},
+                                    effective_project_root=effective_project_root,
+                                    allow_gradle_resolve=False,
+                                )
+                            )
+
+                            current_content = editor._cached_content if hasattr(editor, '_cached_content') else (editor.value or '')
+                            diags = build_draft_diagnostics(te2_sidecar=te2_sidecar or {}, uri=uri, content=current_content)
+
+                            # Retry until iframe finishes LSP initialize and session has a current_sid.
+                            for _ in range(20):
+                                ok = await publish_draft_diagnostics_to_client(
+                                    language_id='kotlin-android',
+                                    project_root=effective_project_root,
+                                    uri=uri,
+                                    draft_diagnostics=diags,
+                                    has_drafts=bool(cached_entry.get('unsaved', False)) if cached_entry else False,
+                                )
+                                if ok:
+                                    return
+                                await asyncio.sleep(0.25)
+                        except Exception:
+                            return
+
+                    asyncio.create_task(_publish_android_draft_on_open_bg())
             except Exception as exc:
                 print(f"[LSP] Failed to auto-connect LSP on init for {initial_path}: {exc}", file=sys.stderr)
 
@@ -1749,6 +1828,7 @@ async def update_preference(data: dict = Body(...)):
     LSP_KEYS = {
         'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
         'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
+        'lspKotlinAndroidModule', 'lspKotlinAndroidVariant',
     }
     if key not in LSP_KEYS:
         from app.apps.file_editor_cm6.preferences_store import DEFAULT_EDITOR_PREFS
@@ -1806,6 +1886,7 @@ async def update_preference(data: dict = Body(...)):
         elif key in (
             'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
             'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
+            'lspKotlinAndroidModule', 'lspKotlinAndroidVariant',
         ):
             # LSP preferences are project-scoped (sidecar SSOT via HistoryStore facade).
             # Persist + apply after success below.
@@ -1852,6 +1933,7 @@ async def update_preference(data: dict = Body(...)):
         if key in (
             'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
             'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
+            'lspKotlinAndroidModule', 'lspKotlinAndroidVariant',
         ):
             project_path = _history_store.get_active_project() or str(get_project_root())
             if not project_path:
@@ -1871,6 +1953,20 @@ async def update_preference(data: dict = Body(...)):
                 if server_id:
                     if not _history_store.set_lsp_server_enabled(project_path, server_id, bool(value)):
                         raise RuntimeError("Failed to persist LSP server enablement")
+            elif key in ('lspKotlinAndroidModule', 'lspKotlinAndroidVariant'):
+                # Persist kotlin-android module/variant config into project sidecar.
+                try:
+                    sidecar = _history_store.get_project_sidecar(project_path)
+                    if not sidecar:
+                        raise RuntimeError('Missing project sidecar')
+                    if key == 'lspKotlinAndroidModule':
+                        sidecar.set_lsp_kotlin_android_config(module=str(value))
+                    else:
+                        sidecar.set_lsp_kotlin_android_config(variant=str(value))
+                    sidecar.save()
+                except Exception as exc:
+                    raise HTTPException(status_code=400, detail=f"Failed to persist kotlin-android config: {exc}")
+
             else:
                 root_map = {
                     'lspRootRelPyright': 'pyright',
@@ -2103,10 +2199,20 @@ async def save_current_file(data: dict = Body(...)):
                     async def _update_android_sidecar_bg() -> None:
                         try:
                             # 1) Update Sprint A sidecar (disk)
+                            try:
+                                cfg = {}
+                                sc = _history_store.get_project_sidecar(base_project_path)
+                                if sc:
+                                    cfg = sc.get_lsp_kotlin_android_config()
+                            except Exception:
+                                cfg = {}
+
                             sidecar_path = await anyio.to_thread.run_sync(
                                 lambda: update_android_sidecar_for_project(
                                     project_root=base_project_root,
                                     effective_project_root=effective_project_root,
+                                    module=str((cfg or {}).get('module') or 'app'),
+                                    variant=str((cfg or {}).get('variant') or 'GeckoDebug'),
                                 )
                             )
 
@@ -2130,6 +2236,22 @@ async def save_current_file(data: dict = Body(...)):
                                 return {}
 
                             te2_sidecar = await anyio.to_thread.run_sync(_load_sidecar_json)
+
+                            # Sprint E: build/refresh dependency index on save (authoritative, may spawn Gradle).
+                            try:
+                                from app.apps.file_editor_cm6.android_lang.dependency_index import ensure_compiled_dependency_index
+
+                                te2_sidecar = await anyio.to_thread.run_sync(
+                                    lambda: ensure_compiled_dependency_index(
+                                        sidecar_path=Path(sidecar_path),
+                                        te2_sidecar=te2_sidecar or {},
+                                        effective_project_root=effective_project_root,
+                                        allow_gradle_resolve=True,
+                                    )
+                                )
+                            except Exception:
+                                pass
+
                             diags = build_draft_diagnostics(te2_sidecar=te2_sidecar or {}, uri=uri)
 
                             dep = (te2_sidecar or {}).get('dependencyModel') or {}
@@ -2205,9 +2327,15 @@ async def android_sync_project(data: dict = Body(...)):
             # 3) Rebuild dependency model (fast, <1s)
             from app.apps.file_editor_cm6.android_lang.android_lsp_bridge import update_android_sidecar_for_project
             sidecar_path = await anyio.to_thread.run_sync(
-                lambda: update_android_sidecar_for_project(
-                    project_root=base_project_root,
-                    effective_project_root=effective_project_root,
+                lambda: (
+                    lambda _cfg: update_android_sidecar_for_project(
+                        project_root=base_project_root,
+                        effective_project_root=effective_project_root,
+                        module=str((_cfg or {}).get('module') or 'app'),
+                        variant=str((_cfg or {}).get('variant') or 'GeckoDebug'),
+                    )
+                )(
+                    (_history_store.get_project_sidecar(str(base_project_root)).get_lsp_kotlin_android_config() if _history_store.get_project_sidecar(str(base_project_root)) else {})
                 )
             )
 

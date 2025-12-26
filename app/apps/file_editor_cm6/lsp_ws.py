@@ -180,6 +180,23 @@ async def publish_draft_diagnostics_to_client(
     if not session:
         return False
 
+    # Persist TE2 draft diagnostics on the session so that subsequent backend
+    # publishDiagnostics (e.g. kotlin-android syntax diags on didChange) can be
+    # merged before reaching CM6, avoiding "blink" where squiggles disappear.
+    try:
+        dd = session.get("draft_diagnostics_by_uri")
+        if not isinstance(dd, dict):
+            dd = {}
+            session["draft_diagnostics_by_uri"] = dd
+        dd[uri] = draft_diagnostics if isinstance(draft_diagnostics, list) else []
+        hd = session.get("draft_has_drafts_by_uri")
+        if not isinstance(hd, dict):
+            hd = {}
+            session["draft_has_drafts_by_uri"] = hd
+        hd[uri] = bool(has_drafts)
+    except Exception:
+        pass
+
     sid = session.get("current_sid")
     if not sid:
         return False
@@ -344,6 +361,49 @@ async def send_lsp_notification(
 
     This bypasses the iframe client entirely (useful for server-side hooks like /write).
     """
+
+    # Android Kotlin LSP requires LSP JSON-RPC initialize() to have run before it can
+    # handle didSave/didOpen/didChangeConfiguration (androidDiagnostics is lateinit).
+    # TE2 server-side injections must be gated/queued to avoid crashing the server.
+    try:
+        if str(language_id) == "kotlin-android":
+            ns = _LSP_NAMESPACE_INSTANCE
+            if ns is None:
+                return False
+
+            root_key = str(project_root)
+            try:
+                root_key2 = str(project_root.expanduser().resolve(strict=False))
+            except Exception:
+                root_key2 = root_key
+
+            session = None
+            for rk in (root_key, root_key2):
+                session = getattr(ns, "backend_sessions", {}).get((str(language_id), rk))
+                if session:
+                    break
+
+            # No connected client session yet (manual prewarm only). We can't safely inject
+            # because the backend hasn't been initialized by the CM6 LSP client.
+            if not session:
+                return False
+
+            if not session.get("initialized"):
+                try:
+                    pending = session.setdefault("pending_after_init", [])
+                    if isinstance(pending, list):
+                        pending.append(message)
+                        # Keep queue bounded so a spammy save loop doesn't grow unbounded.
+                        if len(pending) > 25:
+                            del pending[:-25]
+                    _lsp_error(
+                        f"[LSP SAVE HOOK] queued until initialized lang={language_id} root={rk} method={message.get('method')}"
+                    )
+                except Exception:
+                    pass
+                return True
+    except Exception:
+        return False
 
     mgr = await get_manager()
 
@@ -733,6 +793,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         
         language_id = data.get("languageId")
         project_root = data.get("projectRoot", ".")
+        base_project_root = data.get("baseProjectRoot") or data.get("base_project_root")
         
         if not language_id:
             await self.emit("lsp:error", {"error": "Missing languageId"}, to=sid)
@@ -750,6 +811,8 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
 
         # Single-attached-client policy: steal attachment on reconnect.
         session["current_sid"] = sid
+        if base_project_root:
+            session["base_project_root"] = str(base_project_root)
 
         if sid in self.session_ready:
             self.session_ready[sid].set()
@@ -832,15 +895,26 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                     params = message.setdefault("params", {})
                     init_opts = params.setdefault("initializationOptions", {})
 
-                    # Default to GeckoDebug variant (most common for Termux Android dev)
-                    init_opts.setdefault("module", "app")
-                    init_opts.setdefault("variant", "GeckoDebug")
+                    # Module/variant come from project sidecar (preferred), fallback to defaults.
+                    module = "app"
+                    variant = "GeckoDebug"
+                    try:
+                        base_root = str(session.get("base_project_root") or session.get("project_root") or "")
+                        if base_root:
+                            sidecar = ProjectSidecar.load_or_create(base_root)
+                            cfg = sidecar.get_lsp_kotlin_android_config()
+                            module = str(cfg.get("module") or module)
+                            variant = str(cfg.get("variant") or variant)
+                    except Exception:
+                        pass
+                    init_opts.setdefault("module", module)
+                    init_opts.setdefault("variant", variant)
 
                     # Stable per-project id (SSOT: ProjectSidecar.lsp.project_id)
                     try:
-                        project_root = str(session.get("project_root") or "")
-                        if project_root:
-                            sidecar = ProjectSidecar.load_or_create(project_root)
+                        base_root = str(session.get("base_project_root") or session.get("project_root") or "")
+                        if base_root:
+                            sidecar = ProjectSidecar.load_or_create(base_root)
                             pid = sidecar.get_or_create_lsp_project_id()
                             try:
                                 sidecar.save()
@@ -976,6 +1050,34 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                     session["dead"] = True
                 except Exception:
                     pass
+
+    async def _forward_session_to_backend(self, session: dict, message: dict) -> bool:
+        """Forward a single message to a backend session without requiring a live sid.
+
+        Used to flush queued server-side notifications after initialize.
+        """
+
+        if not session:
+            return False
+        pipe_state = session.get("pipe_state")
+        if not pipe_state or not pipe_state.process or not pipe_state.process.stdin:
+            return False
+
+        body = json.dumps(message).encode("utf-8")
+        header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+
+        lock = _get_pipe_lock(session.get("shell_id") or "")
+        async with lock:
+            try:
+                pipe_state.process.stdin.write(header + body)
+                await pipe_state.process.stdin.drain()
+                return True
+            except Exception:
+                try:
+                    session["dead"] = True
+                except Exception:
+                    pass
+                return False
     
     async def _bridge_backend_output(self, key: Tuple[str, str]):
         """Read from backend stdout forever; deliver to current sid (session broker)."""
@@ -1040,6 +1142,18 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                         ):
                             session["init_result_template"] = dict(msg)
                             session["initialized"] = True
+                            # Flush any queued server-side notifications that were held until initialize.
+                            try:
+                                pending = session.pop("pending_after_init", None)
+                            except Exception:
+                                pending = None
+                            if isinstance(pending, list) and pending:
+                                _lsp_error(f"[LSP WS] flushing {len(pending)} queued notifications after initialize key={key}")
+                                for qm in pending:
+                                    try:
+                                        await self._forward_session_to_backend(session, qm)
+                                    except Exception:
+                                        pass
                     except Exception:
                         pass
 
@@ -1071,6 +1185,38 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                             diags = params.get("diagnostics") or []
                             diag_count = len(diags)
                             _lsp_error(f"[LSP WS] publishDiagnostics uri={diag_uri} count={diag_count}")
+                            # For kotlin-android, backend publishes diagnostics frequently (syntax on didChange).
+                            # CM6 treats publishDiagnostics as replace-all, so we must merge in TE2 draft
+                            # diagnostics (if any) before forwarding to avoid squiggle "blink".
+                            try:
+                                if (
+                                    session.get("language_id") == "kotlin-android"
+                                    and isinstance(diag_uri, str)
+                                    and diag_uri
+                                    and isinstance(diags, list)
+                                ):
+                                    dd = session.get("draft_diagnostics_by_uri")
+                                    hd = session.get("draft_has_drafts_by_uri")
+                                    draft_diags = dd.get(diag_uri) if isinstance(dd, dict) else None
+                                    has_drafts = bool(hd.get(diag_uri)) if isinstance(hd, dict) else False
+
+                                    if isinstance(draft_diags, list) and draft_diags:
+                                        try:
+                                            from app.apps.file_editor_cm6.android_lang.diagnostic_arbitration import (
+                                                merge_android_diagnostics,
+                                            )
+                                            merged = merge_android_diagnostics(
+                                                backend=diags,
+                                                draft=draft_diags,
+                                                has_drafts=has_drafts,
+                                            )
+                                        except Exception:
+                                            merged = diags + draft_diags
+                                        params["diagnostics"] = merged
+                                        msg["params"] = params
+                                        diags = merged
+                            except Exception:
+                                pass
                             try:
                                 cache = session.get("diagnostics_by_uri")
                                 if not isinstance(cache, dict):

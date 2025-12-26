@@ -176,13 +176,14 @@ class AndroidTextDocumentService(
     override fun didOpen(params: DidOpenTextDocumentParams) {
         val uri = parseURI(params.textDocument.uri)
         LOG.info("didOpen: $uri")
-        server.getAndroidDiagnostics().didOpen(uri, params.textDocument.version)
+        server.getAndroidDiagnostics().didOpen(uri, params.textDocument.version, params.textDocument.text)
     }
     
     override fun didChange(params: DidChangeTextDocumentParams) {
         val uri = parseURI(params.textDocument.uri)
         LOG.debug("didChange: $uri v${params.textDocument.version}")
-        server.getAndroidDiagnostics().didChange(uri, params.textDocument.version)
+        val text = params.contentChanges.firstOrNull()?.text
+        server.getAndroidDiagnostics().didChange(uri, params.textDocument.version, text)
     }
     
     override fun didSave(params: DidSaveTextDocumentParams) {

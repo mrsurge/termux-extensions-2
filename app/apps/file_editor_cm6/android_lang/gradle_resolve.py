@@ -7,39 +7,47 @@ from typing import Iterable
 
 _INIT_SCRIPT = r"""
 // TE2 init script: adds a task to print resolved classpath artifacts (jar/aar).
+// Supports flavor/variant classpaths via -Pte2Variant=GeckoDebug -Pte2Module=app.
 
 gradle.rootProject { root ->
   root.tasks.register('te2ResolveClasspath') {
     doLast {
-      def preferred = []
-      def appProj = root.findProject(':app')
-      if (appProj != null) { preferred.add(appProj) }
-      preferred.add(root)
+      def te2Module = (root.findProperty('te2Module') ?: 'app').toString()
+      def te2Variant = (root.findProperty('te2Variant') ?: '').toString()
+      def proj = root.findProject(":${te2Module}")
+      if (proj == null) { proj = root.findProject(':app') }
+      if (proj == null) { proj = root }
 
-      def cfgNames = [
+      def cfgNames = []
+      if (te2Variant != null && te2Variant.trim()) {
+        def v = te2Variant.trim()
+        def vPrefix = v.substring(0, 1).toLowerCase() + v.substring(1)
+        cfgNames.add(vPrefix + 'CompileClasspath')
+        cfgNames.add(vPrefix + 'RuntimeClasspath')
+      }
+      // Fallbacks for non-flavored projects
+      cfgNames.addAll([
         'debugCompileClasspath',
         'releaseCompileClasspath',
         'debugRuntimeClasspath',
         'releaseRuntimeClasspath'
-      ]
+      ])
 
       def seen = new LinkedHashSet<File>()
 
-      preferred.each { prj ->
-        cfgNames.each { name ->
-          def cfg = prj.configurations.findByName(name)
-          if (cfg != null && cfg.canBeResolved) {
-            try {
-              cfg.resolve().each { f ->
-                if (f != null && (f.name.endsWith('.jar') || f.name.endsWith('.aar'))) {
-                  if (seen.add(f)) {
-                    println "TE2_ART:${f.absolutePath}"
-                  }
+      cfgNames.each { name ->
+        def cfg = proj.configurations.findByName(name)
+        if (cfg != null && cfg.canBeResolved) {
+          try {
+            cfg.resolve().each { f ->
+              if (f != null && (f.name.endsWith('.jar') || f.name.endsWith('.aar'))) {
+                if (seen.add(f)) {
+                  println "TE2_ART:${f.absolutePath}"
                 }
               }
-            } catch (Exception e) {
-              // ignore
             }
+          } catch (Exception e) {
+            // ignore
           }
         }
       }
@@ -60,6 +68,8 @@ def resolve_artifacts_via_gradle(
     *,
     project_root: Path,
     cache_dir: Path,
+    module: str = "app",
+    variant: str = "",
     timeout_s: int = 60,
     extra_args: Iterable[str] = (),
 ) -> list[str]:
@@ -76,7 +86,16 @@ def resolve_artifacts_via_gradle(
     except Exception:
         return []
 
-    cmd = [str(gradlew), "-q", "-I", str(init_path), "te2ResolveClasspath", "--no-daemon"]
+    cmd = [
+        str(gradlew),
+        "-q",
+        "-I",
+        str(init_path),
+        f"-Pte2Module={module or 'app'}",
+    ]
+    if variant:
+        cmd.append(f"-Pte2Variant={variant}")
+    cmd.extend(["te2ResolveClasspath", "--no-daemon"])
     cmd.extend(list(extra_args))
 
     try:

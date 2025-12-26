@@ -2683,6 +2683,9 @@ const lspModal = {
   startKotlin: document.getElementById('lsp-start-kotlin'),
   startKotlinAndroid: document.getElementById('lsp-start-kotlin-android'),
   syncKotlinAndroid: document.getElementById('lsp-sync-kotlin-android'),
+  variantKotlinAndroidBtn: document.getElementById('lsp-variant-kotlin-android-btn'),
+  variantKotlinAndroidLabel: document.getElementById('lsp-variant-kotlin-android-label'),
+  variantKotlinAndroidDD: document.getElementById('lsp-variant-kotlin-android-dd'),
   rootRelPyright: document.getElementById('lsp-rootrel-pyright'),
   rootRelTypescript: document.getElementById('lsp-rootrel-typescript'),
   rootRelClangd: document.getElementById('lsp-rootrel-clangd'),
@@ -2737,6 +2740,7 @@ function _setLastLspStatus(payload) {
       typescript: { running: Boolean(servers?.typescript?.running) },
       clangd: { running: Boolean(servers?.clangd?.running) },
       kotlin: { running: Boolean(servers?.kotlin?.running) },
+      'kotlin-android': { running: Boolean(servers?.['kotlin-android']?.running) },
     },
   };
 }
@@ -2757,6 +2761,7 @@ function _deriveLspStatusFromCache(cache) {
       },
       clangd: { running: Boolean(isRunning(byLang.c) || isRunning(byLang.cpp)) },
       kotlin: { running: Boolean(isRunning(byLang.kotlin)) },
+      'kotlin-android': { running: Boolean(isRunning(byLang['kotlin-android'])) },
     },
   };
 }
@@ -2805,6 +2810,72 @@ function updateLspModalUI(state) {
   } catch (err) {
     console.warn('[LSP Modal] Failed to apply rootrel inputs', err);
   }
+
+  // Kotlin-android: variants dropdown (custom JS menu; do not rely on native <select>)
+  try {
+    if (lspModal.variantKotlinAndroidBtn && lspModal.variantKotlinAndroidDD) {
+      const variants = Array.isArray(state?.lspKotlinAndroidVariants) ? state.lspKotlinAndroidVariants : [];
+      const selected = String(state?.lspKotlinAndroidVariant || '');
+      const currentLabel = selected ? selected : '(auto)';
+
+      if (lspModal.variantKotlinAndroidLabel) {
+        lspModal.variantKotlinAndroidLabel.textContent = currentLabel;
+      } else {
+        lspModal.variantKotlinAndroidBtn.textContent = currentLabel;
+      }
+
+      // Disable when LSP is globally disabled; keep selectable even if variants list is empty
+      // (auto is always available).
+      lspModal.variantKotlinAndroidBtn.disabled = !isEnabled;
+
+      // Rebuild dropdown items.
+      const dd = lspModal.variantKotlinAndroidDD;
+      dd.innerHTML = '';
+
+      const addItem = (label, value) => {
+        const item = document.createElement('div');
+        item.className = 'fe-dd-item';
+        item.setAttribute('data-checkable', 'true');
+        item.dataset.value = String(value || '');
+        item.textContent = label;
+        const isActive = String(value || '') === selected;
+        item.classList.toggle('fe-menu-item-checked', isActive);
+        item.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          dd.classList.remove('show');
+          const v = String(item.dataset.value || '');
+          const ok = await updatePreference('lspKotlinAndroidVariant', v);
+          if (!ok) {
+            host.toast('Failed to update kotlin-android variant');
+            return;
+          }
+          updateLspModalUI(editorViewState);
+
+          // Trigger a sync/index refresh for the selected variant.
+          const btn = lspModal.syncKotlinAndroid;
+          const originalText = btn ? btn.textContent : '';
+          try {
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Syncing...'; }
+            const resp = await fetch('/api/app/file_editor_cm6/editor/android/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reason: 'variant_change' }),
+            });
+            const json = await resp.json();
+            if (!json.ok) host.toast('Sync failed: ' + (json.error || 'unknown error'));
+          } catch (err) {
+            host.toast('Sync failed: ' + (err?.message || err));
+          } finally {
+            if (btn) { btn.disabled = false; btn.textContent = originalText || btn.textContent; }
+          }
+        });
+        dd.appendChild(item);
+      };
+
+      addItem('(auto)', '');
+      for (const v of variants) addItem(String(v), String(v));
+    }
+  } catch { }
 
   const applyRow = (serverId, enabled, dot, toggleBtn, startBtn) => {
     if (dot) {
@@ -3059,6 +3130,18 @@ if (lspModal.rootRelClangd) lspModal.rootRelClangd.addEventListener('change', (e
 if (lspModal.rootRelKotlin) lspModal.rootRelKotlin.addEventListener('change', (e) => _updateLspRootRel('kotlin', e?.target?.value));
 if (lspModal.rootRelKotlinAndroid) lspModal.rootRelKotlinAndroid.addEventListener('change', (e) => _updateLspRootRel('kotlin-android', e?.target?.value));
 
+if (lspModal.variantKotlinAndroidBtn && lspModal.variantKotlinAndroidDD) {
+  lspModal.variantKotlinAndroidBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const dd = lspModal.variantKotlinAndroidDD;
+    const wasOpen = dd.classList.contains('show');
+    closeAllMenus();
+    if (!wasOpen) {
+      dd.classList.add('show');
+    }
+  });
+}
+
 // Sprint D: Sync Project button for kotlin-android
 if (lspModal.syncKotlinAndroid) {
   lspModal.syncKotlinAndroid.addEventListener('click', async () => {
@@ -3218,6 +3301,11 @@ function closeAllMenus() {
   menuViewDD.classList.remove('show');
   menuThemeDD.classList.remove('show');
   recentFilesDD.classList.remove('show');
+  try {
+    if (lspModal && lspModal.variantKotlinAndroidDD) {
+      lspModal.variantKotlinAndroidDD.classList.remove('show');
+    }
+  } catch { }
   if (branchMenuHandle && typeof branchMenuHandle.close === 'function') {
     branchMenuHandle.close();
   }

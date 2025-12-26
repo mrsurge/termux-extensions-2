@@ -315,3 +315,11 @@ Located at `./android/` (gitignored):
   - Server-side save trigger (critical): iframe LSP client does not send `didSave`
     - Inject `workspace/didChangeConfiguration` + `textDocument/didSave` on save endpoints
     - RootRel-aware: fingerprint must be computed from the same effective project root as `connect_lsp`
+
+### 2025-12-26 (Session 4b / Restoration Note)
+
+- User observation: the earlier “working” claims in this tracker were accurate at the time; subsequent breakage/regressions were introduced later.
+- Action taken: project state was restored back to a known-good configuration.
+- Follow-up focus: identify *which* change(s) caused the regression (likely around draft/caching/index/variant plumbing), then re-introduce improvements incrementally with tight validation.
+
+[2025-12-26T17:11:35.085Z] NOTE: The red (Gradle-backed) diagnostics/squiggles path was already working; the intended work scope was only to add draft-based WARNING (yellow) diagnostics on top without destabilizing the existing red error pipeline.

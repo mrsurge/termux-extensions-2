@@ -243,9 +243,30 @@ class HistoryStore:
                 "lspRootRelClangd": "",
                 "lspRootRelKotlin": "",
                 "lspRootRelKotlinAndroid": "",
+                "lspKotlinAndroidModule": "app",
+                "lspKotlinAndroidVariant": "GeckoDebug",
+                "lspKotlinAndroidVariants": [],
             }
         try:
-            return dict(sidecar.get_lsp_state_payload())
+            payload = dict(sidecar.get_lsp_state_payload())
+
+            # Kotlin-android: detect variants from build.gradle(.kts) under rootRel (fast path).
+            try:
+                from app.apps.file_editor_cm6.android_lang.gradle_variants import detect_variants_from_gradle
+
+                root_rel = str(payload.get("lspRootRelKotlinAndroid") or "").strip().rstrip("/")
+                if root_rel:
+                    eff = (Path(project_path).expanduser().resolve(strict=False) / root_rel).expanduser().resolve(strict=False)
+                else:
+                    eff = Path(project_path).expanduser().resolve(strict=False)
+
+                module = str(payload.get("lspKotlinAndroidModule") or "app")
+                detected = detect_variants_from_gradle(effective_project_root=eff, module=module)
+                payload["lspKotlinAndroidVariants"] = detected.get("variants") or []
+            except Exception:
+                payload.setdefault("lspKotlinAndroidVariants", [])
+
+            return payload
         except Exception:
             return {
                 "enableLsp": False,
@@ -259,6 +280,9 @@ class HistoryStore:
                 "lspRootRelClangd": "",
                 "lspRootRelKotlin": "",
                 "lspRootRelKotlinAndroid": "",
+                "lspKotlinAndroidModule": "app",
+                "lspKotlinAndroidVariant": "GeckoDebug",
+                "lspKotlinAndroidVariants": [],
             }
 
     def _touch_project_locked(self, path: str) -> Dict[str, object]:

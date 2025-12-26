@@ -12,7 +12,7 @@ if (window.parent && window.parent !== window) {
 const _io = (window.parent && typeof window.parent.io === 'function') ? window.parent.io : (typeof io === 'function' ? io : null);
 
 class SocketIOTransport {
-  constructor(namespace, languageId, projectRoot) {
+  constructor(namespace, languageId, projectRoot, initExtra) {
     this.socket = null;
     this.onMessage = null;
     this._readyResolve = null;
@@ -48,14 +48,16 @@ class SocketIOTransport {
       console.log('[LSP] Socket created:', this.socket);
       console.log('[LSP] Socket connected?:', this.socket?.connected);
 
+      this._initPayload = Object.assign({
+        languageId: languageId,
+        projectRoot: projectRoot,
+      }, (initExtra && typeof initExtra === 'object') ? initExtra : {});
+
       this.socket.on('connect', () => {
         try {
           console.log('[LSP] Socket.IO connected, sending initialize...');
           this._readyResolve?.();
-          this.socket.emit('initialize', {
-            languageId: languageId,
-            projectRoot: projectRoot,
-          });
+          this.socket.emit('initialize', this._initPayload);
         } catch (err) {
           console.warn('[LSP] Failed to send initialize event:', err);
         }
@@ -1567,7 +1569,10 @@ export default {
       // Reset document version counter for new connection
       this._lspDocumentVersion = 1;
 
-      const transport = new SocketIOTransport('/lsp', languageId, projectRoot);
+      const initExtra = (typeof options === 'object' && options !== null) ? {
+        baseProjectRoot: options.baseProjectRoot || '',
+      } : {};
+      const transport = new SocketIOTransport('/lsp', languageId, projectRoot, initExtra);
       if (!transport || !transport.socket) {
         console.warn('[LSP] SocketIOTransport not initialized; aborting LSP connect');
         return;
@@ -1605,7 +1610,9 @@ export default {
           } catch (err) {
             console.warn('[LSP] Waiting for lsp_initialized failed, retrying initialize...', err);
             try {
-              transport.socket?.emit('initialize', { languageId, projectRoot });
+              try {
+                transport.socket?.emit('initialize', transport._initPayload || { languageId, projectRoot });
+              } catch { }
             } catch { }
           }
         }

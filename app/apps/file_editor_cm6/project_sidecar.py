@@ -644,9 +644,19 @@ class ProjectSidecar:
     def _ensure_lsp_schema(self) -> dict:
         lsp = self._data.get("lsp")
         if not isinstance(lsp, dict):
-            lsp = {"enabled": False, "servers": {}, "roots": {}}
+            lsp = {"enabled": False, "servers": {}, "roots": {}, "android": {}}
         lsp.setdefault("enabled", False)
         lsp.setdefault("project_id", "")
+        android_cfg = lsp.get("android")
+        if not isinstance(android_cfg, dict):
+            android_cfg = {}
+        kotlin_android = android_cfg.get("kotlin-android")
+        if not isinstance(kotlin_android, dict):
+            kotlin_android = {}
+        kotlin_android.setdefault("module", "app")
+        kotlin_android.setdefault("variant", "GeckoDebug")
+        android_cfg["kotlin-android"] = kotlin_android
+        lsp["android"] = android_cfg
         servers = lsp.get("servers")
         if not isinstance(servers, dict):
             servers = {}
@@ -722,10 +732,34 @@ class ProjectSidecar:
         self._data["lsp"] = lsp
         return text
 
+    def get_lsp_kotlin_android_config(self) -> dict:
+        lsp = self._ensure_lsp_schema()
+        android_cfg = lsp.get("android") or {}
+        cfg = android_cfg.get("kotlin-android")
+        return cfg if isinstance(cfg, dict) else {"module": "app", "variant": "GeckoDebug"}
+
+    def set_lsp_kotlin_android_config(self, *, module: str | None = None, variant: str | None = None) -> dict:
+        lsp = self._ensure_lsp_schema()
+        android_cfg = lsp.get("android")
+        if not isinstance(android_cfg, dict):
+            android_cfg = {}
+        cfg = android_cfg.get("kotlin-android")
+        if not isinstance(cfg, dict):
+            cfg = {}
+        if module is not None:
+            cfg["module"] = str(module).strip() or "app"
+        if variant is not None:
+            cfg["variant"] = str(variant).strip() or "GeckoDebug"
+        android_cfg["kotlin-android"] = cfg
+        lsp["android"] = android_cfg
+        self._data["lsp"] = lsp
+        return cfg
+
     def get_lsp_state_payload(self) -> dict:
         lsp = self._ensure_lsp_schema()
         servers = lsp.get("servers") or {}
         roots = lsp.get("roots") or {}
+        android_cfg = self.get_lsp_kotlin_android_config()
         return {
             "enableLsp": bool(lsp.get("enabled", False)),
             "enableLspPyright": bool(servers.get("pyright", False)),
@@ -738,6 +772,8 @@ class ProjectSidecar:
             "lspRootRelClangd": str(roots.get("clangd") or ""),
             "lspRootRelKotlin": str(roots.get("kotlin") or ""),
             "lspRootRelKotlinAndroid": str(roots.get("kotlin-android") or ""),
+            "lspKotlinAndroidModule": str(android_cfg.get("module") or "app"),
+            "lspKotlinAndroidVariant": str(android_cfg.get("variant") or "GeckoDebug"),
         }
 
 

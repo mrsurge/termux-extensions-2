@@ -342,6 +342,8 @@
   .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
   .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 40; }
   .fe-dropdown.show { display: block; }
+  /* Dropdowns inside modals need to stack above modal content. */
+  .fe-dropdown--modal { z-index: 500; }
   #menu-theme-dd { max-height: calc(80vh - 60px); overflow-y: auto; }
   #recent-files-dd { left: auto; right: 0; }
   #menu-branch-dd { left: auto; right: 0; max-height: calc(80vh - 60px); overflow-y: auto; }
@@ -2067,6 +2069,16 @@
             <div class="lsp-server-config">
               <label for="lsp-rootrel-kotlin-android">Project root (relative)</label>
               <input id="lsp-rootrel-kotlin-android" class="lsp-rootrel-input" type="text" placeholder="e.g. android/" autocomplete="off" autocapitalize="off" spellcheck="false" />
+            </div>
+            <div class="lsp-server-config">
+              <label for="lsp-variant-kotlin-android">Variant</label>
+              <div class="fe-menu" style="width: 100%;">
+                <button id="lsp-variant-kotlin-android-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;">
+                  <span id="lsp-variant-kotlin-android-label">(auto)</span>
+                  <span aria-hidden="true">▾</span>
+                </button>
+                <div id="lsp-variant-kotlin-android-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 260px; overflow-y: auto;"></div>
+              </div>
             </div>
           </div>
           <div class="lsp-server-status">

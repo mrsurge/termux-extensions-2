@@ -1,11 +1,20 @@
 package org.javacs.kt.gradle
 
 import org.eclipse.lsp4j.*
-import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.services.LanguageClient
+import com.intellij.psi.PsiErrorElement
+import com.intellij.psi.util.PsiTreeUtil
+import org.eclipse.lsp4j.Diagnostic
+import org.eclipse.lsp4j.DiagnosticSeverity
+import org.eclipse.lsp4j.PublishDiagnosticsParams
 import org.javacs.kt.LOG
+import org.javacs.kt.ScriptsConfiguration
+import org.javacs.kt.CodegenConfiguration
+import org.javacs.kt.compiler.Compiler
+import org.javacs.kt.position.range
 import org.javacs.kt.util.AsyncExecutor
 import org.javacs.kt.util.Debouncer
+import java.io.File
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
@@ -44,7 +53,15 @@ class AndroidDiagnosticsService(
     private val async = AsyncExecutor()
     
     private var debouncer = Debouncer(Duration.ofMillis(config.debounceTimeMs))
-    
+    private var syntaxDebouncer = Debouncer(Duration.ofMillis(200))
+
+    // Syntax-only diagnostics (fast, no Gradle, based on Kotlin PSI error elements)
+    private val syntaxDiagnostics = ConcurrentHashMap<URI, List<Diagnostic>>()
+    private val gradleDiagnostics = ConcurrentHashMap<URI, List<Diagnostic>>()
+    private val openFileText = ConcurrentHashMap<URI, String>()
+
+    private var syntaxCompiler: Compiler? = null
+
     private val gradleCompiler = GradleCompiler(
         projectRoot,
         GradleCompilerConfig(
@@ -79,6 +96,79 @@ class AndroidDiagnosticsService(
         val version: Int,
         val isDirty: Boolean = false
     )
+
+    private fun ensureSyntaxCompiler(): Compiler {
+        val existing = syntaxCompiler
+        if (existing != null) return existing
+
+        // For syntax diagnostics we only need PSI parsing. Use empty classpath.
+        val outDir = try {
+            val p = sidecarPath?.parent?.resolve("syntax_out")
+            if (p != null) {
+                Files.createDirectories(p)
+                p.toFile()
+            } else {
+                Files.createTempDirectory("kls_syntax_out").toFile()
+            }
+        } catch (_: Exception) {
+            File(System.getProperty("java.io.tmpdir"), "kls_syntax_out").apply { mkdirs() }
+        }
+
+        val c = Compiler(
+            javaSourcePath = emptySet(),
+            classPath = emptySet(),
+            buildScriptClassPath = emptySet(),
+            scriptsConfig = ScriptsConfiguration(enabled = false),
+            codegenConfig = CodegenConfiguration(enabled = false),
+            outputDirectory = outDir,
+        )
+        syntaxCompiler = c
+        return c
+    }
+
+    private fun computeSyntaxDiagnostics(text: String, uri: URI): List<Diagnostic> {
+        return try {
+            val compiler = ensureSyntaxCompiler()
+            val path = try { Path.of(uri) } catch (_: Exception) { null }
+            val file = compiler.createKtFile(text, path ?: java.nio.file.Paths.get("dummy.virtual.kt"))
+
+            val errors = PsiTreeUtil.collectElementsOfType(file, PsiErrorElement::class.java)
+            errors.take(50).mapNotNull { err ->
+                try {
+                    val d = Diagnostic(
+                        range(text, err.textRange),
+                        err.errorDescription ?: "Syntax error",
+                        DiagnosticSeverity.Error,
+                        "kotlin-syntax",
+                    )
+                    d.code = org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft("syntax")
+                    d
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun publishMergedDiagnostics(uri: URI) {
+        val merged = (syntaxDiagnostics[uri] ?: emptyList()) + (gradleDiagnostics[uri] ?: emptyList())
+        lastDiagnostics[uri] = merged
+        client.publishDiagnostics(PublishDiagnosticsParams(uri.toString(), merged))
+        LOG.debug("Published ${merged.size} merged diagnostics for $uri")
+    }
+
+    private fun scheduleSyntax(uri: URI) {
+        syntaxDebouncer.schedule { cancelled ->
+            if (!cancelled.invoke()) {
+                val text = openFileText[uri] ?: return@schedule
+                val diags = computeSyntaxDiagnostics(text, uri)
+                syntaxDiagnostics[uri] = diags
+                publishMergedDiagnostics(uri)
+            }
+        }
+    }
     
     fun connect(client: LanguageClient) {
         this.client = client
@@ -117,9 +207,13 @@ class AndroidDiagnosticsService(
         replayCached(sc, provenance = "cached")
     }
     
-    fun didOpen(uri: URI, version: Int) {
+    fun didOpen(uri: URI, version: Int, text: String?) {
         openFiles[uri] = OpenFileState(uri, version, isDirty = false)
+        if (text != null) {
+            openFileText[uri] = text
+        }
         LOG.info("Opened: $uri")
+        scheduleSyntax(uri)
 
         // Mid-flight page refreshes create a new client, but the same LSP backend.
         // Re-emit cached diagnostics for the specific opened file so the new client gets squiggles.
@@ -131,7 +225,7 @@ class AndroidDiagnosticsService(
                 if (cached != null) {
                     val diags = cached.map { cd ->
                         val d = cd.toLspDiagnostic()
-                        d.code = Either.forLeft("cached")
+                        d.code = org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft("cached")
                         d
                     }
                     publishDiagnostics(uri, diags)
@@ -148,10 +242,14 @@ class AndroidDiagnosticsService(
         }
     }
     
-    fun didChange(uri: URI, version: Int) {
+    fun didChange(uri: URI, version: Int, text: String?) {
         openFiles[uri] = OpenFileState(uri, version, isDirty = true)
+        if (text != null) {
+            openFileText[uri] = text
+        }
         LOG.debug("Changed: $uri v$version")
 
+        scheduleSyntax(uri)
         // Never compile on change; TE2 is responsible for repo/dirty tracking + save triggers.
     }
     
@@ -244,10 +342,11 @@ class AndroidDiagnosticsService(
         // Publish diagnostics for files with errors (tag provenance)
         for ((uri, diags0) in byFile) {
             val diags = diags0.map { d ->
-                d.code = Either.forLeft("gradle")
+                d.code = org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft("gradle")
                 d
             }
-            publishDiagnostics(uri, diags)
+            gradleDiagnostics[uri] = diags
+            publishMergedDiagnostics(uri)
         }
 
         // Persist sidecar (keyed by lspProjectId) if configured
@@ -260,7 +359,7 @@ class AndroidDiagnosticsService(
 
                 val current: Map<String, List<CachedDiagnostic>> = byFile.entries.associate { (uri, diags0) ->
                     val diags = diags0.map { d ->
-                        d.code = Either.forLeft("gradle")
+                        d.code = org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft("gradle")
                         d
                     }
                     uri.toString() to diags.map { it.toCached() }
@@ -293,7 +392,8 @@ class AndroidDiagnosticsService(
         val filesWithErrors = byFile.keys
         for (uri in lastDiagnostics.keys) {
             if (uri !in filesWithErrors) {
-                clearDiagnostics(uri)
+                gradleDiagnostics[uri] = emptyList()
+                publishMergedDiagnostics(uri)
             }
         }
 
@@ -306,9 +406,9 @@ class AndroidDiagnosticsService(
     }
     
     private fun publishDiagnostics(uri: URI, diagnostics: List<Diagnostic>) {
-        lastDiagnostics[uri] = diagnostics
-        client.publishDiagnostics(PublishDiagnosticsParams(uri.toString(), diagnostics))
-        LOG.debug("Published ${diagnostics.size} diagnostics for $uri")
+        // Legacy entrypoint (used by cached replay). Treat as Gradle-source diagnostics.
+        gradleDiagnostics[uri] = diagnostics
+        publishMergedDiagnostics(uri)
     }
 
     private fun replayCached(sc: AndroidSidecarV1, provenance: String) {
@@ -320,7 +420,7 @@ class AndroidDiagnosticsService(
                 val uri = URI.create(uriStr)
                 val diags = cached.map { cd ->
                     val d = cd.toLspDiagnostic()
-                    d.code = Either.forLeft(provenance)
+                    d.code = org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(provenance)
                     d
                 }
                 publishDiagnostics(uri, diags)
@@ -339,6 +439,9 @@ class AndroidDiagnosticsService(
     
     private fun clearDiagnostics(uri: URI) {
         lastDiagnostics.remove(uri)
+        syntaxDiagnostics.remove(uri)
+        gradleDiagnostics.remove(uri)
+        openFileText.remove(uri)
         client.publishDiagnostics(PublishDiagnosticsParams(uri.toString(), emptyList()))
         LOG.debug("Cleared diagnostics for $uri")
     }

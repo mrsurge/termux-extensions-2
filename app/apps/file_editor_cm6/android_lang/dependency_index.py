@@ -134,8 +134,6 @@ def ensure_compiled_dependency_index(
     try:
         sync_fp = str((te2_sidecar or {}).get("syncFingerprint") or "")
         existing = (te2_sidecar or {}).get("dependencyIndex") or {}
-        if isinstance(existing, dict) and existing.get("syncFingerprint") == sync_fp and existing.get("classes"):
-            return te2_sidecar
 
         dep = (te2_sidecar or {}).get("dependencyModel") or {}
         android_jar_s = ((dep.get("androidSdk") or {}).get("androidJar") or "").strip()
@@ -145,14 +143,26 @@ def ensure_compiled_dependency_index(
         if not isinstance(resolved, list):
             resolved = []
 
+        # If we already have a fresh index AND (when Gradle is allowed) we have resolved artifacts,
+        # we can reuse it.
+        if isinstance(existing, dict) and existing.get("syncFingerprint") == sync_fp and existing.get("classes"):
+            if (not allow_gradle_resolve) or resolved:
+                return te2_sidecar
+
         # If we don't have resolved artifacts yet, try to fetch them via gradle (bounded).
         if not resolved and allow_gradle_resolve:
             try:
                 from app.apps.file_editor_cm6.android_lang.gradle_resolve import resolve_artifacts_via_gradle
 
+                lgc = (te2_sidecar or {}).get("lastGradleCompile") or {}
+                module = str(lgc.get("module") or "app")
+                variant = str(lgc.get("variant") or "")
+
                 resolved = resolve_artifacts_via_gradle(
                     project_root=effective_project_root,
                     cache_dir=sidecar_path.parent,
+                    module=module,
+                    variant=variant,
                     timeout_s=60,
                 )
                 dep.setdefault("gradle", {})["resolvedArtifacts"] = resolved
