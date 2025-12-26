@@ -542,6 +542,78 @@ def _persist_to_cache_debounced():
     except Exception as e:
         print(f"[PERSIST] Failed to refresh diffs: {e}", file=sys.stderr)
 
+    # Sprint E: publish WARNING-level Android draft diagnostics (draft mode only).
+    try:
+        if Path(current_file).suffix in ('.kt', '.kts'):
+            base_project_root = Path(project_path)
+            base_project_path = str(base_project_root)
+            if _history_store.get_lsp_enabled(base_project_path) and _history_store.get_lsp_server_enabled(base_project_path, 'kotlin-android'):
+                effective_project_root = base_project_root
+                try:
+                    rel_root = _history_store.get_lsp_server_root_rel(base_project_path, 'kotlin-android')
+                    if rel_root:
+                        candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
+                        if candidate.exists() and candidate.is_dir():
+                            effective_project_root = candidate
+                except Exception:
+                    effective_project_root = base_project_root
+
+                uri = f"file://{current_file}"
+                sig_key = f"{effective_project_root}::{uri}"
+                sig = f"draft:{current_hash}"
+                if _android_draft_diag_sig.get(sig_key) != sig:
+                    _android_draft_diag_sig[sig_key] = sig
+
+                    async def _publish_android_draft_diags_bg() -> None:
+                        try:
+                            from app.apps.file_editor_cm6.android_lang.android_sidecar import resolve_te2_android_sidecar_path
+                            from app.apps.file_editor_cm6.android_lang.dependency_index import ensure_compiled_dependency_index
+                            from app.apps.file_editor_cm6.android_lang.draft_diagnostics import build_draft_diagnostics
+                            from app.apps.file_editor_cm6.android_lang.android_lsp_bridge import update_android_sidecar_for_project
+                            from ..lsp_ws import publish_draft_diagnostics_to_client
+
+                            sidecar_path = resolve_te2_android_sidecar_path(project_root=base_project_root)
+                            if not sidecar_path.exists():
+                                sidecar_path = await anyio.to_thread.run_sync(
+                                    lambda: update_android_sidecar_for_project(
+                                        project_root=base_project_root,
+                                        effective_project_root=effective_project_root,
+                                    )
+                                )
+
+                            def _load_sidecar() -> dict:
+                                try:
+                                    if sidecar_path and Path(sidecar_path).exists():
+                                        return json.loads(Path(sidecar_path).read_text(encoding='utf-8'))
+                                except Exception:
+                                    return {}
+                                return {}
+
+                            te2_sidecar = await anyio.to_thread.run_sync(_load_sidecar)
+                            te2_sidecar = await anyio.to_thread.run_sync(
+                                lambda: ensure_compiled_dependency_index(
+                                    sidecar_path=Path(sidecar_path),
+                                    te2_sidecar=te2_sidecar or {},
+                                    effective_project_root=effective_project_root,
+                                )
+                            )
+
+                            diags = build_draft_diagnostics(te2_sidecar=te2_sidecar or {}, uri=uri, content=current_content)
+
+                            await publish_draft_diagnostics_to_client(
+                                language_id='kotlin-android',
+                                project_root=effective_project_root,
+                                uri=uri,
+                                draft_diagnostics=diags,
+                                has_drafts=bool(cache_entry.get('unsaved', False)),
+                            )
+                        except Exception as exc:
+                            print(f"[ANDROID DRAFT DIAGS] failed: {exc}", file=sys.stderr)
+
+                    asyncio.create_task(_publish_android_draft_diags_bg())
+    except Exception:
+        pass
+
 def _cancel_cache_persist_timer():
     """Cancel any pending cache persist timer."""
     global _cache_persist_timer

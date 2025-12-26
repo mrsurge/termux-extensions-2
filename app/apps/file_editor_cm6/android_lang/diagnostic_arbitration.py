@@ -79,7 +79,23 @@ def merge_android_diagnostics(
         # Environment is broken: don't suppress anything, user needs to fix SDK/JDK
         return list(backend) + list(draft)
 
-    # Suppress ghost diagnostics from backend
-    filtered_backend = [d for d in backend if not _is_ghost_diagnostic(d)]
+    # Only suppress ghost diagnostics if TE2 provided replacements (Sprint E: never go blind).
+    has_replacements = False
+    try:
+        for d in draft:
+            if not isinstance(d, dict):
+                continue
+            if (d.get("source") or "") != _DRAFT_SOURCE:
+                continue
+            code = str(d.get("code") or "")
+            if code.startswith("DRAFT_UNRESOLVED_"):
+                has_replacements = True
+                break
+    except Exception:
+        has_replacements = False
 
+    if not has_replacements:
+        return list(backend) + list(draft)
+
+    filtered_backend = [d for d in backend if not _is_ghost_diagnostic(d)]
     return filtered_backend + list(draft)

@@ -64,7 +64,20 @@ def update_android_sidecar_for_project(
     project_cache_dir = resolve_project_cache_dir(cache_root=cache_root, lsp_project_id=lsp_project_id)
     sidecar_path = project_cache_dir / "te2_android_sidecar.json"
 
+    existing: Dict[str, Any] = AndroidTe2Sidecar(sidecar_path).load()
+    existing_sync = str((existing or {}).get("syncFingerprint") or "")
+    keep_cached = bool(existing_sync and existing_sync == sync_fp)
+
     dep_model = build_dependency_model_v1(effective_project_root=eff_root, module=module, variant=variant)
+
+    # Preserve resolved artifact list + indices if still valid for the same syncFingerprint.
+    if keep_cached:
+        try:
+            prev_resolved = (((existing or {}).get("dependencyModel") or {}).get("gradle") or {}).get("resolvedArtifacts")
+            if isinstance(prev_resolved, list) and prev_resolved:
+                dep_model.setdefault("gradle", {})["resolvedArtifacts"] = prev_resolved
+        except Exception:
+            pass
 
     payload: Dict[str, Any] = {
         "version": 1,
@@ -83,6 +96,11 @@ def update_android_sidecar_for_project(
         "dependencyModel": dep_model,
         "updatedAtMs": int(time.time() * 1000),
     }
+
+    if keep_cached:
+        for k in ("dependencyIndex", "shadowIndex", "gradleDraftFingerprint"):
+            if k in (existing or {}):
+                payload[k] = (existing or {}).get(k)
 
     AndroidTe2Sidecar(sidecar_path).save(payload)
     return sidecar_path
