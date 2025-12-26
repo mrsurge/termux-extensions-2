@@ -101,7 +101,9 @@ class ConnectionManager:
         self.ws_project_map: Dict[WebSocket, str] = {}
         self.pulse_task: Optional[asyncio.Task] = None
         self.lsp_status_task: Optional[asyncio.Task] = None
+        self.diagnostics_task: Optional[asyncio.Task] = None
         self._last_lsp_status: Dict[str, dict] = {}
+        self._last_diagnostics: Dict[str, dict] = {}
 
     async def accept_and_register(self, websocket: WebSocket, project_path: str):
         # Some shims (Socket.IO) don't need accept; provide no-op if missing
@@ -125,6 +127,7 @@ class ConnectionManager:
         if was_empty:
             self.start_pulse()
             self.start_lsp_status()
+            self.start_diagnostics()
             # Start watcher for the project (using SSOT active project)
             try:
                 from .core_read import init_watcher
@@ -149,6 +152,7 @@ class ConnectionManager:
         if not any(self.active_connections.values()):
             self.stop_pulse()
             self.stop_lsp_status()
+            self.stop_diagnostics()
             # Stop watcher to save resources
             try:
                 from .core_read import stop_watcher
@@ -184,6 +188,33 @@ class ConnectionManager:
             self.lsp_status_task = None
             self._last_lsp_status = {}
             logger.info("[LSP_STATUS] Broadcaster stopped")
+
+    def start_diagnostics(self):
+        """Start diagnostics broadcaster task."""
+        if self.diagnostics_task is None or self.diagnostics_task.done():
+            loop = asyncio.get_event_loop()
+            self.diagnostics_task = loop.create_task(self._diagnostics_loop())
+            try:
+                import sys
+
+                print("[DIAGNOSTICS] Broadcaster started", file=sys.stderr, flush=True)
+            except Exception:
+                pass
+        else:
+            try:
+                import sys
+
+                print("[DIAGNOSTICS] Broadcaster already running", file=sys.stderr, flush=True)
+            except Exception:
+                pass
+
+    def stop_diagnostics(self):
+        """Stop the diagnostics broadcaster task."""
+        if self.diagnostics_task:
+            self.diagnostics_task.cancel()
+            self.diagnostics_task = None
+            self._last_diagnostics = {}
+            logger.info("[DIAGNOSTICS] Broadcaster stopped")
 
     async def _pulse_loop(self):
         """Periodically ping clients to ensure they are alive and keep connection active."""
@@ -257,6 +288,64 @@ class ConnectionManager:
             pass
         except Exception as e:
             logger.warning(f"[LSP_STATUS] loop error: {e}")
+
+    async def _diagnostics_loop(self):
+        """Poll LSP diagnostics and broadcast summary to explorer clients.
+
+        This provides explorer UI hints (red/yellow dots) for files with errors/warnings.
+        """
+
+        from .lsp_ws import get_diagnostics_summary_for_project
+
+        try:
+            while True:
+                await asyncio.sleep(1.0)
+                if not any(self.active_connections.values()):
+                    break
+
+                for project_path in list(self.active_connections.keys()):
+                    try:
+                        summary = get_diagnostics_summary_for_project(project_root=project_path)
+                    except Exception as e:
+                        try:
+                            import sys
+
+                            print(
+                                f"[DIAGNOSTICS] summary compute failed project={project_path}: {e}",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                        except Exception:
+                            pass
+                        continue
+
+                    # Only broadcast if changed
+                    last = self._last_diagnostics.get(project_path)
+                    if last == summary:
+                        continue
+                    self._last_diagnostics[project_path] = summary
+
+                    try:
+                        import sys
+
+                        count = len(summary) if isinstance(summary, dict) else -1
+                        conn_n = len(self.active_connections.get(project_path, []) or [])
+                        print(
+                            f"[DIAGNOSTICS] broadcast project={project_path} connections={conn_n} entries={count}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    except Exception:
+                        pass
+
+                    await self.broadcast(
+                        project_path,
+                        {"type": "explorer:updateDiagnostics", "payload": {"diagnostics": summary}},
+                    )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning(f"[DIAGNOSTICS] loop error: {e}")
     
     def get_connection_count(self, project_path: str) -> int:
         """Returns the number of active connections for a project."""
@@ -842,6 +931,27 @@ class ExplorerDispatcher:
         # Let's broadcast root to be safe.
         data = list_dir('.')
         await self.broadcast("explorer:setList", data)
+
+    async def handle_explorer_getDiagnostics(self, payload: dict, msg_id: str):
+        """Return a point-in-time diagnostics summary snapshot.
+
+        This is used by the explorer frontend to proactively fetch the current
+        diagnostics state after it installs its dispatch hook, preventing races
+        where the periodic broadcast arrives before the UI is ready.
+        """
+
+        try:
+            from .lsp_ws import get_diagnostics_summary_for_project
+
+            summary = get_diagnostics_summary_for_project(project_root=str(self.project_root))
+        except Exception:
+            summary = {}
+
+        await self.emit_personal(
+            "explorer:updateDiagnostics",
+            {"diagnostics": summary},
+            msg_id,
+        )
 
     async def handle_explorer_setOpenDirs(self, payload: dict, msg_id: str):
         """Persist the list of open directories in explorer tree."""

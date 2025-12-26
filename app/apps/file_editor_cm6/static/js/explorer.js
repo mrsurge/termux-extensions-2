@@ -45,6 +45,14 @@ let renderedProjectPath = null;
 // Currently opened document (relative to project root), if known.
 let activeFileRel = null;
 
+// Diagnostics summary (Sprint C): keep the last snapshot so newly-rendered
+// nodes can receive flags even if the first broadcast raced before UI init.
+let diagnosticsByRel = {};
+let diagHasErrors = false;
+let diagHasWarnings = false;
+let diagErrorDirs = new Set();
+let diagWarningDirs = new Set();
+
 function setActiveFileRel(nextRel) {
   activeFileRel = typeof nextRel === 'string' && nextRel.trim() ? nextRel : null;
   applyActiveFileMarker();
@@ -1077,6 +1085,7 @@ function renderEntriesInto(containerUl, entries, parentRel = null) {
     li.dataset.kind = entry.kind || 'file';
     li.dataset.name = entry.name || '';
 
+
     // Update Git Status
     if (entry.gitStatus) {
       li.dataset.gitStatus = entry.gitStatus;
@@ -1205,6 +1214,7 @@ function renderEntriesInto(containerUl, entries, parentRel = null) {
   // (fe-dir-has-*) so parent directories can visually reflect dirty
   // descendants independently of the single gitStatus value.
   applyAggregatedGitStatusFlags();
+  applyAggregatedDiagnosticFlags();
 }
 
 function applyAggregatedGitStatusFlags() {
@@ -1293,6 +1303,132 @@ function applyAggregatedGitStatusFlags() {
     while (current) {
       current.classList.add('fe-dir-has-draft');
       current = current.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
+    }
+  });
+}
+
+function _setDiagnosticsSummary(next) {
+  const obj = next && typeof next === 'object' ? next : {};
+  diagnosticsByRel = obj;
+  diagHasErrors = false;
+  diagHasWarnings = false;
+  diagErrorDirs = new Set();
+  diagWarningDirs = new Set();
+
+  Object.entries(obj).forEach(([rel, counts]) => {
+    if (!counts) return;
+    const errors = Number(counts.errors || 0);
+    const warnings = Number(counts.warnings || 0);
+    if (errors <= 0 && warnings <= 0) return;
+    if (errors > 0) diagHasErrors = true;
+    if (warnings > 0) diagHasWarnings = true;
+
+    const parts = String(rel || '').split('/');
+    for (let i = 1; i < parts.length; i++) {
+      const dirRel = parts.slice(0, i).join('/');
+      if (errors > 0) diagErrorDirs.add(dirRel);
+      if (warnings > 0) diagWarningDirs.add(dirRel);
+    }
+  });
+}
+
+function _queryNodeByRel(root, kind, rel) {
+  if (!root || !rel) return null;
+  try {
+    const esc = window.CSS && CSS.escape ? CSS.escape(rel) : null;
+    if (esc) {
+      return root.querySelector(`li.fe-tree-node[data-kind="${kind}"][data-rel="${esc}"]`);
+    }
+  } catch {
+    // fall back to scan
+  }
+  const nodes = root.querySelectorAll(`li.fe-tree-node[data-kind="${kind}"]`);
+  for (const li of nodes) {
+    if ((li.dataset.rel || '') === rel) return li;
+  }
+  return null;
+}
+
+function applyAggregatedDiagnosticFlags() {
+  if (!treeElement) {
+    treeElement = document.getElementById('fe-file-tree');
+  }
+  const root = treeElement;
+  if (!root) return;
+
+  // Clear previous diagnostic classes
+  root.querySelectorAll('li.fe-tree-node').forEach((li) => {
+    li.classList.remove(
+      'fe-diag-error',
+      'fe-diag-warning',
+      'fe-dir-has-diag-error',
+      'fe-dir-has-diag-warning',
+    );
+    delete li.dataset.diagErrors;
+    delete li.dataset.diagWarnings;
+  });
+
+  // Apply file-level flags for nodes currently in the DOM
+  try {
+    Object.entries(diagnosticsByRel || {}).forEach(([rel, counts]) => {
+      if (!counts) return;
+      const errors = Number(counts.errors || 0);
+      const warnings = Number(counts.warnings || 0);
+      if (errors <= 0 && warnings <= 0) return;
+
+      const li = _queryNodeByRel(root, 'file', rel);
+      if (!li) return;
+      if (errors > 0) {
+        li.classList.add('fe-diag-error');
+        li.dataset.diagErrors = String(errors);
+      }
+      if (warnings > 0) {
+        li.classList.add('fe-diag-warning');
+        li.dataset.diagWarnings = String(warnings);
+      }
+    });
+  } catch {
+    // ignore
+  }
+
+  // Apply directory inheritance flags for dirs currently in the DOM
+  const allDirRels = new Set([...diagErrorDirs, ...diagWarningDirs]);
+  allDirRels.forEach((dirRel) => {
+    const li = _queryNodeByRel(root, 'dir', dirRel);
+    if (!li) return;
+    if (diagErrorDirs.has(dirRel)) li.classList.add('fe-dir-has-diag-error');
+    if (diagWarningDirs.has(dirRel)) li.classList.add('fe-dir-has-diag-warning');
+  });
+
+  // Root always exists; mark if anything in the project has diagnostics.
+  const rootLi = root.querySelector('li.fe-tree-node.fe-tree-root');
+  if (rootLi) {
+    if (diagHasErrors) rootLi.classList.add('fe-dir-has-diag-error');
+    if (diagHasWarnings) rootLi.classList.add('fe-dir-has-diag-warning');
+  }
+
+  // Render an inline marker INSIDE the filename span.
+  // If inserted as a sibling, the grid layout (icon | text | menu) pushes it into the right column.
+  root.querySelectorAll('li.fe-tree-node').forEach((li) => {
+    const textSpan = li.querySelector('.fe-tree-text');
+    if (!textSpan) return;
+
+    let mark = textSpan.querySelector('.fe-diag-mark');
+    if (!mark) {
+      mark = document.createElement('span');
+      mark.className = 'fe-diag-mark';
+      textSpan.appendChild(mark);
+    }
+
+    if (li.classList.contains('fe-diag-error') || li.classList.contains('fe-dir-has-diag-error')) {
+      mark.textContent = ' 🔴';
+    } else if (
+      li.classList.contains('fe-diag-warning') ||
+      li.classList.contains('fe-dir-has-diag-warning')
+    ) {
+      mark.textContent = ' 🟡';
+    } else {
+      mark.textContent = '';
     }
   });
 }
@@ -1627,6 +1763,13 @@ function handleExplorerEvent(type, payload) {
           }
         }
       }
+      break;
+    }
+    case 'explorer:updateDiagnostics': {
+      // Save snapshot + apply to current DOM.
+      const diagnostics = (payload && payload.diagnostics) || {};
+      _setDiagnosticsSummary(diagnostics);
+      applyAggregatedDiagnosticFlags();
       break;
     }
     case 'project:opened': {
@@ -3027,6 +3170,16 @@ export async function initExplorerUI() {
       window.__explorerBusSend('explorer:refresh', {});
     }
   };
+
+  // Proactively fetch diagnostics after the dispatch hook is installed.
+  // This prevents a race where the periodic broadcast arrives before initExplorerUI runs.
+  try {
+    if (typeof window.__explorerBusSend === 'function') {
+      window.__explorerBusSend('explorer:getDiagnostics', {});
+    }
+  } catch {
+    // ignore
+  }
 
   // Initial render placeholders until first snapshot arrives
   renderProjectLabel();

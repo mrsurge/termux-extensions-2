@@ -155,12 +155,20 @@ async def publish_draft_diagnostics_to_client(
     project_root: Path,
     uri: str,
     draft_diagnostics: list[dict],
+    has_drafts: bool = False,
 ) -> bool:
-    """Publish TE2-generated draft diagnostics without clobbering backend diagnostics.
+    """Publish TE2-generated draft diagnostics with intelligent arbitration.
 
-    CM6 overwrites diagnostics per-URI on each publish. To avoid wiping Gradle-backed
-    diagnostics, merge draft diagnostics with the last diagnostics received from
-    the backend for that URI.
+    CM6 overwrites diagnostics per-URI on each publish. We merge draft diagnostics
+    with backend diagnostics and apply arbitration rules to suppress ghost errors
+    when the user has unsaved changes.
+
+    Args:
+        language_id: LSP language identifier.
+        project_root: Project root path.
+        uri: File URI.
+        draft_diagnostics: TE2-generated draft diagnostics.
+        has_drafts: Whether this specific file has unsaved changes.
     """
 
     ns = _LSP_NAMESPACE_INSTANCE
@@ -176,24 +184,36 @@ async def publish_draft_diagnostics_to_client(
     if not sid:
         return False
 
-    base = []
+    backend = []
     try:
         cache = session.get("diagnostics_by_uri")
         if isinstance(cache, dict):
-            base = cache.get(uri) or []
+            backend = cache.get(uri) or []
     except Exception:
-        base = []
+        backend = []
 
+    # Filter out previous TE2 draft diagnostics from backend
     try:
-        base_no_draft = [
+        backend_no_draft = [
             d
-            for d in (base if isinstance(base, list) else [])
+            for d in (backend if isinstance(backend, list) else [])
             if (d or {}).get("source") != "te2-android:draft"
         ]
     except Exception:
-        base_no_draft = base if isinstance(base, list) else []
+        backend_no_draft = backend if isinstance(backend, list) else []
 
-    merged = base_no_draft + (draft_diagnostics if isinstance(draft_diagnostics, list) else [])
+    # Apply arbitration rules (Sprint C)
+    try:
+        from app.apps.file_editor_cm6.android_lang.diagnostic_arbitration import merge_android_diagnostics
+
+        merged = merge_android_diagnostics(
+            backend=backend_no_draft,
+            draft=draft_diagnostics if isinstance(draft_diagnostics, list) else [],
+            has_drafts=has_drafts,
+        )
+    except Exception:
+        # Fallback to simple concatenation if arbitration fails
+        merged = backend_no_draft + (draft_diagnostics if isinstance(draft_diagnostics, list) else [])
 
     payload = {
         "jsonrpc": "2.0",
@@ -214,6 +234,103 @@ async def publish_draft_diagnostics_to_client(
         return True
     except Exception:
         return False
+
+
+def get_diagnostics_summary_for_project(*, project_root: str) -> dict[str, dict]:
+    """Return aggregated diagnostic counts per project-relative path.
+
+    Returns:
+        { "rel/path.kt": {"errors": N, "warnings": N}, ... }
+
+    LSP severity: 1=Error, 2=Warning, 3=Information, 4=Hint
+    We only count errors (1) and warnings (2).
+
+    Note: This is rootRel-aware. LSP sessions may use an effective root that is
+    a subdirectory of the base project root (e.g., <repo>/android for kotlin-android).
+    We include those sessions and compute paths relative to the base project root.
+    """
+
+    ns = _LSP_NAMESPACE_INSTANCE
+    if ns is None:
+        return {}
+
+    result: dict[str, dict] = {}
+    project_root_str = str(project_root).rstrip("/")
+
+    try:
+        base_root_p = Path(project_root_str).expanduser().resolve(strict=False)
+    except Exception:
+        return {}
+
+    # Iterate over all backend sessions whose root is the base project root
+    # OR a subdirectory of it (rootRel-aware)
+    for key, session in ns.backend_sessions.items():
+        if not isinstance(session, dict):
+            continue
+        sess_root = session.get("project_root") or ""
+        if not sess_root:
+            continue
+
+        # Check if session root matches or is a child of base project root
+        try:
+            sess_root_p = Path(sess_root).expanduser().resolve(strict=False)
+            # Session root must be base_root or a descendant of it
+            if sess_root_p != base_root_p:
+                try:
+                    sess_root_p.relative_to(base_root_p)
+                except ValueError:
+                    # Not a descendant, skip this session
+                    continue
+        except Exception:
+            continue
+
+        cache = session.get("diagnostics_by_uri")
+        if not isinstance(cache, dict):
+            continue
+
+        for uri, diags in cache.items():
+            if not isinstance(diags, list):
+                continue
+
+            # Convert file:// URI to absolute path
+            abs_path = None
+            if uri.startswith("file://"):
+                abs_path = uri[7:]  # strip "file://"
+            elif uri.startswith("/"):
+                abs_path = uri
+            else:
+                continue
+
+            # Convert to path relative to BASE project root (not session root)
+            try:
+                abs_p = Path(abs_path).expanduser().resolve(strict=False)
+                if abs_p == base_root_p:
+                    rel = "."
+                else:
+                    rel = str(abs_p.relative_to(base_root_p))
+            except Exception:
+                continue
+
+            errors = 0
+            warnings = 0
+            for d in diags:
+                if not isinstance(d, dict):
+                    continue
+                sev = d.get("severity")
+                if sev == 1:
+                    errors += 1
+                elif sev == 2:
+                    warnings += 1
+
+            if errors > 0 or warnings > 0:
+                existing = result.get(rel)
+                if existing:
+                    existing["errors"] = existing.get("errors", 0) + errors
+                    existing["warnings"] = existing.get("warnings", 0) + warnings
+                else:
+                    result[rel] = {"errors": errors, "warnings": warnings}
+
+    return result
 
 
 async def send_lsp_notification(

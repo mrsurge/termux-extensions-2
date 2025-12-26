@@ -356,10 +356,13 @@ export function initExplorerStickyScopes({
 
     const text = document.createElement('span');
     text.className = 'fe-tree-text';
-    text.textContent =
-      srcLi.querySelector('.fe-tree-text')?.textContent ||
-      srcLi.dataset.name ||
-      '';
+    const srcTextEl = srcLi.querySelector('.fe-tree-text');
+    if (srcTextEl) {
+      // Preserve inline markers (e.g. diagnostics emoji span) so they keep their CSS sizing.
+      text.innerHTML = srcTextEl.innerHTML;
+    } else {
+      text.textContent = srcLi.dataset.name || '';
+    }
 
     const menuBtn = document.createElement('button');
     menuBtn.className = 'fe-card-menu-btn';
@@ -530,8 +533,10 @@ export function initExplorerStickyScopes({
         fillRowFromSource(srcLi, depth, false);
         const rowEl = stickyRows[depth];
         const text = rowEl?.querySelector('.fe-tree-text');
-        const srcText = srcLi.querySelector('.fe-tree-text')?.textContent || '';
-        if (text && srcText) text.textContent = srcText;
+        const srcTextEl = srcLi.querySelector('.fe-tree-text');
+        if (text && srcTextEl) {
+          text.innerHTML = srcTextEl.innerHTML;
+        }
       });
     }
 

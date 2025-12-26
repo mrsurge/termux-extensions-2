@@ -199,17 +199,9 @@
   position: relative;  /* For ::after pseudo-element positioning */
 }
 
-.fe-tree-node.fe-active-file[data-kind="file"]::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px; /* overlap the 1px card border without changing layout */
-  height: 2px;
-  background: var(--explorer-active-file-accent);
-  pointer-events: none;
-  border-bottom-left-radius: 8px;
-  border-bottom-right-radius: 1px;
+.fe-tree-node.fe-active-file[data-kind="file"] {
+  /* Use an inset shadow instead of ::before so ::before can be reserved for other overlays. */
+  box-shadow: inset 0 -2px 0 var(--explorer-active-file-accent);
 }
 
 /* Make nested ul span the full width */
@@ -1151,6 +1143,19 @@
   bottom: 0;
   width: 2px;
   background: rgba(250, 204, 21, 0.5);
+  pointer-events: none;
+}
+
+/* Diagnostic indicator marker (Sprint C) */
+/* Inline right after the filename text (no floating / no overlap with menu button). */
+
+.fe-tree-node .fe-diag-mark {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 0.5em; /* 50% of filename text size */
+  line-height: 1;
+  vertical-align: middle;
+  opacity: 0.9;
   pointer-events: none;
 }
 

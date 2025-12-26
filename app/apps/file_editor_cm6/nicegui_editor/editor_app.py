@@ -2017,6 +2017,7 @@ async def save_current_file(data: dict = Body(...)):
                                 project_root=effective_project_root,
                                 uri=uri,
                                 draft_diagnostics=diags,
+                                has_drafts=False,  # Just saved, no unsaved changes
                             )
                         except Exception as exc:
                             print(f"[ANDROID SIDECAR] update/publish failed: {exc}", file=sys.stderr)
