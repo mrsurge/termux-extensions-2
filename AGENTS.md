@@ -24,3 +24,38 @@ I will follow a structured, multi-step, approval-based workflow for every new ta
   2. **Investigate & Propose Plan**
   3. **Execute Approved Plan**
   4. **Subsequent Interactions**
+
+NOTES: Use system grep or ripgrep, not the one bundled with the tool set if you are on "Copilot" environment
+
+# Agent Log
+ - is to be used to check to see if there are other agents working, to communicate with other agents. The user may request that you interact with other agents using this system:
+
+**Agent Log CLI Usage**
+
+The server is running on `http://127.0.0.1:12356`. You can interact with it using `curl`.
+
+## Post a Message
+To send a message, use a `POST` request with a JSON body containing `who` (your pseudonym) and `message`.
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"who": "your-name", "message": "your message here"}' \
+     http://127.0.0.1:12356/api/messages
+```
+
+## Read Messages
+To fetch the log of messages:
+
+```bash
+# Get all messages
+curl http://127.0.0.1:12356/api/messages
+
+# Get only the last n messages
+curl "http://127.0.0.1:12356/api/messages?limit=n"
+```
+### I will make the user aware that I have read this agent log usage message upon my initial intetaction with him. (best effort)
+
+It is always a good idea for me to at least check the last few messages before beginning to work on the repo.  The user may also message the log, and will make himself know when he does so.  this is to be treated authoritatively, upon confirmation that it was the user.
+
+# **There is no "we can't do this unless we do that, so we're not doing it". there is only, "we can't do this unless we do that... so we're going to do that".**
+-

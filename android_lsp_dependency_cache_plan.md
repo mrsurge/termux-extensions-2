@@ -39,13 +39,15 @@ This document is a concrete, implementation-oriented plan for adding a TE2-side 
 ## 1) Problem / Motivation
 
 Gradle/AGP is authoritative, but it’s too slow to run on every keystroke.
-We still want “live-ish” feedback in the editor while typing (drafts), without pretending to be a full semantic IDE.
+We still want **live draft edits** to behave like an IDE: unresolved imports / classes should show up immediately while typing, without waiting for save/compile.
 
 We achieve this by:
 
 1) Treating Gradle diagnostics as **truth**, cached and replayed.
-2) Maintaining a background **dependency-resolution model** (the “unresolved dependency table”) that helps us generate **conservative heuristic diagnostics** during draft mode.
-3) Always emitting diagnostics through the same UI pipeline (Issues + squiggles).
+2) Maintaining a background **dependency-resolution model** (the “unresolved dependency table”) that acts like an editor classpath map.
+   - This model is *not* user-facing; it only feeds the final `publishDiagnostics` stream.
+3) Using that model to produce **draft-time unresolved-import/unresolved-class diagnostics** (fast, deterministic) on top of the draft buffer.
+4) Always emitting diagnostics through the same UI pipeline (Issues + squiggles).
 
 ---
 
@@ -56,8 +58,9 @@ We achieve this by:
 - **Provenance tagging**: every diagnostic indicates whether it is:
   - `gradle` (authoritative, fresh)
   - `cached` (authoritative-ish, from last compile)
-  - `draft` (heuristic)
-- **Conservative draft mode**: prefer false negatives over false positives.
+  - `draft` (**dependency-model-backed draft diagnostics for imports/classes**)
+- **Draft mode goal:** make unresolved imports/classes show up immediately while typing.
+  - We accept that Kotlin semantics aren’t complete, but dependency presence/absence should be accurate.
 
 ### Non-goals (for this plan)
 - Full Kotlin semantic correctness (overloads, extension resolution, etc.).
@@ -218,60 +221,78 @@ Keep it cheap:
 ### Trigger rules
 - Build/refresh dependency model when:
   - `syncFingerprint` changes (Gradle files changed)
-  - user explicitly clicks “Sync Project with Gradle Files” (future button)
-  - periodic background refresh (optional; low priority)
+  - user explicitly clicks “Sync Project with Gradle Files”
+  - periodic background refresh (optional)
 
-### What we extract (minimal viable)
-We do NOT need a full dependency graph UI.
-We need a cached mapping for heuristic decisions:
+### What we extract (minimal viable, but actually useful for drafts)
+We do NOT need a UI dependency graph.
+We **do** need a cached map that can answer: “should this import/class exist right now?”
+
+Minimum required facts + indexes:
 
 - Android SDK paths:
   - determine `compileSdk` and locate `android.jar`
-- Java/JDK location (from env or Gradle):
-  - `JAVA_HOME`, `org.gradle.java.home`, or runtime
-- Gradle resolved artifact paths:
-  - run: `./gradlew :app:dependencies --configuration <...>` OR `:app:androidDependencies` (AGP)
-  - parse for GAVs
-  - optionally locate actual jar/aar files from Gradle cache
-- Generated source roots known to affect “unresolved”:
-  - R symbols (`R.jar`, `R.txt`)
-  - view binding output directories
-  - build config output
+- Java/JDK location:
+  - `JAVA_HOME`, and whether `jmods/` exists
+- Gradle resolved artifacts:
+  - obtain resolved classpath artifacts for the variant (jar/aar paths)
+  - record paths in sidecar
+- **Dependency index (the actual table method):**
+  - Build a cached index of packages/classes available from:
+    - `android.jar`
+    - resolved jar/aar files
+    - generated outputs (R, view binding, BuildConfig)
+  - Store this index in sidecar so draft mode can resolve imports/classes without running Gradle.
 
 Output:
-- a normalized list of “resolution facts” stored in `dependencyModel`.
+- `dependencyModel` facts + `dependencyIndex` (package/class index) stored in the TE2 sidecar.
 
 ---
 
-## 7) Draft Diagnostics Heuristics (Using the Dependency Table)
+## 7) Draft Diagnostics (Dependency-Model-Backed)
 
-### Scope
-Draft diagnostics should be explicitly conservative and mostly focused on:
-- imports and unresolved references that we can confidently classify
-- stale-cache explanations (“this is based on last compile / last sync”)
+### Scope (the actual point of the dependency table)
+Draft diagnostics are **not** “nice hints”; they are meant to power the core editor UX:
 
-### Example heuristic rules
-1) **Import looks like Android framework** (`import android.*`):
-   - if dependency model says android.jar missing → emit diagnostic:
-     - message: `Android SDK missing for compileSdk=... (android.jar not found)`
-     - provenance: `draft`
+- While typing (draft buffer), show unresolved:
+  - imports
+  - fully-qualified names
+  - basic class references
 
-2) **Import looks like Java/JDK** (`import java.*`, `javax.*`, `kotlin.*`):
-   - if JDK path missing → emit `JDK not configured` diagnostic
+This is where the **dependency tree table** matters: it provides a cached “where would this symbol come from?” map.
 
-3) **R / ViewBinding / BuildConfig references**:
-   - if referencing `R.` and dependency model indicates last build failed to generate resources → emit note:
-     - `R is unresolved because resource symbol generation failed in last compile`
-     - provenance: `cached` (or `draft` depending on signal)
+### What draft mode is responsible for
+1) Tokenize the draft buffer for:
+   - `import ...` lines
+   - obvious qualified references (e.g. `android.webkit.WebView`, `com.foo.Bar`)
+   - `R.*`, `BuildConfig.*`, `*Binding` patterns
+2) Consult the dependency model to decide whether the referenced package/class **should exist**.
+3) Emit `publishDiagnostics` immediately (debounced), tagged `source=draft`.
 
-4) **External GAV-driven class usage**:
-   - only flag if we’ve previously observed a Gradle error that references the missing class/import.
-   - do NOT try to infer full classpath existence without heavy jar scanning in v1.
+### Dependency table sources (what we cache)
+For each unresolved category, we cache the *expected backing artifact/path*:
+- Android framework → `android.jar` under SDK
+- Java/Kotlin stdlib → JDK (jmods/jrt) + Kotlin stdlib jars (from Gradle deps)
+- External libraries → Gradle cache jar/aar paths
+- Project modules → module outputs / AARs
+- Generated symbols → build/generated (R.jar/R.txt, view binding roots, BuildConfig roots)
+
+### Draft diagnostics rules (v1)
+- **Imports**:
+  - If an import targets Android framework (`android.*`) and android.jar is missing → mark that import line as unresolved.
+  - If an import targets Java/Kotlin (`java.*`, `javax.*`, `kotlin.*`) and JDK is missing → mark unresolved.
+  - For external/project packages:
+    - Use cached dependency index (see Phase 3 below) to decide if the package/class exists.
+    - If not present in the index, mark import as unresolved.
+
+- **Class references** (cheap, not semantic):
+  - If `Foo` is referenced but not defined in-file and not resolvable from imports + dependency index, flag it.
 
 ### Messaging policy
-- Overlay note should be subtle:
-  - `Based on last Gradle compile` or `Based on cached dependency model`.
-- Don’t spam: only emit a few high-confidence diagnostics.
+- Still keep the UI subtle (no new surfaces), but do not weaken the result: the end user should see unresolved imports/classes in drafts.
+- Provenance tagging:
+  - `diagnostic.source = "te2-android:draft"`
+  - `diagnostic.code = "DRAFT_UNRESOLVED_IMPORT" | "DRAFT_UNRESOLVED_CLASS" | ...`
 
 ---
 
@@ -342,9 +363,17 @@ Implementation note:
   - record Gradle user home
   - collect a few generated roots if present
 
-### Sprint B (Heuristic diagnostics + provenance)
-- [ ] Implement 2–3 draft heuristics (Android SDK missing, R generation missing, JDK missing)
-- [ ] Emit as `publishDiagnostics` with provenance tagging
+### Sprint B (Draft unresolved imports/classes)
+- [ ] Build a draft diagnostics engine that runs on draft buffer updates (debounced):
+  - extract imports + basic symbol references
+  - classify via dependency table
+  - emit `publishDiagnostics` (same Issues/squiggle pipeline)
+- [ ] Implement dependency-table-backed unresolved detection for:
+  - Android framework (`android.*` via `android.jar`)
+  - Java/Kotlin stdlib (`java.*`, `javax.*`, `kotlin.*` via JDK + Kotlin stdlib)
+  - Generated symbols (`R.*`, `BuildConfig.*`, view binding)
+  - External/project packages via cached dependency index (Phase 3)
+- [ ] Provenance tagging on every diagnostic (`source=te2-android:draft`, stable `code` values)
 
 ### Sprint C (Arbitration + suppression rules)
 - [ ] Implement merge rules between cached and draft

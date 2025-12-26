@@ -181,3 +181,170 @@ cmComponent.resetLspStats()
 - `[LSP Stats] didChange → server: #N, v=V` — outgoing didChange notifications
 - `[LSP Stats] publishDiagnostics received: #N, X issues` — incoming diagnostics
 - `[LSP Broker] Sending METHOD (nonce=N)` — broker request dispatch
+
+---
+
+# Android LSP (kotlin-android) — Current Implementation Deep Dive
+
+**Timestamp:** 2025-12-26T05:11:56.406Z
+
+This section documents how the **Android Kotlin LSP** integration currently works in this repo (server + sidecars + diagnostics transport), *as implemented right now*.
+
+## 0) Big picture
+There are 3 cooperating layers:
+
+1) **Editor buffer + draft SSOT** (NiceGUI iframe)
+- The user edits in the iframe (CodeMirror 6).
+- The NiceGUI backend debounces draft persistence into a **per-project sidecar** (session cache), which is the SSOT for drafts/crash recovery.
+
+2) **LSP transport** (Socket.IO bridge)
+- Browser/iframe talks to `/lsp` Socket.IO namespace.
+- `app/apps/file_editor_cm6/lsp_ws.py` bridges Socket.IO messages to a language server running in a **Framework Shell** (stdio pipes).
+
+3) **Android Kotlin LSP-specific state** (TE2 Android sidecar + config injection)
+- `te2_android_sidecar.json` is maintained by TE2 code to provide the kotlin-android server with stable fingerprints and a dependency-model skeleton.
+- On save/sync, TE2 injects `workspace/didChangeConfiguration` with `te2Android` settings to the kotlin-android server.
+
+## 1) Where persistent state lives (two distinct sidecars)
+
+### 1.1 ProjectSidecar (editor SSOT)
+**File:** `app/apps/file_editor_cm6/project_sidecar.py`
+
+- Stored under: `~/.cache/cm6_editor/projects/<sha1(project_root)>.json`
+- Holds (among many things):
+  - `session_cache`: per-file cached draft content and metadata
+  - `lsp.enabled` and per-server enable flags
+  - project-scoped LSP settings (root overrides etc.)
+
+This is the sidecar the editor uses for drafts and for LSP project preferences.
+
+### 1.2 TE2 Android sidecar (kotlin-android SSOT)
+**Files:**
+- `app/apps/file_editor_cm6/android_lang/android_sidecar.py`
+- `app/apps/file_editor_cm6/android_lang/android_lsp_bridge.py`
+
+- Stored under: `~/.cache/te2_android_lsp/<lspProjectId>/te2_android_sidecar.json` (cache root overridable via `TE2_ANDROID_LSP_CACHE_ROOT`).
+- `lspProjectId` is **stable for the base project root** (not the rootRel) via `ProjectSidecar.get_or_create_lsp_project_id()`.
+
+Why two sidecars:
+- ProjectSidecar = editor UX + drafts + preferences
+- te2_android_sidecar.json = android LSP dependency/fingerprint “feed” and cache keys
+
+## 2) Fingerprints (what they are, where computed)
+**File:** `app/apps/file_editor_cm6/android_lang/android_fingerprints.py`
+
+There are multiple fingerprints, serving different invalidation domains:
+
+- `repoFingerprint`: best-effort **git HEAD + status + diff** hash, fallback to filesystem fingerprint.
+  - used to know “the repo changed, Gradle results may be stale”.
+
+- `draftFingerprint`: hash of **(project-relative path + content_sha256)** for all draft entries.
+  - computed from `ProjectSidecar.list_project_drafts()`.
+
+- `syncFingerprint`: hash of pinned Gradle/config inputs (settings/build.gradle/etc + module + variant).
+  - meant to detect “dependency model should be rebuilt”.
+
+## 3) Dependency model v1 (what we actually store today)
+**File:** `app/apps/file_editor_cm6/android_lang/android_dependency_model.py`
+
+`build_dependency_model_v1()` is intentionally cheap and currently collects:
+- Android SDK root → picks `android.jar` by best-effort `compileSdk` extraction from build.gradle(.kts) (fallback: highest installed platform).
+- JDK info from `JAVA_HOME` (+ `jmods` path if present).
+- `GRADLE_USER_HOME` (default `~/.gradle`).
+- Best-effort “generated roots” under `<module>/build/generated`.
+- Best-effort discovery of `R.jar` / `R.txt` under `<module>/build`.
+
+**Important:** It does *not* yet build a full class/package dependency index. It’s a skeleton with pointers.
+
+## 4) How te2_android_sidecar.json is written
+**File:** `app/apps/file_editor_cm6/android_lang/android_lsp_bridge.py`
+
+`update_android_sidecar_for_project(project_root, effective_project_root, module="app", variant="GeckoDebug")`:
+- `lspProjectId` is derived from **base project root** (stable across rootRel overrides).
+- Fingerprints + dependency model are computed relative to the **effective project root** (rootRel-aware).
+- Writes:
+  - `repoFingerprint`, `draftFingerprint`, `syncFingerprint`
+  - `dependencyModel` (v1)
+  - placeholder `lastGradleCompile`
+  - `effectiveProjectRoot`
+
+## 5) LSP transport details (Socket.IO ↔ Framework Shell ↔ stdio)
+**Files:**
+- `app/apps/file_editor_cm6/lsp_ws.py`
+- `app/apps/file_editor_cm6/lsp_shell_manager.py`
+
+### 5.1 Spawning servers
+- Most servers use `LSP_COMMANDS`.
+- **kotlin-android** is special-cased and spawned via shellspec (`_spawn_android_kotlin_lsp`).
+
+### 5.2 Session keying + rootRel awareness
+In `lsp_ws.py`, backend sessions are keyed by:
+- `(language_id, project_root)`
+
+For kotlin-android, `project_root` should be the **effective project root** (e.g. `<repo>/android`).
+This is why save/sync paths explicitly compute `effective_project_root` from the project’s configured rootRel.
+
+### 5.3 Diagnostics caching
+While bridging server stdout → client, `lsp_ws.py`:
+- parses framed LSP messages
+- for each `textDocument/publishDiagnostics`:
+  - logs it (`[LSP WS] publishDiagnostics uri=... count=N`)
+  - caches it into `session["diagnostics_by_uri"][uri] = diagnostics`
+
+This cache is then used by:
+- server-side diagnostic summary aggregation (`get_diagnostics_summary_for_project()`)
+- TE2-side “draft diagnostics” merging (`publish_draft_diagnostics_to_client()`)
+
+## 6) How “save” affects kotlin-android
+**Files:**
+- `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+- `app/apps/file_editor_cm6/lsp_ws.py`
+
+When the user saves (`POST /editor/save`):
+
+1) Buffer is written to disk.
+2) The session cache entry is updated to “clean”.
+3) A kotlin-android-specific hook runs:
+   - `send_android_did_save_for_path(project_root=effective_project_root, abs_path=current_file)`
+   - This injects:
+     - `workspace/didChangeConfiguration` with `te2Android.repoFingerprint` (+ currently `dirtyFiles=[]`)
+     - then `textDocument/didSave` for the saved URI
+
+This is the pathway that causes the kotlin-android server to decide whether it should reuse cached Gradle results or run a compile.
+
+## 7) Android Sync endpoint (manual re-sidecar + push settings)
+**File:** `app/apps/file_editor_cm6/nicegui_editor/editor_app.py`
+
+`POST /editor/android/sync`:
+- Rebuilds `te2_android_sidecar.json` via `update_android_sidecar_for_project(...)`
+- Computes `repoFingerprint`
+- Sends `workspace/didChangeConfiguration` to kotlin-android (no Gradle compile)
+
+This is intended as a fast “refresh dependency model pointers / fingerprints” button.
+
+## 8) Draft diagnostics (TE2-generated) and arbitration
+**Files:**
+- `app/apps/file_editor_cm6/android_lang/draft_diagnostics.py`
+- `app/apps/file_editor_cm6/android_lang/diagnostic_arbitration.py`
+- `app/apps/file_editor_cm6/lsp_ws.py` (`publish_draft_diagnostics_to_client`)
+
+Current state:
+- `build_draft_diagnostics()` only emits conservative environment warnings:
+  - `ANDROID_SDK_MISSING`
+  - `JDK_MISSING`
+- `publish_draft_diagnostics_to_client()` merges TE2 draft diagnostics with backend diagnostics per-URI.
+- `merge_android_diagnostics()` currently suppresses backend “ghost” patterns ("Unresolved reference" / "Unresolved import") when `has_drafts=True`, unless the draft diagnostics indicate env problems.
+
+## 9) Explorer “error dot” integration (diagnostics summary)
+**Files:**
+- `app/apps/file_editor_cm6/explorer_ws.py`
+- `app/apps/file_editor_cm6/lsp_ws.py` (`get_diagnostics_summary_for_project`)
+
+- The explorer connects to a WS and receives periodic diagnostics snapshots.
+- Backend aggregates cached LSP diagnostics per project-relative file path (rootRel-aware).
+- The frontend renders an inline marker next to explorer entries based on `{errors,warnings}` counts.
+
+## 10) Known limitation (current implementation)
+- The system does **not yet** compute a full dependency class/package index.
+- Therefore it cannot currently emit draft-time unresolved import/class diagnostics based on the editor’s draft buffer.
+- Sprint E is where the missing piece lands: build a compiled dependency index and overlay a shadow index driven by drafts, then publish draft diagnostics on debounce.

@@ -387,15 +387,11 @@ async def send_android_did_save_for_path(*, project_root: Path, abs_path: Path) 
     except Exception:
         repo_fp = None
 
+    # NOTE: Temporarily disable dirtyFiles propagation to kotlin-android until
+    # Sprint E implements draft-buffer-backed unresolved diagnostics.
+    # Otherwise the server may suppress or clear unresolved-import/reference
+    # diagnostics for "dirty" files with no replacement, resulting in no squiggles.
     dirty_files: list[str] = []
-    try:
-        sidecar = ProjectSidecar.load_or_create(str(project_root))
-        for entry in sidecar.list_project_drafts():
-            fp = entry.get("file_path")
-            if fp:
-                dirty_files.append(str(fp))
-    except Exception:
-        pass
 
     settings_msg = {
         "jsonrpc": "2.0",
@@ -524,16 +520,9 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         except Exception:
             return
 
+        # NOTE: Temporarily disable dirtyFiles propagation to kotlin-android until
+        # Sprint E implements draft-buffer-backed unresolved diagnostics.
         dirty_files: list[str] = []
-        try:
-            sidecar = ProjectSidecar.load_or_create(project_root_raw)
-            # Drafts in ProjectSidecar session_cache are SSOT for "dirty".
-            for entry in sidecar.list_project_drafts():
-                fp = entry.get("file_path")
-                if fp:
-                    dirty_files.append(str(fp))
-        except Exception:
-            pass
 
         payload = {
             "jsonrpc": "2.0",

@@ -40,6 +40,9 @@ _cache_persist_debounce_ms = 1000  # 1 second debounce
 # Sprint B: per-URI throttle for TE2 draft diagnostics publishing.
 _android_draft_diag_sig: dict[str, str] = {}
 
+# Sprint D: per-project lock for Android sync to prevent concurrent stomping.
+_android_sync_locks: dict[str, asyncio.Lock] = {}
+
 # --- Constants ---
 THEME_MAP = {
     'cm6-dark': 'basicDark',
@@ -2037,6 +2040,88 @@ async def save_current_file(data: dict = Body(...)):
     except Exception as e:
         print(f"[SAVE] ERROR path={current_file!r} error={e}", file=sys.stderr)
         return {"ok": False, "error": str(e)}
+
+
+# --- Sprint D: Android Sync Endpoint ---
+
+@editor_router.post('/android/sync')
+async def android_sync_project(data: dict = Body(...)):
+    """Sync Project with Gradle Files: rebuild dependency model + notify LSP.
+    
+    This is a fast, synchronous operation that:
+    1. Rebuilds te2_android_sidecar.json with fresh dependency model
+    2. Sends workspace/didChangeConfiguration to kotlin-android LSP
+    
+    Does NOT trigger a Gradle compile (that's a future sprint).
+    """
+    
+    # 1) Get project roots (same logic as save path)
+    base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
+    effective_project_root = base_project_root
+    try:
+        rel_root = _history_store.get_lsp_server_root_rel(str(base_project_root), "kotlin-android")
+        if rel_root:
+            candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
+            if candidate.exists() and candidate.is_dir():
+                effective_project_root = candidate
+    except Exception:
+        pass
+    
+    # 2) Acquire per-project lock to prevent concurrent sync requests
+    lock_key = str(base_project_root)
+    if lock_key not in _android_sync_locks:
+        _android_sync_locks[lock_key] = asyncio.Lock()
+    
+    async with _android_sync_locks[lock_key]:
+        try:
+            # 3) Rebuild dependency model (fast, <1s)
+            from app.apps.file_editor_cm6.android_lang.android_lsp_bridge import update_android_sidecar_for_project
+            sidecar_path = await anyio.to_thread.run_sync(
+                lambda: update_android_sidecar_for_project(
+                    project_root=base_project_root,
+                    effective_project_root=effective_project_root,
+                )
+            )
+            
+            # 4) Compute repo fingerprint for LSP notification
+            from ..lsp_ws import send_lsp_notification, _compute_repo_fingerprint
+            
+            repo_fp = await anyio.to_thread.run_sync(
+                lambda: _compute_repo_fingerprint(effective_project_root)
+            )
+            
+            # 5) Collect dirty files from ProjectSidecar
+            # NOTE: Temporarily disabled until Sprint E draft-buffer diagnostics land.
+            dirty_files: list[str] = []
+            
+            # 6) Notify kotlin-android LSP so it consumes updated model
+            lsp_notified = await send_lsp_notification(
+                language_id="kotlin-android",
+                project_root=effective_project_root,
+                message={
+                    "jsonrpc": "2.0",
+                    "method": "workspace/didChangeConfiguration",
+                    "params": {
+                        "settings": {
+                            "te2Android": {
+                                "repoFingerprint": repo_fp,
+                                "dirtyFiles": dirty_files,
+                            }
+                        }
+                    },
+                },
+                spawn_if_missing=False,
+            )
+            
+            print(f"[ANDROID SYNC] OK sidecar={sidecar_path} lsp_notified={lsp_notified}", file=sys.stderr)
+            return {
+                "ok": True,
+                "sidecar_path": str(sidecar_path),
+                "lsp_notified": lsp_notified,
+            }
+        except Exception as e:
+            print(f"[ANDROID SYNC] ERROR: {e}", file=sys.stderr)
+            return {"ok": False, "error": str(e)}
 
 
 @editor_router.post('/set_view_settings')

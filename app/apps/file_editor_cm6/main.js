@@ -2682,6 +2682,7 @@ const lspModal = {
   startClangd: document.getElementById('lsp-start-clangd'),
   startKotlin: document.getElementById('lsp-start-kotlin'),
   startKotlinAndroid: document.getElementById('lsp-start-kotlin-android'),
+  syncKotlinAndroid: document.getElementById('lsp-sync-kotlin-android'),
   rootRelPyright: document.getElementById('lsp-rootrel-pyright'),
   rootRelTypescript: document.getElementById('lsp-rootrel-typescript'),
   rootRelClangd: document.getElementById('lsp-rootrel-clangd'),
@@ -3057,6 +3058,34 @@ if (lspModal.rootRelTypescript) lspModal.rootRelTypescript.addEventListener('cha
 if (lspModal.rootRelClangd) lspModal.rootRelClangd.addEventListener('change', (e) => _updateLspRootRel('clangd', e?.target?.value));
 if (lspModal.rootRelKotlin) lspModal.rootRelKotlin.addEventListener('change', (e) => _updateLspRootRel('kotlin', e?.target?.value));
 if (lspModal.rootRelKotlinAndroid) lspModal.rootRelKotlinAndroid.addEventListener('change', (e) => _updateLspRootRel('kotlin-android', e?.target?.value));
+
+// Sprint D: Sync Project button for kotlin-android
+if (lspModal.syncKotlinAndroid) {
+  lspModal.syncKotlinAndroid.addEventListener('click', async () => {
+    const btn = lspModal.syncKotlinAndroid;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Syncing...';
+    try {
+      const resp = await fetch('/api/app/file_editor_cm6/editor/android/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const json = await resp.json();
+      if (json.ok) {
+        toast('Project synced successfully');
+      } else {
+        toast('Sync failed: ' + (json.error || 'unknown error'));
+      }
+    } catch (e) {
+      toast('Sync failed: ' + (e.message || e));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
+}
 
 function _hideLspSetupBanner() {
   if (!lspSetupBanner.root) return;
