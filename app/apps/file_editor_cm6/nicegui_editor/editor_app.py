@@ -2630,6 +2630,66 @@ async def pyright_scan_project(data: dict = Body(...)):
             except Exception:
                 pass
 
+            # Reconcile any stale in-memory LSP diagnostics cache for Python so explorer dots clear
+            # after a scan even if the pyright LSP hasn't re-published empty diagnostics for a file.
+            try:
+                import app.apps.file_editor_cm6.lsp_ws as _lsp_ws_mod
+
+                ns = getattr(_lsp_ws_mod, "_LSP_NAMESPACE_INSTANCE", None)
+                if ns is not None:
+                    base_root = base_project_root.expanduser().resolve(strict=False)
+                    # Build a set of file:// URIs that should remain flagged after this scan.
+                    keep_uris: set[str] = set()
+                    for rel, counts in (scan.summary_by_rel or {}).items():
+                        try:
+                            e = int((counts or {}).get("errors") or 0)
+                            w = int((counts or {}).get("warnings") or 0)
+                        except Exception:
+                            e = 0
+                            w = 0
+                        if e <= 0 and w <= 0:
+                            continue
+                        if not isinstance(rel, str) or not rel:
+                            continue
+                        try:
+                            abs_p = (base_root / rel).expanduser().resolve(strict=False)
+                            keep_uris.add(f"file://{str(abs_p)}")
+                        except Exception:
+                            continue
+
+                    for (_lang, sess_root), sess in list(getattr(ns, "backend_sessions", {}).items()):
+                        try:
+                            if str(_lang) not in ("python", "pyright"):
+                                continue
+                            if not isinstance(sess, dict):
+                                continue
+                            sess_root_p = Path(str(sess_root)).expanduser().resolve(strict=False)
+                            # Only reconcile sessions under this base project root.
+                            try:
+                                sess_root_p.relative_to(base_root)
+                            except ValueError:
+                                continue
+
+                            cache = sess.get("diagnostics_by_uri")
+                            if not isinstance(cache, dict) or not cache:
+                                continue
+
+                            # Clear anything not present in the scan results set.
+                            for uri in list(cache.keys()):
+                                if not isinstance(uri, str) or not uri.startswith("file://"):
+                                    continue
+                                abs_path = uri[7:]
+                                try:
+                                    Path(abs_path).expanduser().resolve(strict=False).relative_to(base_root)
+                                except Exception:
+                                    continue
+                                if uri not in keep_uris:
+                                    cache.pop(uri, None)
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
             # Trigger an immediate explorer refresh (the periodic loop will also pick it up).
             try:
                 summary = get_diagnostics_summary_for_project(project_root=str(base_project_root))

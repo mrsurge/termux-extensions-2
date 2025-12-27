@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 from app.apps.file_editor_cm6.project_sidecar import ProjectSidecar
 
@@ -75,7 +75,13 @@ def update_android_sidecar_for_project(
         try:
             prev_resolved = (((existing or {}).get("dependencyModel") or {}).get("gradle") or {}).get("resolvedArtifacts")
             if isinstance(prev_resolved, list) and prev_resolved:
-                dep_model.setdefault("gradle", {})["resolvedArtifacts"] = prev_resolved
+                # dep_model is a TypedDict; cast for mutation via dict methods.
+                dep_any = cast(Dict[str, Any], dep_model)
+                gradle = dep_any.get("gradle")
+                if not isinstance(gradle, dict):
+                    gradle = {"gradleUserHome": str(Path.home() / ".gradle"), "resolvedArtifacts": []}
+                    dep_any["gradle"] = gradle
+                gradle["resolvedArtifacts"] = prev_resolved
         except Exception:
             pass
 

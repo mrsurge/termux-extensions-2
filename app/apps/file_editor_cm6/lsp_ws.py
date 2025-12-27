@@ -421,7 +421,9 @@ async def send_lsp_notification(
                 root_key2 = root_key
 
             session = None
+            matched_root = root_key
             for rk in (root_key, root_key2):
+                matched_root = rk
                 session = getattr(ns, "backend_sessions", {}).get((str(language_id), rk))
                 if session:
                     break
@@ -440,7 +442,7 @@ async def send_lsp_notification(
                         if len(pending) > 25:
                             del pending[:-25]
                     _lsp_error(
-                        f"[LSP SAVE HOOK] queued until initialized lang={language_id} root={rk} method={message.get('method')}"
+                        f"[LSP SAVE HOOK] queued until initialized lang={language_id} root={matched_root} method={message.get('method')}"
                     )
                 except Exception:
                     pass
@@ -475,8 +477,11 @@ async def send_lsp_notification(
             # Add LSP framing (Content-Length header)
             body = json.dumps(message).encode("utf-8")
             header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
-            pipe_state.process.stdin.write(header + body)
-            await pipe_state.process.stdin.drain()
+            stdin = pipe_state.process.stdin
+            if stdin is None:
+                return False
+            stdin.write(header + body)
+            await stdin.drain()
             return True
         except Exception:
             return False
@@ -597,6 +602,44 @@ class LSPFrameParser:
 
 class LSPSocketIONamespace(socketio.AsyncNamespace):
     """Socket.IO namespace for LSP communication."""
+
+    async def _send_pyright_settings(self, sid: str, *, force: bool = False) -> None:
+        """Send workspace/didChangeConfiguration to pyright-langserver (best-effort).
+
+        This makes the LSP emit the same class of diagnostics as the repo-wide
+        pyright scan (workspace scope, non-off type checking).
+        """
+        key = self.sid_to_key.get(sid)
+        session = self.backend_sessions.get(key) if key else None
+        if not session or session.get("language_id") not in ("python", "pyright"):
+            return
+
+        now = time.time()
+        last = float(session.get("pyright_settings_last_sent") or 0.0)
+        if not force and (now - last) < 2.0:
+            return
+
+        try:
+            await self._forward_to_backend(
+                sid,
+                {
+                    "jsonrpc": "2.0",
+                    "method": "workspace/didChangeConfiguration",
+                    "params": {
+                        "settings": {
+                            "python": {
+                                "analysis": {
+                                    "diagnosticMode": "workspace",
+                                    "typeCheckingMode": "basic",
+                                }
+                            }
+                        }
+                    },
+                },
+            )
+            session["pyright_settings_last_sent"] = now
+        except Exception:
+            return
 
     async def _send_android_state(self, sid: str, *, force: bool = False) -> None:
         key = self.sid_to_key.get(sid)
@@ -920,6 +963,13 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                 except Exception:
                     pass
 
+                # For Pyright, re-send config on didOpen so long-lived servers
+                # converge even if they started before our config injection existed.
+                try:
+                    await self._send_pyright_settings(sid, force=False)
+                except Exception:
+                    pass
+
                 # For Android Kotlin LSP, push current repo/dirty state on open.
                 try:
                     if session.get("language_id") == "kotlin-android":
@@ -929,7 +979,12 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
             if method == "initialize":
                 if session.get("initialized") and session.get("init_result_template") is not None:
                     _lsp_debug(f"[LSP WS] Short-circuit initialize for sid={sid}")
-                    await self._emit_initialize_response(sid, message.get("id"), session.get("init_result_template"))
+                    template = session.get("init_result_template")
+                    await self._emit_initialize_response(
+                        sid,
+                        message.get("id"),
+                        template if isinstance(template, dict) else None,
+                    )
                     return
                 if session.get("init_request_id") is None and message.get("id") is not None:
                     session["init_request_id"] = message.get("id")
@@ -986,25 +1041,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                 # agrees with the repo-wide pyright scan behavior.
                 try:
                     if session.get("language_id") in ("python", "pyright"):
-                        await self._forward_to_backend(
-                            sid,
-                            {
-                                "jsonrpc": "2.0",
-                                "method": "workspace/didChangeConfiguration",
-                                "params": {
-                                    "settings": {
-                                        "python": {
-                                            "analysis": {
-                                                # Prefer workspace diagnostics so explorer dots and in-file squiggles align.
-                                                "diagnosticMode": "workspace",
-                                                # Ensure we don't run in an "off" mode that suppresses attribute/type issues.
-                                                "typeCheckingMode": "basic",
-                                            }
-                                        }
-                                    }
-                                },
-                            },
-                        )
+                        await self._send_pyright_settings(sid, force=True)
                 except Exception:
                     pass
             elif method == "textDocument/didSave":
@@ -1048,7 +1085,9 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                                     try:
                                         await asyncio.sleep(0.35)
                                         pend2 = session.get("save_compile_pending_by_uri")
-                                        rec2 = pend2.get(uri) if isinstance(pend2, dict) else None
+                                        if not isinstance(pend2, dict):
+                                            return
+                                        rec2 = pend2.get(uri)
                                         if not isinstance(rec2, dict):
                                             return
                                         if str(rec2.get("task_id") or "") != task_id:
@@ -1106,7 +1145,9 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                                             try:
                                                 await asyncio.sleep(60.0)
                                                 pend3 = session.get("compile_busy_by_uri")
-                                                rec3 = pend3.get(uri) if isinstance(pend3, dict) else None
+                                                if not isinstance(pend3, dict):
+                                                    return
+                                                rec3 = pend3.get(uri)
                                                 if not isinstance(rec3, dict):
                                                     return
                                                 if str(rec3.get("task_id") or "") != task_id:
@@ -1160,10 +1201,13 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         try:
             if isinstance(message, dict) and message.get("method") == "textDocument/documentSymbol":
                 want_id = message.get("id")
+                if not key:
+                    return
+                key2 = key
 
                 async def _trace_timeout() -> None:
                     await asyncio.sleep(36.0)
-                    s2 = self.backend_sessions.get(key)
+                    s2 = self.backend_sessions.get(key2)
                     if not s2:
                         return
                     if s2.get("last_document_symbol_request_id") != want_id:
@@ -1173,7 +1217,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                         return
                     bytes_read = int(s2.get("symbol_trace_bytes") or 0)
                     chunks_read = int(s2.get("symbol_trace_chunks") or 0)
-                    proc = (s2.get("pipe_state") or {}).process if isinstance(s2.get("pipe_state"), object) else None
+                    proc = None
                     try:
                         pipe_state = s2.get("pipe_state")
                         proc = getattr(pipe_state, "process", None) if pipe_state else None
@@ -1198,8 +1242,10 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         except Exception:
             pass
     
-    async def _emit_initialize_response(self, sid: str, request_id: Any, template: dict) -> None:
+    async def _emit_initialize_response(self, sid: str, request_id: Any, template: dict | None) -> None:
         if request_id is None:
+            return
+        if template is None:
             return
         try:
             payload = dict(template)
@@ -1299,7 +1345,14 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
             return
         
         parser: LSPFrameParser = session["parser"]
-        pipe_state: PipeState = session["pipe_state"]
+        pipe_state = session.get("pipe_state")
+        if not pipe_state or not getattr(pipe_state, "process", None):
+            _lsp_error(f"[LSP WS] Bridge exit key={key} reason=no_pipe_state")
+            try:
+                session["dead"] = True
+            except Exception:
+                pass
+            return
         proc = pipe_state.process
         
         try:
@@ -1431,11 +1484,86 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                             except Exception:
                                 pass
 
+                            # For Pyright, keep the persisted explorer diagnostics cache in sync with
+                            # live publishDiagnostics so dots can clear immediately when a file becomes clean.
+                            try:
+                                if session.get("language_id") in ("python", "pyright") and isinstance(diag_uri, str) and diag_uri:
+                                    base_root = str(session.get("base_project_root") or session.get("project_root") or "")
+                                    if base_root:
+                                        # Convert URI -> rel path under base project root.
+                                        abs_path = None
+                                        if diag_uri.startswith("file://"):
+                                            abs_path = diag_uri[7:]
+                                        elif diag_uri.startswith("/"):
+                                            abs_path = diag_uri
+                                        if abs_path:
+                                            try:
+                                                base_p = Path(base_root).expanduser().resolve(strict=False)
+                                                abs_p = Path(abs_path).expanduser().resolve(strict=False)
+                                                rel = "." if abs_p == base_p else str(abs_p.relative_to(base_p))
+                                            except Exception:
+                                                rel = None
+                                            if isinstance(rel, str) and rel and rel != ".":
+                                                # Count errors/warnings (treat 2/3/4 as warnings like explorer).
+                                                e = 0
+                                                w = 0
+                                                if isinstance(diags, list):
+                                                    for d in diags:
+                                                        if not isinstance(d, dict):
+                                                            continue
+                                                        sev = d.get("severity")
+                                                        if sev == 1:
+                                                            e += 1
+                                                        elif sev in (2, 3, 4):
+                                                            w += 1
+
+                                                from app.apps.file_editor_cm6.project_sidecar import ProjectSidecar
+
+                                                sidecar = ProjectSidecar.load_or_create(str(base_p))
+                                                raw = sidecar.dump_raw()
+                                                dc = raw.get("diagnostics_cache") or {}
+                                                py = dc.get("pyright") or {}
+                                                sb = py.get("summaryByRel") or {}
+                                                if not isinstance(sb, dict):
+                                                    sb = {}
+                                                if e <= 0 and w <= 0:
+                                                    sb.pop(rel, None)
+                                                else:
+                                                    sb[rel] = {"errors": int(e), "warnings": int(w)}
+
+                                                # Persist back via API so types are normalized.
+                                                sidecar.set_pyright_diagnostics_summary(
+                                                    summary_by_rel=sb,
+                                                    effective_root=str(session.get("project_root") or ""),
+                                                    repo_fingerprint=str(py.get("repoFingerprint") or "") or None,
+                                                )
+                                                try:
+                                                    sidecar.save()
+                                                except Exception:
+                                                    pass
+
+                                                # Push updated explorer snapshot immediately (don't wait for 1s poll loop).
+                                                try:
+                                                    from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+
+                                                    summary = get_diagnostics_summary_for_project(project_root=str(base_p))
+                                                    await _explorer_manager.broadcast(
+                                                        str(base_p),
+                                                        {"type": "explorer:updateDiagnostics", "payload": {"diagnostics": summary}},
+                                                    )
+                                                except Exception:
+                                                    pass
+                            except Exception:
+                                pass
+
                             # Save-triggered compile/analysis: end busy after diagnostics settle for this URI.
                             try:
                                 if session.get("language_id") == "kotlin-android" and isinstance(diag_uri, str) and diag_uri:
                                     pending = session.get("compile_busy_by_uri")
-                                    rec = pending.get(diag_uri) if isinstance(pending, dict) else None
+                                    if not isinstance(pending, dict):
+                                        pending = {}
+                                        session["compile_busy_by_uri"] = pending
+                                    rec = pending.get(diag_uri)
                                     if isinstance(rec, dict) and rec.get("task_id"):
                                         task_id = str(rec.get("task_id"))
                                         base_root = str(rec.get("base_root") or session.get("base_project_root") or session.get("project_root") or "")
@@ -1448,16 +1576,21 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                                             except Exception:
                                                 pass
 
+                                            sess: dict = session
+
                                             async def _settle_end() -> None:
                                                 try:
                                                     await asyncio.sleep(0.75)
-                                                    pend2 = session.get("compile_busy_by_uri")
-                                                    rec2 = pend2.get(diag_uri) if isinstance(pend2, dict) else None
+                                                    pend2 = sess.get("compile_busy_by_uri")
+                                                    if not isinstance(pend2, dict):
+                                                        return
+                                                    pend2_dict: dict = pend2
+                                                    rec2 = pend2_dict.get(diag_uri)
                                                     if not isinstance(rec2, dict):
                                                         return
                                                     if str(rec2.get("task_id") or "") != task_id:
                                                         return
-                                                    pend2.pop(diag_uri, None)
+                                                    pend2_dict.pop(diag_uri, None)
                                                     try:
                                                         tt = rec2.get("timeout_task")
                                                         if isinstance(tt, asyncio.Task):

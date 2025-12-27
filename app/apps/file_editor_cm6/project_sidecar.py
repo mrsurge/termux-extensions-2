@@ -268,6 +268,20 @@ class ProjectSidecar:
         py["effectiveRoot"] = str(effective_root) if effective_root else None
         py["repoFingerprint"] = str(repo_fingerprint) if repo_fingerprint else None
 
+    def pop_pyright_diagnostics_rel(self, rel_path: str) -> None:
+        """Remove a cached pyright summary entry for a rel path (best-effort)."""
+        try:
+            rel = str(rel_path or "").strip()
+            if not rel or rel == ".":
+                return
+            dc = self._data.get("diagnostics_cache") or {}
+            py = dc.get("pyright") or {}
+            sb = py.get("summaryByRel") or {}
+            if isinstance(sb, dict):
+                sb.pop(rel, None)
+        except Exception:
+            return
+
     # --------------------------------------------------------------------- #
     # Session counter API
     # --------------------------------------------------------------------- #
@@ -445,15 +459,19 @@ class ProjectSidecar:
         recent = [e for e in recent if e.get("path") != normalized]
         
         # Build new entry, preserving scroll_line if not explicitly provided
-        entry = {
+        entry: Dict[str, Any] = {
             "path": normalized,
             "label": self._file_label(normalized),
             "opened_at": timestamp,
         }
-        # Use provided scroll_line, or preserve existing, or omit
+        # Use provided scroll_line, or preserve existing, or omit.
+        # Coerce to int so stored type is stable (CM can report fractional line positions).
         effective_scroll = scroll_line if scroll_line is not None else existing_scroll
         if effective_scroll is not None:
-            entry["scroll_line"] = effective_scroll
+            try:
+                entry["scroll_line"] = int(effective_scroll)
+            except Exception:
+                pass
         
         recent.insert(0, entry)
         # Cap at 12 entries
@@ -471,7 +489,10 @@ class ProjectSidecar:
         
         for entry in recent:
             if entry.get("path") == normalized:
-                entry["scroll_line"] = scroll_line
+                try:
+                    entry["scroll_line"] = int(scroll_line)
+                except Exception:
+                    entry["scroll_line"] = scroll_line
                 return True
         return False
 

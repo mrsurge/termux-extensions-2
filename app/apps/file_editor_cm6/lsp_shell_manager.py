@@ -453,6 +453,18 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
         if android_sdk:
             lsp_env["ANDROID_HOME"] = android_sdk
             lsp_env["ANDROID_SDK_ROOT"] = android_sdk
+    elif language_id == "python":
+        # Ensure pyright-langserver sees the repo modules similarly to the CLI scan.
+        lsp_env = dict(os.environ)
+        try:
+            repo_root = str(project_root.expanduser().resolve(strict=False).parent)
+        except Exception:
+            repo_root = str(project_root)
+        existing = (lsp_env.get("PYTHONPATH") or "").strip()
+        parts = [repo_root, str(project_root)]
+        if existing:
+            parts.append(existing)
+        lsp_env["PYTHONPATH"] = ":".join([p for p in parts if p])
 
     # Spawn fresh shell with live pipes for LSP bidirectional communication.
     try:

@@ -165,7 +165,11 @@ def ensure_compiled_dependency_index(
                     variant=variant,
                     timeout_s=60,
                 )
-                dep.setdefault("gradle", {})["resolvedArtifacts"] = resolved
+                gradle = dep.get("gradle")
+                if not isinstance(gradle, dict):
+                    gradle = {"gradleUserHome": str(Path.home() / ".gradle"), "resolvedArtifacts": []}
+                    dep["gradle"] = gradle
+                gradle["resolvedArtifacts"] = resolved
                 te2_sidecar["dependencyModel"] = dep
             except Exception:
                 resolved = []
