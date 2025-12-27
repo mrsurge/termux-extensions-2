@@ -12,6 +12,8 @@ import org.javacs.kt.ScriptsConfiguration
 import org.javacs.kt.CodegenConfiguration
 import org.javacs.kt.compiler.Compiler
 import org.javacs.kt.position.range
+import org.javacs.kt.progress.LanguageClientProgress
+import org.javacs.kt.progress.Progress
 import org.javacs.kt.util.AsyncExecutor
 import org.javacs.kt.util.Debouncer
 import java.io.File
@@ -20,6 +22,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
  * Configuration for the Android pseudo-LSP diagnostics service.
@@ -51,6 +54,10 @@ class AndroidDiagnosticsService(
 ) {
     private lateinit var client: LanguageClient
     private val async = AsyncExecutor()
+
+    private var progressFactory: Progress.Factory = Progress.Factory.None
+    private var compileProgress: Progress? = null
+    private var compileProgressBuildId: Int = 0
     
     private var debouncer = Debouncer(Duration.ofMillis(config.debounceTimeMs))
     private var syntaxDebouncer = Debouncer(Duration.ofMillis(200))
@@ -172,6 +179,7 @@ class AndroidDiagnosticsService(
     
     fun connect(client: LanguageClient) {
         this.client = client
+        this.progressFactory = LanguageClientProgress.Factory(client)
         LOG.info("AndroidDiagnosticsService connected to client")
     }
 
@@ -303,6 +311,29 @@ class AndroidDiagnosticsService(
         val buildId = currentBuildId
         
         LOG.info("Starting Gradle compile (build #$buildId)")
+
+        // Emit workDoneProgress so clients can show a spinner during Gradle builds.
+        try {
+            // Close any prior progress first.
+            try {
+                compileProgress?.close()
+            } catch (_: Exception) {
+            }
+            compileProgress = null
+            compileProgressBuildId = buildId
+
+            val task = if (config.useFullAssemble) {
+                ":${config.module}:assemble${config.variant}"
+            } else {
+                ":${config.module}:compile${config.variant}Kotlin"
+            }
+
+            compileProgress = progressFactory.create("Gradle compile")
+                .get(2, TimeUnit.SECONDS)
+                .also { it.update("Running $task", 0) }
+        } catch (e: Exception) {
+            compileProgress = null
+        }
         
         // Cancel any in-flight build
         if (gradleCompiler.isRunning()) {
@@ -319,15 +350,39 @@ class AndroidDiagnosticsService(
         // Check if this build is still current
         if (buildId != currentBuildId) {
             LOG.info("Build #$buildId superseded by #$currentBuildId, discarding results")
+            try {
+                if (compileProgressBuildId == buildId) {
+                    compileProgress?.close()
+                    compileProgress = null
+                }
+            } catch (_: Exception) {
+            }
             return
         }
         
         if (result.wasCancelled) {
             LOG.info("Build #$buildId was cancelled")
+            try {
+                if (compileProgressBuildId == buildId) {
+                    compileProgress?.close()
+                    compileProgress = null
+                }
+            } catch (_: Exception) {
+            }
             return
         }
         
         LOG.info("Build #$buildId completed in ${result.durationMs}ms, exit=${result.exitCode}")
+
+        try {
+            if (compileProgressBuildId == buildId) {
+                val status = if (result.exitCode == 0) "Succeeded" else "Failed (exit=${result.exitCode})"
+                compileProgress?.update("Gradle compile finished: $status", 100)
+                compileProgress?.close()
+                compileProgress = null
+            }
+        } catch (_: Exception) {
+        }
         
         // Log raw output for debugging (first 500 chars)
         val outputPreview = result.output.take(500).replace("\n", "\\n")

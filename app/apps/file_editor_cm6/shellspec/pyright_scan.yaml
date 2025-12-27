@@ -1,0 +1,27 @@
+version: "1"
+
+shells:
+  # Pyright workspace scan (CLI) - repo-wide diagnostics snapshot for explorer dots
+  pyright-scan:
+    backend: pipe
+    cwd: ${ctx:EFFECTIVE_ROOT}
+    subgroups:
+      - file_editor_cm6
+      - pyright_scan
+      - "project:${ctx:PROJECT_HASH}"
+    ui:
+      subgroup_styles:
+        pyright_scan:
+          bg: rgba(59, 130, 246, 0.15)
+          border: rgba(59, 130, 246, 0.60)
+        project:*:
+          bg: rgba(0, 0, 0, 0.88)
+          border: rgba(29, 70, 126, 0.88)
+    command:
+      - ${ctx:PYRIGHT_BIN}
+      - --outputjson
+      - --project
+      - ${ctx:EFFECTIVE_ROOT}
+    env:
+      PATH: ${env:PATH}
+

@@ -4,7 +4,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Optional, TypedDict
 
 
 def _read_local_properties_sdk_dir(project_root: Path) -> Optional[str]:
@@ -104,7 +104,43 @@ def _pick_android_jar(*, sdk_root: Path, compile_sdk: Optional[int]) -> Optional
     return str(best) if best else None
 
 
-def build_dependency_model_v1(*, effective_project_root: Path, module: str, variant: str) -> Dict:
+class AndroidSdkModel(TypedDict, total=False):
+    androidJar: str
+    compileSdk: int
+
+
+class JvmModel(TypedDict, total=False):
+    javaHome: str
+    jrtOrJmods: str
+
+
+class RSymbolsModel(TypedDict, total=False):
+    rJar: str
+    rTxt: str
+
+
+class GeneratedModel(TypedDict, total=False):
+    buildConfigRoots: list[str]
+    viewBindingRoots: list[str]
+    rSymbols: RSymbolsModel
+
+
+class GradleModel(TypedDict):
+    gradleUserHome: str
+    resolvedArtifacts: list[Any]
+
+
+class DependencyModelV1(TypedDict, total=False):
+    builtAtMs: int
+    variant: str
+    module: str
+    androidSdk: AndroidSdkModel
+    jvm: JvmModel
+    gradle: GradleModel
+    generated: GeneratedModel
+
+
+def build_dependency_model_v1(*, effective_project_root: Path, module: str, variant: str) -> DependencyModelV1:
     root = effective_project_root.expanduser().resolve(strict=False)
     module_dir = root / module
 
@@ -114,7 +150,7 @@ def build_dependency_model_v1(*, effective_project_root: Path, module: str, vari
     android_jar = _pick_android_jar(sdk_root=sdk_root, compile_sdk=compile_sdk) if sdk_root else None
 
     java_home = (os.getenv("JAVA_HOME") or "").strip() or None
-    jmods = None
+    jmods: Optional[str] = None
     if java_home:
         try:
             cand = (Path(java_home).expanduser() / "jmods")
@@ -127,7 +163,7 @@ def build_dependency_model_v1(*, effective_project_root: Path, module: str, vari
     if not gradle_user_home:
         gradle_user_home = str(Path.home() / ".gradle")
 
-    generated: Dict[str, object] = {}
+    generated: GeneratedModel = {}
 
     # Generated roots (best-effort, cheap checks)
     try:
@@ -144,7 +180,7 @@ def build_dependency_model_v1(*, effective_project_root: Path, module: str, vari
         pass
 
     # R symbols (bounded search under module/build)
-    r_symbols: Dict[str, str] = {}
+    r_symbols: RSymbolsModel = {}
     try:
         build_dir = module_dir / "build"
         if build_dir.is_dir():
@@ -177,35 +213,29 @@ def build_dependency_model_v1(*, effective_project_root: Path, module: str, vari
 
     built_at_ms = int(time.time() * 1000)
 
-    out: Dict[str, object] = {
+    android_sdk: AndroidSdkModel = {}
+    if android_jar:
+        android_sdk["androidJar"] = android_jar
+    if compile_sdk is not None:
+        android_sdk["compileSdk"] = int(compile_sdk)
+
+    jvm: JvmModel = {}
+    if java_home:
+        jvm["javaHome"] = java_home
+    if jmods:
+        jvm["jrtOrJmods"] = jmods
+
+    out: DependencyModelV1 = {
         "builtAtMs": built_at_ms,
         "variant": variant,
         "module": module,
-        "androidSdk": {
-            "androidJar": android_jar,
-            "compileSdk": compile_sdk,
-        },
-        "jvm": {
-            "javaHome": java_home,
-            "jrtOrJmods": jmods,
-        },
-        "gradle": {
-            "gradleUserHome": gradle_user_home,
-            "resolvedArtifacts": [],
-        },
-        "generated": generated,
+        "androidSdk": android_sdk,
+        "jvm": jvm,
+        "gradle": {"gradleUserHome": gradle_user_home, "resolvedArtifacts": []},
     }
 
-    # Remove nulls for compactness.
-    # Keep keys present but values None for schema stability? For now drop only top-level nulls in subdicts.
-    try:
-        if out.get("androidSdk"):
-            out["androidSdk"] = {k: v for k, v in out["androidSdk"].items() if v is not None}
-        if out.get("jvm"):
-            out["jvm"] = {k: v for k, v in out["jvm"].items() if v is not None}
-        if out.get("generated") == {}:
-            out.pop("generated", None)
-    except Exception:
-        pass
+    # Only include generated if we found any candidate roots/symbols.
+    if generated:
+        out["generated"] = generated
 
     return out

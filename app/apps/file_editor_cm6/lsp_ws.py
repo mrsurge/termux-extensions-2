@@ -277,17 +277,29 @@ def get_diagnostics_summary_for_project(*, project_root: str) -> dict[str, dict]
     We include those sessions and compute paths relative to the base project root.
     """
 
-    ns = _LSP_NAMESPACE_INSTANCE
-    if ns is None:
-        return {}
-
-    result: dict[str, dict] = {}
     project_root_str = str(project_root).rstrip("/")
-
     try:
         base_root_p = Path(project_root_str).expanduser().resolve(strict=False)
     except Exception:
         return {}
+
+    # Always include persisted diagnostics cache (e.g. pyright workspace scan)
+    # even if the LSP namespace isn't running.
+    cached_summary: dict[str, dict] = {}
+    try:
+        from app.apps.file_editor_cm6.project_sidecar import ProjectSidecar
+
+        sidecar = ProjectSidecar.load_or_create(project_root_str)
+        cached_summary = sidecar.get_pyright_diagnostics_summary() or {}
+    except Exception:
+        cached_summary = {}
+
+    ns = _LSP_NAMESPACE_INSTANCE
+
+    result: dict[str, dict] = {}
+    if ns is None:
+        # No live LSP sessions; return cache only.
+        return cached_summary if isinstance(cached_summary, dict) else {}
 
     # Iterate over all backend sessions whose root is the base project root
     # OR a subdirectory of it (rootRel-aware)
@@ -346,7 +358,7 @@ def get_diagnostics_summary_for_project(*, project_root: str) -> dict[str, dict]
                 sev = d.get("severity")
                 if sev == 1:
                     errors += 1
-                elif sev == 2:
+                elif sev in (2, 3, 4):
                     warnings += 1
 
             if errors > 0 or warnings > 0:
@@ -356,6 +368,27 @@ def get_diagnostics_summary_for_project(*, project_root: str) -> dict[str, dict]
                     existing["warnings"] = existing.get("warnings", 0) + warnings
                 else:
                     result[rel] = {"errors": errors, "warnings": warnings}
+
+    # Merge persisted diagnostics cache (avoid double-counting by using max).
+    try:
+        if isinstance(cached_summary, dict) and cached_summary:
+            for rel, counts in cached_summary.items():
+                if not isinstance(rel, str) or not rel:
+                    continue
+                if not isinstance(counts, dict):
+                    continue
+                e = int(counts.get("errors") or 0)
+                w = int(counts.get("warnings") or 0)
+                if e <= 0 and w <= 0:
+                    continue
+                existing = result.get(rel)
+                if existing:
+                    existing["errors"] = max(int(existing.get("errors") or 0), e)
+                    existing["warnings"] = max(int(existing.get("warnings") or 0), w)
+                else:
+                    result[rel] = {"errors": e, "warnings": w}
+    except Exception:
+        pass
 
     return result
 
@@ -949,6 +982,31 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                 if session.get("backend_initialized_notified"):
                     return
                 session["backend_initialized_notified"] = True
+                # For pyright, inject workspace-wide diagnostics settings so the LSP
+                # agrees with the repo-wide pyright scan behavior.
+                try:
+                    if session.get("language_id") in ("python", "pyright"):
+                        await self._forward_to_backend(
+                            sid,
+                            {
+                                "jsonrpc": "2.0",
+                                "method": "workspace/didChangeConfiguration",
+                                "params": {
+                                    "settings": {
+                                        "python": {
+                                            "analysis": {
+                                                # Prefer workspace diagnostics so explorer dots and in-file squiggles align.
+                                                "diagnosticMode": "workspace",
+                                                # Ensure we don't run in an "off" mode that suppresses attribute/type issues.
+                                                "typeCheckingMode": "basic",
+                                            }
+                                        }
+                                    }
+                                },
+                            },
+                        )
+                except Exception:
+                    pass
             elif method == "textDocument/didSave":
                 # For Android Kotlin LSP, push current repo/dirty state before save-driven compile logic.
                 try:
@@ -1434,6 +1492,9 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                         if isinstance(msg, dict) and session.get("language_id") == "kotlin-android":
                             method = msg.get("method")
                             if method == "window/workDoneProgress/create":
+                                # NOTE: This is a request in LSP (has an "id"). The browser client does
+                                # not implement it, so we must ACK it here or the server may block and
+                                # never emit $/progress.
                                 try:
                                     params = msg.get("params") or {}
                                     token = params.get("token")
@@ -1443,6 +1504,18 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                                         session["work_progress_known_tokens"] = wps
                                     if token is not None:
                                         wps.add(str(token))
+                                except Exception:
+                                    pass
+
+                                try:
+                                    req_id = msg.get("id")
+                                    if req_id is not None:
+                                        await self._forward_session_to_backend(
+                                            session,
+                                            {"jsonrpc": "2.0", "id": req_id, "result": None},
+                                        )
+                                        # Do not forward this request to the iframe.
+                                        continue
                                 except Exception:
                                     pass
                             elif method == "$/progress":

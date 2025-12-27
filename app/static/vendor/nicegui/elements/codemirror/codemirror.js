@@ -1631,6 +1631,9 @@ export default {
           // This is required for nested sticky scroll to work correctly
           const hierarchicalSymbolCapability = {
             clientCapabilities: {
+              window: {
+                workDoneProgress: true
+              },
               textDocument: {
                 documentSymbol: {
                   hierarchicalDocumentSymbolSupport: true,

@@ -2755,6 +2755,7 @@ const lspModal = {
   toggleKotlin: document.getElementById('lsp-toggle-kotlin'),
   toggleKotlinAndroid: document.getElementById('lsp-toggle-kotlin-android'),
   startPyright: document.getElementById('lsp-start-pyright'),
+  scanPyright: document.getElementById('lsp-scan-pyright'),
   startTypescript: document.getElementById('lsp-start-typescript'),
   startClangd: document.getElementById('lsp-start-clangd'),
   startKotlin: document.getElementById('lsp-start-kotlin'),
@@ -3305,6 +3306,34 @@ if (lspModal.startTypescript) lspModal.startTypescript.addEventListener('click',
 if (lspModal.startClangd) lspModal.startClangd.addEventListener('click', () => _startStopLspServer('clangd'));
 if (lspModal.startKotlin) lspModal.startKotlin.addEventListener('click', () => _startStopLspServer('kotlin'));
 if (lspModal.startKotlinAndroid) lspModal.startKotlinAndroid.addEventListener('click', () => _startStopLspServer('kotlin-android'));
+
+// Workspace scan for Pyright (repo-wide explorer dots)
+if (lspModal.scanPyright) {
+  lspModal.scanPyright.addEventListener('click', async () => {
+    const btn = lspModal.scanPyright;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Scanning...';
+    try {
+      const resp = await fetch('/api/app/file_editor_cm6/editor/pyright/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const json = await resp.json();
+      if (json && json.ok) {
+        toast('Pyright scan started');
+      } else {
+        toast('Pyright scan failed: ' + (json?.error || 'unknown error'));
+      }
+    } catch (e) {
+      toast('Pyright scan failed: ' + (e?.message || e));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
+}
 
 if (lspModal.rootRelPyright) lspModal.rootRelPyright.addEventListener('change', (e) => _updateLspRootRel('pyright', e?.target?.value));
 if (lspModal.rootRelTypescript) lspModal.rootRelTypescript.addEventListener('change', (e) => _updateLspRootRel('typescript', e?.target?.value));

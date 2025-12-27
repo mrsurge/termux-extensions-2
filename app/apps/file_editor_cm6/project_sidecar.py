@@ -148,6 +148,17 @@ class ProjectSidecar:
                     "kotlin": False,
                 },
             },
+            # Cached diagnostics summary (project-scoped SSOT) used by the explorer
+            # for file-level warning/error dots. This is intentionally lightweight:
+            # only counts, not full diagnostics payloads.
+            "diagnostics_cache": {
+                "pyright": {
+                    "summaryByRel": {},
+                    "updatedAt": None,
+                    "effectiveRoot": None,
+                    "repoFingerprint": None,
+                }
+            },
         }
 
     # --------------------------------------------------------------------- #
@@ -206,6 +217,56 @@ class ProjectSidecar:
             return json.loads(json.dumps(self._data, ensure_ascii=False, default=str))
         except Exception:
             return {"error": "failed_to_dump", "repr": repr(self._data)}
+
+    # --------------------------------------------------------------------- #
+    # Diagnostics cache API (explorer dots)
+    # --------------------------------------------------------------------- #
+
+    def get_pyright_diagnostics_summary(self) -> Dict[str, Dict[str, int]]:
+        """Return cached {rel: {errors, warnings}} for Pyright, if available."""
+        try:
+            dc = self._data.get("diagnostics_cache") or {}
+            py = dc.get("pyright") or {}
+            summary = py.get("summaryByRel") or {}
+            if not isinstance(summary, dict):
+                return {}
+            out: Dict[str, Dict[str, int]] = {}
+            for rel, counts in summary.items():
+                if not isinstance(rel, str) or not rel:
+                    continue
+                if not isinstance(counts, dict):
+                    continue
+                e = int(counts.get("errors") or 0)
+                w = int(counts.get("warnings") or 0)
+                if e <= 0 and w <= 0:
+                    continue
+                out[rel] = {"errors": e, "warnings": w}
+            return out
+        except Exception:
+            return {}
+
+    def set_pyright_diagnostics_summary(
+        self,
+        *,
+        summary_by_rel: Dict[str, Dict[str, int]],
+        updated_at: Optional[str] = None,
+        effective_root: Optional[str] = None,
+        repo_fingerprint: Optional[str] = None,
+    ) -> None:
+        dc = self._data.setdefault("diagnostics_cache", {})
+        if not isinstance(dc, dict):
+            dc = {}
+            self._data["diagnostics_cache"] = dc
+        py = dc.setdefault("pyright", {})
+        if not isinstance(py, dict):
+            py = {}
+            dc["pyright"] = py
+
+        # Store as-is (counts only); normalize in getter.
+        py["summaryByRel"] = summary_by_rel if isinstance(summary_by_rel, dict) else {}
+        py["updatedAt"] = updated_at or _utc_timestamp()
+        py["effectiveRoot"] = str(effective_root) if effective_root else None
+        py["repoFingerprint"] = str(repo_fingerprint) if repo_fingerprint else None
 
     # --------------------------------------------------------------------- #
     # Session counter API

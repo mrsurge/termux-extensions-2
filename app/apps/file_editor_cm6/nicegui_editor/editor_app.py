@@ -52,6 +52,9 @@ _android_dep_index_build_inflight: dict[str, int] = {}
 # Sprint D: per-project lock for Android sync to prevent concurrent stomping.
 _android_sync_locks: dict[str, asyncio.Lock] = {}
 
+# Workspace diagnostics scans (repo-wide, best-effort).
+_pyright_scan_tasks: dict[str, asyncio.Task] = {}
+
 # Sprint F: broadcast "busy" signals for long-running Android LSP work (e.g., Gradle).
 _lsp_busy_counts: dict[str, int] = {}
 _lsp_busy_tasks: dict[str, dict] = {}
@@ -2555,6 +2558,108 @@ async def android_sync_project(data: dict = Body(...)):
         except Exception as e:
             print(f"[ANDROID SYNC] ERROR: {e}", file=sys.stderr)
             return {"ok": False, "error": str(e)}
+
+
+# --- Pyright Workspace Scan Endpoint (repo-wide diagnostics dots) ---
+
+@editor_router.post('/pyright/scan')
+async def pyright_scan_project(data: dict = Body(...)):
+    """Run Pyright (CLI) across the configured Pyright workspace root.
+
+    This populates explorer warning/error dots for *all* Python files under the
+    effective Pyright root, and persists a lightweight summary in ProjectSidecar
+    so dots survive worker restarts.
+    """
+
+    base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
+    effective_project_root = base_project_root
+    try:
+        rel_root = _history_store.get_lsp_server_root_rel(str(base_project_root), "pyright")
+        if rel_root:
+            candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
+            if candidate.exists() and candidate.is_dir():
+                effective_project_root = candidate
+    except Exception:
+        pass
+
+    lock_key = str(base_project_root)
+
+    # Supersede any in-flight scan for this project.
+    try:
+        existing = _pyright_scan_tasks.get(lock_key)
+        if existing and not existing.done():
+            existing.cancel()
+    except Exception:
+        pass
+
+    async def _scan_bg() -> None:
+        busy_token = await _lsp_busy_begin(
+            project_path=base_project_root,
+            language_id="python",
+            activity="pyright_scan",
+            detail="Scanning workspace (pyright)…",
+        )
+        ok = True
+        err = ""
+        try:
+            from app.apps.file_editor_cm6.python_lang.pyright_workspace_scan import run_pyright_workspace_scan
+            from app.apps.file_editor_cm6.project_sidecar import ProjectSidecar
+            from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+            from app.apps.file_editor_cm6.lsp_ws import get_diagnostics_summary_for_project, _compute_repo_fingerprint
+
+            scan = await run_pyright_workspace_scan(
+                base_project_root=base_project_root,
+                effective_project_root=effective_project_root,
+                timeout_s=180.0,
+            )
+
+            repo_fp = ""
+            try:
+                repo_fp = await anyio.to_thread.run_sync(lambda: _compute_repo_fingerprint(effective_project_root))
+            except Exception:
+                repo_fp = ""
+
+            sidecar = ProjectSidecar.load_or_create(str(base_project_root))
+            sidecar.set_pyright_diagnostics_summary(
+                summary_by_rel=scan.summary_by_rel,
+                effective_root=str(effective_project_root),
+                repo_fingerprint=repo_fp or None,
+            )
+            try:
+                sidecar.save()
+            except Exception:
+                pass
+
+            # Trigger an immediate explorer refresh (the periodic loop will also pick it up).
+            try:
+                summary = get_diagnostics_summary_for_project(project_root=str(base_project_root))
+                await _explorer_manager.broadcast(
+                    str(base_project_root),
+                    {"type": "explorer:updateDiagnostics", "payload": {"diagnostics": summary}},
+                )
+            except Exception:
+                pass
+        except asyncio.CancelledError:
+            ok = False
+            err = "superseded"
+        except Exception as exc:
+            ok = False
+            err = str(exc)
+        finally:
+            try:
+                await _lsp_busy_end(token=busy_token, ok=ok, error=err)
+            except Exception:
+                pass
+
+    task = asyncio.create_task(_scan_bg())
+    _pyright_scan_tasks[lock_key] = task
+
+    return {
+        "ok": True,
+        "started": True,
+        "baseProjectRoot": str(base_project_root),
+        "effectiveProjectRoot": str(effective_project_root),
+    }
 
 
 @editor_router.post('/set_view_settings')
