@@ -15,6 +15,8 @@ _GHOST_PATTERNS = (
     "Unresolved import",
 )
 
+_UNRESOLVED_IMPORT_PATTERN = "Unresolved import"
+
 # TE2 draft source tag (environment hints)
 _DRAFT_SOURCE = "te2-android:draft"
 
@@ -30,6 +32,11 @@ def _is_ghost_diagnostic(diag: Dict[str, Any]) -> bool:
         if pattern in msg:
             return True
     return False
+
+
+def _is_unresolved_import_backend(diag: Dict[str, Any]) -> bool:
+    msg = str(diag.get("message") or "")
+    return _UNRESOLVED_IMPORT_PATTERN in msg
 
 
 def _is_env_problem_diagnostic(diag: Dict[str, Any]) -> bool:
@@ -70,14 +77,16 @@ def merge_android_diagnostics(
 
     if not has_drafts:
         # No unsaved edits: return everything
-        return list(backend) + list(draft)
+        merged = list(backend) + list(draft)
+        return _dedupe_backend_vs_draft(backend=backend, merged=merged)
 
     # Check if draft diagnostics indicate environment problems
     has_env_problems = any(_is_env_problem_diagnostic(d) for d in draft)
 
     if has_env_problems:
         # Environment is broken: don't suppress anything, user needs to fix SDK/JDK
-        return list(backend) + list(draft)
+        merged = list(backend) + list(draft)
+        return _dedupe_backend_vs_draft(backend=backend, merged=merged)
 
     # Only suppress ghost diagnostics if TE2 provided replacements (Sprint E: never go blind).
     has_replacements = False
@@ -95,7 +104,47 @@ def merge_android_diagnostics(
         has_replacements = False
 
     if not has_replacements:
-        return list(backend) + list(draft)
+        merged = list(backend) + list(draft)
+        return _dedupe_backend_vs_draft(backend=backend, merged=merged)
 
     filtered_backend = [d for d in backend if not _is_ghost_diagnostic(d)]
-    return filtered_backend + list(draft)
+    merged = filtered_backend + list(draft)
+    return _dedupe_backend_vs_draft(backend=filtered_backend, merged=merged)
+
+
+def _dedupe_backend_vs_draft(*, backend: List[Dict[str, Any]], merged: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Suppress redundant TE2 draft diagnostics when backend already reports the same issue."""
+
+    try:
+        backend_unresolved_import_lines: set[int] = set()
+        for d in backend:
+            if not isinstance(d, dict):
+                continue
+            if not _is_unresolved_import_backend(d):
+                continue
+            rng = d.get("range") or {}
+            start = (rng.get("start") or {}) if isinstance(rng, dict) else {}
+            line = start.get("line")
+            if isinstance(line, int):
+                backend_unresolved_import_lines.add(line)
+
+        out: list[Dict[str, Any]] = []
+        for d in merged:
+            if not isinstance(d, dict):
+                continue
+            if (d.get("source") or "") != _DRAFT_SOURCE:
+                out.append(d)
+                continue
+            if (d.get("code") or "") != "DRAFT_UNRESOLVED_IMPORT":
+                out.append(d)
+                continue
+            rng = d.get("range") or {}
+            start = (rng.get("start") or {}) if isinstance(rng, dict) else {}
+            line = start.get("line")
+            if isinstance(line, int) and line in backend_unresolved_import_lines:
+                continue
+            out.append(d)
+
+        return out
+    except Exception:
+        return merged

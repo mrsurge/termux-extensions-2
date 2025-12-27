@@ -1071,6 +1071,70 @@ let lastScrollState = null;
 let scrollStateTimer = null;
 const CURSOR_STATE_DEBOUNCE = 1000; // ms
 
+function _feUpdateLspSpinner() {
+  try {
+    const spinner = document.getElementById('fe-lsp-spinner');
+    if (!spinner) return;
+
+    if (!window.__feLspSpinnerUi) {
+      window.__feLspSpinnerUi = {
+        lspShow: false,
+        lspTitle: '',
+        busyShow: false,
+        busyTitle: '',
+        busyLanguageId: '',
+        busyActivity: '',
+      };
+    }
+    const ui = window.__feLspSpinnerUi;
+
+    const anyShow = Boolean(ui.lspShow || ui.busyShow);
+    const title = ui.busyShow ? (ui.busyTitle || ui.lspTitle) : ui.lspTitle;
+
+    // Anti-flicker: if we show, keep visible for a minimum window.
+    const MIN_VISIBLE_MS = 650;
+    const now = Date.now();
+    if (!window.__feLspSpinnerState) {
+      window.__feLspSpinnerState = { shownAtMs: 0, hideTimer: null };
+    }
+    const st = window.__feLspSpinnerState;
+
+    if (anyShow) {
+      if (st.hideTimer) {
+        clearTimeout(st.hideTimer);
+        st.hideTimer = null;
+      }
+      if (spinner.style.display === 'none') {
+        spinner.style.display = 'inline-block';
+        st.shownAtMs = now;
+      } else if (!spinner.style.display) {
+        spinner.style.display = 'inline-block';
+        st.shownAtMs = now;
+      }
+      spinner.title = title || spinner.title;
+      return;
+    }
+
+    // anyShow === false
+    const elapsed = now - (st.shownAtMs || 0);
+    const wait = Math.max(0, MIN_VISIBLE_MS - elapsed);
+    if (wait > 0) {
+      if (st.hideTimer) return; // already scheduled
+      st.hideTimer = setTimeout(() => {
+        try {
+          st.hideTimer = null;
+          spinner.style.display = 'none';
+          spinner.title = title || spinner.title;
+        } catch { }
+      }, wait);
+      return;
+    }
+
+    spinner.style.display = 'none';
+    spinner.title = title || spinner.title;
+  } catch { }
+}
+
 function handleCacheStateBridgeEvent(event) {
   if (!event || !event.data || event.data.type !== 'cm6-cache-state') {
     return;
@@ -1235,13 +1299,26 @@ window.addEventListener('message', (event) => {
     const languageId = payload.languageId ? String(payload.languageId) : '';
 
     const show = state === 'connecting' || state === 'backend_ready' || state === 'initializing';
-    spinner.style.display = show ? 'inline-block' : 'none';
+
+    if (!window.__feLspSpinnerUi) {
+      window.__feLspSpinnerUi = {
+        lspShow: false,
+        lspTitle: '',
+        busyShow: false,
+        busyTitle: '',
+        busyLanguageId: '',
+        busyActivity: '',
+      };
+    }
+    const feSpinnerUi = window.__feLspSpinnerUi;
+    feSpinnerUi.lspShow = Boolean(show);
 
     let title = 'Language server';
     if (languageId) title += ` (${languageId})`;
     if (state) title += `: ${state}`;
     if (payload.error) title += ` — ${payload.error}`;
-    spinner.title = title;
+    feSpinnerUi.lspTitle = title;
+    _feUpdateLspSpinner();
 
     // Toast behavior:
     // - Show "Loading <lang> LSP…" only if the spinner stays visible long enough (avoids spam for fast servers)
@@ -1275,7 +1352,7 @@ window.addEventListener('message', (event) => {
         ui.loadingToastTimer = setTimeout(() => {
           // Only show if still the same attempt and still loading.
           if (ui.activeAttempt !== attemptId) return;
-          if (!spinner || spinner.style.display === 'none') return;
+          if (!feSpinnerUi || !feSpinnerUi.lspShow) return;
           if (ui.loadingToastShown) return;
           ui.loadingToastShown = true;
           host.toast(`Loading ${langLabel}…`, 2500);
@@ -2967,11 +3044,116 @@ window.__cm6HandleLspStatus = (payload) => {
   }
 };
 
+window.__cm6HandleLspBusy = (payload) => {
+  try {
+    const spinner = document.getElementById('fe-lsp-spinner');
+    if (!spinner) return;
+
+    if (!window.__feLspSpinnerUi) {
+      window.__feLspSpinnerUi = {
+        lspShow: false,
+        lspTitle: '',
+        busyShow: false,
+        busyTitle: '',
+        busyLanguageId: '',
+        busyActivity: '',
+      };
+    }
+    const feSpinnerUi = window.__feLspSpinnerUi;
+
+    if (!window.__cm6BusyUi) {
+      window.__cm6BusyUi = {
+        tasks: new Map(), // taskId -> { startTimer, startToastShown, startedAtMs, headline, detail, activity, languageId }
+        lastHeadline: '',
+        lastEndToastAt: 0,
+      };
+    }
+    const busyUi = window.__cm6BusyUi;
+
+    const languageId = payload && payload.languageId ? String(payload.languageId) : '';
+    const activity = payload && payload.activity ? String(payload.activity) : '';
+    const detail = payload && payload.detail ? String(payload.detail) : '';
+    const isBusy = Boolean(payload && payload.busy);
+    const taskId = payload && payload.taskId ? String(payload.taskId) : `${languageId || 'lsp'}|${activity || 'work'}`;
+
+    const label = activity ? activity.replace(/_/g, ' ') : 'working';
+    const headline = languageId ? `${languageId}: ${label}` : label;
+
+    const recomputeSpinner = () => {
+      const anyBusy = busyUi.tasks && typeof busyUi.tasks.size === 'number' ? busyUi.tasks.size > 0 : false;
+      feSpinnerUi.busyShow = anyBusy;
+      feSpinnerUi.busyTitle = anyBusy ? (busyUi.lastHeadline || feSpinnerUi.busyTitle) : '';
+      _feUpdateLspSpinner();
+    };
+
+    if (isBusy) {
+      const startedAtMs = payload && typeof payload.startedAtMs === 'number' ? payload.startedAtMs : Date.now();
+      busyUi.lastHeadline = detail ? `${headline} — ${detail}` : headline;
+      recomputeSpinner();
+
+      if (!busyUi.tasks.has(taskId)) {
+        const rec = {
+          startTimer: null,
+          startToastShown: false,
+          startedAtMs,
+          headline,
+          detail,
+          activity,
+          languageId,
+        };
+        rec.startTimer = setTimeout(() => {
+          const r2 = busyUi.tasks.get(taskId);
+          if (!r2) return;
+          if (r2.startToastShown) return;
+          r2.startToastShown = true;
+          host.toast(detail ? `${headline}…` : `${headline}…`, 2500);
+        }, 650);
+        busyUi.tasks.set(taskId, rec);
+      }
+      recomputeSpinner();
+      return;
+    }
+
+    // busy=false
+    const ok = payload && typeof payload.ok === 'boolean' ? payload.ok : true;
+    const error = payload && payload.error ? String(payload.error) : '';
+    const durationMs = payload && typeof payload.durationMs === 'number' ? payload.durationMs : null;
+
+    const rec = busyUi.tasks.get(taskId);
+    if (rec && rec.startTimer) {
+      clearTimeout(rec.startTimer);
+      rec.startTimer = null;
+    }
+    if (rec) busyUi.tasks.delete(taskId);
+
+    const now = Date.now();
+    if (now - (busyUi.lastEndToastAt || 0) > 1200) {
+      const startShown = Boolean(rec && rec.startToastShown);
+      if (startShown) {
+        const dur = durationMs != null ? ` (${Math.round(durationMs)}ms)` : '';
+        if (!ok) host.toast(error ? `${headline} failed: ${error}${dur}` : `${headline} failed${dur}`, 4500);
+        else host.toast(`${headline} done${dur}`, 1800);
+        busyUi.lastEndToastAt = now;
+      }
+    }
+    recomputeSpinner();
+  } catch (err) {
+    console.warn('[LSP Busy] handler failed', err);
+  }
+};
+
 // If explorer delivered an early status snapshot before main.js installed the handler, replay it now.
 try {
   if (window.__cm6PendingLspStatus) {
     window.__cm6HandleLspStatus(window.__cm6PendingLspStatus);
     delete window.__cm6PendingLspStatus;
+  }
+} catch (_) { }
+
+try {
+  if (window.__cm6PendingLspBusy) {
+    window.__cm6HandleLspBusy(window.__cm6PendingLspBusy);
+    delete window.__cm6PendingLspBusy;
   }
 } catch (_) { }
 

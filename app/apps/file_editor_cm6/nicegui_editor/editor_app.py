@@ -6,6 +6,7 @@ import os
 import hashlib
 import time
 import asyncio
+import uuid
 from pathlib import Path
 from typing import Optional
 import anyio
@@ -50,6 +51,10 @@ _android_dep_index_build_inflight: dict[str, int] = {}
 
 # Sprint D: per-project lock for Android sync to prevent concurrent stomping.
 _android_sync_locks: dict[str, asyncio.Lock] = {}
+
+# Sprint F: broadcast "busy" signals for long-running Android LSP work (e.g., Gradle).
+_lsp_busy_counts: dict[str, int] = {}
+_lsp_busy_tasks: dict[str, dict] = {}
 
 # --- Constants ---
 THEME_MAP = {
@@ -119,6 +124,101 @@ def _resolve_theme_preference(theme_key: Optional[str]) -> str:
             f"Preference file{location_hint} references unsupported theme '{theme_key}'. "
             "Add it to THEME_MAP or update the preference file."
         ) from exc
+
+
+def _normalize_project_path_for_broadcast(project_path: str | Path) -> str:
+    try:
+        return str(Path(project_path).expanduser().resolve(strict=False))
+    except Exception:
+        return str(project_path)
+
+
+async def _broadcast_lsp_busy(*, project_path: str, payload: dict) -> None:
+    try:
+        from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+
+        await _explorer_manager.broadcast(str(project_path), {"type": "lsp:busy", "payload": payload})
+    except Exception:
+        return
+
+
+async def _lsp_busy_begin(*, project_path: str | Path, language_id: str, activity: str, detail: str = "") -> str:
+    project_path_s = _normalize_project_path_for_broadcast(project_path)
+    key = f"{project_path_s}::{language_id}"
+    count = int(_lsp_busy_counts.get(key) or 0) + 1
+    _lsp_busy_counts[key] = count
+
+    task_id = uuid.uuid4().hex
+    started_at_ms = int(time.time() * 1000)
+    started_mono = time.monotonic()
+    _lsp_busy_tasks[task_id] = {
+        "project_path": project_path_s,
+        "languageId": str(language_id),
+        "activity": str(activity or "work"),
+        "detail": str(detail or ""),
+        "startedAtMs": started_at_ms,
+        "startedMono": started_mono,
+        "key": key,
+    }
+
+    await _broadcast_lsp_busy(
+        project_path=project_path_s,
+        payload={
+            "taskId": task_id,
+            "languageId": str(language_id),
+            "busy": True,
+            "activity": str(activity or "work"),
+            "detail": str(detail or ""),
+            "startedAtMs": started_at_ms,
+        },
+    )
+    return task_id
+
+
+async def _lsp_busy_end(*, token: str, ok: bool = True, error: str = "") -> None:
+    try:
+        task_id = str(token or "")
+        if not task_id:
+            return
+
+        meta = _lsp_busy_tasks.pop(task_id, None)
+        if not isinstance(meta, dict):
+            return
+
+        project_path = str(meta.get("project_path") or "")
+        language_id = str(meta.get("languageId") or "")
+        activity = str(meta.get("activity") or "")
+        detail = str(meta.get("detail") or "")
+        started_mono = float(meta.get("startedMono") or time.monotonic())
+        duration_ms = max(0, int((time.monotonic() - started_mono) * 1000))
+
+        # Decrement per-(project,language) busy count (best-effort).
+        try:
+            key = str(meta.get("key") or f"{project_path}::{language_id}")
+            count = int(_lsp_busy_counts.get(key) or 0)
+            if count <= 1:
+                _lsp_busy_counts.pop(key, None)
+            else:
+                _lsp_busy_counts[key] = count - 1
+        except Exception:
+            pass
+
+        await _broadcast_lsp_busy(
+            project_path=project_path,
+            payload={
+                "taskId": task_id,
+                "languageId": language_id,
+                "busy": False,
+                "activity": activity,
+                "detail": detail,
+                "ok": bool(ok),
+                "error": str(error or ""),
+                "durationMs": duration_ms,
+            },
+        )
+        return
+    except Exception:
+        return
 
 
 def _resolve_font_scale(scale_value: Optional[float]) -> float:
@@ -645,7 +745,16 @@ def _persist_to_cache_debounced():
                                             _android_dep_index_build_inflight[build_key] = now_ms
 
                                             async def _build_index_bg() -> None:
+                                                busy_token = ""
+                                                ok = True
+                                                err = ""
                                                 try:
+                                                    busy_token = await _lsp_busy_begin(
+                                                        project_path=base_project_root,
+                                                        language_id="kotlin-android",
+                                                        activity="gradle_dependency_index",
+                                                        detail="Building dependency index (Gradle)…",
+                                                    )
                                                     sidecar2 = await anyio.to_thread.run_sync(_load_sidecar)
                                                     await anyio.to_thread.run_sync(
                                                         lambda: ensure_compiled_dependency_index(
@@ -655,9 +764,15 @@ def _persist_to_cache_debounced():
                                                             allow_gradle_resolve=True,
                                                         )
                                                     )
-                                                except Exception:
-                                                    pass
+                                                except Exception as exc:
+                                                    ok = False
+                                                    err = str(exc)
                                                 finally:
+                                                    try:
+                                                        if busy_token:
+                                                            await _lsp_busy_end(token=busy_token, ok=ok, error=err)
+                                                    except Exception:
+                                                        pass
                                                     try:
                                                         _android_dep_index_build_inflight.pop(build_key, None)
                                                     except Exception:
@@ -2241,18 +2356,41 @@ async def save_current_file(data: dict = Body(...)):
                             try:
                                 from app.apps.file_editor_cm6.android_lang.dependency_index import ensure_compiled_dependency_index
 
-                                te2_sidecar = await anyio.to_thread.run_sync(
-                                    lambda: ensure_compiled_dependency_index(
-                                        sidecar_path=Path(sidecar_path),
-                                        te2_sidecar=te2_sidecar or {},
-                                        effective_project_root=effective_project_root,
-                                        allow_gradle_resolve=True,
-                                    )
+                                busy_token = await _lsp_busy_begin(
+                                    project_path=base_project_root,
+                                    language_id="kotlin-android",
+                                    activity="gradle_dependency_index",
+                                    detail="Refreshing dependency index (Gradle)…",
                                 )
+                                ok = True
+                                err = ""
+                                try:
+                                    te2_sidecar = await anyio.to_thread.run_sync(
+                                        lambda: ensure_compiled_dependency_index(
+                                            sidecar_path=Path(sidecar_path),
+                                            te2_sidecar=te2_sidecar or {},
+                                            effective_project_root=effective_project_root,
+                                            allow_gradle_resolve=True,
+                                        )
+                                    )
+                                except Exception as exc:
+                                    ok = False
+                                    err = str(exc)
+                                finally:
+                                    try:
+                                        await _lsp_busy_end(token=busy_token, ok=ok, error=err)
+                                    except Exception:
+                                        pass
                             except Exception:
                                 pass
 
-                            diags = build_draft_diagnostics(te2_sidecar=te2_sidecar or {}, uri=uri)
+                            # Include current file content so we don't accidentally wipe draft import
+                            # diagnostics (which are content-derived) during the save path.
+                            try:
+                                current_content = Path(current_file).read_text(encoding='utf-8', errors='replace')
+                            except Exception:
+                                current_content = None
+                            diags = build_draft_diagnostics(te2_sidecar=te2_sidecar or {}, uri=uri, content=current_content)
 
                             dep = (te2_sidecar or {}).get('dependencyModel') or {}
                             android_jar = ((dep.get('androidSdk') or {}).get('androidJar') or '')
@@ -2350,14 +2488,31 @@ async def android_sync_project(data: dict = Body(...)):
                         return {}
 
                 te2_sidecar = await anyio.to_thread.run_sync(_load_sidecar_json)
-                await anyio.to_thread.run_sync(
-                    lambda: ensure_compiled_dependency_index(
-                        sidecar_path=Path(sidecar_path),
-                        te2_sidecar=te2_sidecar or {},
-                        effective_project_root=effective_project_root,
-                        allow_gradle_resolve=True,
-                    )
+                busy_token = await _lsp_busy_begin(
+                    project_path=base_project_root,
+                    language_id="kotlin-android",
+                    activity="gradle_dependency_index",
+                    detail="Syncing Android dependencies (Gradle)…",
                 )
+                ok = True
+                err = ""
+                try:
+                    await anyio.to_thread.run_sync(
+                        lambda: ensure_compiled_dependency_index(
+                            sidecar_path=Path(sidecar_path),
+                            te2_sidecar=te2_sidecar or {},
+                            effective_project_root=effective_project_root,
+                            allow_gradle_resolve=True,
+                        )
+                    )
+                except Exception as exc:
+                    ok = False
+                    err = str(exc)
+                finally:
+                    try:
+                        await _lsp_busy_end(token=busy_token, ok=ok, error=err)
+                    except Exception:
+                        pass
             except Exception:
                 pass
             

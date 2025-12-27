@@ -245,6 +245,7 @@ class ConnectionManager:
             "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
             "clangd": ["c", "cpp"],
             "kotlin": ["kotlin"],
+            "kotlin-android": ["kotlin-android"],
         }
 
         async def _is_running(mgr, language_id: str) -> bool:
@@ -979,6 +980,7 @@ class ExplorerDispatcher:
             "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
             "clangd": ["c", "cpp"],
             "kotlin": ["kotlin"],
+            "kotlin-android": ["kotlin-android"],
         }
 
         async def _is_running(mgr, language_id: str) -> bool:

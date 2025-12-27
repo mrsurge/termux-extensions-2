@@ -1468,6 +1468,19 @@ function handleExplorerEvent(type, payload) {
     }
     return;
   }
+  if (type === 'lsp:busy') {
+    try {
+      const next = payload || {};
+      if (typeof window.__cm6HandleLspBusy === 'function') {
+        window.__cm6HandleLspBusy(next);
+      } else {
+        window.__cm6PendingLspBusy = next;
+      }
+    } catch (err) {
+      console.warn('[Explorer] lsp:busy handler failed', err);
+    }
+    return;
+  }
   switch (type) {
     case 'prefs:setUi': {
       const ui =

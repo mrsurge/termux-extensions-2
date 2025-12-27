@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -51,6 +52,15 @@ def _lsp_error(msg: str) -> None:
         print(msg, file=sys.stderr)
     except Exception:
         pass
+
+
+async def _broadcast_lsp_busy(*, project_path: str, payload: dict) -> None:
+    try:
+        from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+
+        await _explorer_manager.broadcast(str(project_path), {"type": "lsp:busy", "payload": payload})
+    except Exception:
+        return
 
 
 def _git_fingerprint(project_root: Path) -> Optional[str]:
@@ -947,6 +957,142 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                         await self._send_android_state(sid, force=True)
                 except Exception:
                     pass
+                # Emit a host-side "busy" signal for save-triggered compile/analysis.
+                # The kotlin-android backend often compiles or re-analyzes on didSave.
+                try:
+                    if session.get("language_id") == "kotlin-android":
+                        uri = ((message.get("params") or {}).get("textDocument") or {}).get("uri")
+                        if isinstance(uri, str) and uri:
+                            base_root = str(session.get("base_project_root") or session.get("project_root") or "")
+                            if base_root:
+                                # Delay-start the fallback busy indicator to avoid flicker and avoid
+                                # duplicating LSP $/progress (workDoneProgress) indicators.
+                                pending_save = session.get("save_compile_pending_by_uri")
+                                if not isinstance(pending_save, dict):
+                                    pending_save = {}
+                                    session["save_compile_pending_by_uri"] = pending_save
+
+                                # Cancel prior per-URI pending timers.
+                                try:
+                                    prev = pending_save.get(uri)
+                                    if isinstance(prev, dict):
+                                        t = prev.get("timer_task")
+                                        if isinstance(t, asyncio.Task):
+                                            t.cancel()
+                                except Exception:
+                                    pass
+
+                                task_id = uuid.uuid4().hex
+                                started_at_ms = int(time.time() * 1000)
+                                started_mono = time.monotonic()
+
+                                async def _delayed_start() -> None:
+                                    try:
+                                        await asyncio.sleep(0.35)
+                                        pend2 = session.get("save_compile_pending_by_uri")
+                                        rec2 = pend2.get(uri) if isinstance(pend2, dict) else None
+                                        if not isinstance(rec2, dict):
+                                            return
+                                        if str(rec2.get("task_id") or "") != task_id:
+                                            return
+
+                                        # If work progress is active, don't start fallback busy.
+                                        wp = session.get("work_progress_tasks")
+                                        if isinstance(wp, dict) and wp:
+                                            pend2.pop(uri, None)
+                                            return
+
+                                        pend2.pop(uri, None)
+
+                                        pending = session.get("compile_busy_by_uri")
+                                        if not isinstance(pending, dict):
+                                            pending = {}
+                                            session["compile_busy_by_uri"] = pending
+
+                                        # Cancel prior per-URI timers (we only show the latest save run).
+                                        try:
+                                            prev2 = pending.get(uri)
+                                            if isinstance(prev2, dict):
+                                                st = prev2.get("settle_task")
+                                                tt = prev2.get("timeout_task")
+                                                if isinstance(st, asyncio.Task):
+                                                    st.cancel()
+                                                if isinstance(tt, asyncio.Task):
+                                                    tt.cancel()
+                                        except Exception:
+                                            pass
+
+                                        pending[uri] = {
+                                            "task_id": task_id,
+                                            "base_root": base_root,
+                                            "started_at_ms": started_at_ms,
+                                            "started_mono": started_mono,
+                                            "settle_task": None,
+                                            "timeout_task": None,
+                                        }
+
+                                        await _broadcast_lsp_busy(
+                                            project_path=base_root,
+                                            payload={
+                                                "taskId": task_id,
+                                                "languageId": "kotlin-android",
+                                                "busy": True,
+                                                "activity": "gradle_compile",
+                                                "detail": "Compiling (on save)…",
+                                                "startedAtMs": started_at_ms,
+                                                "uri": uri,
+                                            },
+                                        )
+
+                                        async def _timeout_end() -> None:
+                                            try:
+                                                await asyncio.sleep(60.0)
+                                                pend3 = session.get("compile_busy_by_uri")
+                                                rec3 = pend3.get(uri) if isinstance(pend3, dict) else None
+                                                if not isinstance(rec3, dict):
+                                                    return
+                                                if str(rec3.get("task_id") or "") != task_id:
+                                                    return
+                                                pend3.pop(uri, None)
+                                                dur_ms = max(
+                                                    0,
+                                                    int(
+                                                        (time.monotonic() - float(rec3.get("started_mono") or time.monotonic()))
+                                                        * 1000
+                                                    ),
+                                                )
+                                                await _broadcast_lsp_busy(
+                                                    project_path=base_root,
+                                                    payload={
+                                                        "taskId": task_id,
+                                                        "languageId": "kotlin-android",
+                                                        "busy": False,
+                                                        "activity": "gradle_compile",
+                                                        "detail": "Compiling (on save)…",
+                                                        "ok": False,
+                                                        "error": "timeout waiting for diagnostics",
+                                                        "durationMs": dur_ms,
+                                                        "uri": uri,
+                                                    },
+                                                )
+                                            except Exception:
+                                                return
+
+                                        pending[uri]["timeout_task"] = asyncio.create_task(_timeout_end())
+                                    except asyncio.CancelledError:
+                                        return
+                                    except Exception:
+                                        return
+
+                                timer_task = asyncio.create_task(_delayed_start())
+                                pending_save[uri] = {
+                                    "task_id": task_id,
+                                    "timer_task": timer_task,
+                                    "started_at_ms": started_at_ms,
+                                    "started_mono": started_mono,
+                                }
+                except Exception:
+                    pass
             elif method in ("shutdown", "exit"):
                 return
 
@@ -1226,6 +1372,164 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                                     cache[diag_uri] = list(diags) if isinstance(diags, list) else []
                             except Exception:
                                 pass
+
+                            # Save-triggered compile/analysis: end busy after diagnostics settle for this URI.
+                            try:
+                                if session.get("language_id") == "kotlin-android" and isinstance(diag_uri, str) and diag_uri:
+                                    pending = session.get("compile_busy_by_uri")
+                                    rec = pending.get(diag_uri) if isinstance(pending, dict) else None
+                                    if isinstance(rec, dict) and rec.get("task_id"):
+                                        task_id = str(rec.get("task_id"))
+                                        base_root = str(rec.get("base_root") or session.get("base_project_root") or session.get("project_root") or "")
+                                        if base_root:
+                                            # Reset settle timer.
+                                            try:
+                                                st = rec.get("settle_task")
+                                                if isinstance(st, asyncio.Task):
+                                                    st.cancel()
+                                            except Exception:
+                                                pass
+
+                                            async def _settle_end() -> None:
+                                                try:
+                                                    await asyncio.sleep(0.75)
+                                                    pend2 = session.get("compile_busy_by_uri")
+                                                    rec2 = pend2.get(diag_uri) if isinstance(pend2, dict) else None
+                                                    if not isinstance(rec2, dict):
+                                                        return
+                                                    if str(rec2.get("task_id") or "") != task_id:
+                                                        return
+                                                    pend2.pop(diag_uri, None)
+                                                    try:
+                                                        tt = rec2.get("timeout_task")
+                                                        if isinstance(tt, asyncio.Task):
+                                                            tt.cancel()
+                                                    except Exception:
+                                                        pass
+                                                    dur_ms = max(0, int((time.monotonic() - float(rec2.get("started_mono") or time.monotonic())) * 1000))
+                                                    await _broadcast_lsp_busy(
+                                                        project_path=base_root,
+                                                        payload={
+                                                            "taskId": task_id,
+                                                            "languageId": "kotlin-android",
+                                                            "busy": False,
+                                                            "activity": "gradle_compile",
+                                                            "detail": "Compiling (on save)…",
+                                                            "ok": True,
+                                                            "durationMs": dur_ms,
+                                                            "uri": diag_uri,
+                                                        },
+                                                    )
+                                                except Exception:
+                                                    return
+
+                                            rec["settle_task"] = asyncio.create_task(_settle_end())
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+                    # Work done progress ($/progress): surface longer backend work (compile/index) to host UI.
+                    try:
+                        if isinstance(msg, dict) and session.get("language_id") == "kotlin-android":
+                            method = msg.get("method")
+                            if method == "window/workDoneProgress/create":
+                                try:
+                                    params = msg.get("params") or {}
+                                    token = params.get("token")
+                                    wps = session.get("work_progress_known_tokens")
+                                    if not isinstance(wps, set):
+                                        wps = set()
+                                        session["work_progress_known_tokens"] = wps
+                                    if token is not None:
+                                        wps.add(str(token))
+                                except Exception:
+                                    pass
+                            elif method == "$/progress":
+                                params = msg.get("params") or {}
+                                token = params.get("token")
+                                value = params.get("value") or {}
+                                kind = (value.get("kind") or "").lower() if isinstance(value, dict) else ""
+
+                                if token is not None and kind in {"begin", "report", "end"}:
+                                    token_s = str(token)
+                                    tasks = session.get("work_progress_tasks")
+                                    if not isinstance(tasks, dict):
+                                        tasks = {}
+                                        session["work_progress_tasks"] = tasks
+
+                                    base_root = str(session.get("base_project_root") or session.get("project_root") or "")
+                                    title = str(value.get("title") or "")
+                                    message2 = str(value.get("message") or "")
+                                    detail = (title or message2 or "Working…").strip()
+                                    # Label it "gradle_compile" when it looks like compile/build.
+                                    dlow = detail.lower()
+                                    activity = "work_progress"
+                                    if any(x in dlow for x in ("gradle", "compile", "compil", "build")):
+                                        activity = "gradle_compile"
+
+                                    if kind == "begin":
+                                        # Cancel fallback didSave busy for active file if progress is present.
+                                        try:
+                                            pend_save = session.get("save_compile_pending_by_uri")
+                                            if isinstance(pend_save, dict):
+                                                for u, rec in list(pend_save.items()):
+                                                    try:
+                                                        t = (rec or {}).get("timer_task")
+                                                        if isinstance(t, asyncio.Task):
+                                                            t.cancel()
+                                                    except Exception:
+                                                        pass
+                                                    try:
+                                                        pend_save.pop(u, None)
+                                                    except Exception:
+                                                        pass
+                                        except Exception:
+                                            pass
+
+                                        task_id = f"wp:{token_s}"
+                                        tasks[token_s] = {
+                                            "task_id": task_id,
+                                            "started_mono": time.monotonic(),
+                                            "started_at_ms": int(time.time() * 1000),
+                                            "detail": detail,
+                                            "activity": activity,
+                                            "base_root": base_root,
+                                        }
+                                        if base_root:
+                                            await _broadcast_lsp_busy(
+                                                project_path=base_root,
+                                                payload={
+                                                    "taskId": task_id,
+                                                    "languageId": "kotlin-android",
+                                                    "busy": True,
+                                                    "activity": activity,
+                                                    "detail": detail,
+                                                    "startedAtMs": int(time.time() * 1000),
+                                                },
+                                            )
+                                    elif kind == "report":
+                                        # Keep spinner up; optionally update detail (no toast spam).
+                                        rec = tasks.get(token_s) if isinstance(tasks, dict) else None
+                                        if isinstance(rec, dict):
+                                            rec["detail"] = detail or rec.get("detail") or ""
+                                            rec["activity"] = activity or rec.get("activity") or "work_progress"
+                                    elif kind == "end":
+                                        rec = tasks.pop(token_s, None) if isinstance(tasks, dict) else None
+                                        if isinstance(rec, dict) and base_root:
+                                            dur_ms = max(0, int((time.monotonic() - float(rec.get("started_mono") or time.monotonic())) * 1000))
+                                            await _broadcast_lsp_busy(
+                                                project_path=base_root,
+                                                payload={
+                                                    "taskId": str(rec.get("task_id") or f"wp:{token_s}"),
+                                                    "languageId": "kotlin-android",
+                                                    "busy": False,
+                                                    "activity": str(rec.get("activity") or activity or "work_progress"),
+                                                    "detail": str(rec.get("detail") or detail or ""),
+                                                    "ok": True,
+                                                    "durationMs": dur_ms,
+                                                },
+                                            )
                     except Exception:
                         pass
 
