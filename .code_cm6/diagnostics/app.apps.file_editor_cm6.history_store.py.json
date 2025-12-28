@@ -1,0 +1,2065 @@
+{
+  "exported_at": "2025-12-28T05:35:49.165Z",
+  "project_root": "/data/data/com.termux/files/home/mrselect5",
+  "file_path": "/data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/history_store.py",
+  "dump": {
+    "exported_at": "2025-12-28T05:35:45.650Z",
+    "uri": "file:///data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/history_store.py",
+    "lsp_language_id": "python",
+    "lsp_file_uri": "file:///data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/history_store.py",
+    "counts": {
+      "errors": 40,
+      "warnings": 0
+    },
+    "total": 40,
+    "activeIndex": 9,
+    "rawDiagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 100,
+            "character": 128
+          },
+          "end": {
+            "line": 100,
+            "character": 133
+          }
+        },
+        "message": "Cannot access attribute \"items\" for class \"object\"\n  Attribute \"items\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 311,
+            "character": 49
+          },
+          "end": {
+            "line": 311,
+            "character": 86
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 325,
+            "character": 42
+          },
+          "end": {
+            "line": 325,
+            "character": 86
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 425,
+            "character": 45
+          },
+          "end": {
+            "line": 425,
+            "character": 82
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 433,
+            "character": 28
+          },
+          "end": {
+            "line": 433,
+            "character": 38
+          }
+        },
+        "message": "Argument of type \"dict[str, str]\" cannot be assigned to parameter \"object\" of type \"Dict[str, object]\" in function \"insert\"\n  \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n    Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 437,
+            "character": 15
+          },
+          "end": {
+            "line": 437,
+            "character": 25
+          }
+        },
+        "message": "Type \"dict[str, str]\" is not assignable to return type \"Dict[str, object]\"\n  \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n    Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 443,
+            "character": 53
+          },
+          "end": {
+            "line": 443,
+            "character": 90
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 447,
+            "character": 45
+          },
+          "end": {
+            "line": 447,
+            "character": 77
+          }
+        },
+        "message": "Type \"object | list[Dict[str, object]]\" is not assignable to declared type \"List[Dict[str, object]]\"\n  Type \"object | list[Dict[str, object]]\" is not assignable to type \"List[Dict[str, object]]\"\n    \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 471,
+            "character": 53
+          },
+          "end": {
+            "line": 471,
+            "character": 90
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 482,
+            "character": 24
+          },
+          "end": {
+            "line": 482,
+            "character": 61
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n    \"__iter__\" is not present",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 484,
+            "character": 36
+          },
+          "end": {
+            "line": 484,
+            "character": 39
+          }
+        },
+        "message": "\"Any\" is not defined",
+        "severity": 1,
+        "code": "reportUndefinedVariable",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportUndefinedVariable"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 506,
+            "character": 61
+          },
+          "end": {
+            "line": 506,
+            "character": 91
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 513,
+            "character": 37
+          },
+          "end": {
+            "line": 513,
+            "character": 59
+          }
+        },
+        "message": "No overloads for \"__new__\" match the provided arguments",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        },
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/pyright/dist/typeshed-fallback/stdlib/builtins.pyi",
+              "range": {
+                "start": {
+                  "line": 1879,
+                  "character": 8
+                },
+                "end": {
+                  "line": 1879,
+                  "character": 15
+                }
+              }
+            },
+            "message": "Overload 2 is the closest match"
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 513,
+            "character": 46
+          },
+          "end": {
+            "line": 513,
+            "character": 58
+          }
+        },
+        "message": "Argument of type \"object | list[Unknown]\" cannot be assigned to parameter \"sequence\" of type \"SupportsLenAndGetItem[_T@reversed]\" in function \"__new__\"\n  Type \"object | list[Unknown]\" is not assignable to type \"SupportsLenAndGetItem[_T@reversed]\"\n    \"object\" is incompatible with protocol \"SupportsLenAndGetItem[_T@reversed]\"\n      \"__len__\" is not present\n      \"__getitem__\" is not present",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 518,
+            "character": 54
+          },
+          "end": {
+            "line": 518,
+            "character": 65
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"file_path\" of type \"str | None\" in function \"set_last_file\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 527,
+            "character": 53
+          },
+          "end": {
+            "line": 527,
+            "character": 83
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 531,
+            "character": 24
+          },
+          "end": {
+            "line": 531,
+            "character": 48
+          }
+        },
+        "message": "Argument of type \"object | list[_T@list]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  Type \"object | list[_T@list]\" is not assignable to type \"Iterable[_T@list]\"\n    \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n      \"__iter__\" is not present",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 553,
+            "character": 53
+          },
+          "end": {
+            "line": 553,
+            "character": 90
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 571,
+            "character": 53
+          },
+          "end": {
+            "line": 571,
+            "character": 90
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 576,
+            "character": 46
+          },
+          "end": {
+            "line": 576,
+            "character": 83
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 613,
+            "character": 19
+          },
+          "end": {
+            "line": 613,
+            "character": 51
+          }
+        },
+        "message": "Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 678,
+            "character": 50
+          },
+          "end": {
+            "line": 678,
+            "character": 56
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"shell_id\" of type \"str | None\" in function \"set_terminal_shell_id\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 711,
+            "character": 49
+          },
+          "end": {
+            "line": 711,
+            "character": 86
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 740,
+            "character": 61
+          },
+          "end": {
+            "line": 740,
+            "character": 91
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 748,
+            "character": 54
+          },
+          "end": {
+            "line": 748,
+            "character": 65
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"file_path\" of type \"str | None\" in function \"set_last_file\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 750,
+            "character": 37
+          },
+          "end": {
+            "line": 750,
+            "character": 59
+          }
+        },
+        "message": "No overloads for \"__new__\" match the provided arguments",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        },
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/pyright/dist/typeshed-fallback/stdlib/builtins.pyi",
+              "range": {
+                "start": {
+                  "line": 1879,
+                  "character": 8
+                },
+                "end": {
+                  "line": 1879,
+                  "character": 15
+                }
+              }
+            },
+            "message": "Overload 2 is the closest match"
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 750,
+            "character": 46
+          },
+          "end": {
+            "line": 750,
+            "character": 58
+          }
+        },
+        "message": "Argument of type \"object | list[Unknown]\" cannot be assigned to parameter \"sequence\" of type \"SupportsLenAndGetItem[_T@reversed]\" in function \"__new__\"\n  Type \"object | list[Unknown]\" is not assignable to type \"SupportsLenAndGetItem[_T@reversed]\"\n    \"object\" is incompatible with protocol \"SupportsLenAndGetItem[_T@reversed]\"\n      \"__len__\" is not present\n      \"__getitem__\" is not present",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 761,
+            "character": 53
+          },
+          "end": {
+            "line": 761,
+            "character": 83
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 765,
+            "character": 19
+          },
+          "end": {
+            "line": 765,
+            "character": 41
+          }
+        },
+        "message": "Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 806,
+            "character": 53
+          },
+          "end": {
+            "line": 806,
+            "character": 83
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 811,
+            "character": 53
+          },
+          "end": {
+            "line": 811,
+            "character": 58
+          }
+        },
+        "message": "Cannot access attribute \"strip\" for class \"object\"\n  Attribute \"strip\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 827,
+            "character": 53
+          },
+          "end": {
+            "line": 827,
+            "character": 83
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 829,
+            "character": 19
+          },
+          "end": {
+            "line": 829,
+            "character": 57
+          }
+        },
+        "message": "Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 855,
+            "character": 45
+          },
+          "end": {
+            "line": 855,
+            "character": 82
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 864,
+            "character": 28
+          },
+          "end": {
+            "line": 864,
+            "character": 33
+          }
+        },
+        "message": "Argument of type \"dict[str, str] | Dict[str, Any]\" cannot be assigned to parameter \"object\" of type \"Dict[str, object]\" in function \"insert\"\n  Type \"dict[str, str] | Dict[str, Any]\" is not assignable to type \"Dict[str, object]\"\n    \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n      Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n      Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 867,
+            "character": 19
+          },
+          "end": {
+            "line": 867,
+            "character": 24
+          }
+        },
+        "message": "Type \"dict[str, str] | Dict[str, Any]\" is not assignable to return type \"Dict[str, object]\"\n  Type \"dict[str, str] | Dict[str, Any]\" is not assignable to type \"Dict[str, object]\"\n    \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n      Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n      Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 904,
+            "character": 19
+          },
+          "end": {
+            "line": 904,
+            "character": 30
+          }
+        },
+        "message": "No overloads for \"__init__\" match the provided arguments",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        },
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/pyright/dist/typeshed-fallback/stdlib/builtins.pyi",
+              "range": {
+                "start": {
+                  "line": 1188,
+                  "character": 8
+                },
+                "end": {
+                  "line": 1188,
+                  "character": 16
+                }
+              }
+            },
+            "message": "Overload 8 is the closest match"
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 904,
+            "character": 24
+          },
+          "end": {
+            "line": 904,
+            "character": 29
+          }
+        },
+        "message": "Argument of type \"object | dict[Unknown, Unknown]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[list[bytes]]\" in function \"__init__\"\n  Type \"object | dict[Unknown, Unknown]\" is not assignable to type \"Iterable[list[bytes]]\"\n    \"object\" is incompatible with protocol \"Iterable[list[bytes]]\"\n      \"__iter__\" is not present",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 904,
+            "character": 19
+          },
+          "end": {
+            "line": 904,
+            "character": 30
+          }
+        },
+        "message": "Type \"dict[bytes, bytes]\" is not assignable to return type \"Dict[str, object]\"\n  \"dict[bytes, bytes]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_KT@dict\" is invariant, but \"bytes\" is not the same as \"str\"\n    Type parameter \"_VT@dict\" is invariant, but \"bytes\" is not the same as \"object\"",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 909,
+            "character": 39
+          },
+          "end": {
+            "line": 909,
+            "character": 81
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, object]\"\n  \"object\" is not assignable to \"Dict[str, object]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      }
+    ],
+    "filteredDiagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 100,
+            "character": 128
+          },
+          "end": {
+            "line": 100,
+            "character": 133
+          }
+        },
+        "message": "Cannot access attribute \"items\" for class \"object\"\n  Attribute \"items\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 311,
+            "character": 49
+          },
+          "end": {
+            "line": 311,
+            "character": 86
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 325,
+            "character": 42
+          },
+          "end": {
+            "line": 325,
+            "character": 86
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 425,
+            "character": 45
+          },
+          "end": {
+            "line": 425,
+            "character": 82
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 433,
+            "character": 28
+          },
+          "end": {
+            "line": 433,
+            "character": 38
+          }
+        },
+        "message": "Argument of type \"dict[str, str]\" cannot be assigned to parameter \"object\" of type \"Dict[str, object]\" in function \"insert\"\n  \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n    Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 437,
+            "character": 15
+          },
+          "end": {
+            "line": 437,
+            "character": 25
+          }
+        },
+        "message": "Type \"dict[str, str]\" is not assignable to return type \"Dict[str, object]\"\n  \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n    Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 443,
+            "character": 53
+          },
+          "end": {
+            "line": 443,
+            "character": 90
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 447,
+            "character": 45
+          },
+          "end": {
+            "line": 447,
+            "character": 77
+          }
+        },
+        "message": "Type \"object | list[Dict[str, object]]\" is not assignable to declared type \"List[Dict[str, object]]\"\n  Type \"object | list[Dict[str, object]]\" is not assignable to type \"List[Dict[str, object]]\"\n    \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 471,
+            "character": 53
+          },
+          "end": {
+            "line": 471,
+            "character": 90
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 482,
+            "character": 24
+          },
+          "end": {
+            "line": 482,
+            "character": 61
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n    \"__iter__\" is not present",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 484,
+            "character": 36
+          },
+          "end": {
+            "line": 484,
+            "character": 39
+          }
+        },
+        "message": "\"Any\" is not defined",
+        "severity": 1,
+        "code": "reportUndefinedVariable",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportUndefinedVariable"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 506,
+            "character": 61
+          },
+          "end": {
+            "line": 506,
+            "character": 91
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 513,
+            "character": 37
+          },
+          "end": {
+            "line": 513,
+            "character": 59
+          }
+        },
+        "message": "No overloads for \"__new__\" match the provided arguments",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        },
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/pyright/dist/typeshed-fallback/stdlib/builtins.pyi",
+              "range": {
+                "start": {
+                  "line": 1879,
+                  "character": 8
+                },
+                "end": {
+                  "line": 1879,
+                  "character": 15
+                }
+              }
+            },
+            "message": "Overload 2 is the closest match"
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 513,
+            "character": 46
+          },
+          "end": {
+            "line": 513,
+            "character": 58
+          }
+        },
+        "message": "Argument of type \"object | list[Unknown]\" cannot be assigned to parameter \"sequence\" of type \"SupportsLenAndGetItem[_T@reversed]\" in function \"__new__\"\n  Type \"object | list[Unknown]\" is not assignable to type \"SupportsLenAndGetItem[_T@reversed]\"\n    \"object\" is incompatible with protocol \"SupportsLenAndGetItem[_T@reversed]\"\n      \"__len__\" is not present\n      \"__getitem__\" is not present",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 518,
+            "character": 54
+          },
+          "end": {
+            "line": 518,
+            "character": 65
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"file_path\" of type \"str | None\" in function \"set_last_file\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 527,
+            "character": 53
+          },
+          "end": {
+            "line": 527,
+            "character": 83
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 531,
+            "character": 24
+          },
+          "end": {
+            "line": 531,
+            "character": 48
+          }
+        },
+        "message": "Argument of type \"object | list[_T@list]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  Type \"object | list[_T@list]\" is not assignable to type \"Iterable[_T@list]\"\n    \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n      \"__iter__\" is not present",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 553,
+            "character": 53
+          },
+          "end": {
+            "line": 553,
+            "character": 90
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 571,
+            "character": 53
+          },
+          "end": {
+            "line": 571,
+            "character": 90
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 576,
+            "character": 46
+          },
+          "end": {
+            "line": 576,
+            "character": 83
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 613,
+            "character": 19
+          },
+          "end": {
+            "line": 613,
+            "character": 51
+          }
+        },
+        "message": "Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 678,
+            "character": 50
+          },
+          "end": {
+            "line": 678,
+            "character": 56
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"shell_id\" of type \"str | None\" in function \"set_terminal_shell_id\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 711,
+            "character": 49
+          },
+          "end": {
+            "line": 711,
+            "character": 86
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 740,
+            "character": 61
+          },
+          "end": {
+            "line": 740,
+            "character": 91
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 748,
+            "character": 54
+          },
+          "end": {
+            "line": 748,
+            "character": 65
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"file_path\" of type \"str | None\" in function \"set_last_file\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 750,
+            "character": 37
+          },
+          "end": {
+            "line": 750,
+            "character": 59
+          }
+        },
+        "message": "No overloads for \"__new__\" match the provided arguments",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        },
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/pyright/dist/typeshed-fallback/stdlib/builtins.pyi",
+              "range": {
+                "start": {
+                  "line": 1879,
+                  "character": 8
+                },
+                "end": {
+                  "line": 1879,
+                  "character": 15
+                }
+              }
+            },
+            "message": "Overload 2 is the closest match"
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 750,
+            "character": 46
+          },
+          "end": {
+            "line": 750,
+            "character": 58
+          }
+        },
+        "message": "Argument of type \"object | list[Unknown]\" cannot be assigned to parameter \"sequence\" of type \"SupportsLenAndGetItem[_T@reversed]\" in function \"__new__\"\n  Type \"object | list[Unknown]\" is not assignable to type \"SupportsLenAndGetItem[_T@reversed]\"\n    \"object\" is incompatible with protocol \"SupportsLenAndGetItem[_T@reversed]\"\n      \"__len__\" is not present\n      \"__getitem__\" is not present",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 761,
+            "character": 53
+          },
+          "end": {
+            "line": 761,
+            "character": 83
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 765,
+            "character": 19
+          },
+          "end": {
+            "line": 765,
+            "character": 41
+          }
+        },
+        "message": "Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 806,
+            "character": 53
+          },
+          "end": {
+            "line": 806,
+            "character": 83
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 811,
+            "character": 53
+          },
+          "end": {
+            "line": 811,
+            "character": 58
+          }
+        },
+        "message": "Cannot access attribute \"strip\" for class \"object\"\n  Attribute \"strip\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 827,
+            "character": 53
+          },
+          "end": {
+            "line": 827,
+            "character": 83
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 829,
+            "character": 19
+          },
+          "end": {
+            "line": 829,
+            "character": 57
+          }
+        },
+        "message": "Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 855,
+            "character": 45
+          },
+          "end": {
+            "line": 855,
+            "character": 82
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 864,
+            "character": 28
+          },
+          "end": {
+            "line": 864,
+            "character": 33
+          }
+        },
+        "message": "Argument of type \"dict[str, str] | Dict[str, Any]\" cannot be assigned to parameter \"object\" of type \"Dict[str, object]\" in function \"insert\"\n  Type \"dict[str, str] | Dict[str, Any]\" is not assignable to type \"Dict[str, object]\"\n    \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n      Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n      Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 867,
+            "character": 19
+          },
+          "end": {
+            "line": 867,
+            "character": 24
+          }
+        },
+        "message": "Type \"dict[str, str] | Dict[str, Any]\" is not assignable to return type \"Dict[str, object]\"\n  Type \"dict[str, str] | Dict[str, Any]\" is not assignable to type \"Dict[str, object]\"\n    \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n      Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n      Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 904,
+            "character": 19
+          },
+          "end": {
+            "line": 904,
+            "character": 30
+          }
+        },
+        "message": "No overloads for \"__init__\" match the provided arguments",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        },
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/pyright/dist/typeshed-fallback/stdlib/builtins.pyi",
+              "range": {
+                "start": {
+                  "line": 1188,
+                  "character": 8
+                },
+                "end": {
+                  "line": 1188,
+                  "character": 16
+                }
+              }
+            },
+            "message": "Overload 8 is the closest match"
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 904,
+            "character": 24
+          },
+          "end": {
+            "line": 904,
+            "character": 29
+          }
+        },
+        "message": "Argument of type \"object | dict[Unknown, Unknown]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[list[bytes]]\" in function \"__init__\"\n  Type \"object | dict[Unknown, Unknown]\" is not assignable to type \"Iterable[list[bytes]]\"\n    \"object\" is incompatible with protocol \"Iterable[list[bytes]]\"\n      \"__iter__\" is not present",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 904,
+            "character": 19
+          },
+          "end": {
+            "line": 904,
+            "character": 30
+          }
+        },
+        "message": "Type \"dict[bytes, bytes]\" is not assignable to return type \"Dict[str, object]\"\n  \"dict[bytes, bytes]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_KT@dict\" is invariant, but \"bytes\" is not the same as \"str\"\n    Type parameter \"_VT@dict\" is invariant, but \"bytes\" is not the same as \"object\"",
+        "severity": 1,
+        "code": "reportReturnType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportReturnType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 909,
+            "character": 39
+          },
+          "end": {
+            "line": 909,
+            "character": 81
+          }
+        },
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, object]\"\n  \"object\" is not assignable to \"Dict[str, object]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      }
+    ],
+    "flat": [
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"items\" for class \"object\"\n  Attribute \"items\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"items\" for class \"object\"\n  Attribute \"items\" is unknown",
+        "startLine": 101,
+        "startChar": 128,
+        "endChar": 133
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "startLine": 312,
+        "startChar": 49,
+        "endChar": 86
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "startLine": 326,
+        "startChar": 42,
+        "endChar": 86
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "startLine": 426,
+        "startChar": 45,
+        "endChar": 82
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"dict[str, str]\" cannot be assigned to parameter \"object\" of type \"Dict[str, object]\" in function \"insert\"\n  \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n    Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"dict[str, str]\" cannot be assigned to parameter \"object\" of type \"Dict[str, object]\" in function \"insert\"\n  \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n    Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "startLine": 434,
+        "startChar": 28,
+        "endChar": 38
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"dict[str, str]\" is not assignable to return type \"Dict[str, object]\"\n  \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n    Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "source": "Pyright",
+        "code": "reportReturnType",
+        "sig": "Pyright|reportReturnType|1|Type \"dict[str, str]\" is not assignable to return type \"Dict[str, object]\"\n  \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n    Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "startLine": 438,
+        "startChar": 15,
+        "endChar": 25
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "startLine": 444,
+        "startChar": 53,
+        "endChar": 90
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object | list[Dict[str, object]]\" is not assignable to declared type \"List[Dict[str, object]]\"\n  Type \"object | list[Dict[str, object]]\" is not assignable to type \"List[Dict[str, object]]\"\n    \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object | list[Dict[str, object]]\" is not assignable to declared type \"List[Dict[str, object]]\"\n  Type \"object | list[Dict[str, object]]\" is not assignable to type \"List[Dict[str, object]]\"\n    \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "startLine": 448,
+        "startChar": 45,
+        "endChar": 77
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "startLine": 472,
+        "startChar": 53,
+        "endChar": 90
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n    \"__iter__\" is not present",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n    \"__iter__\" is not present",
+        "startLine": 483,
+        "startChar": 24,
+        "endChar": 61
+      },
+      {
+        "bucket": "error",
+        "message": "\"Any\" is not defined",
+        "source": "Pyright",
+        "code": "reportUndefinedVariable",
+        "sig": "Pyright|reportUndefinedVariable|1|\"Any\" is not defined",
+        "startLine": 485,
+        "startChar": 36,
+        "endChar": 39
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "startLine": 507,
+        "startChar": 61,
+        "endChar": 91
+      },
+      {
+        "bucket": "error",
+        "message": "No overloads for \"__new__\" match the provided arguments",
+        "source": "Pyright",
+        "code": "reportCallIssue",
+        "sig": "Pyright|reportCallIssue|1|No overloads for \"__new__\" match the provided arguments",
+        "startLine": 514,
+        "startChar": 37,
+        "endChar": 59
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object | list[Unknown]\" cannot be assigned to parameter \"sequence\" of type \"SupportsLenAndGetItem[_T@reversed]\" in function \"__new__\"\n  Type \"object | list[Unknown]\" is not assignable to type \"SupportsLenAndGetItem[_T@reversed]\"\n    \"object\" is incompatible with protocol \"SupportsLenAndGetItem[_T@reversed]\"\n      \"__len__\" is not present\n      \"__getitem__\" is not present",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object | list[Unknown]\" cannot be assigned to parameter \"sequence\" of type \"SupportsLenAndGetItem[_T@reversed]\" in function \"__new__\"\n  Type \"object | list[Unknown]\" is not assignable to type \"SupportsLenAndGetItem[_T@reversed]\"\n    \"object\" is incompatible with protocol \"SupportsLenAndGetItem[_T@reversed]\"\n      \"__len__\" is not present\n      \"__getitem__\" is not present",
+        "startLine": 514,
+        "startChar": 46,
+        "endChar": 58
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"file_path\" of type \"str | None\" in function \"set_last_file\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object\" cannot be assigned to parameter \"file_path\" of type \"str | None\" in function \"set_last_file\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "startLine": 519,
+        "startChar": 54,
+        "endChar": 65
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "startLine": 528,
+        "startChar": 53,
+        "endChar": 83
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object | list[_T@list]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  Type \"object | list[_T@list]\" is not assignable to type \"Iterable[_T@list]\"\n    \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n      \"__iter__\" is not present",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object | list[_T@list]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_T@list]\" in function \"__init__\"\n  Type \"object | list[_T@list]\" is not assignable to type \"Iterable[_T@list]\"\n    \"object\" is incompatible with protocol \"Iterable[_T@list]\"\n      \"__iter__\" is not present",
+        "startLine": 532,
+        "startChar": 24,
+        "endChar": 48
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "startLine": 554,
+        "startChar": 53,
+        "endChar": 90
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "startLine": 572,
+        "startChar": 53,
+        "endChar": 90
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "startLine": 577,
+        "startChar": 46,
+        "endChar": 83
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "source": "Pyright",
+        "code": "reportReturnType",
+        "sig": "Pyright|reportReturnType|1|Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "startLine": 614,
+        "startChar": 19,
+        "endChar": 51
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"shell_id\" of type \"str | None\" in function \"set_terminal_shell_id\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object\" cannot be assigned to parameter \"shell_id\" of type \"str | None\" in function \"set_terminal_shell_id\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "startLine": 679,
+        "startChar": 50,
+        "endChar": 56
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "startLine": 712,
+        "startChar": 49,
+        "endChar": 86
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "startLine": 741,
+        "startChar": 61,
+        "endChar": 91
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"file_path\" of type \"str | None\" in function \"set_last_file\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object\" cannot be assigned to parameter \"file_path\" of type \"str | None\" in function \"set_last_file\"\n  Type \"object\" is not assignable to type \"str | None\"\n    \"object\" is not assignable to \"str\"\n    \"object\" is not assignable to \"None\"",
+        "startLine": 749,
+        "startChar": 54,
+        "endChar": 65
+      },
+      {
+        "bucket": "error",
+        "message": "No overloads for \"__new__\" match the provided arguments",
+        "source": "Pyright",
+        "code": "reportCallIssue",
+        "sig": "Pyright|reportCallIssue|1|No overloads for \"__new__\" match the provided arguments",
+        "startLine": 751,
+        "startChar": 37,
+        "endChar": 59
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object | list[Unknown]\" cannot be assigned to parameter \"sequence\" of type \"SupportsLenAndGetItem[_T@reversed]\" in function \"__new__\"\n  Type \"object | list[Unknown]\" is not assignable to type \"SupportsLenAndGetItem[_T@reversed]\"\n    \"object\" is incompatible with protocol \"SupportsLenAndGetItem[_T@reversed]\"\n      \"__len__\" is not present\n      \"__getitem__\" is not present",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object | list[Unknown]\" cannot be assigned to parameter \"sequence\" of type \"SupportsLenAndGetItem[_T@reversed]\" in function \"__new__\"\n  Type \"object | list[Unknown]\" is not assignable to type \"SupportsLenAndGetItem[_T@reversed]\"\n    \"object\" is incompatible with protocol \"SupportsLenAndGetItem[_T@reversed]\"\n      \"__len__\" is not present\n      \"__getitem__\" is not present",
+        "startLine": 751,
+        "startChar": 46,
+        "endChar": 58
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "startLine": 762,
+        "startChar": 53,
+        "endChar": 83
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "source": "Pyright",
+        "code": "reportReturnType",
+        "sig": "Pyright|reportReturnType|1|Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "startLine": 766,
+        "startChar": 19,
+        "endChar": 41
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "startLine": 807,
+        "startChar": 53,
+        "endChar": 83
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"strip\" for class \"object\"\n  Attribute \"strip\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"strip\" for class \"object\"\n  Attribute \"strip\" is unknown",
+        "startLine": 812,
+        "startChar": 53,
+        "endChar": 58
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, Dict[str, object]]\"\n  \"object\" is not assignable to \"Dict[str, Dict[str, object]]\"",
+        "startLine": 828,
+        "startChar": 53,
+        "endChar": 83
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "source": "Pyright",
+        "code": "reportReturnType",
+        "sig": "Pyright|reportReturnType|1|Type \"object | None\" is not assignable to return type \"str | None\"\n  Type \"object | None\" is not assignable to type \"str | None\"\n    Type \"object\" is not assignable to type \"str | None\"\n      \"object\" is not assignable to \"str\"\n      \"object\" is not assignable to \"None\"",
+        "startLine": 830,
+        "startChar": 19,
+        "endChar": 57
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"List[Dict[str, object]]\"\n  \"object\" is not assignable to \"List[Dict[str, object]]\"",
+        "startLine": 856,
+        "startChar": 45,
+        "endChar": 82
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"dict[str, str] | Dict[str, Any]\" cannot be assigned to parameter \"object\" of type \"Dict[str, object]\" in function \"insert\"\n  Type \"dict[str, str] | Dict[str, Any]\" is not assignable to type \"Dict[str, object]\"\n    \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n      Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n      Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"dict[str, str] | Dict[str, Any]\" cannot be assigned to parameter \"object\" of type \"Dict[str, object]\" in function \"insert\"\n  Type \"dict[str, str] | Dict[str, Any]\" is not assignable to type \"Dict[str, object]\"\n    \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n      Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n      Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "startLine": 865,
+        "startChar": 28,
+        "endChar": 33
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"dict[str, str] | Dict[str, Any]\" is not assignable to return type \"Dict[str, object]\"\n  Type \"dict[str, str] | Dict[str, Any]\" is not assignable to type \"Dict[str, object]\"\n    \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n      Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n      Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "source": "Pyright",
+        "code": "reportReturnType",
+        "sig": "Pyright|reportReturnType|1|Type \"dict[str, str] | Dict[str, Any]\" is not assignable to return type \"Dict[str, object]\"\n  Type \"dict[str, str] | Dict[str, Any]\" is not assignable to type \"Dict[str, object]\"\n    \"dict[str, str]\" is not assignable to \"Dict[str, object]\"\n      Type parameter \"_VT@dict\" is invariant, but \"str\" is not the same as \"object\"\n      Consider switching from \"dict\" to \"Mapping\" which is covariant in the value type",
+        "startLine": 868,
+        "startChar": 19,
+        "endChar": 24
+      },
+      {
+        "bucket": "error",
+        "message": "No overloads for \"__init__\" match the provided arguments",
+        "source": "Pyright",
+        "code": "reportCallIssue",
+        "sig": "Pyright|reportCallIssue|1|No overloads for \"__init__\" match the provided arguments",
+        "startLine": 905,
+        "startChar": 19,
+        "endChar": 30
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"dict[bytes, bytes]\" is not assignable to return type \"Dict[str, object]\"\n  \"dict[bytes, bytes]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_KT@dict\" is invariant, but \"bytes\" is not the same as \"str\"\n    Type parameter \"_VT@dict\" is invariant, but \"bytes\" is not the same as \"object\"",
+        "source": "Pyright",
+        "code": "reportReturnType",
+        "sig": "Pyright|reportReturnType|1|Type \"dict[bytes, bytes]\" is not assignable to return type \"Dict[str, object]\"\n  \"dict[bytes, bytes]\" is not assignable to \"Dict[str, object]\"\n    Type parameter \"_KT@dict\" is invariant, but \"bytes\" is not the same as \"str\"\n    Type parameter \"_VT@dict\" is invariant, but \"bytes\" is not the same as \"object\"",
+        "startLine": 905,
+        "startChar": 19,
+        "endChar": 30
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object | dict[Unknown, Unknown]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[list[bytes]]\" in function \"__init__\"\n  Type \"object | dict[Unknown, Unknown]\" is not assignable to type \"Iterable[list[bytes]]\"\n    \"object\" is incompatible with protocol \"Iterable[list[bytes]]\"\n      \"__iter__\" is not present",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object | dict[Unknown, Unknown]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[list[bytes]]\" in function \"__init__\"\n  Type \"object | dict[Unknown, Unknown]\" is not assignable to type \"Iterable[list[bytes]]\"\n    \"object\" is incompatible with protocol \"Iterable[list[bytes]]\"\n      \"__iter__\" is not present",
+        "startLine": 905,
+        "startChar": 24,
+        "endChar": 29
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"object\" is not assignable to declared type \"Dict[str, object]\"\n  \"object\" is not assignable to \"Dict[str, object]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"object\" is not assignable to declared type \"Dict[str, object]\"\n  \"object\" is not assignable to \"Dict[str, object]\"",
+        "startLine": 910,
+        "startChar": 39,
+        "endChar": 81
+      }
+    ],
+    "suppressed": [],
+    "lsp_stats": {
+      "broker": {
+        "requestsSent": 2,
+        "requestsDropped": 0,
+        "requestsCoalesced": 0,
+        "responsesReceived": 2,
+        "responsesStale": 0
+      },
+      "didChangeExplicit": 0,
+      "didChangeSentTotal": 2,
+      "diagnosticsReceived": 7,
+      "documentVersion": 2
+    }
+  }
+}

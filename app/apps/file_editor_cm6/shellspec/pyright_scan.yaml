@@ -21,7 +21,6 @@ shells:
       - ${ctx:PYRIGHT_BIN}
       - --outputjson
       - --project
-      - ${ctx:EFFECTIVE_ROOT}
+      - ${ctx:PROJECT_PATH}
     env:
       PATH: ${env:PATH}
-

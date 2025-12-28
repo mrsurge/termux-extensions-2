@@ -15,7 +15,7 @@ import os
 import shlex
 import shutil
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from framework_shells import ShellRecord, get_manager
 from framework_shells.orchestrator import Orchestrator
@@ -48,12 +48,32 @@ SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
 
 
 # Minimal in-memory tracking; avoids persisting state outside manager.
-_language_shell_ids: Dict[str, str] = {}
-_active_language_id: Optional[str] = None
+_language_shell_ids: Dict[Tuple[str, str], str] = {}
+_active_shell_key: Optional[Tuple[str, str]] = None
 
 
-def _label(language_id: str) -> str:
-    return f"lsp:{language_id}"
+def _root_key(project_root: Path) -> str:
+    try:
+        return str(project_root.expanduser().resolve(strict=False))
+    except Exception:
+        return str(project_root)
+
+
+def _cache_key(language_id: str, project_root: Path) -> Tuple[str, str]:
+    return (language_id, _root_key(project_root))
+
+
+def _label(language_id: str, project_root: Optional[Path] = None) -> str:
+    if project_root is None:
+        return f"lsp:{language_id}"
+    root_str = _root_key(project_root)
+    digest = hashlib.sha1(root_str.encode("utf-8")).hexdigest()[:8]
+    return f"lsp:{language_id}:{digest}"
+
+
+def _label_for_key(language_id: str, root_key: str) -> str:
+    digest = hashlib.sha1(root_key.encode("utf-8")).hexdigest()[:8]
+    return f"lsp:{language_id}:{digest}"
 
 
 def _is_termux_android() -> bool:
@@ -223,7 +243,9 @@ async def _spawn_android_kotlin_lsp(project_root: Path) -> Optional[ShellRecord]
     the Kotlin compiler directly. It only provides diagnostics, not
     completion/hover/go-to-definition.
     """
-    
+
+    global _active_shell_key
+
     # Check if the Android LSP binary exists
     if not ANDROID_KOTLIN_LSP_BIN.exists():
         print(f"[LSP shells] Android Kotlin LSP not found at: {ANDROID_KOTLIN_LSP_BIN}")
@@ -234,21 +256,30 @@ async def _spawn_android_kotlin_lsp(project_root: Path) -> Optional[ShellRecord]
     orch = Orchestrator(mgr)
     
     project_hash = hashlib.sha1(str(project_root).encode()).hexdigest()[:8]
-    label = _label("kotlin-android")
+    cache_key = _cache_key("kotlin-android", project_root)
+    label = _label("kotlin-android", project_root)
     
     # Check for existing running shell
-    cached_id = _language_shell_ids.get("kotlin-android")
+    cached_id = _language_shell_ids.get(cache_key)
     if cached_id:
         cached = await _get_alive_shell(cached_id)
         if cached and mgr.get_pipe_state(cached.id):
+            _active_shell_key = cache_key
             return cached
-        _language_shell_ids.pop("kotlin-android", None)
-    
+        _language_shell_ids.pop(cache_key, None)
+
     # Check by label
     existing = await mgr.find_shell_by_label(label, status="running")
+    if not existing:
+        legacy_label = _label("kotlin-android")
+        if legacy_label != label:
+            has_any = any(lang == "kotlin-android" for lang, _ in _language_shell_ids.keys())
+            if not has_any:
+                existing = await mgr.find_shell_by_label(legacy_label, status="running")
     if existing:
         if mgr.get_pipe_state(existing.id):
-            _language_shell_ids["kotlin-android"] = existing.id
+            _language_shell_ids[cache_key] = existing.id
+            _active_shell_key = cache_key
             return existing
         # Stale - terminate and respawn
         try:
@@ -271,10 +302,9 @@ async def _spawn_android_kotlin_lsp(project_root: Path) -> Optional[ShellRecord]
     except Exception as exc:
         print(f"[LSP shells] Failed to spawn Android Kotlin LSP: {exc}")
         return None
-    
-    _language_shell_ids["kotlin-android"] = shell.id
-    global _active_language_id
-    _active_language_id = "kotlin-android"
+
+    _language_shell_ids[cache_key] = shell.id
+    _active_shell_key = cache_key
     return shell
 
 
@@ -283,6 +313,8 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
 
     Returns None if the language isn't supported or required binary is missing.
     """
+
+    global _active_shell_key
 
     print(f"[LSP shells] get_or_spawn_lsp_shell called: language_id={language_id}, project_root={project_root}")
 
@@ -420,22 +452,31 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
         full_cmd = [resolved_binary, *cmd[1:]]
 
     mgr = await get_manager()
-    label = _label(language_id)
+    cache_key = _cache_key(language_id, project_root)
+    label = _label(language_id, project_root)
 
     # Prefer cached shell if still alive.
-    cached_id = _language_shell_ids.get(language_id)
+    cached_id = _language_shell_ids.get(cache_key)
     if cached_id:
         cached = await _get_alive_shell(cached_id)
         if cached and mgr.get_pipe_state(cached.id):
+            _active_shell_key = cache_key
             return cached
         # Cached record exists but we have no live pipe handles (e.g. adopted across restart).
-        _language_shell_ids.pop(language_id, None)
+        _language_shell_ids.pop(cache_key, None)
 
     # Fallback to label lookup (covers adopted shells across restarts).
     existing = await mgr.find_shell_by_label(label, status="running")
+    if not existing:
+        legacy_label = _label(language_id)
+        if legacy_label != label:
+            has_any = any(lang == language_id for lang, _ in _language_shell_ids.keys())
+            if not has_any:
+                existing = await mgr.find_shell_by_label(legacy_label, status="running")
     if existing:
         if mgr.get_pipe_state(existing.id):
-            _language_shell_ids[language_id] = existing.id
+            _language_shell_ids[cache_key] = existing.id
+            _active_shell_key = cache_key
             return existing
         # Pipe shells can't be reused without live handles; terminate and respawn.
         try:
@@ -480,18 +521,17 @@ async def get_or_spawn_lsp_shell(language_id: str, project_root: Path) -> Option
         print(f"[LSP shells] Failed to spawn {language_id}: {exc}")
         return None
 
-    _language_shell_ids[language_id] = record.id
-    global _active_language_id
-    _active_language_id = language_id
+    _language_shell_ids[cache_key] = record.id
+    _active_shell_key = cache_key
     return record
 
 
 async def get_active_lsp_shell() -> Optional[ShellRecord]:
     """Return the currently active shell if it is still running."""
 
-    if not _active_language_id:
+    if not _active_shell_key:
         return None
-    cached_id = _language_shell_ids.get(_active_language_id)
+    cached_id = _language_shell_ids.get(_active_shell_key)
     if not cached_id:
         return None
     record = await _get_alive_shell(cached_id)
@@ -499,46 +539,58 @@ async def get_active_lsp_shell() -> Optional[ShellRecord]:
         return record
 
     # Clean stale cache
-    _language_shell_ids.pop(_active_language_id, None)
+    _language_shell_ids.pop(_active_shell_key, None)
     return None
 
 
 async def switch_lsp_shell(new_language_id: str, project_root: Path) -> Optional[ShellRecord]:
     """Switch active shell to the requested language, spawning if needed."""
 
+    global _active_shell_key
+
     record = await get_or_spawn_lsp_shell(new_language_id, project_root)
     if record:
-        global _active_language_id
-        _active_language_id = new_language_id
+        _active_shell_key = _cache_key(new_language_id, project_root)
     return record
 
 
 async def shutdown_lsp_shell(language_id: str) -> None:
     """Gracefully terminate a language shell if running."""
 
+    global _active_shell_key
+
     mgr = await get_manager()
-    label = _label(language_id)
 
-    shell_id = _language_shell_ids.get(language_id)
-    target: Optional[ShellRecord] = None
-
-    if shell_id:
-        target = await mgr.get_shell(shell_id)
-    if not target:
-        target = await mgr.find_shell_by_label(label, status=None)
-
-    if not target:
-        return
+    shell_ids: set[str] = set()
+    for (lang, _root_key_val), shell_id in list(_language_shell_ids.items()):
+        if lang == language_id:
+            shell_ids.add(shell_id)
 
     try:
-        await mgr.terminate_shell(target.id)
-    except Exception as exc:
-        print(f"[LSP shells] Terminate failed for {language_id}: {exc}")
+        shells = await mgr.list_shells()
+    except Exception:
+        shells = []
 
-    _language_shell_ids.pop(language_id, None)
-    global _active_language_id
-    if _active_language_id == language_id:
-        _active_language_id = None
+    label_prefix = f"lsp:{language_id}"
+    for rec in shells:
+        try:
+            if rec.label and rec.label.startswith(label_prefix):
+                shell_ids.add(rec.id)
+        except Exception:
+            continue
+
+    for shell_id in shell_ids:
+        try:
+            await mgr.terminate_shell(shell_id)
+        except Exception as exc:
+            print(f"[LSP shells] Terminate failed for {language_id}: {exc}")
+
+    # Remove cached entries for this language.
+    for key in [k for k in _language_shell_ids.keys() if k[0] == language_id]:
+        _language_shell_ids.pop(key, None)
+
+    if _active_shell_key and _active_shell_key[0] == language_id:
+        _active_shell_key = None
 
 
 # Small helper for tests/debugging.
@@ -546,6 +598,7 @@ async def list_lsp_shells() -> Dict[str, Optional[ShellRecord]]:
     """Return a snapshot of language→shell mapping for debug output."""
 
     snapshot: Dict[str, Optional[ShellRecord]] = {}
-    for lang, shell_id in _language_shell_ids.items():
-        snapshot[lang] = await _get_alive_shell(shell_id)
+    for (lang, root_key), shell_id in _language_shell_ids.items():
+        key = _label_for_key(lang, root_key)
+        snapshot[key] = await _get_alive_shell(shell_id)
     return snapshot

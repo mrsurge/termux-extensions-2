@@ -468,13 +468,22 @@ async def api_lsp_status():
     from framework_shells import get_manager
 
     mgr = await get_manager()
+    try:
+        shells = await mgr.list_shells()
+    except Exception:
+        shells = []
+
+    running_labels: list[str] = []
+    for rec in shells:
+        try:
+            if rec and rec.pid and rec.status == "running" and rec.label:
+                running_labels.append(rec.label)
+        except Exception:
+            continue
 
     async def _is_running(language_id: str) -> bool:
-        try:
-            rec = await mgr.find_shell_by_label(f"lsp:{language_id}", status="running")
-            return bool(rec and rec.pid and rec.status == "running")
-        except Exception:
-            return False
+        prefix = f"lsp:{language_id}"
+        return any(lbl == prefix or lbl.startswith(prefix + ":") for lbl in running_labels)
 
     async def _any_running(language_ids: list[str]) -> bool:
         for lang in language_ids:

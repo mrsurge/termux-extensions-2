@@ -248,13 +248,6 @@ class ConnectionManager:
             "kotlin-android": ["kotlin-android"],
         }
 
-        async def _is_running(mgr, language_id: str) -> bool:
-            try:
-                rec = await mgr.find_shell_by_label(f"lsp:{language_id}", status="running")
-                return bool(rec and rec.pid and rec.status == "running")
-            except Exception:
-                return False
-
         try:
             while True:
                 await asyncio.sleep(1.0)
@@ -265,6 +258,22 @@ class ConnectionManager:
                     mgr = await get_manager()
                 except Exception:
                     continue
+                try:
+                    shells = await mgr.list_shells()
+                except Exception:
+                    shells = []
+
+                running_labels: list[str] = []
+                for rec in shells:
+                    try:
+                        if rec and rec.pid and rec.status == "running" and rec.label:
+                            running_labels.append(rec.label)
+                    except Exception:
+                        continue
+
+                def _is_running_label(language_id: str) -> bool:
+                    prefix = f"lsp:{language_id}"
+                    return any(lbl == prefix or lbl.startswith(prefix + ":") for lbl in running_labels)
 
                 # Build a per-project status object. LSP shells are scoped per project root in Code CM6,
                 # but the label naming is per-language; as a pragmatic approximation, we broadcast a
@@ -273,7 +282,7 @@ class ConnectionManager:
                 for server_id, langs in server_groups.items():
                     running = False
                     for lang in langs:
-                        if await _is_running(mgr, lang):
+                        if _is_running_label(lang):
                             running = True
                             break
                     snapshot["servers"][server_id] = {"running": running}
@@ -466,9 +475,12 @@ def notify_explorer_of_change(abs_path: str, event_type: str):
                     def do_refresh():
                         with _explorer_refresh_lock:
                             _explorer_refresh_timers.pop(debounce_key, None)
+                        loop = _explorer_event_loop
+                        if not loop:
+                            return
                         asyncio.run_coroutine_threadsafe(
                             _refresh_explorer_directory(project_path, parent_rel),
-                            _explorer_event_loop
+                            loop
                         )
                     
                     timer = Timer(EXPLORER_REFRESH_DEBOUNCE, do_refresh)
@@ -495,9 +507,12 @@ def _schedule_git_status_broadcast(project_path: str):
         def do_broadcast():
             with _explorer_refresh_lock:
                 _explorer_refresh_timers.pop(debounce_key, None)
+            loop = _explorer_event_loop
+            if not loop:
+                return
             asyncio.run_coroutine_threadsafe(
                 _broadcast_git_status_update(project_path),
-                _explorer_event_loop
+                loop
             )
         
         # Use slightly longer debounce for git status (500ms)
@@ -734,6 +749,8 @@ class ExplorerDispatcher:
             try:
                 # Non-blocking check with short timeout
                 payload = await asyncio.to_thread(self._job_queue.get, timeout=0.5)
+                if not isinstance(payload, dict):
+                    continue
                 
                 for job_data in payload.get("jobs", []):
                     job_id = job_data.get("id", "")
@@ -983,23 +1000,33 @@ class ExplorerDispatcher:
             "kotlin-android": ["kotlin-android"],
         }
 
-        async def _is_running(mgr, language_id: str) -> bool:
-            try:
-                rec = await mgr.find_shell_by_label(f"lsp:{language_id}", status="running")
-                return bool(rec and rec.pid and rec.status == "running")
-            except Exception:
-                return False
-
         try:
             mgr = await get_manager()
         except Exception as e:
             return await self.send_error(f"Failed to query shell manager: {e}", msg_id)
 
+        try:
+            shells = await mgr.list_shells()
+        except Exception:
+            shells = []
+
+        running_labels: list[str] = []
+        for rec in shells:
+            try:
+                if rec and rec.pid and rec.status == "running" and rec.label:
+                    running_labels.append(rec.label)
+            except Exception:
+                continue
+
+        def _is_running_label(language_id: str) -> bool:
+            prefix = f"lsp:{language_id}"
+            return any(lbl == prefix or lbl.startswith(prefix + ":") for lbl in running_labels)
+
         snapshot = {"servers": {}}
         for server_id, langs in server_groups.items():
             running = False
             for lang in langs:
-                if await _is_running(mgr, lang):
+                if _is_running_label(lang):
                     running = True
                     break
             snapshot["servers"][server_id] = {"running": running}

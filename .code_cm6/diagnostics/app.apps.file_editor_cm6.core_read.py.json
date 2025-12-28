@@ -1,0 +1,517 @@
+{
+  "exported_at": "2025-12-28T05:31:33.253Z",
+  "project_root": "/data/data/com.termux/files/home/mrselect5",
+  "file_path": "/data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/core_read.py",
+  "dump": {
+    "exported_at": "2025-12-28T05:31:30.677Z",
+    "uri": "file:///data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/core_read.py",
+    "lsp_language_id": "python",
+    "lsp_file_uri": "file:///data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/core_read.py",
+    "counts": {
+      "errors": 10,
+      "warnings": 0
+    },
+    "total": 10,
+    "activeIndex": 2,
+    "rawDiagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 19,
+            "character": 35
+          },
+          "end": {
+            "line": 19,
+            "character": 43
+          }
+        },
+        "message": "Type \"BaseObserverSubclassCallable\" is not assignable to declared type \"type[Observer]\"\n  Type \"BaseObserverSubclassCallable\" is not assignable to type \"type[Observer]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 20,
+            "character": 32
+          },
+          "end": {
+            "line": 20,
+            "character": 54
+          }
+        },
+        "message": "Type \"type[watchdog.events.FileSystemEventHandler]\" is not assignable to declared type \"type[core_read.FileSystemEventHandler]\"\n  \"watchdog.events.FileSystemEventHandler\" is not assignable to \"core_read.FileSystemEventHandler\"\n  Type \"type[watchdog.events.FileSystemEventHandler]\" is not assignable to type \"type[core_read.FileSystemEventHandler]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 223,
+            "character": 23
+          },
+          "end": {
+            "line": 223,
+            "character": 27
+          }
+        },
+        "message": "Cannot access attribute \"stop\" for class \"Thread\"\n  Attribute \"stop\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 226,
+            "character": 23
+          },
+          "end": {
+            "line": 226,
+            "character": 31
+          }
+        },
+        "message": "Cannot assign to attribute \"_running\" for class \"Thread\"\n  Attribute \"_running\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 292,
+            "character": 38
+          },
+          "end": {
+            "line": 292,
+            "character": 42
+          }
+        },
+        "message": "Expression of type \"None\" cannot be assigned to parameter of type \"Path\"\n  \"None\" is not assignable to \"Path\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 337,
+            "character": 21
+          },
+          "end": {
+            "line": 337,
+            "character": 29
+          }
+        },
+        "message": "Cannot access attribute \"schedule\" for class \"Observer\"\n  Attribute \"schedule\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 338,
+            "character": 21
+          },
+          "end": {
+            "line": 338,
+            "character": 26
+          }
+        },
+        "message": "Cannot access attribute \"start\" for class \"Observer\"\n  Attribute \"start\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 340,
+            "character": 34
+          },
+          "end": {
+            "line": 340,
+            "character": 42
+          }
+        },
+        "message": "Type \"Observer\" is not assignable to declared type \"Thread | None\"\n  Type \"Observer\" is not assignable to type \"Thread | None\"\n    \"Observer\" is not assignable to \"Thread\"\n    \"Observer\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 348,
+            "character": 38
+          },
+          "end": {
+            "line": 348,
+            "character": 45
+          }
+        },
+        "message": "Type \"PollingWatcher\" is not assignable to declared type \"Thread | None\"\n  Type \"PollingWatcher\" is not assignable to type \"Thread | None\"\n    \"PollingWatcher\" is not assignable to \"Thread\"\n    \"PollingWatcher\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 356,
+            "character": 30
+          },
+          "end": {
+            "line": 356,
+            "character": 37
+          }
+        },
+        "message": "Type \"PollingWatcher\" is not assignable to declared type \"Thread | None\"\n  Type \"PollingWatcher\" is not assignable to type \"Thread | None\"\n    \"PollingWatcher\" is not assignable to \"Thread\"\n    \"PollingWatcher\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      }
+    ],
+    "filteredDiagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 19,
+            "character": 35
+          },
+          "end": {
+            "line": 19,
+            "character": 43
+          }
+        },
+        "message": "Type \"BaseObserverSubclassCallable\" is not assignable to declared type \"type[Observer]\"\n  Type \"BaseObserverSubclassCallable\" is not assignable to type \"type[Observer]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 20,
+            "character": 32
+          },
+          "end": {
+            "line": 20,
+            "character": 54
+          }
+        },
+        "message": "Type \"type[watchdog.events.FileSystemEventHandler]\" is not assignable to declared type \"type[core_read.FileSystemEventHandler]\"\n  \"watchdog.events.FileSystemEventHandler\" is not assignable to \"core_read.FileSystemEventHandler\"\n  Type \"type[watchdog.events.FileSystemEventHandler]\" is not assignable to type \"type[core_read.FileSystemEventHandler]\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 223,
+            "character": 23
+          },
+          "end": {
+            "line": 223,
+            "character": 27
+          }
+        },
+        "message": "Cannot access attribute \"stop\" for class \"Thread\"\n  Attribute \"stop\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 226,
+            "character": 23
+          },
+          "end": {
+            "line": 226,
+            "character": 31
+          }
+        },
+        "message": "Cannot assign to attribute \"_running\" for class \"Thread\"\n  Attribute \"_running\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 292,
+            "character": 38
+          },
+          "end": {
+            "line": 292,
+            "character": 42
+          }
+        },
+        "message": "Expression of type \"None\" cannot be assigned to parameter of type \"Path\"\n  \"None\" is not assignable to \"Path\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 337,
+            "character": 21
+          },
+          "end": {
+            "line": 337,
+            "character": 29
+          }
+        },
+        "message": "Cannot access attribute \"schedule\" for class \"Observer\"\n  Attribute \"schedule\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 338,
+            "character": 21
+          },
+          "end": {
+            "line": 338,
+            "character": 26
+          }
+        },
+        "message": "Cannot access attribute \"start\" for class \"Observer\"\n  Attribute \"start\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 340,
+            "character": 34
+          },
+          "end": {
+            "line": 340,
+            "character": 42
+          }
+        },
+        "message": "Type \"Observer\" is not assignable to declared type \"Thread | None\"\n  Type \"Observer\" is not assignable to type \"Thread | None\"\n    \"Observer\" is not assignable to \"Thread\"\n    \"Observer\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 348,
+            "character": 38
+          },
+          "end": {
+            "line": 348,
+            "character": 45
+          }
+        },
+        "message": "Type \"PollingWatcher\" is not assignable to declared type \"Thread | None\"\n  Type \"PollingWatcher\" is not assignable to type \"Thread | None\"\n    \"PollingWatcher\" is not assignable to \"Thread\"\n    \"PollingWatcher\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 356,
+            "character": 30
+          },
+          "end": {
+            "line": 356,
+            "character": 37
+          }
+        },
+        "message": "Type \"PollingWatcher\" is not assignable to declared type \"Thread | None\"\n  Type \"PollingWatcher\" is not assignable to type \"Thread | None\"\n    \"PollingWatcher\" is not assignable to \"Thread\"\n    \"PollingWatcher\" is not assignable to \"None\"",
+        "severity": 1,
+        "code": "reportAssignmentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAssignmentType"
+        }
+      }
+    ],
+    "flat": [
+      {
+        "bucket": "error",
+        "message": "Type \"BaseObserverSubclassCallable\" is not assignable to declared type \"type[Observer]\"\n  Type \"BaseObserverSubclassCallable\" is not assignable to type \"type[Observer]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"BaseObserverSubclassCallable\" is not assignable to declared type \"type[Observer]\"\n  Type \"BaseObserverSubclassCallable\" is not assignable to type \"type[Observer]\"",
+        "startLine": 20,
+        "startChar": 35,
+        "endChar": 43
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"type[watchdog.events.FileSystemEventHandler]\" is not assignable to declared type \"type[core_read.FileSystemEventHandler]\"\n  \"watchdog.events.FileSystemEventHandler\" is not assignable to \"core_read.FileSystemEventHandler\"\n  Type \"type[watchdog.events.FileSystemEventHandler]\" is not assignable to type \"type[core_read.FileSystemEventHandler]\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"type[watchdog.events.FileSystemEventHandler]\" is not assignable to declared type \"type[core_read.FileSystemEventHandler]\"\n  \"watchdog.events.FileSystemEventHandler\" is not assignable to \"core_read.FileSystemEventHandler\"\n  Type \"type[watchdog.events.FileSystemEventHandler]\" is not assignable to type \"type[core_read.FileSystemEventHandler]\"",
+        "startLine": 21,
+        "startChar": 32,
+        "endChar": 54
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"stop\" for class \"Thread\"\n  Attribute \"stop\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"stop\" for class \"Thread\"\n  Attribute \"stop\" is unknown",
+        "startLine": 224,
+        "startChar": 23,
+        "endChar": 27
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot assign to attribute \"_running\" for class \"Thread\"\n  Attribute \"_running\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot assign to attribute \"_running\" for class \"Thread\"\n  Attribute \"_running\" is unknown",
+        "startLine": 227,
+        "startChar": 23,
+        "endChar": 31
+      },
+      {
+        "bucket": "error",
+        "message": "Expression of type \"None\" cannot be assigned to parameter of type \"Path\"\n  \"None\" is not assignable to \"Path\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Expression of type \"None\" cannot be assigned to parameter of type \"Path\"\n  \"None\" is not assignable to \"Path\"",
+        "startLine": 293,
+        "startChar": 38,
+        "endChar": 42
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"schedule\" for class \"Observer\"\n  Attribute \"schedule\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"schedule\" for class \"Observer\"\n  Attribute \"schedule\" is unknown",
+        "startLine": 338,
+        "startChar": 21,
+        "endChar": 29
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"start\" for class \"Observer\"\n  Attribute \"start\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"start\" for class \"Observer\"\n  Attribute \"start\" is unknown",
+        "startLine": 339,
+        "startChar": 21,
+        "endChar": 26
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"Observer\" is not assignable to declared type \"Thread | None\"\n  Type \"Observer\" is not assignable to type \"Thread | None\"\n    \"Observer\" is not assignable to \"Thread\"\n    \"Observer\" is not assignable to \"None\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"Observer\" is not assignable to declared type \"Thread | None\"\n  Type \"Observer\" is not assignable to type \"Thread | None\"\n    \"Observer\" is not assignable to \"Thread\"\n    \"Observer\" is not assignable to \"None\"",
+        "startLine": 341,
+        "startChar": 34,
+        "endChar": 42
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"PollingWatcher\" is not assignable to declared type \"Thread | None\"\n  Type \"PollingWatcher\" is not assignable to type \"Thread | None\"\n    \"PollingWatcher\" is not assignable to \"Thread\"\n    \"PollingWatcher\" is not assignable to \"None\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"PollingWatcher\" is not assignable to declared type \"Thread | None\"\n  Type \"PollingWatcher\" is not assignable to type \"Thread | None\"\n    \"PollingWatcher\" is not assignable to \"Thread\"\n    \"PollingWatcher\" is not assignable to \"None\"",
+        "startLine": 349,
+        "startChar": 38,
+        "endChar": 45
+      },
+      {
+        "bucket": "error",
+        "message": "Type \"PollingWatcher\" is not assignable to declared type \"Thread | None\"\n  Type \"PollingWatcher\" is not assignable to type \"Thread | None\"\n    \"PollingWatcher\" is not assignable to \"Thread\"\n    \"PollingWatcher\" is not assignable to \"None\"",
+        "source": "Pyright",
+        "code": "reportAssignmentType",
+        "sig": "Pyright|reportAssignmentType|1|Type \"PollingWatcher\" is not assignable to declared type \"Thread | None\"\n  Type \"PollingWatcher\" is not assignable to type \"Thread | None\"\n    \"PollingWatcher\" is not assignable to \"Thread\"\n    \"PollingWatcher\" is not assignable to \"None\"",
+        "startLine": 357,
+        "startChar": 30,
+        "endChar": 37
+      }
+    ],
+    "suppressed": [],
+    "lsp_stats": {
+      "broker": {
+        "requestsSent": 1,
+        "requestsDropped": 0,
+        "requestsCoalesced": 0,
+        "responsesReceived": 1,
+        "responsesStale": 0
+      },
+      "didChangeExplicit": 0,
+      "didChangeSentTotal": 1,
+      "diagnosticsReceived": 2,
+      "documentVersion": 2
+    }
+  }
+}

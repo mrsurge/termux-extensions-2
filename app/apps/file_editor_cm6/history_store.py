@@ -179,6 +179,26 @@ class HistoryStore:
         except Exception:
             return ""
 
+    def get_lsp_pyright_config_mode(self, project_path: str) -> str:
+        sidecar = self.get_project_sidecar(project_path)
+        if not sidecar:
+            return "root"
+        try:
+            return str(sidecar.get_lsp_pyright_config_mode() or "root")
+        except Exception:
+            return "root"
+
+    def set_lsp_pyright_config_mode(self, project_path: str, mode: str) -> bool:
+        sidecar = self.get_project_sidecar(project_path)
+        if not sidecar:
+            return False
+        try:
+            sidecar.set_lsp_pyright_config_mode(mode)
+            sidecar.save()
+            return True
+        except Exception:
+            return False
+
     def set_lsp_server_root_rel(self, project_path: str, server_id: str, root_rel: str) -> bool:
         sidecar = self.get_project_sidecar(project_path)
         if not sidecar:
@@ -238,6 +258,7 @@ class HistoryStore:
                 "enableLspClangd": False,
                 "enableLspKotlin": False,
                 "enableLspKotlinAndroid": False,
+                "lspPyrightConfigMode": "root",
                 "lspRootRelPyright": "",
                 "lspRootRelTypescript": "",
                 "lspRootRelClangd": "",
@@ -275,6 +296,7 @@ class HistoryStore:
                 "enableLspClangd": False,
                 "enableLspKotlin": False,
                 "enableLspKotlinAndroid": False,
+                "lspPyrightConfigMode": "root",
                 "lspRootRelPyright": "",
                 "lspRootRelTypescript": "",
                 "lspRootRelClangd": "",

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "updatedAt": "2025-12-28T02:59:25.748770Z",
+  "generated": false,
+  "workers": [
+    {
+      "id": "Framework",
+      "root": "app",
+      "enabled": true,
+      "pyright_project": "pyrightconfig.json"
+    },
+    {
+      "id": "Code_CM6",
+      "root": "app/apps/file_editor_cm6",
+      "enabled": true,
+      "pyright_project": "pyrightconfig.json"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Code CM6 — Issues Overlay (Technical Description, Current State)
 
-**Last Updated:** 2025-12-24
+**Last Updated:** 2025-12-27
 
 This document describes how the **Issues Overlay** + **squiggle underlines** work right now in Code CM6 (NiceGUI iframe + CM6 LSP bridge), and what is still broken.
 
@@ -32,12 +32,14 @@ This document describes how the **Issues Overlay** + **squiggle underlines** wor
 
 - Shows **issue counts** (errors/warnings) next to the filename in the host toolbar.
 - Provides **Prev/Next** navigation buttons (host toolbar) that jump between issues.
+- Shows an **LSP busy spinner** in the host toolbar when a backend task is running (notably **Android Gradle compile** for `kotlin-android`).
+- Shows lightweight **toasts** for longer-running background tasks (start/end), so background work is visible on mobile.
 - Renders an **Issues Overlay panel inside the iframe** with:
   - A "replica line" preview for the active issue line
   - 1..N issue rows under that line (severity + message + optional source/code)
   - Per-issue **dismiss** button (currently in-memory only)
 - Renders **squiggle underlines in the editor text** driven by LSP diagnostics (custom decoration field, not @codemirror/lint).
-- Supports **Export Diagnostics…** (Editor menu) which saves a JSON snapshot under `.diagnostics/` in the project root.
+- Supports **Export Diagnostics…** (Editor menu) which saves a JSON snapshot under `.code_cm6/diagnostics/` in the project root.
 
 ## Architecture / Data Flow
 
@@ -145,15 +147,23 @@ Code CM6 can export the current file’s diagnostics/Issues state to a JSON file
 - Host asks the iframe for a dump via `postMessage` (`issues_cmd: dump`)
 - Iframe responds with `cm6-issues-dump` containing: raw/filtered diagnostics, flat list, counts, suppressed sigs, LSP stats
 - Host uses the shared file picker (`window.teFilePicker.saveFile`) and writes the JSON using Code CM6’s existing `POST /write` endpoint
-- Default save directory: `<projectRoot>/.diagnostics/`
-  - If `.diagnostics` does not exist, the host prompts with a confirm dialog and creates it if approved
+- Default save directory: `<projectRoot>/.code_cm6/diagnostics/`
+  - If `.code_cm6/diagnostics` does not exist, the host prompts with a confirm dialog and creates it if approved
 - Default filename: `<project-relative-path with '/' replaced by '.'>.json` (example: `app.main.py.json`)
+
+### 11) Repo-local metadata (.code_cm6)
+
+Code CM6 keeps repo-scoped metadata under a single dot directory at the repo root:
+
+- `.code_cm6/diagnostics/` — default target for exported diagnostics JSON snapshots.
+- `.code_cm6/lang/python/workers.json` — Python **App Worker Registry** (multi-root scan/LSP routing).
 
 ## Current Known Issues / Limitations
 
 ### ✅ FIXED
 - ~~Issues do **not update during live edits** (typing)~~ — **FIXED**: Explicit `didChange` notifications now trigger diagnostics refresh
 - ~~If the page is reloaded while an LSP is already running, the Issues feature **does not mount / reattach**~~ — **FIXED** (for TypeScript/JavaScript): Diagnostics nudge after `didOpen` triggers refresh
+- ~~Android Gradle compile runs “silently” with no UI feedback~~ — **FIXED**: `kotlin-android` emits LSP work progress and the host toolbar shows a spinner + start/end toasts.
 
 ### ⏳ REMAINING
 - Dismiss is **in-memory only** right now (not persisted to HistoryStore/ProjectSidecar yet).
@@ -205,6 +215,13 @@ There are 3 cooperating layers:
 - `te2_android_sidecar.json` is maintained by TE2 code to provide the kotlin-android server with stable fingerprints and a dependency-model skeleton.
 - On save/sync, TE2 injects `workspace/didChangeConfiguration` with `te2Android` settings to the kotlin-android server.
 
+## 0.1) User-visible Android LSP controls (host UI)
+The Language Servers modal exposes Android-specific controls:
+
+- **Start/Stop + running state** for `kotlin-android` (same UX as other LSPs).
+- **Variant selector** (custom JS dropdown; does not rely on native `<select>` behavior so it works in GeckoView).
+- **Sync Project** button (forces the TE2 Android sidecar refresh + triggers server-side re-index behavior).
+
 ## 1) Where persistent state lives (two distinct sidecars)
 
 ### 1.1 ProjectSidecar (editor SSOT)
@@ -237,6 +254,21 @@ There are multiple fingerprints, serving different invalidation domains:
 
 - `repoFingerprint`: best-effort **git HEAD + status + diff** hash, fallback to filesystem fingerprint.
   - used to know “the repo changed, Gradle results may be stale”.
+
+## 11) Progress + spinner/toasts (Gradle compile visibility)
+
+Android diagnostics work involves real Gradle work (compile / analysis). The MVP surfaces this work to the user:
+
+- The `kotlin-android` language server emits LSP work progress using:
+  - `window/workDoneProgress/create`
+  - `$/progress` (`begin` / `report` / `end`)
+- The TE2 LSP broker (`app/apps/file_editor_cm6/lsp_ws.py`) intercepts `window/workDoneProgress/create` and **auto-ACKs** it (the iframe client does not implement that request), ensuring the server can proceed to emit `$/progress`.
+- The broker converts `$/progress` into a shared-bus event (`lsp:busy`) with an activity label (ex: `gradle_compile`), and the host UI (`main.js`) shows:
+  - a toolbar spinner while any busy task is active, and
+  - start/end toasts for longer tasks (rate-limited to avoid spam).
+
+Fallback behavior:
+- If a save triggers compile but the server does not emit `$/progress` (or progress is delayed), the broker may start a delayed “Compiling (on save)…” busy indicator and then end it once diagnostics settle.
 
 - `draftFingerprint`: hash of **(project-relative path + content_sha256)** for all draft entries.
   - computed from `ProjectSidecar.list_project_drafts()`.
@@ -335,14 +367,41 @@ Current state:
 - `publish_draft_diagnostics_to_client()` merges TE2 draft diagnostics with backend diagnostics per-URI.
 - `merge_android_diagnostics()` currently suppresses backend “ghost” patterns ("Unresolved reference" / "Unresolved import") when `has_drafts=True`, unless the draft diagnostics indicate env problems.
 
-## 9) Explorer “error dot” integration (diagnostics summary)
+## 9) Explorer “error dot” integration (diagnostics summary + cache)
 **Files:**
 - `app/apps/file_editor_cm6/explorer_ws.py`
 - `app/apps/file_editor_cm6/lsp_ws.py` (`get_diagnostics_summary_for_project`)
+- `app/apps/file_editor_cm6/project_sidecar.py` (persisted cache)
+- `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` (Pyright scan endpoint)
 
 - The explorer connects to a WS and receives periodic diagnostics snapshots.
 - Backend aggregates cached LSP diagnostics per project-relative file path (rootRel-aware).
 - The frontend renders an inline marker next to explorer entries based on `{errors,warnings}` counts.
+
+### 9.1 Persisted diagnostics cache (Pyright workspace scan)
+Pyright supports a repo-wide “scan” that updates explorer dots for all Python files under the configured Pyright root:
+
+- Trigger: Language Servers modal → **Pyright → 🔄 Scan**
+- Backend: `POST /editor/pyright/scan`
+  - runs `pyright --outputjson --project <effectiveRoot>` as a temporary **Framework Shell** (pipe backend) using shellspec (`app/apps/file_editor_cm6/shellspec/pyright_scan.yaml`)
+  - parses `generalDiagnostics` and stores a lightweight `{rel: {errors,warnings}}` summary under:
+    - `ProjectSidecar.diagnostics_cache.pyright.summaryByRel`
+
+This cache allows explorer dots to survive worker restarts and avoids needing the LSP to “touch” every file.
+
+### 9.2 Clearing dots without a full rescan (live LSP reconciliation)
+Pyright LSP does not reliably publish “empty diagnostics” for every file that becomes clean.
+To prevent stale dots:
+
+- On `textDocument/publishDiagnostics` from the Pyright LSP, TE2 updates the same persisted `summaryByRel` entry for that file.
+  - If the file is clean (0/0), the entry is removed.
+  - If it has issues, the counts are updated.
+- After updating, TE2 broadcasts an updated `explorer:updateDiagnostics` snapshot immediately so the UI clears dots promptly.
+
+### 9.3 Severity bucketing
+- Explorer counts:
+  - **Errors**: LSP severity `1`, Pyright severity `"error"`
+  - **Warnings**: LSP severities `2/3/4`, Pyright severities `"warning"`, `"information"`, `"hint"`
 
 ## 10) Known limitation (current implementation)
 - The system does **not yet** compute a full dependency class/package index.

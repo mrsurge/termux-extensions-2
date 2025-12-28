@@ -1,0 +1,4933 @@
+{
+  "exported_at": "2025-12-28T05:20:30.042Z",
+  "project_root": "/data/data/com.termux/files/home/mrselect5",
+  "file_path": "/data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/nicegui_editor/editor_app.py",
+  "dump": {
+    "exported_at": "2025-12-28T05:20:15.456Z",
+    "uri": "file:///data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/nicegui_editor/editor_app.py",
+    "lsp_language_id": "python",
+    "lsp_file_uri": "file:///data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/nicegui_editor/editor_app.py",
+    "counts": {
+      "errors": 102,
+      "warnings": 0
+    },
+    "total": 102,
+    "activeIndex": 4,
+    "rawDiagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 1112,
+            "character": 16
+          },
+          "end": {
+            "line": 1112,
+            "character": 26
+          }
+        },
+        "message": "No parameter named \"font_scale\"",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1114,
+            "character": 16
+          },
+          "end": {
+            "line": 1114,
+            "character": 28
+          }
+        },
+        "message": "No parameter named \"show_minimap\"",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1115,
+            "character": 16
+          },
+          "end": {
+            "line": 1115,
+            "character": 35
+          }
+        },
+        "message": "No parameter named \"initial_scroll_line\"",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 992,
+            "character": 95
+          },
+          "end": {
+            "line": 992,
+            "character": 101
+          }
+        },
+        "message": "Cannot access attribute \"encode\" for class \"object\"\n  Attribute \"encode\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 992,
+            "character": 95
+          },
+          "end": {
+            "line": 992,
+            "character": 101
+          }
+        },
+        "message": "\"encode\" is not a known attribute of \"None\"",
+        "severity": 1,
+        "code": "reportOptionalMemberAccess",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportOptionalMemberAccess"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 260,
+            "character": 46
+          },
+          "end": {
+            "line": 260,
+            "character": 50
+          }
+        },
+        "message": "Expression of type \"None\" cannot be assigned to parameter of type \"str\"\n  \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 538,
+            "character": 11
+          },
+          "end": {
+            "line": 538,
+            "character": 26
+          }
+        },
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 539,
+            "character": 27
+          },
+          "end": {
+            "line": 539,
+            "character": 33
+          }
+        },
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 552,
+            "character": 19
+          },
+          "end": {
+            "line": 552,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 626,
+            "character": 19
+          },
+          "end": {
+            "line": 626,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 665,
+            "character": 16
+          },
+          "end": {
+            "line": 665,
+            "character": 49
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 674,
+            "character": 15
+          },
+          "end": {
+            "line": 674,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 710,
+            "character": 69
+          },
+          "end": {
+            "line": 710,
+            "character": 77
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 719,
+            "character": 95
+          },
+          "end": {
+            "line": 719,
+            "character": 124
+          }
+        },
+        "message": "\"get_lsp_kotlin_android_config\" is not a known attribute of \"None\"",
+        "severity": 1,
+        "code": "reportOptionalMemberAccess",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportOptionalMemberAccess"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 731,
+            "character": 64
+          },
+          "end": {
+            "line": 731,
+            "character": 72
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 744,
+            "character": 68
+          },
+          "end": {
+            "line": 744,
+            "character": 76
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 778,
+            "character": 85
+          },
+          "end": {
+            "line": 778,
+            "character": 93
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 779,
+            "character": 74
+          },
+          "end": {
+            "line": 779,
+            "character": 82
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 885,
+            "character": 16
+          },
+          "end": {
+            "line": 885,
+            "character": 49
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 893,
+            "character": 15
+          },
+          "end": {
+            "line": 893,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1128,
+            "character": 19
+          },
+          "end": {
+            "line": 1128,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1129,
+            "character": 19
+          },
+          "end": {
+            "line": 1129,
+            "character": 33
+          }
+        },
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1130,
+            "character": 19
+          },
+          "end": {
+            "line": 1130,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1132,
+            "character": 19
+          },
+          "end": {
+            "line": 1132,
+            "character": 38
+          }
+        },
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1133,
+            "character": 19
+          },
+          "end": {
+            "line": 1133,
+            "character": 32
+          }
+        },
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1220,
+            "character": 45
+          },
+          "end": {
+            "line": 1220,
+            "character": 48
+          }
+        },
+        "message": "\"get\" is not a known attribute of \"None\"",
+        "severity": 1,
+        "code": "reportOptionalMemberAccess",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportOptionalMemberAccess"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1235,
+            "character": 23
+          },
+          "end": {
+            "line": 1235,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1242,
+            "character": 23
+          },
+          "end": {
+            "line": 1242,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1254,
+            "character": 27
+          },
+          "end": {
+            "line": 1254,
+            "character": 47
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1297,
+            "character": 19
+          },
+          "end": {
+            "line": 1297,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1054,
+            "character": 23
+          },
+          "end": {
+            "line": 1054,
+            "character": 38
+          }
+        },
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1057,
+            "character": 27
+          },
+          "end": {
+            "line": 1057,
+            "character": 40
+          }
+        },
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1118,
+            "character": 19
+          },
+          "end": {
+            "line": 1118,
+            "character": 34
+          }
+        },
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1122,
+            "character": 29
+          },
+          "end": {
+            "line": 1122,
+            "character": 41
+          }
+        },
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"path\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1122,
+            "character": 43
+          },
+          "end": {
+            "line": 1122,
+            "character": 57
+          }
+        },
+        "message": "Argument of type \"object | str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"object | str | None\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1182,
+            "character": 64
+          },
+          "end": {
+            "line": 1182,
+            "character": 72
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1183,
+            "character": 64
+          },
+          "end": {
+            "line": 1183,
+            "character": 72
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1192,
+            "character": 53
+          },
+          "end": {
+            "line": 1192,
+            "character": 68
+          }
+        },
+        "message": "Cannot access attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1220,
+            "character": 32
+          },
+          "end": {
+            "line": 1220,
+            "character": 66
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1253,
+            "character": 76
+          },
+          "end": {
+            "line": 1253,
+            "character": 91
+          }
+        },
+        "message": "Argument of type \"object | str | None\" cannot be assigned to parameter \"current_content\" of type \"str\" in function \"_get_combined_diffs\"\n  Type \"object | str | None\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1289,
+            "character": 39
+          },
+          "end": {
+            "line": 1289,
+            "character": 59
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1589,
+            "character": 24
+          },
+          "end": {
+            "line": 1589,
+            "character": 37
+          }
+        },
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1654,
+            "character": 52
+          },
+          "end": {
+            "line": 1654,
+            "character": 58
+          }
+        },
+        "message": "Cannot access attribute \"encode\" for class \"object\"\n  Attribute \"encode\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1731,
+            "character": 11
+          },
+          "end": {
+            "line": 1731,
+            "character": 28
+          }
+        },
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1732,
+            "character": 11
+          },
+          "end": {
+            "line": 1732,
+            "character": 25
+          }
+        },
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1733,
+            "character": 11
+          },
+          "end": {
+            "line": 1733,
+            "character": 28
+          }
+        },
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1734,
+            "character": 11
+          },
+          "end": {
+            "line": 1734,
+            "character": 30
+          }
+        },
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1735,
+            "character": 11
+          },
+          "end": {
+            "line": 1735,
+            "character": 24
+          }
+        },
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1736,
+            "character": 11
+          },
+          "end": {
+            "line": 1736,
+            "character": 28
+          }
+        },
+        "message": "Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1750,
+            "character": 19
+          },
+          "end": {
+            "line": 1750,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1711,
+            "character": 23
+          },
+          "end": {
+            "line": 1711,
+            "character": 43
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1667,
+            "character": 31
+          },
+          "end": {
+            "line": 1667,
+            "character": 42
+          }
+        },
+        "message": "Argument of type \"Unknown | str | object\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"Unknown | str | object\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1680,
+            "character": 11
+          },
+          "end": {
+            "line": 1680,
+            "character": 26
+          }
+        },
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1749,
+            "character": 83
+          },
+          "end": {
+            "line": 1749,
+            "character": 90
+          }
+        },
+        "message": "Argument of type \"object | Unknown | Literal['']\" cannot be assigned to parameter \"current_content\" of type \"str\" in function \"_get_combined_diffs\"\n  Type \"object | Unknown | Literal['']\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1753,
+            "character": 19
+          },
+          "end": {
+            "line": 1753,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1755,
+            "character": 15
+          },
+          "end": {
+            "line": 1755,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1774,
+            "character": 15
+          },
+          "end": {
+            "line": 1774,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1815,
+            "character": 11
+          },
+          "end": {
+            "line": 1815,
+            "character": 23
+          }
+        },
+        "message": "Cannot access attribute \"jump_to_line\" for class \"CodeMirror\"\n  Attribute \"jump_to_line\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1831,
+            "character": 15
+          },
+          "end": {
+            "line": 1831,
+            "character": 32
+          }
+        },
+        "message": "Cannot access attribute \"open_search_panel\" for class \"CodeMirror\"\n  Attribute \"open_search_panel\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1853,
+            "character": 15
+          },
+          "end": {
+            "line": 1853,
+            "character": 34
+          }
+        },
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1875,
+            "character": 15
+          },
+          "end": {
+            "line": 1875,
+            "character": 28
+          }
+        },
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1891,
+            "character": 15
+          },
+          "end": {
+            "line": 1891,
+            "character": 31
+          }
+        },
+        "message": "Cannot access attribute \"set_minimap_mode\" for class \"CodeMirror\"\n  Attribute \"set_minimap_mode\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1990,
+            "character": 35
+          },
+          "end": {
+            "line": 1990,
+            "character": 55
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1988,
+            "character": 87
+          },
+          "end": {
+            "line": 1988,
+            "character": 105
+          }
+        },
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"raw_path\" of type \"str\" in function \"_normalize_rel_path\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1995,
+            "character": 19
+          },
+          "end": {
+            "line": 1995,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1997,
+            "character": 19
+          },
+          "end": {
+            "line": 1997,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2012,
+            "character": 19
+          },
+          "end": {
+            "line": 2012,
+            "character": 33
+          }
+        },
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2014,
+            "character": 19
+          },
+          "end": {
+            "line": 2014,
+            "character": 38
+          }
+        },
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2016,
+            "character": 19
+          },
+          "end": {
+            "line": 2016,
+            "character": 32
+          }
+        },
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2022,
+            "character": 19
+          },
+          "end": {
+            "line": 2022,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2167,
+            "character": 35
+          },
+          "end": {
+            "line": 2167,
+            "character": 49
+          }
+        },
+        "message": "Cannot access attribute \"disconnect_lsp\" for class \"CodeMirror\"\n  Attribute \"disconnect_lsp\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2005,
+            "character": 29
+          },
+          "end": {
+            "line": 2005,
+            "character": 41
+          }
+        },
+        "message": "Argument of type \"str\" cannot be assigned to parameter \"theme\" of type \"SUPPORTED_THEMES\" in function \"set_theme\"\n  Type \"str\" is not assignable to type \"SUPPORTED_THEMES\"\n    \"str\" is not assignable to type \"Literal['abcdef']\"\n    \"str\" is not assignable to type \"Literal['abcdefDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['abyss']\"\n    \"str\" is not assignable to type \"Literal['abyssDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['androidstudio']\"\n    \"str\" is not assignable to type \"Literal['androidstudioDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['andromeda']\"\n  ...",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2019,
+            "character": 19
+          },
+          "end": {
+            "line": 2019,
+            "character": 31
+          }
+        },
+        "message": "Cannot assign to attribute \"show_minimap\" for class \"CodeMirror\"\n  Attribute \"show_minimap\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2182,
+            "character": 35
+          },
+          "end": {
+            "line": 2182,
+            "character": 49
+          }
+        },
+        "message": "Cannot access attribute \"disconnect_lsp\" for class \"CodeMirror\"\n  Attribute \"disconnect_lsp\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3202,
+            "character": 15
+          },
+          "end": {
+            "line": 3202,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2264,
+            "character": 38
+          },
+          "end": {
+            "line": 2264,
+            "character": 46
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2288,
+            "character": 19
+          },
+          "end": {
+            "line": 2288,
+            "character": 45
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"run_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2289,
+            "character": 21
+          },
+          "end": {
+            "line": 2289,
+            "character": 49
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"shell_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2290,
+            "character": 25
+          },
+          "end": {
+            "line": 2290,
+            "character": 57
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"shell_run_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2291,
+            "character": 25
+          },
+          "end": {
+            "line": 2291,
+            "character": 57
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"launcher_pid\" of type \"int\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"int\"\n    \"None\" is not assignable to \"int\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2292,
+            "character": 23
+          },
+          "end": {
+            "line": 2292,
+            "character": 53
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"worker_pid\" of type \"int\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"int\"\n    \"None\" is not assignable to \"int\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2298,
+            "character": 20
+          },
+          "end": {
+            "line": 2298,
+            "character": 53
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2306,
+            "character": 15
+          },
+          "end": {
+            "line": 2306,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2361,
+            "character": 65
+          },
+          "end": {
+            "line": 2361,
+            "character": 73
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2389,
+            "character": 64
+          },
+          "end": {
+            "line": 2389,
+            "character": 72
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2404,
+            "character": 72
+          },
+          "end": {
+            "line": 2404,
+            "character": 80
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2503,
+            "character": 49
+          },
+          "end": {
+            "line": 2503,
+            "character": 57
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2526,
+            "character": 52
+          },
+          "end": {
+            "line": 2526,
+            "character": 60
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2536,
+            "character": 42
+          },
+          "end": {
+            "line": 2536,
+            "character": 50
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2558,
+            "character": 44
+          },
+          "end": {
+            "line": 2558,
+            "character": 52
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2512,
+            "character": 80
+          },
+          "end": {
+            "line": 2512,
+            "character": 109
+          }
+        },
+        "message": "\"get_lsp_kotlin_android_config\" is not a known attribute of \"None\"",
+        "severity": 1,
+        "code": "reportOptionalMemberAccess",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportOptionalMemberAccess"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2689,
+            "character": 48
+          },
+          "end": {
+            "line": 2689,
+            "character": 56
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3068,
+            "character": 26
+          },
+          "end": {
+            "line": 3068,
+            "character": 43
+          }
+        },
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3073,
+            "character": 26
+          },
+          "end": {
+            "line": 3073,
+            "character": 43
+          }
+        },
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3083,
+            "character": 23
+          },
+          "end": {
+            "line": 3083,
+            "character": 43
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3087,
+            "character": 19
+          },
+          "end": {
+            "line": 3087,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3097,
+            "character": 29
+          },
+          "end": {
+            "line": 3097,
+            "character": 41
+          }
+        },
+        "message": "Argument of type \"str\" cannot be assigned to parameter \"theme\" of type \"SUPPORTED_THEMES\" in function \"set_theme\"\n  Type \"str\" is not assignable to type \"SUPPORTED_THEMES\"\n    \"str\" is not assignable to type \"Literal['abcdef']\"\n    \"str\" is not assignable to type \"Literal['abcdefDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['abyss']\"\n    \"str\" is not assignable to type \"Literal['abyssDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['androidstudio']\"\n    \"str\" is not assignable to type \"Literal['androidstudioDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['andromeda']\"\n  ...",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3119,
+            "character": 23
+          },
+          "end": {
+            "line": 3119,
+            "character": 37
+          }
+        },
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3168,
+            "character": 19
+          },
+          "end": {
+            "line": 3168,
+            "character": 34
+          }
+        },
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3169,
+            "character": 40
+          },
+          "end": {
+            "line": 3169,
+            "character": 43
+          }
+        },
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3181,
+            "character": 19
+          },
+          "end": {
+            "line": 3181,
+            "character": 32
+          }
+        },
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3187,
+            "character": 19
+          },
+          "end": {
+            "line": 3187,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      }
+    ],
+    "filteredDiagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 1112,
+            "character": 16
+          },
+          "end": {
+            "line": 1112,
+            "character": 26
+          }
+        },
+        "message": "No parameter named \"font_scale\"",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1114,
+            "character": 16
+          },
+          "end": {
+            "line": 1114,
+            "character": 28
+          }
+        },
+        "message": "No parameter named \"show_minimap\"",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1115,
+            "character": 16
+          },
+          "end": {
+            "line": 1115,
+            "character": 35
+          }
+        },
+        "message": "No parameter named \"initial_scroll_line\"",
+        "severity": 1,
+        "code": "reportCallIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportCallIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 992,
+            "character": 95
+          },
+          "end": {
+            "line": 992,
+            "character": 101
+          }
+        },
+        "message": "Cannot access attribute \"encode\" for class \"object\"\n  Attribute \"encode\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 992,
+            "character": 95
+          },
+          "end": {
+            "line": 992,
+            "character": 101
+          }
+        },
+        "message": "\"encode\" is not a known attribute of \"None\"",
+        "severity": 1,
+        "code": "reportOptionalMemberAccess",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportOptionalMemberAccess"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 260,
+            "character": 46
+          },
+          "end": {
+            "line": 260,
+            "character": 50
+          }
+        },
+        "message": "Expression of type \"None\" cannot be assigned to parameter of type \"str\"\n  \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 538,
+            "character": 11
+          },
+          "end": {
+            "line": 538,
+            "character": 26
+          }
+        },
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 539,
+            "character": 27
+          },
+          "end": {
+            "line": 539,
+            "character": 33
+          }
+        },
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 552,
+            "character": 19
+          },
+          "end": {
+            "line": 552,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 626,
+            "character": 19
+          },
+          "end": {
+            "line": 626,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 665,
+            "character": 16
+          },
+          "end": {
+            "line": 665,
+            "character": 49
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 674,
+            "character": 15
+          },
+          "end": {
+            "line": 674,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 710,
+            "character": 69
+          },
+          "end": {
+            "line": 710,
+            "character": 77
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 719,
+            "character": 95
+          },
+          "end": {
+            "line": 719,
+            "character": 124
+          }
+        },
+        "message": "\"get_lsp_kotlin_android_config\" is not a known attribute of \"None\"",
+        "severity": 1,
+        "code": "reportOptionalMemberAccess",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportOptionalMemberAccess"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 731,
+            "character": 64
+          },
+          "end": {
+            "line": 731,
+            "character": 72
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 744,
+            "character": 68
+          },
+          "end": {
+            "line": 744,
+            "character": 76
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 778,
+            "character": 85
+          },
+          "end": {
+            "line": 778,
+            "character": 93
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 779,
+            "character": 74
+          },
+          "end": {
+            "line": 779,
+            "character": 82
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 885,
+            "character": 16
+          },
+          "end": {
+            "line": 885,
+            "character": 49
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 893,
+            "character": 15
+          },
+          "end": {
+            "line": 893,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1128,
+            "character": 19
+          },
+          "end": {
+            "line": 1128,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1129,
+            "character": 19
+          },
+          "end": {
+            "line": 1129,
+            "character": 33
+          }
+        },
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1130,
+            "character": 19
+          },
+          "end": {
+            "line": 1130,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1132,
+            "character": 19
+          },
+          "end": {
+            "line": 1132,
+            "character": 38
+          }
+        },
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1133,
+            "character": 19
+          },
+          "end": {
+            "line": 1133,
+            "character": 32
+          }
+        },
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1220,
+            "character": 45
+          },
+          "end": {
+            "line": 1220,
+            "character": 48
+          }
+        },
+        "message": "\"get\" is not a known attribute of \"None\"",
+        "severity": 1,
+        "code": "reportOptionalMemberAccess",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportOptionalMemberAccess"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1235,
+            "character": 23
+          },
+          "end": {
+            "line": 1235,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1242,
+            "character": 23
+          },
+          "end": {
+            "line": 1242,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1254,
+            "character": 27
+          },
+          "end": {
+            "line": 1254,
+            "character": 47
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1297,
+            "character": 19
+          },
+          "end": {
+            "line": 1297,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1054,
+            "character": 23
+          },
+          "end": {
+            "line": 1054,
+            "character": 38
+          }
+        },
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1057,
+            "character": 27
+          },
+          "end": {
+            "line": 1057,
+            "character": 40
+          }
+        },
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1118,
+            "character": 19
+          },
+          "end": {
+            "line": 1118,
+            "character": 34
+          }
+        },
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1122,
+            "character": 29
+          },
+          "end": {
+            "line": 1122,
+            "character": 41
+          }
+        },
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"path\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1122,
+            "character": 43
+          },
+          "end": {
+            "line": 1122,
+            "character": 57
+          }
+        },
+        "message": "Argument of type \"object | str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"object | str | None\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1182,
+            "character": 64
+          },
+          "end": {
+            "line": 1182,
+            "character": 72
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1183,
+            "character": 64
+          },
+          "end": {
+            "line": 1183,
+            "character": 72
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1192,
+            "character": 53
+          },
+          "end": {
+            "line": 1192,
+            "character": 68
+          }
+        },
+        "message": "Cannot access attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1220,
+            "character": 32
+          },
+          "end": {
+            "line": 1220,
+            "character": 66
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1253,
+            "character": 76
+          },
+          "end": {
+            "line": 1253,
+            "character": 91
+          }
+        },
+        "message": "Argument of type \"object | str | None\" cannot be assigned to parameter \"current_content\" of type \"str\" in function \"_get_combined_diffs\"\n  Type \"object | str | None\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1289,
+            "character": 39
+          },
+          "end": {
+            "line": 1289,
+            "character": 59
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1589,
+            "character": 24
+          },
+          "end": {
+            "line": 1589,
+            "character": 37
+          }
+        },
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1654,
+            "character": 52
+          },
+          "end": {
+            "line": 1654,
+            "character": 58
+          }
+        },
+        "message": "Cannot access attribute \"encode\" for class \"object\"\n  Attribute \"encode\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1731,
+            "character": 11
+          },
+          "end": {
+            "line": 1731,
+            "character": 28
+          }
+        },
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1732,
+            "character": 11
+          },
+          "end": {
+            "line": 1732,
+            "character": 25
+          }
+        },
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1733,
+            "character": 11
+          },
+          "end": {
+            "line": 1733,
+            "character": 28
+          }
+        },
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1734,
+            "character": 11
+          },
+          "end": {
+            "line": 1734,
+            "character": 30
+          }
+        },
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1735,
+            "character": 11
+          },
+          "end": {
+            "line": 1735,
+            "character": 24
+          }
+        },
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1736,
+            "character": 11
+          },
+          "end": {
+            "line": 1736,
+            "character": 28
+          }
+        },
+        "message": "Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1750,
+            "character": 19
+          },
+          "end": {
+            "line": 1750,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1711,
+            "character": 23
+          },
+          "end": {
+            "line": 1711,
+            "character": 43
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1667,
+            "character": 31
+          },
+          "end": {
+            "line": 1667,
+            "character": 42
+          }
+        },
+        "message": "Argument of type \"Unknown | str | object\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"Unknown | str | object\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1680,
+            "character": 11
+          },
+          "end": {
+            "line": 1680,
+            "character": 26
+          }
+        },
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1749,
+            "character": 83
+          },
+          "end": {
+            "line": 1749,
+            "character": 90
+          }
+        },
+        "message": "Argument of type \"object | Unknown | Literal['']\" cannot be assigned to parameter \"current_content\" of type \"str\" in function \"_get_combined_diffs\"\n  Type \"object | Unknown | Literal['']\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1753,
+            "character": 19
+          },
+          "end": {
+            "line": 1753,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1755,
+            "character": 15
+          },
+          "end": {
+            "line": 1755,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1774,
+            "character": 15
+          },
+          "end": {
+            "line": 1774,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1815,
+            "character": 11
+          },
+          "end": {
+            "line": 1815,
+            "character": 23
+          }
+        },
+        "message": "Cannot access attribute \"jump_to_line\" for class \"CodeMirror\"\n  Attribute \"jump_to_line\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1831,
+            "character": 15
+          },
+          "end": {
+            "line": 1831,
+            "character": 32
+          }
+        },
+        "message": "Cannot access attribute \"open_search_panel\" for class \"CodeMirror\"\n  Attribute \"open_search_panel\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1853,
+            "character": 15
+          },
+          "end": {
+            "line": 1853,
+            "character": 34
+          }
+        },
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1875,
+            "character": 15
+          },
+          "end": {
+            "line": 1875,
+            "character": 28
+          }
+        },
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1891,
+            "character": 15
+          },
+          "end": {
+            "line": 1891,
+            "character": 31
+          }
+        },
+        "message": "Cannot access attribute \"set_minimap_mode\" for class \"CodeMirror\"\n  Attribute \"set_minimap_mode\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1990,
+            "character": 35
+          },
+          "end": {
+            "line": 1990,
+            "character": 55
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1988,
+            "character": 87
+          },
+          "end": {
+            "line": 1988,
+            "character": 105
+          }
+        },
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"raw_path\" of type \"str\" in function \"_normalize_rel_path\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1995,
+            "character": 19
+          },
+          "end": {
+            "line": 1995,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1997,
+            "character": 19
+          },
+          "end": {
+            "line": 1997,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2012,
+            "character": 19
+          },
+          "end": {
+            "line": 2012,
+            "character": 33
+          }
+        },
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2014,
+            "character": 19
+          },
+          "end": {
+            "line": 2014,
+            "character": 38
+          }
+        },
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2016,
+            "character": 19
+          },
+          "end": {
+            "line": 2016,
+            "character": 32
+          }
+        },
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2022,
+            "character": 19
+          },
+          "end": {
+            "line": 2022,
+            "character": 36
+          }
+        },
+        "message": "Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2167,
+            "character": 35
+          },
+          "end": {
+            "line": 2167,
+            "character": 49
+          }
+        },
+        "message": "Cannot access attribute \"disconnect_lsp\" for class \"CodeMirror\"\n  Attribute \"disconnect_lsp\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2005,
+            "character": 29
+          },
+          "end": {
+            "line": 2005,
+            "character": 41
+          }
+        },
+        "message": "Argument of type \"str\" cannot be assigned to parameter \"theme\" of type \"SUPPORTED_THEMES\" in function \"set_theme\"\n  Type \"str\" is not assignable to type \"SUPPORTED_THEMES\"\n    \"str\" is not assignable to type \"Literal['abcdef']\"\n    \"str\" is not assignable to type \"Literal['abcdefDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['abyss']\"\n    \"str\" is not assignable to type \"Literal['abyssDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['androidstudio']\"\n    \"str\" is not assignable to type \"Literal['androidstudioDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['andromeda']\"\n  ...",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2019,
+            "character": 19
+          },
+          "end": {
+            "line": 2019,
+            "character": 31
+          }
+        },
+        "message": "Cannot assign to attribute \"show_minimap\" for class \"CodeMirror\"\n  Attribute \"show_minimap\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2182,
+            "character": 35
+          },
+          "end": {
+            "line": 2182,
+            "character": 49
+          }
+        },
+        "message": "Cannot access attribute \"disconnect_lsp\" for class \"CodeMirror\"\n  Attribute \"disconnect_lsp\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3202,
+            "character": 15
+          },
+          "end": {
+            "line": 3202,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2264,
+            "character": 38
+          },
+          "end": {
+            "line": 2264,
+            "character": 46
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2288,
+            "character": 19
+          },
+          "end": {
+            "line": 2288,
+            "character": 45
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"run_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2289,
+            "character": 21
+          },
+          "end": {
+            "line": 2289,
+            "character": 49
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"shell_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2290,
+            "character": 25
+          },
+          "end": {
+            "line": 2290,
+            "character": 57
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"shell_run_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2291,
+            "character": 25
+          },
+          "end": {
+            "line": 2291,
+            "character": 57
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"launcher_pid\" of type \"int\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"int\"\n    \"None\" is not assignable to \"int\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2292,
+            "character": 23
+          },
+          "end": {
+            "line": 2292,
+            "character": 53
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"worker_pid\" of type \"int\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"int\"\n    \"None\" is not assignable to \"int\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2298,
+            "character": 20
+          },
+          "end": {
+            "line": 2298,
+            "character": 53
+          }
+        },
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2306,
+            "character": 15
+          },
+          "end": {
+            "line": 2306,
+            "character": 35
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2361,
+            "character": 65
+          },
+          "end": {
+            "line": 2361,
+            "character": 73
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2389,
+            "character": 64
+          },
+          "end": {
+            "line": 2389,
+            "character": 72
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2404,
+            "character": 72
+          },
+          "end": {
+            "line": 2404,
+            "character": 80
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2503,
+            "character": 49
+          },
+          "end": {
+            "line": 2503,
+            "character": 57
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2526,
+            "character": 52
+          },
+          "end": {
+            "line": 2526,
+            "character": 60
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2536,
+            "character": 42
+          },
+          "end": {
+            "line": 2536,
+            "character": 50
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2558,
+            "character": 44
+          },
+          "end": {
+            "line": 2558,
+            "character": 52
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2512,
+            "character": 80
+          },
+          "end": {
+            "line": 2512,
+            "character": 109
+          }
+        },
+        "message": "\"get_lsp_kotlin_android_config\" is not a known attribute of \"None\"",
+        "severity": 1,
+        "code": "reportOptionalMemberAccess",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportOptionalMemberAccess"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2689,
+            "character": 48
+          },
+          "end": {
+            "line": 2689,
+            "character": 56
+          }
+        },
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3068,
+            "character": 26
+          },
+          "end": {
+            "line": 3068,
+            "character": 43
+          }
+        },
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3073,
+            "character": 26
+          },
+          "end": {
+            "line": 3073,
+            "character": 43
+          }
+        },
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3083,
+            "character": 23
+          },
+          "end": {
+            "line": 3083,
+            "character": 43
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3087,
+            "character": 19
+          },
+          "end": {
+            "line": 3087,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3097,
+            "character": 29
+          },
+          "end": {
+            "line": 3097,
+            "character": 41
+          }
+        },
+        "message": "Argument of type \"str\" cannot be assigned to parameter \"theme\" of type \"SUPPORTED_THEMES\" in function \"set_theme\"\n  Type \"str\" is not assignable to type \"SUPPORTED_THEMES\"\n    \"str\" is not assignable to type \"Literal['abcdef']\"\n    \"str\" is not assignable to type \"Literal['abcdefDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['abyss']\"\n    \"str\" is not assignable to type \"Literal['abyssDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['androidstudio']\"\n    \"str\" is not assignable to type \"Literal['androidstudioDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['andromeda']\"\n  ...",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3119,
+            "character": 23
+          },
+          "end": {
+            "line": 3119,
+            "character": 37
+          }
+        },
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3168,
+            "character": 19
+          },
+          "end": {
+            "line": 3168,
+            "character": 34
+          }
+        },
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3169,
+            "character": 40
+          },
+          "end": {
+            "line": 3169,
+            "character": 43
+          }
+        },
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3181,
+            "character": 19
+          },
+          "end": {
+            "line": 3181,
+            "character": 32
+          }
+        },
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3187,
+            "character": 19
+          },
+          "end": {
+            "line": 3187,
+            "character": 39
+          }
+        },
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "severity": 1,
+        "code": "reportAttributeAccessIssue",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportAttributeAccessIssue"
+        }
+      }
+    ],
+    "flat": [
+      {
+        "bucket": "error",
+        "message": "Expression of type \"None\" cannot be assigned to parameter of type \"str\"\n  \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Expression of type \"None\" cannot be assigned to parameter of type \"str\"\n  \"None\" is not assignable to \"str\"",
+        "startLine": 261,
+        "startChar": 46,
+        "endChar": 50
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "startLine": 539,
+        "startChar": 11,
+        "endChar": 26
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 540,
+        "startChar": 27,
+        "endChar": 33
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 553,
+        "startChar": 19,
+        "endChar": 39
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 627,
+        "startChar": 19,
+        "endChar": 39
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "startLine": 666,
+        "startChar": 16,
+        "endChar": 49
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 675,
+        "startChar": 15,
+        "endChar": 35
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 711,
+        "startChar": 69,
+        "endChar": 77
+      },
+      {
+        "bucket": "error",
+        "message": "\"get_lsp_kotlin_android_config\" is not a known attribute of \"None\"",
+        "source": "Pyright",
+        "code": "reportOptionalMemberAccess",
+        "sig": "Pyright|reportOptionalMemberAccess|1|\"get_lsp_kotlin_android_config\" is not a known attribute of \"None\"",
+        "startLine": 720,
+        "startChar": 95,
+        "endChar": 124
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 732,
+        "startChar": 64,
+        "endChar": 72
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 745,
+        "startChar": 68,
+        "endChar": 76
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 779,
+        "startChar": 85,
+        "endChar": 93
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 780,
+        "startChar": 74,
+        "endChar": 82
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "startLine": 886,
+        "startChar": 16,
+        "endChar": 49
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 894,
+        "startChar": 15,
+        "endChar": 35
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"encode\" for class \"object\"\n  Attribute \"encode\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"encode\" for class \"object\"\n  Attribute \"encode\" is unknown",
+        "startLine": 993,
+        "startChar": 95,
+        "endChar": 101
+      },
+      {
+        "bucket": "error",
+        "message": "\"encode\" is not a known attribute of \"None\"",
+        "source": "Pyright",
+        "code": "reportOptionalMemberAccess",
+        "sig": "Pyright|reportOptionalMemberAccess|1|\"encode\" is not a known attribute of \"None\"",
+        "startLine": 993,
+        "startChar": 95,
+        "endChar": 101
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "startLine": 1055,
+        "startChar": 23,
+        "endChar": 38
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "startLine": 1058,
+        "startChar": 27,
+        "endChar": 40
+      },
+      {
+        "bucket": "error",
+        "message": "No parameter named \"font_scale\"",
+        "source": "Pyright",
+        "code": "reportCallIssue",
+        "sig": "Pyright|reportCallIssue|1|No parameter named \"font_scale\"",
+        "startLine": 1113,
+        "startChar": 16,
+        "endChar": 26
+      },
+      {
+        "bucket": "error",
+        "message": "No parameter named \"show_minimap\"",
+        "source": "Pyright",
+        "code": "reportCallIssue",
+        "sig": "Pyright|reportCallIssue|1|No parameter named \"show_minimap\"",
+        "startLine": 1115,
+        "startChar": 16,
+        "endChar": 28
+      },
+      {
+        "bucket": "error",
+        "message": "No parameter named \"initial_scroll_line\"",
+        "source": "Pyright",
+        "code": "reportCallIssue",
+        "sig": "Pyright|reportCallIssue|1|No parameter named \"initial_scroll_line\"",
+        "startLine": 1116,
+        "startChar": 16,
+        "endChar": 35
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "startLine": 1119,
+        "startChar": 19,
+        "endChar": 34
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"path\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"str | None\" cannot be assigned to parameter \"path\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1123,
+        "startChar": 29,
+        "endChar": 41
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object | str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"object | str | None\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object | str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"object | str | None\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "startLine": 1123,
+        "startChar": 43,
+        "endChar": 57
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "startLine": 1129,
+        "startChar": 19,
+        "endChar": 36
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "startLine": 1130,
+        "startChar": 19,
+        "endChar": 33
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "startLine": 1131,
+        "startChar": 19,
+        "endChar": 36
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "startLine": 1133,
+        "startChar": 19,
+        "endChar": 38
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "startLine": 1134,
+        "startChar": 19,
+        "endChar": 32
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 1183,
+        "startChar": 64,
+        "endChar": 72
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 1184,
+        "startChar": 64,
+        "endChar": 72
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "startLine": 1193,
+        "startChar": 53,
+        "endChar": 68
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "startLine": 1221,
+        "startChar": 32,
+        "endChar": 66
+      },
+      {
+        "bucket": "error",
+        "message": "\"get\" is not a known attribute of \"None\"",
+        "source": "Pyright",
+        "code": "reportOptionalMemberAccess",
+        "sig": "Pyright|reportOptionalMemberAccess|1|\"get\" is not a known attribute of \"None\"",
+        "startLine": 1221,
+        "startChar": 45,
+        "endChar": 48
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "startLine": 1236,
+        "startChar": 23,
+        "endChar": 36
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "startLine": 1243,
+        "startChar": 23,
+        "endChar": 36
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object | str | None\" cannot be assigned to parameter \"current_content\" of type \"str\" in function \"_get_combined_diffs\"\n  Type \"object | str | None\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object | str | None\" cannot be assigned to parameter \"current_content\" of type \"str\" in function \"_get_combined_diffs\"\n  Type \"object | str | None\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "startLine": 1254,
+        "startChar": 76,
+        "endChar": 91
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 1255,
+        "startChar": 27,
+        "endChar": 47
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 1290,
+        "startChar": 39,
+        "endChar": 59
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "startLine": 1298,
+        "startChar": 19,
+        "endChar": 36
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "startLine": 1590,
+        "startChar": 24,
+        "endChar": 37
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"encode\" for class \"object\"\n  Attribute \"encode\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"encode\" for class \"object\"\n  Attribute \"encode\" is unknown",
+        "startLine": 1655,
+        "startChar": 52,
+        "endChar": 58
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | str | object\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"Unknown | str | object\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | str | object\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"Unknown | str | object\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "startLine": 1668,
+        "startChar": 31,
+        "endChar": 42
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "startLine": 1681,
+        "startChar": 11,
+        "endChar": 26
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 1712,
+        "startChar": 23,
+        "endChar": 43
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "startLine": 1732,
+        "startChar": 11,
+        "endChar": 28
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "startLine": 1733,
+        "startChar": 11,
+        "endChar": 25
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "startLine": 1734,
+        "startChar": 11,
+        "endChar": 28
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "startLine": 1735,
+        "startChar": 11,
+        "endChar": 30
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "startLine": 1736,
+        "startChar": 11,
+        "endChar": 24
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "startLine": 1737,
+        "startChar": 11,
+        "endChar": 28
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object | Unknown | Literal['']\" cannot be assigned to parameter \"current_content\" of type \"str\" in function \"_get_combined_diffs\"\n  Type \"object | Unknown | Literal['']\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object | Unknown | Literal['']\" cannot be assigned to parameter \"current_content\" of type \"str\" in function \"_get_combined_diffs\"\n  Type \"object | Unknown | Literal['']\" is not assignable to type \"str\"\n    \"object\" is not assignable to \"str\"",
+        "startLine": 1750,
+        "startChar": 83,
+        "endChar": 90
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 1751,
+        "startChar": 19,
+        "endChar": 39
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 1754,
+        "startChar": 19,
+        "endChar": 39
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 1756,
+        "startChar": 15,
+        "endChar": 35
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 1775,
+        "startChar": 15,
+        "endChar": 35
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"jump_to_line\" for class \"CodeMirror\"\n  Attribute \"jump_to_line\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"jump_to_line\" for class \"CodeMirror\"\n  Attribute \"jump_to_line\" is unknown",
+        "startLine": 1816,
+        "startChar": 11,
+        "endChar": 23
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"open_search_panel\" for class \"CodeMirror\"\n  Attribute \"open_search_panel\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"open_search_panel\" for class \"CodeMirror\"\n  Attribute \"open_search_panel\" is unknown",
+        "startLine": 1832,
+        "startChar": 15,
+        "endChar": 32
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "startLine": 1854,
+        "startChar": 15,
+        "endChar": 34
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "startLine": 1876,
+        "startChar": 15,
+        "endChar": 28
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_minimap_mode\" for class \"CodeMirror\"\n  Attribute \"set_minimap_mode\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_minimap_mode\" for class \"CodeMirror\"\n  Attribute \"set_minimap_mode\" is unknown",
+        "startLine": 1892,
+        "startChar": 15,
+        "endChar": 31
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"raw_path\" of type \"str\" in function \"_normalize_rel_path\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"str | None\" cannot be assigned to parameter \"raw_path\" of type \"str\" in function \"_normalize_rel_path\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1989,
+        "startChar": 87,
+        "endChar": 105
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 1991,
+        "startChar": 35,
+        "endChar": 55
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "startLine": 1996,
+        "startChar": 19,
+        "endChar": 36
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "startLine": 1998,
+        "startChar": 19,
+        "endChar": 36
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"str\" cannot be assigned to parameter \"theme\" of type \"SUPPORTED_THEMES\" in function \"set_theme\"\n  Type \"str\" is not assignable to type \"SUPPORTED_THEMES\"\n    \"str\" is not assignable to type \"Literal['abcdef']\"\n    \"str\" is not assignable to type \"Literal['abcdefDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['abyss']\"\n    \"str\" is not assignable to type \"Literal['abyssDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['androidstudio']\"\n    \"str\" is not assignable to type \"Literal['androidstudioDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['andromeda']\"\n  ...",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"str\" cannot be assigned to parameter \"theme\" of type \"SUPPORTED_THEMES\" in function \"set_theme\"\n  Type \"str\" is not assignable to type \"SUPPORTED_THEMES\"\n    \"str\" is not assignable to type \"Literal['abcdef']\"\n    \"str\" is not assignable to type \"Literal['abcdefDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['abyss']\"\n    \"str\" is not assignable to type \"Literal['abyssDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['androidstudio']\"\n    \"str\" is not assignable to type \"Literal['androidstudioDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['andromeda']\"\n  ...",
+        "startLine": 2006,
+        "startChar": 29,
+        "endChar": 41
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "startLine": 2013,
+        "startChar": 19,
+        "endChar": 33
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"toggle_color_picker\" for class \"CodeMirror\"\n  Attribute \"toggle_color_picker\" is unknown",
+        "startLine": 2015,
+        "startChar": 19,
+        "endChar": 38
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_read_only\" for class \"CodeMirror\"\n  Attribute \"set_read_only\" is unknown",
+        "startLine": 2017,
+        "startChar": 19,
+        "endChar": 32
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot assign to attribute \"show_minimap\" for class \"CodeMirror\"\n  Attribute \"show_minimap\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot assign to attribute \"show_minimap\" for class \"CodeMirror\"\n  Attribute \"show_minimap\" is unknown",
+        "startLine": 2020,
+        "startChar": 19,
+        "endChar": 31
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_sticky_scroll\" for class \"CodeMirror\"\n  Attribute \"set_sticky_scroll\" is unknown",
+        "startLine": 2023,
+        "startChar": 19,
+        "endChar": 36
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"disconnect_lsp\" for class \"CodeMirror\"\n  Attribute \"disconnect_lsp\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"disconnect_lsp\" for class \"CodeMirror\"\n  Attribute \"disconnect_lsp\" is unknown",
+        "startLine": 2168,
+        "startChar": 35,
+        "endChar": 49
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"disconnect_lsp\" for class \"CodeMirror\"\n  Attribute \"disconnect_lsp\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"disconnect_lsp\" for class \"CodeMirror\"\n  Attribute \"disconnect_lsp\" is unknown",
+        "startLine": 2183,
+        "startChar": 35,
+        "endChar": 49
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 2265,
+        "startChar": 38,
+        "endChar": 46
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"run_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"run_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 2289,
+        "startChar": 19,
+        "endChar": 45
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"shell_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"shell_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 2290,
+        "startChar": 21,
+        "endChar": 49
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"shell_run_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"shell_run_id\" of type \"str\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 2291,
+        "startChar": 25,
+        "endChar": 57
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"launcher_pid\" of type \"int\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"int\"\n    \"None\" is not assignable to \"int\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"launcher_pid\" of type \"int\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"int\"\n    \"None\" is not assignable to \"int\"",
+        "startLine": 2292,
+        "startChar": 25,
+        "endChar": 57
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"worker_pid\" of type \"int\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"int\"\n    \"None\" is not assignable to \"int\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"worker_pid\" of type \"int\" in function \"upsert_cached_document\"\n  Type \"Unknown | None\" is not assignable to type \"int\"\n    \"None\" is not assignable to \"int\"",
+        "startLine": 2293,
+        "startChar": 23,
+        "endChar": 53
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"object\" cannot be assigned to parameter \"unsaved\" of type \"bool\" in function \"_broadcast_cache_state\"\n  \"object\" is not assignable to \"bool\"",
+        "startLine": 2299,
+        "startChar": 20,
+        "endChar": 53
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 2307,
+        "startChar": 15,
+        "endChar": 35
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 2362,
+        "startChar": 65,
+        "endChar": 73
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 2390,
+        "startChar": 64,
+        "endChar": 72
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 2405,
+        "startChar": 72,
+        "endChar": 80
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 2504,
+        "startChar": 49,
+        "endChar": 57
+      },
+      {
+        "bucket": "error",
+        "message": "\"get_lsp_kotlin_android_config\" is not a known attribute of \"None\"",
+        "source": "Pyright",
+        "code": "reportOptionalMemberAccess",
+        "sig": "Pyright|reportOptionalMemberAccess|1|\"get_lsp_kotlin_android_config\" is not a known attribute of \"None\"",
+        "startLine": 2513,
+        "startChar": 80,
+        "endChar": 109
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 2527,
+        "startChar": 52,
+        "endChar": 60
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 2537,
+        "startChar": 42,
+        "endChar": 50
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 2559,
+        "startChar": 44,
+        "endChar": 52
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"run_sync\" for class \"type[BrokenWorkerInterpreter]\"\n  Attribute \"run_sync\" is unknown",
+        "startLine": 2690,
+        "startChar": 48,
+        "endChar": 56
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_zebra_stripes\" for class \"CodeMirror\"\n  Attribute \"set_zebra_stripes\" is unknown",
+        "startLine": 3069,
+        "startChar": 26,
+        "endChar": 43
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_indent_guides\" for class \"CodeMirror\"\n  Attribute \"set_indent_guides\" is unknown",
+        "startLine": 3074,
+        "startChar": 26,
+        "endChar": 43
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 3084,
+        "startChar": 23,
+        "endChar": 43
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 3088,
+        "startChar": 19,
+        "endChar": 39
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"str\" cannot be assigned to parameter \"theme\" of type \"SUPPORTED_THEMES\" in function \"set_theme\"\n  Type \"str\" is not assignable to type \"SUPPORTED_THEMES\"\n    \"str\" is not assignable to type \"Literal['abcdef']\"\n    \"str\" is not assignable to type \"Literal['abcdefDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['abyss']\"\n    \"str\" is not assignable to type \"Literal['abyssDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['androidstudio']\"\n    \"str\" is not assignable to type \"Literal['androidstudioDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['andromeda']\"\n  ...",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"str\" cannot be assigned to parameter \"theme\" of type \"SUPPORTED_THEMES\" in function \"set_theme\"\n  Type \"str\" is not assignable to type \"SUPPORTED_THEMES\"\n    \"str\" is not assignable to type \"Literal['abcdef']\"\n    \"str\" is not assignable to type \"Literal['abcdefDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['abyss']\"\n    \"str\" is not assignable to type \"Literal['abyssDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['androidstudio']\"\n    \"str\" is not assignable to type \"Literal['androidstudioDarkStyle']\"\n    \"str\" is not assignable to type \"Literal['andromeda']\"\n  ...",
+        "startLine": 3098,
+        "startChar": 29,
+        "endChar": 41
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_font_scale\" for class \"CodeMirror\"\n  Attribute \"set_font_scale\" is unknown",
+        "startLine": 3120,
+        "startChar": 23,
+        "endChar": 37
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot assign to attribute \"_cached_content\" for class \"CodeMirror\"\n  Attribute \"_cached_content\" is unknown",
+        "startLine": 3169,
+        "startChar": 19,
+        "endChar": 34
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"str | None\" cannot be assigned to parameter \"sha256\" of type \"str\" in function \"set_current_file\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 3170,
+        "startChar": 40,
+        "endChar": 43
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"notify_parent\" for class \"CodeMirror\"\n  Attribute \"notify_parent\" is unknown",
+        "startLine": 3182,
+        "startChar": 19,
+        "endChar": 32
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 3188,
+        "startChar": 19,
+        "endChar": 39
+      },
+      {
+        "bucket": "error",
+        "message": "Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "source": "Pyright",
+        "code": "reportAttributeAccessIssue",
+        "sig": "Pyright|reportAttributeAccessIssue|1|Cannot access attribute \"set_diff_decorations\" for class \"CodeMirror\"\n  Attribute \"set_diff_decorations\" is unknown",
+        "startLine": 3203,
+        "startChar": 15,
+        "endChar": 35
+      }
+    ],
+    "suppressed": [],
+    "lsp_stats": {
+      "broker": {
+        "requestsSent": 3,
+        "requestsDropped": 0,
+        "requestsCoalesced": 0,
+        "responsesReceived": 3,
+        "responsesStale": 0
+      },
+      "didChangeExplicit": 0,
+      "didChangeSentTotal": 3,
+      "diagnosticsReceived": 7,
+      "documentVersion": 2
+    }
+  }
+}

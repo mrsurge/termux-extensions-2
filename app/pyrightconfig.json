@@ -1,0 +1,12 @@
+{
+  "typeCheckingMode": "strict",
+  "pythonPlatform": "Linux",
+  "exclude": [
+    "apps",
+    "static/vendor"
+  ],
+  "ignore": [
+    "apps",
+    "static/vendor"
+  ]
+}

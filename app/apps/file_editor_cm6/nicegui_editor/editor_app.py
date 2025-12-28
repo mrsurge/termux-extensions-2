@@ -372,6 +372,24 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
     except Exception:
         effective_project_root = project_root
 
+    pyright_mode = "root"
+    if language_id == "python":
+        try:
+            pyright_mode = _history_store.get_lsp_pyright_config_mode(str(project_root))
+        except Exception:
+            pyright_mode = "root"
+
+    # If a python worker registry exists and mode=workers, pick the most specific worker root.
+    if language_id == "python" and pyright_mode == "workers":
+        try:
+            from app.apps.file_editor_cm6.python_lang.worker_registry import find_python_worker_for_file
+
+            entry = find_python_worker_for_file(project_root, file_path)
+            if entry and entry.root:
+                effective_project_root = entry.root
+        except Exception:
+            pass
+
     # At this point we want LSP active for this document
     print(f"[LSP] Triggering connect_lsp: {language_id} / {effective_project_root} / {file_path}", file=sys.stderr)
     try:
@@ -1889,6 +1907,7 @@ def _get_view_state_dict() -> dict:
         "enableLspClangd": False,
         "enableLspKotlin": False,
         "enableLspKotlinAndroid": False,
+        "lspPyrightConfigMode": "root",
     }
     try:
         project_path = _history_store.get_active_project() or str(get_project_root())
@@ -1947,6 +1966,7 @@ async def update_preference(data: dict = Body(...)):
         'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
         'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
         'lspKotlinAndroidModule', 'lspKotlinAndroidVariant',
+        'lspPyrightConfigMode',
     }
     if key not in LSP_KEYS:
         from app.apps.file_editor_cm6.preferences_store import DEFAULT_EDITOR_PREFS
@@ -2005,6 +2025,7 @@ async def update_preference(data: dict = Body(...)):
             'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
             'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
             'lspKotlinAndroidModule', 'lspKotlinAndroidVariant',
+            'lspPyrightConfigMode',
         ):
             # LSP preferences are project-scoped (sidecar SSOT via HistoryStore facade).
             # Persist + apply after success below.
@@ -2052,6 +2073,7 @@ async def update_preference(data: dict = Body(...)):
             'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
             'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
             'lspKotlinAndroidModule', 'lspKotlinAndroidVariant',
+            'lspPyrightConfigMode',
         ):
             project_path = _history_store.get_active_project() or str(get_project_root())
             if not project_path:
@@ -2084,6 +2106,18 @@ async def update_preference(data: dict = Body(...)):
                     sidecar.save()
                 except Exception as exc:
                     raise HTTPException(status_code=400, detail=f"Failed to persist kotlin-android config: {exc}")
+            elif key == 'lspPyrightConfigMode':
+                mode = str(value or "").strip().lower()
+                if not _history_store.set_lsp_pyright_config_mode(project_path, mode):
+                    raise RuntimeError("Failed to persist Pyright config mode")
+
+                # Restart Pyright LSP on next open/start.
+                from app.apps.file_editor_cm6.lsp_shell_manager import shutdown_lsp_shell
+
+                try:
+                    await shutdown_lsp_shell("python")
+                except Exception:
+                    pass
 
             else:
                 root_map = {
@@ -2582,6 +2616,21 @@ async def pyright_scan_project(data: dict = Body(...)):
     except Exception:
         pass
 
+    pyright_mode = "root"
+    try:
+        pyright_mode = _history_store.get_lsp_pyright_config_mode(str(base_project_root))
+    except Exception:
+        pyright_mode = "root"
+
+    worker_entries = []
+    try:
+        from app.apps.file_editor_cm6.python_lang.worker_registry import list_python_worker_roots
+
+        if pyright_mode == "workers":
+            worker_entries = list_python_worker_roots(base_project_root)
+    except Exception:
+        worker_entries = []
+
     lock_key = str(base_project_root)
 
     # Supersede any in-flight scan for this project.
@@ -2607,22 +2656,45 @@ async def pyright_scan_project(data: dict = Body(...)):
             from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
             from app.apps.file_editor_cm6.lsp_ws import get_diagnostics_summary_for_project, _compute_repo_fingerprint
 
-            scan = await run_pyright_workspace_scan(
-                base_project_root=base_project_root,
-                effective_project_root=effective_project_root,
-                timeout_s=180.0,
-            )
+            summary_by_rel: dict[str, dict[str, int]] = {}
+            if worker_entries:
+                for entry in worker_entries:
+                    project_path = entry.pyright_project or entry.root
+                    scan = await run_pyright_workspace_scan(
+                        base_project_root=base_project_root,
+                        effective_project_root=entry.root,
+                        project_path=project_path,
+                        timeout_s=180.0,
+                    )
+                    for rel, counts in (scan.summary_by_rel or {}).items():
+                        bucket = summary_by_rel.get(rel)
+                        if not bucket:
+                            bucket = {"errors": 0, "warnings": 0}
+                            summary_by_rel[rel] = bucket
+                        try:
+                            bucket["errors"] += int((counts or {}).get("errors") or 0)
+                            bucket["warnings"] += int((counts or {}).get("warnings") or 0)
+                        except Exception:
+                            continue
+            else:
+                scan = await run_pyright_workspace_scan(
+                    base_project_root=base_project_root,
+                    effective_project_root=effective_project_root,
+                    timeout_s=180.0,
+                )
+                summary_by_rel = scan.summary_by_rel or {}
 
             repo_fp = ""
             try:
-                repo_fp = await anyio.to_thread.run_sync(lambda: _compute_repo_fingerprint(effective_project_root))
+                fp_root = base_project_root if worker_entries else effective_project_root
+                repo_fp = await anyio.to_thread.run_sync(lambda: _compute_repo_fingerprint(fp_root))
             except Exception:
                 repo_fp = ""
 
             sidecar = ProjectSidecar.load_or_create(str(base_project_root))
             sidecar.set_pyright_diagnostics_summary(
-                summary_by_rel=scan.summary_by_rel,
-                effective_root=str(effective_project_root),
+                summary_by_rel=summary_by_rel,
+                effective_root=str(base_project_root if worker_entries else effective_project_root),
                 repo_fingerprint=repo_fp or None,
             )
             try:
@@ -2640,7 +2712,7 @@ async def pyright_scan_project(data: dict = Body(...)):
                     base_root = base_project_root.expanduser().resolve(strict=False)
                     # Build a set of file:// URIs that should remain flagged after this scan.
                     keep_uris: set[str] = set()
-                    for rel, counts in (scan.summary_by_rel or {}).items():
+                    for rel, counts in (summary_by_rel or {}).items():
                         try:
                             e = int((counts or {}).get("errors") or 0)
                             w = int((counts or {}).get("warnings") or 0)
@@ -2720,6 +2792,264 @@ async def pyright_scan_project(data: dict = Body(...)):
         "baseProjectRoot": str(base_project_root),
         "effectiveProjectRoot": str(effective_project_root),
     }
+
+
+# --- Pyright worker registry endpoints (repo-scoped config) ---
+
+@editor_router.get('/pyright/workers')
+async def pyright_workers_get():
+    base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
+    try:
+        from app.apps.file_editor_cm6.python_lang.worker_registry import (
+            load_python_worker_registry,
+            serialize_worker_entries,
+            get_registry_path,
+        )
+
+        entries = load_python_worker_registry(base_project_root)
+        payload = serialize_worker_entries(base_project_root, entries)
+        mode = _history_store.get_lsp_pyright_config_mode(str(base_project_root))
+        return {
+            "ok": True,
+            "data": {
+                "projectRoot": str(base_project_root),
+                "registryPath": str(get_registry_path(base_project_root)),
+                "mode": mode,
+                "workers": payload,
+            },
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@editor_router.post('/pyright/workers/save')
+async def pyright_workers_save(data: dict = Body(...)):
+    base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
+    items = data.get("workers", [])
+    try:
+        from app.apps.file_editor_cm6.python_lang.worker_registry import (
+            normalize_worker_payload,
+            save_python_worker_registry,
+            serialize_worker_entries,
+        )
+
+        entries, errors = normalize_worker_payload(base_project_root, items if isinstance(items, list) else [])
+        path = save_python_worker_registry(base_project_root, entries, generated=False)
+        payload = serialize_worker_entries(base_project_root, entries)
+        return {
+            "ok": True,
+            "data": {
+                "projectRoot": str(base_project_root),
+                "path": str(path),
+                "workers": payload,
+                "errors": errors,
+            },
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@editor_router.post('/pyright/workers/generate')
+async def pyright_workers_generate(data: dict = Body(...)):
+    base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
+    save = bool(data.get("save", False))
+    try:
+        from app.apps.file_editor_cm6.python_lang.worker_registry import (
+            discover_python_worker_entries,
+            save_python_worker_registry,
+            serialize_worker_entries,
+        )
+
+        entries = discover_python_worker_entries(base_project_root)
+        if save:
+            save_python_worker_registry(base_project_root, entries, generated=True)
+        payload = serialize_worker_entries(base_project_root, entries)
+        return {
+            "ok": True,
+            "data": {
+                "projectRoot": str(base_project_root),
+                "workers": payload,
+                "saved": save,
+            },
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+# --- Pyright config endpoints (pyrightconfig.json / pyproject.toml) ---
+
+_PYRIGHT_SIMPLE_KEYS = (
+    "typeCheckingMode",
+    "pythonVersion",
+    "pythonPlatform",
+    "include",
+    "exclude",
+    "ignore",
+    "venvPath",
+    "venv",
+)
+
+
+def _resolve_project_file(project_root: Path, raw_path: str) -> Path:
+    rel = _normalize_rel_path(project_root, raw_path)
+    return (project_root / rel).expanduser().resolve(strict=False)
+
+
+def _toml_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _toml_value(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        items = []
+        for item in value:
+            if isinstance(item, (int, float)):
+                items.append(str(item))
+            else:
+                items.append(f"\"{_toml_escape(str(item))}\"")
+        return f"[{', '.join(items)}]"
+    return f"\"{_toml_escape(str(value))}\""
+
+
+def _toml_block_lines(config: dict) -> list[str]:
+    lines = ["[tool.pyright]"]
+    for key in _PYRIGHT_SIMPLE_KEYS:
+        if key not in config:
+            continue
+        val = config.get(key)
+        if val is None:
+            continue
+        if isinstance(val, str) and not val.strip():
+            continue
+        if isinstance(val, list) and not val:
+            continue
+        lines.append(f"{key} = {_toml_value(val)}")
+    return lines
+
+
+def _update_pyright_toml(text: str, config: dict) -> str:
+    import re
+
+    pattern = re.compile(r"(?ms)^\\[tool\\.pyright\\]\\s*$.*?(?=^\\[[^\\]]+\\]\\s*$|\\Z)")
+    match = pattern.search(text or "")
+    new_lines = _toml_block_lines(config)
+
+    if match:
+        block = match.group(0)
+        block_lines = block.splitlines()
+        kept = [block_lines[0]]
+        for line in block_lines[1:]:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith(";"):
+                kept.append(line)
+                continue
+            key = stripped.split("=", 1)[0].strip()
+            if key in _PYRIGHT_SIMPLE_KEYS:
+                continue
+            kept.append(line)
+
+        # Ensure a blank line before new keys if existing content present.
+        if len(kept) > 1 and kept[-1].strip():
+            kept.append("")
+        kept.extend(new_lines[1:])
+
+        replacement = "\n".join(kept).rstrip() + "\n"
+        return text[: match.start()] + replacement + text[match.end() :]
+
+    # No existing block: append one.
+    base = text or ""
+    if base and not base.endswith("\n"):
+        base += "\n"
+    if base and not base.endswith("\n\n"):
+        base += "\n"
+    return base + "\n".join(new_lines).rstrip() + "\n"
+
+
+@editor_router.get('/pyright/config')
+async def pyright_config_get(path: str = Query(...)):
+    project_root = Path(_history_store.get_active_project() or str(get_project_root()))
+    try:
+        abs_path = _resolve_project_file(project_root, path)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    kind = "toml" if abs_path.suffix.lower() == ".toml" else "json"
+    config: dict = {}
+
+    if abs_path.exists():
+        try:
+            raw = abs_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            raw = ""
+        if kind == "json":
+            try:
+                config = json.loads(raw) if raw.strip() else {}
+            except Exception:
+                config = {}
+        else:
+            try:
+                import tomllib  # Python 3.11+
+
+                data = tomllib.loads(raw) if raw.strip() else {}
+                tool = data.get("tool") if isinstance(data, dict) else None
+                if isinstance(tool, dict):
+                    pyright_cfg = tool.get("pyright")
+                    if isinstance(pyright_cfg, dict):
+                        config = dict(pyright_cfg)
+            except Exception:
+                config = {}
+
+    return {
+        "ok": True,
+        "data": {
+            "path": str(abs_path),
+            "kind": kind,
+            "config": config or {},
+        },
+    }
+
+
+@editor_router.post('/pyright/config/save')
+async def pyright_config_save(data: dict = Body(...)):
+    project_root = Path(_history_store.get_active_project() or str(get_project_root()))
+    raw_path = data.get("path") or ""
+    config_in = data.get("config") or {}
+    if not isinstance(config_in, dict):
+        raise HTTPException(status_code=400, detail="config must be an object")
+
+    try:
+        abs_path = _resolve_project_file(project_root, raw_path)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    kind = "toml" if abs_path.suffix.lower() == ".toml" else "json"
+
+    if kind == "json":
+        abs_path.write_text(json.dumps(config_in, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return {"ok": True, "data": {"path": str(abs_path), "kind": kind, "config": config_in}}
+
+    # TOML (pyproject.toml): update [tool.pyright] block
+    existing = ""
+    try:
+        if abs_path.exists():
+            existing = abs_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        existing = ""
+
+    # Keep only known simple keys (others stay in file untouched).
+    config: dict = {}
+    for key in _PYRIGHT_SIMPLE_KEYS:
+        if key in config_in:
+            config[key] = config_in.get(key)
+
+    updated = _update_pyright_toml(existing, config)
+    abs_path.write_text(updated, encoding="utf-8")
+    return {"ok": True, "data": {"path": str(abs_path), "kind": kind, "config": config}}
 
 
 @editor_router.post('/set_view_settings')

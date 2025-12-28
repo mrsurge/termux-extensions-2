@@ -1,0 +1,25 @@
+{
+  "typeCheckingMode": "basic",
+  "pythonPlatform": "Linux",
+  "include": [
+    "../.."
+  ],
+  "exclude": [
+    "../file_editor",
+    "../archive_manager",
+    "../file_explorer",
+    "../aria_downloader",
+    "../terminal",
+    "../settings",
+    "../../static/vendor"
+  ],
+  "ignore": [
+    "../file_editor",
+    "../archive_manager",
+    "../file_explorer",
+    "../aria_downloader",
+    "../terminal",
+    "../settings",
+    "../../static/vendor"
+  ]
+}

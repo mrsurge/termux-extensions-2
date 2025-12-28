@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict
@@ -30,6 +31,28 @@ def _pyright_bin() -> Path:
         / ".bin"
         / "pyright"
     )
+
+
+def _build_pyright_env(effective_root: Path) -> dict:
+    """Match LSP env so CLI scan resolves imports the same way."""
+
+    env = dict(os.environ)
+    try:
+        root_p = effective_root.expanduser().resolve(strict=False)
+    except Exception:
+        root_p = effective_root
+
+    try:
+        repo_root = root_p.parent
+    except Exception:
+        repo_root = root_p
+
+    existing = (env.get("PYTHONPATH") or "").strip()
+    parts = [str(repo_root), str(root_p)]
+    if existing:
+        parts.append(existing)
+    env["PYTHONPATH"] = ":".join([p for p in parts if p])
+    return env
 
 
 def _best_effort_json_parse(text: str) -> dict:
@@ -85,6 +108,7 @@ async def run_pyright_workspace_scan(
     *,
     base_project_root: Path,
     effective_project_root: Path,
+    project_path: Path | None = None,
     timeout_s: float = 180.0,
 ) -> PyrightScanResult:
     """Run pyright (CLI) across effective_project_root and summarize per-file counts.
@@ -101,15 +125,24 @@ async def run_pyright_workspace_scan(
     project_hash = hashlib.sha1(str(base_project_root).encode()).hexdigest()[:8]
     label = f"pyright-scan:{project_hash}"
 
+    project_path = project_path or effective_project_root
+    try:
+        if project_path and project_path.name == "pyproject.toml":
+            project_path = project_path.parent
+    except Exception:
+        pass
+
     record = await orch.start_from_ref(
         "pyright_scan.yaml#pyright-scan",
         base_dir=(Path(__file__).resolve(strict=False).parents[1] / "shellspec"),
         ctx={
             "PYRIGHT_BIN": str(pyright),
             "EFFECTIVE_ROOT": str(effective_project_root),
+            "PROJECT_PATH": str(project_path),
             "PROJECT_HASH": project_hash,
         },
         label=label,
+        env_overrides=_build_pyright_env(effective_project_root),
     )
 
     pipe_state = mgr.get_pipe_state(record.id)

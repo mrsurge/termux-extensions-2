@@ -1553,6 +1553,131 @@
     cursor: not-allowed;
   }
 
+  .lsp-radio-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
+  }
+
+  .lsp-radio-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: var(--foreground, #e5e7eb);
+  }
+
+  .lsp-radio-option input[type="radio"] {
+    accent-color: var(--primary, #3b82f6);
+  }
+
+  .pyright-workers-modal .fe-modal-card {
+    max-width: 860px;
+  }
+
+  .pyright-workers-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+
+  .pyright-worker-row {
+    display: grid;
+    grid-template-columns: 1.2fr 2fr 2fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px;
+    border: 1px solid var(--border, #333);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    margin-bottom: 8px;
+  }
+
+  .pyright-worker-input {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border, #333);
+    background: rgba(0, 0, 0, 0.25);
+    color: var(--foreground, #e5e7eb);
+    font-size: 0.78rem;
+  }
+
+  .pyright-worker-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .pyright-worker-actions .fe-btn {
+    padding: 6px 8px;
+    font-size: 0.75rem;
+  }
+
+  .pyright-worker-enabled {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--muted-foreground, #9ca3af);
+  }
+
+  .pyright-config-grid {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .pyright-config-grid label {
+    font-size: 0.78rem;
+    color: var(--muted-foreground, #9ca3af);
+  }
+
+  .pyright-config-input,
+  .pyright-config-textarea,
+  .pyright-config-select {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border, #333);
+    background: rgba(0, 0, 0, 0.25);
+    color: var(--foreground, #e5e7eb);
+    font-size: 0.78rem;
+  }
+
+  .pyright-config-textarea {
+    min-height: 64px;
+    resize: vertical;
+  }
+
+  .pyright-config-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+
+  .pyright-config-note {
+    font-size: 0.75rem;
+    color: var(--muted-foreground, #9ca3af);
+    margin-bottom: 10px;
+  }
+
+  @media (max-width: 720px) {
+    .pyright-worker-row {
+      grid-template-columns: 1fr;
+    }
+    .pyright-worker-actions {
+      justify-content: flex-start;
+      flex-wrap: wrap;
+    }
+  }
+
   .lsp-global-toggle {
     display: flex;
     align-items: center;
@@ -2005,6 +2130,22 @@
               <label for="lsp-rootrel-pyright">Project root (relative)</label>
               <input id="lsp-rootrel-pyright" class="lsp-rootrel-input" type="text" placeholder="(default: project root)" autocomplete="off" autocapitalize="off" spellcheck="false" />
             </div>
+            <div class="lsp-server-config">
+              <label>Pyright scope</label>
+              <div class="lsp-radio-group">
+                <label class="lsp-radio-option">
+                  <input type="radio" name="lsp-pyright-mode" id="lsp-pyright-mode-root" value="root" />
+                  Single root
+                </label>
+                <label class="lsp-radio-option">
+                  <input type="radio" name="lsp-pyright-mode" id="lsp-pyright-mode-workers" value="workers" />
+                  Worker registry
+                </label>
+              </div>
+              <div class="lsp-radio-group">
+                <button class="fe-btn fe-btn-secondary" id="lsp-pyright-workers-btn" disabled>Configure Workers…</button>
+              </div>
+            </div>
           </div>
           <div class="lsp-server-status">
             <span class="lsp-status-dot" id="lsp-status-pyright"></span>
@@ -2094,6 +2235,87 @@
       <p style="margin-top: 16px; font-size: 0.75rem; color: var(--muted-foreground, #9ca3af);">
         Note: Changes take effect when you open a new file of the corresponding type.
       </p>
+    </div>
+  </div>
+</div>
+
+<!-- Pyright Worker Registry Modal -->
+<div id="pyright-workers-modal" class="fe-modal pyright-workers-modal" aria-hidden="true" style="z-index: 320;">
+  <div class="fe-modal-card">
+    <div class="fe-modal-header">
+      <strong>Pyright Worker Registry</strong>
+      <span style="flex:1"></span>
+      <button class="fe-btn" id="pyright-workers-close" aria-label="Close">✕</button>
+    </div>
+    <div class="fe-modal-body">
+      <div class="pyright-workers-toolbar">
+        <button class="fe-btn fe-btn-secondary" id="pyright-workers-generate">Scan repo</button>
+        <button class="fe-btn fe-btn-secondary" id="pyright-workers-add">Add row</button>
+        <span style="flex:1"></span>
+        <button class="fe-btn" id="pyright-workers-save">Save</button>
+      </div>
+      <div style="font-size:0.75rem; color: var(--muted-foreground, #9ca3af); margin-bottom: 10px;">
+        Each worker points to a Pyright config location (or a root folder). Use “Scan repo” to auto-detect configs.
+      </div>
+      <div id="pyright-workers-list"></div>
+      <div id="pyright-workers-empty" style="display:none; font-size:0.8rem; color: var(--muted-foreground, #9ca3af);">
+        No workers configured yet.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pyright Config Modal -->
+<div id="pyright-config-modal" class="fe-modal" aria-hidden="true" style="z-index: 330;">
+  <div class="fe-modal-card" style="max-width: 760px;">
+    <div class="fe-modal-header">
+      <strong>Pyright Config</strong>
+      <span style="flex:1"></span>
+      <button class="fe-btn" id="pyright-config-close" aria-label="Close">✕</button>
+    </div>
+    <div class="fe-modal-body">
+      <div class="pyright-config-note" id="pyright-config-note">
+        Edit common Pyright settings. For advanced changes, open the JSON file.
+      </div>
+      <div class="pyright-config-grid">
+        <label>Config path</label>
+        <input id="pyright-config-path" class="pyright-config-input" type="text" readonly />
+
+        <label for="pyright-config-type-btn">Type checking</label>
+        <div class="fe-menu" style="width: 100%;">
+          <button id="pyright-config-type-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;">
+            <span id="pyright-config-type-label">(default)</span>
+            <span aria-hidden="true">▾</span>
+          </button>
+          <div id="pyright-config-type-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 220px; overflow-y: auto;"></div>
+        </div>
+
+        <label for="pyright-config-version">Python version</label>
+        <input id="pyright-config-version" class="pyright-config-input" type="text" placeholder="3.11" />
+
+        <label for="pyright-config-platform">Python platform</label>
+        <input id="pyright-config-platform" class="pyright-config-input" type="text" placeholder="Linux" />
+
+        <label for="pyright-config-include">Include (one per line)</label>
+        <textarea id="pyright-config-include" class="pyright-config-textarea" placeholder="src"></textarea>
+
+        <label for="pyright-config-exclude">Exclude (one per line)</label>
+        <textarea id="pyright-config-exclude" class="pyright-config-textarea" placeholder="**/node_modules"></textarea>
+
+        <label for="pyright-config-ignore">Ignore (one per line)</label>
+        <textarea id="pyright-config-ignore" class="pyright-config-textarea" placeholder="**/migrations"></textarea>
+
+        <label for="pyright-config-venvpath">venvPath</label>
+        <input id="pyright-config-venvpath" class="pyright-config-input" type="text" placeholder=".">
+
+        <label for="pyright-config-venv">venv</label>
+        <input id="pyright-config-venv" class="pyright-config-input" type="text" placeholder=".venv">
+      </div>
+      <div class="pyright-config-actions">
+        <button class="fe-btn fe-btn-secondary" id="pyright-config-open-json">Open Config File</button>
+        <span style="flex:1"></span>
+        <button class="fe-btn" id="pyright-config-save">Save</button>
+      </div>
     </div>
   </div>
 </div>

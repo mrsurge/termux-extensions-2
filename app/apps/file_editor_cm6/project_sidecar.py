@@ -729,6 +729,7 @@ class ProjectSidecar:
             lsp = {"enabled": False, "servers": {}, "roots": {}, "android": {}}
         lsp.setdefault("enabled", False)
         lsp.setdefault("project_id", "")
+        lsp.setdefault("pyrightConfigMode", "root")
         android_cfg = lsp.get("android")
         if not isinstance(android_cfg, dict):
             android_cfg = {}
@@ -756,6 +757,19 @@ class ProjectSidecar:
 
         self._data["lsp"] = lsp
         return lsp
+
+    def get_lsp_pyright_config_mode(self) -> str:
+        lsp = self._ensure_lsp_schema()
+        mode = str(lsp.get("pyrightConfigMode") or "root").strip().lower()
+        return "workers" if mode == "workers" else "root"
+
+    def set_lsp_pyright_config_mode(self, mode: str) -> str:
+        lsp = self._ensure_lsp_schema()
+        text = str(mode or "").strip().lower()
+        final = "workers" if text == "workers" else "root"
+        lsp["pyrightConfigMode"] = final
+        self._data["lsp"] = lsp
+        return final
 
     def get_or_create_lsp_project_id(self) -> str:
         lsp = self._ensure_lsp_schema()
@@ -849,6 +863,7 @@ class ProjectSidecar:
             "enableLspClangd": bool(servers.get("clangd", False)),
             "enableLspKotlin": bool(servers.get("kotlin", False)),
             "enableLspKotlinAndroid": bool(servers.get("kotlin-android", False)),
+            "lspPyrightConfigMode": self.get_lsp_pyright_config_mode(),
             "lspRootRelPyright": str(roots.get("pyright") or ""),
             "lspRootRelTypescript": str(roots.get("typescript") or ""),
             "lspRootRelClangd": str(roots.get("clangd") or ""),

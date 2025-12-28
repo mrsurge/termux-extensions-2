@@ -1,0 +1,1669 @@
+{
+  "exported_at": "2025-12-28T05:38:58.742Z",
+  "project_root": "/data/data/com.termux/files/home/mrselect5",
+  "file_path": "/data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/explorer_ws.py",
+  "dump": {
+    "exported_at": "2025-12-28T05:38:49.944Z",
+    "uri": "file:///data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/explorer_ws.py",
+    "lsp_language_id": "python",
+    "lsp_file_uri": "file:///data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/explorer_ws.py",
+    "counts": {
+      "errors": 34,
+      "warnings": 0
+    },
+    "total": 34,
+    "activeIndex": 1,
+    "rawDiagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 479,
+            "character": 28
+          },
+          "end": {
+            "line": 479,
+            "character": 48
+          }
+        },
+        "message": "Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 508,
+            "character": 16
+          },
+          "end": {
+            "line": 508,
+            "character": 36
+          }
+        },
+        "message": "Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 605,
+            "character": 16
+          },
+          "end": {
+            "line": 605,
+            "character": 36
+          }
+        },
+        "message": "Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 744,
+            "character": 66
+          },
+          "end": {
+            "line": 744,
+            "character": 69
+          }
+        },
+        "message": "\"get\" is not a known attribute of \"None\"",
+        "severity": 1,
+        "code": "reportOptionalMemberAccess",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportOptionalMemberAccess"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 769,
+            "character": 71
+          },
+          "end": {
+            "line": 769,
+            "character": 75
+          }
+        },
+        "message": "Argument of type \"None\" cannot be assigned to parameter \"msg_id\" of type \"str\" in function \"handle_explorer_refresh\"\n  \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1074,
+            "character": 58
+          },
+          "end": {
+            "line": 1074,
+            "character": 77
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_file\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1082,
+            "character": 63
+          },
+          "end": {
+            "line": 1082,
+            "character": 82
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_directory\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1089,
+            "character": 37
+          },
+          "end": {
+            "line": 1089,
+            "character": 40
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1090,
+            "character": 27
+          },
+          "end": {
+            "line": 1090,
+            "character": 30
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"rename_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1090,
+            "character": 32
+          },
+          "end": {
+            "line": 1090,
+            "character": 55
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"new_name\" of type \"str\" in function \"rename_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1097,
+            "character": 37
+          },
+          "end": {
+            "line": 1097,
+            "character": 40
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1098,
+            "character": 27
+          },
+          "end": {
+            "line": 1098,
+            "character": 30
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"delete_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1126,
+            "character": 31
+          },
+          "end": {
+            "line": 1126,
+            "character": 40
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"batch_copy\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1129,
+            "character": 37
+          },
+          "end": {
+            "line": 1129,
+            "character": 46
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1138,
+            "character": 31
+          },
+          "end": {
+            "line": 1138,
+            "character": 40
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"batch_move\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1142,
+            "character": 37
+          },
+          "end": {
+            "line": 1142,
+            "character": 46
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1153,
+            "character": 40
+          },
+          "end": {
+            "line": 1153,
+            "character": 43
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1154,
+            "character": 25
+          },
+          "end": {
+            "line": 1154,
+            "character": 28
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"move_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1154,
+            "character": 30
+          },
+          "end": {
+            "line": 1154,
+            "character": 39
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"move_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1157,
+            "character": 37
+          },
+          "end": {
+            "line": 1157,
+            "character": 46
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1167,
+            "character": 25
+          },
+          "end": {
+            "line": 1167,
+            "character": 28
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"copy_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1167,
+            "character": 30
+          },
+          "end": {
+            "line": 1167,
+            "character": 39
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"copy_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1170,
+            "character": 37
+          },
+          "end": {
+            "line": 1170,
+            "character": 46
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1178,
+            "character": 33
+          },
+          "end": {
+            "line": 1178,
+            "character": 59
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_source\" of type \"str\" in function \"copy_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1178,
+            "character": 61
+          },
+          "end": {
+            "line": 1178,
+            "character": 69
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_rel\" of type \"str\" in function \"copy_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1182,
+            "character": 62
+          },
+          "end": {
+            "line": 1182,
+            "character": 70
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"list_dir\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1188,
+            "character": 33
+          },
+          "end": {
+            "line": 1188,
+            "character": 59
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_source\" of type \"str\" in function \"move_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1188,
+            "character": 61
+          },
+          "end": {
+            "line": 1188,
+            "character": 69
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_rel\" of type \"str\" in function \"move_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1192,
+            "character": 62
+          },
+          "end": {
+            "line": 1192,
+            "character": 70
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"list_dir\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1226,
+            "character": 40
+          },
+          "end": {
+            "line": 1226,
+            "character": 59
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"path\" of type \"str\" in function \"restore_path\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1233,
+            "character": 42
+          },
+          "end": {
+            "line": 1233,
+            "character": 64
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"message\" of type \"str\" in function \"commit_changes\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1348,
+            "character": 29
+          },
+          "end": {
+            "line": 1348,
+            "character": 55
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"parent_path_str\" of type \"str\" in function \"create_project\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1348,
+            "character": 57
+          },
+          "end": {
+            "line": 1348,
+            "character": 76
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_project\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1528,
+            "character": 40
+          },
+          "end": {
+            "line": 1528,
+            "character": 42
+          }
+        },
+        "message": "Argument of type \"SocketIOSocketShim\" cannot be assigned to parameter \"websocket\" of type \"WebSocket\" in function \"__init__\"\n  \"SocketIOSocketShim\" is not assignable to \"WebSocket\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      }
+    ],
+    "filteredDiagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 479,
+            "character": 28
+          },
+          "end": {
+            "line": 479,
+            "character": 48
+          }
+        },
+        "message": "Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 508,
+            "character": 16
+          },
+          "end": {
+            "line": 508,
+            "character": 36
+          }
+        },
+        "message": "Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 605,
+            "character": 16
+          },
+          "end": {
+            "line": 605,
+            "character": 36
+          }
+        },
+        "message": "Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 744,
+            "character": 66
+          },
+          "end": {
+            "line": 744,
+            "character": 69
+          }
+        },
+        "message": "\"get\" is not a known attribute of \"None\"",
+        "severity": 1,
+        "code": "reportOptionalMemberAccess",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportOptionalMemberAccess"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 769,
+            "character": 71
+          },
+          "end": {
+            "line": 769,
+            "character": 75
+          }
+        },
+        "message": "Argument of type \"None\" cannot be assigned to parameter \"msg_id\" of type \"str\" in function \"handle_explorer_refresh\"\n  \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1074,
+            "character": 58
+          },
+          "end": {
+            "line": 1074,
+            "character": 77
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_file\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1082,
+            "character": 63
+          },
+          "end": {
+            "line": 1082,
+            "character": 82
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_directory\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1089,
+            "character": 37
+          },
+          "end": {
+            "line": 1089,
+            "character": 40
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1090,
+            "character": 27
+          },
+          "end": {
+            "line": 1090,
+            "character": 30
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"rename_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1090,
+            "character": 32
+          },
+          "end": {
+            "line": 1090,
+            "character": 55
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"new_name\" of type \"str\" in function \"rename_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1097,
+            "character": 37
+          },
+          "end": {
+            "line": 1097,
+            "character": 40
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1098,
+            "character": 27
+          },
+          "end": {
+            "line": 1098,
+            "character": 30
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"delete_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1126,
+            "character": 31
+          },
+          "end": {
+            "line": 1126,
+            "character": 40
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"batch_copy\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1129,
+            "character": 37
+          },
+          "end": {
+            "line": 1129,
+            "character": 46
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1138,
+            "character": 31
+          },
+          "end": {
+            "line": 1138,
+            "character": 40
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"batch_move\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1142,
+            "character": 37
+          },
+          "end": {
+            "line": 1142,
+            "character": 46
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1153,
+            "character": 40
+          },
+          "end": {
+            "line": 1153,
+            "character": 43
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1154,
+            "character": 25
+          },
+          "end": {
+            "line": 1154,
+            "character": 28
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"move_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1154,
+            "character": 30
+          },
+          "end": {
+            "line": 1154,
+            "character": 39
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"move_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1157,
+            "character": 37
+          },
+          "end": {
+            "line": 1157,
+            "character": 46
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1167,
+            "character": 25
+          },
+          "end": {
+            "line": 1167,
+            "character": 28
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"copy_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1167,
+            "character": 30
+          },
+          "end": {
+            "line": 1167,
+            "character": 39
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"copy_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1170,
+            "character": 37
+          },
+          "end": {
+            "line": 1170,
+            "character": 46
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1178,
+            "character": 33
+          },
+          "end": {
+            "line": 1178,
+            "character": 59
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_source\" of type \"str\" in function \"copy_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1178,
+            "character": 61
+          },
+          "end": {
+            "line": 1178,
+            "character": 69
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_rel\" of type \"str\" in function \"copy_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1182,
+            "character": 62
+          },
+          "end": {
+            "line": 1182,
+            "character": 70
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"list_dir\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1188,
+            "character": 33
+          },
+          "end": {
+            "line": 1188,
+            "character": 59
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_source\" of type \"str\" in function \"move_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1188,
+            "character": 61
+          },
+          "end": {
+            "line": 1188,
+            "character": 69
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_rel\" of type \"str\" in function \"move_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1192,
+            "character": 62
+          },
+          "end": {
+            "line": 1192,
+            "character": 70
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"list_dir\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1226,
+            "character": 40
+          },
+          "end": {
+            "line": 1226,
+            "character": 59
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"path\" of type \"str\" in function \"restore_path\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1233,
+            "character": 42
+          },
+          "end": {
+            "line": 1233,
+            "character": 64
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"message\" of type \"str\" in function \"commit_changes\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1348,
+            "character": 29
+          },
+          "end": {
+            "line": 1348,
+            "character": 55
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"parent_path_str\" of type \"str\" in function \"create_project\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1348,
+            "character": 57
+          },
+          "end": {
+            "line": 1348,
+            "character": 76
+          }
+        },
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_project\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1528,
+            "character": 40
+          },
+          "end": {
+            "line": 1528,
+            "character": 42
+          }
+        },
+        "message": "Argument of type \"SocketIOSocketShim\" cannot be assigned to parameter \"websocket\" of type \"WebSocket\" in function \"__init__\"\n  \"SocketIOSocketShim\" is not assignable to \"WebSocket\"",
+        "severity": 1,
+        "code": "reportArgumentType",
+        "source": "Pyright",
+        "codeDescription": {
+          "href": "https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType"
+        }
+      }
+    ],
+    "flat": [
+      {
+        "bucket": "error",
+        "message": "Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "startLine": 480,
+        "startChar": 28,
+        "endChar": 48
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "startLine": 509,
+        "startChar": 16,
+        "endChar": 36
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"AbstractEventLoop | None\" cannot be assigned to parameter \"loop\" of type \"AbstractEventLoop\" in function \"run_coroutine_threadsafe\"\n  Type \"AbstractEventLoop | None\" is not assignable to type \"AbstractEventLoop\"\n    \"None\" is not assignable to \"AbstractEventLoop\"",
+        "startLine": 606,
+        "startChar": 16,
+        "endChar": 36
+      },
+      {
+        "bucket": "error",
+        "message": "\"get\" is not a known attribute of \"None\"",
+        "source": "Pyright",
+        "code": "reportOptionalMemberAccess",
+        "sig": "Pyright|reportOptionalMemberAccess|1|\"get\" is not a known attribute of \"None\"",
+        "startLine": 745,
+        "startChar": 66,
+        "endChar": 69
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"None\" cannot be assigned to parameter \"msg_id\" of type \"str\" in function \"handle_explorer_refresh\"\n  \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"None\" cannot be assigned to parameter \"msg_id\" of type \"str\" in function \"handle_explorer_refresh\"\n  \"None\" is not assignable to \"str\"",
+        "startLine": 770,
+        "startChar": 71,
+        "endChar": 75
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_file\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_file\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1075,
+        "startChar": 58,
+        "endChar": 77
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_directory\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_directory\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1083,
+        "startChar": 63,
+        "endChar": 82
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1090,
+        "startChar": 37,
+        "endChar": 40
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"rename_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"rename_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1091,
+        "startChar": 27,
+        "endChar": 30
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"new_name\" of type \"str\" in function \"rename_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"new_name\" of type \"str\" in function \"rename_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1091,
+        "startChar": 32,
+        "endChar": 55
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1098,
+        "startChar": 37,
+        "endChar": 40
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"delete_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"delete_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1099,
+        "startChar": 27,
+        "endChar": 30
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"batch_copy\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"batch_copy\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1127,
+        "startChar": 31,
+        "endChar": 40
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1130,
+        "startChar": 37,
+        "endChar": 46
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"batch_move\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"batch_move\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1139,
+        "startChar": 31,
+        "endChar": 40
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1143,
+        "startChar": 37,
+        "endChar": 46
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel_path\" of type \"str\" in function \"_get_parent_rel\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1154,
+        "startChar": 40,
+        "endChar": 43
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"move_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"move_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1155,
+        "startChar": 25,
+        "endChar": 28
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"move_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"move_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1155,
+        "startChar": 30,
+        "endChar": 39
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1158,
+        "startChar": 37,
+        "endChar": 46
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"copy_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"copy_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1168,
+        "startChar": 25,
+        "endChar": 28
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"copy_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_dir_path\" of type \"str\" in function \"copy_entry\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1168,
+        "startChar": 30,
+        "endChar": 39
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_path\" of type \"str\" in function \"_get_rel_from_abs\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1171,
+        "startChar": 37,
+        "endChar": 46
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_source\" of type \"str\" in function \"copy_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_source\" of type \"str\" in function \"copy_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1179,
+        "startChar": 33,
+        "endChar": 59
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_rel\" of type \"str\" in function \"copy_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_rel\" of type \"str\" in function \"copy_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1179,
+        "startChar": 61,
+        "endChar": 69
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"list_dir\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"list_dir\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1183,
+        "startChar": 62,
+        "endChar": 70
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_source\" of type \"str\" in function \"move_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"abs_source\" of type \"str\" in function \"move_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1189,
+        "startChar": 33,
+        "endChar": 59
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_rel\" of type \"str\" in function \"move_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"dest_rel\" of type \"str\" in function \"move_entry_inbound\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1189,
+        "startChar": 61,
+        "endChar": 69
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"list_dir\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"rel\" of type \"str\" in function \"list_dir\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1193,
+        "startChar": 62,
+        "endChar": 70
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"path\" of type \"str\" in function \"restore_path\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"path\" of type \"str\" in function \"restore_path\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1227,
+        "startChar": 40,
+        "endChar": 59
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"message\" of type \"str\" in function \"commit_changes\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"message\" of type \"str\" in function \"commit_changes\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1234,
+        "startChar": 42,
+        "endChar": 64
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"parent_path_str\" of type \"str\" in function \"create_project\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"parent_path_str\" of type \"str\" in function \"create_project\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1349,
+        "startChar": 29,
+        "endChar": 55
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_project\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"Unknown | None\" cannot be assigned to parameter \"name\" of type \"str\" in function \"create_project\"\n  Type \"Unknown | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+        "startLine": 1349,
+        "startChar": 57,
+        "endChar": 76
+      },
+      {
+        "bucket": "error",
+        "message": "Argument of type \"SocketIOSocketShim\" cannot be assigned to parameter \"websocket\" of type \"WebSocket\" in function \"__init__\"\n  \"SocketIOSocketShim\" is not assignable to \"WebSocket\"",
+        "source": "Pyright",
+        "code": "reportArgumentType",
+        "sig": "Pyright|reportArgumentType|1|Argument of type \"SocketIOSocketShim\" cannot be assigned to parameter \"websocket\" of type \"WebSocket\" in function \"__init__\"\n  \"SocketIOSocketShim\" is not assignable to \"WebSocket\"",
+        "startLine": 1529,
+        "startChar": 40,
+        "endChar": 42
+      }
+    ],
+    "suppressed": [],
+    "lsp_stats": {
+      "broker": {
+        "requestsSent": 4,
+        "requestsDropped": 0,
+        "requestsCoalesced": 0,
+        "responsesReceived": 4,
+        "responsesStale": 0
+      },
+      "didChangeExplicit": 0,
+      "didChangeSentTotal": 4,
+      "diagnosticsReceived": 21,
+      "documentVersion": 2
+    }
+  }
+}

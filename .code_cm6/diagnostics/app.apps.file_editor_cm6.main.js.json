@@ -1,0 +1,1381 @@
+{
+  "exported_at": "2025-12-28T05:52:37.862Z",
+  "project_root": "/data/data/com.termux/files/home/mrselect5",
+  "file_path": "/data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/main.js",
+  "dump": {
+    "exported_at": "2025-12-28T05:52:36.318Z",
+    "uri": "file:///data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/main.js",
+    "lsp_language_id": "javascript",
+    "lsp_file_uri": "file:///data/data/com.termux/files/home/mrselect5/app/apps/file_editor_cm6/main.js",
+    "counts": {
+      "errors": 0,
+      "warnings": 26
+    },
+    "total": 26,
+    "activeIndex": 25,
+    "rawDiagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 288,
+            "character": 45
+          },
+          "end": {
+            "line": 288,
+            "character": 51
+          }
+        },
+        "message": "'rootEl' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 357,
+            "character": 6
+          },
+          "end": {
+            "line": 357,
+            "character": 15
+          }
+        },
+        "message": "'container' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 429,
+            "character": 9
+          },
+          "end": {
+            "line": 429,
+            "character": 23
+          }
+        },
+        "message": "'_basenameNoExt' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 437,
+            "character": 9
+          },
+          "end": {
+            "line": 437,
+            "character": 18
+          }
+        },
+        "message": "'_extNoDot' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 776,
+            "character": 9
+          },
+          "end": {
+            "line": 776,
+            "character": 27
+          }
+        },
+        "message": "'connectEditTracker' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 784,
+            "character": 9
+          },
+          "end": {
+            "line": 784,
+            "character": 30
+          }
+        },
+        "message": "'disconnectEditTracker' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 791,
+            "character": 9
+          },
+          "end": {
+            "line": 791,
+            "character": 31
+          }
+        },
+        "message": "'handleEditTrackerEvent' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 956,
+            "character": 9
+          },
+          "end": {
+            "line": 956,
+            "character": 31
+          }
+        },
+        "message": "'formatDisplayDirectory' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1043,
+            "character": 4
+          },
+          "end": {
+            "line": 1043,
+            "character": 21
+          }
+        },
+        "message": "'agentDrawerHandle' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1060,
+            "character": 4
+          },
+          "end": {
+            "line": 1060,
+            "character": 17
+          }
+        },
+        "message": "'editTrackerWS' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1061,
+            "character": 66
+          },
+          "end": {
+            "line": 1061,
+            "character": 72
+          }
+        },
+        "message": "'(from: number, length?: number | undefined): string' is deprecated.",
+        "severity": 4,
+        "code": 6385,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.es5.d.ts",
+              "range": {
+                "start": {
+                  "line": 521,
+                  "character": 7
+                },
+                "end": {
+                  "line": 522,
+                  "character": 7
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1478,
+            "character": 20
+          },
+          "end": {
+            "line": 1478,
+            "character": 27
+          }
+        },
+        "message": "'docText' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1484,
+            "character": 17
+          },
+          "end": {
+            "line": 1484,
+            "character": 18
+          }
+        },
+        "message": "'t' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1657,
+            "character": 10
+          },
+          "end": {
+            "line": 1657,
+            "character": 20
+          }
+        },
+        "message": "'scrollLine' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1681,
+            "character": 35
+          },
+          "end": {
+            "line": 1681,
+            "character": 49
+          }
+        },
+        "message": "'newProjectPath' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1938,
+            "character": 9
+          },
+          "end": {
+            "line": 1938,
+            "character": 32
+          }
+        },
+        "message": "'scheduleExplorerRefresh' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2196,
+            "character": 62
+          },
+          "end": {
+            "line": 2196,
+            "character": 68
+          }
+        },
+        "message": "'(from: number, length?: number | undefined): string' is deprecated.",
+        "severity": 4,
+        "code": 6385,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.es5.d.ts",
+              "range": {
+                "start": {
+                  "line": 521,
+                  "character": 7
+                },
+                "end": {
+                  "line": 522,
+                  "character": 7
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2259,
+            "character": 62
+          },
+          "end": {
+            "line": 2259,
+            "character": 68
+          }
+        },
+        "message": "'(from: number, length?: number | undefined): string' is deprecated.",
+        "severity": 4,
+        "code": 6385,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.es5.d.ts",
+              "range": {
+                "start": {
+                  "line": 521,
+                  "character": 7
+                },
+                "end": {
+                  "line": 522,
+                  "character": 7
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2391,
+            "character": 18
+          },
+          "end": {
+            "line": 2391,
+            "character": 33
+          }
+        },
+        "message": "'await' has no effect on the type of this expression.",
+        "severity": 4,
+        "code": 80007,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3025,
+            "character": 20
+          },
+          "end": {
+            "line": 3025,
+            "character": 28
+          }
+        },
+        "message": "'serverId' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3708,
+            "character": 15
+          },
+          "end": {
+            "line": 3708,
+            "character": 28
+          }
+        },
+        "message": "'_writeFileAbs' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 4274,
+            "character": 38
+          },
+          "end": {
+            "line": 4274,
+            "character": 49
+          }
+        },
+        "message": "The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "severity": 4,
+        "code": 6387,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.dom.d.ts",
+              "range": {
+                "start": {
+                  "line": 10252,
+                  "character": 7
+                },
+                "end": {
+                  "line": 10255,
+                  "character": 5
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 4275,
+            "character": 38
+          },
+          "end": {
+            "line": 4275,
+            "character": 49
+          }
+        },
+        "message": "The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "severity": 4,
+        "code": 6387,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.dom.d.ts",
+              "range": {
+                "start": {
+                  "line": 10252,
+                  "character": 7
+                },
+                "end": {
+                  "line": 10255,
+                  "character": 5
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 4284,
+            "character": 11
+          },
+          "end": {
+            "line": 4284,
+            "character": 22
+          }
+        },
+        "message": "The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "severity": 4,
+        "code": 6387,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.dom.d.ts",
+              "range": {
+                "start": {
+                  "line": 10252,
+                  "character": 7
+                },
+                "end": {
+                  "line": 10255,
+                  "character": 5
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 4475,
+            "character": 9
+          },
+          "end": {
+            "line": 4475,
+            "character": 18
+          }
+        },
+        "message": "'reobserve' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 4481,
+            "character": 54
+          },
+          "end": {
+            "line": 4481,
+            "character": 62
+          }
+        },
+        "message": "'platform' is deprecated.",
+        "severity": 4,
+        "code": 6385,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.dom.d.ts",
+              "range": {
+                "start": {
+                  "line": 21552,
+                  "character": 7
+                },
+                "end": {
+                  "line": 21555,
+                  "character": 5
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      }
+    ],
+    "filteredDiagnostics": [
+      {
+        "range": {
+          "start": {
+            "line": 288,
+            "character": 45
+          },
+          "end": {
+            "line": 288,
+            "character": 51
+          }
+        },
+        "message": "'rootEl' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 357,
+            "character": 6
+          },
+          "end": {
+            "line": 357,
+            "character": 15
+          }
+        },
+        "message": "'container' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 429,
+            "character": 9
+          },
+          "end": {
+            "line": 429,
+            "character": 23
+          }
+        },
+        "message": "'_basenameNoExt' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 437,
+            "character": 9
+          },
+          "end": {
+            "line": 437,
+            "character": 18
+          }
+        },
+        "message": "'_extNoDot' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 776,
+            "character": 9
+          },
+          "end": {
+            "line": 776,
+            "character": 27
+          }
+        },
+        "message": "'connectEditTracker' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 784,
+            "character": 9
+          },
+          "end": {
+            "line": 784,
+            "character": 30
+          }
+        },
+        "message": "'disconnectEditTracker' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 791,
+            "character": 9
+          },
+          "end": {
+            "line": 791,
+            "character": 31
+          }
+        },
+        "message": "'handleEditTrackerEvent' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 956,
+            "character": 9
+          },
+          "end": {
+            "line": 956,
+            "character": 31
+          }
+        },
+        "message": "'formatDisplayDirectory' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1043,
+            "character": 4
+          },
+          "end": {
+            "line": 1043,
+            "character": 21
+          }
+        },
+        "message": "'agentDrawerHandle' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1060,
+            "character": 4
+          },
+          "end": {
+            "line": 1060,
+            "character": 17
+          }
+        },
+        "message": "'editTrackerWS' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1061,
+            "character": 66
+          },
+          "end": {
+            "line": 1061,
+            "character": 72
+          }
+        },
+        "message": "'(from: number, length?: number | undefined): string' is deprecated.",
+        "severity": 4,
+        "code": 6385,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.es5.d.ts",
+              "range": {
+                "start": {
+                  "line": 521,
+                  "character": 7
+                },
+                "end": {
+                  "line": 522,
+                  "character": 7
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1478,
+            "character": 20
+          },
+          "end": {
+            "line": 1478,
+            "character": 27
+          }
+        },
+        "message": "'docText' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1484,
+            "character": 17
+          },
+          "end": {
+            "line": 1484,
+            "character": 18
+          }
+        },
+        "message": "'t' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1657,
+            "character": 10
+          },
+          "end": {
+            "line": 1657,
+            "character": 20
+          }
+        },
+        "message": "'scrollLine' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1681,
+            "character": 35
+          },
+          "end": {
+            "line": 1681,
+            "character": 49
+          }
+        },
+        "message": "'newProjectPath' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 1938,
+            "character": 9
+          },
+          "end": {
+            "line": 1938,
+            "character": 32
+          }
+        },
+        "message": "'scheduleExplorerRefresh' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2196,
+            "character": 62
+          },
+          "end": {
+            "line": 2196,
+            "character": 68
+          }
+        },
+        "message": "'(from: number, length?: number | undefined): string' is deprecated.",
+        "severity": 4,
+        "code": 6385,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.es5.d.ts",
+              "range": {
+                "start": {
+                  "line": 521,
+                  "character": 7
+                },
+                "end": {
+                  "line": 522,
+                  "character": 7
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2259,
+            "character": 62
+          },
+          "end": {
+            "line": 2259,
+            "character": 68
+          }
+        },
+        "message": "'(from: number, length?: number | undefined): string' is deprecated.",
+        "severity": 4,
+        "code": 6385,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.es5.d.ts",
+              "range": {
+                "start": {
+                  "line": 521,
+                  "character": 7
+                },
+                "end": {
+                  "line": 522,
+                  "character": 7
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 2391,
+            "character": 18
+          },
+          "end": {
+            "line": 2391,
+            "character": 33
+          }
+        },
+        "message": "'await' has no effect on the type of this expression.",
+        "severity": 4,
+        "code": 80007,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3025,
+            "character": 20
+          },
+          "end": {
+            "line": 3025,
+            "character": 28
+          }
+        },
+        "message": "'serverId' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 3708,
+            "character": 15
+          },
+          "end": {
+            "line": 3708,
+            "character": 28
+          }
+        },
+        "message": "'_writeFileAbs' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 4274,
+            "character": 38
+          },
+          "end": {
+            "line": 4274,
+            "character": 49
+          }
+        },
+        "message": "The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "severity": 4,
+        "code": 6387,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.dom.d.ts",
+              "range": {
+                "start": {
+                  "line": 10252,
+                  "character": 7
+                },
+                "end": {
+                  "line": 10255,
+                  "character": 5
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 4275,
+            "character": 38
+          },
+          "end": {
+            "line": 4275,
+            "character": 49
+          }
+        },
+        "message": "The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "severity": 4,
+        "code": 6387,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.dom.d.ts",
+              "range": {
+                "start": {
+                  "line": 10252,
+                  "character": 7
+                },
+                "end": {
+                  "line": 10255,
+                  "character": 5
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 4284,
+            "character": 11
+          },
+          "end": {
+            "line": 4284,
+            "character": 22
+          }
+        },
+        "message": "The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "severity": 4,
+        "code": 6387,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.dom.d.ts",
+              "range": {
+                "start": {
+                  "line": 10252,
+                  "character": 7
+                },
+                "end": {
+                  "line": 10255,
+                  "character": 5
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      },
+      {
+        "range": {
+          "start": {
+            "line": 4475,
+            "character": 9
+          },
+          "end": {
+            "line": 4475,
+            "character": 18
+          }
+        },
+        "message": "'reobserve' is declared but its value is never read.",
+        "severity": 4,
+        "code": 6133,
+        "source": "typescript"
+      },
+      {
+        "range": {
+          "start": {
+            "line": 4481,
+            "character": 54
+          },
+          "end": {
+            "line": 4481,
+            "character": 62
+          }
+        },
+        "message": "'platform' is deprecated.",
+        "severity": 4,
+        "code": 6385,
+        "source": "typescript",
+        "relatedInformation": [
+          {
+            "location": {
+              "uri": "file:///data/data/com.termux/files/home/mrselect5/app/static/vendor/lsp_servers/node_modules/typescript/lib/lib.dom.d.ts",
+              "range": {
+                "start": {
+                  "line": 21552,
+                  "character": 7
+                },
+                "end": {
+                  "line": 21555,
+                  "character": 5
+                }
+              }
+            },
+            "message": "The declaration was marked as deprecated here."
+          }
+        ]
+      }
+    ],
+    "flat": [
+      {
+        "bucket": "warning",
+        "message": "'rootEl' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'rootEl' is declared but its value is never read.",
+        "startLine": 289,
+        "startChar": 45,
+        "endChar": 51
+      },
+      {
+        "bucket": "warning",
+        "message": "'container' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'container' is declared but its value is never read.",
+        "startLine": 358,
+        "startChar": 6,
+        "endChar": 15
+      },
+      {
+        "bucket": "warning",
+        "message": "'_basenameNoExt' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'_basenameNoExt' is declared but its value is never read.",
+        "startLine": 430,
+        "startChar": 9,
+        "endChar": 23
+      },
+      {
+        "bucket": "warning",
+        "message": "'_extNoDot' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'_extNoDot' is declared but its value is never read.",
+        "startLine": 438,
+        "startChar": 9,
+        "endChar": 18
+      },
+      {
+        "bucket": "warning",
+        "message": "'connectEditTracker' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'connectEditTracker' is declared but its value is never read.",
+        "startLine": 777,
+        "startChar": 9,
+        "endChar": 27
+      },
+      {
+        "bucket": "warning",
+        "message": "'disconnectEditTracker' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'disconnectEditTracker' is declared but its value is never read.",
+        "startLine": 785,
+        "startChar": 9,
+        "endChar": 30
+      },
+      {
+        "bucket": "warning",
+        "message": "'handleEditTrackerEvent' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'handleEditTrackerEvent' is declared but its value is never read.",
+        "startLine": 792,
+        "startChar": 9,
+        "endChar": 31
+      },
+      {
+        "bucket": "warning",
+        "message": "'formatDisplayDirectory' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'formatDisplayDirectory' is declared but its value is never read.",
+        "startLine": 957,
+        "startChar": 9,
+        "endChar": 31
+      },
+      {
+        "bucket": "warning",
+        "message": "'agentDrawerHandle' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'agentDrawerHandle' is declared but its value is never read.",
+        "startLine": 1044,
+        "startChar": 4,
+        "endChar": 21
+      },
+      {
+        "bucket": "warning",
+        "message": "'editTrackerWS' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'editTrackerWS' is declared but its value is never read.",
+        "startLine": 1061,
+        "startChar": 4,
+        "endChar": 17
+      },
+      {
+        "bucket": "warning",
+        "message": "'(from: number, length?: number | undefined): string' is deprecated.",
+        "source": "typescript",
+        "code": "6385",
+        "sig": "typescript|6385|4|'(from: number, length?: number | undefined): string' is deprecated.",
+        "startLine": 1062,
+        "startChar": 66,
+        "endChar": 72
+      },
+      {
+        "bucket": "warning",
+        "message": "'docText' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'docText' is declared but its value is never read.",
+        "startLine": 1479,
+        "startChar": 20,
+        "endChar": 27
+      },
+      {
+        "bucket": "warning",
+        "message": "'t' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'t' is declared but its value is never read.",
+        "startLine": 1485,
+        "startChar": 17,
+        "endChar": 18
+      },
+      {
+        "bucket": "warning",
+        "message": "'scrollLine' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'scrollLine' is declared but its value is never read.",
+        "startLine": 1658,
+        "startChar": 10,
+        "endChar": 20
+      },
+      {
+        "bucket": "warning",
+        "message": "'newProjectPath' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'newProjectPath' is declared but its value is never read.",
+        "startLine": 1682,
+        "startChar": 35,
+        "endChar": 49
+      },
+      {
+        "bucket": "warning",
+        "message": "'scheduleExplorerRefresh' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'scheduleExplorerRefresh' is declared but its value is never read.",
+        "startLine": 1939,
+        "startChar": 9,
+        "endChar": 32
+      },
+      {
+        "bucket": "warning",
+        "message": "'(from: number, length?: number | undefined): string' is deprecated.",
+        "source": "typescript",
+        "code": "6385",
+        "sig": "typescript|6385|4|'(from: number, length?: number | undefined): string' is deprecated.",
+        "startLine": 2197,
+        "startChar": 62,
+        "endChar": 68
+      },
+      {
+        "bucket": "warning",
+        "message": "'(from: number, length?: number | undefined): string' is deprecated.",
+        "source": "typescript",
+        "code": "6385",
+        "sig": "typescript|6385|4|'(from: number, length?: number | undefined): string' is deprecated.",
+        "startLine": 2260,
+        "startChar": 62,
+        "endChar": 68
+      },
+      {
+        "bucket": "warning",
+        "message": "'await' has no effect on the type of this expression.",
+        "source": "typescript",
+        "code": "80007",
+        "sig": "typescript|80007|4|'await' has no effect on the type of this expression.",
+        "startLine": 2392,
+        "startChar": 18,
+        "endChar": 33
+      },
+      {
+        "bucket": "warning",
+        "message": "'serverId' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'serverId' is declared but its value is never read.",
+        "startLine": 3026,
+        "startChar": 20,
+        "endChar": 28
+      },
+      {
+        "bucket": "warning",
+        "message": "'_writeFileAbs' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'_writeFileAbs' is declared but its value is never read.",
+        "startLine": 3709,
+        "startChar": 15,
+        "endChar": 28
+      },
+      {
+        "bucket": "warning",
+        "message": "The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "source": "typescript",
+        "code": "6387",
+        "sig": "typescript|6387|4|The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "startLine": 4275,
+        "startChar": 38,
+        "endChar": 49
+      },
+      {
+        "bucket": "warning",
+        "message": "The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "source": "typescript",
+        "code": "6387",
+        "sig": "typescript|6387|4|The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "startLine": 4276,
+        "startChar": 38,
+        "endChar": 49
+      },
+      {
+        "bucket": "warning",
+        "message": "The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "source": "typescript",
+        "code": "6387",
+        "sig": "typescript|6387|4|The signature '(commandId: string, showUI?: boolean | undefined, value?: string | undefined): boolean' of 'document.execCommand' is deprecated.",
+        "startLine": 4285,
+        "startChar": 11,
+        "endChar": 22
+      },
+      {
+        "bucket": "warning",
+        "message": "'reobserve' is declared but its value is never read.",
+        "source": "typescript",
+        "code": "6133",
+        "sig": "typescript|6133|4|'reobserve' is declared but its value is never read.",
+        "startLine": 4476,
+        "startChar": 9,
+        "endChar": 18
+      },
+      {
+        "bucket": "warning",
+        "message": "'platform' is deprecated.",
+        "source": "typescript",
+        "code": "6385",
+        "sig": "typescript|6385|4|'platform' is deprecated.",
+        "startLine": 4482,
+        "startChar": 54,
+        "endChar": 62
+      }
+    ],
+    "suppressed": [],
+    "lsp_stats": {
+      "broker": {
+        "requestsSent": 1,
+        "requestsDropped": 0,
+        "requestsCoalesced": 0,
+        "responsesReceived": 1,
+        "responsesStale": 0
+      },
+      "didChangeExplicit": 0,
+      "didChangeSentTotal": 1,
+      "diagnosticsReceived": 2,
+      "documentVersion": 2
+    }
+  }
+}

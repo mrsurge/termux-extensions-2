@@ -54,6 +54,15 @@ def _lsp_error(msg: str) -> None:
         pass
 
 
+def _label_for_language_root(language_id: str, project_root: Path) -> str:
+    try:
+        root_str = str(project_root.expanduser().resolve(strict=False))
+    except Exception:
+        root_str = str(project_root)
+    digest = hashlib.sha1(root_str.encode("utf-8")).hexdigest()[:8]
+    return f"lsp:{language_id}:{digest}"
+
+
 async def _broadcast_lsp_busy(*, project_path: str, payload: dict) -> None:
     try:
         from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
@@ -452,7 +461,12 @@ async def send_lsp_notification(
 
     mgr = await get_manager()
 
-    rec = await mgr.find_shell_by_label(f"lsp:{language_id}", status="running")
+    label = _label_for_language_root(str(language_id), project_root)
+    rec = await mgr.find_shell_by_label(label, status="running")
+    if not rec:
+        legacy_label = f"lsp:{language_id}"
+        if legacy_label != label:
+            rec = await mgr.find_shell_by_label(legacy_label, status="running")
     if not rec and spawn_if_missing:
         rec = await get_or_spawn_lsp_shell(str(language_id), project_root)
 
@@ -603,6 +617,14 @@ class LSPFrameParser:
 class LSPSocketIONamespace(socketio.AsyncNamespace):
     """Socket.IO namespace for LSP communication."""
 
+    @staticmethod
+    def _pyright_analysis_settings() -> dict:
+        """Return python.analysis settings used for both config requests and change events."""
+        return {
+            "diagnosticMode": "workspace",
+            "typeCheckingMode": "basic",
+        }
+
     async def _send_pyright_settings(self, sid: str, *, force: bool = False) -> None:
         """Send workspace/didChangeConfiguration to pyright-langserver (best-effort).
 
@@ -628,10 +650,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                     "params": {
                         "settings": {
                             "python": {
-                                "analysis": {
-                                    "diagnosticMode": "workspace",
-                                    "typeCheckingMode": "basic",
-                                }
+                                "analysis": self._pyright_analysis_settings(),
                             }
                         }
                     },
@@ -1617,6 +1636,42 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                                             rec["settle_task"] = asyncio.create_task(_settle_end())
                             except Exception:
                                 pass
+                    except Exception:
+                        pass
+
+                    # Pyright requests workspace/configuration for python.analysis; respond here
+                    # since the CM6 client does not implement it.
+                    try:
+                        if (
+                            isinstance(msg, dict)
+                            and session.get("language_id") in ("python", "pyright")
+                            and msg.get("method") == "workspace/configuration"
+                        ):
+                            req_id = msg.get("id")
+                            params = msg.get("params") or {}
+                            items = params.get("items")
+                            analysis = self._pyright_analysis_settings()
+                            result: list = []
+                            if isinstance(items, list) and items:
+                                for item in items:
+                                    section = item.get("section") if isinstance(item, dict) else None
+                                    if section == "python.analysis":
+                                        result.append(dict(analysis))
+                                    elif section == "python":
+                                        result.append({"analysis": dict(analysis)})
+                                    elif section in (None, ""):
+                                        result.append({"python": {"analysis": dict(analysis)}})
+                                    else:
+                                        result.append(None)
+                            else:
+                                result = [{"python": {"analysis": dict(analysis)}}]
+
+                            if req_id is not None:
+                                await self._forward_session_to_backend(
+                                    session,
+                                    {"jsonrpc": "2.0", "id": req_id, "result": result},
+                                )
+                                continue
                     except Exception:
                         pass
 

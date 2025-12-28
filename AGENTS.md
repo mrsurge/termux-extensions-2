@@ -25,6 +25,9 @@ I will follow a structured, multi-step, approval-based workflow for every new ta
   3. **Execute Approved Plan**
   4. **Subsequent Interactions**
 
+**3. Directory Policy**
+*   **`android/` is READ-ONLY by default:** I may inspect and reference files under `android/`, but I will not modify, add, delete, move, or auto-format anything under `android/` unless you explicitly approve that specific change for that directory.
+
 NOTES: Use system grep or ripgrep, not the one bundled with the tool set if you are on "Copilot" environment
 
 # Agent Log
