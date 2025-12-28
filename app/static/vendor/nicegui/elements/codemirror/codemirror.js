@@ -10,6 +10,7 @@ if (window.parent && window.parent !== window) {
 // NOTE: CodeMirror runs in a NiceGUI iframe, but socket.io is loaded in the parent window.
 // We access `io` from the parent to bridge the iframe barrier.
 const _io = (window.parent && typeof window.parent.io === 'function') ? window.parent.io : (typeof io === 'function' ? io : null);
+const DEBUG_STICKY = false; // set true for sticky scroll logging
 
 class SocketIOTransport {
   constructor(namespace, languageId, projectRoot, initExtra) {
@@ -1989,7 +1990,9 @@ export default {
           this._stickyScrollPlugin.updateStickyHeader(true);
         }
       } catch (err) {
-        console.warn('[StickyScroll] Failed to refresh after LSP disconnect:', err);
+        if (DEBUG_STICKY) {
+          console.warn('[StickyScroll] Failed to refresh after LSP disconnect:', err);
+        }
       }
     },
     // Handle LSP documentSymbols payloads.
@@ -2029,7 +2032,9 @@ export default {
           this._stickyScrollPlugin.updateStickyHeader(true);
         }
       } catch (err) {
-        console.warn('[StickyScroll] Failed to refresh from LSP symbols:', err);
+        if (DEBUG_STICKY) {
+          console.warn('[StickyScroll] Failed to refresh from LSP symbols:', err);
+        }
       }
 
       // Optional: bubble up to host iframe consumer for outline/telemetry
@@ -3214,7 +3219,6 @@ export default {
     },
     // ============================================================================
 
-    // ============================================================================
     // CUSTOM METHOD: applyStickyScroll
     // Added: 2025-12-03 by vectorArc - TE2 Team
     // Purpose: Enable Monaco-style sticky scroll showing current function/class scope
@@ -3934,7 +3938,9 @@ export default {
 
             return result;
           } catch (e) {
-            console.warn('[StickyScroll] highlightCode failed:', e);
+            if (DEBUG_STICKY) {
+              console.warn('[StickyScroll] highlightCode failed:', e);
+            }
             // Fallback to plain text
             try {
               const line = state.doc.line(lineNumber);
@@ -3956,7 +3962,9 @@ export default {
         // forces a clean render. Call this when enabling sticky scroll or opening
         // a file mid-document to avoid rendering issues (whitespace, empty slots).
         initializeAtCurrentPosition() {
-          console.log('[StickyScroll] Initializing at current position');
+          if (DEBUG_STICKY) {
+            console.log('[StickyScroll] Initializing at current position');
+          }
           
           const view = this.view;
           const state = view.state;
@@ -4000,9 +4008,13 @@ export default {
                   }
                 }
               }
-              console.log('[StickyScroll] Pre-measured heights for lines 1-' + Math.min(refLine, state.doc.lines));
+              if (DEBUG_STICKY) {
+                console.log('[StickyScroll] Pre-measured heights for lines 1-' + Math.min(refLine, state.doc.lines));
+              }
             } catch (err) {
-              console.warn('[StickyScroll] Failed to pre-measure heights:', err);
+              if (DEBUG_STICKY) {
+                console.warn('[StickyScroll] Failed to pre-measure heights:', err);
+              }
             }
           }
           
@@ -4026,7 +4038,7 @@ export default {
           // Debug: log every 50th call to verify handler is running
           if (!this._callCount) this._callCount = 0;
           this._callCount++;
-          if (this._callCount % 50 === 0) {
+          if (DEBUG_STICKY && this._callCount % 50 === 0) {
             console.log('[Slots] heartbeat', { callCount: this._callCount, scrollTop });
           }
 
@@ -4164,7 +4176,7 @@ export default {
             });
           } else if (cmComponent && Array.isArray(cmComponent.lspSymbols) && cmComponent.lspSymbols.length) {
             // LSP-backed scopes for languages with documentSymbols
-            const DEBUG_LSP_STICKY = true; // Enable for debugging
+            const DEBUG_LSP_STICKY = DEBUG_STICKY; // Enable for debugging
             const indentSize = Math.max(1, (cmComponent && typeof cmComponent.indent === 'string') ? cmComponent.indent.length : 4);
 
             const flattenSymbols = (symbols, depth) => {
@@ -4523,7 +4535,7 @@ export default {
           const hysteresisLines = 0.5;
           const earlyMarginLines = 1.5;
 
-          const DEBUG_SLOTS = true; // Set true to log to browser_console.log
+          const DEBUG_SLOTS = DEBUG_STICKY; // Set true to log to browser_console.log
 
           // First pass: clear slots that are no longer valid
           // A slot should clear if refLine is outside its activation window
@@ -4710,8 +4722,6 @@ export default {
             this.lastOverlayHeight = totalLines * lineHeight;
           }
 
-          // Debug logging (disabled by default); flip to true for diagnostics
-          const DEBUG_STICKY = false; // set true for troubleshooting sticky overlay
           const signature = activeScopes.map((s) => `${s.depth}:${s.startLine}-${s.endLine}`).join('|');
           try {
             if (DEBUG_STICKY && signature !== this.lastActiveSignature) {

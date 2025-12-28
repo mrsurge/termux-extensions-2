@@ -87,7 +87,9 @@ async def lifespan(app_instance):
     _loaded_extensions = load_extensions()
     print(f"Loaded {len(_loaded_extensions)} extensions.")
     print("--- Loading Apps ---")
-    loaded_apps = load_apps()
+    # App services are loaded in the main process via the apps extension loader.
+    from app.extensions.apps import loader as apps_loader
+    loaded_apps = apps_loader.load_apps_and_services(app)
     # Store in app_manager module so ensure_app_running can access it
     from app.libs import app_manager
     app_manager._LOADED_APPS = loaded_apps
@@ -649,27 +651,6 @@ def load_extensions():
 async def root():
     return FileResponse(os.path.join(project_root, 'app', 'templates', 'index.html'))
 
-def load_apps():
-    """Scans for apps, loads their blueprints (if any), and returns their manifests."""
-    apps = []
-    apps_dir = os.path.join(os.path.dirname(__file__), 'apps')
-    if not os.path.exists(apps_dir):
-        return []
-
-    for app_name in os.listdir(apps_dir):
-        app_path = os.path.join(apps_dir, app_name)
-        manifest_path = os.path.join(app_path, 'manifest.json')
-
-        if not os.path.isdir(app_path) or not os.path.exists(manifest_path):
-            continue
-
-        with open(manifest_path, 'r') as f:
-            manifest = json.load(f)
-            manifest['_dir'] = app_name
-            apps.append(manifest)
-
-
-    return apps
 
 
 @app.get('/extensions/{ext_dir}/{filename:path}')
@@ -987,7 +968,8 @@ def _ensure_initialized():
             print(f"Error loading extensions: {e}")
         try:
             if not loaded_apps:
-                loaded_apps = load_apps()
+                from app.extensions.apps import loader as apps_loader
+                loaded_apps = apps_loader.load_apps_and_services(app)
 
         except Exception as e:
             print(f"Error loading apps: {e}")
@@ -1421,6 +1403,8 @@ async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
         if websocket.application_state != WebSocketState.DISCONNECTED:
             with suppress(Exception):
                 await websocket.close()
+
+
 
 
 

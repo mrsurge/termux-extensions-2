@@ -1006,3 +1006,15 @@ class HistoryStore:
         if not project_path:
             return []
         return self.list_project_drafts(project_path)
+
+    def prune_clean_drafts(self, project_path: str) -> int:
+        """Remove cached draft entries marked unsaved == False."""
+        normalized_project = self._normalize_project_path(project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            removed = sidecar.prune_clean_drafts()
+            if removed:
+                sidecar.save()
+            return removed
+        except Exception:
+            return 0

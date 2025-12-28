@@ -4,6 +4,7 @@ import json
 import sys
 import os
 import hashlib
+import threading
 import time
 import asyncio
 import uuid
@@ -44,6 +45,8 @@ _android_draft_diag_sig: dict[str, str] = {}
 # Sprint E: in-memory cache for TE2 draft diagnostics replay.
 # key: "<effective_project_root>::<uri>" -> (cache_key, diagnostics)
 _android_draft_diag_cache: dict[str, tuple[str, list[dict]]] = {}
+_nicegui_loop: Optional[asyncio.AbstractEventLoop] = None
+_nicegui_loop_thread: Optional[int] = None
 
 # Sprint E: guard expensive dependency index builds (no Gradle spam on every keystroke).
 # key: "<effective_project_root>::<syncFingerprint>" -> started_at_ms
@@ -587,6 +590,35 @@ def _get_combined_diffs(project_root: Path, file_path: str, current_content: str
     return hunks
 
 
+async def _get_combined_diffs_async(project_root: Path, file_path: str, current_content: str) -> list:
+    return await anyio.to_thread.run_sync(
+        lambda: _get_combined_diffs(project_root, file_path, current_content)
+    )
+
+
+def _schedule_diff_refresh(project_root: Path, file_path: str, current_content: str, editor, reason: str) -> None:
+    async def _run():
+        try:
+            hunks = await _get_combined_diffs_async(project_root, file_path, current_content)
+            if editor:
+                editor.set_diff_decorations(hunks)
+        except Exception as e:
+            print(f"[DIFF_REFRESH][{reason}] Failed: {e}", file=sys.stderr)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        loop.create_task(_run())
+        return
+    loop = _nicegui_loop
+    if loop and loop.is_running():
+        try:
+            asyncio.run_coroutine_threadsafe(_run(), loop)
+        except Exception as exc:
+            print(f"[DIFF_REFRESH][{reason}] Schedule failed: {exc}", file=sys.stderr)
+
+
 def _persist_to_cache_debounced():
     """Debounced cache persistence called on editor change."""
     global _cache_persist_timer
@@ -623,8 +655,7 @@ def _persist_to_cache_debounced():
         )
         try:
             project_root = get_project_root()
-            hunks = _get_combined_diffs(project_root, current_file, current_content)
-            editor.set_diff_decorations(hunks)
+            _schedule_diff_refresh(project_root, current_file, current_content, editor, "persist_autosave")
         except Exception as e:
             print(f"[PERSIST] Failed to refresh diffs (autosave mode): {e}", file=sys.stderr)
         return
@@ -671,8 +702,7 @@ def _persist_to_cache_debounced():
     # Refresh Diffs (Combined)
     try:
         project_root = get_project_root()
-        hunks = _get_combined_diffs(project_root, current_file, current_content)
-        editor.set_diff_decorations(hunks)
+        _schedule_diff_refresh(project_root, current_file, current_content, editor, "persist")
     except Exception as e:
         print(f"[PERSIST] Failed to refresh diffs: {e}", file=sys.stderr)
 
@@ -890,8 +920,7 @@ def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
 
     try:
         project_root = get_project_root()
-        hunks = _get_combined_diffs(project_root, current_file, current_content)
-        editor.set_diff_decorations(hunks)
+        _schedule_diff_refresh(project_root, current_file, current_content, editor, f"persist_{reason}")
     except Exception as exc:
         print(f"[PERSIST][{reason}] Failed to refresh diffs: {exc}", file=sys.stderr)
     return True
@@ -929,8 +958,15 @@ def disable_edit_tracking():
 @ui.page('/nc', reconnect_timeout=3.0)
 async def editor_page():
     global _active_editor
+    global _nicegui_loop, _nicegui_loop_thread
     
     print(f"[EDITOR_APP] ==================== PAGE LOAD ====================", file=sys.stderr)
+    try:
+        _nicegui_loop = asyncio.get_running_loop()
+        _nicegui_loop_thread = threading.get_ident()
+    except RuntimeError:
+        _nicegui_loop = None
+        _nicegui_loop_thread = None
     
     # 1. Load Preferences and History
     prefs = _preferences_store.get_preferences()
@@ -957,7 +993,7 @@ async def editor_page():
 
     if last_file and Path(last_file).is_file():
         try:
-            content_bytes = Path(last_file).read_bytes()
+            content_bytes = await anyio.to_thread.run_sync(lambda: Path(last_file).read_bytes())
             initial_content = content_bytes.decode('utf-8', errors='replace')
             initial_path = last_file
             initial_sha256 = hashlib.sha256(content_bytes).hexdigest()
@@ -1251,7 +1287,7 @@ async def editor_page():
                     # On init, if file exists, we check diffs.
                     # _get_combined_diffs uses preferences store, which is loaded.
                     project_root = Path(project_path).expanduser() if project_path else get_project_root()
-                    hunks = _get_combined_diffs(project_root, initial_path, initial_content)
+                    hunks = await _get_combined_diffs_async(project_root, initial_path, initial_content)
                     editor.set_diff_decorations(hunks)
                             
             except Exception as e:
@@ -1285,9 +1321,7 @@ async def editor_page():
                         # Only recalculate diffs if content was actually replaced
                         if was_applied and _preferences_store.get_preferences().get('editor', {}).get('showInlineDiffs', False):
                             try:
-                                rel_path = _normalize_rel_path(project_root, initial_path)
-                                diff_data = collect_diff(project_root, rel_path, base_ref=_current_diff_base(project_path))
-                                editor.set_diff_decorations(diff_data.get('hunks', []))
+                                _schedule_diff_refresh(project_root, initial_path, new_content, editor, "watcher_replace")
                             except Exception as e:
                                 print(f"[FILE_WATCH] Failed to recalculate diffs: {e}", file=sys.stderr)
                 
@@ -1708,8 +1742,7 @@ async def set_editor_content(data: dict = Body(...)):
             # Refresh diffs (Combined)
             try:
                 current_content = editor.value or ''
-                hunks = _get_combined_diffs(project_root, new_path, current_content)
-                editor.set_diff_decorations(hunks)
+                _schedule_diff_refresh(project_root, new_path, current_content, editor, "set_content_watcher")
             except Exception as e:
                 print(f"[FILE_WATCH] Failed to recalculate diffs: {e}", file=sys.stderr)
 
@@ -1747,7 +1780,7 @@ async def set_editor_content(data: dict = Body(...)):
             # So draft diffs will be empty. Git diffs will show if enabled.
             # _get_combined_diffs handles the preferences check.
             project_path = _history_store.get_active_project() or str(get_project_root())
-            hunks = _get_combined_diffs(Path(project_path).expanduser(), new_path, content)
+            hunks = await _get_combined_diffs_async(Path(project_path).expanduser(), new_path, content)
             editor.set_diff_decorations(hunks)
         except Exception as e: 
             print(f"[SET_CONTENT] Failed to load diffs: {e}", file=sys.stderr)
@@ -1770,7 +1803,9 @@ async def refresh_diffs(data: dict = Body(...)):
         
         project_root = Path(project_path).expanduser()
         rel = _normalize_rel_path(project_root, path)
-        diff_data = collect_diff(project_root, rel, base_ref=_current_diff_base(project_path))
+        diff_data = await anyio.to_thread.run_sync(
+            lambda: collect_diff(project_root, rel, base_ref=_current_diff_base(project_path))
+        )
         hunks = diff_data.get('hunks', [])
         editor.set_diff_decorations(hunks)
         return {"ok": True, "hunks_count": len(hunks)}
@@ -2300,10 +2335,17 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: Optional[str]) 
             cache_entry=cache_entry,
             reason='save',
         )
+        removed_clean = _history_store.prune_clean_drafts(project_path)
+        if removed_clean:
+            try:
+                from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
+                notify_draft_state_changed(project_path)
+            except Exception:
+                pass
 
     # Refresh Diffs (Combined)
     try:
-        hunks = _get_combined_diffs(project_root, current_file, content)
+        hunks = await _get_combined_diffs_async(project_root, current_file, content)
         editor.set_diff_decorations(hunks)
     except Exception as e:
         print(f"[SAVE] Failed to refresh diffs: {e}", file=sys.stderr)
@@ -3199,7 +3241,6 @@ def _refresh_active_diffs():
         return
     content = editor.value or ''
     try:
-        hunks = _get_combined_diffs(Path(project_path).expanduser(), current_file, content)
-        editor.set_diff_decorations(hunks)
+        _schedule_diff_refresh(Path(project_path).expanduser(), current_file, content, editor, "prefs")
     except Exception as exc:
         print(f"[PREFERENCE] Failed to refresh combined diffs: {exc}", file=sys.stderr)

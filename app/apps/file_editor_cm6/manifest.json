@@ -13,6 +13,12 @@
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"
   },
+  "services": {
+    "path": "services",
+    "modules": [
+      "explorer_transport"
+    ]
+  },
   "fullscreen": true,
   "ipc_modules": [
     "app.apps.file_editor_cm6.ipc_stack"

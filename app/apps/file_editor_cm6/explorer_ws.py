@@ -424,9 +424,20 @@ async def reset_project_session(new_project_path: str) -> bool:
     was_new_sidecar = not ProjectSidecar.sidecar_exists(normalized_path)
     sidecar = ProjectSidecar.load_or_create(normalized_path)
     sidecar.get_or_create_lsp_project_id()
+    removed_clean = sidecar.prune_clean_drafts()
     # NOTE: We intentionally do NOT clear session_cache or tracked_jobs here.
     # Drafts and jobs persist across project switches.
     sidecar.save()
+    if removed_clean:
+        try:
+            from .explorer_helper import mark_draft_cache_dirty
+            mark_draft_cache_dirty(Path(normalized_path))
+        except Exception:
+            pass
+        try:
+            notify_draft_state_changed(normalized_path)
+        except Exception:
+            pass
 
     # Force any live terminal drawers to reconnect so they bind to the
     # new active project's shell. Frontend stays project-agnostic.

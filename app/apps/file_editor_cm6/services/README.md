@@ -1,0 +1,39 @@
+# App Services (Main-Process Modules)
+
+This directory contains **app-specific services** that run in the **main server
+process**, not in the app worker. These modules are loaded at framework startup
+via the apps extension loader and can register routes, Socket.IO servers, or
+other infrastructure that should outlive worker restarts.
+
+## Why this exists
+
+We split services from workers to avoid transport interference and reconnect
+loops. In particular, `file_editor_cm6` now runs its **Explorer Socket.IO**
+transport here, so it no longer shares the NiceGUI Engine.IO endpoint.
+
+## How it’s loaded
+
+The app manifest declares a `services` entry:
+
+```
+"services": {
+  "path": "services",
+  "modules": ["explorer_transport"]
+}
+```
+
+The apps extension loader imports each module and:
+- calls `register(app)` if present
+- auto-registers any `APIRouter` found in the module
+
+## Service module contract
+
+A service module can export either or both:
+
+- `register(app)`: imperative hook for mounting or custom setup
+- `APIRouter` instances for standard route registration
+
+## Current services
+
+- `explorer_transport.py` — Dedicated Explorer Socket.IO server mounted at
+  `/explorer_ws/socket.io` (separate from NiceGUI transport).

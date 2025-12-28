@@ -555,12 +555,7 @@ def init_nicegui_with_app(fastapi_app):
 
     # Now import the page definitions
     from app.apps.file_editor_cm6.nicegui_editor import editor_app
-    # Register explorer Socket.IO namespace (shares NiceGUI sio server)
-    try:
-        from app.apps.file_editor_cm6.explorer_ws import ExplorerSocketIONamespace
-        ng.sio.register_namespace(ExplorerSocketIONamespace('/explorer'))
-    except Exception as e:
-        print(f"[ExplorerSIO] Failed to register namespace: {e}")
+    # Explorer Socket.IO transport is registered in main server via app services.
     
     # Register LSP Socket.IO namespace
     try:
@@ -595,6 +590,7 @@ def initialize_project_session() -> Optional[ProjectSidecar]:
 
     sidecar = ProjectSidecar.load_or_create(project_path)
     sidecar.increment_session()
+    sidecar.prune_clean_drafts()
 
     sidecar.save()
     return sidecar
@@ -916,6 +912,13 @@ async def write_file_route(data: dict = Body(...)):
         project_path = _history_store.get_active_project()
         if project_path:
             _history_store.clear_cached_document(project_path, path)
+            removed_clean = _history_store.prune_clean_drafts(project_path)
+            if removed_clean:
+                try:
+                    from .explorer_ws import notify_draft_state_changed
+                    notify_draft_state_changed(project_path)
+                except Exception:
+                    pass
 
         # Send save acknowledgement to prevent self-echo
         push_save_ack(str(rel_path), op_id, client_id, file_meta)
@@ -1812,6 +1815,8 @@ async def review_save(data: dict = Body(...)):
         except Exception as e:
             errors.append(f"{rel_path}: {str(e)}")
             
+    _history_store.prune_clean_drafts(project_root)
+
     # Refresh git status cache and draft cache
     mark_git_cache_dirty(root_path)
     from .explorer_helper import mark_draft_cache_dirty

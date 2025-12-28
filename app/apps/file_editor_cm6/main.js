@@ -88,8 +88,8 @@ function connectExplorerSocket() {
   ensureSocketIoLoaded()
     .then((io) => {
       if (!io) throw new Error('Socket.IO client unavailable');
-      // Use the existing NiceGUI Socket.IO endpoint (proxied via /ui/_nicegui_ws/socket.io)
-      const socketPath = '/ui/_nicegui_ws/socket.io';
+      // Use dedicated Explorer Socket.IO endpoint (separate from NiceGUI transport).
+      const socketPath = '/explorer_ws/socket.io';
       explorerSocket = io('/explorer', {
         path: socketPath,
         transports: ['websocket'],

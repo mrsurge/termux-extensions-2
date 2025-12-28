@@ -387,6 +387,22 @@ class ProjectSidecar:
                 continue
         return results
 
+    def prune_clean_drafts(self) -> int:
+        """Remove cached draft entries that are explicitly marked unsaved == False."""
+        cache: Dict[str, Dict[str, Any]] = self._data.get("session_cache") or {}
+        if not cache:
+            return 0
+        to_remove = []
+        for key, entry in cache.items():
+            try:
+                if entry.get("unsaved") is False:
+                    to_remove.append(key)
+            except Exception:
+                continue
+        for key in to_remove:
+            cache.pop(key, None)
+        return len(to_remove)
+
     def clear_session_cache(self) -> None:
         self._data["session_cache"] = {}
 
