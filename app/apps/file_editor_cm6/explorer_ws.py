@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+import os
+import urllib.request
 from contextlib import suppress
 from typing import Dict, Any, List, Optional
 from fastapi import WebSocket, WebSocketDisconnect
@@ -586,6 +588,43 @@ async def _broadcast_draft_decorations(project_path: str):
         logger.warning(f"Failed to broadcast draft decorations: {e}")
 
 
+def _is_worker_process() -> bool:
+    return bool(os.getenv("TE_APP_ID") or os.getenv("TE_APP_WORKER_PORT"))
+
+
+def _framework_url() -> str:
+    return os.environ.get("TE_FRAMEWORK_URL", "http://127.0.0.1:8089").rstrip("/")
+
+
+def _forward_draft_notification(project_path: str) -> None:
+    url = f"{_framework_url()}/api/app/file_editor_cm6/explorer/notify_drafts"
+    payload = {"project": project_path}
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            resp.read()
+    except Exception as exc:
+        logger.debug(f"Failed to forward draft notify to main: {exc}")
+
+
+def _schedule_forward_draft_refresh(project_path: str) -> None:
+    debounce_key = f"drafts-forward:{project_path}"
+    with _explorer_refresh_lock:
+        existing_timer = _explorer_refresh_timers.get(debounce_key)
+        if existing_timer:
+            existing_timer.cancel()
+
+        def do_forward():
+            with _explorer_refresh_lock:
+                _explorer_refresh_timers.pop(debounce_key, None)
+            _forward_draft_notification(project_path)
+
+        timer = Timer(0.5, do_forward)
+        _explorer_refresh_timers[debounce_key] = timer
+        timer.start()
+
+
 def notify_draft_state_changed(project_path: str):
     """
     Called when draft state changes (file edited, saved, or discarded).
@@ -595,12 +634,16 @@ def notify_draft_state_changed(project_path: str):
     from .explorer_helper import mark_draft_cache_dirty
     from pathlib import Path
     
-    if not _explorer_event_loop:
-        return
-    
     # Normalize to absolute path to match how connections are registered
     normalized_path = str(Path(project_path).resolve())
     
+    if _is_worker_process() and not manager.has_connections(normalized_path):
+        _schedule_forward_draft_refresh(normalized_path)
+        return
+
+    if not _explorer_event_loop:
+        return
+
     # Check if there are any connections for this project
     if not manager.has_connections(normalized_path):
         return
@@ -670,6 +713,15 @@ class ExplorerDispatcher:
         global _explorer_event_loop
         if _explorer_event_loop is None:
             _explorer_event_loop = asyncio.get_event_loop()
+
+        # On full framework restart, explorer_helper defaults to ~ until
+        # we rehydrate from HistoryStore. Do that before sending snapshots.
+        try:
+            active_project = _history_store.get_active_project()
+            if isinstance(active_project, str) and active_project.strip():
+                self.project_root = set_project_root(active_project)
+        except Exception:
+            pass
         
         # --- WATCHER LIFECYCLE (future implementation) ---
         # When first client connects, we could start the file watcher:

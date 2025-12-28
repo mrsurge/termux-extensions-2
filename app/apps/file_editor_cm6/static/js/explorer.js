@@ -41,6 +41,7 @@ const uiState = {
 };
 
 let renderedProjectPath = null;
+let draftUpdateListenerInstalled = false;
 
 // Currently opened document (relative to project root), if known.
 let activeFileRel = null;
@@ -91,6 +92,79 @@ function applyActiveFileMarker() {
       li.classList.add('fe-active-file');
       break;
     }
+  }
+}
+
+function relFromAbsPath(absPath) {
+  if (!absPath || !uiState.projectPath) return null;
+  const root = String(uiState.projectPath).replace(/\\/g, '/');
+  const normalized = String(absPath).replace(/\\/g, '/');
+  if (!normalized.startsWith(root)) return null;
+  let rel = normalized.slice(root.length);
+  if (rel.startsWith('/')) rel = rel.slice(1);
+  return rel || '.';
+}
+
+function applyDraftFlag(rel, hasDraft) {
+  if (!treeElement) {
+    treeElement = document.getElementById('fe-file-tree');
+  }
+  const root = treeElement;
+  if (!root || !rel || rel === '.') return;
+
+  let node = null;
+  try {
+    const esc = window.CSS && CSS.escape ? CSS.escape(rel) : null;
+    if (esc) {
+      node = root.querySelector(`li.fe-tree-node[data-kind="file"][data-rel="${esc}"]`);
+    }
+  } catch {
+    node = null;
+  }
+  if (!node) {
+    const nodes = root.querySelectorAll('li.fe-tree-node[data-kind="file"]');
+    for (const li of nodes) {
+      if ((li.dataset.rel || '') === rel) {
+        node = li;
+        break;
+      }
+    }
+  }
+
+  if (node) {
+    if (hasDraft) {
+      node.dataset.hasDraft = '1';
+      node.classList.add('fe-draft');
+    } else {
+      delete node.dataset.hasDraft;
+      node.classList.remove('fe-draft');
+    }
+  }
+
+  if (!hasDraft) return;
+
+  const parts = rel.split('/');
+  for (let i = 1; i < parts.length; i += 1) {
+    const dirRel = parts.slice(0, i).join('/');
+    let dirNode = null;
+    try {
+      const esc = window.CSS && CSS.escape ? CSS.escape(dirRel) : null;
+      if (esc) {
+        dirNode = root.querySelector(
+          `li.fe-tree-node[data-kind="dir"][data-rel="${esc}"]`,
+        );
+      }
+    } catch {
+      dirNode = null;
+    }
+    if (!dirNode) continue;
+    dirNode.dataset.hasDraft = '1';
+    dirNode.classList.add('fe-dir-has-draft');
+  }
+  const rootNode = root.querySelector('li.fe-tree-node.fe-tree-root');
+  if (rootNode) {
+    rootNode.dataset.hasDraft = '1';
+    rootNode.classList.add('fe-dir-has-draft');
   }
 }
 
@@ -1982,6 +2056,16 @@ export async function initExplorerUI() {
   const searchBtn = document.getElementById('fe-search-btn');
   gitBaseBtn = document.getElementById('fe-git-base-btn');
   gitBaseDropdown = document.getElementById('fe-git-base-dd');
+
+  if (!draftUpdateListenerInstalled) {
+    window.addEventListener('cm6:draft-updated', (event) => {
+      const detail = event?.detail || {};
+      const rel = relFromAbsPath(detail.path);
+      if (!rel || rel === '.') return;
+      applyDraftFlag(rel, !!detail.unsaved);
+    });
+    draftUpdateListenerInstalled = true;
+  }
 
   gitButtons = {
     init: document.getElementById('fe-git-init'),

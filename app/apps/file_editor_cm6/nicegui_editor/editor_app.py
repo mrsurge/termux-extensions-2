@@ -909,6 +909,13 @@ def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
 
     print(f"[SESSION_CACHE][IMMEDIATE] Persisted draft for {current_file} (Unsaved: {cache_entry.get('unsaved', False)})", file=sys.stderr)
 
+    # Keep explorer draft accents in sync for immediate persists (file switch).
+    try:
+        from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
+        notify_draft_state_changed(project_path)
+    except Exception as exc:
+        print(f"[SESSION_CACHE][IMMEDIATE] Failed to notify explorer: {exc}", file=sys.stderr)
+
     _broadcast_cache_state(
         project_path,
         current_file,
