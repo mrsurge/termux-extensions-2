@@ -1018,8 +1018,9 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                     try:
                         base_root = str(session.get("base_project_root") or session.get("project_root") or "")
                         if base_root:
-                            sidecar = ProjectSidecar.load_or_create(base_root)
-                            cfg = sidecar.get_lsp_kotlin_android_config()
+                            from app.apps.file_editor_cm6.android_lang.android_lsp_config import get_android_lsp_config
+
+                            cfg = get_android_lsp_config(Path(base_root))
                             module = str(cfg.get("module") or module)
                             variant = str(cfg.get("variant") or variant)
                     except Exception:

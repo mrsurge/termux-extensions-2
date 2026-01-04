@@ -139,7 +139,10 @@ async def _startup() -> None:
     run.setup()
     app.start()
     background_tasks.create(binding.refresh_loop(), name='refresh bindings')
-    app.timer(10, Client.prune_instances)
+    def _prune_clients() -> None:
+        Client.prune_instances(client_age_threshold=core.app.config.reconnect_timeout)
+
+    app.timer(10, _prune_clients)
     app.timer(10, Slot.prune_stacks)
     app.timer(10, prune_tab_storage)
     if app.storage.secret is not None:

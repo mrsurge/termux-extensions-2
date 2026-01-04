@@ -3,6 +3,7 @@ from fastapi import Body
 
 from app.apps.file_editor_cm6.explorer_ws import (
     ExplorerSocketIONamespace,
+    manager as _explorer_manager,
     notify_draft_state_changed,
 )
 
@@ -15,7 +16,7 @@ def register(app):
     explorer_app = socketio.ASGIApp(explorer_sio, socketio_path='')
     app.mount('/explorer_ws/socket.io', explorer_app)
 
-    @app.post('/api/app/file_editor_cm6/explorer/notify_drafts')
+    @app.post('/api/apps/file_editor_cm6/explorer/notify_drafts')
     async def _notify_drafts(payload: dict = Body(...)):
         """Allow worker processes to trigger explorer draft refreshes on main."""
         project = payload.get("project") if isinstance(payload, dict) else None
@@ -23,6 +24,21 @@ def register(app):
             return {"ok": False, "error": "missing project"}
         try:
             notify_draft_state_changed(project)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True}
+
+    @app.post('/api/apps/file_editor_cm6/explorer/broadcast')
+    async def _broadcast_event(payload: dict = Body(...)):
+        """Forward worker explorer broadcasts to the main Socket.IO transport."""
+        if not isinstance(payload, dict):
+            return {"ok": False, "error": "invalid payload"}
+        project = payload.get("project")
+        message = payload.get("message")
+        if not project or not isinstance(message, dict):
+            return {"ok": False, "error": "missing project/message"}
+        try:
+            await _explorer_manager.broadcast(str(project), message)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True}

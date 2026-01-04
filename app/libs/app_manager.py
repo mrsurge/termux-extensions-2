@@ -225,6 +225,8 @@ async def ensure_app_running(app_id):
         "PYTHONPATH": f"{os.environ.get('PYTHONPATH', '')}:{project_root}",
         "TE_APP_ID": app_id,
     }
+    if os.environ.get("TE_FRAMEWORK_URL"):
+        env["TE_FRAMEWORK_URL"] = os.environ.get("TE_FRAMEWORK_URL")
 
     if nicegui_module and nicegui_shell:
         port = find_free_port()

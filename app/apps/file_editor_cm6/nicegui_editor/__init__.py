@@ -28,6 +28,8 @@ def init_nicegui():
         core.app.config.language = 'en'
     if not hasattr(core.app.config, 'binding_refresh_interval'):
         core.app.config.binding_refresh_interval = 0.1
+    if not hasattr(core.app.config, 'reconnect_timeout'):
+        core.app.config.reconnect_timeout = 1200.0
     
     # Import pages after core is initialized
     from . import editor_app

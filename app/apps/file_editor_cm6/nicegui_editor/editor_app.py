@@ -25,6 +25,11 @@ from app.apps.file_editor_cm6.core_read import init_watcher, push_save_ack, emit
 from app.apps.file_editor_cm6.core_write import write_full, BaseMismatchError
 from app.apps.file_editor_cm6.diff_helper import invalidate_diff_cache, collect_diff
 from app.apps.file_editor_cm6.draft_diff_helper import compute_draft_diff
+from app.apps.file_editor_cm6.android_lang.android_config import (
+    collect_android_config,
+    update_properties_file,
+    update_build_gradle,
+)
 
 
 # --- FastAPI Router ---
@@ -63,6 +68,8 @@ _lsp_busy_counts: dict[str, int] = {}
 _lsp_busy_tasks: dict[str, dict] = {}
 
 # --- Constants ---
+RECONNECT_TIMEOUT_S = 1200.0
+
 THEME_MAP = {
     'cm6-dark': 'basicDark',
     'one-dark': 'oneDark',
@@ -712,15 +719,13 @@ def _persist_to_cache_debounced():
             base_project_root = Path(project_path)
             base_project_path = str(base_project_root)
             if _history_store.get_lsp_enabled(base_project_path) and _history_store.get_lsp_server_enabled(base_project_path, 'kotlin-android'):
+                cfg = _get_android_lsp_config(base_project_root)
                 effective_project_root = base_project_root
-                try:
-                    rel_root = _history_store.get_lsp_server_root_rel(base_project_path, 'kotlin-android')
-                    if rel_root:
-                        candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
-                        if candidate.exists() and candidate.is_dir():
-                            effective_project_root = candidate
-                except Exception:
-                    effective_project_root = base_project_root
+                rel_root = str(cfg.get("rootRel") or "").strip()
+                if rel_root:
+                    candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
+                    if candidate.exists() and candidate.is_dir():
+                        effective_project_root = candidate
 
                 uri = f"file://{current_file}"
                 sig_key = f"{effective_project_root}::{uri}"
@@ -747,7 +752,7 @@ def _persist_to_cache_debounced():
                                             variant=str((_cfg or {}).get('variant') or 'GeckoDebug'),
                                         )
                                     )(
-                                        (_history_store.get_project_sidecar(base_project_path).get_lsp_kotlin_android_config() if _history_store.get_project_sidecar(base_project_path) else {})
+                                        _get_android_lsp_config(base_project_root)
                                     )
                                 )
 
@@ -962,7 +967,7 @@ def disable_edit_tracking():
         print(f"[EDIT_TRACK] Disabled automatic jump on edits", file=sys.stderr)
 
 # --- NiceGUI Page ---
-@ui.page('/nc', reconnect_timeout=3.0)
+@ui.page('/nc', reconnect_timeout=RECONNECT_TIMEOUT_S)
 async def editor_page():
     global _active_editor
     global _nicegui_loop, _nicegui_loop_thread
@@ -1038,6 +1043,13 @@ async def editor_page():
             print(f"[EDITOR_APP] Restored cached session ({restored_state}) for {initial_path}", file=sys.stderr)
 
     # 3. Set up UI
+    ui.add_head_html(f'''
+    <script>
+        window.NICEGUI_RECONNECT_TIMEOUT = {int(RECONNECT_TIMEOUT_S)};
+        window.NICEGUI_CONTINUE_ON_DISCONNECT = true;
+    </script>
+    ''')
+
     ui.add_head_html('''
     <style>
       html, body, #q-app, .q-page-container, .q-page, .nicegui-content { margin:0 !important; padding:0 !important; height:100%; }
@@ -2135,17 +2147,18 @@ async def update_preference(data: dict = Body(...)):
                 if server_id:
                     if not _history_store.set_lsp_server_enabled(project_path, server_id, bool(value)):
                         raise RuntimeError("Failed to persist LSP server enablement")
-            elif key in ('lspKotlinAndroidModule', 'lspKotlinAndroidVariant'):
-                # Persist kotlin-android module/variant config into project sidecar.
+            elif key in ('lspRootRelKotlinAndroid', 'lspKotlinAndroidModule', 'lspKotlinAndroidVariant'):
+                # Persist kotlin-android config into .code_cm6/lang/android/android_build_config.json (SSOT).
                 try:
-                    sidecar = _history_store.get_project_sidecar(project_path)
-                    if not sidecar:
-                        raise RuntimeError('Missing project sidecar')
-                    if key == 'lspKotlinAndroidModule':
-                        sidecar.set_lsp_kotlin_android_config(module=str(value))
+                    from app.apps.file_editor_cm6.android_lang.android_lsp_config import update_android_lsp_config
+
+                    root_path = Path(project_path)
+                    if key == 'lspRootRelKotlinAndroid':
+                        update_android_lsp_config(root_path, root_rel=str(value))
+                    elif key == 'lspKotlinAndroidModule':
+                        update_android_lsp_config(root_path, module=str(value))
                     else:
-                        sidecar.set_lsp_kotlin_android_config(variant=str(value))
-                    sidecar.save()
+                        update_android_lsp_config(root_path, variant=str(value))
                 except Exception as exc:
                     raise HTTPException(status_code=400, detail=f"Failed to persist kotlin-android config: {exc}")
             elif key == 'lspPyrightConfigMode':
@@ -2167,7 +2180,6 @@ async def update_preference(data: dict = Body(...)):
                     'lspRootRelTypescript': 'typescript',
                     'lspRootRelClangd': 'clangd',
                     'lspRootRelKotlin': 'kotlin',
-                    'lspRootRelKotlinAndroid': 'kotlin-android',
                 }
                 server_id = root_map.get(key)
                 if not server_id:
@@ -2377,14 +2389,12 @@ async def save_current_file(data: dict = Body(...)):
 
             base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
             effective_project_root = base_project_root
-            try:
-                rel_root = _history_store.get_lsp_server_root_rel(str(base_project_root), "kotlin-android")
-                if rel_root:
-                    candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
-                    if candidate.exists() and candidate.is_dir():
-                        effective_project_root = candidate
-            except Exception:
-                effective_project_root = base_project_root
+            cfg = _get_android_lsp_config(base_project_root)
+            rel_root = str(cfg.get("rootRel") or "").strip()
+            if rel_root:
+                candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
+                if candidate.exists() and candidate.is_dir():
+                    effective_project_root = candidate
 
             if current_file:
                 ok = await send_android_did_save_for_path(project_root=effective_project_root, abs_path=Path(current_file))
@@ -2400,13 +2410,7 @@ async def save_current_file(data: dict = Body(...)):
                     async def _update_android_sidecar_bg() -> None:
                         try:
                             # 1) Update Sprint A sidecar (disk)
-                            try:
-                                cfg = {}
-                                sc = _history_store.get_project_sidecar(base_project_path)
-                                if sc:
-                                    cfg = sc.get_lsp_kotlin_android_config()
-                            except Exception:
-                                cfg = {}
+                            cfg = _get_android_lsp_config(base_project_root)
 
                             sidecar_path = await anyio.to_thread.run_sync(
                                 lambda: update_android_sidecar_for_project(
@@ -2532,14 +2536,12 @@ async def android_sync_project(data: dict = Body(...)):
     # 1) Get project roots (same logic as save path)
     base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
     effective_project_root = base_project_root
-    try:
-        rel_root = _history_store.get_lsp_server_root_rel(str(base_project_root), "kotlin-android")
-        if rel_root:
-            candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
-            if candidate.exists() and candidate.is_dir():
-                effective_project_root = candidate
-    except Exception:
-        pass
+    cfg = _get_android_lsp_config(base_project_root)
+    rel_root = str(cfg.get("rootRel") or "").strip()
+    if rel_root:
+        candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
+        if candidate.exists() and candidate.is_dir():
+            effective_project_root = candidate
     
     # 2) Acquire per-project lock to prevent concurrent sync requests
     lock_key = str(base_project_root)
@@ -2559,7 +2561,7 @@ async def android_sync_project(data: dict = Body(...)):
                         variant=str((_cfg or {}).get('variant') or 'GeckoDebug'),
                     )
                 )(
-                    (_history_store.get_project_sidecar(str(base_project_root)).get_lsp_kotlin_android_config() if _history_store.get_project_sidecar(str(base_project_root)) else {})
+                    _get_android_lsp_config(base_project_root)
                 )
             )
 
@@ -3099,6 +3101,332 @@ async def pyright_config_save(data: dict = Body(...)):
     updated = _update_pyright_toml(existing, config)
     abs_path.write_text(updated, encoding="utf-8")
     return {"ok": True, "data": {"path": str(abs_path), "kind": kind, "config": config}}
+
+
+# --- Android config endpoints (Gradle/LSP support) ---
+
+def _get_android_lsp_config(base_root: Path) -> dict:
+    try:
+        from app.apps.file_editor_cm6.android_lang.android_lsp_config import get_android_lsp_config
+
+        return get_android_lsp_config(base_root)
+    except Exception:
+        return {"rootRel": "", "module": "app", "variant": "GeckoDebug"}
+
+def _resolve_android_roots() -> tuple[Path, Path, str]:
+    base_root = Path(_history_store.get_active_project() or str(get_project_root()))
+    effective_root = base_root
+    cfg = _get_android_lsp_config(base_root)
+    root_rel = str(cfg.get("rootRel") or "").strip()
+    if root_rel:
+        candidate = (base_root / root_rel).expanduser().resolve(strict=False)
+        if candidate.exists() and candidate.is_dir():
+            effective_root = candidate
+
+    module = str(cfg.get("module") or "app")
+
+    return base_root, effective_root, module
+
+
+@editor_router.get('/android/config')
+async def android_config_get():
+    base_root, effective_root, module = _resolve_android_roots()
+    data = collect_android_config(effective_root=effective_root, module=module)
+    data["projectRoot"] = str(base_root)
+    data["effectiveRoot"] = str(effective_root)
+    data["module"] = module
+    try:
+        from app.apps.file_editor_cm6.android_lang.android_lsp_config import update_android_autodetect
+
+        autodetect = {
+            "files": data.get("files") or {},
+            "gradleProperties": data.get("gradleProperties") or {},
+            "localProperties": data.get("localProperties") or {},
+            "buildConfig": data.get("buildConfig") or {},
+            "modules": data.get("modules") or [],
+            "variants": data.get("variants") or {},
+            "sourceSets": data.get("sourceSets") or [],
+            "termuxAapt2Path": data.get("termuxAapt2Path") or "",
+            "importantGradleProperties": data.get("importantGradleProperties") or [],
+        }
+        update_android_autodetect(base_root, autodetect)
+    except Exception:
+        pass
+    return {"ok": True, "data": data}
+
+
+@editor_router.post('/set_active_project')
+async def set_active_project(payload: dict = Body(...)):
+    project_path = payload.get("projectPath") if isinstance(payload, dict) else None
+    if not project_path:
+        raise HTTPException(status_code=400, detail="projectPath required")
+    try:
+        from app.apps.file_editor_cm6.explorer_helper import set_project_root
+        from app.apps.file_editor_cm6.core_read import init_watcher
+
+        normalized = _history_store.set_active_project(str(project_path))
+        if not normalized:
+            raise ValueError("invalid project path")
+        root = set_project_root(normalized)
+        init_watcher(root)
+        return {"ok": True, "projectRoot": str(root)}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@editor_router.post('/android/config/save')
+async def android_config_save(payload: dict = Body(...)):
+    base_root, effective_root, module_default = _resolve_android_roots()
+    module = str(payload.get("module") or module_default).strip() or module_default
+    create_missing = bool(payload.get("createMissing", False))
+
+    cfg = collect_android_config(effective_root=effective_root, module=module)
+    files = cfg.get("files") or {}
+
+    gradle_updates = payload.get("gradleProperties") or {}
+    local_updates = payload.get("localProperties") or {}
+    build_updates = payload.get("buildGradle") or {}
+
+    if not isinstance(gradle_updates, dict) or not isinstance(local_updates, dict) or not isinstance(build_updates, dict):
+        raise HTTPException(status_code=400, detail="updates must be objects")
+
+    if "sdkDir" in local_updates and "sdk.dir" not in local_updates:
+        local_updates["sdk.dir"] = local_updates.get("sdkDir")
+
+    results = {"gradleProperties": {}, "localProperties": {}, "buildGradle": {}}
+
+    gradle_props_path = Path(files.get("gradleProperties", {}).get("path") or (effective_root / "gradle.properties"))
+    if gradle_updates:
+        results["gradleProperties"] = update_properties_file(
+            gradle_props_path,
+            gradle_updates,
+            create_missing=create_missing,
+        )
+
+    local_props_path = Path(files.get("localProperties", {}).get("path") or (effective_root / "local.properties"))
+    if local_updates:
+        results["localProperties"] = update_properties_file(
+            local_props_path,
+            local_updates,
+            create_missing=create_missing,
+        )
+
+    build_path = None
+    module_build = files.get("moduleBuildGradle", {}).get("path")
+    root_build = files.get("rootBuildGradle", {}).get("path")
+    if module_build:
+        build_path = Path(module_build)
+    elif root_build:
+        build_path = Path(root_build)
+
+    if build_updates:
+        results["buildGradle"] = update_build_gradle(build_path, build_updates)
+
+    updated = collect_android_config(effective_root=effective_root, module=module)
+    updated["projectRoot"] = str(base_root)
+    updated["effectiveRoot"] = str(effective_root)
+    updated["module"] = module
+    try:
+        from app.apps.file_editor_cm6.android_lang.android_lsp_config import update_android_lsp_config, update_android_autodetect
+
+        update_android_lsp_config(base_root, module=module)
+        autodetect = {
+            "files": updated.get("files") or {},
+            "gradleProperties": updated.get("gradleProperties") or {},
+            "localProperties": updated.get("localProperties") or {},
+            "buildConfig": updated.get("buildConfig") or {},
+            "modules": updated.get("modules") or [],
+            "variants": updated.get("variants") or {},
+            "sourceSets": updated.get("sourceSets") or [],
+            "termuxAapt2Path": updated.get("termuxAapt2Path") or "",
+            "importantGradleProperties": updated.get("importantGradleProperties") or [],
+        }
+        update_android_autodetect(base_root, autodetect)
+    except Exception:
+        pass
+
+    return {"ok": True, "data": {"results": results, "config": updated}}
+
+
+def _normalize_android_source_set_name(name: object) -> str:
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    import re
+    raw = str(name).strip()
+    if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", raw):
+        raw = re.sub(r"[^A-Za-z0-9_]", "_", raw)
+        raw = re.sub(r"_+", "_", raw).strip("_")
+        if not raw or not re.match(r"^[A-Za-z]", raw):
+            raise HTTPException(status_code=400, detail="invalid source set name")
+    return raw
+
+
+def _create_android_source_set_dirs(
+    *,
+    effective_root: Path,
+    module_name: str,
+    name: object,
+    include: dict | None,
+) -> tuple[str, list[str], list[str]]:
+    include = include if isinstance(include, dict) else {}
+    include_code = bool(include.get("code", True))
+    include_res = bool(include.get("res", True))
+    include_manifest = bool(include.get("manifest", False))
+
+    name = _normalize_android_source_set_name(name)
+
+    created: list[str] = []
+    existing: list[str] = []
+
+    src_root = (effective_root / module_name / "src").expanduser().resolve(strict=False)
+    target_root = (src_root / name).expanduser().resolve(strict=False)
+    if not str(target_root).startswith(str(effective_root.expanduser().resolve(strict=False))):
+        raise HTTPException(status_code=400, detail="invalid source set path")
+
+    def _touch_dir(path: Path) -> None:
+        if path.exists():
+            existing.append(str(path))
+            return
+        path.mkdir(parents=True, exist_ok=True)
+        created.append(str(path))
+
+    def _touch_file(path: Path, content: str) -> None:
+        if path.exists():
+            existing.append(str(path))
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        created.append(str(path))
+
+    _touch_dir(target_root)
+    if include_code:
+        _touch_dir(target_root / "java")
+        _touch_dir(target_root / "kotlin")
+    if include_res:
+        _touch_dir(target_root / "res")
+    if include_manifest:
+        _touch_file(
+            target_root / "AndroidManifest.xml",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+            "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
+            "</manifest>\n",
+        )
+
+    return name, created, existing
+
+
+@editor_router.post('/android/source_set/create')
+async def android_source_set_create(payload: dict = Body(...)):
+    base_root, effective_root, module_default = _resolve_android_roots()
+    name = payload.get("name") if isinstance(payload, dict) else None
+    module_name = str(payload.get("module") or module_default or "app").strip() or "app"
+    include = payload.get("include") if isinstance(payload, dict) else None
+    name, created, existing = _create_android_source_set_dirs(
+        effective_root=effective_root,
+        module_name=module_name,
+        name=name,
+        include=include,
+    )
+
+    updated = collect_android_config(effective_root=effective_root, module=module_name)
+    updated["projectRoot"] = str(base_root)
+    updated["effectiveRoot"] = str(effective_root)
+    updated["module"] = module_name
+    try:
+        from app.apps.file_editor_cm6.android_lang.android_lsp_config import update_android_autodetect
+
+        autodetect = {
+            "files": updated.get("files") or {},
+            "gradleProperties": updated.get("gradleProperties") or {},
+            "localProperties": updated.get("localProperties") or {},
+            "buildConfig": updated.get("buildConfig") or {},
+            "modules": updated.get("modules") or [],
+            "variants": updated.get("variants") or {},
+            "sourceSets": updated.get("sourceSets") or [],
+            "termuxAapt2Path": updated.get("termuxAapt2Path") or "",
+            "importantGradleProperties": updated.get("importantGradleProperties") or [],
+        }
+        update_android_autodetect(base_root, autodetect)
+    except Exception:
+        pass
+
+    return {"ok": True, "data": {"created": created, "existing": existing, "name": name, "config": updated}}
+
+
+@editor_router.post('/android/variant/create')
+async def android_variant_create(payload: dict = Body(...)):
+    base_root, effective_root, module_default = _resolve_android_roots()
+    name = payload.get("name") if isinstance(payload, dict) else None
+    kind = str(payload.get("type") or "").strip()
+    if kind not in ("buildType", "flavor"):
+        raise HTTPException(status_code=400, detail="invalid variant type")
+    module_name = str(payload.get("module") or module_default or "app").strip() or "app"
+    dimension = str(payload.get("dimension") or "").strip() or None
+    create_source_set = bool(payload.get("createSourceSet", False)) if isinstance(payload, dict) else False
+
+    name = _normalize_android_source_set_name(name)
+
+    cfg = collect_android_config(effective_root=effective_root, module=module_name)
+    files = cfg.get("files") or {}
+    module_build = files.get("moduleBuildGradle", {}).get("path")
+    root_build = files.get("rootBuildGradle", {}).get("path")
+    build_path = Path(module_build or root_build or "")
+    if not build_path or not build_path.is_file():
+        raise HTTPException(status_code=400, detail="build.gradle not found")
+
+    from app.apps.file_editor_cm6.android_lang.android_config import update_build_gradle_variants
+
+    result = update_build_gradle_variants(
+        build_path,
+        kind=kind,
+        name=name,
+        flavor_dimension=dimension,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    created = []
+    existing = []
+    if create_source_set:
+        _, created, existing = _create_android_source_set_dirs(
+            effective_root=effective_root,
+            module_name=module_name,
+            name=name,
+            include={"code": True, "res": True, "manifest": False},
+        )
+
+    updated = collect_android_config(effective_root=effective_root, module=module_name)
+    updated["projectRoot"] = str(base_root)
+    updated["effectiveRoot"] = str(effective_root)
+    updated["module"] = module_name
+    try:
+        from app.apps.file_editor_cm6.android_lang.android_lsp_config import update_android_autodetect
+
+        autodetect = {
+            "files": updated.get("files") or {},
+            "gradleProperties": updated.get("gradleProperties") or {},
+            "localProperties": updated.get("localProperties") or {},
+            "buildConfig": updated.get("buildConfig") or {},
+            "modules": updated.get("modules") or [],
+            "variants": updated.get("variants") or {},
+            "sourceSets": updated.get("sourceSets") or [],
+            "termuxAapt2Path": updated.get("termuxAapt2Path") or "",
+            "importantGradleProperties": updated.get("importantGradleProperties") or [],
+        }
+        update_android_autodetect(base_root, autodetect)
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "data": {
+            "result": result,
+            "created": created,
+            "existing": existing,
+            "name": name,
+            "config": updated,
+        },
+    }
 
 
 @editor_router.post('/set_view_settings')

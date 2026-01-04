@@ -1474,8 +1474,9 @@
 
   .lsp-server-status {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
   }
   .lsp-server-status .lsp-toggle-btn {
     padding: 6px 10px;
@@ -1666,6 +1667,138 @@
     font-size: 0.75rem;
     color: var(--muted-foreground, #9ca3af);
     margin-bottom: 10px;
+  }
+
+  .android-config-modal .fe-modal-card {
+    max-width: 900px;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  .android-config-note {
+    font-size: 0.75rem;
+    color: var(--muted-foreground, #9ca3af);
+    margin-bottom: 10px;
+  }
+
+  .android-config-section {
+    margin-top: 12px;
+  }
+
+  .android-config-section-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-foreground, #9ca3af);
+    margin-bottom: 6px;
+  }
+
+  .android-config-grid {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .android-config-grid label {
+    font-size: 0.78rem;
+    color: var(--muted-foreground, #9ca3af);
+  }
+
+  .android-config-input {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border, #333);
+    background: rgba(0, 0, 0, 0.25);
+    color: var(--foreground, #e5e7eb);
+    font-size: 0.78rem;
+  }
+  .android-config-input--multi {
+    min-height: 32px;
+    resize: none;
+    overflow: hidden;
+    white-space: pre-wrap;
+    line-height: 1.25;
+  }
+
+  .android-config-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .android-config-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+
+  .android-config-files {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 10px;
+    font-size: 0.78rem;
+  }
+  .android-config-sourceset-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 0.75rem;
+  }
+  .android-config-sourceset {
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--foreground, #e5e7eb);
+  }
+  .android-config-sourceset-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .android-config-sourceset-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .android-config-file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .android-config-file .status {
+    font-size: 0.7rem;
+    color: var(--muted-foreground, #9ca3af);
+  }
+
+  .android-config-module-picker {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .android-config-missing {
+    font-size: 0.72rem;
+    color: #facc15;
+    margin-top: 6px;
+  }
+
+  @media (max-width: 720px) {
+    .android-config-grid {
+      grid-template-columns: 1fr;
+    }
+    .android-config-row,
+    .android-config-module-picker {
+      flex-direction: column;
+      align-items: stretch;
+    }
   }
 
   @media (max-width: 720px) {
@@ -2228,6 +2361,7 @@
             <button class="lsp-toggle-btn" id="lsp-toggle-kotlin-android">On</button>
             <button class="fe-btn" id="lsp-start-kotlin-android">Start</button>
             <button class="fe-btn fe-btn-secondary" id="lsp-sync-kotlin-android" title="Rebuild dependency model from Gradle files">🔄 Sync</button>
+            <button class="fe-btn fe-btn-secondary" id="lsp-config-kotlin-android">Configure…</button>
           </div>
         </div>
       </div>
@@ -2235,6 +2369,151 @@
       <p style="margin-top: 16px; font-size: 0.75rem; color: var(--muted-foreground, #9ca3af);">
         Note: Changes take effect when you open a new file of the corresponding type.
       </p>
+    </div>
+  </div>
+</div>
+
+<!-- Android Build Config Modal -->
+<div id="android-config-modal" class="fe-modal android-config-modal" aria-hidden="true" style="z-index: 335;">
+  <div class="fe-modal-card">
+    <div class="fe-modal-header">
+      <strong>Android Build Config</strong>
+      <span style="flex:1"></span>
+      <button class="fe-btn" id="android-config-close" aria-label="Close">✕</button>
+    </div>
+    <div class="android-config-note" id="android-config-note">
+      Configure key Gradle/Android settings for the current Kotlin-Android LSP root.
+    </div>
+
+    <div class="android-config-section">
+      <div class="android-config-section-title">Detected files</div>
+      <div id="android-config-files" class="android-config-files"></div>
+    </div>
+
+    <div class="android-config-section">
+      <div class="android-config-section-title">Project / Module</div>
+      <div class="android-config-grid">
+        <label>Project root</label>
+        <textarea id="android-config-project-root" class="android-config-input android-config-input--multi" rows="1" readonly></textarea>
+        <label>Effective root</label>
+        <textarea id="android-config-effective-root" class="android-config-input android-config-input--multi" rows="1" readonly></textarea>
+        <label>Module</label>
+        <div class="android-config-module-picker">
+          <textarea id="android-config-module-input" class="android-config-input android-config-input--multi" rows="1" placeholder="app"></textarea>
+          <div class="fe-menu">
+            <button id="android-config-module-btn" class="fe-btn fe-btn-secondary" type="button">Pick</button>
+            <div id="android-config-module-dd" class="fe-dropdown fe-dropdown--modal" style="width: 220px; max-height: 240px; overflow-y: auto;"></div>
+          </div>
+        </div>
+        <label>Detected variants</label>
+        <textarea id="android-config-variants" class="android-config-input android-config-input--multi" rows="1" readonly></textarea>
+      </div>
+    </div>
+
+    <div class="android-config-section">
+      <div class="android-config-section-title">Source sets</div>
+      <div id="android-config-sourcesets" class="android-config-sourceset-list"></div>
+      <div class="android-config-sourceset-form">
+        <div class="android-config-sourceset-row">
+          <input id="android-config-sourceset-name" class="android-config-input" type="text" placeholder="freeDebug" />
+          <div class="fe-menu" style="max-width: 160px; width: 100%;">
+            <button id="android-config-sourceset-kind-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;">
+              <span id="android-config-sourceset-kind-label">Variant</span>
+              <span aria-hidden="true">▾</span>
+            </button>
+            <div id="android-config-sourceset-kind-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 220px; overflow-y: auto;"></div>
+          </div>
+          <button class="fe-btn" id="android-config-sourceset-create" type="button">Add Source Set</button>
+        </div>
+        <div class="android-config-sourceset-row">
+          <label><input id="android-config-sourceset-code" type="checkbox" checked /> Code (java/kotlin)</label>
+          <label><input id="android-config-sourceset-res" type="checkbox" checked /> res/</label>
+          <label><input id="android-config-sourceset-manifest" type="checkbox" /> AndroidManifest.xml</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="android-config-section">
+      <div class="android-config-section-title">Add variant (Gradle)</div>
+      <div class="android-config-sourceset-form">
+        <div class="android-config-sourceset-row">
+          <input id="android-config-variant-name" class="android-config-input" type="text" placeholder="staging" />
+          <div class="fe-menu" style="max-width: 180px; width: 100%;">
+            <button id="android-config-variant-type-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;">
+              <span id="android-config-variant-type-label">Build type</span>
+              <span aria-hidden="true">▾</span>
+            </button>
+            <div id="android-config-variant-type-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 220px; overflow-y: auto;"></div>
+          </div>
+          <input id="android-config-variant-dimension" class="android-config-input" type="text" placeholder="dimension (flavor only)" />
+          <button class="fe-btn" id="android-config-variant-create" type="button">Add Variant</button>
+        </div>
+        <div class="android-config-sourceset-row">
+          <label><input id="android-config-variant-create-sources" type="checkbox" checked /> Create source set folders</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="android-config-section">
+      <div class="android-config-section-title">SDK / AAPT2</div>
+      <div class="android-config-grid">
+        <label>SDK dir (sdk.dir)</label>
+        <div class="android-config-row">
+          <textarea id="android-config-sdk-dir" class="android-config-input android-config-input--multi" rows="1" placeholder="/path/to/Android/Sdk"></textarea>
+          <button class="fe-btn fe-btn-secondary" id="android-config-sdk-pick">Pick</button>
+        </div>
+        <label>aapt2 override</label>
+        <div class="android-config-row">
+          <textarea id="android-config-aapt2" class="android-config-input android-config-input--multi" rows="1" placeholder="/path/to/aapt2"></textarea>
+          <button class="fe-btn fe-btn-secondary" id="android-config-aapt2-pick">Pick</button>
+          <button class="fe-btn" id="android-config-aapt2-termux">Use Termux</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="android-config-section">
+      <div class="android-config-section-title">Build flags</div>
+      <div class="android-config-grid">
+        <label>compileSdk</label>
+        <input id="android-config-compile-sdk" class="android-config-input" type="number" min="1" step="1" />
+        <label>minSdk</label>
+        <input id="android-config-min-sdk" class="android-config-input" type="number" min="1" step="1" />
+        <label>targetSdk</label>
+        <input id="android-config-target-sdk" class="android-config-input" type="number" min="1" step="1" />
+        <label>minifyEnabled</label>
+        <input id="android-config-minify" type="checkbox" />
+        <label>shrinkResources</label>
+        <input id="android-config-shrink" type="checkbox" />
+      </div>
+    </div>
+
+    <div class="android-config-section">
+      <div class="android-config-section-title">ABI splits (if present)</div>
+      <div class="android-config-grid">
+        <label>Enable</label>
+        <input id="android-config-abi-enable" type="checkbox" />
+        <label>Universal APK</label>
+        <input id="android-config-abi-universal" type="checkbox" />
+        <label>Include ABIs</label>
+        <textarea id="android-config-abi-include" class="android-config-input android-config-input--multi" rows="1" placeholder="arm64-v8a, armeabi-v7a"></textarea>
+      </div>
+    </div>
+
+    <div class="android-config-section">
+      <div class="android-config-section-title">Gradle properties</div>
+      <div id="android-config-gradle-props" class="android-config-grid"></div>
+    </div>
+
+    <div id="android-config-missing" class="android-config-missing" style="display: none;"></div>
+
+    <div class="android-config-actions">
+      <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem;">
+        <input id="android-config-create-missing" type="checkbox" />
+        Create missing properties files
+      </label>
+      <span style="flex:1"></span>
+      <button class="fe-btn fe-btn-secondary" id="android-config-refresh">Refresh</button>
+      <button class="fe-btn" id="android-config-save">Save</button>
     </div>
   </div>
 </div>

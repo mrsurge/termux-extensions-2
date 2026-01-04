@@ -369,6 +369,9 @@ class ConnectionManager:
 
     async def broadcast(self, project_path: str, message: Dict[str, Any]):
         """Send message to all clients connected to a specific project."""
+        if _is_worker_process() and not self.has_connections(project_path):
+            _schedule_forward_broadcast(project_path, message)
+            return
         if project_path in self.active_connections:
             # Create text message once
             text = json.dumps(message)
@@ -597,7 +600,7 @@ def _framework_url() -> str:
 
 
 def _forward_draft_notification(project_path: str) -> None:
-    url = f"{_framework_url()}/api/app/file_editor_cm6/explorer/notify_drafts"
+    url = f"{_framework_url()}/api/apps/file_editor_cm6/explorer/notify_drafts"
     payload = {"project": project_path}
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
@@ -623,6 +626,25 @@ def _schedule_forward_draft_refresh(project_path: str) -> None:
         timer = Timer(0.5, do_forward)
         _explorer_refresh_timers[debounce_key] = timer
         timer.start()
+
+
+def _forward_explorer_broadcast(project_path: str, message: Dict[str, Any]) -> None:
+    url = f"{_framework_url()}/api/apps/file_editor_cm6/explorer/broadcast"
+    payload = {"project": project_path, "message": message}
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            resp.read()
+    except Exception as exc:
+        logger.debug(f"Failed to forward explorer broadcast to main: {exc}")
+
+
+def _schedule_forward_broadcast(project_path: str, message: Dict[str, Any]) -> None:
+    # Avoid flooding the main server with redundant pulses.
+    if message.get("type") == "pulse":
+        return
+    Timer(0, lambda: _forward_explorer_broadcast(project_path, message)).start()
 
 
 def notify_draft_state_changed(project_path: str):

@@ -340,13 +340,7 @@ function createApp(elements, options) {
             : options.transports,
       });
       window.did_handshake = false;
-      const allowReload = window.self === window.top;
-      const requestReload = (message) => {
-        console.log(message);
-        if (allowReload) {
-          window.location.reload();
-        }
-      };
+      const shouldReload = () => window.NICEGUI_CONTINUE_ON_DISCONNECT !== true;
       const messageHandlers = {
         connect: () => {
           const args = {
@@ -358,7 +352,8 @@ function createApp(elements, options) {
           };
           window.socket.emit("handshake", args, (ok) => {
             if (!ok) {
-              requestReload("reloading because handshake failed for clientId " + window.clientId);
+              console.log("reloading because handshake failed for clientId " + window.clientId);
+              window.location.reload();
             }
             window.did_handshake = true;
             document.getElementById("popup").ariaHidden = true;
@@ -366,13 +361,19 @@ function createApp(elements, options) {
         },
         connect_error: (err) => {
           if (err.message == "timeout") {
-            requestReload("reloading because connection timed out"); // see https://github.com/zauberzeug/nicegui/issues/198
+            console.log("reloading because connection timed out");
+            if (shouldReload()) {
+              window.location.reload(); // see https://github.com/zauberzeug/nicegui/issues/198
+            } else {
+              document.getElementById("popup").ariaHidden = false;
+            }
           }
         },
         try_reconnect: async () => {
           document.getElementById("popup").ariaHidden = false;
           await fetch(window.location.href, { headers: { "NiceGUI-Check": "try_reconnect" } });
-          requestReload("reloading because reconnect was requested");
+          console.log("reloading because reconnect was requested");
+          window.location.reload();
         },
         disconnect: () => {
           document.getElementById("popup").ariaHidden = false;

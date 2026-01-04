@@ -171,6 +171,14 @@ class HistoryStore:
             return False
 
     def get_lsp_server_root_rel(self, project_path: str, server_id: str) -> str:
+        if str(server_id) == "kotlin-android":
+            try:
+                from app.apps.file_editor_cm6.android_lang.android_lsp_config import get_android_lsp_config
+
+                cfg = get_android_lsp_config(Path(project_path))
+                return str(cfg.get("rootRel") or "")
+            except Exception:
+                return ""
         sidecar = self.get_project_sidecar(project_path)
         if not sidecar:
             return ""
@@ -251,7 +259,7 @@ class HistoryStore:
 
         sidecar = self.get_project_sidecar(project_path)
         if not sidecar:
-            return {
+            payload = {
                 "enableLsp": False,
                 "enableLspPyright": False,
                 "enableLspTypescript": False,
@@ -268,8 +276,28 @@ class HistoryStore:
                 "lspKotlinAndroidVariant": "GeckoDebug",
                 "lspKotlinAndroidVariants": [],
             }
+            try:
+                from app.apps.file_editor_cm6.android_lang.android_lsp_config import get_android_lsp_config
+
+                cfg = get_android_lsp_config(Path(project_path))
+                payload["lspRootRelKotlinAndroid"] = str(cfg.get("rootRel") or "")
+                payload["lspKotlinAndroidModule"] = str(cfg.get("module") or "app")
+                payload["lspKotlinAndroidVariant"] = str(cfg.get("variant") or "GeckoDebug")
+            except Exception:
+                pass
+            return payload
         try:
             payload = dict(sidecar.get_lsp_state_payload())
+
+            try:
+                from app.apps.file_editor_cm6.android_lang.android_lsp_config import get_android_lsp_config
+
+                cfg = get_android_lsp_config(Path(project_path))
+                payload["lspRootRelKotlinAndroid"] = str(cfg.get("rootRel") or "")
+                payload["lspKotlinAndroidModule"] = str(cfg.get("module") or "app")
+                payload["lspKotlinAndroidVariant"] = str(cfg.get("variant") or "GeckoDebug")
+            except Exception:
+                pass
 
             # Kotlin-android: detect variants from build.gradle(.kts) under rootRel (fast path).
             try:
