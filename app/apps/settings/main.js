@@ -58,7 +58,12 @@ export default function init(root, _api, host) {
   const maxAppShellsInput = root.querySelector('#max-app-shells');
   const appTtlInput = root.querySelector('#app-ttl');
   const saveLifecycleBtn = root.querySelector('[data-action="save-lifecycle-settings"]');
+  const saveIntegrationBtn = root.querySelector('[data-action="save-integration-settings"]');
   const ipcLogOutput = root.querySelector('[data-role="ipc-log-output"]');
+
+  const persistentNetworkToggle = root.querySelector('#setting-persistent-network');
+  const agentDrawerIframeToggle = root.querySelector('#setting-agent-drawer-iframe');
+  const agentDrawerIframeUrlInput = root.querySelector('#setting-agent-drawer-iframe-url');
 
   let ipcEventSource = null;
 
@@ -439,6 +444,34 @@ export default function init(root, _api, host) {
     }
   });
 
+  function setAgentIframeUrlEnabled(enabled) {
+    if (!agentDrawerIframeUrlInput) return;
+    agentDrawerIframeUrlInput.disabled = !enabled;
+    agentDrawerIframeUrlInput.style.opacity = enabled ? '1' : '0.7';
+  }
+
+  agentDrawerIframeToggle?.addEventListener('change', () => {
+    setAgentIframeUrlEnabled(!!agentDrawerIframeToggle.checked);
+  });
+
+  saveIntegrationBtn?.addEventListener('click', async () => {
+    const patch = {
+      persistent_network_notification: !!persistentNetworkToggle?.checked,
+      agent_drawer_iframe: !!agentDrawerIframeToggle?.checked,
+    };
+    if (agentDrawerIframeUrlInput) {
+      patch.agent_drawer_iframe_url = agentDrawerIframeUrlInput.value.trim();
+    }
+
+    try {
+      await persistSettingsPatch(patch);
+      if (host?.toast) host.toast('Integration settings saved', 2000);
+    } catch (err) {
+      console.error('Failed to save integration settings', err);
+      if (host?.toast) host.toast('Failed to save settings', 3000);
+    }
+  });
+
   async function loadAndRenderAll() {
     await loadMetrics().catch(() => { });
     await loadShells().catch(() => { });
@@ -455,6 +488,20 @@ export default function init(root, _api, host) {
       const ttlSeconds = settings.APP_TTL_SECONDS || 1800;
       appTtlInput.value = Math.floor(ttlSeconds / 60);
     }
+
+    if (persistentNetworkToggle) {
+      persistentNetworkToggle.checked = !!settings.persistent_network_notification;
+    }
+
+    if (agentDrawerIframeToggle) {
+      agentDrawerIframeToggle.checked = !!settings.agent_drawer_iframe;
+    }
+
+    if (agentDrawerIframeUrlInput) {
+      agentDrawerIframeUrlInput.value = settings.agent_drawer_iframe_url || '';
+    }
+
+    setAgentIframeUrlEnabled(!!agentDrawerIframeToggle?.checked);
   }
 
   loadAndRenderAll();

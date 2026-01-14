@@ -110,6 +110,28 @@
   color: var(--muted-foreground, #94a3b8);
   margin: 0;
 }
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.95rem;
+}
+.settings-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+.settings-input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #374151);
+  background: var(--background, #0f172a);
+  color: var(--foreground, #f9fafb);
+}
 .reorder-list {
   display: flex;
   flex-direction: column;
@@ -212,6 +234,30 @@
       <button data-action="refresh-shells">Refresh</button>
     </header>
     <div data-role="shell-list"></div>
+  </section>
+
+  <section class="settings-card" data-section="integrations">
+    <header>
+      <h2>Debug & Integrations</h2>
+      <button data-action="save-integration-settings">Save</button>
+    </header>
+    <div class="shutdown-form">
+      <label class="settings-toggle" for="setting-persistent-network">
+        <input id="setting-persistent-network" type="checkbox">
+        <span>Persistent network notification (Android)</span>
+      </label>
+      <p class="hint">Runs a foreground service to keep network connections alive while backgrounded.</p>
+
+      <label class="settings-toggle" for="setting-agent-drawer-iframe">
+        <input id="setting-agent-drawer-iframe" type="checkbox">
+        <span>Use agent iframe drawer</span>
+      </label>
+      <p class="hint">Swap the CM6 agent drawer UI for an iframe.</p>
+
+      <label for="setting-agent-drawer-iframe-url">Agent iframe URL</label>
+      <input id="setting-agent-drawer-iframe-url" class="settings-input" type="text" placeholder="http://127.0.0.1:12359/codex-agent">
+      <p class="hint">Defaults to http://127.0.0.1:12359/codex-agent if left blank.</p>
+    </div>
   </section>
 
   <section class="settings-card" data-section="extensions">

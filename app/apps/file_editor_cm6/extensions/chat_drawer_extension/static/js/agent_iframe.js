@@ -1,0 +1,129 @@
+// app/apps/file_editor_cm6/extensions/chat_drawer_extension/static/js/agent_iframe.js
+// Lightweight iframe-based agent drawer.
+
+const DEFAULT_IFRAME_URL = 'http://127.0.0.1:12359/codex-agent';
+const DEFAULT_HOST_UI_ENDPOINT = 'http://127.0.0.1:12359/api/host/ui';
+const DEFAULT_DRAWER_OPEN_ENDPOINT = 'http://127.0.0.1:12359/api/host/drawer/open';
+const DEFAULT_DRAWER_CLOSE_ENDPOINT = 'http://127.0.0.1:12359/api/host/drawer/close';
+
+export function initAgentIframe(options = {}) {
+  const drawer = document.getElementById('agent-drawer');
+  const toggle = document.getElementById('fe-agent-toggle');
+  const closeBtn = document.getElementById('agent-close');
+  const iframe = document.getElementById('agent-iframe');
+  const title = document.querySelector('.agent-drawer__title');
+  const header = drawer?.querySelector('.agent-drawer__header');
+
+  if (!drawer || !toggle) {
+    return { open: () => {}, close: () => {} };
+  }
+
+  const url = options.url || DEFAULT_IFRAME_URL;
+  const hostUiEndpoint = options.hostUiEndpoint || DEFAULT_HOST_UI_ENDPOINT;
+  const drawerOpenEndpoint = options.drawerOpenEndpoint || DEFAULT_DRAWER_OPEN_ENDPOINT;
+  const drawerCloseEndpoint = options.drawerCloseEndpoint || DEFAULT_DRAWER_CLOSE_ENDPOINT;
+  const allowAnyOrigin = options.allowAnyOrigin === true;
+  let isOpen = false;
+  let iframeOrigin = null;
+
+  function updateAria() {
+    drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  }
+
+  function resolveIframeOrigin() {
+    try {
+      iframeOrigin = new URL(url, window.location.href).origin;
+    } catch {
+      iframeOrigin = null;
+    }
+  }
+
+  async function updateHostUi(showClose) {
+    const endpoint = showClose ? drawerOpenEndpoint : drawerCloseEndpoint;
+    if (!endpoint) return;
+    try {
+      await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          show_close: !!showClose,
+          parent_origin: window.location.origin,
+        }),
+      });
+    } catch (err) {
+      // Non-fatal if iframe app isn't up yet or CORS blocks.
+      console.warn('[Agent iframe] Failed to update host UI state:', err);
+    }
+  }
+
+  async function updateHostHints() {
+    try {
+      const resp = await fetch('/api/app/file_editor_cm6/agent/drawer/ui_hints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hide_header: true }),
+      });
+      const body = await resp.json();
+      return !!(body && body.ok);
+    } catch (err) {
+      console.warn('[Agent iframe] Failed to update UI hints:', err);
+      return false;
+    }
+  }
+
+  function ensureIframeLoaded() {
+    if (!iframe) return;
+    if (!iframe.src) {
+      iframe.src = url;
+    }
+  }
+
+  function openDrawer() {
+    if (isOpen) return;
+    drawer.classList.add('open');
+    isOpen = true;
+    updateAria();
+    ensureIframeLoaded();
+    updateHostUi(true);
+    updateHostHints().then((ok) => {
+      if (ok && header) {
+        header.remove();
+      }
+    });
+  }
+
+  function closeDrawer() {
+    if (!isOpen) return;
+    drawer.classList.remove('open');
+    isOpen = false;
+    updateAria();
+    updateHostUi(false);
+  }
+
+  drawer.classList.add('agent-drawer--iframe');
+  if (title) {
+    title.textContent = options.title || 'Agent';
+  }
+
+  resolveIframeOrigin();
+
+  window.addEventListener('message', (event) => {
+    if (!allowAnyOrigin && iframeOrigin && event.origin !== iframeOrigin) return;
+    const data = event?.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'codex_agent_close') {
+      closeDrawer();
+    }
+  });
+
+  toggle.addEventListener('click', () => {
+    if (isOpen) closeDrawer();
+    else openDrawer();
+  });
+
+  if (closeBtn) {
+    closeBtn.addEventListener('click', closeDrawer);
+  }
+
+  return { open: openDrawer, close: closeDrawer };
+}

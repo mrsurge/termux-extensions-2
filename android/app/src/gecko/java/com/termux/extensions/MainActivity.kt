@@ -1,5 +1,8 @@
 package com.termux.extensions
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
@@ -15,13 +18,17 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import android.net.Uri
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
@@ -34,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var geckoView: GeckoView
     private lateinit var geckoSession: GeckoSession
     private lateinit var runtime: GeckoRuntime
+    private lateinit var nativeHeader: View
 
     private lateinit var consoleOverlay: FrameLayout
     private lateinit var consoleScroll: ScrollView
@@ -58,6 +66,7 @@ class MainActivity : AppCompatActivity() {
     private var canNavigateBack = false
 
     private var inAppShell: Boolean = true
+    private var persistentNetworkNotificationEnabled: Boolean = false
 
     private fun dpToPx(dp: Int): Int {
         return TypedValue.applyDimension(
@@ -67,11 +76,41 @@ class MainActivity : AppCompatActivity() {
         ).toInt()
     }
 
+    private fun updatePersistentNetworkService() {
+        if (!persistentNetworkNotificationEnabled || !inAppShell) {
+            stopService(Intent(this, PersistentNetworkService::class.java))
+            return
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            val granted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    9301
+                )
+                return
+            }
+        }
+
+        val intent = Intent(this, PersistentNetworkService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            ContextCompat.startForegroundService(this, intent)
+        } else {
+            startService(intent)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         geckoView = findViewById(R.id.geckoView)
+        nativeHeader = findViewById(R.id.nativeHeader)
 
         consoleOverlay = findViewById(R.id.consoleOverlay)
         consoleScroll = findViewById(R.id.consoleScroll)
@@ -100,9 +139,8 @@ class MainActivity : AppCompatActivity() {
         consoleOverlay.setOnClickListener { hideConsoleOverlay() }
         findViewById<View>(R.id.consolePanel).setOnClickListener { /* consume */ }
 
-        // Private mode avoids surprising state restores (e.g. reopening the last app worker URL).
         geckoSession = GeckoSession(
-            GeckoSessionSettings.Builder().usePrivateMode(true).build()
+            GeckoSessionSettings.Builder().usePrivateMode(false).build()
         ).apply {
             historyDelegate = object : GeckoSession.HistoryDelegate {
                 override fun onHistoryStateChange(
@@ -298,6 +336,64 @@ class MainActivity : AppCompatActivity() {
                     return result
                 }
             }
+
+            navigationDelegate = object : GeckoSession.NavigationDelegate {
+                private fun isAppShellUrl(uri: Uri): Boolean {
+                    val path = uri.path ?: return false
+                    return path == "/app" || path.startsWith("/app/")
+                }
+
+                private fun ensureGvNative(uri: Uri): Uri {
+                    val params = uri.queryParameterNames
+                    if (params.contains("gv_native")) return uri
+                    val builder = uri.buildUpon()
+                    val existingQuery = uri.encodedQuery
+                    if (existingQuery.isNullOrBlank()) {
+                        builder.encodedQuery("gv_native=1")
+                    } else {
+                        builder.encodedQuery("$existingQuery&gv_native=1")
+                    }
+                    return builder.build()
+                }
+
+                override fun onLoadRequest(
+                    session: GeckoSession,
+                    request: GeckoSession.NavigationDelegate.LoadRequest
+                ): GeckoResult<AllowOrDeny>? {
+                    val uri = try {
+                        Uri.parse(request.uri)
+                    } catch (_: Exception) {
+                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+                    }
+
+                    val scheme = uri.scheme?.lowercase()
+                    if (scheme != null && scheme != "http" && scheme != "https") {
+                        // Ignore javascript:, about:, etc. so UI state isn't toggled.
+                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+                    }
+
+                    val isAppShell = isAppShellUrl(uri)
+                    runOnUiThread {
+                        inAppShell = isAppShell
+                        nativeHeader.visibility = if (inAppShell) View.VISIBLE else View.GONE
+                        updatePersistentNetworkService()
+                    }
+
+                    if (!isAppShell) {
+                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+                    }
+
+                    val rewritten = ensureGvNative(uri)
+                    if (rewritten.toString() == request.uri) {
+                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+                    }
+
+                    runOnUiThread {
+                        geckoSession.loadUri(rewritten.toString())
+                    }
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
+            }
         }
 
         runtime = GeckoRuntimeProvider.get(applicationContext)
@@ -308,15 +404,30 @@ class MainActivity : AppCompatActivity() {
         wakeFrameworkAndLoad()
     }
 
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 9301) {
+            updatePersistentNetworkService()
+        }
+    }
+
     private fun loadHome() {
         if (!::geckoSession.isInitialized) return
         inAppShell = false
+        nativeHeader.visibility = View.GONE
+        updatePersistentNetworkService()
         geckoSession.loadUri(frameworkBaseUrl.trimEnd('/') + "/")
     }
 
     private fun loadApp(appId: String) {
         if (!::geckoSession.isInitialized) return
         inAppShell = true
+        nativeHeader.visibility = View.VISIBLE
+        updatePersistentNetworkService()
         currentAppId = appId
         isLocked = false
         findViewById<Button>(R.id.btnLock).text = "Lock"
@@ -571,8 +682,23 @@ class MainActivity : AppCompatActivity() {
             }
 
             frameworkBaseUrl = frameworkUrl
+
+            try {
+                val androidCfgUrl = frameworkUrl.trimEnd('/') + "/api/android/config"
+                val req = Request.Builder().url(androidCfgUrl).get().build()
+                httpClient.newCall(req).execute().use { resp ->
+                    val body = resp.body?.string()
+                    if (resp.isSuccessful && !body.isNullOrBlank()) {
+                        val json = JSONObject(body)
+                        val data = json.optJSONObject("data")
+                        persistentNetworkNotificationEnabled =
+                            data?.optBoolean("persistent_network_notification", false) ?: false
+                    }
+                }
+            } catch (_: Exception) {
+            }
             runOnUiThread {
-                loadApp(DEFAULT_APP_ID)
+                loadHome()
             }
         }.start()
     }

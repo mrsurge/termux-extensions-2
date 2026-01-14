@@ -1,0 +1,6 @@
+{
+  "name": "Chat Drawer",
+  "id": "chat_drawer_extension",
+  "icon": "/apps/file_editor_cm6/extensions/chat_drawer_extension/static/codexas-icon.svg",
+  "icon_emoji": "💬"
+}

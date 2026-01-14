@@ -679,6 +679,19 @@
     #terminal-container .xterm-viewport::-webkit-scrollbar-thumb { background: transparent; }
   }
   .fe-agent-toggle { font-size: 1.1rem; line-height: 1; }
+  .fe-agent-toggle .fe-agent-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    line-height: 1;
+  }
+  .fe-agent-toggle .fe-agent-icon img {
+    width: 1.1rem;
+    height: 1.1rem;
+    display: block;
+  }
   .fe-git-actions .fe-btn {
     flex: 0 0 auto;
     font-size: 0.8rem;
@@ -816,6 +829,32 @@
     gap: 16px;
     padding: 16px;
     overflow: hidden;
+  }
+
+  .agent-drawer__iframe {
+    flex: 1;
+    display: none;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .agent-drawer__iframe iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+  }
+
+  .agent-drawer--iframe .agent-drawer__body {
+    display: none;
+  }
+
+  .agent-drawer--iframe .agent-drawer__iframe {
+    display: flex;
+  }
+
+  .agent-drawer--iframe #agent-new-session {
+    display: none;
   }
 
   .agent-section {
@@ -1975,10 +2014,9 @@
       <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
       <span id="fe-lsp-spinner" class="fe-lsp-spinner" title="Language server starting…" aria-hidden="true" style="display: none;"></span>
-      <div style="position: relative;">
-        <button id="recent-files-btn" class="fe-btn" style="margin: 0;" disabled>Recents ▾</button>
-        <div id="recent-files-dd" class="fe-dropdown"></div>
-      </div>
+      <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Agent drawer">
+        <span class="fe-agent-icon" data-default-icon="💬">💬</span>
+      </button>
     </div>
     <span id="fe-status" class="fe-status" style="display: none;"></span>
     <span id="edit-tracker-status" class="fe-status" style="display: none; margin-left: 0.5rem;"></span>
@@ -2080,7 +2118,10 @@
       <button class="fe-menu-btn" id="menu-branch-btn">Branch ▾</button>
       <div class="fe-dropdown" id="menu-branch-dd"></div>
     </div>
-    <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Agent drawer">💬</button>
+    <div style="position: relative;">
+      <button id="recent-files-btn" class="fe-menu-btn" style="margin: 0;" disabled>Recents ▾</button>
+      <div id="recent-files-dd" class="fe-dropdown"></div>
+    </div>
   </div>
 
   <div class="fe-editor-container" id="editor-container">
@@ -2126,6 +2167,15 @@
         <button class="fe-btn" id="agent-close">✕</button>
       </div>
     </header>
+    <div class="agent-drawer__iframe" id="agent-iframe-wrap">
+      <iframe
+        id="agent-iframe"
+        title="Agent"
+        loading="lazy"
+        referrerpolicy="no-referrer"
+        allow="clipboard-read; clipboard-write">
+      </iframe>
+    </div>
     <div class="agent-drawer__body">
       <section class="agent-section agent-section--current-session" aria-label="Current agent session">
         <h3>Current Session</h3>

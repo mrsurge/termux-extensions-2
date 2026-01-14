@@ -506,6 +506,10 @@ async def api_lsp_status():
 from .agent_routes import bp as agent_routes_bp
 file_editor_cm6_bp.include_router(agent_routes_bp)
 
+# Chat drawer extension routes (hardwired until dynamic extension loading lands).
+from .extensions.chat_drawer_extension.codex_as_extension import bp as chat_drawer_extension_bp
+file_editor_cm6_bp.include_router(chat_drawer_extension_bp)
+
 # Serve static files (JS, CSS, etc.)
 @file_editor_cm6_bp.get("/static/{file_path:path}")
 async def serve_static(file_path: str):

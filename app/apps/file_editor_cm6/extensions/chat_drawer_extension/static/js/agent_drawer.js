@@ -1,4 +1,4 @@
-// app/apps/file_editor_cm6/static/js/agent_drawer.js
+// app/apps/file_editor_cm6/extensions/chat_drawer_extension/static/js/agent_drawer.js
 // Agent drawer with shared shell architecture - ONE MCP server for all sessions
 
 function notify(message) {

@@ -735,6 +735,17 @@ async def post_settings(payload: dict = Body(...)):
     return {"ok": True, "data": saved}
 
 
+@app.get("/api/android/config")
+async def get_android_config():
+    """
+    Small, stable config surface for the Android wrappers (GeckoView/WebView).
+
+    This intentionally avoids returning the entire settings.json to reduce coupling.
+    """
+    enabled = bool(get_setting("persistent_network_notification", False))
+    return {"ok": True, "data": {"persistent_network_notification": enabled}}
+
+
 
 @app.get("/api/state")
 async def get_state(key: List[str] = Query(...)):

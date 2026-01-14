@@ -9,7 +9,9 @@ import { initExplorerUI } from './static/js/explorer.js';
 import { createDiffController } from './static/js/diff_decorations.js';
 import { createTerminalDrawer } from './static/js/terminal.js';
 import { initBranchMenu } from './static/js/git_menu.js';
-import { initAgentDrawer } from './static/js/agent_drawer.js';
+// Hardcoded extension imports for now; will be dynamically loaded later.
+import { initAgentDrawer } from './extensions/chat_drawer_extension/static/js/agent_drawer.js';
+import { initAgentIframe } from './extensions/chat_drawer_extension/static/js/agent_iframe.js';
 import ReconnectingWebSocket from './static/js/reconnecting_websocket.js'; // used by other WS helpers (not explorer)
 import { initLspModal } from './static/js/lsp-modal/index.js';
 
@@ -25,6 +27,81 @@ function ensureSocketIoLoaded() {
   });
 }
 import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
+
+const DEFAULT_AGENT_IFRAME_URL = 'http://127.0.0.1:12359/codex-agent';
+const AGENT_EXTENSION_MANIFEST = '/apps/file_editor_cm6/extensions/chat_drawer_extension/manifest.json';
+
+async function fetchFrameworkSettings() {
+  try {
+    const resp = await fetch('/api/settings', { cache: 'no-store' });
+    const body = await resp.json();
+    if (body && body.ok && body.data && typeof body.data === 'object') {
+      return body.data;
+    }
+  } catch (e) {
+    console.warn('[Settings] Failed to load framework settings:', e);
+  }
+  return {};
+}
+
+async function fetchAgentExtensionManifest() {
+  try {
+    const resp = await fetch(AGENT_EXTENSION_MANIFEST, { cache: 'no-store' });
+    const body = await resp.json();
+    if (body && typeof body === 'object') {
+      return body;
+    }
+  } catch (e) {
+    console.warn('[Agent Drawer] Failed to load extension manifest:', e);
+  }
+  return {};
+}
+
+function applyAgentIcon(manifest) {
+  const iconEl = document.querySelector('#fe-agent-toggle .fe-agent-icon');
+  if (!iconEl) return;
+
+  const iconPath = typeof manifest.icon === 'string' ? manifest.icon.trim() : '';
+  const iconEmoji = typeof manifest.icon_emoji === 'string' ? manifest.icon_emoji.trim() : '';
+
+  if (iconPath) {
+    const img = document.createElement('img');
+    const resolvedPath = iconPath.startsWith('/')
+      ? iconPath
+      : `/apps/file_editor_cm6/${iconPath.replace(/^\/+/, '')}`;
+    img.src = resolvedPath;
+    img.alt = '';
+    img.setAttribute('aria-hidden', 'true');
+    iconEl.textContent = '';
+    iconEl.appendChild(img);
+    return;
+  }
+
+  if (iconEmoji) {
+    iconEl.textContent = iconEmoji;
+  } else if (iconEl.dataset?.defaultIcon) {
+    iconEl.textContent = iconEl.dataset.defaultIcon;
+  }
+}
+
+function parseBoolean(value) {
+  if (value === true) return true;
+  if (value === false || value == null) return false;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    return v === 'true' || v === '1' || v === 'yes' || v === 'on';
+  }
+  return false;
+}
+
+function resolveAgentIframeSettings(settings) {
+  const enabled = parseBoolean(settings.agent_drawer_iframe);
+  const url = typeof settings.agent_drawer_iframe_url === 'string' && settings.agent_drawer_iframe_url.trim()
+    ? settings.agent_drawer_iframe_url.trim()
+    : DEFAULT_AGENT_IFRAME_URL;
+  return { enabled, url };
+}
 
 // =============================================================================
 // Debug Console WebSocket - forwards ALL console output to server file
@@ -3322,7 +3399,13 @@ async function main() {
   }
 
   branchMenuHandle = initBranchMenu();
-  agentDrawerHandle = initAgentDrawer();
+  const agentExtensionManifest = await fetchAgentExtensionManifest();
+  applyAgentIcon(agentExtensionManifest);
+  const frameworkSettings = await fetchFrameworkSettings();
+  const agentIframeConfig = resolveAgentIframeSettings(frameworkSettings);
+  agentDrawerHandle = agentIframeConfig.enabled
+    ? initAgentIframe({ url: agentIframeConfig.url, title: 'Agent', allowAnyOrigin: true })
+    : initAgentDrawer();
 
   const serverState = await syncEditorState(true);
   
