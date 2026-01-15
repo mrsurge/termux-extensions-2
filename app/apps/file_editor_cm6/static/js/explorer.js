@@ -2452,6 +2452,29 @@ export async function initExplorerUI() {
     }
   }
 
+  async function sendAgentMention(relPath) {
+    if (!relPath) {
+      toast('Missing path for mention');
+      return;
+    }
+    try {
+      const resp = await fetch(`${window.__agentHostBase || 'http://127.0.0.1:12359'}/api/appserver/mention`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: relPath }),
+      });
+      const body = await resp.json();
+      if (body && body.ok) {
+        toast('Mentioned in conversation');
+      } else {
+        toast(body?.error || 'Failed to mention in conversation');
+      }
+    } catch (err) {
+      console.error('Failed to send mention:', err);
+      toast('Failed to mention in conversation');
+    }
+  }
+
   function openCardMenuForEntry(entry, anchorEl) {
     if (!cardMenu || !anchorEl) return;
 
@@ -2499,6 +2522,7 @@ export async function initExplorerUI() {
       items.push({ label: 'Copy Name', type: 'copyName' });
       items.push({ label: 'Copy Path', type: 'copyPath' });
       items.push({ label: 'Copy Relative Path', type: 'copyRelPath' });
+      items.push({ label: 'Mention in conversation', type: 'mentionAgent' });
       items.push({ divider: true });
       items.push({ label: 'Copy to…', type: 'copyTo' });
       items.push({ label: 'Move to…', type: 'moveTo' });
@@ -2722,6 +2746,10 @@ export async function initExplorerUI() {
             } catch {
               toast('Failed to copy relative path');
             }
+            break;
+          }
+          case 'mentionAgent': {
+            await sendAgentMention(rel);
             break;
           }
           case 'copyTo': {

@@ -1000,12 +1000,33 @@ async def proxy_app_request(app_id: str, subpath: str, request: Request):
     # Fast lookup - don't spawn workers on every request
     # Apps must be started via POST /api/apps/{app_id}/start first
     running_apps = await get_running_apps()
+
+    # Minimal CORS passthrough for the agent cwd endpoint (iframe at 12359).
+    origin = request.headers.get("origin")
+    if (
+        origin in {"http://127.0.0.1:12359", "http://localhost:12359"}
+        and app_id == "file_editor_cm6"
+        and subpath == "agent/cwd"
+    ):
+        cors_headers = {
+            "Access-Control-Allow-Origin": origin,
+            "Vary": "Origin",
+        }
+        if request.method == "OPTIONS":
+            cors_headers.update({
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Max-Age": "600",
+            })
+            return Response(status_code=204, headers=cors_headers)
+    else:
+        cors_headers = {}
     
     if app_id not in running_apps:
         return JSONResponse({
             "ok": False, 
             "error": f"App '{app_id}' is not running. Start it from the launcher first."
-        }, status_code=503)  # Service Unavailable
+        }, status_code=503, headers=cors_headers)  # Service Unavailable
     
     port = running_apps[app_id]['port']
     url = f"http://127.0.0.1:{port}/{subpath}"
@@ -1038,6 +1059,11 @@ async def proxy_app_request(app_id: str, subpath: str, request: Request):
     # Strip hop-by-hop headers
     excluded = {'content-encoding', 'content-length', 'transfer-encoding', 'connection'}
     resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+    if cors_headers:
+        # Ensure a single Access-Control-Allow-Origin header (avoid duplicates).
+        resp_headers.pop("access-control-allow-origin", None)
+        resp_headers.pop("Access-Control-Allow-Origin", None)
+        resp_headers.update(cors_headers)
 
     async def _iter_body():
         try:

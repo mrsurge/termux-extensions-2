@@ -28,8 +28,11 @@ function ensureSocketIoLoaded() {
 }
 import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
 
-const DEFAULT_AGENT_IFRAME_URL = 'http://127.0.0.1:12359/codex-agent';
+const AGENT_HOST_PORT = 12359;
+const AGENT_HOST_RESOLVE_ENDPOINT = '/api/host/resolve_iframe';
+const AGENT_IFRAME_STORAGE_KEY = 'te2_agent_iframe_url';
 const AGENT_EXTENSION_MANIFEST = '/apps/file_editor_cm6/extensions/chat_drawer_extension/manifest.json';
+const AGENT_HOST_CWD_ENDPOINT = '/api/host/project/cwd';
 
 async function fetchFrameworkSettings() {
   try {
@@ -84,6 +87,20 @@ function applyAgentIcon(manifest) {
   }
 }
 
+async function pushAgentHostCwd(cwd) {
+  const value = typeof cwd === 'string' ? cwd.trim() : '';
+  if (!value) return;
+  try {
+    await fetch(`${getAgentHostBase()}${AGENT_HOST_CWD_ENDPOINT}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd: value }),
+    });
+  } catch (err) {
+    console.warn('[Agent Host] Failed to push project cwd:', err);
+  }
+}
+
 function parseBoolean(value) {
   if (value === true) return true;
   if (value === false || value == null) return false;
@@ -95,11 +112,65 @@ function parseBoolean(value) {
   return false;
 }
 
-function resolveAgentIframeSettings(settings) {
-  const enabled = parseBoolean(settings.agent_drawer_iframe);
-  const url = typeof settings.agent_drawer_iframe_url === 'string' && settings.agent_drawer_iframe_url.trim()
+function buildAgentHostBase() {
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const host = window.location.hostname || '127.0.0.1';
+  return `${protocol}//${host}:${AGENT_HOST_PORT}`;
+}
+
+function buildDefaultAgentIframeUrl() {
+  return `${buildAgentHostBase()}/codex-agent`;
+}
+
+function getAgentHostBaseFromStorage() {
+  try {
+    const stored = localStorage.getItem(AGENT_IFRAME_STORAGE_KEY);
+    if (stored) {
+      const parsed = new URL(stored, window.location.href);
+      return parsed.origin;
+    }
+  } catch (_) {}
+  return '';
+}
+
+function getAgentHostBase() {
+  return getAgentHostBaseFromStorage() || buildAgentHostBase();
+}
+
+async function resolveAgentIframeUrl(settings) {
+  const explicit = typeof settings.agent_drawer_iframe_url === 'string'
     ? settings.agent_drawer_iframe_url.trim()
-    : DEFAULT_AGENT_IFRAME_URL;
+    : '';
+  if (explicit) {
+    return explicit;
+  }
+
+  let resolved = '';
+  try {
+    const resp = await fetch(`${buildAgentHostBase()}${AGENT_HOST_RESOLVE_ENDPOINT}`, { cache: 'no-store' });
+    const body = await resp.json();
+    resolved = (body && typeof body.url === 'string' && body.url.trim()) ? body.url.trim() : '';
+    if (!resolved && body && body.data && typeof body.data.url === 'string') {
+      resolved = body.data.url.trim();
+    }
+  } catch (e) {
+    console.warn('[Agent Drawer] Failed to resolve iframe URL:', e);
+  }
+
+  if (!resolved) {
+    resolved = buildDefaultAgentIframeUrl();
+  }
+
+  try {
+    localStorage.setItem(AGENT_IFRAME_STORAGE_KEY, resolved);
+  } catch (_) {}
+
+  return resolved;
+}
+
+async function resolveAgentIframeSettings(settings) {
+  const enabled = parseBoolean(settings.agent_drawer_iframe);
+  const url = await resolveAgentIframeUrl(settings);
   return { enabled, url };
 }
 
@@ -1798,6 +1869,15 @@ async function handleProjectOpened(newProjectPath) {
   // Refresh state snapshot so cachedProjectRoot, recents, and git base reflect
   // the new active project.
   const newState = await syncEditorState(true);
+
+  // Notify agent host about the new project root (updates conversation list).
+  try {
+    const root = newState?.activeProject || newProjectPath || '';
+    const rootAbs = root ? String(root).replace(/\/+$/, '') : '';
+    await pushAgentHostCwd(rootAbs);
+  } catch (err) {
+    console.warn('[ProjectSwitch] Failed to push agent cwd:', err);
+  }
   
   // Update recents dropdown with new project's recents
   broadcastRecentsUpdate(newState);
@@ -3402,7 +3482,14 @@ async function main() {
   const agentExtensionManifest = await fetchAgentExtensionManifest();
   applyAgentIcon(agentExtensionManifest);
   const frameworkSettings = await fetchFrameworkSettings();
-  const agentIframeConfig = resolveAgentIframeSettings(frameworkSettings);
+  const agentIframeConfig = await resolveAgentIframeSettings(frameworkSettings);
+  let agentHostBase = getAgentHostBase();
+  try {
+    if (agentIframeConfig && agentIframeConfig.url) {
+      agentHostBase = new URL(agentIframeConfig.url, window.location.href).origin;
+    }
+  } catch (_) {}
+  window.__agentHostBase = agentHostBase;
   agentDrawerHandle = agentIframeConfig.enabled
     ? initAgentIframe({ url: agentIframeConfig.url, title: 'Agent', allowAnyOrigin: true })
     : initAgentDrawer();

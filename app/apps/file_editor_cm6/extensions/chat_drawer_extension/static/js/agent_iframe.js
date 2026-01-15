@@ -1,10 +1,10 @@
 // app/apps/file_editor_cm6/extensions/chat_drawer_extension/static/js/agent_iframe.js
 // Lightweight iframe-based agent drawer.
 
-const DEFAULT_IFRAME_URL = 'http://127.0.0.1:12359/codex-agent';
-const DEFAULT_HOST_UI_ENDPOINT = 'http://127.0.0.1:12359/api/host/ui';
-const DEFAULT_DRAWER_OPEN_ENDPOINT = 'http://127.0.0.1:12359/api/host/drawer/open';
-const DEFAULT_DRAWER_CLOSE_ENDPOINT = 'http://127.0.0.1:12359/api/host/drawer/close';
+const DEFAULT_IFRAME_URL = '/codex-agent';
+const DEFAULT_HOST_UI_ENDPOINT = '/api/host/ui';
+const DEFAULT_DRAWER_OPEN_ENDPOINT = '/api/host/drawer/open';
+const DEFAULT_DRAWER_CLOSE_ENDPOINT = '/api/host/drawer/close';
 
 export function initAgentIframe(options = {}) {
   const drawer = document.getElementById('agent-drawer');
@@ -19,9 +19,15 @@ export function initAgentIframe(options = {}) {
   }
 
   const url = options.url || DEFAULT_IFRAME_URL;
-  const hostUiEndpoint = options.hostUiEndpoint || DEFAULT_HOST_UI_ENDPOINT;
-  const drawerOpenEndpoint = options.drawerOpenEndpoint || DEFAULT_DRAWER_OPEN_ENDPOINT;
-  const drawerCloseEndpoint = options.drawerCloseEndpoint || DEFAULT_DRAWER_CLOSE_ENDPOINT;
+  let hostOrigin = '';
+  try {
+    hostOrigin = new URL(url, window.location.href).origin;
+  } catch {
+    hostOrigin = '';
+  }
+  const hostUiEndpoint = options.hostUiEndpoint || (hostOrigin ? `${hostOrigin}${DEFAULT_HOST_UI_ENDPOINT}` : DEFAULT_HOST_UI_ENDPOINT);
+  const drawerOpenEndpoint = options.drawerOpenEndpoint || (hostOrigin ? `${hostOrigin}${DEFAULT_DRAWER_OPEN_ENDPOINT}` : DEFAULT_DRAWER_OPEN_ENDPOINT);
+  const drawerCloseEndpoint = options.drawerCloseEndpoint || (hostOrigin ? `${hostOrigin}${DEFAULT_DRAWER_CLOSE_ENDPOINT}` : DEFAULT_DRAWER_CLOSE_ENDPOINT);
   const allowAnyOrigin = options.allowAnyOrigin === true;
   let isOpen = false;
   let iframeOrigin = null;
