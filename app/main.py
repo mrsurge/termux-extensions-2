@@ -28,7 +28,7 @@ from typing import Any, Dict, Iterable, List, Optional
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from fastapi import FastAPI, Request, Query, Body, HTTPException, Header
+from fastapi import FastAPI, Request, Query, Body, HTTPException, Header, Response
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 import requests
 from app.libs.app_lifecycle import start_background_tasks
@@ -1001,12 +1001,12 @@ async def proxy_app_request(app_id: str, subpath: str, request: Request):
     # Apps must be started via POST /api/apps/{app_id}/start first
     running_apps = await get_running_apps()
 
-    # Minimal CORS passthrough for the agent cwd endpoint (iframe at 12359).
+    # Minimal CORS passthrough for agent iframe → host HTTP bridge (iframe at 12359).
     origin = request.headers.get("origin")
     if (
         origin in {"http://127.0.0.1:12359", "http://localhost:12359"}
         and app_id == "file_editor_cm6"
-        and subpath == "agent/cwd"
+        and (subpath == "agent/cwd" or subpath.startswith("agent/"))
     ):
         cors_headers = {
             "Access-Control-Allow-Origin": origin,
@@ -1014,7 +1014,7 @@ async def proxy_app_request(app_id: str, subpath: str, request: Request):
         }
         if request.method == "OPTIONS":
             cors_headers.update({
-                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Max-Age": "600",
             })

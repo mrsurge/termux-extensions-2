@@ -3012,30 +3012,40 @@ export default {
       }
     },
     // ============================================================================
-    // CUSTOM METHOD: jumpToLine
-    // Added: 2025-11-17 by TE-2 Team
-    // Purpose: Jump to a specific line number in the editor
-    // Used by: Explorer search feature, Go To Line menu
-    // Note: Uses proper CM6 API via editor.dispatch() for reliable scrolling
-    // ============================================================================
-    jumpToLine(payload) {
+	    // CUSTOM METHOD: jumpToLine
+	    // Added: 2025-11-17 by TE-2 Team
+	    // Updated: 2026-01-16 - Added optional scrollY:'center' (CM6 EditorView.scrollIntoView)
+	    // Purpose: Jump to a specific line number in the editor
+	    // Used by: Explorer search feature, Go To Line menu
+	    // Note: Uses proper CM6 API via editor.dispatch() for reliable scrolling
+	    // ============================================================================
+	    jumpToLine(payload) {
       if (!this.editor) {
         console.warn('[CodeMirror] jumpToLine: editor not ready');
         return;
       }
 
-      let shouldFocus = true;
-      let scrollToTop = false; // If true, position line at viewport top (for scroll restore)
-      let input = payload;
-      if (payload && typeof payload === 'object') {
-        input = payload.line;
-        if (Object.prototype.hasOwnProperty.call(payload, 'focus')) {
-          shouldFocus = !!payload.focus;
-        }
-        if (Object.prototype.hasOwnProperty.call(payload, 'scrollToTop')) {
-          scrollToTop = !!payload.scrollToTop;
-        }
-      }
+	      let shouldFocus = true;
+	      let scrollToTop = false; // If true, position line at viewport top (for scroll restore)
+	      let scrollY = null; // Optional: 'center' uses CM6 EditorView.scrollIntoView for better UX
+	      let input = payload;
+	      if (payload && typeof payload === 'object') {
+	        input = payload.line;
+	        if (Object.prototype.hasOwnProperty.call(payload, 'focus')) {
+	          shouldFocus = !!payload.focus;
+	        }
+	        if (Object.prototype.hasOwnProperty.call(payload, 'scrollToTop')) {
+	          scrollToTop = !!payload.scrollToTop;
+	        }
+	        const rawScrollY = Object.prototype.hasOwnProperty.call(payload, 'scrollY')
+	          ? payload.scrollY
+	          : (Object.prototype.hasOwnProperty.call(payload, 'scroll_y') ? payload.scroll_y : null);
+	        if (typeof rawScrollY === 'string' && rawScrollY.trim()) {
+	          scrollY = rawScrollY.trim();
+	        } else if (Object.prototype.hasOwnProperty.call(payload, 'center') && payload.center) {
+	          scrollY = 'center';
+	        }
+	      }
 
       const line = parseInt(input, 10);
       if (isNaN(line) || line < 1) {
@@ -3050,11 +3060,11 @@ export default {
         const targetLine = Math.max(1, Math.min(line, maxLine));
         const pos = doc.line(targetLine).from;
 
-        if (scrollToTop) {
-          // Scroll restore mode: position target line at viewport top
-          // Use lineBlockAt to get pixel position, then set scrollTop directly
-          const lineBlock = view.lineBlockAt(pos);
-          view.scrollDOM.scrollTop = lineBlock.top;
+	        if (scrollToTop) {
+	          // Scroll restore mode: position target line at viewport top
+	          // Use lineBlockAt to get pixel position, then set scrollTop directly
+	          const lineBlock = view.lineBlockAt(pos);
+	          view.scrollDOM.scrollTop = lineBlock.top;
           
           // Set selection without scrolling (we already scrolled)
           view.dispatch({
@@ -3070,15 +3080,24 @@ export default {
             }, 50);
           }
           
-          console.log('[CodeMirror] jumpToLine: scrolled line', targetLine, 'to top, scrollTop=', lineBlock.top);
-        } else {
-          // Default behavior: scroll target line into view (minimal scroll)
-          view.dispatch({
-            selection: { anchor: pos },
-            scrollIntoView: true
-          });
-          console.log('[CodeMirror] jumpToLine: jumped to line', targetLine, 'focus=', shouldFocus);
-        }
+	          console.log('[CodeMirror] jumpToLine: scrolled line', targetLine, 'to top, scrollTop=', lineBlock.top);
+	        } else {
+	          if (scrollY === 'center' && CM?.EditorView?.scrollIntoView) {
+	            // Center behavior: use CM6 recommended effect for better UX
+	            view.dispatch({
+	              selection: { anchor: pos },
+	              effects: [CM.EditorView.scrollIntoView(pos, { y: 'center' })],
+	            });
+	            console.log('[CodeMirror] jumpToLine: centered line', targetLine, 'focus=', shouldFocus);
+	          } else {
+	            // Default behavior: scroll target line into view (minimal scroll)
+	            view.dispatch({
+	              selection: { anchor: pos },
+	              scrollIntoView: true
+	            });
+	            console.log('[CodeMirror] jumpToLine: jumped to line', targetLine, 'focus=', shouldFocus);
+	          }
+	        }
 
         if (shouldFocus) {
           view.focus();

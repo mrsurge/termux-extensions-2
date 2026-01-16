@@ -8,6 +8,40 @@ export function initResizeManager() {
     let startPos = 0;
     let startSize = 0;
     let panel = null;
+    let dragShield = null;
+
+    const ensureDragShield = (cursor) => {
+      // Remove any stale shield (e.g., if a prior drag ended unexpectedly).
+      try {
+        const existing = document.getElementById('fe-resize-drag-shield');
+        if (existing) existing.remove();
+      } catch (_) {}
+
+      const shield = document.createElement('div');
+      shield.id = 'fe-resize-drag-shield';
+      shield.style.position = 'fixed';
+      shield.style.left = '0';
+      shield.style.top = '0';
+      shield.style.right = '0';
+      shield.style.bottom = '0';
+      shield.style.background = 'transparent';
+      shield.style.cursor = cursor;
+      shield.style.zIndex = '2147483647';
+      shield.style.touchAction = 'none';
+      shield.style.userSelect = 'none';
+      // Ensure touchmove can be canceled to avoid scroll-jank.
+      shield.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+      document.body.appendChild(shield);
+      return shield;
+    };
+
+    const removeDragShield = () => {
+      if (!dragShield) return;
+      try {
+        dragShield.remove();
+      } catch (_) {}
+      dragShield = null;
+    };
     
     const onStart = (e) => {
       const clientX = e.clientX || e.touches?.[0]?.clientX;
@@ -16,6 +50,13 @@ export function initResizeManager() {
       const panelType = handle.dataset.panel;
       isDragging = true;
       panel = panelType;
+
+      // While dragging, a transparent full-screen shield prevents iframes from
+      // hijacking the pointer stream (which causes "snap" resizing).
+      dragShield = ensureDragShield(panelType === 'terminal' ? 'row-resize' : 'col-resize');
+      dragShield.addEventListener('mouseup', onEnd);
+      dragShield.addEventListener('touchend', onEnd);
+      dragShield.addEventListener('touchcancel', onEnd);
       
       if (panelType === 'explorer' || panelType === 'agent') {
         startPos = clientX;
@@ -33,6 +74,7 @@ export function initResizeManager() {
       document.addEventListener('mouseup', onEnd);
       document.addEventListener('touchmove', onMove);
       document.addEventListener('touchend', onEnd);
+      document.addEventListener('touchcancel', onEnd);
       e.preventDefault();
     };
     
@@ -69,6 +111,8 @@ export function initResizeManager() {
       document.removeEventListener('mouseup', onEnd);
       document.removeEventListener('touchmove', onMove);
       document.removeEventListener('touchend', onEnd);
+      document.removeEventListener('touchcancel', onEnd);
+      removeDragShield();
       
       saveLayoutPreferences();
     };

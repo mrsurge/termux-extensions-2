@@ -320,6 +320,8 @@ let searchDebounceTimer = null;
 let lastKnownProjectPath = '';
 const selectedReviewFiles = new Set();
 
+let reconnectResyncPending = false;
+
 // Minimal diff-base shell for changes note (no dropdown wiring yet)
 let gitDiffBase = { ref: 'HEAD', mode: 'none', commit: null };
 let searchBaseBtn = null;
@@ -1568,15 +1570,23 @@ function handleExplorerEvent(type, payload) {
       break;
     }
     case 'project:setActive': {
-      uiState.projectPath = payload.path || payload.projectPath || uiState.projectPath;
+      const prevProjectPath = uiState.projectPath || '';
+      const nextProjectPath = payload.path || payload.projectPath || prevProjectPath;
+      uiState.projectPath = nextProjectPath;
       renderProjectLabel();
       // When the active project changes, refresh diff base from backend
       // so both footer and overlay selectors stay in sync with HistoryStore.
       initDiffBaseFromBackend();
       setActiveFileRel(null);
-      // Reset open directories tracking for new project
-      openDirectories.clear();
-      openDirsInitialized = false;
+
+      // Only reset open directory tracking when the project actually changes.
+      // On Android, a Socket.IO reconnect can re-send project:setActive for the
+      // same project; clearing here makes the explorer appear "empty" until a
+      // manual directory open triggers fresh listings.
+      if (prevProjectPath && nextProjectPath && prevProjectPath !== nextProjectPath) {
+        openDirectories.clear();
+        openDirsInitialized = false;
+      }
 
       // New-project prompt: if backend reports this is a newly-created sidecar, offer LSP setup.
       try {
@@ -1632,6 +1642,14 @@ function handleExplorerEvent(type, payload) {
           rootLi.appendChild(childList);
         }
         renderEntriesInto(childList, payload.entries);
+
+        if (reconnectResyncPending) {
+          reconnectResyncPending = false;
+          if (openDirectories.size && typeof window.__explorerBusSend === 'function') {
+            // Re-expand and refresh tracked open dirs after reconnect.
+            restoreOpenDirectories(Array.from(openDirectories));
+          }
+        }
       } else {
         // Directory listing for cwd
         const dirLi = treeElement.querySelector(
@@ -3286,6 +3304,19 @@ export async function initExplorerUI() {
     } catch (err) {
       console.warn('[Explorer] dispatch error', type, err);
     }
+  };
+
+  // Called by main.js after the explorer Socket.IO transport reconnects.
+  // We request a fresh root listing (which repopulates DOM nodes), then
+  // re-expand our tracked open directories once the root snapshot arrives.
+  window.__cm6ExplorerOnReconnect = () => {
+    if (typeof window.__explorerBusSend !== 'function') return;
+    reconnectResyncPending = true;
+    try {
+      window.__explorerBusSend('explorer:list', { rel: '.' });
+      window.__explorerBusSend('git:status', {});
+      window.__explorerBusSend('explorer:getDiagnostics', {});
+    } catch (_) {}
   };
 
   // Host calls this when it wants to "refresh" the explorer.

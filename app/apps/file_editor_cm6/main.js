@@ -47,6 +47,20 @@ async function fetchFrameworkSettings() {
   return {};
 }
 
+function _isMobileLayout() {
+  try {
+    const root = document.querySelector('.fe-root');
+    if (root && root.classList.contains('layout-mobile')) return true;
+    if (root && root.classList.contains('layout-desktop')) return false;
+
+    // Fallback for early boot / unexpected DOM state.
+    const isDesktop = window.matchMedia('(min-width: 768px) and (orientation: landscape)').matches;
+    return !isDesktop;
+  } catch (_) {
+    return true;
+  }
+}
+
 async function fetchAgentExtensionManifest() {
   try {
     const resp = await fetch(AGENT_EXTENSION_MANIFEST, { cache: 'no-store' });
@@ -85,6 +99,77 @@ function applyAgentIcon(manifest) {
   } else if (iconEl.dataset?.defaultIcon) {
     iconEl.textContent = iconEl.dataset.defaultIcon;
   }
+}
+
+let _agentOpenRequestPollerStarted = false;
+
+function startAgentOpenRequestPoller() {
+  if (_agentOpenRequestPollerStarted) return;
+  _agentOpenRequestPollerStarted = true;
+
+  const nextUrl = '/api/app/file_editor_cm6/agent/open_request/next';
+
+  async function drainOnce() {
+    // Drain up to a few queued requests per tick to keep UI responsive.
+    for (let i = 0; i < 4; i++) {
+      let resp;
+      try {
+        resp = await fetch(nextUrl, { cache: 'no-store' });
+      } catch (_) {
+        return;
+      }
+
+      if (!resp || resp.status === 204) return;
+
+      let body;
+      try {
+        body = await resp.json();
+      } catch (_) {
+        return;
+      }
+      if (!body || !body.ok || !body.data) return;
+
+      const req = body.data || {};
+      const rel = typeof req.rel === 'string' ? req.rel.trim() : '';
+      const abs = typeof req.path === 'string' ? req.path.trim() : '';
+      const line = Number.isFinite(Number(req.line)) ? Number(req.line) : null;
+
+      // Mobile: close overlay drawer before navigating/jumping.
+      if (_isMobileLayout()) {
+        try {
+          agentDrawerHandle?.close?.();
+        } catch (_) {}
+      }
+
+      let targetAbs = abs;
+      if (!targetAbs && rel) {
+        const base = cachedProjectRoot || (await getCurrentProjectRoot(false)) || HOME_DIR;
+        targetAbs = toAbsolute(rel, base, HOME_DIR);
+      }
+
+      if (!targetAbs) return;
+
+      try {
+        await openFile(targetAbs, { forceRefresh: true });
+        if (typeof line === 'number' && line >= 1) {
+          await new Promise((resolve) => setTimeout(resolve, 140));
+          await jumpToCurrentFileLine(line, { focus: true });
+        }
+      } catch (e) {
+        host.toast(`Failed to open link: ${e?.message || 'unknown error'}`);
+      }
+    }
+  }
+
+  async function loop() {
+    try {
+      await drainOnce();
+    } finally {
+      setTimeout(loop, 650);
+    }
+  }
+
+  loop();
 }
 
 async function pushAgentHostCwd(cwd) {
@@ -231,6 +316,69 @@ initDebugConsole();
 
 let explorerSocket = null;
 const explorerPending = [];
+let explorerNeedsResync = false;
+
+async function handleAgentOpen(payload) {
+  const isMobile = _isMobileLayout();
+  const rel = typeof payload?.rel === 'string' ? payload.rel.trim() : '';
+  const abs = typeof payload?.path === 'string'
+    ? payload.path.trim()
+    : (typeof payload?.abs === 'string'
+      ? payload.abs.trim()
+      : (typeof payload?.file === 'string' ? payload.file.trim() : ''));
+  const line = Number.isFinite(Number(payload?.line)) ? Number(payload.line) : null;
+  const source = typeof payload?.source === 'string' ? payload.source : '';
+
+  if (isMobile) {
+    try {
+      agentDrawerHandle?.close?.();
+    } catch (_) {}
+    try {
+      const drawer = document.getElementById('agent-drawer');
+      if (drawer) {
+        drawer.classList.remove('open');
+        drawer.setAttribute('aria-hidden', 'true');
+      }
+    } catch (_) {}
+  }
+
+  let targetAbs = abs;
+  if (!targetAbs && rel) {
+    try {
+      const base = cachedProjectRoot || (await getCurrentProjectRoot(false)) || HOME_DIR;
+      targetAbs = toAbsolute(rel, base, HOME_DIR);
+    } catch (_) {
+      targetAbs = '';
+    }
+  }
+
+  if (!targetAbs) return;
+  try {
+    if (typeof openFile === 'function') {
+      await openFile(targetAbs, { forceRefresh: true });
+    } else if (typeof window.appOpenFile === 'function') {
+      window.appOpenFile(targetAbs);
+      await new Promise((resolve) => setTimeout(resolve, 220));
+    } else {
+      throw new Error('openFile is not available yet');
+    }
+    if (typeof line === 'number' && line >= 1) {
+      await new Promise((resolve) => setTimeout(resolve, 140));
+      const jumpOptions = { focus: !isMobile };
+      if (source === 'codex-agent') {
+        jumpOptions.scrollY = 'center';
+      }
+      if (typeof jumpToCurrentFileLine === 'function') {
+        await jumpToCurrentFileLine(line, jumpOptions);
+      } else if (typeof window.jumpToCurrentFileLine === 'function') {
+        await window.jumpToCurrentFileLine(line, jumpOptions);
+      }
+    }
+  } catch (e) {
+    console.warn('[AgentOpen] Failed to open+jump:', e);
+    host.toast(`Failed to open link: ${e?.message || 'unknown error'}`);
+  }
+}
 
 function connectExplorerSocket() {
   if (explorerSocket) return;
@@ -252,10 +400,22 @@ function connectExplorerSocket() {
           const msg = explorerPending.shift();
           explorerSocket.emit('explorer_send', msg);
         }
+
+        if (explorerNeedsResync) {
+          explorerNeedsResync = false;
+          try {
+            if (typeof window.__cm6ExplorerOnReconnect === 'function') {
+              window.__cm6ExplorerOnReconnect();
+            }
+          } catch (e) {
+            console.warn('[ExplorerSIO] Reconnect resync failed:', e);
+          }
+        }
       });
 
       explorerSocket.on('disconnect', (reason) => {
         console.log('[ExplorerSIO] Disconnected', reason);
+        explorerNeedsResync = true;
       });
 
       explorerSocket.on('connect_error', (err) => {
@@ -276,6 +436,10 @@ function connectExplorerSocket() {
         }
         const type = msg.type || msg?.data?.type;
         const payload = msg.payload || msg?.data?.payload || {};
+        if (type === 'agent:open') {
+          handleAgentOpen(payload);
+          return;
+        }
         if (type && typeof window.__explorerBusDispatch === 'function') {
           window.__explorerBusDispatch(type, payload);
         }
@@ -289,6 +453,17 @@ function connectExplorerSocket() {
           explorerPending.push(msg);
         }
       };
+
+      // Android/Gecko often drops websockets while backgrounded; force a reconnect
+      // when returning to the foreground so explorer state can resync.
+      document.addEventListener('visibilitychange', () => {
+        try {
+          if (document.visibilityState !== 'visible') return;
+          if (explorerSocket && !explorerSocket.connected) {
+            explorerSocket.connect();
+          }
+        } catch (_) {}
+      });
     })
     .catch((err) => {
       console.warn('[ExplorerSIO] Failed to open explorer Socket.IO:', err);
@@ -3023,6 +3198,11 @@ async function jumpToCurrentFileLine(line, options = {}) {
     // scrollToTop: position line at viewport top (for scroll restore)
     if (options && Object.prototype.hasOwnProperty.call(options, 'scrollToTop')) {
       payload.scroll_to_top = Boolean(options.scrollToTop);
+    }
+    if (options && Object.prototype.hasOwnProperty.call(options, 'scrollY')) {
+      if (typeof options.scrollY === 'string') {
+        payload.scroll_y = options.scrollY;
+      }
     }
     await apiPost('editor/jump_to_line', payload);
   } catch (e) {

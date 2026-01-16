@@ -5,11 +5,15 @@ from pathlib import Path
 import os
 import stat
 import subprocess
+import threading
 import time
 import shutil
 from typing import Dict, Iterable, Optional
 
 from app.apps.file_editor_cm6.stores import _history_store
+
+# Shared state lock: list_dir and git/draft caches can be accessed from multiple threads.
+_STATE_LOCK = threading.RLock()
 
 # Global project root for this app (default: HOME)
 _PROJECT_ROOT = Path.home()
@@ -40,14 +44,17 @@ def _collect_project_draft_rel_paths(project_root: Path) -> set[str]:
     now = time.time()
     
     # Check cache
-    cached = _DRAFT_PATHS_CACHE.get(key)
-    if cached and now - cached.get('timestamp', 0) < DRAFT_CACHE_TTL_SECONDS:
-        return cached.get('paths', set())
+    with _STATE_LOCK:
+        cached = _DRAFT_PATHS_CACHE.get(key)
+        if cached and now - cached.get('timestamp', 0) < DRAFT_CACHE_TTL_SECONDS:
+            return cached.get('paths', set())
     
     # Refresh cache
     try:
         drafts = _history_store.list_project_drafts(str(project_root))
     except Exception:
+        with _STATE_LOCK:
+            _DRAFT_PATHS_CACHE[key] = {'paths': set(), 'timestamp': now}
         return set()
     
     rel_paths: set[str] = set()
@@ -61,18 +68,19 @@ def _collect_project_draft_rel_paths(project_root: Path) -> set[str]:
         except Exception:
             continue
     
-    _DRAFT_PATHS_CACHE[key] = {'paths': rel_paths, 'timestamp': now}
+    with _STATE_LOCK:
+        _DRAFT_PATHS_CACHE[key] = {'paths': rel_paths, 'timestamp': now}
     return rel_paths
 
 
 def mark_draft_cache_dirty(project_root: Path = None):
     """Mark draft cache as dirty so it refreshes on next access."""
-    if project_root:
-        key = str(project_root.resolve())
-        if key in _DRAFT_PATHS_CACHE:
-            del _DRAFT_PATHS_CACHE[key]
-    else:
-        _DRAFT_PATHS_CACHE.clear()
+    with _STATE_LOCK:
+        if project_root:
+            key = str(project_root.resolve())
+            _DRAFT_PATHS_CACHE.pop(key, None)
+        else:
+            _DRAFT_PATHS_CACHE.clear()
 
 
 def set_project_root(path: str) -> Path:
@@ -81,14 +89,16 @@ def set_project_root(path: str) -> Path:
     if not p.exists() or not p.is_dir():
         raise ValueError("project path must be an existing directory")
     global _PROJECT_ROOT
-    _PROJECT_ROOT = p
-    _prime_git_cache(_PROJECT_ROOT)
-    return _PROJECT_ROOT
+    with _STATE_LOCK:
+        _PROJECT_ROOT = p
+    _prime_git_cache(p)
+    return p
 
 
 def get_project_root() -> Path:
     """Get the current project root directory."""
-    return _PROJECT_ROOT
+    with _STATE_LOCK:
+        return _PROJECT_ROOT
 
 
 def list_dir(rel: str = '.') -> dict:
@@ -184,12 +194,14 @@ def list_dir(rel: str = '.') -> dict:
 def mark_git_cache_dirty(project_root: Optional[Path] = None) -> None:
     """Marks the git status cache dirty so the next lookup refreshes."""
     if project_root is None:
-        _GIT_STATUS_CACHE.clear()
+        with _STATE_LOCK:
+            _GIT_STATUS_CACHE.clear()
         return
     key = _cache_key(project_root)
-    entry = _GIT_STATUS_CACHE.get(key)
-    if entry:
-        entry['dirty'] = True
+    with _STATE_LOCK:
+        entry = _GIT_STATUS_CACHE.get(key)
+        if entry:
+            entry['dirty'] = True
 
 
 def _cache_key(root: Path) -> str:
@@ -210,10 +222,11 @@ def _prime_git_cache(root: Path) -> None:
 
 def _get_git_status_snapshot(root: Path) -> Dict[str, str]:
     key = _cache_key(root)
-    entry = _GIT_STATUS_CACHE.get(key)
     now = time.time()
-    if entry and not entry.get('dirty') and now - entry.get('timestamp', 0) < GIT_CACHE_TTL_SECONDS:
-        return entry.get('status', {})
+    with _STATE_LOCK:
+        entry = _GIT_STATUS_CACHE.get(key)
+        if entry and not entry.get('dirty') and now - entry.get('timestamp', 0) < GIT_CACHE_TTL_SECONDS:
+            return entry.get('status', {})
     try:
         status = _refresh_git_status(root)
     except Exception:
@@ -225,11 +238,12 @@ def _refresh_git_status(root: Path) -> Dict[str, str]:
     """Refresh the git status snapshot for the given root."""
     status = _collect_git_status(root)
     key = _cache_key(root)
-    _GIT_STATUS_CACHE[key] = {
-        'status': status,
-        'timestamp': time.time(),
-        'dirty': False,
-    }
+    with _STATE_LOCK:
+        _GIT_STATUS_CACHE[key] = {
+            'status': status,
+            'timestamp': time.time(),
+            'dirty': False,
+        }
     return status
 
 

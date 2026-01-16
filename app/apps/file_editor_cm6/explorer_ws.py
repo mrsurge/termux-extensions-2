@@ -544,12 +544,12 @@ async def _broadcast_git_status_update(project_path: str):
         mark_git_cache_dirty(Path(project_path))
         
         # 1. Broadcast tree decorations (explorer:updateGitStatus)
-        statuses = get_all_git_statuses()
+        statuses = await asyncio.to_thread(get_all_git_statuses)
         msg = {"type": "explorer:updateGitStatus", "payload": {"statuses": statuses}}
         await manager.broadcast(project_path, msg)
         
         # 2. Broadcast summary bar (git:status)
-        status = git_get_status(Path(project_path))
+        status = await asyncio.to_thread(git_get_status, Path(project_path))
         logger.info(f"[GIT_STATUS_DEBUG] staged={status.staged}, unstaged={status.unstaged}, untracked={status.untracked}")
         summary_msg = {
             "type": "git:status",
@@ -570,7 +570,7 @@ async def _broadcast_git_status_update(project_path: str):
 async def _refresh_explorer_directory(project_path: str, rel_dir: str):
     """Broadcasts an explorer:setList for the given directory."""
     try:
-        dir_listing = list_dir(rel_dir)
+        dir_listing = await asyncio.to_thread(list_dir, rel_dir)
         msg = {"type": "explorer:setList", "payload": dir_listing}
         await manager.broadcast(project_path, msg)
     except Exception as e:
@@ -786,7 +786,7 @@ class ExplorerDispatcher:
         # 2. Git Status
         await self.broadcast_git_status()
         # 3. Explorer Tree (Root)
-        await self.emit_personal("explorer:setList", list_dir('.'))
+        await self.emit_personal("explorer:setList", await asyncio.to_thread(list_dir, '.'))
         # 4. Review List (if any)
         await self.broadcast_review_state()
         # 5. Open Directories (for restoring tree state)
@@ -922,7 +922,7 @@ class ExplorerDispatcher:
 
     async def broadcast_git_status(self):
         try:
-            status = git_get_status(self.project_root)
+            status = await asyncio.to_thread(git_get_status, self.project_root)
             logger.info(f"[GIT_STATUS_DEBUG] broadcast_git_status: staged={status.staged}, unstaged={status.unstaged}, untracked={status.untracked}")
             data = {
                 "branch": status.branch,
@@ -945,7 +945,7 @@ class ExplorerDispatcher:
         without replacing the tree structure (preserves expanded state).
         """
         try:
-            statuses = get_all_git_statuses()
+            statuses = await asyncio.to_thread(get_all_git_statuses)
             await self.broadcast("explorer:updateGitStatus", {"statuses": statuses})
         except Exception:
             pass
@@ -1019,7 +1019,7 @@ class ExplorerDispatcher:
     async def handle_explorer_list(self, payload: dict, msg_id: str):
         rel = payload.get("rel", ".")
         try:
-            data = list_dir(rel)
+            data = await asyncio.to_thread(list_dir, rel)
             # This is a personal response (lazy load), not a broadcast
             await self.emit_personal("explorer:setList", data, msg_id)
         except Exception as e:
@@ -1032,7 +1032,7 @@ class ExplorerDispatcher:
         await self.broadcast_review_state()
         # For tree, we typically just refresh the view from client, or broadcast root?
         # Let's broadcast root to be safe.
-        data = list_dir('.')
+        data = await asyncio.to_thread(list_dir, '.')
         await self.broadcast("explorer:setList", data)
 
     async def handle_explorer_getDiagnostics(self, payload: dict, msg_id: str):
@@ -1169,13 +1169,13 @@ class ExplorerDispatcher:
         await self.broadcast("explorer:created", res)
         # Implicitly refresh parent dir? Client should request or we push?
         # Ideally we push the updated list of the parent.
-        parent_list = list_dir(payload.get("parent_rel", "."))
+        parent_list = await asyncio.to_thread(list_dir, payload.get("parent_rel", "."))
         await self.broadcast("explorer:setList", parent_list)
 
     async def handle_explorer_createDir(self, payload: dict, msg_id: str):
         res = create_directory(payload.get("parent_rel", "."), payload.get("name"))
         await self.broadcast("explorer:created", res)
-        parent_list = list_dir(payload.get("parent_rel", "."))
+        parent_list = await asyncio.to_thread(list_dir, payload.get("parent_rel", "."))
         await self.broadcast("explorer:setList", parent_list)
 
     async def handle_explorer_rename(self, payload: dict, msg_id: str):
@@ -1184,7 +1184,7 @@ class ExplorerDispatcher:
         res = rename_entry(rel, payload.get("new_name"))
         await self.broadcast("explorer:renamed", res)
         # Refresh parent directory
-        await self.broadcast("explorer:setList", list_dir(parent_rel))
+        await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, parent_rel))
 
     async def handle_explorer_delete(self, payload: dict, msg_id: str):
         rel = payload.get("rel")
@@ -1192,7 +1192,7 @@ class ExplorerDispatcher:
         res = delete_entry(rel)
         await self.broadcast("explorer:deleted", res)
         # Refresh the parent directory to reflect deletion
-        await self.broadcast("explorer:setList", list_dir(parent_rel))
+        await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, parent_rel))
         # Update git status
         mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
@@ -1206,7 +1206,7 @@ class ExplorerDispatcher:
         parent_rels = set(_get_parent_rel(r) for r in rels)
         for parent_rel in parent_rels:
             try:
-                await self.broadcast("explorer:setList", list_dir(parent_rel))
+                await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, parent_rel))
             except Exception:
                 pass  # Directory may no longer exist
         # Update git status
@@ -1222,7 +1222,7 @@ class ExplorerDispatcher:
         # Refresh destination directory (source unchanged for copy)
         dest_rel = _get_rel_from_abs(dest_path, self.project_root)
         try:
-            await self.broadcast("explorer:setList", list_dir(dest_rel))
+            await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, dest_rel))
         except Exception:
             pass
 
@@ -1237,7 +1237,7 @@ class ExplorerDispatcher:
         parent_rels.add(dest_rel)
         for parent_rel in parent_rels:
             try:
-                await self.broadcast("explorer:setList", list_dir(parent_rel))
+                await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, parent_rel))
             except Exception:
                 pass
 
@@ -1251,7 +1251,7 @@ class ExplorerDispatcher:
         dest_rel = _get_rel_from_abs(dest_path, self.project_root)
         for parent_rel in set([source_parent, dest_rel]):
             try:
-                await self.broadcast("explorer:setList", list_dir(parent_rel))
+                await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, parent_rel))
             except Exception:
                 pass
 
@@ -1263,7 +1263,7 @@ class ExplorerDispatcher:
         # Refresh destination directory only (source unchanged)
         dest_rel = _get_rel_from_abs(dest_path, self.project_root)
         try:
-            await self.broadcast("explorer:setList", list_dir(dest_rel))
+            await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, dest_rel))
         except Exception:
             pass
 
@@ -1273,7 +1273,7 @@ class ExplorerDispatcher:
         await self.broadcast("explorer:copied", res)
         # Refresh destination directory
         try:
-            await self.broadcast("explorer:setList", list_dir(dest_rel))
+            await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, dest_rel))
         except Exception:
             pass
 
@@ -1283,7 +1283,7 @@ class ExplorerDispatcher:
         await self.broadcast("explorer:moved", res)
         # Refresh destination directory
         try:
-            await self.broadcast("explorer:setList", list_dir(dest_rel))
+            await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, dest_rel))
         except Exception:
             pass
 

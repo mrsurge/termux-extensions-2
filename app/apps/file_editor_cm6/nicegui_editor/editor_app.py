@@ -1848,6 +1848,7 @@ async def jump_to_line(data: dict = Body(...)):
         focus: Whether to focus editor (default: True)
         scroll_to_top: If True, position line at viewport top (for scroll restore).
                       If False, uses default scrollIntoView behavior. (default: False)
+        scroll_y: Optional scroll mode. Use 'center' to center the target line in the viewport.
     """
     editor = get_active_editor()
     if not editor:
@@ -1864,12 +1865,30 @@ async def jump_to_line(data: dict = Body(...)):
     # scroll_to_top: position line at viewport top (symmetrical with scroll recording)
     scroll_to_top = bool(data.get('scroll_to_top') or data.get('scrollToTop'))
 
-    print(f"[JUMP_TO_LINE] Scrolling to line {target_line}, scroll_to_top={scroll_to_top}", file=sys.stderr)
+    scroll_y = data.get('scroll_y') or data.get('scrollY')
+    if isinstance(scroll_y, str):
+        scroll_y = scroll_y.strip()
+    else:
+        scroll_y = None
+    if scroll_to_top:
+        # scroll_to_top is a special mode; ignore scroll_y to avoid conflicting semantics
+        scroll_y = None
+
+    print(
+        f"[JUMP_TO_LINE] Scrolling to line {target_line}, scroll_to_top={scroll_to_top}, scroll_y={scroll_y}",
+        file=sys.stderr,
+    )
 
     # Use the vendored CodeMirror jump_to_line method
-    editor.jump_to_line(target_line, focus=should_focus, scroll_to_top=scroll_to_top)
+    editor.jump_to_line(target_line, focus=should_focus, scroll_to_top=scroll_to_top, scroll_y=scroll_y)
 
-    return {"ok": True, "line": target_line, "focus": should_focus, "scroll_to_top": scroll_to_top}
+    return {
+        "ok": True,
+        "line": target_line,
+        "focus": should_focus,
+        "scroll_to_top": scroll_to_top,
+        "scroll_y": scroll_y,
+    }
 
 @editor_router.post('/search/open')
 async def editor_search_open(data: dict = Body(...)):

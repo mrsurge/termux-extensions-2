@@ -110,13 +110,21 @@
     right: auto;
     top: auto;
     bottom: auto;
-    width: 100%;
+    width: 100% !important;
     grid-column: 3;
     grid-row: 3 / 5;
     border-left: 1px solid var(--border);
     transition: opacity 0.2s ease, visibility 0.2s ease;
     overflow-y: auto;
     z-index: 50;
+  }
+
+  /* Fullscreen drawer is only for overlay mode; keep it tiled on desktop. */
+  .layout-desktop .agent-drawer.agent-drawer--fullscreen {
+    width: 100% !important;
+    transform: none !important;
+    right: auto !important;
+    left: auto !important;
   }
 
   /* When agent is "closed" (open class NOT present) */
