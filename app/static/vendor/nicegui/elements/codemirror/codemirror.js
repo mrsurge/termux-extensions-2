@@ -2550,15 +2550,15 @@ export default {
       );
 
       // Scroll activity detector for mobile minimap fade-in
-      const scrollActivityPlugin = CM.ViewPlugin.fromClass(
-        class {
-          constructor(view) {
-            this.view = view;
-            this.timeout = null;
-            this.onScroll = this.onScroll.bind(this);
-            // Attach to scroller DOM
-            this.view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
-          }
+	      const scrollActivityPlugin = CM.ViewPlugin.fromClass(
+	        class {
+	          constructor(view) {
+	            this.view = view;
+	            this.timeout = null;
+	            this.onScroll = this.onScroll.bind(this);
+	            // Attach to scroller DOM
+	            this.view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
+	          }
 
           onScroll() {
             const wrapper = this.view.dom;
@@ -2576,12 +2576,130 @@ export default {
             this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
             if (this.timeout) clearTimeout(this.timeout);
           }
-        }
-      );
+	        }
+	      );
 
-      // Lezer-based local syntax diagnostics (cached per-URI in issues map).
-      const lezerDiagnosticsPlugin = CM.ViewPlugin.fromClass(
-        class {
+	      // Mobile minimap scrub (touch drag as scrollbar).
+	      // The upstream minimap overlay handles mouse dragging only, so mobile needs a custom path.
+	      const mobileMinimapScrubPlugin = CM.ViewPlugin.fromClass(
+	        class {
+	          constructor(view) {
+	            this.view = view;
+	            this.target = null;
+	            this.isDragging = false;
+	            this.pointerId = null;
+	            this.onPointerDown = this.onPointerDown.bind(this);
+	            this.onPointerMove = this.onPointerMove.bind(this);
+	            this.onPointerUp = this.onPointerUp.bind(this);
+	            this.refreshTarget();
+	          }
+
+	          refreshTarget() {
+	            try {
+	              const next = this.view?.dom?.querySelector?.('.cm-minimap-mobile') || null;
+	              if (next === this.target) return;
+	              if (this.target) {
+	                this.target.removeEventListener('pointerdown', this.onPointerDown);
+	              }
+	              this.target = next;
+	              if (this.target) {
+	                this.target.addEventListener('pointerdown', this.onPointerDown, { passive: false });
+	              }
+	            } catch { }
+	          }
+
+	          update(update) {
+	            // Minimap DOM may be recreated on layout changes/reconfigures.
+	            if (update.geometryChanged || update.viewportChanged || update.docChanged) {
+	              this.refreshTarget();
+	            }
+	          }
+
+	          scrollToClientY(clientY) {
+	            const t = this.target;
+	            if (!t) return;
+	            const scrollDOM = this.view.scrollDOM;
+	            const maxScrollTop = Math.max(0, (scrollDOM.scrollHeight || 0) - (scrollDOM.clientHeight || 0));
+	            if (maxScrollTop <= 0) return;
+	            const rect = t.getBoundingClientRect();
+	            const height = rect.height || 0;
+	            if (height <= 0) return;
+	            const y = Math.max(0, Math.min(height, clientY - rect.top));
+	            const ratio = y / height;
+	            const desired = ratio * (scrollDOM.scrollHeight || 0) - (scrollDOM.clientHeight || 0) / 2;
+	            scrollDOM.scrollTop = Math.max(0, Math.min(maxScrollTop, desired));
+	          }
+
+	          onPointerDown(event) {
+	            if (!self.isMobileLayout) return;
+	            if (!event || event.isPrimary === false) return;
+	            if (!this.target) return;
+	            try {
+	              event.preventDefault();
+	              event.stopPropagation();
+	            } catch { }
+	            this.isDragging = true;
+	            this.pointerId = event.pointerId;
+	            try {
+	              this.target.setPointerCapture(event.pointerId);
+	            } catch { }
+	            try {
+	              this.view.dom.classList.add('cm-minimap-interacting');
+	            } catch { }
+	            this.target.addEventListener('pointermove', this.onPointerMove, { passive: false });
+	            this.target.addEventListener('pointerup', this.onPointerUp, { passive: false });
+	            this.target.addEventListener('pointercancel', this.onPointerUp, { passive: false });
+	            this.scrollToClientY(event.clientY);
+	          }
+
+	          onPointerMove(event) {
+	            if (!this.isDragging) return;
+	            if (event.pointerId !== this.pointerId) return;
+	            try {
+	              event.preventDefault();
+	              event.stopPropagation();
+	            } catch { }
+	            this.scrollToClientY(event.clientY);
+	          }
+
+	          onPointerUp(event) {
+	            if (!this.isDragging) return;
+	            if (event.pointerId !== this.pointerId) return;
+	            try {
+	              event.preventDefault();
+	              event.stopPropagation();
+	            } catch { }
+	            this.isDragging = false;
+	            this.pointerId = null;
+	            if (this.target) {
+	              try {
+	                this.target.releasePointerCapture(event.pointerId);
+	              } catch { }
+	              this.target.removeEventListener('pointermove', this.onPointerMove);
+	              this.target.removeEventListener('pointerup', this.onPointerUp);
+	              this.target.removeEventListener('pointercancel', this.onPointerUp);
+	            }
+	            try {
+	              this.view.dom.classList.remove('cm-minimap-interacting');
+	            } catch { }
+	          }
+
+	          destroy() {
+	            try {
+	              if (this.target) {
+	                this.target.removeEventListener('pointerdown', this.onPointerDown);
+	                this.target.removeEventListener('pointermove', this.onPointerMove);
+	                this.target.removeEventListener('pointerup', this.onPointerUp);
+	                this.target.removeEventListener('pointercancel', this.onPointerUp);
+	              }
+	            } catch { }
+	          }
+	        }
+	      );
+
+	      // Lezer-based local syntax diagnostics (cached per-URI in issues map).
+	      const lezerDiagnosticsPlugin = CM.ViewPlugin.fromClass(
+	        class {
           constructor() {
             this.timer = null;
           }
@@ -2657,15 +2775,16 @@ export default {
 
       const initialThemeExtension = this.resolveThemeExtension(this.theme);
 
-      const extensions = [
-        CM.basicSetup,
-        changeSender,
-        scrollActivityPlugin, // Add the scroll listener
-        lezerDiagnosticsPlugin,
-        // Enables the Tab key to indent the current lines https://codemirror.net/examples/tab/
-        CM.keymap.of([CM.indentWithTab]),
-        // Sets indentation https://codemirror.net/docs/ref/#language.indentUnit
-        this.indentUnitCompartment.of(CM.indentUnit.of(this.indent)),
+	      const extensions = [
+	        CM.basicSetup,
+	        changeSender,
+	        scrollActivityPlugin, // Add the scroll listener
+	        mobileMinimapScrubPlugin,
+	        lezerDiagnosticsPlugin,
+	        // Enables the Tab key to indent the current lines https://codemirror.net/examples/tab/
+	        CM.keymap.of([CM.indentWithTab]),
+	        // Sets indentation https://codemirror.net/docs/ref/#language.indentUnit
+	        this.indentUnitCompartment.of(CM.indentUnit.of(this.indent)),
         // We will set these Compartments later and dynamically through props
         this.themeConfig.of([initialThemeExtension]),
         this.languageConfig.of([]),

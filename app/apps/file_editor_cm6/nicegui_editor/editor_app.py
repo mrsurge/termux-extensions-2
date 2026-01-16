@@ -1395,23 +1395,31 @@ async def editor_page():
       padding-right: 75px; /* 75px width */
     }
 
-    /* Mobile: semi-transparent overlay “preview” on the right */
-    .cm-editor .cm-minimap-mobile {
-      position: fixed; /* Changed to fixed to stay in viewport */
-      top: 0;
-      right: 0;
-      bottom: 0;
-      width: 30%;
-      opacity: 0; /* Hidden by default */
-      pointer-events: none;
-      transition: opacity 0.3s ease; /* Smooth fade */
-      z-index: 5001; /* Ensure it's above everything */
-    }
-    
-    /* Show mobile minimap when scrolling */
-    .cm-editor.cm-scrolling .cm-minimap-mobile {
-      opacity: 0.7;
-    }
+	    /* Mobile: semi-transparent overlay “preview” on the right */
+	    .cm-editor .cm-minimap-mobile {
+	      position: fixed; /* Changed to fixed to stay in viewport */
+	      top: 0;
+	      right: 0;
+	      bottom: 0;
+	      width: 30%;
+	      opacity: 0; /* Hidden by default */
+	      pointer-events: none;
+	      touch-action: none;
+	      transition: opacity 0.3s ease; /* Smooth fade */
+	      z-index: 5001; /* Ensure it's above everything */
+	    }
+	    
+	    /* Show mobile minimap when scrolling */
+	    .cm-editor.cm-scrolling .cm-minimap-mobile {
+	      opacity: 0.7;
+	      pointer-events: auto;
+	    }
+	    
+	    /* Keep minimap interactive during touch scrub even after scroll state clears */
+	    .cm-editor.cm-minimap-interacting .cm-minimap-mobile {
+	      opacity: 0.7;
+	      pointer-events: auto;
+	    }
 
     /* You can also hide desktop style when really narrow, if you ever send mode=desktop on a phone */
     @media (max-width: 600px) {
