@@ -18,3 +18,4 @@ pyright
 python-multipart
 markdown2
 pygments
+docutils
