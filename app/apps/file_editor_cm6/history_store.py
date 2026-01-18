@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .project_sidecar import ProjectSidecar
+from .draft_index_sidecar import DraftIndexSidecar
 
 MAX_RECENT_PROJECTS = 12
 MAX_RECENT_FILES = 12
@@ -988,6 +989,12 @@ class HistoryStore:
                 worker_pid=worker_pid,
             )
             sidecar.save()
+            try:
+                idx = DraftIndexSidecar.load_or_create(normalized_project)
+                idx.update_from_abs_file(entry.get("file_path") or file_path, unsaved=bool(entry.get("unsaved")))
+            except Exception:
+                # No disk access => drafts are treated as off.
+                pass
             return dict(entry)
         except Exception:
             # Fall back to returning an in-memory representation only.
@@ -1016,6 +1023,11 @@ class HistoryStore:
             existed = sidecar.clear_cached_document(file_path)
             if existed:
                 sidecar.save()
+                try:
+                    idx = DraftIndexSidecar.load_or_create(normalized_project)
+                    idx.remove_abs_file(file_path)
+                except Exception:
+                    pass
             return existed
         except Exception:
             return False

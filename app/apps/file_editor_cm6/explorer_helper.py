@@ -10,7 +10,7 @@ import time
 import shutil
 from typing import Dict, Iterable, Optional
 
-from app.apps.file_editor_cm6.stores import _history_store
+from app.apps.file_editor_cm6.draft_index_sidecar import DraftIndexSidecar
 
 # Shared state lock: list_dir and git/draft caches can be accessed from multiple threads.
 _STATE_LOCK = threading.RLock()
@@ -20,9 +20,9 @@ _PROJECT_ROOT = Path.home()
 _GIT_STATUS_CACHE: Dict[str, dict] = {}
 GIT_CACHE_TTL_SECONDS = 6.0
 
-# Draft paths cache - avoids expensive list_project_drafts() on every list_dir()
-_DRAFT_PATHS_CACHE: Dict[str, dict] = {}  # project_path -> {paths: set, timestamp: float}
-DRAFT_CACHE_TTL_SECONDS = 5.0
+# Draft index cache (loaded from disk-backed DraftIndexSidecar).
+_DRAFT_INDEX_CACHE: Dict[str, dict] = {}  # project_path -> {files:set, dirs:set, timestamp: float}
+DRAFT_INDEX_CACHE_TTL_SECONDS = 2.0
 
 _STATUS_PRIORITY = (
     "conflict",
@@ -38,49 +38,36 @@ _STATUS_PRIORITY = (
 )
 
 
-def _collect_project_draft_rel_paths(project_root: Path) -> set[str]:
-    """Return set of relative file paths that currently have drafts (cached)."""
+def _get_draft_index_snapshot(project_root: Path) -> tuple[set[str], set[str]]:
+    """Return (draft_files, draft_dirs) from disk-backed DraftIndexSidecar (cached)."""
     key = str(project_root.resolve())
     now = time.time()
-    
-    # Check cache
     with _STATE_LOCK:
-        cached = _DRAFT_PATHS_CACHE.get(key)
-        if cached and now - cached.get('timestamp', 0) < DRAFT_CACHE_TTL_SECONDS:
-            return cached.get('paths', set())
-    
-    # Refresh cache
+        cached = _DRAFT_INDEX_CACHE.get(key)
+        if cached and now - cached.get("timestamp", 0) < DRAFT_INDEX_CACHE_TTL_SECONDS:
+            return cached.get("files", set()), cached.get("dirs", set())
+
+    # Reload from disk (best-effort); no disk access => drafts are off (empty).
     try:
-        drafts = _history_store.list_project_drafts(str(project_root))
+        idx = DraftIndexSidecar.load_or_create(key)
+        idx.reload()
+        draft_files, draft_dirs = idx.snapshot()
     except Exception:
-        with _STATE_LOCK:
-            _DRAFT_PATHS_CACHE[key] = {'paths': set(), 'timestamp': now}
-        return set()
-    
-    rel_paths: set[str] = set()
-    for draft in drafts:
-        file_path = draft.get("file_path")
-        if not file_path:
-            continue
-        try:
-            abs_path = Path(file_path).expanduser().resolve()
-            rel_paths.add(str(abs_path.relative_to(project_root)))
-        except Exception:
-            continue
-    
+        draft_files, draft_dirs = set(), set()
+
     with _STATE_LOCK:
-        _DRAFT_PATHS_CACHE[key] = {'paths': rel_paths, 'timestamp': now}
-    return rel_paths
+        _DRAFT_INDEX_CACHE[key] = {"files": draft_files, "dirs": draft_dirs, "timestamp": now}
+    return draft_files, draft_dirs
 
 
 def mark_draft_cache_dirty(project_root: Path = None):
-    """Mark draft cache as dirty so it refreshes on next access."""
+    """Mark draft caches as dirty so they refresh on next access."""
     with _STATE_LOCK:
         if project_root:
             key = str(project_root.resolve())
-            _DRAFT_PATHS_CACHE.pop(key, None)
+            _DRAFT_INDEX_CACHE.pop(key, None)
         else:
-            _DRAFT_PATHS_CACHE.clear()
+            _DRAFT_INDEX_CACHE.clear()
 
 
 def set_project_root(path: str) -> Path:
@@ -115,7 +102,7 @@ def list_dir(rel: str = '.') -> dict:
     root = get_project_root()
     
     _t1 = _time.perf_counter()
-    draft_rel_paths = _collect_project_draft_rel_paths(root)
+    draft_files, draft_dirs = _get_draft_index_snapshot(root)
     _t2 = _time.perf_counter()
     
     base = (root / rel).resolve()
@@ -148,12 +135,10 @@ def list_dir(rel: str = '.') -> dict:
                 git_flags = _derive_git_flags(rel_path, kind, status_map)
 
                 # For files: check if this exact file has a draft
-                # For dirs: check if any draft path starts with this dir
                 if kind == 'file':
-                    has_draft = rel_path in draft_rel_paths
+                    has_draft = rel_path in draft_files
                 else:
-                    prefix = rel_path + '/'
-                    has_draft = any(d.startswith(prefix) for d in draft_rel_paths)
+                    has_draft = rel_path in draft_dirs
 
                 entries.append({
                     'name': e.name,

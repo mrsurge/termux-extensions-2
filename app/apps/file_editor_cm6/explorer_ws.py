@@ -583,8 +583,20 @@ async def _broadcast_draft_decorations(project_path: str):
         from pathlib import Path
         # Normalize to absolute path to match how connections are registered
         normalized_path = str(Path(project_path).resolve())
-        reviews = await review.list_reviews(Path(project_path), lightweight=True)
-        draft_decorations = {r["rel"]: {"hasDraft": True} for r in reviews if r.get("has_draft")}
+        # Fast path: use disk-backed DraftIndexSidecar (avoid parsing ProjectSidecar.session_cache content).
+        from .draft_index_sidecar import DraftIndexSidecar
+
+        def _load_snapshot() -> set[str]:
+            try:
+                idx = DraftIndexSidecar.load_or_create(str(Path(project_path).resolve()))
+                idx.reload()
+                files, _dirs = idx.snapshot()
+                return files
+            except Exception:
+                return set()
+
+        draft_files = await asyncio.to_thread(_load_snapshot)
+        draft_decorations = {rel: {"hasDraft": True} for rel in draft_files}
         msg = {"type": "explorer:updateDecorations", "payload": {"drafts": draft_decorations}}
         await manager.broadcast(normalized_path, msg)
     except Exception as e:

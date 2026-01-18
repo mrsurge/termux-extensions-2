@@ -65,7 +65,7 @@ class ProjectSidecar:
     """
 
     project_path: str
-    VERSION: int = 1
+    VERSION: int = 2
 
     _path: Path = field(init=False, repr=False)
     _data: Dict[str, Any] = field(init=False, repr=False)
@@ -180,13 +180,29 @@ class ProjectSidecar:
             # Corrupt or unreadable sidecar; treat as fresh.
             return
 
-        # Versioned merge: overlay persisted data onto defaults.
+        # Versioned merge: on mismatch, wipe drafts (session_cache) and avoid migrations.
+        loaded_version = data.get("version")
         defaults = self._default_data()
+        if loaded_version != self.VERSION:
+            for key, value in data.items():
+                if key in defaults and key != "session_cache":
+                    defaults[key] = value
+            defaults["version"] = self.VERSION
+            defaults["project_path"] = self.project_path
+            defaults["session_cache"] = {}
+            self._data = defaults
+            try:
+                self.save()
+            except Exception:
+                pass
+            return
+
         for key, value in data.items():
             if key in defaults:
                 defaults[key] = value
         # Always trust the normalized project_path we were constructed with.
         defaults["project_path"] = self.project_path
+        defaults["version"] = self.VERSION
         self._data = defaults
 
     def save(self) -> None:

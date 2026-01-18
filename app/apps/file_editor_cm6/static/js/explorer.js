@@ -2475,11 +2475,22 @@ export async function initExplorerUI() {
       toast('Missing path for mention');
       return;
     }
+    if (!uiState.projectPath) {
+      toast('No project open');
+      return;
+    }
+    let absPath = uiState.projectPath;
+    if (relPath && relPath !== '.') {
+      absPath =
+        uiState.projectPath.replace(/\/+$/, '') +
+        '/' +
+        relPath.replace(/^\/+/, '');
+    }
     try {
       const resp = await fetch(`${window.__agentHostBase || 'http://127.0.0.1:12359'}/api/appserver/mention`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: relPath }),
+        body: JSON.stringify({ path: absPath }),
       });
       const body = await resp.json();
       if (body && body.ok) {
