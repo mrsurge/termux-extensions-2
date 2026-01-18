@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "projectRoot": "/data/data/com.termux/files/home/mrselect5",
+  "lsp": {
+    "rootRel": "android",
+    "module": "app",
+    "variant": "GeckoDebug"
+  },
+  "updatedAtMs": 1767298843972,
+  "autodetect": {
+    "files": {
+      "rootBuildGradle": {
+        "path": "/data/data/com.termux/files/home/mrselect5/android/build.gradle.kts",
+        "exists": true,
+        "kind": "kts"
+      },
+      "moduleBuildGradle": {
+        "path": "/data/data/com.termux/files/home/mrselect5/android/app/build.gradle.kts",
+        "exists": true,
+        "kind": "kts"
+      },
+      "settingsGradle": {
+        "path": "/data/data/com.termux/files/home/mrselect5/android/settings.gradle.kts",
+        "exists": true,
+        "kind": "kts"
+      },
+      "gradleProperties": {
+        "path": "/data/data/com.termux/files/home/mrselect5/android/gradle.properties",
+        "exists": true
+      },
+      "localProperties": {
+        "path": "/data/data/com.termux/files/home/mrselect5/android/local.properties",
+        "exists": true
+      },
+      "versionsCatalog": {
+        "path": "/data/data/com.termux/files/home/mrselect5/android/gradle/libs.versions.toml",
+        "exists": false
+      }
+    },
+    "gradleProperties": {
+      "org.gradle.jvmargs": "-Xmx2048m -Dfile.encoding=UTF-8",
+      "android.useAndroidX": "true",
+      "kotlin.code.style": "official",
+      "android.nonTransitiveRClass": "true",
+      "android.aapt2FromMavenOverride": "/data/data/com.termux/files/usr/bin/aapt2"
+    },
+    "localProperties": {
+      "sdk.dir": "/data/data/com.termux/files/usr/opt/android-sdk"
+    },
+    "buildConfig": {
+      "compileSdk": 34,
+      "minSdk": 24,
+      "targetSdk": 34,
+      "minifyEnabled": false
+    },
+    "modules": [
+      "app"
+    ],
+    "variants": {
+      "module": "app",
+      "flavors": [
+        "webview",
+        "gecko",
+        "ndk"
+      ],
+      "buildTypes": [
+        "Debug",
+        "Release"
+      ],
+      "variants": [
+        "WebviewDebug",
+        "WebviewRelease",
+        "GeckoDebug",
+        "GeckoRelease",
+        "NdkDebug",
+        "NdkRelease"
+      ],
+      "gradleFile": "/data/data/com.termux/files/home/mrselect5/android/app/build.gradle.kts"
+    },
+    "sourceSets": [
+      "gecko",
+      "main",
+      "webview"
+    ],
+    "termuxAapt2Path": "/data/data/com.termux/files/usr/bin/aapt2",
+    "importantGradleProperties": [
+      "android.aapt2FromMavenOverride",
+      "org.gradle.jvmargs",
+      "android.useAndroidX",
+      "android.enableJetifier",
+      "kotlin.code.style",
+      "android.nonTransitiveRClass",
+      "android.nonFinalResIds"
+    ]
+  }
+}

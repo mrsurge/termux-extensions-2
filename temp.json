@@ -1,0 +1,6 @@
+{
+  "projectRoot": "/data/data/com.termux/files/home/mrselect5",
+  "kotlinAndroidRootRel": "android",
+  "kotlinAndroidVariant": "GeckoDebug",
+  "kotlinAndroidModule": "app"
+}

@@ -25,3 +25,5 @@ framework-shells/
 app/static/vendor/lsp_servers/kotlin-lsp/
 # app/static/vendor/ignored/
 .tmp/
+android/app/build
+**/build
