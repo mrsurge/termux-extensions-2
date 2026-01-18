@@ -16,3 +16,4 @@ watchdog
 git-python
 pyright
 python-multipart
+markdown2

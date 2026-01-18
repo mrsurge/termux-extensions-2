@@ -1,0 +1,11 @@
+clang
+build-essential
+tur-repo
+python
+libev
+c-ares
+rust
+binutils
+curl
+wget
+openssl-tool
