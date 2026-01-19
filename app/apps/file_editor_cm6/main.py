@@ -552,6 +552,14 @@ def init_nicegui_with_app(fastapi_app):
     # f"{mount}/_nicegui_ws/socket.io" which matches the client's URL.
     ng.sio_app.engineio_path = '/socket.io'
 
+    # Ensure the NiceGUI client includes app_id in its Socket.IO query so the main proxy
+    # can route /ui/_nicegui_ws/socket.io reliably even when Referer is absent.
+    try:
+        from nicegui import core as ng_core
+        ng_core.app.config.socket_io_js_query_params["app_id"] = "file_editor_cm6"
+    except Exception:
+        pass
+
     ui.run_with(
         fastapi_app,
         mount_path=mount,

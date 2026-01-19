@@ -326,6 +326,15 @@ function createApp(elements, options) {
       mounted_app = this;
       window.documentId = createRandomUUID();
       window.clientId = options.query.client_id;
+      try {
+        const params = new URLSearchParams(window.location.search || "");
+        const app_id = params.get("app_id");
+        if (app_id && typeof app_id === "string") {
+          options.query = options.query || {};
+          options.query.app_id = app_id;
+        }
+      } catch {
+      }
       const url = window.location.protocol === "https:" ? "wss://" : "ws://" + window.location.host;
       window.path_prefix = options.prefix;
       window.nextMessageId = options.query.next_message_id;

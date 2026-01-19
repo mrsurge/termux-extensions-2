@@ -1343,7 +1343,25 @@ async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
     # Option B: default to file_editor_cm6 when not provided (WS often lacks Referer)
     if not app_id:
         app_id = "file_editor_cm6"
-        print(f"[NiceGUI WS] No Referer/app_id; defaulting to {app_id}")
+        try:
+            # Print enough context to identify which client/URL is missing Referer/app_id.
+            path = websocket.scope.get("path")
+            query = websocket.scope.get("query_string", b"")
+            query_s = query.decode("utf-8", errors="replace") if isinstance(query, (bytes, bytearray)) else str(query)
+            hdrs = websocket.headers
+            referer = hdrs.get("referer")
+            origin = hdrs.get("origin")
+            host = hdrs.get("host")
+            ua = hdrs.get("user-agent")
+            has_cookie = bool(hdrs.get("cookie"))
+            client = websocket.client.host if websocket.client else None
+            print(
+                f"[NiceGUI WS] No Referer/app_id; defaulting to {app_id} "
+                f"(client={client} host={host} origin={origin} referer={referer} has_cookie={has_cookie} "
+                f"path={path} qs={query_s})"
+            )
+        except Exception:
+            print(f"[NiceGUI WS] No Referer/app_id; defaulting to {app_id}")
     
     running_apps = await get_running_apps()
     
@@ -1386,12 +1404,48 @@ async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
         extra_headers.append(("X-Forwarded-Host", xfh_hdr))
     
     try:
-        # Some environments use older websockets versions which don't support extra_headers/subprotocols
-        # Start with a minimal, widely-supported set of arguments.
-        async with websockets.connect(
-            worker_url,
-            origin=origin_hdr,
-        ) as worker_ws:
+        # Forward cookies/UA/subprotocols to the worker to preserve NiceGUI's client identity
+        # across the main->worker proxy. If the installed websockets version doesn't support
+        # these kwargs, fall back to a minimal connect.
+        try:
+            async with websockets.connect(
+                worker_url,
+                origin=origin_hdr,
+                extra_headers=extra_headers or None,
+                subprotocols=subprotocols,
+            ) as worker_ws:
+                async def forward_client_to_worker():
+                    try:
+                        if hasattr(websocket, "receive"):
+                            # Starlette >=0.27: low-level receive available
+                            while True:
+                                packet = await websocket.receive()
+                                if packet.get("type") == "websocket.disconnect":
+                                    break
+                                if packet.get("text") is not None:
+                                    await worker_ws.send(packet["text"])
+                                elif packet.get("bytes") is not None:
+                                    await worker_ws.send(packet["bytes"])
+                    except Exception:
+                        pass
+
+                async def forward_worker_to_client():
+                    try:
+                        async for message in worker_ws:
+                            if isinstance(message, bytes):
+                                await websocket.send_bytes(message)
+                            else:
+                                await websocket.send_text(message)
+                    except Exception:
+                        pass
+
+                await asyncio.gather(forward_client_to_worker(), forward_worker_to_client())
+                return
+        except TypeError:
+            # Fallback for older websockets API
+            pass
+
+        async with websockets.connect(worker_url, origin=origin_hdr) as worker_ws:
             async def forward_client_to_worker():
                 try:
                     if hasattr(websocket, "receive"):
