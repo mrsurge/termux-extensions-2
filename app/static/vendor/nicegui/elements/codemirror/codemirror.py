@@ -264,6 +264,8 @@ class CodeMirror(ValueElement, DisableableElement,
         highlight_whitespace: bool = False,
         show_minimap: bool = False,
         initial_scroll_line: Optional[int] = None,
+        client_id: Optional[str] = None,
+        enable_mirror: bool = True,
     ) -> None:
         """CodeMirror
 
@@ -312,6 +314,11 @@ class CodeMirror(ValueElement, DisableableElement,
                 line_val = None
             if line_val is not None and line_val > 0:
                 self._props['initialScrollLine'] = line_val
+        # Client ID for filtering self-echo in mirror broadcasts
+        if client_id is not None:
+            self._props['clientId'] = client_id
+        # Enable live mirroring of edits to other connected clients
+        self._props['enableMirror'] = enable_mirror
         self._update_method = 'setEditorValueFromProps'
 
         self.on('change', self._handle_change)

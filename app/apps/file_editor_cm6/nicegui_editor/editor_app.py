@@ -493,6 +493,12 @@ def _build_cache_state_payload(
         except Exception:
             rel_path = None
 
+    auto_save_enabled = None
+    try:
+        auto_save_enabled = bool(_preferences_store.get_preferences().get("editor", {}).get("autoSave", False))
+    except Exception:
+        auto_save_enabled = None
+
     payload = {
         "path": resolved_path or None,
         "project_path": project_path,
@@ -502,6 +508,7 @@ def _build_cache_state_payload(
         "absolute_directory": directory or None,
         "state": state,
         "unsaved": bool(unsaved),
+        "auto_save": auto_save_enabled,
         "reason": reason,
         "updated_at": (cache_entry or {}).get("updated_at"),
         "timestamp": time.time(),
@@ -2579,6 +2586,7 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: Optional[str]) 
 @editor_router.post('/save')
 async def save_current_file(data: dict = Body(...)):
     client_id = data.get('client_id', 'unknown')
+    nicegui_client_id = data.get('nicegui_client_id')
     op_id = data.get('op_id')
     current_file = get_current_file()
     base_snapshot = get_current_file_sha256()
@@ -2712,6 +2720,44 @@ async def save_current_file(data: dict = Body(...)):
                 pass
         except Exception as e:
             print(f"[LSP SAVE HOOK] exception: {e}", file=sys.stderr)
+
+        # Live autosave propagation: in autosave mode, broadcast the saved buffer
+        # to other host shells via the explorer bus (SSOT active file only).
+        try:
+            editor_prefs = _preferences_store.get_preferences().get('editor', {})
+            if editor_prefs.get('autoSave', False):
+                project_path = _history_store.get_active_project()
+                if project_path and current_file:
+                    try:
+                        editor = get_active_editor()
+                        content = _get_cached_editor_content(editor) if editor else None
+                    except Exception:
+                        content = None
+                    if content is None:
+                        try:
+                            content = Path(current_file).read_text(encoding='utf-8', errors='replace')
+                        except Exception:
+                            content = ''
+
+                    content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest() if content else ''
+                    proj_norm = str(Path(project_path).expanduser().resolve(strict=False))
+                    payload = {
+                        "path": str(current_file),
+                        "project_path": proj_norm,
+                        "content": content,
+                        "base_sha256": (file_meta or {}).get("sha256") or '',
+                        "content_sha256": content_hash or '',
+                        "source_client": nicegui_client_id,
+                    }
+                    from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+                    asyncio.create_task(
+                        _explorer_manager.broadcast(
+                            proj_norm,
+                            {"type": "autosave:content", "payload": payload},
+                        )
+                    )
+        except Exception:
+            pass
 
         return {"ok": True, "data": file_meta}
     except SaveValidationError as e:

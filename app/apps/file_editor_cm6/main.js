@@ -1498,6 +1498,20 @@ function handleCacheStateBridgeEvent(event) {
     reason: data.reason,
     restoredActive: restoredSessionActive,
   });
+
+  // Synchronize autosave mode across host shells (other clients).
+  try {
+    const autosaveValue =
+      typeof data.auto_save === 'boolean' ? data.auto_save :
+      (typeof data.autoSave === 'boolean' ? data.autoSave : null);
+    if (typeof autosaveValue === 'boolean') {
+      if (!editorViewState || typeof editorViewState !== 'object') editorViewState = {};
+      editorViewState.autoSave = autosaveValue;
+      if (typeof applyStateToMenus === 'function') {
+        applyStateToMenus(editorViewState);
+      }
+    }
+  } catch (_) {}
   
   if (data.path) {
       window.dispatchEvent(new CustomEvent('cm6:draft-updated', {
@@ -1879,6 +1893,38 @@ window.__cm6ApplyRemoteDraft = async (payload) => {
     } catch (_) {}
   } catch (err) {
     console.warn('[DraftSync] Failed to apply remote draft:', err);
+  }
+};
+
+// Live autosave propagation: apply the latest saved buffer to viewer clients.
+// The authoring client (source_client) is excluded to keep cursor stable.
+window.__cm6ApplyAutosaveContent = async (payload) => {
+  try {
+    const absPath = payload && typeof payload.path === 'string' ? payload.path : null;
+    if (!absPath) return;
+    if (!window.currentPath || String(window.currentPath) !== String(absPath)) return;
+
+    const content = typeof payload.content === 'string' ? payload.content : null;
+    if (content === null) return;
+
+    // Drop self-echo using the NiceGUI client id (context.client.id).
+    try {
+      if (payload.source_client && cm6NiceguiClientId && String(payload.source_client) === String(cm6NiceguiClientId)) {
+        return;
+      }
+    } catch (_) {}
+
+    const editorFrame = document.getElementById('editorFrame');
+    if (!editorFrame || !editorFrame.contentWindow) return;
+    editorFrame.contentWindow.postMessage({
+      type: 'cm6_mirror',
+      data: { path: absPath, content, source_client: payload.source_client || null }
+    }, '*');
+
+    // Autosave implies disk is up to date for viewers.
+    markUnsaved(false);
+  } catch (err) {
+    console.warn('[AutosaveSync] Failed to apply autosave content:', err);
   }
 };
 
@@ -2650,6 +2696,9 @@ async function saveFile() {
     client_id: clientId,
     op_id: opId
   };
+  if (cm6NiceguiClientId) {
+    payload.nicegui_client_id = cm6NiceguiClientId;
+  }
   
   if (lastSha256) {
     payload.base_sha256 = lastSha256;
@@ -2696,6 +2745,9 @@ async function saveFile() {
           client_id: clientId,
           op_id: `${opId}_retry`
         };
+        if (cm6NiceguiClientId) {
+          retryPayload.nicegui_client_id = cm6NiceguiClientId;
+        }
         try {
           const retryResult = await apiPost('editor/save', retryPayload);
           if (retryResult.ok) {

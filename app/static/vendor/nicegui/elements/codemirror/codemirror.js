@@ -41,7 +41,7 @@ class SocketIOTransport {
       console.log('[LSP] _io type:', typeof _io, '_io:', _io);
 
       this.socket = _io(namespace, {
-        path: "/ui/_nicegui_ws/socket.io",
+        path: "/lsp_ws/socket.io",
         transports: ["websocket"],
         query: { app_id: 'file_editor_cm6' },
       });
@@ -746,6 +746,10 @@ export default {
     showMinimap: Boolean,
     // Optional 1-based line number for initial scroll anchoring (backend-driven)
     initialScrollLine: { type: Number, default: null },
+    // NiceGUI client ID for filtering self-echo in mirror broadcasts
+    clientId: { type: String, default: null },
+    // Enable live mirroring of edits to other connected clients
+    enableMirror: { type: Boolean, default: true },
   },
   watch: {
     language(newLanguage) {
@@ -1502,9 +1506,63 @@ export default {
       if (!this.editor) return;
       if (this.editor.state.doc.toString() === value) return;
 
+      // When the server pushes content (e.g. mirroring another client), avoid
+      // yanking scroll position for viewers that aren't actively editing.
+      const preserveViewport = !!(this.editor && !this.editor.hasFocus);
+      let prevScrollTop = null;
+      let prevSelection = null;
+      try {
+        if (preserveViewport) {
+          prevScrollTop = this.editor.scrollDOM?.scrollTop ?? null;
+          prevSelection = this.editor.state?.selection ?? null;
+        }
+      } catch { }
+
       this.emitting = false;
       this.editor.dispatch({ changes: { from: 0, to: this.editor.state.doc.length, insert: value } });
       this.emitting = true;
+
+      try {
+        if (preserveViewport) {
+          if (typeof prevScrollTop === 'number') {
+            this.editor.scrollDOM.scrollTop = prevScrollTop;
+          }
+          if (prevSelection) {
+            const docLen = this.editor.state.doc.length;
+            const anchor = Math.max(0, Math.min(docLen, prevSelection.main?.anchor ?? 0));
+            const head = Math.max(0, Math.min(docLen, prevSelection.main?.head ?? anchor));
+            this.editor.dispatch({ selection: { anchor, head } });
+          }
+        }
+      } catch { }
+    },
+    applyMirrorContent(payload) {
+      try {
+        if (!payload || typeof payload !== 'object') return;
+        const path = typeof payload.path === 'string' ? payload.path : '';
+        const content = typeof payload.content === 'string' ? payload.content : null;
+        if (!path || content === null) return;
+        if (!this.editor) return;
+
+        // Filter self-echo: if this mirror originated from our own client, skip it.
+        // The source_client field is set by editor_app.py from context.client.id.
+        const sourceClient = payload.source_client;
+        const localClient = this.clientId || window.clientId;
+        if (sourceClient && localClient && sourceClient === localClient) {
+          return; // Self-echo - we sent this, ignore it
+        }
+
+        // Secondary guard: don't clobber actively typing user (safety net for edge cases)
+        try {
+          if (this.editor.hasFocus) {
+            const last = typeof this._lastLocalEditAt === 'number' ? this._lastLocalEditAt : 0;
+            if (Date.now() - last < 800) return;
+          }
+        } catch { }
+
+        if (this.editor.state.doc.toString() === content) return;
+        this.setEditorValue(content);
+      } catch { }
     },
     emitCacheState(payload) {
       try {
@@ -2493,10 +2551,15 @@ export default {
           constructor() {
             this.debounceTimer = null;
             this.lspDebounceTimer = null;
+            this.mirrorDebounceTimer = null;
           }
           update(update) {
             if (!update.docChanged) return;
             if (!self.emitting) return;
+            try { self._lastLocalEditAt = Date.now(); } catch { }
+
+            // Live mirroring is handled server-side in editor_app.py to update
+            // other NiceGUI clients without involving the parent window.
 
             // Trigger LSP symbol refresh on document changes
             if (self._symbolRefreshDebounce) {
@@ -5283,6 +5346,22 @@ export default {
     } catch (err) {
       console.warn('[CodeMirror] Failed to attach editor focus handlers:', err);
     }
+
+    // Let the parent shell know our NiceGUI client id (used for self-echo filtering).
+    try {
+      const target = window.parent || window;
+      target.postMessage({ type: 'cm6_client_id', data: { client_id: window.clientId || null } }, '*');
+    } catch { }
+
+    // Mirror events from the parent shell (SSOT broadcast over explorer bus).
+    try {
+      window.addEventListener('message', (event) => {
+        const data = event && event.data;
+        if (!data || typeof data !== 'object') return;
+        if (data.type !== 'cm6_mirror') return;
+        this.applyMirrorContent(data.data || {});
+      });
+    } catch { }
 
     // Apply initial scroll position from backend, if provided
     // Position target line at viewport top (symmetrical with how we record scroll position)

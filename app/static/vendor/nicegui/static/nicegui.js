@@ -324,6 +324,9 @@ function createApp(elements, options) {
     },
     mounted() {
       mounted_app = this;
+      // Keep the UI alive on flaky/mobile networks (avoid hard reload loops on transient disconnects).
+      // The host app may still choose to force a reload via the existing "try_reconnect" mechanism.
+      window.NICEGUI_CONTINUE_ON_DISCONNECT = true;
       window.documentId = createRandomUUID();
       window.clientId = options.query.client_id;
       try {
@@ -361,10 +364,35 @@ function createApp(elements, options) {
           };
           window.socket.emit("handshake", args, (ok) => {
             if (!ok) {
-              console.log("reloading because handshake failed for clientId " + window.clientId);
-              window.location.reload();
+              // Handshake failures can happen on flaky links (esp. remote/mobile) and were causing reload loops.
+              // Avoid immediate reload; show the popup and retry via a delayed reload backoff.
+              window.__nicegui_handshake_failures = (window.__nicegui_handshake_failures || 0) + 1;
+              document.getElementById("popup").ariaHidden = false;
+
+              const failures = window.__nicegui_handshake_failures;
+              const delayMs = Math.min(30000, 2000 * Math.pow(2, Math.min(5, failures - 1)));
+              console.log(
+                "handshake failed for clientId " +
+                  window.clientId +
+                  " (failures=" +
+                  failures +
+                  "); reloading in " +
+                  delayMs +
+                  "ms"
+              );
+
+              if (window.__nicegui_handshake_reload_timer) {
+                clearTimeout(window.__nicegui_handshake_reload_timer);
+              }
+              window.__nicegui_handshake_reload_timer = setTimeout(() => window.location.reload(), delayMs);
+              return;
             }
             window.did_handshake = true;
+            window.__nicegui_handshake_failures = 0;
+            if (window.__nicegui_handshake_reload_timer) {
+              clearTimeout(window.__nicegui_handshake_reload_timer);
+              window.__nicegui_handshake_reload_timer = null;
+            }
             document.getElementById("popup").ariaHidden = true;
           });
         },

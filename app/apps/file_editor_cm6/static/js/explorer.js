@@ -1889,6 +1889,17 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
+    case 'autosave:content': {
+      // Live autosave propagation (SSOT active file only).
+      try {
+        if (payload && typeof window.__cm6ApplyAutosaveContent === 'function') {
+          window.__cm6ApplyAutosaveContent(payload);
+        }
+      } catch (err) {
+        console.warn('[Explorer] autosave:content handler failed', err);
+      }
+      break;
+    }
     case 'project:opened': {
       // Backend confirms a project switch (open/create).
       // Update UI state - no page reload needed, WebSocket stays connected
