@@ -50,7 +50,7 @@ DEBOUNCE_DELAY = 0.15 # 150 ms
 
 # Self-echo suppression: tracks recent saves to prevent flicker
 _suppression_windows: Dict[tuple, float] = {}  # (path, client_id) -> expiry_time
-SUPPRESSION_WINDOW = 0.3  # 300 ms
+SUPPRESSION_WINDOW = 1.8  # seconds (match frontend SELF_ECHO_GRACE)
 
 
 def _norm_path(p: str) -> str:
@@ -330,31 +330,27 @@ def init_watcher(project_root: Path = None):
         with _lock:
             _project_root = desired_root
 
-    # Start new watcher
-    if _is_watchdog_available:
-        try:
-            handler = WatchdogHandler(_handle_fs_event)
-            observer = Observer()
-            observer.schedule(handler, str(desired_root), recursive=True)
-            observer.start()
-            with _lock:
-                _watcher_thread = observer
-        except OSError as e:
-            if e.errno == errno.ENOSPC:
-                logger.warning("[WATCHER] Inotify watch limit reached (ENOSPC). Falling back to PollingWatcher.")
-                # Fallback to polling
-                watcher = PollingWatcher(str(desired_root), _handle_fs_event)
-                watcher.start()
-                with _lock:
-                    _watcher_thread = watcher
-            else:
-                # Re-raise other OSErrors
-                raise e
-    else:
-        watcher = PollingWatcher(str(desired_root), _handle_fs_event)
-        watcher.start()
+    # Start new watcher (NO polling fallback).
+    # This editor already has git-based reconciliation paths; polling is too noisy and expensive.
+    if not _is_watchdog_available:
+        raise RuntimeError(
+            "[WATCHER] watchdog is not available (import failed). "
+            "Install watchdog or disable watcher-dependent features."
+        )
+    try:
+        handler = WatchdogHandler(_handle_fs_event)
+        observer = Observer()
+        observer.schedule(handler, str(desired_root), recursive=True)
+        observer.start()
         with _lock:
-            _watcher_thread = watcher
+            _watcher_thread = observer
+    except OSError as e:
+        if e.errno == errno.ENOSPC:
+            raise RuntimeError(
+                "[WATCHER] Inotify watch limit reached (ENOSPC). "
+                "Increase inotify limits; polling fallback is disabled by design."
+            ) from e
+        raise
 
 def subscribe(path: str, client_id: str, on_event: Callable[[dict], None]) -> str:
     """Subscribes a client to file events, sends an initial snapshot, and returns a token."""

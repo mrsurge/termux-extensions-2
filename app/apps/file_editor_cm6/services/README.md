@@ -37,3 +37,5 @@ A service module can export either or both:
 
 - `explorer_transport.py` — Dedicated Explorer Socket.IO server mounted at
   `/explorer_ws/socket.io` (separate from NiceGUI transport).
+- `lsp_transport.py` — Dedicated LSP Socket.IO server mounted at
+  `/lsp_ws/socket.io` (separate from NiceGUI transport).

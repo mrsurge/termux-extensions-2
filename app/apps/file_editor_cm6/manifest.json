@@ -16,7 +16,8 @@
   "services": {
     "path": "services",
     "modules": [
-      "explorer_transport"
+      "explorer_transport",
+      "lsp_transport"
     ]
   },
   "fullscreen": true,

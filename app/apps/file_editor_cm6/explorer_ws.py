@@ -1068,6 +1068,24 @@ class ExplorerDispatcher:
             msg_id,
         )
 
+    async def handle_cm6_mirror(self, payload: dict, msg_id: str):
+        """Relay live CM6 buffer mirroring payloads to connected clients."""
+        if not isinstance(payload, dict):
+            return await self.send_error("Invalid payload", msg_id)
+
+        path = payload.get("path")
+        content = payload.get("content")
+        if not isinstance(path, str) or not path:
+            return await self.send_error("Missing path", msg_id)
+        if not isinstance(content, str):
+            return await self.send_error("Missing content", msg_id)
+
+        # Broadcast to all clients; receivers self-filter via source_client.
+        await self.broadcast("cm6:mirror", payload)
+
+        if msg_id:
+            await self.emit_personal("cm6:mirror:ack", {"ok": True}, msg_id)
+
     async def handle_explorer_setOpenDirs(self, payload: dict, msg_id: str):
         """Persist the list of open directories in explorer tree."""
         dirs = payload.get("dirs", [])

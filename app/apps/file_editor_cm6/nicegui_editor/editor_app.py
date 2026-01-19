@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 import anyio
 
-from nicegui import ui, app as nicegui_app
+from nicegui import ui, app as nicegui_app, context
 from fastapi import APIRouter, Body, HTTPException, Query, Response
 
 # --- Local Imports ---
@@ -37,11 +37,22 @@ editor_router = APIRouter(prefix="/editor")
 
 # --- Global State ---
 _active_editor = None
+_active_editor_client_id: str | None = None
+_active_editors: dict[str, object] = {}
 _current_file_path = None
 _current_file_sha256 = None
 _current_watcher_token = None # Track active watcher subscription
 _edit_tracker_subscription = None
 _cache_persist_timer = None
+# When multiple clients are connected, cache persistence must use the editor that
+# actually triggered the change (not whichever client connected last).
+_cache_persist_source_editor = None
+_cache_persist_source_client_id = None
+
+# Live (non-disk) mirroring of the active buffer between connected clients.
+# NOTE: Mirror emission logic has been moved to codemirror.js to avoid
+# NiceGUI component updates that can reset editor state. The iframe now
+# emits cm6_mirror_out postMessages which main.js relays to the explorer bus.
 _cache_persist_debounce_ms = 1000  # 1 second debounce
 
 # Sprint B: per-URI throttle for TE2 draft diagnostics publishing.
@@ -52,6 +63,10 @@ _android_draft_diag_sig: dict[str, str] = {}
 _android_draft_diag_cache: dict[str, tuple[str, list[dict]]] = {}
 _nicegui_loop: Optional[asyncio.AbstractEventLoop] = None
 _nicegui_loop_thread: Optional[int] = None
+
+# Live draft propagation: suppress local on_change persistence briefly after applying
+# a remote draft update (prevents feedback loops).
+_suppress_on_change_until: float = 0.0
 
 # Sprint E: guard expensive dependency index builds (no Gradle spam on every keystroke).
 # key: "<effective_project_root>::<syncFingerprint>" -> started_at_ms
@@ -268,6 +283,34 @@ class SaveValidationError(Exception):
 def get_active_editor():
     return _active_editor
 
+
+def get_active_editors() -> list[object]:
+    if _active_editors:
+        return list(_active_editors.values())
+    return [_active_editor] if _active_editor else []
+
+
+def _register_editor_for_client(*, client_id: str, editor: object) -> None:
+    global _active_editor, _active_editor_client_id
+    _active_editors[client_id] = editor
+    _active_editor = editor
+    _active_editor_client_id = client_id
+
+
+def _unregister_editor_for_client(*, client_id: str) -> None:
+    global _active_editor, _active_editor_client_id
+    removed = _active_editors.pop(client_id, None)
+    if removed is None:
+        return
+    if _active_editor_client_id == client_id:
+        if _active_editors:
+            new_id, new_editor = next(iter(_active_editors.items()))
+            _active_editor = new_editor
+            _active_editor_client_id = new_id
+        else:
+            _active_editor = None
+            _active_editor_client_id = None
+
 def set_current_file(path: str, sha256: str = None):
     global _current_file_path, _current_file_sha256
     _current_file_path = path
@@ -481,8 +524,8 @@ def _broadcast_cache_state(
     cache_entry: dict | None = None,
     reason: str = 'update',
 ):
-    editor = get_active_editor()
-    if not editor or not file_path:
+    editors = get_active_editors()
+    if not editors or not file_path:
         return
     payload = _build_cache_state_payload(
         project_path,
@@ -492,10 +535,11 @@ def _broadcast_cache_state(
         cache_entry=cache_entry,
         reason=reason,
     )
-    try:
-        editor.run_method('emitCacheState', payload)
-    except Exception as exc:
-        print(f"[SESSION_CACHE] Failed to emit cache state: {exc}", file=sys.stderr)
+    for editor in editors:
+        try:
+            editor.run_method('emitCacheState', payload)
+        except Exception as exc:
+            print(f"[SESSION_CACHE] Failed to emit cache state: {exc}", file=sys.stderr)
 
 
 def _apply_watcher_replace(
@@ -511,8 +555,8 @@ def _apply_watcher_replace(
     Returns True if content was actually applied to the editor.
     Returns False if the event was ignored (e.g., disk matches draft base).
     """
-    editor = get_active_editor()
-    if not editor or not path:
+    editors = get_active_editors()
+    if not editors or not path:
         return False
 
     cache_entry = None
@@ -545,8 +589,27 @@ def _apply_watcher_replace(
 
     # If we reach here, we either had no draft, or we had a conflict and cleared it.
     # In both cases, the editor should accept the disk content.
-    editor.set_value(content)
-    editor._cached_content = content
+    # Guard: if disk content is identical to the current editor buffer, don't
+    # re-apply. Re-applying via set_value() can reset selection/scroll and looks
+    # like the editor "refreshing" while the user is typing.
+    try:
+        same = False
+        try:
+            current = _get_cached_editor_content(get_active_editor())
+            same = (current == content)
+        except Exception:
+            same = False
+        if same:
+            return False
+    except Exception:
+        pass
+
+    for editor in editors:
+        try:
+            editor.set_value(content)
+            editor._cached_content = content
+        except Exception as exc:
+            print(f"[WATCHER] Failed to apply content to editor: {exc}", file=sys.stderr)
     set_current_file(path, sha256)
 
     _broadcast_cache_state(
@@ -559,10 +622,11 @@ def _apply_watcher_replace(
     )
 
     if external_change:
-        try:
-            editor.set_diff_decorations([])
-        except Exception as err:
-            print(f"[DIFF] Failed to clear decorations after external edit: {err}", file=sys.stderr)
+        for editor in editors:
+            try:
+                editor.set_diff_decorations([])
+            except Exception as err:
+                print(f"[DIFF] Failed to clear decorations after external edit: {err}", file=sys.stderr)
 
     return True  # Content was applied to editor
 
@@ -607,8 +671,11 @@ def _schedule_diff_refresh(project_root: Path, file_path: str, current_content: 
     async def _run():
         try:
             hunks = await _get_combined_diffs_async(project_root, file_path, current_content)
-            if editor:
-                editor.set_diff_decorations(hunks)
+            for ed in get_active_editors():
+                try:
+                    ed.set_diff_decorations(hunks)
+                except Exception:
+                    pass
         except Exception as e:
             print(f"[DIFF_REFRESH][{reason}] Failed: {e}", file=sys.stderr)
     try:
@@ -631,7 +698,11 @@ def _persist_to_cache_debounced():
     global _cache_persist_timer
     _cache_persist_timer = None
     
-    editor = get_active_editor()
+    global _cache_persist_source_editor, _cache_persist_source_client_id
+    editor = _cache_persist_source_editor or get_active_editor()
+    source_client_id = _cache_persist_source_client_id
+    _cache_persist_source_editor = None
+    _cache_persist_source_client_id = None
     current_file = get_current_file()
     current_sha = get_current_file_sha256()
     
@@ -690,6 +761,28 @@ def _persist_to_cache_debounced():
     
     print(f"[SESSION_CACHE] Persisted draft for {current_file} (Unsaved: {cache_entry.get('unsaved', False)})", file=sys.stderr)
 
+    # Live draft propagation (SSOT active file only): broadcast the draft buffer to other clients.
+    try:
+        state = _history_store.get_session_state() or {}
+        ssot_current = state.get("currentPath")
+        if isinstance(ssot_current, str) and ssot_current.strip() and str(ssot_current) == str(current_file):
+            from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+
+            proj_norm = str(Path(project_path).expanduser().resolve(strict=False))
+            source_client = source_client_id
+
+            payload = {
+                "path": str(current_file),
+                "project_path": proj_norm,
+                "content": current_content,
+                "base_sha256": current_sha or '',
+                "content_sha256": current_hash or '',
+                "source_client": source_client,
+            }
+            asyncio.create_task(_explorer_manager.broadcast(proj_norm, {"type": "draft:content", "payload": payload}))
+    except Exception:
+        pass
+
     # Notify explorer of draft state change (debounced)
     try:
         from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
@@ -706,10 +799,14 @@ def _persist_to_cache_debounced():
         reason='persist',
     )
 
-    # Refresh Diffs (Combined)
+    # Refresh diffs for live draft markers (and git inline diffs if enabled).
+    # This is debounced via the draft persist timer, so it should remain stable
+    # while still keeping diff decorations up to date.
     try:
-        project_root = get_project_root()
-        _schedule_diff_refresh(project_root, current_file, current_content, editor, "persist")
+        prefs = _preferences_store.get_preferences().get('editor', {})
+        if prefs.get('showInlineDiffs', False) or prefs.get('showDraftDiffs', False):
+            project_root = get_project_root()
+            _schedule_diff_refresh(project_root, current_file, current_content, editor, "persist")
     except Exception as e:
         print(f"[PERSIST] Failed to refresh diffs: {e}", file=sys.stderr)
 
@@ -875,6 +972,14 @@ def _schedule_cache_persist():
     )
 
 
+def _schedule_cache_persist_from(*, editor: object, source_client_id: str | None) -> None:
+    """Schedule cache persistence using the editor that actually changed."""
+    global _cache_persist_source_editor, _cache_persist_source_client_id
+    _cache_persist_source_editor = editor
+    _cache_persist_source_client_id = source_client_id
+    _schedule_cache_persist()
+
+
 def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
     """
     Flush the currently active draft to disk immediately.
@@ -969,7 +1074,6 @@ def disable_edit_tracking():
 # --- NiceGUI Page ---
 @ui.page('/nc', reconnect_timeout=RECONNECT_TIMEOUT_S)
 async def editor_page():
-    global _active_editor
     global _nicegui_loop, _nicegui_loop_thread
     
     print(f"[EDITOR_APP] ==================== PAGE LOAD ====================", file=sys.stderr)
@@ -1101,12 +1205,16 @@ async def editor_page():
     
     with ui.element('div').style('width: 100vw; height: 100vh; display: flex; flex-direction: column; background: #0b0f1a; color: #e5e7eb; overflow: hidden;'):
         with ui.element('div').style('flex: 1; display: flex; flex-direction: column; overflow: hidden;').classes('editor-wrapper w-full h-full'):
-            
+
             # 4. Create Editor with Auto-Loaded Content
             def _on_editor_change(event):
+                global _suppress_on_change_until
                 # Use the authoritative backend value; event.value can lag during init.
                 value = editor.value or ''
-                print(f"[ON_CHANGE] len={len(value)} sha={hashlib.sha256(value.encode('utf-8')).hexdigest() if value else '0'*64}", file=sys.stderr)
+                print(
+                    f"[ON_CHANGE] len={len(value)} sha={hashlib.sha256(value.encode('utf-8')).hexdigest() if value else '0'*64}",
+                    file=sys.stderr,
+                )
                 editor._cached_content = value
                 current_path = get_current_file()
                 try:
@@ -1117,11 +1225,43 @@ async def editor_page():
                 except Exception as notify_err:
                     print(f"[ON_CHANGE] Failed to signal dirty state: {notify_err}", file=sys.stderr)
                 auto_save_enabled = _preferences_store.get_preferences().get('editor', {}).get('autoSave', False)
+                # If we just applied a remote draft update, don't persist/broadcast again.
+                try:
+                    if _suppress_on_change_until and time.time() < _suppress_on_change_until:
+                        return
+                except Exception:
+                    pass
+
+
+                # Identify the client that originated this change (if available).
+                source_client_id = None
+                try:
+                    source_client_id = context.client.id
+                except Exception:
+                    source_client_id = None
+
+                # Live mirror: push the updated buffer to all OTHER connected
+                # NiceGUI clients (SSOT: only one file may be open).
+                # Do not send back to the authoring client (prevents cursor/selection churn).
+                try:
+                    for cid, ed in list(_active_editors.items()):
+                        if not cid or ed is None:
+                            continue
+                        if source_client_id and cid == source_client_id:
+                            continue
+                        try:
+                            ed.run_method('setEditorValue', value)
+                            ed._cached_content = value
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
                 if auto_save_enabled:
                     _cancel_cache_persist_timer()
                     _persist_to_cache_debounced()
                 else:
-                    _schedule_cache_persist()
+                    _schedule_cache_persist_from(editor=editor, source_client_id=source_client_id)
             
             # Debug: What are we passing to the editor?
             theme_from_prefs = editor_prefs.get('theme')
@@ -1160,6 +1300,12 @@ async def editor_page():
             except Exception as exc:
                 print(f"[EDITOR_APP] Failed to resolve initial_scroll_line: {exc}", file=sys.stderr)
 
+            # Get client ID early so we can pass it to the editor for self-echo filtering
+            try:
+                client_id = context.client.id
+            except Exception:
+                client_id = str(uuid.uuid4())
+
             editor = ui.codemirror(
                 value=initial_content,
                 language=initial_language,
@@ -1169,12 +1315,18 @@ async def editor_page():
                 highlight_whitespace=False,
                 show_minimap=editor_prefs.get('showMinimap', False),
                 initial_scroll_line=initial_scroll_line,
+                client_id=client_id,
                 on_change=_on_editor_change,
             ).style('flex: 1; border: none;').classes('editor-content w-full h-full').props('flat borderless')
             editor._cached_content = initial_content
 
-            # 5. Set Global State and Apply ALL Settings (Single Source of Truth)
-            _active_editor = editor
+            # 5. Register editor for multi-client broadcasting (keep last-created as "primary")
+            _register_editor_for_client(client_id=client_id, editor=editor)
+            try:
+                # Only remove when the client is deleted; disconnect handlers also fire on reconnect.
+                context.client.on_delete(lambda *_args, _cid=client_id: _unregister_editor_for_client(client_id=_cid))
+            except Exception:
+                pass
             set_current_file(initial_path, initial_sha256)
             
             # Apply runtime-only preferences (not available in constructor)
@@ -1646,12 +1798,14 @@ async def refresh_cache_state():
         
         # Explicitly signal draft state if active
         if state == 'crashed' or (state == 'mid_session'):
-             editor = get_active_editor()
-             if editor:
-                 editor.notify_parent('draft_state', {
-                    'has_draft': True,
-                    'path': current_file
-                })
+             for editor in get_active_editors():
+                 try:
+                     editor.notify_parent('draft_state', {
+                        'has_draft': True,
+                        'path': current_file
+                    })
+                 except Exception:
+                     pass
             
     return {"ok": True}
 
@@ -1681,8 +1835,11 @@ async def check_cache(data: dict = Body(...)):
 @editor_router.post('/set_content')
 async def set_editor_content(data: dict = Body(...)):
     global _current_watcher_token
+    global _suppress_on_change_until
+    editors = get_active_editors()
     editor = get_active_editor()
-    if not editor: return {"ok": False, "error": "Editor not ready"}
+    if not editors or not editor:
+        return {"ok": False, "error": "Editor not ready"}
     
     new_path = data.get('path', '')
     old_path = get_current_file()
@@ -1728,6 +1885,11 @@ async def set_editor_content(data: dict = Body(...)):
     )
     set_current_file(new_path, base_sha256)
 
+    remote_apply = bool(data.get("remote_apply"))
+    if remote_apply:
+        # Prevent this apply from immediately persisting/re-broadcasting via on_change.
+        _suppress_on_change_until = time.time() + 1.0
+
     # LSP: connect or disconnect based on the newly active file
     try:
         if project_path and new_path:
@@ -1738,10 +1900,14 @@ async def set_editor_content(data: dict = Body(...)):
     except Exception as exc:
         print(f"[LSP] Failed to update LSP on set_content for {new_path}: {exc}", file=sys.stderr)
     
-    editor.set_value(content)
-    editor._cached_content = content
-    editor.set_language(language)
-    editor.update()
+    for ed in editors:
+        try:
+            ed.set_value(content)
+            ed._cached_content = content
+            ed.set_language(language)
+            ed.update()
+        except Exception as exc:
+            print(f"[SET_CONTENT] Failed to update editor: {exc}", file=sys.stderr)
 
     _broadcast_cache_state(
         project_path,
@@ -1821,8 +1987,9 @@ async def set_editor_content(data: dict = Body(...)):
 async def refresh_diffs(data: dict = Body(...)):
     path = data.get('path')
     if not path: return {"ok": False, "error": "No path provided"}
-    editor = get_active_editor()
-    if not editor: return {"ok": False, "error": "Editor not ready"}
+    editors = get_active_editors()
+    if not editors:
+        return {"ok": False, "error": "Editor not ready"}
     
     try:
         project_path = _history_store.get_active_project() or str(get_project_root())
@@ -1834,7 +2001,11 @@ async def refresh_diffs(data: dict = Body(...)):
             lambda: collect_diff(project_root, rel, base_ref=_current_diff_base(project_path))
         )
         hunks = diff_data.get('hunks', [])
-        editor.set_diff_decorations(hunks)
+        for editor in editors:
+            try:
+                editor.set_diff_decorations(hunks)
+            except Exception:
+                pass
         return {"ok": True, "hunks_count": len(hunks)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -1858,8 +2029,9 @@ async def jump_to_line(data: dict = Body(...)):
                       If False, uses default scrollIntoView behavior. (default: False)
         scroll_y: Optional scroll mode. Use 'center' to center the target line in the viewport.
     """
-    editor = get_active_editor()
-    if not editor:
+    editors = get_active_editors()
+    primary = get_active_editor()
+    if not editors or not primary:
         return {"ok": False, "error": "Editor not ready"}
 
     try:
@@ -1887,8 +2059,13 @@ async def jump_to_line(data: dict = Body(...)):
         file=sys.stderr,
     )
 
-    # Use the vendored CodeMirror jump_to_line method
-    editor.jump_to_line(target_line, focus=should_focus, scroll_to_top=scroll_to_top, scroll_y=scroll_y)
+    for editor in editors:
+        try:
+            # Avoid focusing multiple clients (esp. mobile keyboard popups).
+            focus_this = should_focus if editor is primary else False
+            editor.jump_to_line(target_line, focus=focus_this, scroll_to_top=scroll_to_top, scroll_y=scroll_y)
+        except Exception as exc:
+            print(f"[JUMP_TO_LINE] Failed: {exc}", file=sys.stderr)
 
     return {
         "ok": True,

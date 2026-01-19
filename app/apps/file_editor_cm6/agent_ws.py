@@ -27,7 +27,7 @@ from .conversation_utils import build_transcript
 _shared_shells = {}
 _initialized_shells = set()
 
-
+# comment
 def _debug_log(stage: str, message: str) -> None:
     """Lightweight debug print with consistent prefix."""
     print(f"[AgentDrawer][{stage}] {message}")

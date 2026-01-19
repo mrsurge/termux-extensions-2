@@ -1877,6 +1877,18 @@ function handleExplorerEvent(type, payload) {
       applyAggregatedDiagnosticFlags();
       break;
     }
+    case 'draft:content': {
+      // Live draft propagation (SSOT active file only).
+      // Only apply if we are currently on the same absolute file path.
+      try {
+        if (payload && typeof window.__cm6ApplyRemoteDraft === 'function') {
+          window.__cm6ApplyRemoteDraft(payload);
+        }
+      } catch (err) {
+        console.warn('[Explorer] draft:content handler failed', err);
+      }
+      break;
+    }
     case 'project:opened': {
       // Backend confirms a project switch (open/create).
       // Update UI state - no page reload needed, WebSocket stays connected

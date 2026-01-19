@@ -1384,6 +1384,7 @@ let lastPickerPath = HOME_DIR;
 let ws = null;
 let editTrackerWS = null;
 let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+let cm6NiceguiClientId = null;
 let explorerRefreshTimer = null;
 let lastSha256 = null;
 let inflightOpId = null;
@@ -1391,7 +1392,7 @@ let saveDebounceTimer = null;
 const AUTOSAVE_IDLE_DELAY = 1200; // manual saves / disabled autosave
 const AUTOSAVE_ACTIVE_DELAY = 450; // faster loop while autosave is ON
 let lastSaveTime = 0;
-const SELF_ECHO_GRACE = 300; // 300ms grace period after save
+const SELF_ECHO_GRACE = 1800; // 1.8s grace period after save (avoid cursor jumps on slow typing)
 let restoredSessionPath = null;
 
 let lastScrollState = null;
@@ -1723,6 +1724,14 @@ window.addEventListener('message', (event) => {
       }
     } catch { }
   }
+  else if (event.data.type === 'cm6_client_id') {
+    try {
+      const cid = event.data?.data?.client_id;
+      if (typeof cid === 'string' && cid.trim()) {
+        cm6NiceguiClientId = cid.trim();
+      }
+    } catch (_) {}
+  }
 });
 
 async function triggerExternalRefresh(path) {
@@ -1838,6 +1847,40 @@ async function apiPost(path, body) {
     return {};
   }
 }
+
+// Live draft propagation: apply remote draft buffers to the editor without
+// triggering feedback loops (backend suppresses on_change persistence).
+window.__cm6ApplyRemoteDraft = async (payload) => {
+  try {
+    const absPath = payload && typeof payload.path === 'string' ? payload.path : null;
+    if (!absPath) return;
+    if (!window.currentPath || String(window.currentPath) !== String(absPath)) return;
+
+    const content = typeof payload.content === 'string' ? payload.content : null;
+    if (content === null) return;
+
+    try {
+      // Drop self-echo using the NiceGUI client id (context.client.id).
+      // Draft broadcasts originate from editor_app.py and include source_client.
+      if (payload.source_client && cm6NiceguiClientId && String(payload.source_client) === String(cm6NiceguiClientId)) {
+        return;
+      }
+    } catch (_) {}
+
+    // Apply draft content inside the CM6 iframe (non-destructive).
+    try {
+      const editorFrame = document.getElementById('editorFrame');
+      if (!editorFrame || !editorFrame.contentWindow) return;
+      editorFrame.contentWindow.postMessage({
+        type: 'cm6_mirror',
+        data: { path: absPath, content, source_client: payload.source_client || null }
+      }, '*');
+      markUnsaved(true);
+    } catch (_) {}
+  } catch (err) {
+    console.warn('[DraftSync] Failed to apply remote draft:', err);
+  }
+};
 
 async function triggerEditorSearchPanel(reason = 'menu') {
   const payload = {

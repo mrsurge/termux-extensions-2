@@ -6,13 +6,19 @@ from app.apps.file_editor_cm6.explorer_ws import (
     manager as _explorer_manager,
     notify_draft_state_changed,
 )
-
+# comment
 
 def register(app):
     """Register dedicated Explorer Socket.IO transport on main server."""
     # This runs in the main server process to keep Explorer separate from NiceGUI.
     explorer_sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
     explorer_sio.register_namespace(ExplorerSocketIONamespace('/explorer'))
+    # IMPORTANT:
+    # Mount directly at '/explorer_ws/socket.io' and let the ASGI app handle the
+    # engine.io path internally (socketio_path='').
+    #
+    # This avoids FastAPI/Starlette mount path rewriting quirks that can cause the
+    # Engine.IO path match to miss and return 404, which breaks remote clients.
     explorer_app = socketio.ASGIApp(explorer_sio, socketio_path='')
     app.mount('/explorer_ws/socket.io', explorer_app)
 
