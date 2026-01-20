@@ -1564,6 +1564,51 @@ export default {
         this.setEditorValue(content);
       } catch { }
     },
+    applyDelta(payload) {
+      try {
+        if (!payload || typeof payload !== 'object') return;
+        if (!this.editor) return;
+
+        // Filter self-echo: if this delta originated from our own client, skip it.
+        const sourceClient = payload.source_client;
+        const localClient = this.clientId || window.clientId;
+        if (sourceClient && localClient && sourceClient === localClient) {
+          return;
+        }
+
+        const rev = payload.rev;
+        try {
+          const last = typeof this._lastRemoteDeltaRev === 'number' ? this._lastRemoteDeltaRev : 0;
+          if (typeof rev === 'number' && rev <= last) return;
+        } catch { }
+
+        const changesJson = payload.changes;
+        if (!changesJson) return;
+
+        let changeSet = null;
+        try {
+          if (CM && CM.ChangeSet && typeof CM.ChangeSet.fromJSON === 'function') {
+            changeSet = CM.ChangeSet.fromJSON(changesJson);
+          }
+        } catch (err) {
+          console.warn('[CodeMirror] applyDelta: ChangeSet.fromJSON failed', err);
+          changeSet = null;
+        }
+        if (!changeSet) return;
+
+        // Apply without emitting change events back to the server.
+        this._applyingRemoteDelta = true;
+        const prevEmitting = this.emitting;
+        this.emitting = false;
+        try {
+          this.editor.dispatch({ changes: changeSet });
+          if (typeof rev === 'number') this._lastRemoteDeltaRev = rev;
+        } finally {
+          this.emitting = prevEmitting;
+          this._applyingRemoteDelta = false;
+        }
+      } catch { }
+    },
     emitCacheState(payload) {
       try {
         const envelope = Object.assign({ type: 'cm6-cache-state' }, payload || {});
@@ -2556,10 +2601,21 @@ export default {
           update(update) {
             if (!update.docChanged) return;
             if (!self.emitting) return;
+            if (self._applyingRemoteDelta) return;
             try { self._lastLocalEditAt = Date.now(); } catch { }
 
             // Live mirroring is handled server-side in editor_app.py to update
             // other NiceGUI clients without involving the parent window.
+
+            // Incremental mirror: emit ChangeSet deltas (JSON) to the backend so it can
+            // multicast to other clients without full-text replacement.
+            try {
+              const cs = update.changes;
+              if (cs && typeof cs.toJSON === 'function') {
+                self._mirrorRev = (self._mirrorRev || 0) + 1;
+                self.$emit('cm_delta', { rev: self._mirrorRev, changes: cs.toJSON() });
+              }
+            } catch { }
 
             // Trigger LSP symbol refresh on document changes
             if (self._symbolRefreshDebounce) {

@@ -23,7 +23,8 @@ pip-venv-amd64/
 packages/
 framework-shells/
 app/static/vendor/lsp_servers/kotlin-lsp/
-# app/static/vendor/ignored/
+app/static/vendor/ignored/
+app/static/vendor/lsp_servers/android-kotlin-lsp
 .tmp/
 android/app/build
 **/build

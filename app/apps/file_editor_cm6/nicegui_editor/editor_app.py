@@ -68,6 +68,10 @@ _nicegui_loop_thread: Optional[int] = None
 # a remote draft update (prevents feedback loops).
 _suppress_on_change_until: float = 0.0
 
+# When True, live mirroring between clients uses incremental ChangeSet deltas
+# (cm_delta → multicast → applyDelta) instead of full-text setEditorValue().
+_incremental_mirror_active: bool = False
+
 # Sprint E: guard expensive dependency index builds (no Gradle spam on every keystroke).
 # key: "<effective_project_root>::<syncFingerprint>" -> started_at_ms
 _android_dep_index_build_inflight: dict[str, int] = {}
@@ -1216,6 +1220,7 @@ async def editor_page():
             # 4. Create Editor with Auto-Loaded Content
             def _on_editor_change(event):
                 global _suppress_on_change_until
+                global _incremental_mirror_active
                 # Use the authoritative backend value; event.value can lag during init.
                 value = editor.value or ''
                 print(
@@ -1250,19 +1255,20 @@ async def editor_page():
                 # Live mirror: push the updated buffer to all OTHER connected
                 # NiceGUI clients (SSOT: only one file may be open).
                 # Do not send back to the authoring client (prevents cursor/selection churn).
-                try:
-                    for cid, ed in list(_active_editors.items()):
-                        if not cid or ed is None:
-                            continue
-                        if source_client_id and cid == source_client_id:
-                            continue
-                        try:
-                            ed.run_method('setEditorValue', value)
-                            ed._cached_content = value
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                if not _incremental_mirror_active:
+                    try:
+                        for cid, ed in list(_active_editors.items()):
+                            if not cid or ed is None:
+                                continue
+                            if source_client_id and cid == source_client_id:
+                                continue
+                            try:
+                                ed.run_method('setEditorValue', value)
+                                ed._cached_content = value
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
 
                 if auto_save_enabled:
                     _cancel_cache_persist_timer()
@@ -1335,6 +1341,45 @@ async def editor_page():
             except Exception:
                 pass
             set_current_file(initial_path, initial_sha256)
+
+            # Incremental mirroring: listen for cm_delta events emitted by the
+            # CM6 component (ChangeSet.toJSON) and multicast to other clients.
+            def _on_cm_delta(e):
+                global _incremental_mirror_active
+                try:
+                    delta = getattr(e, "args", None)
+                except Exception:
+                    delta = None
+                if not isinstance(delta, dict):
+                    return
+                try:
+                    source_cid = context.client.id
+                except Exception:
+                    source_cid = client_id
+
+                _incremental_mirror_active = True
+                payload = {
+                    **delta,
+                    "source_client": source_cid,
+                    "path": get_current_file(),
+                }
+                try:
+                    for cid, ed in list(_active_editors.items()):
+                        if not cid or ed is None:
+                            continue
+                        if source_cid and cid == source_cid:
+                            continue
+                        try:
+                            ed.run_method("applyDelta", payload)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            try:
+                editor.on("cm_delta", _on_cm_delta)
+            except Exception:
+                pass
             
             # Apply runtime-only preferences (not available in constructor)
             # NOTE: theme and line_wrapping already set in constructor above
