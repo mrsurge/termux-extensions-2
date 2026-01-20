@@ -2663,7 +2663,11 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: Optional[str]) 
     # Refresh Diffs (Combined)
     try:
         hunks = await _get_combined_diffs_async(project_root, current_file, content)
-        editor.set_diff_decorations(hunks)
+        for ed in get_active_editors():
+            try:
+                ed.set_diff_decorations(hunks)
+            except Exception:
+                pass
     except Exception as e:
         print(f"[SAVE] Failed to refresh diffs: {e}", file=sys.stderr)
 
