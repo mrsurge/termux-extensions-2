@@ -1082,6 +1082,7 @@ async def proxy_app_request(app_id: str, subpath: str, request: Request):
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 import websockets
 import asyncio
+import inspect
 
 
 def _ipc_host() -> str:
@@ -1338,30 +1339,9 @@ async def _nicegui_engineio_http(request: Request, rest: str):
 async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
     """Forward NiceGUI Socket.IO to the correct worker based on Referer"""
     await websocket.accept()
-    
-    app_id = _extract_app_id_from_referer(websocket.headers) or websocket.query_params.get("app_id")
-    # Option B: default to file_editor_cm6 when not provided (WS often lacks Referer)
-    if not app_id:
-        app_id = "file_editor_cm6"
-        try:
-            # Print enough context to identify which client/URL is missing Referer/app_id.
-            path = websocket.scope.get("path")
-            query = websocket.scope.get("query_string", b"")
-            query_s = query.decode("utf-8", errors="replace") if isinstance(query, (bytes, bytearray)) else str(query)
-            hdrs = websocket.headers
-            referer = hdrs.get("referer")
-            origin = hdrs.get("origin")
-            host = hdrs.get("host")
-            ua = hdrs.get("user-agent")
-            has_cookie = bool(hdrs.get("cookie"))
-            client = websocket.client.host if websocket.client else None
-            print(
-                f"[NiceGUI WS] No Referer/app_id; defaulting to {app_id} "
-                f"(client={client} host={host} origin={origin} referer={referer} has_cookie={has_cookie} "
-                f"path={path} qs={query_s})"
-            )
-        except Exception:
-            print(f"[NiceGUI WS] No Referer/app_id; defaulting to {app_id}")
+
+    # Always route NiceGUI WS on this path to the editor app.
+    app_id = "file_editor_cm6"
     
     running_apps = await get_running_apps()
     
@@ -1404,48 +1384,19 @@ async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
         extra_headers.append(("X-Forwarded-Host", xfh_hdr))
     
     try:
-        # Forward cookies/UA/subprotocols to the worker to preserve NiceGUI's client identity
-        # across the main->worker proxy. If the installed websockets version doesn't support
-        # these kwargs, fall back to a minimal connect.
-        try:
-            async with websockets.connect(
-                worker_url,
-                origin=origin_hdr,
-                extra_headers=extra_headers or None,
-                subprotocols=subprotocols,
-            ) as worker_ws:
-                async def forward_client_to_worker():
-                    try:
-                        if hasattr(websocket, "receive"):
-                            # Starlette >=0.27: low-level receive available
-                            while True:
-                                packet = await websocket.receive()
-                                if packet.get("type") == "websocket.disconnect":
-                                    break
-                                if packet.get("text") is not None:
-                                    await worker_ws.send(packet["text"])
-                                elif packet.get("bytes") is not None:
-                                    await worker_ws.send(packet["bytes"])
-                    except Exception:
-                        pass
-
-                async def forward_worker_to_client():
-                    try:
-                        async for message in worker_ws:
-                            if isinstance(message, bytes):
-                                await websocket.send_bytes(message)
-                            else:
-                                await websocket.send_text(message)
-                    except Exception:
-                        pass
-
-                await asyncio.gather(forward_client_to_worker(), forward_worker_to_client())
-                return
-        except TypeError:
-            # Fallback for older websockets API
-            pass
-
-        async with websockets.connect(worker_url, origin=origin_hdr) as worker_ws:
+        # Always forward cookies/UA/subprotocols to preserve NiceGUI's client identity
+        # across the main->worker proxy.
+        connect_kwargs = {
+            "origin": origin_hdr,
+            "subprotocols": subprotocols,
+        }
+        if extra_headers:
+            param_names = inspect.signature(websockets.connect).parameters
+            if "additional_headers" in param_names:
+                connect_kwargs["additional_headers"] = extra_headers
+            else:
+                connect_kwargs["extra_headers"] = extra_headers
+        async with websockets.connect(worker_url, **connect_kwargs) as worker_ws:
             async def forward_client_to_worker():
                 try:
                     if hasattr(websocket, "receive"):
@@ -1478,7 +1429,6 @@ async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
                     pass
                 except Exception as exc:
                     print(f"[NiceGUI WS] Error worker->client: {exc}")
-
             tasks = [
                 asyncio.create_task(forward_client_to_worker()),
                 asyncio.create_task(forward_worker_to_client()),
