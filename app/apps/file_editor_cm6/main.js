@@ -1960,7 +1960,9 @@ async function updatePreference(key, value) {
   // Returns full state in single round trip (Jimmy's optimization)
   try {
     console.log('[Preference] updatePreference request', key, value);
-    const resp = await apiPost('editor/update_preference', { key, value });
+    const body = { key, value };
+    if (cm6NiceguiClientId) body.nicegui_client_id = cm6NiceguiClientId;
+    const resp = await apiPost('editor/update_preference', body);
     
     // apiPost already unwraps the response (returns res.data)
     // Backend sends {ok: true, data: {...}}, apiPost returns the data object
@@ -1980,6 +1982,36 @@ async function updatePreference(key, value) {
     return false;
   }
 }
+
+// Cross-client preference sync: other connected host shells apply immediately when
+// the backend broadcasts editor:prefs_changed on the explorer bus.
+window.__cm6HandlePrefsChanged = function(payload) {
+  try {
+    const viewState = payload && typeof payload === 'object'
+      ? (payload.view_state || payload.viewState || null)
+      : null;
+    if (!viewState || typeof viewState !== 'object') return;
+
+    // Ignore self-echo (originating host that initiated the preference change).
+    try {
+      if (payload.source_client && cm6NiceguiClientId && String(payload.source_client) === String(cm6NiceguiClientId)) {
+        return;
+      }
+    } catch (_) {}
+
+    editorViewState = viewState;
+    applyStateToMenus(viewState);
+  } catch (err) {
+    console.warn('[PrefsSync] Failed to apply prefs_changed:', err);
+  }
+};
+
+try {
+  if (window.__cm6PendingPrefsChanged) {
+    window.__cm6HandlePrefsChanged(window.__cm6PendingPrefsChanged);
+    window.__cm6PendingPrefsChanged = null;
+  }
+} catch (_) {}
 
 async function refreshMenuState() {
   // Query backend for current state and update menu checkmarks

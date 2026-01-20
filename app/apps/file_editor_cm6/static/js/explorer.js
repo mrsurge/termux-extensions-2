@@ -1900,6 +1900,20 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
+    case 'editor:prefs_changed': {
+      // Preference changes should propagate immediately across host shells.
+      try {
+        if (payload && typeof window.__cm6HandlePrefsChanged === 'function') {
+          window.__cm6HandlePrefsChanged(payload);
+        } else {
+          // Handler may not be registered yet during early boot; keep last event.
+          window.__cm6PendingPrefsChanged = payload;
+        }
+      } catch (err) {
+        console.warn('[Explorer] prefs_changed handler failed', err);
+      }
+      break;
+    }
     case 'project:opened': {
       // Backend confirms a project switch (open/create).
       // Update UI state - no page reload needed, WebSocket stays connected

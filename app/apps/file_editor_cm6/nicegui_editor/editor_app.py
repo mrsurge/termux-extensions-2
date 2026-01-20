@@ -2217,13 +2217,15 @@ async def update_preference(data: dict = Body(...)):
     """
     key = data.get('key')
     value = data.get('value')
+    source_client = data.get('nicegui_client_id')
     
     if not key:
         raise HTTPException(status_code=400, detail="key is required")
     
-    editor = get_active_editor()
-    if not editor:
+    editors = get_active_editors()
+    if not editors:
         raise HTTPException(status_code=404, detail="Editor not initialized")
+    editor = editors[0]
     
     # Validate key. Most preferences are editor-scoped in PreferencesStore, but
     # LSP config is project-scoped (sidecar SSOT via HistoryStore facade).
@@ -2242,7 +2244,8 @@ async def update_preference(data: dict = Body(...)):
     try:
         print(f"[PREFERENCE] Incoming update key={key} value={value}", file=sys.stderr)
         if key == 'wordWrap':
-            editor.set_line_wrapping(bool(value))
+            for ed in editors:
+                ed.set_line_wrapping(bool(value))
             # If turning word wrap ON and diffs are showing, refresh them
             # Deletion widgets don't auto-adapt to word wrap changes
             if value and get_current_file():
@@ -2253,14 +2256,18 @@ async def update_preference(data: dict = Body(...)):
                         try:
                             rel = _normalize_rel_path(Path(project_path).expanduser(), get_current_file())
                             diff_data = collect_diff(Path(project_path).expanduser(), rel, base_ref=_current_diff_base(project_path))
-                            editor.set_diff_decorations(diff_data.get('hunks', []))
+                            hunks = diff_data.get('hunks', [])
+                            for ed in editors:
+                                ed.set_diff_decorations(hunks)
                             print(f"[PREFERENCE] Refreshed diffs after word wrap enabled", file=sys.stderr)
                         except Exception as e:
                             print(f"[PREFERENCE] Failed to refresh diffs: {e}", file=sys.stderr)
         elif key == 'showShading':
-            editor.set_zebra_stripes(bool(value))
+            for ed in editors:
+                ed.set_zebra_stripes(bool(value))
         elif key == 'showIndentGuides':
-            editor.set_indent_guides(bool(value))
+            for ed in editors:
+                ed.set_indent_guides(bool(value))
         elif key == 'theme':
             theme_value = str(value)
             try:
@@ -2268,24 +2275,30 @@ async def update_preference(data: dict = Body(...)):
             except RuntimeError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
             value = theme_value
-            editor.set_theme(mapped_theme)
+            for ed in editors:
+                ed.set_theme(mapped_theme)
         elif key == 'fontScale':
             try:
                 scale = _resolve_font_scale(value)
             except RuntimeError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
             value = scale
-            editor.set_font_scale(scale)
+            for ed in editors:
+                ed.set_font_scale(scale)
         elif key == 'colorPicker':
-            editor.toggle_color_picker(bool(value))
+            for ed in editors:
+                ed.toggle_color_picker(bool(value))
         elif key == 'readOnly':
-            editor.set_read_only(bool(value))
+            for ed in editors:
+                ed.set_read_only(bool(value))
         elif key == 'showMinimap':
             # Use prop setter to trigger client-side auto-detect logic
-            editor.show_minimap = bool(value)
+            for ed in editors:
+                ed.show_minimap = bool(value)
         elif key == 'stickyScroll':
             # Added: 2025-12-03 by vectorArc - TE2 Team
-            editor.set_sticky_scroll(bool(value))
+            for ed in editors:
+                ed.set_sticky_scroll(bool(value))
         elif key in (
             'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
             'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
@@ -2302,7 +2315,6 @@ async def update_preference(data: dict = Body(...)):
         elif key == 'autoSave':
             project_path = _history_store.get_active_project() or str(get_project_root())
             current_file = get_current_file()
-            content = editor.value or ''
             # When enabling autosave, drop any cached drafts for the active document
             if value and project_path and current_file:
                 try:
@@ -2332,7 +2344,8 @@ async def update_preference(data: dict = Body(...)):
             # Persistence happens after this block once runtime updates succeed
             pass
         
-        editor.update()
+        for ed in editors:
+            ed.update()
 
         if key in (
             'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
@@ -2430,7 +2443,8 @@ async def update_preference(data: dict = Body(...)):
                     if current_file:
                         current_lang = LSP_LANGUAGE_MAP.get(Path(current_file).suffix)
                         if current_lang in server_languages.get(server_id, []):
-                            editor.disconnect_lsp()
+                            for ed in editors:
+                                ed.disconnect_lsp()
                 except Exception:
                     pass
 
@@ -2442,10 +2456,12 @@ async def update_preference(data: dict = Body(...)):
                 else:
                     current_file = get_current_file()
                     if current_file:
-                        _maybe_connect_lsp(editor, Path(current_file), Path(project_path))
+                        for ed in editors:
+                            _maybe_connect_lsp(ed, Path(current_file), Path(project_path))
                     else:
                         if key == 'enableLsp' and not bool(value):
-                            editor.disconnect_lsp()
+                            for ed in editors:
+                                ed.disconnect_lsp()
             except Exception as exc:
                 print(f"[PREFERENCE] LSP reconnect after {key} failed: {exc}", file=sys.stderr)
         else:
@@ -2455,6 +2471,32 @@ async def update_preference(data: dict = Body(...)):
             _refresh_active_diffs()
         
         print(f"[PREFERENCE] Updated {key}={value}", file=sys.stderr)
+
+        # Broadcast preference changes so other connected host shells converge immediately.
+        # (This is separate from cm6-cache-state, which is primarily about doc cache telemetry.)
+        try:
+            project_path = _history_store.get_active_project() or str(get_project_root())
+            proj_norm = str(Path(project_path).expanduser().resolve(strict=False)) if project_path else None
+            if proj_norm:
+                view_state = _get_view_state_dict()
+                from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+                asyncio.create_task(
+                    _explorer_manager.broadcast(
+                        proj_norm,
+                        {
+                            "type": "editor:prefs_changed",
+                            "payload": {
+                                "project_path": proj_norm,
+                                "key": key,
+                                "value": value,
+                                "view_state": view_state,
+                                "source_client": source_client,
+                            },
+                        },
+                    )
+                )
+        except Exception:
+            pass
         
         # Return full state (Jimmy's optimization - single round trip)
         return {"ok": True, "data": _get_view_state_dict()}
