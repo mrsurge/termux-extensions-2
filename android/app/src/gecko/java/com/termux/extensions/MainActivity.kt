@@ -1,6 +1,7 @@
 package com.termux.extensions
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -67,6 +68,41 @@ class MainActivity : AppCompatActivity() {
 
     private var inAppShell: Boolean = true
     private var persistentNetworkNotificationEnabled: Boolean = false
+
+    private fun prefs() = getSharedPreferences("gecko_session_state", Context.MODE_PRIVATE)
+
+    private fun persistSessionState(state: GeckoSession.SessionState?) {
+        try {
+            val serialized = state?.toString()
+            prefs().edit().putString("session_state", serialized).apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun loadSavedSessionState(): GeckoSession.SessionState? {
+        return try {
+            val s = prefs().getString("session_state", null)
+            if (s.isNullOrBlank()) null else GeckoSession.SessionState.fromString(s)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun persistLastUrl(url: String?) {
+        try {
+            if (url.isNullOrBlank()) return
+            prefs().edit().putString("last_url", url).apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun loadLastUrl(): String? {
+        return try {
+            prefs().getString("last_url", null)
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private fun dpToPx(dp: Int): Int {
         return TypedValue.applyDimension(
@@ -148,6 +184,14 @@ class MainActivity : AppCompatActivity() {
                     historyList: GeckoSession.HistoryDelegate.HistoryList
                 ) {
                     canNavigateBack = historyList.currentIndex > 0
+                }
+            }
+            progressDelegate = object : GeckoSession.ProgressDelegate {
+                override fun onSessionStateChange(
+                    session: GeckoSession,
+                    sessionState: GeckoSession.SessionState
+                ) {
+                    persistSessionState(sessionState)
                 }
             }
             promptDelegate = object : GeckoSession.PromptDelegate {
@@ -385,10 +429,12 @@ class MainActivity : AppCompatActivity() {
 
                     val rewritten = ensureGvNative(uri)
                     if (rewritten.toString() == request.uri) {
+                        persistLastUrl(request.uri)
                         return GeckoResult.fromValue(AllowOrDeny.ALLOW)
                     }
 
                     runOnUiThread {
+                        persistLastUrl(rewritten.toString())
                         geckoSession.loadUri(rewritten.toString())
                     }
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
@@ -401,7 +447,35 @@ class MainActivity : AppCompatActivity() {
 
         geckoView.setSession(geckoSession)
 
-        wakeFrameworkAndLoad()
+        val restored = try {
+            val st = loadSavedSessionState()
+            if (st != null) {
+                geckoSession.restoreState(st)
+                true
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
+
+        wakeFrameworkAndLoad(forceLoadHome = !restored)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        try {
+            if (::geckoSession.isInitialized) geckoSession.setActive(true)
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun onPause() {
+        try {
+            if (::geckoSession.isInitialized) geckoSession.setActive(false)
+        } catch (_: Exception) {
+        }
+        super.onPause()
     }
 
     override fun onRequestPermissionsResult(
@@ -651,7 +725,7 @@ class MainActivity : AppCompatActivity() {
             )
     }
 
-    private fun wakeFrameworkAndLoad() {
+    private fun wakeFrameworkAndLoad(forceLoadHome: Boolean = true) {
         Thread {
             val base = IPC_SLEEP_BASE_URL.trimEnd('/')
             try {
@@ -698,7 +772,16 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
             }
             runOnUiThread {
-                loadHome()
+                if (forceLoadHome) {
+                    loadHome()
+                } else {
+                    // If we restored session state, don't clobber it by forcing a fresh home load.
+                    // Still apply native side effects (header + foreground service decision) based on current URL.
+                    try {
+                        updatePersistentNetworkService()
+                    } catch (_: Exception) {
+                    }
+                }
             }
         }.start()
     }
