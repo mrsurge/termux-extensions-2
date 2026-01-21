@@ -2028,7 +2028,7 @@ async def set_editor_content(data: dict = Body(...)):
             # Lezer nudge: occasionally the language parser can lag behind during fast switches.
             # This is a cheap re-apply of the currently selected language after open.
             try:
-                ed.run_method('nudgeLanguageParse', language, 250)
+                ed.run_method('nudgeLanguageParse', language, 5000)
             except Exception:
                 pass
         except Exception as exc:

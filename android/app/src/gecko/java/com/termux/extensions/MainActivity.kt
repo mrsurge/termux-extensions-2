@@ -68,6 +68,7 @@ class MainActivity : AppCompatActivity() {
 
     private var inAppShell: Boolean = true
     private var persistentNetworkNotificationEnabled: Boolean = false
+    private var pendingSurfaceRecover: Boolean = false
 
     private fun prefs() = getSharedPreferences("gecko_session_state", Context.MODE_PRIVATE)
 
@@ -101,6 +102,338 @@ class MainActivity : AppCompatActivity() {
             prefs().getString("last_url", null)
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private fun createGeckoSession(): GeckoSession {
+        return GeckoSession(
+            GeckoSessionSettings.Builder().usePrivateMode(false).build()
+        ).apply {
+            historyDelegate = object : GeckoSession.HistoryDelegate {
+                override fun onHistoryStateChange(
+                    session: GeckoSession,
+                    historyList: GeckoSession.HistoryDelegate.HistoryList
+                ) {
+                    canNavigateBack = historyList.currentIndex > 0
+                }
+            }
+            progressDelegate = object : GeckoSession.ProgressDelegate {
+                override fun onSessionStateChange(
+                    session: GeckoSession,
+                    sessionState: GeckoSession.SessionState
+                ) {
+                    persistSessionState(sessionState)
+                }
+            }
+            contentDelegate = object : GeckoSession.ContentDelegate {
+                override fun onCrash(session: GeckoSession) {
+                    runOnUiThread { recoverSessionAfterContentDeath("crash") }
+                }
+
+                override fun onKill(session: GeckoSession) {
+                    runOnUiThread { recoverSessionAfterContentDeath("kill") }
+                }
+            }
+            promptDelegate = object : GeckoSession.PromptDelegate {
+                override fun onAlertPrompt(
+                    session: GeckoSession,
+                    prompt: GeckoSession.PromptDelegate.AlertPrompt
+                ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+                    val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+                    runOnUiThread {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setMessage(prompt.message ?: "")
+                            .setPositiveButton(android.R.string.ok) { _, _ ->
+                                result.complete(prompt.dismiss())
+                            }
+                            .setOnCancelListener {
+                                result.complete(prompt.dismiss())
+                            }
+                            .show()
+                    }
+                    return result
+                }
+
+                override fun onButtonPrompt(
+                    session: GeckoSession,
+                    prompt: GeckoSession.PromptDelegate.ButtonPrompt
+                ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+                    val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+                    runOnUiThread {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setMessage(prompt.message ?: "")
+                            .setPositiveButton(android.R.string.ok) { _, _ ->
+                                result.complete(
+                                    prompt.confirm(
+                                        GeckoSession.PromptDelegate.ButtonPrompt.Type.POSITIVE
+                                    )
+                                )
+                            }
+                            .setNegativeButton(android.R.string.cancel) { _, _ ->
+                                result.complete(
+                                    prompt.confirm(
+                                        GeckoSession.PromptDelegate.ButtonPrompt.Type.NEGATIVE
+                                    )
+                                )
+                            }
+                            .setOnCancelListener {
+                                result.complete(prompt.dismiss())
+                            }
+                            .show()
+                    }
+                    return result
+                }
+
+                override fun onTextPrompt(
+                    session: GeckoSession,
+                    prompt: GeckoSession.PromptDelegate.TextPrompt
+                ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+                    val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+                    runOnUiThread {
+                        val input = EditText(this@MainActivity).apply {
+                            setText(prompt.defaultValue ?: "")
+                            setSelection(text?.length ?: 0)
+                        }
+                        AlertDialog.Builder(this@MainActivity)
+                            .setMessage(prompt.message ?: "")
+                            .setView(input)
+                            .setPositiveButton(android.R.string.ok) { _, _ ->
+                                val value = input.text?.toString() ?: ""
+                                result.complete(prompt.confirm(value))
+                            }
+                            .setNegativeButton(android.R.string.cancel) { _, _ ->
+                                result.complete(prompt.dismiss())
+                            }
+                            .setOnCancelListener {
+                                result.complete(prompt.dismiss())
+                            }
+                            .show()
+                    }
+                    return result
+                }
+
+                override fun onColorPrompt(
+                    session: GeckoSession,
+                    prompt: GeckoSession.PromptDelegate.ColorPrompt
+                ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+                    val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+                    runOnUiThread {
+                        var red = 0
+                        var green = 0
+                        var blue = 0
+                        var alpha = 255 // Default to opaque
+
+                        // Try to parse initial color from prompt.defaultValue
+                        prompt.defaultValue?.let {
+                            try {
+                                val color = Color.parseColor(it)
+                                red = Color.red(color)
+                                green = Color.green(color)
+                                blue = Color.blue(color)
+                                alpha = Color.alpha(color)
+                            } catch (e: IllegalArgumentException) {
+                                // Default to black if parsing fails
+                                red = 0
+                                green = 0
+                                blue = 0
+                                alpha = 255
+                            }
+                        }
+
+                        val colorPreview = android.view.View(this@MainActivity).apply {
+                            layoutParams = LinearLayout.LayoutParams(
+                                dpToPx(50),
+                                dpToPx(50)
+                            ).apply {
+                                setMargins(0, dpToPx(8), 0, dpToPx(8))
+                            }
+                            setBackgroundColor(Color.argb(alpha, red, green, blue))
+                        }
+
+                        val redSeekBar = SeekBar(this@MainActivity).apply { max = 255; progress = red }
+                        val greenSeekBar = SeekBar(this@MainActivity).apply { max = 255; progress = green }
+                        val blueSeekBar = SeekBar(this@MainActivity).apply { max = 255; progress = blue }
+                        val alphaSeekBar = SeekBar(this@MainActivity).apply { max = 255; progress = alpha }
+
+                        val updatePreview = {
+                            colorPreview.setBackgroundColor(Color.argb(alpha, red, green, blue))
+                        }
+
+                        val listener = object : SeekBar.OnSeekBarChangeListener {
+                            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                                when (seekBar) {
+                                    redSeekBar -> red = progress
+                                    greenSeekBar -> green = progress
+                                    blueSeekBar -> blue = progress
+                                    alphaSeekBar -> alpha = progress
+                                }
+                                updatePreview()
+                            }
+
+                            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+                        }
+
+                        redSeekBar.setOnSeekBarChangeListener(listener)
+                        greenSeekBar.setOnSeekBarChangeListener(listener)
+                        blueSeekBar.setOnSeekBarChangeListener(listener)
+                        alphaSeekBar.setOnSeekBarChangeListener(listener)
+
+                        val container = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.VERTICAL
+                            addView(TextView(this@MainActivity).apply { text = "Preview" })
+                            addView(colorPreview)
+                            addView(TextView(this@MainActivity).apply { text = "Red" })
+                            addView(redSeekBar)
+                            addView(TextView(this@MainActivity).apply { text = "Green" })
+                            addView(greenSeekBar)
+                            addView(TextView(this@MainActivity).apply { text = "Blue" })
+                            addView(blueSeekBar)
+                            addView(TextView(this@MainActivity).apply { text = "Alpha" })
+                            addView(alphaSeekBar)
+                        }
+
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle(prompt.title ?: "Choose color")
+                            .setView(container)
+                            .setPositiveButton(android.R.string.ok) { _, _ ->
+                                val webColorString = if (alpha < 255) {
+                                    "rgba($red, $green, $blue, ${String.format("%.2f", alpha / 255f)})"
+                                } else {
+                                    String.format("#%02X%02X%02X", red, green, blue)
+                                }
+                                result.complete(prompt.confirm(webColorString))
+                            }
+                            .setNegativeButton(android.R.string.cancel) { _, _ ->
+                                result.complete(prompt.dismiss())
+                            }
+                            .setOnCancelListener {
+                                result.complete(prompt.dismiss())
+                            }
+                            .show()
+                    }
+                    return result
+                }
+            }
+
+            navigationDelegate = object : GeckoSession.NavigationDelegate {
+                private fun isAppShellUrl(uri: Uri): Boolean {
+                    val path = uri.path ?: return false
+                    return path == "/app" || path.startsWith("/app/")
+                }
+
+                private fun ensureGvNative(uri: Uri): Uri {
+                    val params = uri.queryParameterNames
+                    if (params.contains("gv_native")) return uri
+                    val builder = uri.buildUpon()
+                    val existingQuery = uri.encodedQuery
+                    if (existingQuery.isNullOrBlank()) {
+                        builder.encodedQuery("gv_native=1")
+                    } else {
+                        builder.encodedQuery("$existingQuery&gv_native=1")
+                    }
+                    return builder.build()
+                }
+
+                override fun onLoadRequest(
+                    session: GeckoSession,
+                    request: GeckoSession.NavigationDelegate.LoadRequest
+                ): GeckoResult<AllowOrDeny>? {
+                    val uri = try {
+                        Uri.parse(request.uri)
+                    } catch (_: Exception) {
+                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+                    }
+
+                    val scheme = uri.scheme?.lowercase()
+                    if (scheme != null && scheme != "http" && scheme != "https") {
+                        // Ignore javascript:, about:, etc. so UI state isn't toggled.
+                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+                    }
+
+                    val isAppShell = isAppShellUrl(uri)
+                    runOnUiThread {
+                        inAppShell = isAppShell
+                        nativeHeader.visibility = if (inAppShell) View.VISIBLE else View.GONE
+                        updatePersistentNetworkService()
+                    }
+
+                    if (!isAppShell) {
+                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+                    }
+
+                    val rewritten = ensureGvNative(uri)
+                    if (rewritten.toString() == request.uri) {
+                        persistLastUrl(request.uri)
+                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+                    }
+
+                    runOnUiThread {
+                        persistLastUrl(rewritten.toString())
+                        geckoSession.loadUri(rewritten.toString())
+                    }
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
+            }
+        }
+    }
+
+    private fun recoverSessionAfterContentDeath(reason: String) {
+        try {
+            appendConsoleLine("warn", "Gecko content process $reason; recovering session...", null)
+        } catch (_: Exception) {
+        }
+
+        try {
+            if (::geckoSession.isInitialized) {
+                try {
+                    geckoSession.close()
+                } catch (_: Exception) {
+                }
+            }
+        } catch (_: Exception) {
+        }
+
+        geckoSession = createGeckoSession()
+        try {
+            geckoSession.open(runtime)
+        } catch (_: Exception) {
+        }
+        try {
+            geckoView.setSession(geckoSession)
+        } catch (_: Exception) {
+        }
+
+        val restored = try {
+            val st = loadSavedSessionState()
+            if (st != null) {
+                geckoSession.restoreState(st)
+                true
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
+
+        try {
+            geckoSession.setActive(true)
+        } catch (_: Exception) {
+        }
+
+        if (!restored) {
+            val last = loadLastUrl()
+            if (!last.isNullOrBlank()) {
+                try {
+                    geckoSession.loadUri(last)
+                } catch (_: Exception) {
+                }
+            } else {
+                try {
+                    geckoSession.loadUri(frameworkBaseUrl.trimEnd('/') + "/")
+                } catch (_: Exception) {
+                }
+            }
         }
     }
 
@@ -192,6 +525,15 @@ class MainActivity : AppCompatActivity() {
                     sessionState: GeckoSession.SessionState
                 ) {
                     persistSessionState(sessionState)
+                }
+            }
+            contentDelegate = object : GeckoSession.ContentDelegate {
+                override fun onCrash(session: GeckoSession) {
+                    runOnUiThread { recoverSessionAfterContentDeath("crash") }
+                }
+
+                override fun onKill(session: GeckoSession) {
+                    runOnUiThread { recoverSessionAfterContentDeath("kill") }
                 }
             }
             promptDelegate = object : GeckoSession.PromptDelegate {
@@ -467,6 +809,22 @@ class MainActivity : AppCompatActivity() {
         try {
             if (::geckoSession.isInitialized) geckoSession.setActive(true)
         } catch (_: Exception) {
+        }
+
+        // White-surface recovery: sometimes the renderer/surface detaches on background.
+        // Re-attaching the session after a short delay often forces a repaint.
+        if (!pendingSurfaceRecover) {
+            pendingSurfaceRecover = true
+            uiHandler.postDelayed({
+                pendingSurfaceRecover = false
+                try {
+                    if (!::geckoView.isInitialized || !::geckoSession.isInitialized) return@postDelayed
+                    try { geckoView.releaseSession() } catch (_: Exception) {}
+                    geckoView.setSession(geckoSession)
+                    try { geckoSession.setActive(true) } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
+            }, 300)
         }
     }
 

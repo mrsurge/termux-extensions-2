@@ -1373,6 +1373,7 @@ export default {
           ]
         });
         this.applyCompletionFallback();
+        try { this._scheduleLezerDiagnosticsRecompute(null, 0); } catch { }
         return;
       }
 
@@ -1399,6 +1400,17 @@ export default {
           ]
         });
         this.applyCompletionFallback();
+        // IMPORTANT: language loading is async, so local Lezer diagnostics can be computed
+        // against the *previous* parser (docChanged fires from set_value earlier).
+        // Force a recompute after the new language has been applied.
+        try {
+          setTimeout(() => {
+            try {
+              if (this._setLanguageNonce !== setLanguageNonce) return;
+              this._scheduleLezerDiagnosticsRecompute(null, 0);
+            } catch { }
+          }, 1000);
+        } catch { }
       });
     },
 
@@ -1416,8 +1428,119 @@ export default {
             if (!this.editor) return;
             if (!requestedLanguage) return;
             this.setLanguage(requestedLanguage);
+            // If the language was already loaded and setLanguage returns early or doesn't
+            // trigger a docChanged, still force a local diagnostics refresh.
+            try { this._scheduleLezerDiagnosticsRecompute(null, 0); } catch { }
           } catch { }
         }, Number.isFinite(ms) ? ms : 0);
+      } catch { }
+    },
+
+    // Recompute local (Lezer) syntax diagnostics immediately for the currently open file.
+    // This fixes the common case where the document content was set before the language
+    // extension finished loading, leaving stale "max 50" parse errors until reload.
+    recomputeLezerDiagnosticsNow() {
+      try {
+        const st = this._ensureIssuesState();
+        const uri = st?.currentUri || this._lspFileUri;
+        this._scheduleLezerDiagnosticsRecompute(uri, 0);
+      } catch { }
+    },
+
+    _scheduleLezerDiagnosticsRecompute(uri = null, delayMs = 0) {
+      try {
+        if (!this.editor) return;
+        const st = this._ensureIssuesState();
+        const targetUri = uri || st?.currentUri || this._lspFileUri;
+        if (!targetUri) return;
+
+        // Cancel any pending run and start a new stability check loop.
+        this._lezerDiagToken = (this._lezerDiagToken || 0) + 1;
+        const token = this._lezerDiagToken;
+
+        // Per-run stability tracker (not persisted across runs).
+        let lastSig = null;
+        let stableCount = 0;
+        let attempts = 0;
+        const maxAttempts = 10; // ~2.5s at 250ms intervals (after initial delay)
+        const intervalMs = 250;
+
+        const computeOnce = () => {
+          try {
+            if (this._lezerDiagToken !== token) return;
+            if (!this.editor) return;
+
+            const state = this.editor.state;
+
+            // Give Lezer a real chance to build a full tree; transient whitespace/indent
+            // errors are common when we sample too early after big doc replacements.
+            const tree =
+              CM.ensureSyntaxTree(state, state.doc.length, 1500) ||
+              CM.ensureSyntaxTree(state, state.doc.length, 500) ||
+              CM.syntaxTree(state);
+
+            if (!tree || typeof tree.iterate !== 'function') {
+              attempts++;
+              if (attempts >= maxAttempts) {
+                try { this.setLocalDiagnosticsForUri(targetUri, []); } catch { }
+                return;
+              }
+              setTimeout(computeOnce, intervalMs);
+              return;
+            }
+
+            const out = [];
+            const max = 50;
+            const toLspPos = (pos) => {
+              const line = state.doc.lineAt(pos);
+              return { line: Math.max(0, (line.number || 1) - 1), character: Math.max(0, pos - line.from) };
+            };
+
+            tree.iterate({
+              enter: (node) => {
+                try {
+                  if (out.length >= max) return;
+                  if (!node?.type?.isError) return;
+                  const from = Math.max(0, node.from);
+                  const to = Math.max(from + 1, node.to);
+                  out.push({
+                    range: { start: toLspPos(from), end: toLspPos(to) },
+                    severity: 2,
+                    source: 'cm6-lezer',
+                    code: 'SYNTAX_ERROR',
+                    message: 'Syntax error (local parser)',
+                  });
+                } catch { }
+              },
+            });
+
+            // Require stability across two consecutive checks to avoid transient parse artifacts.
+            const firstFrom = out.length ? `${out[0].range.start.line}:${out[0].range.start.character}` : 'none';
+            const sig = `${state.doc.length}|${out.length}|${firstFrom}`;
+            if (sig === lastSig) {
+              stableCount++;
+            } else {
+              stableCount = 0;
+              lastSig = sig;
+            }
+
+            if (stableCount >= 1) {
+              try { this.setLocalDiagnosticsForUri(targetUri, out); } catch { }
+              return;
+            }
+
+            attempts++;
+            if (attempts >= maxAttempts) {
+              try { this.setLocalDiagnosticsForUri(targetUri, out); } catch { }
+              return;
+            }
+            setTimeout(computeOnce, intervalMs);
+          } catch {
+            try { this.setLocalDiagnosticsForUri(targetUri, []); } catch { }
+          }
+        };
+
+        setTimeout(computeOnce, Math.max(0, Number(delayMs) || 0));
       } catch { }
     },
 
@@ -1455,6 +1578,12 @@ export default {
         try {
           this.applyIssueSquiggles([], uri);
           this._flushPendingSquiggles(uri);
+        } catch { }
+
+        // Clear local (Lezer) diagnostics immediately on switch; they'll be recomputed
+        // after the parser settles for the new doc/language.
+        try {
+          this.setLocalDiagnosticsForUri(uri, []);
         } catch { }
 
         this._emitIssuesState();
