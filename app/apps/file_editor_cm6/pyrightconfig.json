@@ -1,6 +1,14 @@
 {
   "typeCheckingMode": "basic",
   "pythonPlatform": "Linux",
+  "executionEnvironments": [
+    {
+      "root": "../..",
+      "extraPaths": [
+        "../../.."
+      ]
+    }
+  ],
   "include": [
     "../.."
   ],

@@ -358,6 +358,41 @@ def _should_use_lsp(project_root: Path | None, language_id: str) -> bool:
     return True
 
 
+def _find_pyright_config_root(file_path: Path, project_root: Path) -> tuple[Path | None, Path | None]:
+    """Find nearest Pyright config root + file path between file_path and project_root."""
+    try:
+        start_dir = file_path if file_path.is_dir() else file_path.parent
+    except Exception:
+        start_dir = file_path.parent
+
+    markers = ("pyrightconfig.json", "pyproject.toml")
+    try:
+        current = start_dir.expanduser().resolve(strict=False)
+        stop_root = project_root.expanduser().resolve(strict=False)
+    except Exception:
+        current = start_dir
+        stop_root = project_root
+
+    visited = set()
+    while True:
+        if current in visited:
+            break
+        visited.add(current)
+        try:
+            for name in markers:
+                candidate = current / name
+                if candidate.exists():
+                    return current, candidate
+        except Exception:
+            pass
+        if current == stop_root:
+            break
+        if current.parent == current:
+            break
+        current = current.parent
+    return None, None
+
+
 def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None) -> None:
     """Connect or disconnect the CM6 LSP client based on file/language.
 
@@ -406,6 +441,7 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
 
     # Allow per-server project-root override (project-scoped via sidecar SSOT).
     effective_project_root = project_root
+    rel_root = ""
     try:
         project_path = str(project_root)
         server_id = None
@@ -421,7 +457,7 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
             server_id = "kotlin-android"
 
         if server_id:
-            rel_root = _history_store.get_lsp_server_root_rel(project_path, server_id)
+            rel_root = _history_store.get_lsp_server_root_rel(project_path, server_id) or ""
             if rel_root:
                 candidate = (project_root / rel_root).expanduser().resolve(strict=False)
                 if candidate.exists() and candidate.is_dir():
@@ -436,6 +472,16 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
         except Exception:
             pyright_mode = "root"
 
+    # Pyright: always find nearest config path for CM6 payloads.
+    cfg_root = None
+    cfg_path = None
+    if language_id == "python":
+        try:
+            cfg_root, cfg_path = _find_pyright_config_root(file_path, project_root)
+        except Exception:
+            cfg_root = None
+            cfg_path = None
+
     # If a python worker registry exists and mode=workers, pick the most specific worker root.
     if language_id == "python" and pyright_mode == "workers":
         try:
@@ -446,6 +492,20 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
                 effective_project_root = entry.root
         except Exception:
             pass
+    elif language_id == "python" and pyright_mode == "root":
+        if cfg_root and cfg_root.exists() and cfg_root.is_dir() and not rel_root:
+            # Only change the root when no explicit root override is set.
+            effective_project_root = cfg_root
+
+    try:
+        if language_id == "python":
+            print(
+                f"[LSP] Pyright config lookup: file={file_path} base={effective_project_root} "
+                f"rel_root={rel_root!r} cfg_root={cfg_root} cfg_path={cfg_path}",
+                file=sys.stderr,
+            )
+    except Exception:
+        pass
 
     # At this point we want LSP active for this document
     print(f"[LSP] Triggering connect_lsp: {language_id} / {effective_project_root} / {file_path}", file=sys.stderr)
@@ -456,6 +516,7 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
                 'projectRoot': str(effective_project_root),
                 'filePath': str(file_path),
                 'baseProjectRoot': str(project_root),
+                'pyrightConfigPath': str(cfg_path) if (language_id == "python" and cfg_path) else "",
             })
         else:
             print("[LSP] connect_lsp() not available on editor; bundle may be outdated", file=sys.stderr)
@@ -1954,6 +2015,12 @@ async def set_editor_content(data: dict = Body(...)):
     
     for ed in editors:
         try:
+            # Keep diagnostics/squiggles bound to the currently open file even when LSP
+            # is disconnected for this language (e.g. Markdown).
+            try:
+                ed.run_method('setCurrentFilePath', new_path)
+            except Exception:
+                pass
             ed.set_value(content)
             ed._cached_content = content
             ed.set_language(language)

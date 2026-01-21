@@ -63,6 +63,41 @@ def _label_for_language_root(language_id: str, project_root: Path) -> str:
     return f"lsp:{language_id}:{digest}"
 
 
+def _find_pyright_config_root(file_path: Path, project_root: Path) -> tuple[Path | None, Path | None]:
+    """Find nearest Pyright config root + file path between file_path and project_root."""
+    try:
+        start_dir = file_path if file_path.is_dir() else file_path.parent
+    except Exception:
+        start_dir = file_path.parent
+
+    markers = ("pyrightconfig.json", "pyproject.toml")
+    try:
+        current = start_dir.expanduser().resolve(strict=False)
+        stop_root = project_root.expanduser().resolve(strict=False)
+    except Exception:
+        current = start_dir
+        stop_root = project_root
+
+    visited = set()
+    while True:
+        if current in visited:
+            break
+        visited.add(current)
+        try:
+            for name in markers:
+                candidate = current / name
+                if candidate.exists():
+                    return current, candidate
+        except Exception:
+            pass
+        if current == stop_root:
+            break
+        if current.parent == current:
+            break
+        current = current.parent
+    return None, None
+
+
 async def _broadcast_lsp_busy(*, project_path: str, payload: dict) -> None:
     try:
         from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
@@ -899,11 +934,29 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         language_id = data.get("languageId")
         project_root = data.get("projectRoot", ".")
         base_project_root = data.get("baseProjectRoot") or data.get("base_project_root")
+        file_path = data.get("filePath") or data.get("file_path")
+        pyright_cfg = data.get("pyrightConfigPath") or data.get("pyright_config_path")
         
         if not language_id:
             await self.emit("lsp:error", {"error": "Missing languageId"}, to=sid)
             return
         
+        if str(language_id or "").lower() == "python":
+            try:
+                base_root = Path(base_project_root or project_root or ".")
+                if pyright_cfg:
+                    cfg_dir = Path(pyright_cfg).expanduser().resolve(strict=False).parent
+                    if cfg_dir.exists():
+                        project_root = str(cfg_dir)
+                elif file_path:
+                    cfg_root, _cfg_path = _find_pyright_config_root(Path(file_path), base_root)
+                    if cfg_root and cfg_root.exists():
+                        project_root = str(cfg_root)
+                elif base_project_root:
+                    project_root = str(base_root)
+            except Exception:
+                pass
+
         _lsp_debug(f"[LSP WS] Initialize: {sid} lang={language_id} root={project_root}")
 
         key = (str(language_id), str(project_root))
@@ -1007,6 +1060,17 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
                     return
                 if session.get("init_request_id") is None and message.get("id") is not None:
                     session["init_request_id"] = message.get("id")
+                # For Pyright, force a real rootUri/workspaceFolders so it doesn't fall back
+                # to "<default workspace root>" (and so config discovery works).
+                if session.get("language_id") in ("python", "pyright"):
+                    params = message.setdefault("params", {})
+                    root_str = str(session.get("project_root") or session.get("base_project_root") or "").strip()
+                    if root_str:
+                        root_uri = f"file://{root_str}"
+                        # Always override for Pyright so it never falls back to "<default workspace root>".
+                        params["rootUri"] = root_uri
+                        params["rootPath"] = root_str
+                        params["workspaceFolders"] = [{"name": "root", "uri": root_uri}]
                 # Inject Android-specific initializationOptions for kotlin-android LSP
                 if session.get("language_id") == "kotlin-android":
                     params = message.setdefault("params", {})
