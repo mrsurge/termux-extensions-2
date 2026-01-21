@@ -49,10 +49,11 @@ class SocketIOTransport {
       console.log('[LSP] Socket created:', this.socket);
       console.log('[LSP] Socket connected?:', this.socket?.connected);
 
+      const extra = (initExtra && typeof initExtra === 'object') ? initExtra : {};
       this._initPayload = Object.assign({
         languageId: languageId,
         projectRoot: projectRoot,
-      }, (initExtra && typeof initExtra === 'object') ? initExtra : {});
+      }, extra);
 
       this.socket.on('connect', () => {
         try {
@@ -1356,6 +1357,13 @@ export default {
       return this.languages.map((lang) => lang.name).sort(Intl.Collator("en").compare);
     },
     setLanguage(language) {
+      // Guard against async language loader races when switching files quickly.
+      // Without this, a previous lang_description.load() can resolve later and
+      // reconfigure the editor back to the old language.
+      this._setLanguageNonce = (this._setLanguageNonce || 0) + 1;
+      const setLanguageNonce = this._setLanguageNonce;
+      const requestedLanguage = language;
+
       if (!language) {
         // Default to 4 spaces when no language
         this.editor.dispatch({
@@ -1375,6 +1383,10 @@ export default {
       }
 
       lang_description.load().then((extension) => {
+        if (this._setLanguageNonce !== setLanguageNonce) return;
+        if (this.language !== requestedLanguage) return;
+        if (!this.editor) return;
+
         // Determine appropriate indent size for this language
         const indentSize = getIndentForLanguage(language);
         const indentString = ' '.repeat(indentSize);
@@ -1388,6 +1400,65 @@ export default {
         });
         this.applyCompletionFallback();
       });
+    },
+
+    // Cheap "Lezer nudge": re-apply the currently selected language after the
+    // document has been opened, to mitigate occasional parser misconfig during
+    // fast file switches.
+    //
+    // Uses setLanguage() which is nonce-guarded against async races.
+    nudgeLanguageParse(language = null, delayMs = 0) {
+      try {
+        const ms = Number(delayMs || 0);
+        const requestedLanguage = (typeof language === 'string' && language.trim()) ? language : (this.language || null);
+        setTimeout(() => {
+          try {
+            if (!this.editor) return;
+            if (!requestedLanguage) return;
+            this.setLanguage(requestedLanguage);
+          } catch { }
+        }, Number.isFinite(ms) ? ms : 0);
+      } catch { }
+    },
+
+    // Ensure the Issues overlay (diagnostics UI + squiggles) always tracks the currently
+    // open file, even when LSP is not connected for the active document.
+    //
+    // This avoids bleed-over where stale diagnostics/squiggles from a previous file remain
+    // visible after switching to a non-LSP file (e.g. Markdown).
+    setCurrentFilePath(path) {
+      try {
+        if (!path || typeof path !== 'string') return;
+
+        const state = this._ensureIssuesState();
+        let uri = path;
+        if (!uri.startsWith('file://')) {
+          uri = 'file://' + uri;
+        }
+        // Normalize "file:////" -> "file:///" for absolute paths.
+        uri = uri.replace(/^file:\/{4}/, 'file:///');
+
+        state.currentUri = uri;
+        if (!state.byUri.get(uri)) {
+          state.byUri.set(uri, {
+            rawDiagnostics: [],
+            localDiagnostics: [],
+            filteredDiagnostics: [],
+            flat: [],
+            counts: { errors: 0, warnings: 0 },
+            activeIndex: 0,
+            suppressed: new Set(),
+          });
+        }
+
+        // Clear squiggles immediately on file switch to prevent bleed-over.
+        try {
+          this.applyIssueSquiggles([], uri);
+          this._flushPendingSquiggles(uri);
+        } catch { }
+
+        this._emitIssuesState();
+      } catch { }
     },
     // Provide a light-weight autocomplete fallback for languages where we may be
     // running without LSP (or where the language mode doesn't provide rich data).
@@ -1651,7 +1722,30 @@ export default {
         filePath = arguments[2] || '';
       }
 
+      const pyrightConfigPath = (typeof options === 'object' && options !== null) ? (options.pyrightConfigPath || '') : '';
+      const baseProjectRoot = (typeof options === 'object' && options !== null) ? (options.baseProjectRoot || '') : '';
+      if ((languageId || '').toLowerCase() === 'python' && pyrightConfigPath) {
+        // If a pyright config is present, pin the workspace root to its directory.
+        const cfgDir = pyrightConfigPath.replace(/\/[^\/]+$/, '');
+        if (cfgDir) {
+          projectRoot = cfgDir;
+        } else if (baseProjectRoot) {
+          projectRoot = baseProjectRoot;
+        }
+      } else if (!projectRoot && baseProjectRoot) {
+        projectRoot = baseProjectRoot;
+      }
+
       console.log(`[LSP] connectLSP called: languageId=${languageId}, projectRoot=${projectRoot}, filePath=${filePath}`);
+      try {
+        console.log('[LSP] connectLSP payload:', {
+          languageId,
+          projectRoot,
+          baseProjectRoot,
+          pyrightConfigPath,
+          filePath,
+        });
+      } catch {}
       try { this.emitLspStatus('connecting', { languageId, projectRoot, filePath }); } catch { }
 
       if (!this.editor) {
@@ -1674,7 +1768,9 @@ export default {
       this._lspDocumentVersion = 1;
 
       const initExtra = (typeof options === 'object' && options !== null) ? {
-        baseProjectRoot: options.baseProjectRoot || '',
+        baseProjectRoot: baseProjectRoot || '',
+        pyrightConfigPath: pyrightConfigPath || '',
+        filePath: filePath || '',
       } : {};
       const transport = new SocketIOTransport('/lsp', languageId, projectRoot, initExtra);
       if (!transport || !transport.socket) {
@@ -2085,6 +2181,14 @@ export default {
 
       // Clear LSP-driven symbols when disconnecting
       this.lspSymbols = [];
+
+      // When LSP disconnects (e.g. switching to a non-LSP file), clear any existing
+      // squiggles so diagnostics from the previous file don't linger.
+      try {
+        const st = this._ensureIssuesState();
+        this.applyIssueSquiggles([], st.currentUri || null);
+      } catch { }
+
       // Restore non-LSP completion fallbacks (if any).
       try { this.applyCompletionFallback(); } catch { }
       try { this.emitLspStatus('disconnected', { languageId: this._lspLanguageId || '' }); } catch { }

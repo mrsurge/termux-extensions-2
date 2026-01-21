@@ -2025,6 +2025,12 @@ async def set_editor_content(data: dict = Body(...)):
             ed._cached_content = content
             ed.set_language(language)
             ed.update()
+            # Lezer nudge: occasionally the language parser can lag behind during fast switches.
+            # This is a cheap re-apply of the currently selected language after open.
+            try:
+                ed.run_method('nudgeLanguageParse', language, 250)
+            except Exception:
+                pass
         except Exception as exc:
             print(f"[SET_CONTENT] Failed to update editor: {exc}", file=sys.stderr)
 
