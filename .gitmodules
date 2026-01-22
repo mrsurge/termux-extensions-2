@@ -1,0 +1,3 @@
+[submodule "worktrees/geckoview"]
+	path = worktrees/geckoview
+	url = https://github.com/mozilla/geckoview.git
