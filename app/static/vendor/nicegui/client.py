@@ -65,6 +65,10 @@ class Client:
         self.id = str(uuid.uuid4())
         self.created = time.time()
         self.instances[self.id] = self
+        # Debug: log client creation
+        import sys
+        print(f"[NiceGUI Client] Created client_id={self.id}, total clients={len(self.instances)}", 
+              file=sys.stderr, flush=True)
 
         self.elements: dict[int, Element] = {}
         self.next_element_id: int = 0
@@ -375,6 +379,11 @@ class Client:
         If the global clients dictionary does not contain the client, its elements are still removed and a KeyError is raised.
         Normally this should never happen, but has been observed (see #1826).
         """
+        # Debug: log deletion with traceback
+        import sys, traceback
+        print(f"[NiceGUI Client] DELETE client_id={self.id}, has_socket={self.has_socket_connection}, "
+              f"remaining={len(self.instances)-1}", file=sys.stderr, flush=True)
+        traceback.print_stack(limit=15, file=sys.stderr)
         for t in self.delete_handlers:
             self.safe_invoke(t)
         for t in core.app._delete_handlers:  # pylint: disable=protected-access

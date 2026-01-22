@@ -190,6 +190,11 @@ async def _exception_handler_500(request: Request, exception: Exception) -> Resp
 async def _on_handshake(sid: str, data: dict[str, Any]) -> bool:
     client = Client.instances.get(data['client_id'])
     if not client:
+        # Debug: log handshake failure details
+        import sys
+        print(f"[NiceGUI Handshake] FAILED - client_id={data.get('client_id')} not found. "
+              f"Active clients: {len(Client.instances)}, ids: {list(Client.instances.keys())[:5]}...",
+              file=sys.stderr, flush=True)
         return False
     if data.get('old_tab_id'):
         app.storage.copy_tab(data['old_tab_id'], data['tab_id'])

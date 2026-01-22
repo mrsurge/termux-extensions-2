@@ -88,6 +88,7 @@ _lsp_busy_tasks: dict[str, dict] = {}
 
 # --- Constants ---
 RECONNECT_TIMEOUT_S = 1200.0
+RESPONSE_TIMEOUT_S = 1200.0  # Time allowed for page to render before client is deleted
 
 THEME_MAP = {
     'cm6-dark': 'basicDark',
@@ -1144,7 +1145,7 @@ def disable_edit_tracking():
         print(f"[EDIT_TRACK] Disabled automatic jump on edits", file=sys.stderr)
 
 # --- NiceGUI Page ---
-@ui.page('/nc', reconnect_timeout=RECONNECT_TIMEOUT_S)
+@ui.page('/nc', reconnect_timeout=RECONNECT_TIMEOUT_S, response_timeout=RESPONSE_TIMEOUT_S)
 async def editor_page():
     global _nicegui_loop, _nicegui_loop_thread
     
@@ -1642,23 +1643,19 @@ async def editor_page():
       z-index: 5000; /* Increased z-index */
     }
 
-    /* Desktop: Sidebar style */
-    .cm-editor .cm-minimap-desktop {
-      position: fixed; /* Fixed to iframe viewport so it doesn't scroll */
-      top: 0;
-      right: 0;
-      bottom: 0;
-      width: 75px;
-      opacity: 1.0;
-      background: var(--bg, #0b0f1a); /* Fallback to dark bg */
-      border-left: 1px solid rgba(128, 128, 128, 0.2);
-      z-index: 5000;
-    }
-    
-    /* Desktop: Push content to the left */
-    .cm-editor.cm-has-minimap-desktop .cm-content {
-      padding-right: 75px; /* 75px width */
-    }
+	    /* Desktop: Sidebar style */
+	    .cm-editor .cm-minimap-desktop {
+	      position: sticky; /* Tiled inside CM scroller (desktop) */
+	      top: 0;
+	      opacity: 1.0;
+	      background: var(--bg, #0b0f1a); /* Fallback to dark bg */
+	      border-left: 1px solid rgba(128, 128, 128, 0.2);
+	      z-index: 5000;
+	    }
+	    
+	    .cm-editor.cm-has-minimap-desktop .cm-content {
+	      padding-right: 0;
+	    }
 
 	    /* Mobile: semi-transparent overlay “preview” on the right */
 	    .cm-editor .cm-minimap-mobile {

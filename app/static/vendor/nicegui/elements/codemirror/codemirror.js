@@ -769,8 +769,8 @@ export default {
       this.updateMinimapState();
     },
   },
-  data() {
-    return {
+	  data() {
+	    return {
       // To let other methods wait for the editor to be created because
       // they might be called by the server before the editor is created.
       editorPromise: new Promise((resolve) => {
@@ -789,18 +789,19 @@ export default {
       // Sticky scroll plugin instance handle (set by plugin constructor when enabled)
       _stickyScrollPlugin: null,
       // Autocompletion override compartment (used for non-LSP fallbacks)
-      completionCompartment: null,
-      isMobileLayout: false,
-      // Issues overlay state (LSP diagnostics-driven)
-      issuesOverlayVisible: false,
+	      completionCompartment: null,
+	      isMobileLayout: false,
+	      _minimapResizeObserver: null,
+	      // Issues overlay state (LSP diagnostics-driven)
+	      issuesOverlayVisible: false,
       // LSP document version counter (for didChange notifications)
       _lspDocumentVersion: 1,
       // LSP instrumentation counters
       _lspDidChangeCount: 0,
       _lspDiagnosticsCount: 0,
-    };
-  },
-  beforeDestroy() {
+	    };
+	  },
+	  beforeDestroy() {
     // Best-effort LSP cleanup for Vue 2 lifecycle
     try {
       if (typeof this.disconnectLSP === 'function') {
@@ -813,11 +814,17 @@ export default {
       if (typeof this._teardownIssuesOverlay === 'function') {
         this._teardownIssuesOverlay();
       }
-    } catch (err) {
-      console.warn('[Issues] Error during beforeDestroy teardown:', err);
-    }
-  },
-  beforeUnmount() {
+	    } catch (err) {
+	      console.warn('[Issues] Error during beforeDestroy teardown:', err);
+	    }
+	    try {
+	      if (this._minimapResizeObserver) {
+	        this._minimapResizeObserver.disconnect();
+	        this._minimapResizeObserver = null;
+	      }
+	    } catch { }
+	  },
+	  beforeUnmount() {
     // Best-effort LSP cleanup for Vue 3 lifecycle
     try {
       if (typeof this.disconnectLSP === 'function') {
@@ -830,10 +837,16 @@ export default {
       if (typeof this._teardownIssuesOverlay === 'function') {
         this._teardownIssuesOverlay();
       }
-    } catch (err) {
-      console.warn('[Issues] Error during beforeUnmount teardown:', err);
-    }
-  },
+	    } catch (err) {
+	      console.warn('[Issues] Error during beforeUnmount teardown:', err);
+	    }
+	    try {
+	      if (this._minimapResizeObserver) {
+	        this._minimapResizeObserver.disconnect();
+	        this._minimapResizeObserver = null;
+	      }
+	    } catch { }
+	  },
   methods: {
     // -------------------------------------------------------------------
     // Issues Overlay (Diagnostics)
@@ -1321,6 +1334,47 @@ export default {
       }
       const mode = this.isMobileLayout ? 'mobile' : 'desktop';
       this.applyMinimapMode(mode);
+    },
+
+    async _cycleMinimapMode(mode) {
+      try {
+        if (!this.editor) return;
+        if (!this.minimapCompartment) {
+          await this.applyMinimapMode(mode);
+          return;
+        }
+        // Force a full teardown+recreate so the minimap redraws cleanly when crossing breakpoints.
+        this.editor.dispatch({ effects: this.minimapCompartment.reconfigure([]) });
+        setTimeout(() => {
+          try {
+            if (!this.showMinimap) return;
+            this.applyMinimapMode(mode);
+            if (mode === 'desktop') {
+              try { this._primeEditorLayoutAfterDesktopMinimap(); } catch { }
+            }
+          } catch { }
+        }, 0);
+      } catch { }
+    },
+
+    _primeEditorLayoutAfterDesktopMinimap() {
+      try {
+        if (!this.editor) return;
+        setTimeout(() => {
+          try {
+            if (!this.editor) return;
+            const focusOnce = () => {
+              try {
+                if (!this.editor) return;
+                this.editor.focus();
+                // Benign dispatch to force geometry recalculation without changing state.
+                this.editor.dispatch({ selection: this.editor.state.selection });
+              } catch { }
+            };
+            requestAnimationFrame(() => requestAnimationFrame(focusOnce));
+          } catch { }
+        }, 1000);
+      } catch { }
     },
     handleLayoutChange(e) {
       this.isMobileLayout = e.matches;
@@ -3658,8 +3712,35 @@ export default {
 
       const targetMode = mode || 'off';
       let extensions = [];
+      const minimapWidthCss = `90px`;
 
       if (targetMode !== 'off') {
+        const layoutExt = (targetMode === 'desktop')
+          ? CM.EditorView.theme({
+            "&.cm-has-minimap-desktop .cm-scroller": {
+              display: "flex",
+              alignItems: "stretch",
+              // Prevent focus/scrollbar appearance from shifting layout.
+              scrollbarGutter: "stable",
+            },
+            // Explicitly set flex for the primary scroller children (gutters, content, minimap).
+            "&.cm-has-minimap-desktop .cm-scroller > .cm-gutters": {
+              flex: "0 0 auto",
+            },
+            "&.cm-has-minimap-desktop .cm-scroller > .cm-content": {
+              flex: "1 1 auto",
+              minWidth: "0",
+            },
+            "&.cm-has-minimap-desktop .cm-scroller > .cm-minimap-container.cm-minimap-desktop": {
+              flex: `0 0 ${minimapWidthCss}`,
+              width: minimapWidthCss,
+              height: "100%",
+              pointerEvents: "auto",
+              boxSizing: "border-box",
+            },
+          })
+          : [];
+
         // Include diffField in dependencies if it exists so minimap updates when diffs change
         const deps = this.diffField ? ['doc', this.diffField] : ['doc'];
 
@@ -3669,6 +3750,13 @@ export default {
             const dom = document.createElement('div');
             // Base class + mode class; CSS will do the heavy lifting
             dom.className = `cm-minimap-container cm-minimap-${targetMode}`;
+
+            // Desktop: mount into the scroller row so it participates in layout (like gutters/content).
+            try {
+              if (targetMode === 'desktop' && view?.scrollDOM) {
+                view.scrollDOM.appendChild(dom);
+              }
+            } catch { }
             return { dom };
           };
 
@@ -3692,7 +3780,7 @@ export default {
           };
         });
 
-        extensions = [minimapExt];
+        extensions = targetMode === 'desktop' ? [minimapExt, layoutExt] : [minimapExt];
       }
 
       this.editor.dispatch({
@@ -3703,6 +3791,7 @@ export default {
       // Add class to editor DOM for desktop sidebar layout
       if (targetMode === 'desktop') {
         this.editor.dom.classList.add('cm-has-minimap-desktop');
+        try { this._primeEditorLayoutAfterDesktopMinimap(); } catch { }
       } else {
         this.editor.dom.classList.remove('cm-has-minimap-desktop');
       }
@@ -5687,9 +5776,42 @@ export default {
     }
 
     // Initialize layout detection for minimap
-    const mql = window.matchMedia('(max-width: 900px)');
-    this.isMobileLayout = mql.matches;
-    mql.addEventListener('change', this.handleLayoutChange);
+    // Prefer editor-width ResizeObserver over matchMedia because iframe/window width
+    // can remain stable even when the editor viewport changes (split panes, shields, etc).
+    const breakpointPx = 900;
+    try {
+      if (this.editor?.dom && typeof ResizeObserver !== 'undefined') {
+        const ro = new ResizeObserver((entries) => {
+          try {
+            const rect = entries?.[0]?.contentRect;
+            const w = rect?.width;
+            if (!w || !Number.isFinite(w)) return;
+            const nextIsMobile = w <= breakpointPx;
+            if (nextIsMobile === this.isMobileLayout) return;
+            this.isMobileLayout = nextIsMobile;
+            // Cycle minimap so it redraws in the new mode.
+            if (this.showMinimap) {
+              this._cycleMinimapMode(nextIsMobile ? 'mobile' : 'desktop');
+            }
+          } catch { }
+        });
+        ro.observe(this.editor.dom);
+        this._minimapResizeObserver = ro;
+        // Seed initial state from current editor width
+        try {
+          const w = this.editor.dom.getBoundingClientRect().width;
+          if (w && Number.isFinite(w)) this.isMobileLayout = w <= breakpointPx;
+        } catch { }
+      } else {
+        const mql = window.matchMedia(`(max-width: ${breakpointPx}px)`);
+        this.isMobileLayout = mql.matches;
+        mql.addEventListener('change', this.handleLayoutChange);
+      }
+    } catch {
+      const mql = window.matchMedia(`(max-width: ${breakpointPx}px)`);
+      this.isMobileLayout = mql.matches;
+      mql.addEventListener('change', this.handleLayoutChange);
+    }
 
     // Initialize diff compartments BEFORE minimap so minimap can reference diffField
     // This ensures proper dependency order - minimap needs diffField to exist

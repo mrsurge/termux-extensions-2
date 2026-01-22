@@ -564,6 +564,7 @@ def init_nicegui_with_app(fastapi_app):
         fastapi_app,
         mount_path=mount,
         storage_secret='file-editor-cm6-secret',  # For session management
+        reconnect_timeout=1200.0,  # Allow long reconnect window (prune_instances uses this)
     )
 
     # Now import the page definitions

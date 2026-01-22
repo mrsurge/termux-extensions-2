@@ -1389,6 +1389,11 @@ async def _nicegui_ws_dynamic(websocket: WebSocket, rest: str):
         connect_kwargs = {
             "origin": origin_hdr,
             "subprotocols": subprotocols,
+            # Match NiceGUI's Socket.IO ping settings (based on reconnect_timeout=1200s)
+            # ping_interval = reconnect_timeout * 0.8 = 960s
+            # ping_timeout = reconnect_timeout * 0.4 = 480s
+            "ping_interval": 960,
+            "ping_timeout": 480,
         }
         if extra_headers:
             param_names = inspect.signature(websockets.connect).parameters

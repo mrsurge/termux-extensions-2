@@ -69,6 +69,7 @@
   .layout-desktop .fe-menubar {
     grid-column: 2 / -1;
     grid-row: 2;
+    z-index: 60; /* Higher than agent-drawer (50) so dropdowns can overlay */
   }
 
   /* Explorer becomes left sidebar - extends from row 2 to bottom */
@@ -345,11 +346,11 @@
 	  #recent-files-btn { font-size: 0.85rem; padding: 4px 8px; white-space: nowrap; }
 	  .fe-btn:hover { border-color: var(--primary, #3b82f6); }
   .fe-status { font-size: calc(0.85rem * var(--chrome-font-scale)); color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
-  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); border-left: 1px solid var(--border, #333); border-right: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: var(--chrome-base-font); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); position: sticky; top: 0; z-index: 200; }
+  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); border-left: 1px solid var(--border, #333); border-right: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: var(--chrome-base-font); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); position: sticky; top: 0; z-index: 20; }
   .fe-menu { position: relative; }
   .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; font-size: var(--chrome-base-font); }
   .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
-  .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 40; }
+  .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 400 !important; }
   .fe-dropdown.show { display: block; }
   /* Dropdowns inside modals need to stack above modal content. */
   .fe-dropdown--modal { z-index: 500; }
