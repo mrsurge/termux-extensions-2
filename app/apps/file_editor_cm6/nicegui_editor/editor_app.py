@@ -1145,7 +1145,7 @@ def disable_edit_tracking():
         print(f"[EDIT_TRACK] Disabled automatic jump on edits", file=sys.stderr)
 
 # --- NiceGUI Page ---
-@ui.page('/nc', reconnect_timeout=RECONNECT_TIMEOUT_S, response_timeout=RESPONSE_TIMEOUT_S)
+@ui.page('/nc_old', reconnect_timeout=RECONNECT_TIMEOUT_S, response_timeout=RESPONSE_TIMEOUT_S)
 async def editor_page():
     global _nicegui_loop, _nicegui_loop_thread
     

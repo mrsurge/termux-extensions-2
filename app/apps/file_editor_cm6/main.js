@@ -1550,6 +1550,10 @@ window.addEventListener('message', (event) => {
       const timeout = payload.timeout || 3000;
       host.toast(payload.message, timeout); 
     }
+  } else if (event.data.type === 'cm6_ready') {
+    // Monaco iframe announces it has booted. It restores from backend SSOT on its own.
+    // Keep this handler lightweight to avoid introducing host↔iframe state drift.
+    try { console.log('[Editor] iframe ready'); } catch (_) {}
   } else if (event.data.type === 'draft_state') {
     const payload = event.data.data;
     if (payload && payload.has_draft && payload.path === currentPath) {
@@ -1883,7 +1887,6 @@ window.__cm6ApplyRemoteDraft = async (payload) => {
 
     // Apply draft content inside the CM6 iframe (non-destructive).
     try {
-      const editorFrame = document.getElementById('editorFrame');
       if (!editorFrame || !editorFrame.contentWindow) return;
       editorFrame.contentWindow.postMessage({
         type: 'cm6_mirror',
@@ -1914,7 +1917,6 @@ window.__cm6ApplyAutosaveContent = async (payload) => {
       }
     } catch (_) {}
 
-    const editorFrame = document.getElementById('editorFrame');
     if (!editorFrame || !editorFrame.contentWindow) return;
     editorFrame.contentWindow.postMessage({
       type: 'cm6_mirror',
@@ -2568,20 +2570,20 @@ async function openFile(path, options = {}) {
     // Initialize SHA256 if provided
     lastSha256 = payload.sha256 || null;
 
-    // Send content to NiceGUI editor backend (fire and forget)
-    apiPost("editor/set_content", {
-      content: payload.content || "",
-      path: resolved,
-      language: currentModeLanguage || "text",
-      has_draft: hasDraft,
-      sha256: payload.sha256 || null
-    }).then(result => {
-      if (result && result.sha256) {
-        lastSha256 = result.sha256;
-        console.log("[Editor] SHA256 initialized:", result.sha256);
-        syncSessionPath();
+    // Tell the editor iframe to open the file (iframe pulls content from backend SSOT).
+    try {
+      if (editorFrame && editorFrame.contentWindow) {
+        editorFrame.contentWindow.postMessage({
+          type: 'cm6_open_path',
+          data: {
+            path: resolved,
+            language: currentModeLanguage || "text",
+          }
+        }, '*');
       }
-    }).catch(e => console.warn("[Editor] Failed to sync content to NiceGUI:", e));
+    } catch (e) {
+      console.warn("[Editor] Failed to postMessage set_content to iframe:", e);
+    }
 
     setText(payload.content || "");
     lastSavedContent = getText();

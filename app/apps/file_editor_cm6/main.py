@@ -540,6 +540,15 @@ from nicegui import ui
 def init_nicegui_with_app(fastapi_app):
     """Initialize NiceGUI by attaching it to the existing FastAPI app"""
     mount = '/ui'
+
+    # --- Monaco (FastHTML) iframe editor at /ui/nc ---
+    # Kept in a dedicated module so the editor runtime can be split out later.
+    try:
+        from .monaco_editor import register_monaco_editor_routes
+        register_monaco_editor_routes(fastapi_app, mount_path=mount)
+    except Exception:
+        # If FastHTML is unavailable for some reason, keep initialization safe.
+        pass
     
     # Critical: Set Socket.IO path BEFORE calling ui.run_with()
     # This ensures the client connects to /ui/_nicegui_ws/socket.io

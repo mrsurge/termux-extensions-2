@@ -1,0 +1,112 @@
+:root {
+  --monaco-editor_touch-selection_z-index: 100000;
+  --monaco-editor_touch-selector_color: #1E90FF;
+  --monaco-editor_touch-selector_size: 1.2rem;
+
+  --monaco-editor_touch-selector-menu_z-index: 100001;
+  --monaco-editor_touch-selector-menu_bg-color: #f7f7f7;
+  --monaco-editor_touch-selector-menu_height: 2.4rem;
+  --monaco-editor_touch-selector-menu_border-color: #ccc;
+  --monaco-editor_touch-selector-menu_icon-color: #666;
+}
+
+.monaco-editor-touch-selections,
+.monaco-editor-touch-selections > .selector > .text-cursor,
+.monaco-editor-touch-selections > .selector > .bottom-cursor,
+.monaco-editor-touch-selector-menu,
+.monaco-editor-touch-selector-menu > .menu-item {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+.monaco-editor-touch-selections {
+  position: absolute;
+  top: 0;
+  display: none;
+  z-index: var(--monaco-editor_touch-selection_z-index);
+}
+
+.monaco-editor-touch-selections.show {
+  display: block;
+}
+
+.monaco-editor-touch-selections > .selector {
+  position: absolute;
+}
+
+.monaco-editor-touch-selections > .selector > .text-cursor {
+  position: absolute;
+  background: transparent;
+  width: 0.4em;
+  transform: translateX(-50%);
+}
+
+.monaco-editor-touch-selections > .selector > .bottom-cursor {
+  position: absolute;
+  background: var(--monaco-editor_touch-selector_color);
+  height: var(--monaco-editor_touch-selector_size);
+  width: var(--monaco-editor_touch-selector_size);
+  border-radius: 0 50% 50% 50%;
+}
+
+/* Bigger touch target without changing the visual size */
+.monaco-editor-touch-selections > .selector > .bottom-cursor::before {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  background: transparent;
+}
+
+.monaco-editor-touch-selections > .selector > .text-cursor::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 32px;
+  transform: translateX(-50%);
+  background: transparent;
+}
+
+.monaco-editor-touch-selector-menu {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  max-width: 90vw;
+  width: fit-content;
+  overflow-x: auto;
+  overflow-y: hidden;
+  z-index: var(--monaco-editor_touch-selector-menu_z-index);
+  background: var(--monaco-editor_touch-selector-menu_bg-color);
+  height: var(--monaco-editor_touch-selector-menu_height);
+  line-height: var(--monaco-editor_touch-selector-menu_height);
+  font-size: 1.05rem;
+  padding: 0 calc((var(--monaco-editor_touch-selector-menu_height) - 1rem) / 2);
+  border: 1px solid var(--monaco-editor_touch-selector-menu_border-color);
+  border-radius: calc(var(--monaco-editor_touch-selector-menu_height) / 2);
+}
+
+.monaco-editor-touch-selector-menu.show {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.monaco-editor-touch-selector-menu > .menu-item {
+  height: 100%;
+  white-space: nowrap;
+  font-size: 0.95rem;
+  padding: 0 0.35rem;
+}
+
+.monaco-editor-touch-selector-menu > .menu-item > svg.icon {
+  display: inline-block;
+  user-select: none;
+  vertical-align: top;
+  stroke: var(--monaco-editor_touch-selector-menu_icon-color);
+  stroke-width: 1.8;
+  height: 1.2rem;
+  margin-top: calc((var(--monaco-editor_touch-selector-menu_height) - 1.2rem) / 2);
+}
+
