@@ -318,6 +318,12 @@ let explorerSocket = null;
 const explorerPending = [];
 let explorerNeedsResync = false;
 
+// Dedicated Editor Socket.IO transport (separate from explorer and NiceGUI).
+let editorSocket = null;
+let editorSocketId = null;
+const editorPending = [];
+const _editorIssuesDumpWaiters = new Map(); // requestId -> {resolve,reject,timer}
+
 async function handleAgentOpen(payload) {
   const isMobile = _isMobileLayout();
   const rel = typeof payload?.rel === 'string' ? payload.rel.trim() : '';
@@ -467,6 +473,191 @@ function connectExplorerSocket() {
     })
     .catch((err) => {
       console.warn('[ExplorerSIO] Failed to open explorer Socket.IO:', err);
+    });
+}
+
+function _applyEditorCacheState(data) {
+  if (!data || typeof data !== 'object') return;
+
+  const normalizedPath = data.path ? toAbsolute(data.path, null, HOME_DIR) : null;
+  if (normalizedPath) {
+    const pathChanged = normalizedPath !== currentPath;
+    currentPath = normalizedPath;
+    currentPathExists = true;
+    lastPickerPath = parentDir(normalizedPath);
+    if (pathChanged || !fileNameEl.textContent || fileNameEl.textContent === 'Untitled') {
+      updatePathDisplay();
+    }
+  }
+  if (typeof data.content_sha256 === 'string' && data.content_sha256.length === 64) {
+    lastSha256 = data.content_sha256;
+  }
+  if (data.reason === 'restore') {
+    restoredSessionActive = true;
+  } else if (data.state === 'clean') {
+    restoredSessionActive = false;
+  }
+  if (data.reason === 'watcher_external' && normalizedPath) {
+    triggerExternalRefresh(normalizedPath);
+  }
+  applyCacheIndicator({
+    state: data.state,
+    unsaved: data.unsaved,
+    reason: data.reason,
+    restoredActive: restoredSessionActive,
+  });
+
+  // Synchronize autosave mode across host shells (other clients).
+  try {
+    const autosaveValue =
+      typeof data.auto_save === 'boolean' ? data.auto_save :
+      (typeof data.autoSave === 'boolean' ? data.autoSave : null);
+    if (typeof autosaveValue === 'boolean') {
+      if (!editorViewState || typeof editorViewState !== 'object') editorViewState = {};
+      editorViewState.autoSave = autosaveValue;
+      if (typeof applyStateToMenus === 'function') {
+        applyStateToMenus(editorViewState);
+      }
+    }
+  } catch (_) {}
+
+  if (data.path) {
+    window.dispatchEvent(new CustomEvent('cm6:draft-updated', {
+      detail: {
+        path: data.path,
+        unsaved: !!data.unsaved
+      }
+    }));
+  }
+  window.__cm6CacheState = data;
+}
+
+function _handleEditorScrollState(payload) {
+  const data = payload && typeof payload === 'object' ? payload : {};
+  if (typeof data.line !== 'number' || data.line < 1) return;
+
+  lastScrollState = {
+    path: currentPath || null,
+    line: data.line,
+    column: (typeof data.column === 'number' && data.column >= 0) ? data.column : null,
+    top: (typeof data.top === 'number' && data.top >= 0) ? data.top : null,
+  };
+
+  if (scrollStateTimer) clearTimeout(scrollStateTimer);
+  scrollStateTimer = setTimeout(async () => {
+    scrollStateTimer = null;
+    if (!lastScrollState || !lastScrollState.path) return;
+    try {
+      queueSessionStateUpdate({
+        scrollLine: lastScrollState.line,
+        scrollTop: lastScrollState.top != null ? lastScrollState.top : null,
+      });
+
+      if (lastScrollState.line && lastScrollState.line > 0) {
+        await apiPost('state/file_scroll', {
+          path: lastScrollState.path,
+          scroll_line: lastScrollState.line,
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to persist scroll state:', err);
+    }
+  }, CURSOR_STATE_DEBOUNCE);
+}
+
+function _resolveIssuesDumpWaiter(requestId, dump) {
+  const waiter = _editorIssuesDumpWaiters.get(requestId);
+  if (!waiter) return;
+  _editorIssuesDumpWaiters.delete(requestId);
+  try { clearTimeout(waiter.timer); } catch (_) {}
+  try { waiter.resolve(dump || null); } catch (_) {}
+}
+
+function _rejectIssuesDumpWaiter(requestId, err) {
+  const waiter = _editorIssuesDumpWaiters.get(requestId);
+  if (!waiter) return;
+  _editorIssuesDumpWaiters.delete(requestId);
+  try { clearTimeout(waiter.timer); } catch (_) {}
+  try { waiter.reject(err); } catch (_) {}
+}
+
+function _issuesDumpRequestOnce() {
+  const requestId = `issues_dump_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timeoutMs = 10000;
+    const timer = setTimeout(() => {
+      _editorIssuesDumpWaiters.delete(requestId);
+      reject(new Error('Issues dump timed out'));
+    }, timeoutMs);
+    _editorIssuesDumpWaiters.set(requestId, { resolve, reject, timer });
+
+    if (editorSocket && editorSocket.connected) {
+      editorSocket.emit('editor_issues_dump_request', { requestId });
+      return;
+    }
+    reject(new Error('Editor socket not connected'));
+  });
+}
+
+function connectEditorSocket() {
+  if (editorSocket) return;
+  ensureSocketIoLoaded()
+    .then((io) => {
+      if (!io) throw new Error('Socket.IO client unavailable');
+      editorSocket = io('/editor', {
+        path: '/editor_ws/socket.io',
+        transports: ['websocket'],
+        query: { app_id: 'file_editor_cm6', role: 'host' },
+      });
+
+      editorSocket.on('connect', () => {
+        editorSocketId = editorSocket.id || null;
+        while (editorPending.length) {
+          const msg = editorPending.shift();
+          editorSocket.emit(msg.type, msg.payload || {});
+        }
+      });
+
+      editorSocket.on('disconnect', (reason) => {
+        console.log('[EditorSIO] Disconnected', reason);
+      });
+
+      editorSocket.on('connect_error', (err) => {
+        console.warn('[EditorSIO] Connect error', err);
+      });
+
+      editorSocket.on('editor:cache_state', (payload) => {
+        _applyEditorCacheState(payload);
+      });
+
+      editorSocket.on('editor:draft_state', (payload) => {
+        const p = payload && typeof payload === 'object' ? payload : {};
+        if (p.has_draft && p.path) {
+          restoredSessionActive = true;
+          restoredSessionPath = p.path;
+        }
+      });
+
+      editorSocket.on('editor:scroll_state', (payload) => {
+        _handleEditorScrollState(payload);
+      });
+
+      editorSocket.on('editor:notify', (payload) => {
+        const p = payload && typeof payload === 'object' ? payload : {};
+        const message = typeof p.message === 'string' ? p.message : null;
+        if (message) host.toast(message, p.timeout || 3000);
+      });
+
+      editorSocket.on('editor:issues_dump_response', (payload) => {
+        try {
+          const requestId = payload && (payload.requestId || payload.request_id) ? String(payload.requestId || payload.request_id) : '';
+          if (!requestId) return;
+          _resolveIssuesDumpWaiter(requestId, payload.dump);
+        } catch (_) {}
+      });
+    })
+    .catch((err) => {
+      console.warn('[EditorSIO] Failed to open editor Socket.IO:', err);
     });
 }
 
@@ -740,10 +931,12 @@ function setIssuesButtonsEnabled(enabled) {
 
 function sendIssuesCmd(action) {
   try {
-    if (!editorFrame || !editorFrame.contentWindow) return;
-    editorFrame.contentWindow.postMessage({ type: 'issues_cmd', data: { action } }, '*');
+    if (!editorSocket || !editorSocket.connected) return;
+    // Monaco editor currently doesn't implement issues navigation, but keep the hook
+    // on the editor websocket channel (no postMessage bridge).
+    editorSocket.emit('editor_issues_cmd', { action: String(action || '') });
   } catch (err) {
-    console.warn('[Issues] Failed to postMessage to iframe:', err);
+    console.warn('[Issues] Failed to send via editor socket:', err);
   }
 }
 
@@ -792,45 +985,8 @@ function buildDefaultDiagnosticsFilename(absPath, projectRoot) {
   return `${dotted || 'untitled'}.json`;
 }
 
-function _issuesDumpRequestOnce() {
-  const requestId = `issues_dump_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  return new Promise((resolve, reject) => {
-    const timeoutMs = 10000;
-    const t = setTimeout(() => {
-      cleanup();
-      reject(new Error('Issues dump timed out'));
-    }, timeoutMs);
-
-    const onMessage = (event) => {
-      try {
-        if (!event || !event.data) return;
-        if (editorFrame && editorFrame.contentWindow && event.source && event.source !== editorFrame.contentWindow) return;
-        if (event.data.type !== 'cm6-issues-dump') return;
-        const payload = event.data.data || {};
-        if (payload.requestId !== requestId) return;
-        cleanup();
-        resolve(payload.dump || null);
-      } catch (err) {
-        cleanup();
-        reject(err);
-      }
-    };
-
-    const cleanup = () => {
-      clearTimeout(t);
-      window.removeEventListener('message', onMessage);
-    };
-
-    window.addEventListener('message', onMessage);
-    try {
-      if (!editorFrame || !editorFrame.contentWindow) throw new Error('Editor iframe not ready');
-      editorFrame.contentWindow.postMessage({ type: 'issues_cmd', data: { action: 'dump', requestId } }, '*');
-    } catch (err) {
-      cleanup();
-      reject(err);
-    }
-  });
-}
+// NOTE: _issuesDumpRequestOnce is now implemented via the editor Socket.IO channel
+// (see connectEditorSocket block) to avoid host↔iframe postMessage bridges.
 
 async function _ensureDiagnosticsDir(projectRootAbs) {
   const projectRoot = String(projectRootAbs || '').replace(/\/+$/, '');
@@ -1463,189 +1619,11 @@ function _feUpdateLspSpinner() {
   } catch { }
 }
 
-function handleCacheStateBridgeEvent(event) {
-  if (!event || !event.data || event.data.type !== 'cm6-cache-state') {
-    return;
-  }
-  if (editorFrame && editorFrame.contentWindow && event.source && event.source !== editorFrame.contentWindow) {
-    return;
-  }
-  const data = event.data;
-  const normalizedPath = data.path ? toAbsolute(data.path, null, HOME_DIR) : null;
-  if (normalizedPath) {
-    const pathChanged = normalizedPath !== currentPath;
-    currentPath = normalizedPath;
-    currentPathExists = true;
-    lastPickerPath = parentDir(normalizedPath);
-    if (pathChanged || !fileNameEl.textContent || fileNameEl.textContent === 'Untitled') {
-      updatePathDisplay();
-    }
-  }
-  if (typeof data.content_sha256 === 'string' && data.content_sha256.length === 64) {
-    lastSha256 = data.content_sha256;
-  }
-  if (data.reason === 'restore') {
-    restoredSessionActive = true;
-  } else if (data.state === 'clean') {
-    restoredSessionActive = false;
-  }
-  if (data.reason === 'watcher_external' && normalizedPath) {
-    triggerExternalRefresh(normalizedPath);
-  }
-  applyCacheIndicator({
-    state: data.state,
-    unsaved: data.unsaved,
-    reason: data.reason,
-    restoredActive: restoredSessionActive,
-  });
-
-  // Synchronize autosave mode across host shells (other clients).
+// No host↔iframe postMessage bridge: all editor telemetry uses /editor Socket.IO.
+// The editor (Monaco) sends LSP status updates over the editor socket; this helper
+// keeps the UI spinner + toast behavior consistent with the prior CM6 implementation.
+function _feHandleLspStatusUpdate({ show, languageId, state, payload } = {}) {
   try {
-    const autosaveValue =
-      typeof data.auto_save === 'boolean' ? data.auto_save :
-      (typeof data.autoSave === 'boolean' ? data.autoSave : null);
-    if (typeof autosaveValue === 'boolean') {
-      if (!editorViewState || typeof editorViewState !== 'object') editorViewState = {};
-      editorViewState.autoSave = autosaveValue;
-      if (typeof applyStateToMenus === 'function') {
-        applyStateToMenus(editorViewState);
-      }
-    }
-  } catch (_) {}
-  
-  if (data.path) {
-      window.dispatchEvent(new CustomEvent('cm6:draft-updated', {
-          detail: {
-              path: data.path,
-              unsaved: !!data.unsaved
-          }
-      }));
-  }
-  window.__cm6CacheState = data;
-}
-
-window.addEventListener('message', handleCacheStateBridgeEvent);
-
-// Handle draft state restoration signal
-window.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'draft_state' && event.data.data && event.data.data.has_draft) {
-    restoredSessionActive = true;
-    restoredSessionPath = event.data.data.path;
-    console.log('[Main] Detected restored draft:', restoredSessionPath);
-  }
-});
-
-// Handle generic notifications from iframe (NiceGUI)
-window.addEventListener('message', (event) => {
-  if (!event || !event.data) return;
-  
-  // Validate source
-  if (editorFrame && editorFrame.contentWindow && event.source && event.source !== editorFrame.contentWindow) {
-    return;
-  }
-
-  if (event.data.type === 'notification') {
-    const payload = event.data.data;
-    if (payload && payload.message) {
-      const timeout = payload.timeout || 3000;
-      host.toast(payload.message, timeout); 
-    }
-  } else if (event.data.type === 'cm6_ready') {
-    // Monaco iframe announces it has booted. It restores from backend SSOT on its own.
-    // Keep this handler lightweight to avoid introducing host↔iframe state drift.
-    try { console.log('[Editor] iframe ready'); } catch (_) {}
-  } else if (event.data.type === 'draft_state') {
-    const payload = event.data.data;
-    if (payload && payload.has_draft && payload.path === currentPath) {
-      // Force indicator to restored state
-      restoredSessionActive = true;
-      applyCacheIndicator({
-        state: 'mid_session',
-        reason: 'restore',
-        restoredActive: true,
-        unsaved: true
-      });
-    }
-  } else if (event.data.type === 'cm6-dirty-state') {
-    const payload = event.data.data || {};
-    const incomingPath = payload.path ? toAbsolute(payload.path, null, HOME_DIR) : currentPath;
-    if (!incomingPath || incomingPath === currentPath) {
-      markUnsaved(true);
-    }
-  } else if (event.data.type === 'cm6-scroll-state') {
-    const payload = event.data.data || {};
-    if (typeof payload.line !== 'number' || payload.line < 1) return;
-
-    lastScrollState = {
-      path: currentPath || null,
-      line: payload.line,
-      column: (typeof payload.column === 'number' && payload.column >= 0) ? payload.column : null,
-      top: (typeof payload.top === 'number' && payload.top >= 0) ? payload.top : null,
-    };
-
-    console.log('[ScrollState] received', lastScrollState);
-
-    if (scrollStateTimer) {
-      clearTimeout(scrollStateTimer);
-    }
-    scrollStateTimer = setTimeout(async () => {
-      scrollStateTimer = null;
-      if (!lastScrollState || !lastScrollState.path) return;
-      console.log('[ScrollState] queueSessionStateUpdate', lastScrollState);
-      try {
-        // Update global session state (legacy)
-        queueSessionStateUpdate({
-          scrollLine: lastScrollState.line,
-          scrollTop: lastScrollState.top != null ? lastScrollState.top : null,
-        });
-        
-        // Also persist per-file scroll line to sidecar
-        if (lastScrollState.line && lastScrollState.line > 0) {
-          await apiPost('state/file_scroll', {
-            path: lastScrollState.path,
-            scroll_line: lastScrollState.line,
-          });
-        }
-      } catch (err) {
-        console.warn('Failed to persist scroll state:', err);
-      }
-    }, CURSOR_STATE_DEBOUNCE);
-  } else if (event.data.type === 'cm6-issues-state') {
-    const payload = event.data.data || {};
-    const errors = Number(payload.errors || 0);
-    const warnings = Number(payload.warnings || 0);
-    const total = Number(payload.total || 0);
-
-    // Toggle button is only meaningful when a file is open.
-    issuesToggleBtn.disabled = !currentPath;
-    issuesPrevBtn.disabled = !(total > 0);
-    issuesNextBtn.disabled = !(total > 0);
-
-    if (errors <= 0 && warnings <= 0) {
-      issuesBadgesEl.textContent = '';
-    } else {
-      const parts = [];
-      if (errors > 0) parts.push(`<span class="fe-issues-dot error">${errors}</span>`);
-      if (warnings > 0) parts.push(`<span class="fe-issues-dot warning">${warnings}</span>`);
-      issuesBadgesEl.innerHTML = parts.join('');
-    }
-  } else if (event.data.type === 'cm6-editor-focus') {
-    // Any interaction inside the iframe editor should close open chrome menus
-    try {
-      closeAllMenus();
-    } catch (err) {
-      console.warn('Failed to close menus on editor focus:', err);
-    }
-  } else if (event.data.type === 'cm6-lsp-status') {
-    const payload = event.data.data || {};
-    const spinner = document.getElementById('fe-lsp-spinner');
-    if (!spinner) return;
-
-    const state = String(payload.state || '').toLowerCase();
-    const languageId = payload.languageId ? String(payload.languageId) : '';
-
-    const show = state === 'connecting' || state === 'backend_ready' || state === 'initializing';
-
     if (!window.__feLspSpinnerUi) {
       window.__feLspSpinnerUi = {
         lspShow: false,
@@ -1657,12 +1635,13 @@ window.addEventListener('message', (event) => {
       };
     }
     const feSpinnerUi = window.__feLspSpinnerUi;
+
     feSpinnerUi.lspShow = Boolean(show);
 
     let title = 'Language server';
     if (languageId) title += ` (${languageId})`;
     if (state) title += `: ${state}`;
-    if (payload.error) title += ` — ${payload.error}`;
+    if (payload && payload.error) title += ` — ${payload.error}`;
     feSpinnerUi.lspTitle = title;
     _feUpdateLspSpinner();
 
@@ -1737,20 +1716,15 @@ window.addEventListener('message', (event) => {
           ui.loadingToastTimer = null;
         }
         ui.loadingToastShown = false;
-        const msg = payload.error ? String(payload.error) : `${langLabel} failed to initialize`;
+        const msg =
+          payload && payload.error ? String(payload.error) : `${langLabel} failed to initialize`;
         host.toast(msg, 4500);
       }
     } catch { }
-  }
-  else if (event.data.type === 'cm6_client_id') {
-    try {
-      const cid = event.data?.data?.client_id;
-      if (typeof cid === 'string' && cid.trim()) {
-        cm6NiceguiClientId = cid.trim();
-      }
-    } catch (_) {}
-  }
-});
+  } catch { }
+}
+
+window.__cm6HandleLspStatusUpdate = _feHandleLspStatusUpdate;
 
 async function triggerExternalRefresh(path) {
   if (externalRefreshInProgress) return;
@@ -1866,69 +1840,7 @@ async function apiPost(path, body) {
   }
 }
 
-// Live draft propagation: apply remote draft buffers to the editor without
-// triggering feedback loops (backend suppresses on_change persistence).
-window.__cm6ApplyRemoteDraft = async (payload) => {
-  try {
-    const absPath = payload && typeof payload.path === 'string' ? payload.path : null;
-    if (!absPath) return;
-    if (!window.currentPath || String(window.currentPath) !== String(absPath)) return;
-
-    const content = typeof payload.content === 'string' ? payload.content : null;
-    if (content === null) return;
-
-    try {
-      // Drop self-echo using the NiceGUI client id (context.client.id).
-      // Draft broadcasts originate from editor_app.py and include source_client.
-      if (payload.source_client && cm6NiceguiClientId && String(payload.source_client) === String(cm6NiceguiClientId)) {
-        return;
-      }
-    } catch (_) {}
-
-    // Apply draft content inside the CM6 iframe (non-destructive).
-    try {
-      if (!editorFrame || !editorFrame.contentWindow) return;
-      editorFrame.contentWindow.postMessage({
-        type: 'cm6_mirror',
-        data: { path: absPath, content, source_client: payload.source_client || null }
-      }, '*');
-      markUnsaved(true);
-    } catch (_) {}
-  } catch (err) {
-    console.warn('[DraftSync] Failed to apply remote draft:', err);
-  }
-};
-
-// Live autosave propagation: apply the latest saved buffer to viewer clients.
-// The authoring client (source_client) is excluded to keep cursor stable.
-window.__cm6ApplyAutosaveContent = async (payload) => {
-  try {
-    const absPath = payload && typeof payload.path === 'string' ? payload.path : null;
-    if (!absPath) return;
-    if (!window.currentPath || String(window.currentPath) !== String(absPath)) return;
-
-    const content = typeof payload.content === 'string' ? payload.content : null;
-    if (content === null) return;
-
-    // Drop self-echo using the NiceGUI client id (context.client.id).
-    try {
-      if (payload.source_client && cm6NiceguiClientId && String(payload.source_client) === String(cm6NiceguiClientId)) {
-        return;
-      }
-    } catch (_) {}
-
-    if (!editorFrame || !editorFrame.contentWindow) return;
-    editorFrame.contentWindow.postMessage({
-      type: 'cm6_mirror',
-      data: { path: absPath, content, source_client: payload.source_client || null }
-    }, '*');
-
-    // Autosave implies disk is up to date for viewers.
-    markUnsaved(false);
-  } catch (err) {
-    console.warn('[AutosaveSync] Failed to apply autosave content:', err);
-  }
-};
+// Live draft/autosave propagation is handled by the dedicated editor Socket.IO channel.
 
 async function triggerEditorSearchPanel(reason = 'menu') {
   const payload = {
@@ -2570,19 +2482,16 @@ async function openFile(path, options = {}) {
     // Initialize SHA256 if provided
     lastSha256 = payload.sha256 || null;
 
-    // Tell the editor iframe to open the file (iframe pulls content from backend SSOT).
+    // Tell the editor runtime to open the file via the dedicated editor Socket.IO channel.
     try {
-      if (editorFrame && editorFrame.contentWindow) {
-        editorFrame.contentWindow.postMessage({
-          type: 'cm6_open_path',
-          data: {
-            path: resolved,
-            language: currentModeLanguage || "text",
-          }
-        }, '*');
+      const msg = { type: 'editor_open_request', payload: { path: resolved } };
+      if (editorSocket && editorSocket.connected) {
+        editorSocket.emit(msg.type, msg.payload);
+      } else {
+        editorPending.push(msg);
       }
     } catch (e) {
-      console.warn("[Editor] Failed to postMessage set_content to iframe:", e);
+      console.warn("[Editor] Failed to request open via editor socket:", e);
     }
 
     setText(payload.content || "");
@@ -3785,6 +3694,13 @@ async function main() {
     connectExplorerSocket();
   } catch (e) {
     console.warn('Failed to connect explorer Socket.IO bus:', e);
+  }
+
+  // Connect dedicated editor Socket.IO channel (Monaco iframe control plane).
+  try {
+    connectEditorSocket();
+  } catch (e) {
+    console.warn('Failed to connect editor Socket.IO channel:', e);
   }
 
   branchMenuHandle = initBranchMenu();

@@ -55,8 +55,8 @@ def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
                     """
                     .__fh_debug_badge {
                       position: fixed;
-                      top: 6px;
-                      left: 6px;
+                      left: 8px;
+                      bottom: 8px;
                       z-index: 2147483647;
                       background: rgba(0,0,0,0.55);
                       color: #e6edf3;

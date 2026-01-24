@@ -2,10 +2,14 @@ import hashlib
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
+import time
 
 import socketio
 
 from .stores import _history_store, _preferences_store
+
+_ISSUES_DUMP_WAITING: dict[str, str] = {}
+_ISSUES_DUMP_TTL_S = 20.0
 
 
 def _runtime_meta() -> dict:
@@ -138,6 +142,82 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         except Exception:
             pass
 
+    async def on_editor_cache_state(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            return
+        payload = dict(payload)
+        payload["source_client"] = sid
+        await self.emit("editor:cache_state", payload, room="file_editor_cm6")
+
+    async def on_editor_scroll_state(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            return
+        payload = dict(payload)
+        payload["source_client"] = sid
+        await self.emit("editor:scroll_state", payload, room="file_editor_cm6")
+
+    async def on_editor_draft_state(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            return
+        payload = dict(payload)
+        payload["source_client"] = sid
+        await self.emit("editor:draft_state", payload, room="file_editor_cm6")
+
+    async def on_editor_notify(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            return
+        payload = dict(payload)
+        payload["source_client"] = sid
+        await self.emit("editor:notify", payload, room="file_editor_cm6")
+
+    async def on_editor_ready(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        payload = dict(payload)
+        payload["source_client"] = sid
+        await self.emit("editor:ready", payload, room="file_editor_cm6")
+
+    async def on_editor_issues_dump_request(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        request_id = payload.get("requestId") or payload.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            return
+        _ISSUES_DUMP_WAITING[request_id] = sid
+        # Attach a timestamp so stale requests can be ignored client-side if desired.
+        await self.emit(
+            "editor:issues_dump_request",
+            {"requestId": request_id, "requestedAtMs": int(time.time() * 1000)},
+            room="file_editor_cm6",
+        )
+
+    async def on_editor_issues_dump_response(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            return
+        request_id = payload.get("requestId") or payload.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            return
+
+        host_sid = _ISSUES_DUMP_WAITING.pop(request_id, None)
+        if not host_sid:
+            return
+
+        try:
+            await self.emit(
+                "editor:issues_dump_response",
+                {"requestId": request_id, "dump": payload.get("dump")},
+                room=host_sid,
+            )
+        except Exception:
+            return
+
     async def on_editor_open_request(self, sid, data):
         project = _active_project()
         if not project:
@@ -159,6 +239,20 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload["source_client"] = sid
 
         await self.emit("editor:open", payload, room="file_editor_cm6")
+
+    async def on_editor_prefs_changed(self, sid, data):
+        """Worker-hosted preference updates -> broadcast to editor clients.
+
+        Matches the explorer pattern: clients emit underscore events; server re-broadcasts
+        colon events to all connected editor clients.
+        """
+
+        payload = data or {}
+        if not isinstance(payload, dict):
+            return
+        payload = dict(payload)
+        payload["source_client"] = payload.get("source_client") or sid
+        await self.emit("editor:prefs_changed", payload, room="file_editor_cm6")
 
     async def on_editor_mirror(self, sid, data):
         project = _active_project()
@@ -203,4 +297,3 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             },
             room="file_editor_cm6",
         )
-

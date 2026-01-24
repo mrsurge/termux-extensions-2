@@ -594,6 +594,14 @@ def init_nicegui_with_app(fastapi_app):
 # Just expose the init hook for app_worker.py to call
 NICEGUI_INIT_HOOK = init_nicegui_with_app
 
+# --- Monaco editor Socket.IO (worker-owned) ---
+# The main framework process proxies /editor_ws/socket.io to this worker endpoint.
+from app.apps.file_editor_cm6.monaco_editor.editor_socketio import EDITOR_ASGI_APP
+
+SUBAPPS = [
+    ("/editor_ws/socket.io", EDITOR_ASGI_APP),
+]
+
 # Import singleton store instances
 from .stores import _history_store, _preferences_store
 

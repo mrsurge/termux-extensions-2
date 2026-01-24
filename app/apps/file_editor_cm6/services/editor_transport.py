@@ -1,17 +1,141 @@
-import socketio
+import asyncio
+import inspect
+import sys
+from contextlib import suppress
 
-from app.apps.file_editor_cm6.editor_ws import EditorSocketIONamespace
+import websockets
+from fastapi import WebSocket
+from starlette.websockets import WebSocketDisconnect, WebSocketState
+
+from app.libs.app_manager import get_running_apps
 
 
-def register(app):
-    """Register dedicated Editor Socket.IO transport on the main server.
+async def _proxy_editor_socketio_websocket(websocket: WebSocket, rest: str = "") -> None:
+    """Main-process shim: proxy /editor_ws Socket.IO (websocket transport) to the worker.
 
-    This keeps editor traffic off NiceGUI's Engine.IO endpoint and gives us a
-    stable bi-directional channel for SSOT sync + live edit mirroring.
+    Contract:
+    - The main process must NOT touch SSOT (HistoryStore/ProjectSidecar).
+    - This module only multiplexes/proxies the websocket to the app worker.
     """
 
-    editor_sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
-    editor_sio.register_namespace(EditorSocketIONamespace("/editor"))
-    editor_app = socketio.ASGIApp(editor_sio, socketio_path="")
-    app.mount("/editor_ws/socket.io", editor_app)
+    await websocket.accept()
 
+    # This mount is app-specific; always route to Code CM6 worker.
+    app_id = "file_editor_cm6"
+
+    running_apps = await get_running_apps()
+    if app_id not in running_apps:
+        with suppress(Exception):
+            await websocket.close(code=1011)
+        return
+
+    port = int(running_apps[app_id]["port"])
+    query = websocket.scope.get("query_string", b"").decode("utf-8")
+
+    # Preserve the exact incoming path, including a possible trailing '/',
+    # because ASGI mount path rewriting affects what the worker sees as scope["path"].
+    # If we drop the trailing slash, the worker may see an empty path, which can
+    # break Engine.IO's socketio_path='' matching and cause immediate closes.
+    incoming_path = websocket.scope.get("path") or "/editor_ws/socket.io"
+    # The worker mounts the Engine.IO ASGI app at '/editor_ws/socket.io' with
+    # socketio_path='', which expects requests at the mount root ('/'). When a
+    # client connects to '/editor_ws/socket.io' (no trailing slash), the mounted
+    # app can see an empty path and reject the connection. Normalize to ensure
+    # the worker always receives a trailing '/' at the mount root.
+    if incoming_path == "/editor_ws/socket.io":
+        incoming_path = "/editor_ws/socket.io/"
+    worker_url = f"ws://127.0.0.1:{port}{incoming_path}"
+    if query:
+        worker_url += f"?{query}"
+
+    client_headers = websocket.headers
+    origin_hdr = client_headers.get("origin")
+    cookie_hdr = client_headers.get("cookie")
+    ua_hdr = client_headers.get("user-agent")
+
+    sec_ws_proto = client_headers.get("sec-websocket-protocol")
+    subprotocols = None
+    if sec_ws_proto:
+        subprotocols = [p.strip() for p in sec_ws_proto.split(",") if p.strip()]
+
+    extra_headers = []
+    if cookie_hdr:
+        extra_headers.append(("Cookie", cookie_hdr))
+    if ua_hdr:
+        extra_headers.append(("User-Agent", ua_hdr))
+
+    connect_kwargs = {
+        "origin": origin_hdr,
+        "subprotocols": subprotocols,
+        # Let Engine.IO handle its own ping/pong at the message layer.
+        # Keep websocket-level ping enabled by default (helps on flaky networks).
+    }
+    if extra_headers:
+        param_names = inspect.signature(websockets.connect).parameters
+        if "additional_headers" in param_names:
+            connect_kwargs["additional_headers"] = extra_headers
+        else:
+            connect_kwargs["extra_headers"] = extra_headers
+
+    try:
+        async with websockets.connect(worker_url, **connect_kwargs) as worker_ws:
+
+            async def forward_client_to_worker() -> None:
+                try:
+                    while True:
+                        packet = await websocket.receive()
+                        if packet.get("type") == "websocket.disconnect":
+                            break
+                        if packet.get("text") is not None:
+                            await worker_ws.send(packet["text"])
+                        elif packet.get("bytes") is not None:
+                            await worker_ws.send(packet["bytes"])
+                except WebSocketDisconnect:
+                    pass
+                except Exception:
+                    pass
+
+            async def forward_worker_to_client() -> None:
+                try:
+                    async for msg in worker_ws:
+                        if isinstance(msg, (bytes, bytearray)):
+                            await websocket.send_bytes(msg)
+                        else:
+                            await websocket.send_text(msg)
+                except websockets.ConnectionClosedOK:
+                    pass
+                except Exception:
+                    pass
+
+            tasks = [
+                asyncio.create_task(forward_client_to_worker()),
+                asyncio.create_task(forward_worker_to_client()),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+    except Exception as exc:
+        print(f"[Editor WS] Failed to proxy to worker_url={worker_url}: {exc}", file=sys.stderr, flush=True)
+    finally:
+        if websocket.application_state != WebSocketState.DISCONNECTED:
+            with suppress(Exception):
+                await websocket.close()
+
+
+def register(app) -> None:
+    """Register the editor Socket.IO websocket proxy in the main process."""
+
+    # Engine.IO websocket requests usually hit exactly '/editor_ws/socket.io', but we
+    # also accept deeper paths for completeness.
+    app.add_api_websocket_route(
+        "/editor_ws/socket.io",
+        _proxy_editor_socketio_websocket,
+        name="editor_ws_proxy_root",
+    )
+    app.add_api_websocket_route(
+        "/editor_ws/socket.io/{rest:path}",
+        _proxy_editor_socketio_websocket,
+        name="editor_ws_proxy",
+    )

@@ -165,7 +165,6 @@ def _normalize_project_path_for_broadcast(project_path: str | Path) -> str:
     except Exception:
         return str(project_path)
 
-
 async def _broadcast_lsp_busy(*, project_path: str, payload: dict) -> None:
     try:
         from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
@@ -2326,7 +2325,7 @@ async def get_view_state():
 @editor_router.post('/update_preference')
 async def update_preference(data: dict = Body(...)):
     """
-    Update a single preference and apply it to the editor immediately.
+    Update a single preference and apply it to the editor immediately (if an editor is active).
     This is the ONLY way frontend should change preferences.
     Returns full view state to eliminate double round-trip (Jimmy's optimization). (also a new thing here... test)
     """
@@ -2338,9 +2337,6 @@ async def update_preference(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail="key is required")
     
     editors = get_active_editors()
-    if not editors:
-        raise HTTPException(status_code=404, detail="Editor not initialized")
-    editor = editors[0]
     
     # Validate key. Most preferences are editor-scoped in PreferencesStore, but
     # LSP config is project-scoped (sidecar SSOT via HistoryStore facade).
@@ -2587,13 +2583,15 @@ async def update_preference(data: dict = Body(...)):
         
         print(f"[PREFERENCE] Updated {key}={value}", file=sys.stderr)
 
+        view_state = _get_view_state_dict()
+
         # Broadcast preference changes so other connected host shells converge immediately.
         # (This is separate from cm6-cache-state, which is primarily about doc cache telemetry.)
         try:
             project_path = _history_store.get_active_project() or str(get_project_root())
             proj_norm = str(Path(project_path).expanduser().resolve(strict=False)) if project_path else None
             if proj_norm:
-                view_state = _get_view_state_dict()
+                preferences = _preferences_store.get_preferences(proj_norm)
                 from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
                 asyncio.create_task(
                     _explorer_manager.broadcast(
@@ -2605,16 +2603,41 @@ async def update_preference(data: dict = Body(...)):
                                 "key": key,
                                 "value": value,
                                 "view_state": view_state,
+                                "preferences": preferences,
                                 "source_client": source_client,
                             },
                         },
                     )
                 )
+
+                # Also notify the dedicated editor Socket.IO channel (Monaco iframe).
+                # Worker-owned Socket.IO server emits directly; main process is proxy-only.
+                try:
+                    from app.apps.file_editor_cm6.monaco_editor.editor_socketio import EDITOR_SIO
+
+                    asyncio.create_task(
+                        EDITOR_SIO.emit(
+                            "editor:prefs_changed",
+                            {
+                                "project_path": proj_norm,
+                                "key": key,
+                                "value": value,
+                                "view_state": view_state,
+                                "preferences": preferences,
+                                "source_client": source_client,
+                            },
+                            room="file_editor_cm6",
+                            namespace="/editor",
+                        )
+                    )
+                except Exception:
+                    pass
+
         except Exception:
             pass
         
         # Return full state (Jimmy's optimization - single round trip)
-        return {"ok": True, "data": _get_view_state_dict()}
+        return {"ok": True, "data": view_state}
         
     except HTTPException:
         raise
