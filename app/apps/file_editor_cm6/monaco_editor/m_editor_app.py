@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi.responses import HTMLResponse, Response
+from starlette.responses import FileResponse
 
 
 def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
@@ -22,6 +23,80 @@ def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
     """
 
     from fasthtml.common import Body, Div, Head, Html, Link, Meta, Script, Style, Title, to_xml
+
+    # Use the pinned VS Code monaco-editor-core build output (ESM) directly.
+    # This directory is produced by: `worktrees/vscode-te2-diff` -> `gulp editor-distro`.
+    # Resolve repo root (m_editor_app.py lives at: app/apps/file_editor_cm6/monaco_editor/...)
+    repo_root = Path(__file__).resolve().parents[4]
+    vscode_monaco_esm_dir = repo_root / "worktrees" / "vscode-te2-diff" / "out-monaco-editor-core" / "esm"
+    if not vscode_monaco_esm_dir.exists():
+        raise FileNotFoundError(
+            f"Missing VS Code monaco-editor-core ESM output at {vscode_monaco_esm_dir}. "
+            "Build it first in `worktrees/vscode-te2-diff` with `gulp editor-distro`."
+        )
+
+    # Monaco language contributions (syntax + pseudo-LSP).
+    # This directory is produced by an esbuild bundle from the pinned monaco-editor sources:
+    # `worktrees/vscode-te2-diff/out-monaco-editor-core/te2-lang/`.
+    vscode_monaco_lang_dir = repo_root / "worktrees" / "vscode-te2-diff" / "out-monaco-editor-core" / "te2-lang"
+    if not vscode_monaco_lang_dir.exists():
+        raise FileNotFoundError(
+            f"Missing Monaco language bundle output at {vscode_monaco_lang_dir}. "
+            "Build it with the TE2 esbuild step (monaco-editor-mobile-playground sources)."
+        )
+
+    # IMPORTANT: Monaco's ESM output imports CSS via `import './foo.css'`.
+    # Browsers don't support CSS module imports directly, so we serve `.css` as a JS
+    # module shim which injects a `<link>` that points at the real CSS with `?raw=1`.
+    async def _serve_static_with_css_shim(base_dir: Path, file_path: str, raw: str | None):
+        base = base_dir.resolve()
+        target = (base / file_path).resolve()
+        if not str(target).startswith(str(base) + "/") and target != base:
+            return Response("not found", status_code=404, media_type="text/plain")
+        if not target.exists() or not target.is_file():
+            return Response("not found", status_code=404, media_type="text/plain")
+
+        # Serve raw CSS when explicitly requested.
+        if target.suffix == ".css" and raw == "1":
+            return FileResponse(str(target), media_type="text/css")
+
+        # Serve a JS module shim for CSS imports.
+        if target.suffix == ".css":
+            shim = """
+// Auto-generated CSS module shim (TE2 / VSCode Monaco ESM)
+const url = new URL(import.meta.url);
+url.searchParams.set('raw', '1');
+const href = url.toString();
+const id = 'te2-css:' + href;
+if (!document.querySelector(`link[data-te2-css="${id}"]`)) {
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = href;
+  link.dataset.te2Css = id;
+  document.head.appendChild(link);
+}
+export default href;
+""".lstrip()
+            return Response(shim, media_type="application/javascript")
+
+        # Default: serve the file normally (js, map, wasm, etc).
+        return FileResponse(str(target))
+
+    @fastapi_app.api_route(
+        f"{mount_path}/monaco_vscode/esm/{{file_path:path}}",
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
+    async def _serve_monaco_vscode_esm(file_path: str, raw: str | None = None):
+        return await _serve_static_with_css_shim(vscode_monaco_esm_dir, file_path, raw)
+
+    @fastapi_app.api_route(
+        f"{mount_path}/monaco_vscode/lang/{{file_path:path}}",
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
+    async def _serve_monaco_vscode_lang(file_path: str, raw: str | None = None):
+        return await _serve_static_with_css_shim(vscode_monaco_lang_dir, file_path, raw)
 
     @fastapi_app.get(f"{mount_path}/monaco_editor/m_editor_app.js", include_in_schema=False)
     async def _serve_monaco_editor_js():
@@ -43,6 +118,20 @@ def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
             href="/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.css",
         )
 
+        # NOTE: Import map URLs are resolved relative to the iframe document.
+        # Use a relative URL so it resolves under `/api/app/<app_id>/ui/...` and
+        # does not accidentally target the host's `/ui/...` NiceGUI mount.
+        import_map = Script(
+            """
+            {
+              "imports": {
+                "monaco-editor-core": "./monaco_vscode/esm/vs/editor/editor.api.js"
+              }
+            }
+            """.strip(),
+            type="importmap",
+        )
+
         html = Html(
             Head(
                 Title("Code CM6"),
@@ -50,6 +139,7 @@ def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
                 Meta(name="viewport", content="width=device-width, initial-scale=1"),
                 css,
                 touch_css,
+                import_map,
                 # Debug: prove CSS is loaded inside the iframe
                 Style(
                     """
@@ -80,7 +170,6 @@ def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
                     src="/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js"
                 ),
                 Script(src="/static/vendor/socket.io.min.js"),
-                Script(src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"),
                 # Monaco editor harness (SSOT-first + editor socket transport).
                 Script(src="monaco_editor/m_editor_app.js"),
             ),

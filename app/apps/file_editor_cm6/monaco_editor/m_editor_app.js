@@ -51,7 +51,7 @@
   function ensureEditor() {
     if (editor) return;
     var el = document.getElementById('fh-monaco');
-    if (!el || !window.monaco || !window.require) return;
+    if (!el || !window.monaco) return;
     // Editor creation MUST be driven by SSOT (HistoryStore/PreferencesStore).
     // This function is only used as a last-resort guard; prefer ensureEditorWithPrefs().
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
@@ -134,7 +134,15 @@
       minimap: { enabled: !!showMinimap },
       renderIndentGuides: !!showIndentGuides,
       autoClosingBrackets: autoCloseBrackets ? 'always' : 'never',
-      quickSuggestions: !!autocompletion,
+      // Monaco has multiple suggestion paths:
+      // - word based suggestions (no language service needed)
+      // - language service backed suggestions (ts/css/json/html workers)
+      // Keep both enabled when `autocompletion` is enabled.
+      quickSuggestions: autocompletion ? { other: true, comments: true, strings: true } : false,
+      suggestOnTriggerCharacters: !!autocompletion,
+      wordBasedSuggestions: autocompletion ? 'currentDocument' : 'off',
+      parameterHints: { enabled: !!autocompletion },
+      tabCompletion: autocompletion ? 'on' : 'off',
       fontSize: fontSize,
     };
   }
@@ -169,7 +177,7 @@
   async function ensureEditorWithPrefs() {
     if (editor) return editor;
     var el = document.getElementById('fh-monaco');
-    if (!el || !window.monaco || !window.require) return null;
+    if (!el || !window.monaco) return null;
 
     try {
       if (!cachedPrefs) cachedPrefs = await fetchSSOTState();
@@ -554,33 +562,75 @@
 
   // No host↔iframe postMessage bridge: all runtime communication uses /editor Socket.IO.
 
-  function bootMonaco() {
-    if (!window.require) return;
-    window.require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } });
-    window.require(['vs/editor/editor.main'], function() {
-      try {
-        // Initialize editor strictly from SSOT.
-        ensureEditorWithPrefs().then(function() {
-          if (pending) applyContent(pending);
-          // Prefer dedicated editor Socket.IO transport; fall back to SSOT HTTP.
-          if (!connectEditorSocket()) {
-            restoreFromSSOT();
+  async function bootMonaco() {
+    try {
+      // Load the pinned VS Code monaco-editor-core ESM build (served by the worker).
+      // NOTE: This is the only supported Monaco source for TE2 right now.
+      var base = (apiBase || '') + '/ui/monaco_vscode/esm';
+      var langBase = (apiBase || '') + '/ui/monaco_vscode/lang';
+
+      // Monaco ESM expects a global MonacoEnvironment.getWorker for editor services.
+      // Provide worker entrypoints for Monaco language services + editor services.
+      window.MonacoEnvironment = {
+        getWorker: function(_moduleId, _label) {
+          try {
+            var label = String(_label || '');
+            // Monaco's language services are worker-backed (completion/diagnostics/etc).
+            // Route by label, mirroring Monaco's standard mapping.
+            if (label === 'typescript' || label === 'javascript') {
+              return new Worker(langBase + '/workers/ts.worker.js', { type: 'module' });
+            }
+            if (label === 'json') {
+              return new Worker(langBase + '/workers/json.worker.js', { type: 'module' });
+            }
+            if (label === 'css' || label === 'scss' || label === 'less') {
+              return new Worker(langBase + '/workers/css.worker.js', { type: 'module' });
+            }
+            if (label === 'html' || label === 'handlebars' || label === 'razor') {
+              return new Worker(langBase + '/workers/html.worker.js', { type: 'module' });
+            }
+
+            // Fallback: editor worker service.
+            return new Worker(base + '/vs/editor/editor.worker.start.js', { type: 'module' });
+          } catch (e) {
+            console.error('[Monaco] Failed to create worker', e);
+            throw e;
           }
-          emitToHost('editor_ready', {});
-          updateDebug('boot=ok');
-        }).catch(function(e) {
-          console.error('[Monaco] SSOT boot failed', e);
-          updateDebug('boot=fail');
-        });
-        // Restore current file/prefs from backend SSOT (HistoryStore/PreferencesStore).
+        },
+      };
+
+      var monacoNs = await import(base + '/vs/editor/editor.main.js');
+      window.monaco = monacoNs;
+
+      // Register tokenizers + language services (typescript/css/html/json) from TE2 language bundles.
+      // These modules import from "monaco-editor-core" which is mapped via <script type="importmap">.
+      try {
+        await import(langBase + '/basic-languages/monaco.contribution.js');
+        await import(langBase + '/language/typescript/monaco.contribution.js');
+        await import(langBase + '/language/json/monaco.contribution.js');
+        await import(langBase + '/language/css/monaco.contribution.js');
+        await import(langBase + '/language/html/monaco.contribution.js');
       } catch (e) {
-        console.error('[Monaco] boot failed', e);
-        updateDebug('boot=fail');
+        console.warn('[Monaco] Failed to load language bundles', e);
       }
-    });
+
+      // Initialize editor strictly from SSOT.
+      await ensureEditorWithPrefs();
+      if (pending) applyContent(pending);
+
+      // Prefer dedicated editor Socket.IO transport; fall back to SSOT HTTP.
+      if (!connectEditorSocket()) {
+        restoreFromSSOT();
+      }
+
+      emitToHost('editor_ready', {});
+      updateDebug('boot=ok');
+    } catch (e) {
+      console.error('[Monaco] boot failed', e);
+      updateDebug('boot=fail');
+    }
   }
 
   updateDebug('boot=init');
   bootMonaco();
 })();
-
