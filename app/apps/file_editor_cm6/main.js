@@ -1737,8 +1737,7 @@ window.addEventListener('message', (event) => {
         host.toast(msg, 4500);
       }
     } catch { }
-  }
-  else if (event.data.type === 'cm6_client_id') {
+  } else if (event.data.type === 'cm6_client_id') {
     try {
       const cid = event.data?.data?.client_id;
       if (typeof cid === 'string' && cid.trim()) {

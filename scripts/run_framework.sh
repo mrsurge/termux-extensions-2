@@ -298,14 +298,25 @@ cleanup_framework_shell_logs
 # Clean up stale python cache files
 find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
-supervisor_running() {
+supervisor_running_on_port() {
+  # Check if a supervisor is already running on the requested framework port
+  local port="$1"
   local pid
-  pid=$(pgrep -f "python -m app.supervisor" || true)
-  [ -n "$pid" ]
+  pid=$(pgrep -f "python -m app.supervisor.*--port[= ]$port" || true)
+  if [ -n "$pid" ]; then
+    return 0
+  fi
+  # Also check if the port is in use (covers edge cases)
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -i :"$port" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+  elif command -v ss >/dev/null 2>&1; then
+    ss -tlnH "sport = :$port" 2>/dev/null | grep -q . && return 0
+  fi
+  return 1
 }
 
-if supervisor_running; then
-  echo "[run_framework] Framework already running. Stop it first or use different args." >&2
+if supervisor_running_on_port "$FRAMEWORK_PORT"; then
+  echo "[run_framework] Framework already running on port $FRAMEWORK_PORT. Stop it first or use --port <OTHER_PORT>." >&2
   exit 1
 fi
 
