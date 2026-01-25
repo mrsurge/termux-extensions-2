@@ -50,6 +50,9 @@
         _layoutEditors();
       });
       layoutObserver.observe(el);
+      try {
+        window.addEventListener('resize', _layoutEditors);
+      } catch (_) {}
     } catch (_) {}
   }
 
@@ -186,6 +189,13 @@
       }
     } catch (_) {}
 
+    var fontFamily = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    try {
+      if (typeof editorPrefs.fontFamily === 'string' && editorPrefs.fontFamily.trim()) {
+        fontFamily = editorPrefs.fontFamily.trim();
+      }
+    } catch (_) {}
+
     // Theme mapping: CM6 themes are not Monaco themes; map to a stable Monaco theme.
     var theme = 'vs-dark';
     try {
@@ -215,6 +225,7 @@
       parameterHints: { enabled: !!autocompletion },
       tabCompletion: autocompletion ? 'on' : 'off',
       fontSize: fontSize,
+      fontFamily: fontFamily,
     };
   }
 
@@ -487,6 +498,7 @@
       readOnly: false,
       originalEditable: false,
       enableSplitViewResizing: false,
+      automaticLayout: true,
     });
 
     // Apply SSOT-derived options to the modified editor.
@@ -619,6 +631,21 @@
     draftZoneIds = [];
   }
 
+  function applyEditorTypography(node) {
+    try {
+      if (!node || !editor || !window.monaco) return;
+      var ff = null;
+      var fs = null;
+      var lh = null;
+      try { ff = editor.getOption(monaco.editor.EditorOption.fontFamily); } catch (_) { ff = null; }
+      try { fs = editor.getOption(monaco.editor.EditorOption.fontSize); } catch (_) { fs = null; }
+      try { lh = editor.getOption(monaco.editor.EditorOption.lineHeight); } catch (_) { lh = null; }
+      if (ff) node.style.fontFamily = ff;
+      if (fs) node.style.fontSize = String(fs) + 'px';
+      if (lh) node.style.lineHeight = String(lh) + 'px';
+    } catch (_) {}
+  }
+
   function _ensureDraftDecoCollection() {
     try {
       if (draftDecoCollection) return draftDecoCollection;
@@ -727,6 +754,7 @@
             var node = document.createElement('div');
             node.className = 'te2-draft-del-zone';
             node.textContent = z.text || '';
+            applyEditorTypography(node);
             try {
               var id = accessor.addZone({
                 afterLineNumber: z.after,

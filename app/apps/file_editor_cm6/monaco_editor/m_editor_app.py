@@ -107,9 +107,38 @@ export default href;
     async def _cm6_fasthtml_monaco_iframe(app_id: str | None = None):
         css = Style(
             """
+            @font-face {
+              font-family: 'JetBrains Mono';
+              src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2') format('woff2');
+              font-weight: 400;
+              font-style: normal;
+              font-display: swap;
+            }
+            @font-face {
+              font-family: 'JetBrains Mono';
+              src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Italic.woff2') format('woff2');
+              font-weight: 400;
+              font-style: italic;
+              font-display: swap;
+            }
+            @font-face {
+              font-family: 'JetBrains Mono';
+              src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Bold.woff2') format('woff2');
+              font-weight: 700;
+              font-style: normal;
+              font-display: swap;
+            }
+            @font-face {
+              font-family: 'JetBrains Mono';
+              src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-BoldItalic.woff2') format('woff2');
+              font-weight: 700;
+              font-style: italic;
+              font-display: swap;
+            }
             html, body { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; background: #0b0f14; }
             .fh-root { height: 100%; width: 100%; margin: 0; padding: 0; display: flex; }
             #fh-monaco { flex: 1; min-height: 0; min-width: 0; width: 100%; height: 100%; -webkit-touch-callout: none; user-select: none; }
+            .fh-root, .monaco-editor { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 
             /* Draft diff decorations (Monaco) */
             .monaco-editor .te2-draft-add-line { background: rgba(56, 139, 253, 0.18) !important; } /* blue */
@@ -127,9 +156,8 @@ export default href;
               color: #e6b450;
               font-family: inherit;
               font-size: inherit;
-              line-height: 1.5;
+              line-height: inherit;
               white-space: pre;
-              padding-left: 8px;
             }
             """
         )
