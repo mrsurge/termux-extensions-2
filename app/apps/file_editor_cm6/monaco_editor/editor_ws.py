@@ -5,9 +5,14 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import anyio
 import socketio
 
 from ..draft_diff_helper import compute_draft_diff
+from ..core_read import emit_diff_changed, init_watcher, push_save_ack
+from ..core_write import BaseMismatchError, _get_file_meta, write_full
+from ..diff_helper import invalidate_diff_cache
+from ..explorer_helper import _normalize_rel_path, mark_draft_cache_dirty, mark_git_cache_dirty
 from ..git_helper import _run_git_optional, is_git_repository
 from ..stores import _history_store, _preferences_store
 
@@ -485,3 +490,113 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             },
             room="file_editor_cm6",
         )
+
+    async def on_editor_save_request(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        project = _active_project()
+        if not project:
+            return {"ok": False, "error": "no_active_project"}
+
+        raw_path = payload.get("path")
+        if not raw_path:
+            session_state = _history_store.get_session_state()
+            raw_path = session_state.get("currentPath")
+
+        abs_path = _normalize_abs_path(str(raw_path) if raw_path else "")
+        if not abs_path:
+            return {"ok": False, "error": "missing_path"}
+        if not _is_under_project(project, abs_path):
+            return {"ok": False, "error": "outside_project"}
+
+        root_path = Path(project)
+        try:
+            init_watcher(root_path)
+        except Exception:
+            pass
+
+        cached = _history_store.get_cached_document(project, abs_path)
+        if not cached or not cached.get("content"):
+            file_meta = _get_file_meta(Path(abs_path))
+            return {"ok": True, "data": file_meta, "noop": True}
+
+        if cached.get("unsaved") is False:
+            file_meta = _get_file_meta(Path(abs_path))
+            return {"ok": True, "data": file_meta, "noop": True}
+
+        content = cached.get("content", "")
+        if not isinstance(content, str):
+            return {"ok": False, "error": "invalid_content"}
+
+        base_sha256 = payload.get("base_sha256")
+        if not isinstance(base_sha256, str) or len(base_sha256) != 64:
+            base_sha256 = cached.get("base_sha256")
+
+        if payload.get("force"):
+            base_sha256 = None
+
+        try:
+            rel_path = _normalize_rel_path(root_path, str(abs_path))
+        except Exception:
+            return {"ok": False, "error": "path_invalid"}
+
+        orig_mode = None
+        abs_path_obj = Path(abs_path)
+        if abs_path_obj.exists():
+            try:
+                orig_mode = abs_path_obj.stat().st_mode & 0o777
+            except OSError:
+                orig_mode = None
+
+        try:
+            await anyio.to_thread.run_sync(
+                lambda: write_full(
+                    root_path,
+                    rel_path,
+                    content,
+                    base_sha256=base_sha256,
+                    mode=orig_mode,
+                )
+            )
+        except BaseMismatchError as exc:
+            return {"ok": False, "error": "BASE_MISMATCH", "current_meta": exc.current_meta}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        file_meta = _get_file_meta(Path(abs_path))
+
+        _history_store.clear_cached_document(project, abs_path)
+        _history_store.prune_clean_drafts(project)
+
+        mark_git_cache_dirty(root_path)
+        mark_draft_cache_dirty(root_path)
+
+        try:
+            from ..explorer_ws import notify_draft_state_changed
+
+            notify_draft_state_changed(project)
+        except Exception:
+            pass
+
+        op_id = payload.get("op_id") or f"editor_save_{int(time.time())}"
+        client_id = payload.get("client_id") or "editor"
+        push_save_ack(str(rel_path), op_id, client_id, file_meta)
+        emit_diff_changed(str(rel_path), file_meta.get("sha256"))
+        invalidate_diff_cache(root_path, str(rel_path))
+
+        await self.emit(
+            "editor:cache_state",
+            {
+                "path": abs_path,
+                "state": "clean",
+                "unsaved": False,
+                "reason": "save",
+                "content_sha256": file_meta.get("sha256"),
+                "source_client": sid,
+            },
+            room="file_editor_cm6",
+        )
+
+        return {"ok": True, "data": file_meta}

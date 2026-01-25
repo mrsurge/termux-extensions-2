@@ -2642,97 +2642,93 @@ async function doSave(targetPath, content) {
   }
 }
 
+function saveFileViaEditorSocket(payload, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    if (!editorSocket || !editorSocket.connected) {
+      reject(new Error('Editor socket not connected'));
+      return;
+    }
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Save timed out'));
+    }, timeoutMs);
+    editorSocket.emit('editor_save_request', payload, (response) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(response);
+    });
+  });
+}
+
 async function saveFile() {
   if (!currentPath || !currentPathExists) return saveAsDialog();
   statusEl.textContent = 'Saving...';
 
-  // Backend-only save - no content round-trip needed
   const opId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  
   const payload = {
+    path: currentPath,
     client_id: clientId,
-    op_id: opId
+    op_id: opId,
   };
-  if (cm6NiceguiClientId) {
-    payload.nicegui_client_id = cm6NiceguiClientId;
-  }
-  
-  if (lastSha256) {
-    payload.base_sha256 = lastSha256;
-  }
+  if (lastSha256) payload.base_sha256 = lastSha256;
 
   try {
-    const result = await apiPost('editor/save', payload);
+    const result = await saveFileViaEditorSocket(payload);
 
-    console.log('[SAVE] Response:', result);
-
-    // apiPost unwraps {ok,data} -> data for most endpoints.
-    // Handle both wrapped and unwrapped save responses.
-    const isWrapped = result && typeof result === 'object' && Object.prototype.hasOwnProperty.call(result, 'ok');
-    if (isWrapped && result.ok === false) {
-      console.error('[SAVE] Failed:', result.error);
+    if (!result || typeof result !== 'object') {
+      throw new Error('Invalid save response');
+    }
+    if (result.ok === false) {
+      if (result.error === 'BASE_MISMATCH') {
+        if (window.confirm('File was modified externally. Retry save and overwrite?')) {
+          const retryPayload = {
+            path: currentPath,
+            client_id: clientId,
+            op_id: `${opId}_retry`,
+            force: true,
+          };
+          const retryResult = await saveFileViaEditorSocket(retryPayload);
+          if (retryResult && retryResult.ok) {
+            const fileMeta = retryResult.data || {};
+            lastSha256 = fileMeta.sha256 || lastSha256;
+            lastSavedContent = getText();
+            markUnsaved(false);
+            statusEl.textContent = 'Saved';
+            setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
+            return true;
+          }
+        }
+        statusEl.textContent = '';
+        return false;
+      }
       if (result.error) host.toast(`Save failed: ${result.error}`);
       statusEl.textContent = '';
       return false;
     }
 
-    const fileMeta = isWrapped ? (result.data || {}) : (result || {});
-
+    const fileMeta = result.data || {};
     if (fileMeta && Object.keys(fileMeta).length > 0) {
       lastSha256 = fileMeta.sha256 || lastSha256;
+      lastSavedContent = getText();
       markUnsaved(false);
       statusEl.textContent = 'Saved';
       setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
       return true;
     }
 
-    // Empty/invalid payload treated as failure.
     console.error('[SAVE] Failed: empty or invalid response');
     host.toast('Save failed');
     statusEl.textContent = '';
     return false;
   } catch (e) {
     console.error('[SAVE] Exception:', e);
-    
-    // Handle 409 conflict
-    if (e.status === 409 || (e.response && e.response.error === 'BASE_MISMATCH')) {
-      if (window.confirm('File was modified externally. Retry save and overwrite?')) {
-        // Retry without base check (force overwrite)
-        const retryPayload = {
-          client_id: clientId,
-          op_id: `${opId}_retry`
-        };
-        if (cm6NiceguiClientId) {
-          retryPayload.nicegui_client_id = cm6NiceguiClientId;
-        }
-        try {
-          const retryResult = await apiPost('editor/save', retryPayload);
-          if (retryResult.ok) {
-            lastSha256 = retryResult.data.sha256 || lastSha256;
-            markUnsaved(false);
-            statusEl.textContent = 'Saved';
-            setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
-            return true;
-          } else {
-            if (retryResult.error) host.toast(`Save failed: ${retryResult.error}`);
-            statusEl.textContent = '';
-            return false;
-          }
-        } catch (retryErr) {
-          host.toast(`Save failed: ${retryErr.message || 'Unknown error'}`);
-          statusEl.textContent = '';
-          return false;
-        }
-      } else {
-        statusEl.textContent = '';
-        return false;
-      }
-    } else {
-      const errMsg = e.message || e.error || JSON.stringify(e);
-      host.toast(`Save failed: ${errMsg}`);
-      statusEl.textContent = '';
-      return false;
-    }
+    const errMsg = e.message || e.error || JSON.stringify(e);
+    host.toast(`Save failed: ${errMsg}`);
+    statusEl.textContent = '';
+    return false;
   }
 }
 
