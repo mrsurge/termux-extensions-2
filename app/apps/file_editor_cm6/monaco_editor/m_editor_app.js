@@ -351,6 +351,7 @@
         ensurePlainEditorWithPrefs();
         return;
       }
+      applyLineNumberSizing();
       _layoutEditors();
 
       // Diff computation is async; getLineChanges() may be null until it settles.
@@ -499,16 +500,29 @@
       originalEditable: false,
       enableSplitViewResizing: false,
       automaticLayout: true,
+      experimental: { useTrueInlineView: true },
+      scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
     });
 
-    // Apply SSOT-derived options to the modified editor.
+    // Apply SSOT-derived options to both editors (original gutter must follow font size).
     try {
       var opts = buildMonacoOptionsFromPrefs(cachedPrefs);
       var theme = null;
       try { theme = opts && opts.theme ? opts.theme : null; } catch (_) { theme = null; }
       try { if (opts) delete opts.theme; } catch (_) {}
-      try { diffEditor.getModifiedEditor().updateOptions(opts || {}); } catch (_) {}
-      try { diffEditor.getOriginalEditor().updateOptions({ readOnly: true, contextmenu: false }); } catch (_) {}
+      try {
+        var diffOpts = Object.assign({}, opts || {}, { minimap: { enabled: false } });
+        diffEditor.getModifiedEditor().updateOptions(diffOpts);
+      } catch (_) {}
+      try {
+        var origOpts = Object.assign({}, opts || {}, { readOnly: true, contextmenu: false, minimap: { enabled: false } });
+        diffEditor.getOriginalEditor().updateOptions(origOpts);
+      } catch (_) {}
+      try {
+        var scrollOpts = { scrollbar: { vertical: 'hidden', verticalScrollbarSize: 0, horizontal: 'hidden', horizontalScrollbarSize: 0 } };
+        diffEditor.getModifiedEditor().updateOptions(scrollOpts);
+        diffEditor.getOriginalEditor().updateOptions(scrollOpts);
+      } catch (_) {}
       if (theme) {
         // Apply the native base theme (diff colors come from Monaco's built-in styling).
         try { monaco.editor.setTheme(theme === 'vs' ? 'vs' : 'vs-dark'); } catch (_) {}
@@ -643,6 +657,26 @@
       if (ff) node.style.fontFamily = ff;
       if (fs) node.style.fontSize = String(fs) + 'px';
       if (lh) node.style.lineHeight = String(lh) + 'px';
+    } catch (_) {}
+  }
+
+  function applyLineNumberSizing() {
+    try {
+      if (!editor || !window.monaco) return;
+      var maxLines = 1;
+      try { if (model && model.getLineCount) maxLines = Math.max(maxLines, model.getLineCount()); } catch (_) {}
+      try { if (gitHeadModel && gitHeadModel.getLineCount) maxLines = Math.max(maxLines, gitHeadModel.getLineCount()); } catch (_) {}
+      try { if (gitDiskModel && gitDiskModel.getLineCount) maxLines = Math.max(maxLines, gitDiskModel.getLineCount()); } catch (_) {}
+      var digits = String(maxLines || 1).length;
+      var minChars = Math.max(4, digits + 1);
+      if (diffEditor && diffEditor.getOriginalEditor && diffEditor.getModifiedEditor) {
+        var diffMin = Math.max(4, digits + 1);
+        try { diffEditor.getOriginalEditor().updateOptions({ lineNumbersMinChars: diffMin }); } catch (_) {}
+        try { diffEditor.getModifiedEditor().updateOptions({ lineNumbersMinChars: diffMin }); } catch (_) {}
+        try { editor.updateOptions({ lineNumbersMinChars: diffMin }); } catch (_) {}
+      } else {
+        try { editor.updateOptions({ lineNumbersMinChars: minChars }); } catch (_) {}
+      }
     } catch (_) {}
   }
 
@@ -824,6 +858,7 @@
     }
     currentPath = nextPath;
     try { lastContentSha256 = data.content_sha256 || lastContentSha256; } catch (_) {}
+    applyLineNumberSizing();
     ensureTouchSelection('post');
     setTimeout(function(){ ensureTouchSelection('tick'); }, 0);
     emitToHost('editor_notify', { type: 'cm6_set_content_ack', path: data.path || null });
@@ -1001,6 +1036,7 @@
               try { model.setValue(payload.content || ''); } finally { isApplyingRemote = false; }
               try { monaco.editor.setModelLanguage(model, lang); } catch (_) {}
             }
+            applyLineNumberSizing();
             ensureTouchSelection('open');
             try { lastContentSha256 = payload.content_sha256 || lastContentSha256; } catch (_) {}
             emitToHost('editor_cache_state', {
@@ -1029,6 +1065,7 @@
           isApplyingRemote = true;
           try { model.setValue(payload.content); } finally { isApplyingRemote = false; }
           try { lastContentSha256 = payload.content_sha256 || lastContentSha256; } catch (_) {}
+          applyLineNumberSizing();
           emitToHost('editor_cache_state', {
             path: payload.path,
             state: 'mid_session',
@@ -1059,12 +1096,29 @@
           try { if (opts) delete opts.theme; } catch (_) {}
 
           try { editor.updateOptions(opts || {}); } catch (e) { console.warn('[Monaco] updateOptions failed', e); }
+          applyLineNumberSizing();
+          if (diffEditor && diffEditor.getOriginalEditor) {
+            try {
+              var origOpts = Object.assign({}, opts || {}, { readOnly: true, contextmenu: false, minimap: { enabled: false } });
+              diffEditor.getOriginalEditor().updateOptions(origOpts);
+              try {
+                var diffOpts = Object.assign({}, opts || {}, { minimap: { enabled: false } });
+                diffEditor.getModifiedEditor().updateOptions(diffOpts);
+              } catch (_) {}
+              try {
+                var scrollOpts = { scrollbar: { vertical: 'hidden', verticalScrollbarSize: 0, horizontal: 'hidden', horizontalScrollbarSize: 0 } };
+                diffEditor.getModifiedEditor().updateOptions(scrollOpts);
+                diffEditor.getOriginalEditor().updateOptions(scrollOpts);
+              } catch (_) {}
+            } catch (_) {}
+          }
           if (theme) {
             try {
               monaco.editor.setTheme(theme === 'vs' ? 'vs' : 'vs-dark');
             } catch (_) {}
           }
           ensureTouchSelection('prefs');
+          _layoutEditors();
           updateDebug('prefs=ok');
           requestGitBaselines();
           if (getShowDraftDiffs()) requestDraftDiff('prefs');
