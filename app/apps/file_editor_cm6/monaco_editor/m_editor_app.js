@@ -713,8 +713,12 @@
 
       var lineCount = 0;
       try { lineCount = model.getLineCount ? model.getLineCount() : 0; } catch (_) { lineCount = 0; }
+      if (!lineCount || lineCount < 1) {
+        clearDraftDiffDecorations();
+        setDebugDraft('draft=empty');
+        return;
+      }
       function clampLine(n) {
-        if (!lineCount) return 1;
         if (n < 1) return 1;
         if (n > lineCount) return lineCount;
         return n;
@@ -737,6 +741,10 @@
           if (t === 'add-draft') {
             addLines += 1;
             var lno = clampLine(newLine);
+            if (lno < 1 || lno > lineCount) {
+              newLine += 1;
+              continue;
+            }
             var lineLen = 0;
             try { lineLen = model.getLineLength(lno); } catch (_) { lineLen = 0; }
             decorations.push({
@@ -753,6 +761,10 @@
           if (t === 'del-draft') {
             delLines += 1;
             var anchor = clampLine(newLine);
+            if (anchor < 1 || anchor > lineCount) {
+              oldLine += 1;
+              continue;
+            }
             decorations.push({
               range: new monaco.Range(anchor, 1, anchor, 1),
               options: {
@@ -762,7 +774,7 @@
               },
             });
             zones.push({
-              after: Math.max(0, anchor - 1),
+              after: Math.max(1, anchor - 1),
               text: (ln && typeof ln.text === 'string') ? ln.text : '',
             });
             oldLine += 1;
@@ -1302,11 +1314,33 @@
         await import(langBase + '/language/html/monaco.contribution.js');
       } catch (e) {
         console.warn('[Monaco] Failed to load language bundles', e);
+        try {
+          var bust = '?ts=' + Date.now();
+          await import(langBase + '/basic-languages/monaco.contribution.js' + bust);
+          await import(langBase + '/language/typescript/monaco.contribution.js' + bust);
+          await import(langBase + '/language/json/monaco.contribution.js' + bust);
+          await import(langBase + '/language/css/monaco.contribution.js' + bust);
+          await import(langBase + '/language/html/monaco.contribution.js' + bust);
+        } catch (e2) {
+          console.warn('[Monaco] Forced language bundle load failed', e2);
+        }
       }
 
       // Initialize editor strictly from SSOT.
       await ensureEditorWithPrefs();
       if (pending) applyContent(pending);
+
+      try {
+        if (window.monaco && model && currentPath) {
+          monaco.editor.setModelLanguage(model, languageFromPath(currentPath));
+        }
+        var langs = (window.monaco && monaco.languages && monaco.languages.getLanguages)
+          ? monaco.languages.getLanguages().map(function(l){ return l && l.id; }).filter(Boolean)
+          : [];
+        if (langs.length <= 1 && langs[0] === 'plaintext') {
+          console.warn('[Monaco] language registry still plaintext-only');
+        }
+      } catch (_) {}
 
       // Prefer dedicated editor Socket.IO transport; fall back to SSOT HTTP.
       if (!connectEditorSocket()) {

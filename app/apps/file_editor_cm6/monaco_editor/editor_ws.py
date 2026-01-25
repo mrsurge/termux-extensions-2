@@ -496,6 +496,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         if not isinstance(payload, dict):
             payload = {}
 
+
         project = _active_project()
         if not project:
             return {"ok": False, "error": "no_active_project"}

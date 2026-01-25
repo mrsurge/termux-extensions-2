@@ -493,7 +493,8 @@ function _applyEditorCacheState(data) {
       const idx = trimmed.lastIndexOf('/');
       lastPickerPath = idx > 0 ? trimmed.slice(0, idx) : '/';
     } catch (_) {}
-    if (pathChanged || !fileNameEl.textContent || fileNameEl.textContent === 'Untitled') {
+    const nameEl = window.fileNameEl || fileNameEl || null;
+    if (nameEl && (pathChanged || !nameEl.textContent || nameEl.textContent === 'Untitled')) {
       updatePathDisplay();
     }
   }
@@ -816,6 +817,7 @@ export default async function initFileEditor(rootEl, api, host) {
 
 window.host = host;
 const cacheStateBadge = requireEl('#fe-file-draft-badge');
+var fileNameEl = null;
 window.api  = api;
 const HOME_DIR = '/data/data/com.termux/files/home';
 const HOME_PREFIX = `${HOME_DIR}/`;
@@ -889,7 +891,8 @@ const agentTranscript = requireEl('#agent-transcript');
 const agentComposer = requireEl('#agent-input');
 
 // Title/status & chrome
-const fileNameEl = requireEl('#fe-file-name');
+fileNameEl = requireEl('#fe-file-name');
+window.fileNameEl = fileNameEl;
 const issuesToggleBtn = requireEl('#fe-issues-toggle');
 const issuesPrevBtn = requireEl('#fe-issues-prev');
 const issuesNextBtn = requireEl('#fe-issues-next');
@@ -1551,6 +1554,7 @@ let lastPickerPath = HOME_DIR;
 
 // WebSocket and autosave state
 let ws = null;
+let wsKeepaliveTimer = null;
 let editTrackerWS = null;
 let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 let cm6NiceguiClientId = null;
@@ -2210,6 +2214,10 @@ function closeWebSocket() {
     try { ws.close(); } catch {}
     ws = null;
   }
+  if (wsKeepaliveTimer) {
+    clearInterval(wsKeepaliveTimer);
+    wsKeepaliveTimer = null;
+  }
 }
 
 async function openWebSocket(path) {
@@ -2254,6 +2262,13 @@ async function openWebSocket(path) {
 
   ws.onopen = () => {
     console.log('WebSocket connected for:', path);
+    if (!wsKeepaliveTimer) {
+      wsKeepaliveTimer = setInterval(() => {
+        try {
+          if (ws && ws.readyState === 1) ws.send('ping');
+        } catch (_) {}
+      }, 15000);
+    }
   };
 
   ws.onmessage = (event) => {
@@ -2271,6 +2286,10 @@ async function openWebSocket(path) {
 
   ws.onclose = () => {
     console.log('WebSocket closed');
+    if (wsKeepaliveTimer) {
+      clearInterval(wsKeepaliveTimer);
+      wsKeepaliveTimer = null;
+    }
   };
   
   ws.onreconnect = (attempt, delay) => {
@@ -2662,7 +2681,7 @@ function saveFileViaEditorSocket(payload, timeoutMs = 8000) {
     });
   });
 }
-
+ // getAgentHostBase
 async function saveFile() {
   if (!currentPath || !currentPathExists) return saveAsDialog();
   statusEl.textContent = 'Saving...';
@@ -2921,6 +2940,112 @@ function showAutosaveModal(fileLabel, hasOtherDrafts) {
     modal.cancelBtn.onclick = onCancel;
   });
 }
+
+// ---------- Watcher (inotify) warning modal ----------
+let watcherModalController = null;
+
+function ensureWatcherLimitModal() {
+  if (watcherModalController) return watcherModalController;
+  const modal = document.createElement('div');
+  modal.id = 'fe-watcher-modal';
+  modal.className = 'fe-modal';
+  modal.setAttribute('aria-hidden', 'true');
+  modal.innerHTML = `
+    <div class="fe-modal-card" style="max-width: 520px;">
+      <div class="fe-modal-header">
+        <strong>File watcher limit reached</strong>
+        <span style="flex:1"></span>
+        <button class="fe-btn" id="fe-watcher-close" aria-label="Close">✕</button>
+      </div>
+      <div class="fe-modal-body">
+        <div id="fe-watcher-message" style="font-size:0.9rem; line-height:1.5;"></div>
+        <div style="margin-top: 10px;">
+          <label style="display:block; font-size: 12px; opacity: 0.85; margin-bottom: 6px;">Sudo password (optional)</label>
+          <input id="fe-watcher-password" type="password" placeholder="Leave blank if sudo has no password" style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--fe-border, #2c333b); background: var(--fe-panel, #0f141a); color: inherit;" />
+        </div>
+        <p style="margin-top:10px; font-size:12px; opacity:0.8;">
+          This will run: <code>sudo sysctl -w fs.inotify.max_user_watches=524288</code>
+        </p>
+      </div>
+      <div class="fe-modal-actions">
+        <button class="fe-btn fe-btn-primary" id="fe-watcher-confirm">Raise limit</button>
+        <button class="fe-btn" id="fe-watcher-cancel">Cancel</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  watcherModalController = {
+    root: modal,
+    messageEl: modal.querySelector('#fe-watcher-message'),
+    passwordEl: modal.querySelector('#fe-watcher-password'),
+    confirmBtn: modal.querySelector('#fe-watcher-confirm'),
+    cancelBtn: modal.querySelector('#fe-watcher-cancel'),
+    closeBtn: modal.querySelector('#fe-watcher-close'),
+  };
+  watcherModalController.closeBtn.addEventListener('click', () => hideWatcherLimitModal());
+  watcherModalController.cancelBtn.addEventListener('click', () => hideWatcherLimitModal());
+  watcherModalController.root.addEventListener('click', (evt) => {
+    if (evt.target === watcherModalController.root) {
+      hideWatcherLimitModal();
+    }
+  });
+  return watcherModalController;
+}
+
+function hideWatcherLimitModal() {
+  if (!watcherModalController) return;
+  watcherModalController.root.classList.remove('show');
+  watcherModalController.root.setAttribute('aria-hidden', 'true');
+}
+
+function showWatcherLimitModal(message, limit) {
+  const modal = ensureWatcherLimitModal();
+  modal.messageEl.textContent = message || 'File watcher limit reached. Attempt to raise now?';
+  modal.passwordEl.value = '';
+  modal.root.classList.add('show');
+  modal.root.setAttribute('aria-hidden', 'false');
+
+  modal.confirmBtn.onclick = () => {
+    const pwd = modal.passwordEl.value || '';
+    if (typeof window.__explorerBusSend === 'function') {
+      window.__explorerBusSend('watcher:raiseLimit', {
+        limit: typeof limit === 'number' ? limit : 524288,
+        password: pwd,
+      });
+    } else {
+      host.toast('Explorer transport not available');
+    }
+    hideWatcherLimitModal();
+  };
+}
+
+window.__cm6HandleWatcherError = (payload) => {
+  const msg = payload && payload.message ? payload.message : null;
+  const limit = payload && typeof payload.limit === 'number' ? payload.limit : 524288;
+  const warning = msg ? `${msg}\n\nAttempt to raise the limit now?` : 'File watcher limit reached. Attempt to raise now?';
+  showWatcherLimitModal(warning, limit);
+};
+
+window.__cm6HandleWatcherRaiseResult = (payload) => {
+  if (!payload) return;
+  if (payload.ok) {
+    host.toast(payload.stdout || 'Watcher limit updated');
+  } else {
+    const err = payload.stderr || payload.stdout || 'Failed to raise watcher limit';
+    host.toast(err);
+  }
+};
+
+try {
+  if (window.__cm6PendingWatcherError) {
+    window.__cm6HandleWatcherError(window.__cm6PendingWatcherError);
+    window.__cm6PendingWatcherError = null;
+  }
+  if (window.__cm6PendingWatcherRaiseResult) {
+    window.__cm6HandleWatcherRaiseResult(window.__cm6PendingWatcherRaiseResult);
+    window.__cm6PendingWatcherRaiseResult = null;
+  }
+} catch (_) {}
 
 // ---------- Projects & Sidecars debug modal ----------
 let projectsDebugModal = null;

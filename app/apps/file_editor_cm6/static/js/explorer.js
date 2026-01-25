@@ -1530,6 +1530,30 @@ function refreshOpenDirectoriesAfterGit() {
 }
 
 function handleExplorerEvent(type, payload) {
+  if (type === 'watcher:error') {
+    try {
+      if (typeof window.__cm6HandleWatcherError === 'function') {
+        window.__cm6HandleWatcherError(payload || {});
+      } else {
+        window.__cm6PendingWatcherError = payload || {};
+      }
+    } catch (err) {
+      console.warn('[Explorer] watcher:error handler failed', err);
+    }
+    return;
+  }
+  if (type === 'watcher:raiseResult') {
+    try {
+      if (typeof window.__cm6HandleWatcherRaiseResult === 'function') {
+        window.__cm6HandleWatcherRaiseResult(payload || {});
+      } else {
+        window.__cm6PendingWatcherRaiseResult = payload || {};
+      }
+    } catch (err) {
+      console.warn('[Explorer] watcher:raiseResult handler failed', err);
+    }
+    return;
+  }
   if (type === 'lsp:status') {
     try {
       const next = payload || {};

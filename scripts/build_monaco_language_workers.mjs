@@ -9,7 +9,7 @@ const repoRoot = path.resolve(__dirname, '..');
 
 const monacoSrcRoot = path.resolve(
   repoRoot,
-  '../git-clone/monaco-editor-mobile-playground',
+  'worktrees/monaco-editor-mobile-playground',
 );
 
 const esbuildEntry = path.resolve(monacoSrcRoot, 'node_modules/esbuild/lib/main.js');
@@ -37,10 +37,23 @@ const workerStart = path.resolve(
   'vs/editor/editor.worker.start.js',
 );
 
+const monacoEditorApi = path.resolve(
+  vscodeMonacoEsmRoot,
+  'vs/editor/editor.api.js',
+);
+
+const vscodeUriEntry = path.resolve(
+  monacoSrcRoot,
+  'node_modules/vscode-uri/lib/esm/index.mjs',
+);
+
 function pluginMonacoEditorCoreRedirect() {
   return {
     name: 'te2-monaco-core-redirect',
     setup(build) {
+      build.onResolve({ filter: /^vscode-uri$/ }, () => ({
+        path: vscodeUriEntry,
+      }));
       build.onResolve({ filter: /^monaco-editor-core$/ }, () => ({
         path: shimMonacoCore,
       }));
@@ -52,8 +65,45 @@ function pluginMonacoEditorCoreRedirect() {
   };
 }
 
+function pluginMonacoEditorCoreForContrib() {
+  return {
+    name: 'te2-monaco-core-contrib',
+    setup(build) {
+      build.onResolve({ filter: /^vscode-uri$/ }, () => ({
+        path: vscodeUriEntry,
+      }));
+    },
+  };
+}
+
 async function main() {
   const entry = (p) => path.resolve(monacoSrcRoot, p);
+
+  const contribEntries = [
+    entry('src/basic-languages/monaco.contribution.ts'),
+    entry('src/language/json/monaco.contribution.ts'),
+    entry('src/language/css/monaco.contribution.ts'),
+    entry('src/language/html/monaco.contribution.ts'),
+    entry('src/language/typescript/monaco.contribution.ts'),
+  ];
+
+  await build({
+    entryPoints: contribEntries,
+    outdir: outLangRoot,
+    outbase: path.resolve(monacoSrcRoot, 'src'),
+    bundle: true,
+    external: ['monaco-editor-core'],
+    absWorkingDir: monacoSrcRoot,
+    format: 'esm',
+    splitting: true,
+    platform: 'browser',
+    target: 'es2022',
+    sourcemap: true,
+    logLevel: 'info',
+    entryNames: '[dir]/[name]',
+    chunkNames: 'chunk-[hash]',
+    plugins: [pluginMonacoEditorCoreForContrib()],
+  });
 
   await build({
     entryPoints: [
@@ -64,6 +114,7 @@ async function main() {
     ],
     outdir: outWorkersRoot,
     bundle: true,
+    absWorkingDir: monacoSrcRoot,
     format: 'esm',
     splitting: true,
     platform: 'browser',

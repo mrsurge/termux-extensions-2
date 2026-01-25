@@ -8,7 +8,20 @@ fix: Resolve stdout/stderr log paths from the framework_shells ShellRecord (rec.
 files: app/extensions/apps/main.py
 
 ---
-commit: (git not used)
+commit: (git nendLineNumberExclusive 249
+
+Error: startLineNumber 268435465 cannot be after endLineNumberExclusive 249
+    at new LineRange (lineRange.ts:79:10)
+    at DetailedLineRangeMapping.inverse (rangeMapping.ts:36:4)
+    at UnchangedRegion.fromDiffs (diffEditorViewModel.ts:487:53)
+    at updateUnchangedRegions (diffEditorViewModel.ts:153:48)
+    at diffEditorViewModel.ts:233:7
+    at transaction (transaction.ts:19:3)
+    at diffEditorViewModel.ts:231:6
+    at UniqueContainer.value (textModel.ts:206:79)
+    at Emitter._deliver (event.ts:1187:13)
+    at Emitter._deliverQueue (event.ts:1198:9)
+    at errors.ts:26:12ot used)
 bug: shell-logs websocket lived in apps extension; needed to be owned by sessions_and_shortcuts (future FWS webui) + session UI needed edge-to-edge
 summary: sessions_and_shortcuts deep-linked to /shell-logs/{shell_id}, but implementation was hidden in app/extensions/apps/main.py; also extension padding prevented full-width cards.
 fix: moved shell log viewer + ws implementation into app/extensions/sessions_and_shortcuts/main.py as shell_logs_bp, mounted at root via apps extension include_router; fixed sessions_and_shortcuts manifest.json; added template wrapper to cancel framework padding for edge-to-edge cards.

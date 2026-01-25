@@ -168,13 +168,12 @@ export default href;
         )
 
         # NOTE: Import map URLs are resolved relative to the iframe document.
-        # Use a relative URL so it resolves under `/api/app/<app_id>/ui/...` and
-        # does not accidentally target the host's `/ui/...` NiceGUI mount.
+        # Use the absolute /api/app/<app_id>/ui/... path to avoid any ambiguity.
         import_map = Script(
             """
             {
               "imports": {
-                "monaco-editor-core": "./monaco_vscode/esm/vs/editor/editor.api.js"
+                "monaco-editor-core": "/api/app/file_editor_cm6/ui/monaco_vscode/esm/vs/editor/editor.api.js"
               }
             }
             """.strip(),

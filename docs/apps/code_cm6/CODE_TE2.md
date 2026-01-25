@@ -198,6 +198,25 @@ Notes:
 
 Clients:
 - Host shell connects with query: `{app_id:'file_editor_cm6', role:'host'}`
+
+---
+
+## 11) Monaco language bundles + workers (recent learnings)
+
+### Invariants (must hold)
+- **Syntax highlighting must work** (non-plaintext languages set correctly).
+- **Syntax checking + autocomplete must work** (Monaco language services).
+- These are considered **hard invariants** for the Monaco iframe.
+
+### What broke (symptoms)
+- Language registry returned only `['plaintext']`.
+- Model language stayed `plaintext` even for `.py`/`.js`.
+- Console showed:
+  - `Failed to load language bundles`
+  - `Import Map ... monaco-editor-core ... blocked by a null value`
+  - `Failed to load .../basic-languages/monaco.contribution.js (404)`
+
+### Root cause
   - see `connectEditorSocket()` in `app/apps/file_editor_cm6/main.js`
 - Monaco iframe connects with query: `{app_id:'file_editor_cm6'}`
   - see `connectEditorSocket()` in `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
@@ -426,3 +445,58 @@ As of now:
 
 The long‑term direction is to migrate needed editor endpoints into a dedicated non‑NiceGUI API module, but the current system is intentionally functional during the transition.
 
+---
+
+## 11) Monaco language bundles + workers (recent learnings)
+
+### Invariants (must hold)
+- Syntax highlighting must work (non-plaintext languages set correctly).
+- Syntax checking + autocomplete must work (Monaco language services).
+
+### Symptoms we hit
+- `monaco.languages.getLanguages()` returned only `['plaintext']`.
+- `model.getLanguageId()` stayed `plaintext` even for `.py`/`.js`.
+- Console showed:
+  - `Failed to load language bundles`
+  - `Import Map ... monaco-editor-core ... blocked by a null value`
+  - 404 for `/api/app/file_editor_cm6/ui/monaco_vscode/lang/basic-languages/monaco.contribution.js`
+
+### Root cause
+Language bundles were bundling a **second** Monaco instance, so contributions attached to a different registry.
+
+### Fix (what actually works)
+1) **Language bundles must keep `monaco-editor-core` external**
+   - `scripts/build_monaco_language_workers.mjs`
+   - Add: `external: ['monaco-editor-core']` for the **contrib build**
+   - Do **not** resolve `monaco-editor-core` to `editor.api.js` in the contrib build plugin.
+
+2) **Import map must point to the worker-served Monaco API**
+   - `app/apps/file_editor_cm6/monaco_editor/m_editor_app.py`
+   - Use an absolute path:
+     - `"monaco-editor-core": "/api/app/file_editor_cm6/ui/monaco_vscode/esm/vs/editor/editor.api.js"`
+
+3) **Force-load language bundles and re-apply model language**
+   - `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
+   - Import language bundles from `/ui/monaco_vscode/lang/...`
+   - On failure, retry with cache-bust query
+   - After `ensureEditorWithPrefs()`, call:
+     - `monaco.editor.setModelLanguage(model, languageFromPath(currentPath))`
+
+### Build command (language bundles + workers)
+```
+/data/data/com.termux/files/usr/opt/nodejs-22/bin/node scripts/build_monaco_language_workers.mjs
+```
+
+### Validation (after worker restart + hard refresh)
+```
+monaco.languages.getLanguages().map(l => l.id)
+monaco.editor.getModels()[0].getLanguageId()
+```
+Expected: language list includes python/js/etc, model language matches file extension.
+
+If still `plaintext`, check:
+- 404s under `/api/app/file_editor_cm6/ui/monaco_vscode/lang/...`
+- `[Monaco] Failed to load language bundles` warnings
+
+### Why this avoids regressions
+Keeping `monaco-editor-core` external guarantees all contributions attach to the **same** Monaco registry used by the main editor ESM import. This prevents the “works once, then breaks” behavior caused by duplicate registries.

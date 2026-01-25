@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import urllib.request
 from contextlib import suppress
 from typing import Dict, Any, List, Optional
@@ -1153,6 +1154,44 @@ class ExplorerDispatcher:
             pass
 
         await self.emit_personal("lsp:status", snapshot, msg_id)
+
+    async def handle_watcher_raiseLimit(self, payload: dict, msg_id: str):
+        limit = payload.get("limit", 524288)
+        password = payload.get("password", "")
+        try:
+            limit_int = int(limit)
+        except Exception:
+            limit_int = 524288
+
+        cmd = ["sudo", "-S", "sysctl", "-w", f"fs.inotify.max_user_watches={limit_int}"]
+
+        def _run():
+            return subprocess.run(
+                cmd,
+                input=(password + "\n") if isinstance(password, str) else "\n",
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+
+        try:
+            result = await asyncio.to_thread(_run)
+            ok = result.returncode == 0
+            out_payload = {
+                "ok": ok,
+                "code": result.returncode,
+                "stdout": (result.stdout or "").strip(),
+                "stderr": (result.stderr or "").strip(),
+            }
+        except Exception as e:
+            out_payload = {
+                "ok": False,
+                "code": -1,
+                "stdout": "",
+                "stderr": str(e),
+            }
+
+        await self.emit_personal("watcher:raiseResult", out_payload, msg_id)
 
     async def handle_prefs_updateUi(self, payload: dict, msg_id: str):
         """Update a single UI preference key via PreferenceStore (backend owns defaults)."""

@@ -55,6 +55,7 @@ from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
 from .draft_diff_helper import compute_draft_diff
 from .core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
+from .explorer_ws import manager as explorer_manager
 from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
 from .explorer import search as explorer_search
@@ -931,7 +932,10 @@ async def write_file_route(data: dict = Body(...)):
     
     try:
         # Initialize watcher if not already running
-        init_watcher(project_root)
+        try:
+            init_watcher(project_root)
+        except Exception as e:
+            await _broadcast_watcher_error(project_root, str(e))
 
         # NEW: Pass mode to write_full
         file_meta = await anyio.to_thread.run_sync(
@@ -1004,6 +1008,19 @@ async def write_file_route(data: dict = Body(...)):
 
 import asyncio
 
+async def _broadcast_watcher_error(project_root: Path | str, message: str) -> None:
+    try:
+        project_path = str(project_root)
+        payload = {
+            "message": message,
+            "limit": 524288,
+            "command": "sudo sysctl -w fs.inotify.max_user_watches=524288",
+        }
+        await explorer_manager.broadcast(project_path, {"type": "watcher:error", "payload": payload})
+    except Exception:
+        # Avoid cascading failures from watcher error notifications
+        pass
+
 @file_editor_cm6_bp.websocket('/ws/read')
 async def ws_read(websocket: WebSocket):
     """WebSocket endpoint for file change notifications."""
@@ -1023,7 +1040,10 @@ async def ws_read(websocket: WebSocket):
         return
 
     # Initialize watcher if not already running
-    init_watcher(project_root)
+    try:
+        init_watcher(project_root)
+    except Exception as e:
+        await _broadcast_watcher_error(project_root, str(e))
 
     # Subscribe to file changes
     event_queue = asyncio.Queue()
@@ -1035,8 +1055,10 @@ async def ws_read(websocket: WebSocket):
                 event = await event_queue.get()
                 await websocket.send_text(json.dumps(event))
             except asyncio.CancelledError:
+                print(f"[ws/read] forward_events cancelled path={path} client={client_id}", file=sys.stderr)
                 break
-            except Exception:
+            except Exception as e:
+                print(f"[ws/read] forward_events error path={path} client={client_id} err={e}", file=sys.stderr)
                 break
 
     forward_task = asyncio.create_task(forward_events())
@@ -1045,9 +1067,17 @@ async def ws_read(websocket: WebSocket):
         # Keep connection alive and ignore incoming messages
         async for msg in websocket.iter_text():
             pass
+    except Exception as e:
+        print(f"[ws/read] iter_text error path={path} client={client_id} err={e}", file=sys.stderr)
     finally:
+        try:
+            if websocket.client_state.value != 3:  # not DISCONNECTED
+                await websocket.close()
+        except Exception:
+            pass
         forward_task.cancel()
         unsubscribe(token)
+        print(f"[ws/read] closed path={path} client={client_id}", file=sys.stderr)
 
 @file_editor_cm6_bp.post('/project/open')
 async def project_open(data: dict = Body(...)):
@@ -1803,7 +1833,10 @@ async def review_save(data: dict = Body(...)):
     errors = []
     
     # Init watcher once
-    init_watcher(root_path)
+    try:
+        init_watcher(root_path)
+    except Exception as e:
+        await _broadcast_watcher_error(root_path, str(e))
     
     import time # Ensure time is available
     

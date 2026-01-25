@@ -15,7 +15,7 @@
     "activeIndex": 0,
     "rawDiagnostics": [
       {
-        "range": {
+        "range": { fsfsdfs
           "start": {
             "line": 187,
             "character": 25
@@ -157,7 +157,7 @@
             "line": 619,
             "character": 39
           }
-        },
+        },ffsdfg
         "message": "\"exec_module\" is not a known attribute of \"None\"",
         "severity": 1,
         "code": "reportOptionalMemberAccess",
