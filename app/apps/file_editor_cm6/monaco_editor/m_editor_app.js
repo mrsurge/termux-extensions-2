@@ -1,6 +1,11 @@
 (function() {
   var editor = null;
+  var diffEditor = null;
   var model = null;
+  var gitHeadModel = null;
+  var gitDiskModel = null;
+  var lastGitBaselines = null;
+  var _workerLogOnce = Object.create(null);
   var pending = null;
   var currentPath = null;
   var dbg = null;
@@ -8,8 +13,16 @@
   var editorSocket = null;
   var editorSocketId = null;
   var baseSha256 = null;
+  var lastContentSha256 = null;
   var isApplyingRemote = false;
   var mirrorDebounceT = null;
+  var draftDecoCollection = null;
+  var draftDecoIds = [];
+  var draftDiffDebounceT = null;
+  var draftDiffRequestId = null;
+  var draftZoneIds = [];
+  var layoutObserver = null;
+  var debugParts = { git: null, draft: null, extra: null };
   var apiBase = (function() {
     try {
       var p = String(window.location && window.location.pathname ? window.location.pathname : '');
@@ -17,6 +30,46 @@
       return idx >= 0 ? p.slice(0, idx) : '';
     } catch (_) { return ''; }
   })();
+
+  function getEditorContainer() {
+    try { return document.getElementById('fh-monaco'); } catch (_) { return null; }
+  }
+
+  function _layoutEditors() {
+    try { if (diffEditor && diffEditor.layout) diffEditor.layout(); } catch (_) {}
+    try { if (editor && editor.layout) editor.layout(); } catch (_) {}
+  }
+
+  function ensureLayoutObserver() {
+    try {
+      if (layoutObserver) return;
+      if (!window.ResizeObserver) return;
+      var el = getEditorContainer();
+      if (!el) return;
+      layoutObserver = new ResizeObserver(function() {
+        _layoutEditors();
+      });
+      layoutObserver.observe(el);
+    } catch (_) {}
+  }
+
+  function getShowInlineDiffs() {
+    try {
+      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
+      if (prefs && prefs.editor && typeof prefs.editor.showInlineDiffs === 'boolean') return prefs.editor.showInlineDiffs;
+      if (prefs && typeof prefs.showInlineDiffs === 'boolean') return prefs.showInlineDiffs;
+    } catch (_) {}
+    return false;
+  }
+
+  function getShowDraftDiffs() {
+    try {
+      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
+      if (prefs && prefs.editor && typeof prefs.editor.showDraftDiffs === 'boolean') return prefs.editor.showDraftDiffs;
+      if (prefs && typeof prefs.showDraftDiffs === 'boolean') return prefs.showDraftDiffs;
+    } catch (_) {}
+    return false;
+  }
 
   function normalizeLanguage(lang) {
     if (!lang) return 'plaintext';
@@ -50,7 +103,7 @@
 
   function ensureEditor() {
     if (editor) return;
-    var el = document.getElementById('fh-monaco');
+    var el = getEditorContainer();
     if (!el || !window.monaco) return;
     // Editor creation MUST be driven by SSOT (HistoryStore/PreferencesStore).
     // This function is only used as a last-resort guard; prefer ensureEditorWithPrefs().
@@ -65,6 +118,24 @@
       }
     } catch (_) {}
     updateDebug();
+  }
+
+  function disposeDiffEditorOnly() {
+    try { if (diffEditor && diffEditor.dispose) diffEditor.dispose(); } catch (_) {}
+    diffEditor = null;
+  }
+
+  function disposePlainEditorOnly() {
+    try { if (editor && editor.dispose) editor.dispose(); } catch (_) {}
+    editor = null;
+  }
+
+  function disposeGitBaselines() {
+    try { if (gitHeadModel && gitHeadModel.dispose) gitHeadModel.dispose(); } catch (_) {}
+    try { if (gitDiskModel && gitDiskModel.dispose) gitDiskModel.dispose(); } catch (_) {}
+    gitHeadModel = null;
+    gitDiskModel = null;
+    lastGitBaselines = null;
   }
 
   function buildMonacoOptionsFromPrefs(state) {
@@ -147,6 +218,30 @@
     };
   }
 
+  function ensureTe2DiffTheme() {
+    try {
+      if (!window.monaco || !window.monaco.editor || !window.monaco.editor.defineTheme) return;
+      if (ensureTe2DiffTheme._done) return;
+      ensureTe2DiffTheme._done = true;
+
+      window.monaco.editor.defineTheme('te2-vs-dark', {
+        base: 'vs-dark',
+        inherit: true,
+        rules: [],
+        colors: {
+          // Make diff backgrounds explicit so we don't end up "invisible" due to theme config.
+          'diffEditor.insertedLineBackground': 'rgba(46, 160, 67, 0.18)',
+          'diffEditor.insertedTextBackground': 'rgba(46, 160, 67, 0.28)',
+          'diffEditor.removedLineBackground': 'rgba(248, 81, 73, 0.14)',
+          'diffEditor.removedTextBackground': 'rgba(248, 81, 73, 0.24)',
+          // Subtle separators.
+          'diffEditor.border': 'rgba(255, 255, 255, 0.10)',
+          'diffEditor.diagonalFill': 'rgba(255, 255, 255, 0.04)',
+        },
+      });
+    } catch (_) {}
+  }
+
   async function fetchJson(path, options) {
     var url = (apiBase || '') + String(path || '');
     var resp = await fetch(url, options || { cache: 'no-store' });
@@ -169,6 +264,139 @@
     }
   }
 
+  function requestGitBaselines() {
+    try {
+      if (!editorSocket || !editorSocket.connected) return false;
+      if (!currentPath) return false;
+
+      if (!getShowInlineDiffs()) {
+        // Drop Git UI immediately if diffs are disabled.
+        disposeGitBaselines();
+        if (diffEditor) ensurePlainEditorWithPrefs();
+        return false;
+      }
+
+      editorSocket.emit('editor_git_baselines_request', { path: currentPath });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function applyGitBaselines(payload) {
+    try {
+      if (!payload || !payload.path || !currentPath) return;
+      if (String(payload.path) !== String(currentPath)) return;
+      if (!window.monaco) return;
+
+      lastGitBaselines = payload;
+
+      if (!getShowInlineDiffs()) {
+        disposeGitBaselines();
+        if (diffEditor) ensurePlainEditorWithPrefs();
+        return;
+      }
+
+      var tracked = !!payload.tracked;
+      var head = (typeof payload.head_content === 'string') ? payload.head_content : null;
+      var disk = (typeof payload.disk_content === 'string') ? payload.disk_content : '';
+      var headSha = (typeof payload.head_sha256 === 'string') ? payload.head_sha256 : null;
+      var diskSha = (typeof payload.disk_sha256 === 'string') ? payload.disk_sha256 : null;
+
+      var hasGitDiff = !!(tracked && head != null && headSha && diskSha && headSha !== diskSha);
+      if (!hasGitDiff) {
+        disposeGitBaselines();
+        ensurePlainEditorWithPrefs();
+        return;
+      }
+
+      var lang = languageFromPath(currentPath);
+
+      if (!gitHeadModel) {
+        gitHeadModel = monaco.editor.createModel(head || '', lang);
+      } else {
+        try { gitHeadModel.setValue(head || ''); } catch (_) {}
+        try { monaco.editor.setModelLanguage(gitHeadModel, lang); } catch (_) {}
+      }
+
+      if (!gitDiskModel) {
+        gitDiskModel = monaco.editor.createModel(disk || '', lang);
+      } else {
+        try { gitDiskModel.setValue(disk || ''); } catch (_) {}
+        try { monaco.editor.setModelLanguage(gitDiskModel, lang); } catch (_) {}
+      }
+
+      ensureDiffEditorWithPrefs();
+
+      try {
+        diffEditor.setModel({
+          original: gitHeadModel,
+          modified: model,
+          modifiedBaseline: gitDiskModel,
+        });
+      } catch (e) {
+        console.warn('[Monaco] diffEditor.setModel failed', e);
+        disposeGitBaselines();
+        ensurePlainEditorWithPrefs();
+        return;
+      }
+      _layoutEditors();
+
+      // Diff computation is async; getLineChanges() may be null until it settles.
+      try {
+        if (!diffEditor.__te2_onDidUpdateDiffBound && diffEditor.onDidUpdateDiff) {
+          diffEditor.__te2_onDidUpdateDiffBound = true;
+          diffEditor.onDidUpdateDiff(function() {
+            try {
+              var lc2 = null;
+              try { lc2 = diffEditor.getLineChanges ? diffEditor.getLineChanges() : null; } catch (_) { lc2 = null; }
+              var n2 = (lc2 && lc2.length != null) ? lc2.length : (lc2 === null ? 'null' : '0');
+              setDebugGit('git=on lc=' + n2);
+            } catch (_) {}
+          });
+        }
+      } catch (_) {}
+
+      try {
+        var updateLc = function(tag) {
+          try {
+            var lc = null;
+            try { lc = diffEditor.getLineChanges ? diffEditor.getLineChanges() : null; } catch (_) { lc = null; }
+            var n = (lc && lc.length != null) ? lc.length : (lc === null ? 'null' : '0');
+            setDebugGit('git=on lc=' + n + (tag ? ' ' + tag : ''));
+            if (tag === 't800' && (lc === null || (lc && lc.length === 0))) {
+              try {
+                var res = null;
+                try { res = diffEditor.getDiffComputationResult ? diffEditor.getDiffComputationResult() : null; } catch (_) { res = null; }
+                var dm = null;
+                try { dm = diffEditor.getModel ? diffEditor.getModel() : null; } catch (_) { dm = null; }
+                console.warn('[Monaco][GitDiff] lc still empty after t800', {
+                  path: currentPath,
+                  tracked: tracked,
+                  headSha: headSha,
+                  diskSha: diskSha,
+                  hasGitDiff: hasGitDiff,
+                  diffResult: res ? { identical: res.identical, quitEarly: res.quitEarly, changesLen: res.changes ? res.changes.length : null, changes2Len: res.changes2 ? res.changes2.length : null } : null,
+                  modelKeys: dm ? Object.keys(dm) : null,
+                  hasModifiedBaselineKey: dm ? Object.prototype.hasOwnProperty.call(dm, 'modifiedBaseline') : null,
+                  modifiedBaselineType: dm && dm.modifiedBaseline ? (typeof dm.modifiedBaseline) : null,
+                });
+              } catch (_) {}
+            }
+          } catch (_) {}
+        };
+        updateLc('t0');
+        setTimeout(function(){ updateLc('t200'); }, 200);
+        setTimeout(function(){ updateLc('t800'); }, 800);
+      } catch (_) {}
+
+      ensureTouchSelection('gitdiff');
+      setTimeout(function(){ ensureTouchSelection('gitdiff-tick'); }, 0);
+    } catch (e) {
+      console.warn('[Monaco] applyGitBaselines failed', e);
+    }
+  }
+
   async function fetchSSOTState() {
     // Single call site so we can instrument/adjust behavior later.
     return await fetchJson('/state', { cache: 'no-store' });
@@ -176,7 +404,7 @@
 
   async function ensureEditorWithPrefs() {
     if (editor) return editor;
-    var el = document.getElementById('fh-monaco');
+    var el = getEditorContainer();
     if (!el || !window.monaco) return null;
 
     try {
@@ -190,6 +418,11 @@
 
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
     try {
+      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
+      var t = prefs && prefs.editor && prefs.editor.theme ? String(prefs.editor.theme).toLowerCase() : '';
+      monaco.editor.setTheme(t.includes('light') ? 'vs' : 'vs-dark');
+    } catch (_) {}
+    try {
       var dom = editor.getDomNode();
       if (dom) {
         dom.addEventListener('contextmenu', function(ev) {
@@ -200,7 +433,95 @@
     } catch (_) {}
     ensureTouchSelection('boot');
     updateDebug('ssot=ok');
+    ensureLayoutObserver();
     return editor;
+  }
+
+  function ensurePlainEditorWithPrefs() {
+    if (diffEditor) {
+      disposeDiffEditorOnly();
+      editor = null;
+    }
+    if (editor) return editor;
+    var el = getEditorContainer();
+    if (!el || !window.monaco) return null;
+
+    editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
+    try {
+      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
+      var t = prefs && prefs.editor && prefs.editor.theme ? String(prefs.editor.theme).toLowerCase() : '';
+      monaco.editor.setTheme(t.includes('light') ? 'vs' : 'vs-dark');
+    } catch (_) {}
+    try {
+      var dom = editor.getDomNode();
+      if (dom) {
+        dom.addEventListener('contextmenu', function(ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }, { capture: true });
+      }
+    } catch (_) {}
+    if (model) {
+      try { editor.setModel(model); } catch (_) {}
+      installMirrorPublisher();
+    }
+    ensureTouchSelection('plain');
+    ensureLayoutObserver();
+    _layoutEditors();
+    return editor;
+  }
+
+  function ensureDiffEditorWithPrefs() {
+    if (diffEditor) return diffEditor;
+
+    // Dispose the plain editor instance before creating the DiffEditor in the same container.
+    if (editor) {
+      disposePlainEditorOnly();
+    }
+
+    var el = getEditorContainer();
+    if (!el || !window.monaco) return null;
+
+    diffEditor = monaco.editor.createDiffEditor(el, {
+      renderSideBySide: false,
+      readOnly: false,
+      originalEditable: false,
+      enableSplitViewResizing: false,
+    });
+
+    // Apply SSOT-derived options to the modified editor.
+    try {
+      var opts = buildMonacoOptionsFromPrefs(cachedPrefs);
+      var theme = null;
+      try { theme = opts && opts.theme ? opts.theme : null; } catch (_) { theme = null; }
+      try { if (opts) delete opts.theme; } catch (_) {}
+      try { diffEditor.getModifiedEditor().updateOptions(opts || {}); } catch (_) {}
+      try { diffEditor.getOriginalEditor().updateOptions({ readOnly: true, contextmenu: false }); } catch (_) {}
+      if (theme) {
+        // Apply the native base theme (diff colors come from Monaco's built-in styling).
+        try { monaco.editor.setTheme(theme === 'vs' ? 'vs' : 'vs-dark'); } catch (_) {}
+      }
+    } catch (_) {}
+
+    editor = diffEditor.getModifiedEditor();
+    try {
+      var dom = editor.getDomNode();
+      if (dom) {
+        dom.addEventListener('contextmenu', function(ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }, { capture: true });
+      }
+    } catch (_) {}
+
+    if (model) {
+      try { editor.setModel(model); } catch (_) {}
+      installMirrorPublisher();
+    }
+    ensureTouchSelection('diff');
+    ensureLayoutObserver();
+    _layoutEditors();
+    return diffEditor;
   }
 
   function installMirrorPublisher() {
@@ -220,6 +541,7 @@
               base_sha256: baseSha256,
             });
           } catch (_) {}
+          requestDraftDiff('local');
         }, 120);
       });
     } catch (e) {
@@ -251,9 +573,198 @@
       var hasExt = !!(window['monaco-touch-selection'] && window['monaco-touch-selection'].editorTouchSelectionHelp);
       var og = editor && editor.getDomNode ? editor.getDomNode().querySelector('.overflow-guard') : null;
       var msg = 'ext=' + (hasExt ? 'yes' : 'no') + ' og=' + (og ? 'yes' : 'no');
-      if (extra) msg += ' ' + extra;
+      if (extra) debugParts.extra = extra;
+      if (debugParts.git) msg += ' ' + debugParts.git;
+      if (debugParts.draft) msg += ' ' + debugParts.draft;
+      if (debugParts.extra) msg += ' ' + debugParts.extra;
       dbg.textContent = msg;
     } catch (_) {}
+  }
+
+  function setDebugGit(s) {
+    debugParts.git = s || null;
+    updateDebug();
+  }
+
+  function setDebugDraft(s) {
+    debugParts.draft = s || null;
+    updateDebug();
+  }
+
+  function clearDraftDiffDecorations() {
+    try {
+      clearDraftDiffZones();
+      if (draftDecoCollection && draftDecoCollection.clear) {
+        draftDecoCollection.clear();
+      } else if (editor && editor.deltaDecorations) {
+        draftDecoIds = editor.deltaDecorations(draftDecoIds, []);
+      }
+    } catch (_) {}
+    setDebugDraft(null);
+  }
+
+  function clearDraftDiffZones() {
+    try {
+      if (!editor || !editor.changeViewZones) {
+        draftZoneIds = [];
+        return;
+      }
+      if (!draftZoneIds || !draftZoneIds.length) return;
+      editor.changeViewZones(function(accessor) {
+        for (var i = 0; i < draftZoneIds.length; i++) {
+          try { accessor.removeZone(draftZoneIds[i]); } catch (_) {}
+        }
+      });
+    } catch (_) {}
+    draftZoneIds = [];
+  }
+
+  function _ensureDraftDecoCollection() {
+    try {
+      if (draftDecoCollection) return draftDecoCollection;
+      if (!editor) return null;
+      if (editor.createDecorationsCollection) {
+        draftDecoCollection = editor.createDecorationsCollection();
+        return draftDecoCollection;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function applyDraftDiffDecorations(payload) {
+    try {
+      if (!payload || !payload.path || !currentPath) return;
+      if (String(payload.path) !== String(currentPath)) return;
+      if (!editor || !window.monaco || !model) return;
+
+      if (!getShowDraftDiffs()) {
+        clearDraftDiffDecorations();
+        return;
+      }
+
+      var hunks = Array.isArray(payload.hunks) ? payload.hunks : [];
+      var ms = (payload.ms != null) ? payload.ms : null;
+
+      var addLines = 0;
+      var delLines = 0;
+      var decorations = [];
+      var zones = [];
+
+      var lineCount = 0;
+      try { lineCount = model.getLineCount ? model.getLineCount() : 0; } catch (_) { lineCount = 0; }
+      function clampLine(n) {
+        if (!lineCount) return 1;
+        if (n < 1) return 1;
+        if (n > lineCount) return lineCount;
+        return n;
+      }
+
+      for (var hi = 0; hi < hunks.length; hi++) {
+        var h = hunks[hi];
+        if (!h || !Array.isArray(h.lines)) continue;
+        var oldLine = (typeof h.oldStart === 'number' ? h.oldStart : 1);
+        var newLine = (typeof h.newStart === 'number' ? h.newStart : 1);
+
+        for (var li = 0; li < h.lines.length; li++) {
+          var ln = h.lines[li];
+          var t = ln && ln.type ? String(ln.type) : '';
+          if (t === 'context') {
+            oldLine += 1;
+            newLine += 1;
+            continue;
+          }
+          if (t === 'add-draft') {
+            addLines += 1;
+            var lno = clampLine(newLine);
+            var lineLen = 0;
+            try { lineLen = model.getLineLength(lno); } catch (_) { lineLen = 0; }
+            decorations.push({
+              range: new monaco.Range(lno, 1, lno, 1),
+              options: { isWholeLine: true, className: 'te2-draft-add-line' },
+            });
+            decorations.push({
+              range: new monaco.Range(lno, 1, lno, Math.max(1, (lineLen || 0) + 1)),
+              options: { inlineClassName: 'te2-draft-add-inline' },
+            });
+            newLine += 1;
+            continue;
+          }
+          if (t === 'del-draft') {
+            delLines += 1;
+            var anchor = clampLine(newLine);
+            decorations.push({
+              range: new monaco.Range(anchor, 1, anchor, 1),
+              options: {
+                isWholeLine: true,
+                className: 'te2-draft-del-line',
+                linesDecorationsClassName: 'te2-draft-del-marker',
+              },
+            });
+            zones.push({
+              after: Math.max(0, anchor - 1),
+              text: (ln && typeof ln.text === 'string') ? ln.text : '',
+            });
+            oldLine += 1;
+            continue;
+          }
+          oldLine += 1;
+          newLine += 1;
+        }
+      }
+
+      var coll = _ensureDraftDecoCollection();
+      if (coll && coll.set) {
+        coll.set(decorations);
+      } else if (editor && editor.deltaDecorations) {
+        draftDecoIds = editor.deltaDecorations(draftDecoIds, decorations);
+      }
+
+      clearDraftDiffZones();
+      if (zones.length && editor && editor.changeViewZones) {
+        editor.changeViewZones(function(accessor) {
+          for (var zi = 0; zi < zones.length; zi++) {
+            var z = zones[zi];
+            var node = document.createElement('div');
+            node.className = 'te2-draft-del-zone';
+            node.textContent = z.text || '';
+            try {
+              var id = accessor.addZone({
+                afterLineNumber: z.after,
+                heightInLines: 1,
+                domNode: node,
+              });
+              draftZoneIds.push(id);
+            } catch (_) {}
+          }
+        });
+      }
+
+      var tag = 'draft=+' + addLines + ' -' + delLines;
+      if (ms != null) tag += ' ' + String(ms) + 'ms';
+      setDebugDraft(tag);
+      if (payload && payload.error) console.warn('[DraftDiff] error', payload.error);
+    } catch (e) {
+      console.warn('[DraftDiff] apply failed', e);
+    }
+  }
+
+  function requestDraftDiff(reason) {
+    try {
+      if (!editorSocket || !editorSocket.connected) return false;
+      if (!currentPath) return false;
+      if (!getShowDraftDiffs()) return false;
+
+      if (draftDiffDebounceT) clearTimeout(draftDiffDebounceT);
+      draftDiffDebounceT = setTimeout(function() {
+        try {
+          draftDiffRequestId = String(Date.now()) + ':' + String(Math.random()).slice(2);
+          editorSocket.emit('editor_draft_diff_request', { path: currentPath, requestId: draftDiffRequestId, reason: reason || '' });
+        } catch (_) {}
+      }, 180);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   function applyContent(data) {
@@ -284,6 +795,7 @@
       try { monaco.editor.setModelLanguage(model, lang); } catch (_) {}
     }
     currentPath = nextPath;
+    try { lastContentSha256 = data.content_sha256 || lastContentSha256; } catch (_) {}
     ensureTouchSelection('post');
     setTimeout(function(){ ensureTouchSelection('tick'); }, 0);
     emitToHost('editor_notify', { type: 'cm6_set_content_ack', path: data.path || null });
@@ -418,6 +930,7 @@
                 try { monaco.editor.setModelLanguage(model, lang); } catch (_) {}
               }
               ensureTouchSelection('ssot');
+              try { lastContentSha256 = f.content_sha256 || lastContentSha256; } catch (_) {}
               emitToHost('editor_cache_state', {
                 path: currentPath,
                 state: f.state,
@@ -426,8 +939,14 @@
                 content_sha256: f.content_sha256,
                 auto_save: f.auto_save,
               });
-              if (f.has_draft) emitToHost('editor_draft_state', { has_draft: true, path: currentPath });
+              if (f.has_draft) {
+                emitToHost('editor_draft_state', { has_draft: true, path: currentPath });
+                requestDraftDiff('ssot');
+              } else {
+                clearDraftDiffDecorations();
+              }
               updateDebug('ws=ssot');
+              requestGitBaselines();
             });
           } else {
             updateDebug('ws=ssot-empty');
@@ -455,6 +974,7 @@
               try { monaco.editor.setModelLanguage(model, lang); } catch (_) {}
             }
             ensureTouchSelection('open');
+            try { lastContentSha256 = payload.content_sha256 || lastContentSha256; } catch (_) {}
             emitToHost('editor_cache_state', {
               path: currentPath,
               state: payload.state || 'clean',
@@ -463,7 +983,10 @@
               content_sha256: payload.content_sha256,
               auto_save: payload.auto_save,
             });
+            if (payload.has_draft) requestDraftDiff('open');
+            else clearDraftDiffDecorations();
           });
+          requestGitBaselines();
         } catch (e) {
           console.warn('[Monaco] open apply failed', e);
         }
@@ -477,6 +1000,7 @@
           if (!model) return;
           isApplyingRemote = true;
           try { model.setValue(payload.content); } finally { isApplyingRemote = false; }
+          try { lastContentSha256 = payload.content_sha256 || lastContentSha256; } catch (_) {}
           emitToHost('editor_cache_state', {
             path: payload.path,
             state: 'mid_session',
@@ -485,6 +1009,8 @@
             content_sha256: payload.content_sha256,
           });
           emitToHost('editor_draft_state', { has_draft: true, path: payload.path });
+          // Do not refresh Git baselines on draft mirror; Git baselines must stay pinned.
+          requestDraftDiff('mirror');
         } catch (e) {
           console.warn('[Monaco] mirror apply failed', e);
         }
@@ -506,13 +1032,47 @@
 
           try { editor.updateOptions(opts || {}); } catch (e) { console.warn('[Monaco] updateOptions failed', e); }
           if (theme) {
-            try { monaco.editor.setTheme(theme); } catch (_) {}
+            try {
+              monaco.editor.setTheme(theme === 'vs' ? 'vs' : 'vs-dark');
+            } catch (_) {}
           }
           ensureTouchSelection('prefs');
           updateDebug('prefs=ok');
+          requestGitBaselines();
+          if (getShowDraftDiffs()) requestDraftDiff('prefs');
+          else clearDraftDiffDecorations();
         } catch (e) {
           console.warn('[Monaco] prefs_changed apply failed', e);
         }
+      });
+
+      editorSocket.on('editor:git_baselines', function(payload) {
+        applyGitBaselines(payload);
+      });
+
+      editorSocket.on('editor:draft_diff', function(payload) {
+        try {
+          if (!payload || !payload.path || !currentPath) return;
+          if (String(payload.path) !== String(currentPath)) return;
+          if (payload.requestId && draftDiffRequestId && String(payload.requestId) !== String(draftDiffRequestId)) return;
+          applyDraftDiffDecorations(payload);
+        } catch (e) {
+          console.warn('[DraftDiff] handler failed', e);
+        }
+      });
+
+      editorSocket.on('editor:cache_state', function(payload) {
+        try {
+          if (!payload || !payload.path || !currentPath) return;
+          if (String(payload.path) !== String(currentPath)) return;
+          if (payload.unsaved === false) {
+            clearDraftDiffDecorations();
+            return;
+          }
+          if (payload.unsaved === true) {
+            requestDraftDiff('cache_state');
+          }
+        } catch (_) {}
       });
 
       editorSocket.on('editor:issues_dump_request', function(payload) {
@@ -575,23 +1135,68 @@
         getWorker: function(_moduleId, _label) {
           try {
             var label = String(_label || '');
+            var moduleId = String(_moduleId || '');
             // Monaco's language services are worker-backed (completion/diagnostics/etc).
             // Route by label, mirroring Monaco's standard mapping.
             if (label === 'typescript' || label === 'javascript') {
-              return new Worker(langBase + '/workers/ts.worker.js', { type: 'module' });
+              var wts = new Worker(langBase + '/workers/ts.worker.js', { type: 'module' });
+              if (!_workerLogOnce['ts']) {
+                _workerLogOnce['ts'] = true;
+                console.log('[MonacoWorker] ts', { moduleId: moduleId, label: label, url: langBase + '/workers/ts.worker.js' });
+              }
+              wts.onerror = function(ev) { console.error('[MonacoWorker] ts error', ev); };
+              wts.onmessageerror = function(ev) { console.error('[MonacoWorker] ts messageerror', ev); };
+              return wts;
             }
             if (label === 'json') {
-              return new Worker(langBase + '/workers/json.worker.js', { type: 'module' });
+              var wj = new Worker(langBase + '/workers/json.worker.js', { type: 'module' });
+              if (!_workerLogOnce['json']) {
+                _workerLogOnce['json'] = true;
+                console.log('[MonacoWorker] json', { moduleId: moduleId, label: label, url: langBase + '/workers/json.worker.js' });
+              }
+              wj.onerror = function(ev) { console.error('[MonacoWorker] json error', ev); };
+              wj.onmessageerror = function(ev) { console.error('[MonacoWorker] json messageerror', ev); };
+              return wj;
             }
             if (label === 'css' || label === 'scss' || label === 'less') {
-              return new Worker(langBase + '/workers/css.worker.js', { type: 'module' });
+              var wc = new Worker(langBase + '/workers/css.worker.js', { type: 'module' });
+              if (!_workerLogOnce['css']) {
+                _workerLogOnce['css'] = true;
+                console.log('[MonacoWorker] css', { moduleId: moduleId, label: label, url: langBase + '/workers/css.worker.js' });
+              }
+              wc.onerror = function(ev) { console.error('[MonacoWorker] css error', ev); };
+              wc.onmessageerror = function(ev) { console.error('[MonacoWorker] css messageerror', ev); };
+              return wc;
             }
             if (label === 'html' || label === 'handlebars' || label === 'razor') {
-              return new Worker(langBase + '/workers/html.worker.js', { type: 'module' });
+              var wh = new Worker(langBase + '/workers/html.worker.js', { type: 'module' });
+              if (!_workerLogOnce['html']) {
+                _workerLogOnce['html'] = true;
+                console.log('[MonacoWorker] html', { moduleId: moduleId, label: label, url: langBase + '/workers/html.worker.js' });
+              }
+              wh.onerror = function(ev) { console.error('[MonacoWorker] html error', ev); };
+              wh.onmessageerror = function(ev) { console.error('[MonacoWorker] html messageerror', ev); };
+              return wh;
             }
 
             // Fallback: editor worker service.
-            return new Worker(base + '/vs/editor/editor.worker.start.js', { type: 'module' });
+            //
+            // IMPORTANT: `vs/editor/editor.worker.start.js` only exports `start()` and does not
+            // bootstrap the worker message loop on its own. Using it directly causes Monaco's
+            // editor worker RPC to never initialize (diff computation stays pending / null).
+            //
+            // `editorWebWorkerMain.js` uses `bootstrapWebWorker(...)` and will correctly wire up
+            // the worker message handler when Monaco posts the initial "-please-ignore-" message.
+            var url = base + '/vs/editor/common/services/editorWebWorkerMain.js';
+            var wk = new Worker(url, { type: 'module' });
+            var key = 'editor:' + label;
+            if (!_workerLogOnce[key]) {
+              _workerLogOnce[key] = true;
+              console.log('[MonacoWorker] editor', { moduleId: moduleId, label: label, url: url });
+            }
+            wk.onerror = function(ev) { console.error('[MonacoWorker] editor error', { moduleId: moduleId, label: label, ev: ev }); };
+            wk.onmessageerror = function(ev) { console.error('[MonacoWorker] editor messageerror', { moduleId: moduleId, label: label, ev: ev }); };
+            return wk;
           } catch (e) {
             console.error('[Monaco] Failed to create worker', e);
             throw e;
@@ -601,6 +1206,9 @@
 
       var monacoNs = await import(base + '/vs/editor/editor.main.js');
       window.monaco = monacoNs;
+      try {
+        monaco.editor.setTheme('vs-dark');
+      } catch (_) {}
 
       // Register tokenizers + language services (typescript/css/html/json) from TE2 language bundles.
       // These modules import from "monaco-editor-core" which is mapped via <script type="importmap">.

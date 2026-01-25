@@ -1,12 +1,15 @@
 import hashlib
 import os
+import subprocess
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
-import time
 
 import socketio
 
-from .stores import _history_store, _preferences_store
+from ..draft_diff_helper import compute_draft_diff
+from ..git_helper import _run_git_optional, is_git_repository
+from ..stores import _history_store, _preferences_store
 
 _ISSUES_DUMP_WAITING: dict[str, str] = {}
 _ISSUES_DUMP_TTL_S = 20.0
@@ -101,6 +104,59 @@ def _read_file_payload(project: str, abs_path: str) -> Dict[str, Any]:
         }
     )
     return payload
+
+
+def _read_disk_text(abs_path: str) -> str:
+    try:
+        content_bytes = Path(abs_path).read_bytes()
+        return content_bytes.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _git_head_text(project_root: str, abs_path: str) -> Optional[str]:
+    """Return the file content at HEAD (or None if untracked / no commits)."""
+
+    try:
+        root = Path(project_root).expanduser().resolve(strict=False)
+        p = Path(abs_path).expanduser().resolve(strict=False)
+    except Exception:
+        return None
+
+    if not is_git_repository(root):
+        return None
+
+    # Compute a repo-relative path for `git show HEAD:<path>`.
+    try:
+        rel = p.relative_to(root).as_posix()
+    except Exception:
+        return None
+
+    if not rel:
+        return None
+
+    # If the repo has no commits, HEAD doesn't exist.
+    head = _run_git_optional(root, "rev-parse", "--verify", "HEAD")
+    if head is None:
+        return None
+
+    # `git show` returns non-zero for untracked paths.
+    # IMPORTANT: do not strip output; we want the exact blob content.
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "show", f"HEAD:{rel}"],
+            check=False,
+            capture_output=True,
+            timeout=20,
+        )
+    except Exception:
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        return completed.stdout.decode("utf-8", errors="replace")
+    except Exception:
+        return completed.stdout.decode(errors="replace")
 
 
 class EditorSocketIONamespace(socketio.AsyncNamespace):
@@ -239,6 +295,138 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload["source_client"] = sid
 
         await self.emit("editor:open", payload, room="file_editor_cm6")
+
+    async def on_editor_git_baselines_request(self, sid, data):
+        """Return HEAD snapshot + disk snapshot for pinned Git diff baselines.
+
+        This does NOT consider the current draft buffer. The contract is:
+          - HEAD snapshot (original)
+          - Disk snapshot (modified baseline)
+        The client may edit a separate live model while keeping the diff baselines pinned.
+        """
+
+        project = _active_project()
+        if not project:
+            await self.emit("editor:error", {"error": "no_active_project"}, room=sid)
+            return
+
+        path = _normalize_abs_path((data or {}).get("path", ""))
+        if not path:
+            await self.emit("editor:error", {"error": "missing_path"}, room=sid)
+            return
+        if not _is_under_project(project, path):
+            await self.emit("editor:error", {"error": "outside_project"}, room=sid)
+            return
+
+        disk = _read_disk_text(path)
+        disk_sha = hashlib.sha256(disk.encode("utf-8")).hexdigest()
+
+        head = _git_head_text(project, path)
+        head_sha = None
+        if isinstance(head, str):
+            head_sha = hashlib.sha256(head.encode("utf-8")).hexdigest()
+
+        payload: Dict[str, Any] = {
+            "path": path,
+            "tracked": bool(head is not None),
+            "base_ref": "HEAD",
+            "disk_content": disk,
+            "disk_sha256": disk_sha,
+            "head_content": head,
+            "head_sha256": head_sha,
+            "source_client": sid,
+        }
+        await self.emit("editor:git_baselines", payload, room=sid)
+
+    async def on_editor_draft_diff_request(self, sid, data):
+        """Return draft diff hunks for the currently cached draft (disk ↔ draft buffer).
+
+        This is separate from Git diffs (HEAD ↔ disk baseline) and is intended to be rendered
+        as custom decorations on the client.
+
+        Contract:
+          - If there is no draft cached for the file, return an empty hunks list.
+          - Never throws; failures return empty hunks + error string.
+        """
+
+        start = time.time()
+        payload_in = data or {}
+        request_id = None
+        if isinstance(payload_in, dict):
+            request_id = payload_in.get("requestId") or payload_in.get("request_id")
+            if not isinstance(request_id, str) or not request_id:
+                request_id = None
+
+        project = _active_project()
+        if not project:
+            await self.emit("editor:error", {"error": "no_active_project"}, room=sid)
+            return
+
+        path = _normalize_abs_path(payload_in.get("path", "") if isinstance(payload_in, dict) else "")
+        if not path:
+            await self.emit("editor:error", {"error": "missing_path"}, room=sid)
+            return
+        if not _is_under_project(project, path):
+            await self.emit("editor:error", {"error": "outside_project"}, room=sid)
+            return
+
+        try:
+            disk_content = _read_disk_text(path)
+            disk_sha256 = hashlib.sha256(disk_content.encode("utf-8")).hexdigest()
+
+            cached = _history_store.get_cached_document(project, path)
+            if not cached or not cached.get("unsaved"):
+                await self.emit(
+                    "editor:draft_diff",
+                    {
+                        "path": path,
+                        "hunks": [],
+                        "summary": {"added": 0, "deleted": 0, "tracked": False},
+                        "disk_sha256": disk_sha256,
+                        "content_sha256": cached.get("content_sha256") if cached else None,
+                        "requestId": request_id,
+                        "ms": int((time.time() - start) * 1000),
+                        "source_client": sid,
+                    },
+                    room=sid,
+                )
+                return
+
+            draft_content = cached.get("content", "")
+            diff_data = compute_draft_diff(path, draft_content, disk_content)
+            hunks = diff_data.get("hunks", []) if isinstance(diff_data, dict) else []
+            summary = diff_data.get("summary", {"added": 0, "deleted": 0, "tracked": False}) if isinstance(diff_data, dict) else {"added": 0, "deleted": 0, "tracked": False}
+            error = diff_data.get("error") if isinstance(diff_data, dict) else None
+
+            await self.emit(
+                "editor:draft_diff",
+                {
+                    "path": path,
+                    "hunks": hunks,
+                    "summary": summary,
+                    "error": error,
+                    "disk_sha256": disk_sha256,
+                    "content_sha256": cached.get("content_sha256"),
+                    "requestId": request_id,
+                    "ms": int((time.time() - start) * 1000),
+                    "source_client": sid,
+                },
+                room=sid,
+            )
+        except Exception as exc:
+            await self.emit(
+                "editor:draft_diff",
+                {
+                    "path": path,
+                    "hunks": [],
+                    "summary": {"added": 0, "deleted": 0, "tracked": False},
+                    "error": str(exc),
+                    "requestId": request_id,
+                    "ms": int((time.time() - start) * 1000),
+                    "source_client": sid,
+                },
+                room=sid,
+            )
 
     async def on_editor_prefs_changed(self, sid, data):
         """Worker-hosted preference updates -> broadcast to editor clients.

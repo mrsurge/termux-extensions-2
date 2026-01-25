@@ -110,6 +110,27 @@ export default href;
             html, body { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; background: #0b0f14; }
             .fh-root { height: 100%; width: 100%; margin: 0; padding: 0; display: flex; }
             #fh-monaco { flex: 1; min-height: 0; min-width: 0; width: 100%; height: 100%; -webkit-touch-callout: none; user-select: none; }
+
+            /* Draft diff decorations (Monaco) */
+            .monaco-editor .te2-draft-add-line { background: rgba(56, 139, 253, 0.18) !important; } /* blue */
+            .monaco-editor .te2-draft-del-line { background: rgba(210, 153, 34, 0.18) !important; } /* yellow */
+            .monaco-editor .te2-draft-add-inline {
+              background: rgba(56, 139, 253, 0.28) !important;
+              border-radius: 2px;
+            }
+            .monaco-editor .margin-view-overlays .te2-draft-del-marker {
+              background: rgba(210, 153, 34, 0.90);
+              width: 3px !important;
+            }
+            .monaco-editor .te2-draft-del-zone {
+              background: rgba(210, 153, 34, 0.12);
+              color: #e6b450;
+              font-family: inherit;
+              font-size: inherit;
+              line-height: 1.5;
+              white-space: pre;
+              padding-left: 8px;
+            }
             """
         )
 

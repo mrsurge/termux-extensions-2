@@ -1,6 +1,6 @@
 import socketio
 
-from app.apps.file_editor_cm6.editor_ws import EditorSocketIONamespace
+from app.apps.file_editor_cm6.monaco_editor.editor_ws import EditorSocketIONamespace
 
 # Worker-owned Socket.IO server for the Monaco editor runtime.
 # The main framework process only proxies the websocket connection.
@@ -9,4 +9,3 @@ EDITOR_SIO.register_namespace(EditorSocketIONamespace("/editor"))
 
 # Mount this ASGI app at '/editor_ws/socket.io' inside the app worker.
 EDITOR_ASGI_APP = socketio.ASGIApp(EDITOR_SIO, socketio_path="")
-

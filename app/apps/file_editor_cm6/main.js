@@ -479,12 +479,20 @@ function connectExplorerSocket() {
 function _applyEditorCacheState(data) {
   if (!data || typeof data !== 'object') return;
 
-  const normalizedPath = data.path ? toAbsolute(data.path, null, HOME_DIR) : null;
+  // Editor runtime always reports absolute paths; avoid pulling in path helpers here
+  // (this function is hit early during bootstrap, before some legacy helpers exist).
+  const normalizedPath = (typeof data.path === 'string' && data.path) ? data.path : null;
   if (normalizedPath) {
-    const pathChanged = normalizedPath !== currentPath;
-    currentPath = normalizedPath;
-    currentPathExists = true;
-    lastPickerPath = parentDir(normalizedPath);
+    let prevPath = null;
+    try { prevPath = currentPath; } catch (_) { prevPath = null; }
+    const pathChanged = prevPath ? (normalizedPath !== prevPath) : true;
+    try { currentPath = normalizedPath; } catch (_) {}
+    try { currentPathExists = true; } catch (_) {}
+    try {
+      const trimmed = normalizedPath.replace(/\/+$/, '');
+      const idx = trimmed.lastIndexOf('/');
+      lastPickerPath = idx > 0 ? trimmed.slice(0, idx) : '/';
+    } catch (_) {}
     if (pathChanged || !fileNameEl.textContent || fileNameEl.textContent === 'Untitled') {
       updatePathDisplay();
     }
@@ -492,10 +500,13 @@ function _applyEditorCacheState(data) {
   if (typeof data.content_sha256 === 'string' && data.content_sha256.length === 64) {
     lastSha256 = data.content_sha256;
   }
+  let restoredActive = (typeof restoredSessionActive !== 'undefined') ? restoredSessionActive : false;
   if (data.reason === 'restore') {
-    restoredSessionActive = true;
+    restoredActive = true;
+    try { restoredSessionActive = true; } catch (_) {}
   } else if (data.state === 'clean') {
-    restoredSessionActive = false;
+    restoredActive = false;
+    try { restoredSessionActive = false; } catch (_) {}
   }
   if (data.reason === 'watcher_external' && normalizedPath) {
     triggerExternalRefresh(normalizedPath);
@@ -504,7 +515,7 @@ function _applyEditorCacheState(data) {
     state: data.state,
     unsaved: data.unsaved,
     reason: data.reason,
-    restoredActive: restoredSessionActive,
+    restoredActive: restoredActive,
   });
 
   // Synchronize autosave mode across host shells (other clients).
@@ -633,8 +644,8 @@ function connectEditorSocket() {
       editorSocket.on('editor:draft_state', (payload) => {
         const p = payload && typeof payload === 'object' ? payload : {};
         if (p.has_draft && p.path) {
-          restoredSessionActive = true;
-          restoredSessionPath = p.path;
+          try { restoredSessionActive = true; } catch (_) {}
+          try { restoredSessionPath = p.path; } catch (_) {}
         }
       });
 
@@ -1513,6 +1524,9 @@ let currentPathExists = false;
 let lastSavedContent = '';
 let unsaved = false;
 let nativeSelectionActive = false; // No NiceGUI native selection tracking; keep flag for legacy guards
+// Restored-session flags must exist before any socket events fire.
+var restoredSessionActive = false;
+var restoredSessionPath = null;
 
 // Preferences are managed by backend; frontend displays state only (no caching)
 let editorViewState = null; // Loaded from backend at startup via /editor/view_state
@@ -1532,7 +1546,6 @@ let sessionState = {
 let sessionStateInitialized = false;
 let sessionStateTimer = null;
 let persistedSessionSnapshot = null;
-let restoredSessionActive = false;
 let externalRefreshInProgress = false;
 let lastPickerPath = HOME_DIR;
 
@@ -1549,7 +1562,6 @@ const AUTOSAVE_IDLE_DELAY = 1200; // manual saves / disabled autosave
 const AUTOSAVE_ACTIVE_DELAY = 450; // faster loop while autosave is ON
 let lastSaveTime = 0;
 const SELF_ECHO_GRACE = 1800; // 1.8s grace period after save (avoid cursor jumps on slow typing)
-let restoredSessionPath = null;
 
 let lastScrollState = null;
 let scrollStateTimer = null;
@@ -2178,7 +2190,9 @@ window.__cm6EnsureDraftDiffs = async function ensureDraftDiffsEnabled(forceOn = 
 
 // Expose currentPath getter
 Object.defineProperty(window, 'currentPath', {
-  get: () => currentPath
+  get: () => currentPath,
+  set: (value) => { currentPath = value; },
+  configurable: true
 });
 
 async function ensureProjectContext() {
