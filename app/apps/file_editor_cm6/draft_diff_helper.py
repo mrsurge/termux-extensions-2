@@ -51,7 +51,9 @@ def compute_draft_diff(file_path: str, draft_content: str, disk_content: str) ->
     a = disk_content.splitlines()
     b = draft_content.splitlines()
     
-    matcher = difflib.SequenceMatcher(None, a, b)
+    # autojunk=True (default) can treat very common lines as "junk" and produce overly-large
+    # replace blocks in structured files (e.g. JSON), which breaks draft diff accuracy.
+    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
     hunks = []
     added = 0
     deleted = 0

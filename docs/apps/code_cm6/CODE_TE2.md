@@ -460,6 +460,7 @@ The iframe builds Monaco options from SSOT preferences (`buildMonacoOptionsFromP
 ### 4) Draft persistence
 - `editor_mirror` should produce a cached draft entry (project sidecar).
 - `editor_save_request` should clear the draft and write disk.
+- On save, the server broadcasts `editor:cache_state` with `unsaved:false`; the iframe must then refresh git baselines so the inline git diff view updates.
 
 ---
 
@@ -526,3 +527,70 @@ If still `plaintext`, check:
 
 ### Why this avoids regressions
 Keeping `monaco-editor-core` external guarantees all contributions attach to the **same** Monaco registry used by the main editor ESM import. This prevents the “works once, then breaks” behavior caused by duplicate registries.
+
+---
+
+## 12) Draft deletion widgets ordering (Git diff + Draft diff together)
+
+### The “3-row” mental model (recommended)
+When both Git diff and Draft diff are enabled, the intended visual model is:
+- Git baseline row (HEAD)
+- Current disk/SSOT row
+- Draft-applied row (what you’ll save)
+
+### Ordering invariant (important)
+In unified inline Git diff mode, Git deletions are rendered using Monaco **view zones**.
+Our draft deletion widgets are also view zones.
+
+To keep the UI readable:
+- Draft deletion zones must render **below** Git deletion zones.
+
+### Implementation note
+We re-append the draft zones after Git diff updates by:
+- installing a `onDidChangeViewZones` hook on the DiffEditor’s **modified** editor
+- re-applying the last computed draft zones after Git diff inserts/removes its own view zones
+
+Primary implementation lives in:
+- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
+  - `_installDraftZoneOrderingHook()`
+  - `applyDraftZones(...)`
+  - `reapplyDraftZones()`
+
+---
+
+## 13) Known issue (next investigation): Git diff + drafts “thrash” / assertion
+
+When Git diff mode is enabled and drafts are updating, we can hit a diff-projection assertion:
+
+```
+errors.ts:26 Uncaught Error: Assertion Failed
+
+Error: Assertion Failed
+    at assertFn (assert.ts:72:21)
+    at lineRangeMappingFromRangeMappings (rangeMapping.ts:301:2)
+    at applyModifiedEditsToLineRangeMappings (diffEditorViewModel.ts:781:10)
+    at applyModifiedEdits (diffEditorViewModel.ts:737:12)
+    at diffEditorViewModel.ts:228:20
+    at UniqueContainer.value (textModel.ts:206:79)
+    at Emitter._deliver (event.ts:1187:13)
+    at Emitter._deliverQueue (event.ts:1198:9)
+    at Emitter.fire (event.ts:1222:9)
+    at DidChangeContentEmitter.endDeferredEmit (textModel.ts:2598:23)
+```
+
+This is currently the primary “thrash” issue to tackle.
+
+### Mitigation (TE2 pinned baseline)
+When using the pinned-baseline diff mode (`modifiedBaseline`), TE2 can freeze projection updates so
+typing/draft edits do not cause the diff engine to re-project on every keystroke.
+
+This is enabled by passing:
+- `te2FreezeProjection: true`
+
+in the `diffEditor.setModel({ ... })` payload from `m_editor_app.js`.
+
+Note: this flag is implemented in the VS Code fork (`worktrees/vscode-te2-diff`) and requires a rebuild
+to take effect in the served Monaco bundle.
+
+### Debugger note
+If your browser keeps pausing on this, DevTools likely has “Pause on exceptions” enabled; disable it while iterating so the UI remains usable.

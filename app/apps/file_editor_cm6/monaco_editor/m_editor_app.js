@@ -30,6 +30,10 @@
   var draftDiffDebounceT = null;
   var draftDiffRequestId = null;
   var draftZoneIds = [];
+  var lastDraftZones = null;
+  var isApplyingDraftZones = false;
+  var _ignoreNextModifiedViewZonesEvent = false;
+  var _reapplyDraftZonesScheduled = false;
   var layoutObserver = null;
   var debugParts = { git: null, draft: null, extra: null };
   var apiBase = (function() {
@@ -233,12 +237,8 @@
       }
     } catch (_) {}
 
-    // Theme mapping: CM6 themes are not Monaco themes; map to a stable Monaco theme.
-    var theme = 'vs-dark';
-    try {
-      var t = String(editorPrefs.theme || '').toLowerCase();
-      if (t.includes('light')) theme = 'vs';
-    } catch (_) {}
+    // Theme mapping: CM6 theme keys map to Monaco theme ids.
+    var theme = _resolveMonacoThemeId(editorPrefs.theme);
 
     return {
       value: '',
@@ -288,6 +288,160 @@
         },
       });
     } catch (_) {}
+  }
+
+  function ensureTe2Themes() {
+    try {
+      if (!window.monaco || !window.monaco.editor || !window.monaco.editor.defineTheme) return;
+      if (ensureTe2Themes._done) return;
+      ensureTe2Themes._done = true;
+
+      // GitHub-inspired palettes (keep light-weight; override only editor UI + token colors).
+      // Theme ids are stable Monaco ids so the host can map CM6 theme keys -> Monaco themes.
+      window.monaco.editor.defineTheme('te2-github-dark', {
+        base: 'vs-dark',
+        inherit: true,
+        rules: [
+          { token: 'comment', foreground: '8B949E' },
+          { token: 'string', foreground: 'A5D6FF' },
+          { token: 'keyword', foreground: 'FF7B72' },
+          { token: 'number', foreground: 'FFA657' },
+          { token: 'type', foreground: '79C0FF' },
+          { token: 'delimiter', foreground: 'C9D1D9' },
+        ],
+        colors: {
+          'editor.background': '#0d1117',
+          'editor.foreground': '#c9d1d9',
+          'editorLineNumber.foreground': '#6e7681',
+          'editorLineNumber.activeForeground': '#c9d1d9',
+          'editorCursor.foreground': '#c9d1d9',
+          'editor.selectionBackground': '#264f78',
+          'editor.inactiveSelectionBackground': '#264f7840',
+          'editorIndentGuide.background': '#30363d',
+          'editorIndentGuide.activeBackground': '#6e7681',
+          'editorWhitespace.foreground': '#484f58',
+          'editorGutter.background': '#0d1117',
+          'editorWidget.background': '#161b22',
+          'editorHoverWidget.background': '#161b22',
+          'editorSuggestWidget.background': '#161b22',
+          'editorSuggestWidget.border': '#30363d',
+          'editorSuggestWidget.foreground': '#c9d1d9',
+          'dropdown.background': '#161b22',
+          'dropdown.border': '#30363d',
+          'input.background': '#0d1117',
+          'input.border': '#30363d',
+          'input.foreground': '#c9d1d9',
+          'scrollbar.shadow': '#00000000',
+          'scrollbarSlider.background': '#484f5833',
+          'scrollbarSlider.hoverBackground': '#484f5866',
+          'scrollbarSlider.activeBackground': '#484f5899',
+        },
+      });
+
+      window.monaco.editor.defineTheme('te2-github-light', {
+        base: 'vs',
+        inherit: true,
+        rules: [
+          { token: 'comment', foreground: '6E7781' },
+          { token: 'string', foreground: '0A3069' },
+          { token: 'keyword', foreground: 'CF222E' },
+          { token: 'number', foreground: '953800' },
+          { token: 'type', foreground: '0550AE' },
+          { token: 'delimiter', foreground: '24292F' },
+        ],
+        colors: {
+          'editor.background': '#ffffff',
+          'editor.foreground': '#24292f',
+          'editorLineNumber.foreground': '#8c959f',
+          'editorLineNumber.activeForeground': '#24292f',
+          'editorCursor.foreground': '#24292f',
+          'editor.selectionBackground': '#add6ff',
+          'editor.inactiveSelectionBackground': '#add6ff66',
+          'editorIndentGuide.background': '#d0d7de',
+          'editorIndentGuide.activeBackground': '#8c959f',
+          'editorWhitespace.foreground': '#d0d7de',
+          'editorGutter.background': '#ffffff',
+          'editorWidget.background': '#f6f8fa',
+          'editorHoverWidget.background': '#f6f8fa',
+          'editorSuggestWidget.background': '#f6f8fa',
+          'editorSuggestWidget.border': '#d0d7de',
+          'editorSuggestWidget.foreground': '#24292f',
+          'dropdown.background': '#ffffff',
+          'dropdown.border': '#d0d7de',
+          'input.background': '#ffffff',
+          'input.border': '#d0d7de',
+          'input.foreground': '#24292f',
+          'scrollbar.shadow': '#00000000',
+          'scrollbarSlider.background': '#8c959f33',
+          'scrollbarSlider.hoverBackground': '#8c959f66',
+          'scrollbarSlider.activeBackground': '#8c959f99',
+        },
+      });
+
+      // Extra dark theme option (quick win): Dracula-ish.
+      window.monaco.editor.defineTheme('te2-dracula', {
+        base: 'vs-dark',
+        inherit: true,
+        rules: [
+          { token: 'comment', foreground: '6272A4' },
+          { token: 'string', foreground: 'F1FA8C' },
+          { token: 'keyword', foreground: 'FF79C6' },
+          { token: 'number', foreground: 'BD93F9' },
+          { token: 'type', foreground: '8BE9FD' },
+          { token: 'delimiter', foreground: 'F8F8F2' },
+        ],
+        colors: {
+          'editor.background': '#282A36',
+          'editor.foreground': '#F8F8F2',
+          'editorLineNumber.foreground': '#6272A4',
+          'editorLineNumber.activeForeground': '#F8F8F2',
+          'editorCursor.foreground': '#F8F8F2',
+          'editor.selectionBackground': '#44475A',
+          'editorIndentGuide.background': '#44475A',
+          'editorIndentGuide.activeBackground': '#6272A4',
+          'editorGutter.background': '#282A36',
+          'editorWidget.background': '#21222C',
+          'editorHoverWidget.background': '#21222C',
+          'editorSuggestWidget.background': '#21222C',
+          'editorSuggestWidget.border': '#44475A',
+          'scrollbar.shadow': '#00000000',
+          'scrollbarSlider.background': '#6272A433',
+          'scrollbarSlider.hoverBackground': '#6272A466',
+          'scrollbarSlider.activeBackground': '#6272A499',
+        },
+      });
+    } catch (e) {
+      console.warn('[Monaco] ensureTe2Themes failed', e);
+    }
+  }
+
+  function _resolveMonacoThemeId(themeKey) {
+    try {
+      var t = String(themeKey || '').toLowerCase();
+      if (t.includes('te2-github-dark') || t.includes('github-dark')) return 'te2-github-dark';
+      if (t.includes('te2-github-light') || t.includes('github-light')) return 'te2-github-light';
+      if (t.includes('te2-dracula') || t.includes('dracula')) return 'te2-dracula';
+      if (t.includes('vscode-dark')) return 'vs-dark';
+      if (t.includes('vscode-light')) return 'vs';
+      // Fall back to Monaco base themes for everything else.
+      if (t.includes('vs-dark')) return 'vs-dark';
+      if (t.includes('vs')) return 'vs';
+      if (t.includes('light')) return 'vs';
+      return 'vs-dark';
+    } catch (_) {
+      return 'vs-dark';
+    }
+  }
+
+  function applyMonacoTheme(themeKey) {
+    try {
+      if (!window.monaco || !window.monaco.editor || !window.monaco.editor.setTheme) return;
+      ensureTe2Themes();
+      ensureTe2DiffTheme();
+      window.monaco.editor.setTheme(_resolveMonacoThemeId(themeKey));
+    } catch (e) {
+      console.warn('[Monaco] applyMonacoTheme failed', e);
+    }
   }
 
   async function fetchJson(path, options) {
@@ -381,6 +535,7 @@
           original: gitHeadModel,
           modified: model,
           modifiedBaseline: gitDiskModel,
+          te2FreezeProjection: true,
         });
       } catch (e) {
         console.warn('[Monaco] diffEditor.setModel failed', e);
@@ -390,6 +545,20 @@
       }
       applyLineNumberSizing();
       _layoutEditors();
+      // Install ordering hook so draft deletion zones can be re-appended after git diff
+      // inserts its own deletion view zones.
+      try { _installDraftZoneOrderingHook(); } catch (e) { console.warn('[DraftDiff] Failed to install zone ordering hook', e); }
+      // Git diff deletion widgets are implemented as view zones; ensure our draft deletion
+      // zones are added *after* the diff engine updates so they appear below git zones.
+      try {
+        if (diffEditor && diffEditor.onDidUpdateDiff && !diffEditor.__te2DraftZoneOrderBound) {
+          diffEditor.__te2DraftZoneOrderBound = true;
+          diffEditor.onDidUpdateDiff(function() {
+            try { if (getShowDraftDiffs()) setTimeout(function(){ reapplyDraftZones(); }, 0); } catch (_) {}
+          });
+        }
+      } catch (_) {}
+      try { if (getShowDraftDiffs()) setTimeout(function(){ reapplyDraftZones(); }, 0); } catch (_) {}
 
       // Diff computation is async; getLineChanges() may be null until it settles.
       try {
@@ -468,8 +637,8 @@
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
     try {
       var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
-      var t = prefs && prefs.editor && prefs.editor.theme ? String(prefs.editor.theme).toLowerCase() : '';
-      monaco.editor.setTheme(t.includes('light') ? 'vs' : 'vs-dark');
+      var t = prefs && prefs.editor && prefs.editor.theme ? prefs.editor.theme : '';
+      applyMonacoTheme(t);
     } catch (_) {}
     try {
       var dom = editor.getDomNode();
@@ -498,8 +667,8 @@
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
     try {
       var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
-      var t = prefs && prefs.editor && prefs.editor.theme ? String(prefs.editor.theme).toLowerCase() : '';
-      monaco.editor.setTheme(t.includes('light') ? 'vs' : 'vs-dark');
+      var t = prefs && prefs.editor && prefs.editor.theme ? prefs.editor.theme : '';
+      applyMonacoTheme(t);
     } catch (_) {}
     try {
       var dom = editor.getDomNode();
@@ -560,10 +729,7 @@
         diffEditor.getModifiedEditor().updateOptions(scrollOpts);
         diffEditor.getOriginalEditor().updateOptions(scrollOpts);
       } catch (_) {}
-      if (theme) {
-        // Apply the native base theme (diff colors come from Monaco's built-in styling).
-        try { monaco.editor.setTheme(theme === 'vs' ? 'vs' : 'vs-dark'); } catch (_) {}
-      }
+          if (theme) applyMonacoTheme(theme);
     } catch (_) {}
 
     editor = diffEditor.getModifiedEditor();
@@ -664,6 +830,7 @@
       }
     } catch (_) {}
     setDebugDraft(null);
+    lastDraftZones = null;
   }
 
   function clearDraftDiffZones() {
@@ -680,6 +847,71 @@
       });
     } catch (_) {}
     draftZoneIds = [];
+  }
+
+  function applyDraftZones(zones) {
+    lastDraftZones = (zones && zones.length) ? zones.slice() : null;
+    clearDraftDiffZones();
+    if (!zones || !zones.length || !editor || !editor.changeViewZones) return;
+    isApplyingDraftZones = true;
+    try {
+      _ignoreNextModifiedViewZonesEvent = true;
+      editor.changeViewZones(function(accessor) {
+        for (var zi = 0; zi < zones.length; zi++) {
+          var z = zones[zi];
+          var node = document.createElement('div');
+          node.className = 'te2-draft-del-zone';
+          node.textContent = z.text || '';
+          node.style.whiteSpace = 'pre';
+          applyEditorTypography(node);
+          try {
+            var id = accessor.addZone({
+              afterLineNumber: z.after,
+              heightInLines: Math.max(1, z.lines || 1),
+              domNode: node,
+            });
+            draftZoneIds.push(id);
+          } catch (_) {}
+        }
+      });
+    } catch (_) {}
+    isApplyingDraftZones = false;
+  }
+
+  function reapplyDraftZones() {
+    try {
+      if (isApplyingDraftZones) return;
+      if (!lastDraftZones || !lastDraftZones.length) return;
+      applyDraftZones(lastDraftZones);
+    } catch (_) {}
+  }
+
+  function _installDraftZoneOrderingHook() {
+    try {
+      if (!diffEditor || diffEditor.__te2DraftZoneOrderingHook) return;
+      const mod = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
+      if (!mod || !mod.onDidChangeViewZones) return;
+      diffEditor.__te2DraftZoneOrderingHook = true;
+      mod.onDidChangeViewZones(function() {
+        try {
+          if (_ignoreNextModifiedViewZonesEvent) {
+            _ignoreNextModifiedViewZonesEvent = false;
+            return;
+          }
+          // When git diff inserts its own deleted-code view zones, re-append our draft zones
+          // so they appear below git zones. Avoid tight loops with a debounce.
+          if (_reapplyDraftZonesScheduled) return;
+          if (!getShowInlineDiffs()) return;
+          if (!getShowDraftDiffs()) return;
+          if (!lastDraftZones || !lastDraftZones.length) return;
+          _reapplyDraftZonesScheduled = true;
+          setTimeout(function() {
+            _reapplyDraftZonesScheduled = false;
+            try { reapplyDraftZones(); } catch (_) {}
+          }, 0);
+        } catch (_) {}
+      });
+    } catch (_) {}
   }
 
   function applyEditorTypography(node) {
@@ -860,8 +1092,10 @@
             decorations.push({
               range: new monaco.Range(anchor, 1, anchor, 1),
               options: {
-                isWholeLine: true,
-                className: 'te2-draft-del-line',
+                // Only render a gutter marker for deletions; avoid tinting the line itself.
+                // In "replace" hunks (del+add at same anchor), line tint would mix with the
+                // insertion highlight and make the first inserted line look wrong.
+                isWholeLine: false,
                 linesDecorationsClassName: 'te2-draft-del-marker',
               },
             });
@@ -899,27 +1133,8 @@
         draftDecoIds = editor.deltaDecorations(draftDecoIds, decorations);
       }
 
-      clearDraftDiffZones();
-      if (zones.length && editor && editor.changeViewZones) {
-        editor.changeViewZones(function(accessor) {
-          for (var zi = 0; zi < zones.length; zi++) {
-            var z = zones[zi];
-            var node = document.createElement('div');
-            node.className = 'te2-draft-del-zone';
-            node.textContent = z.text || '';
-            node.style.whiteSpace = 'pre';
-            applyEditorTypography(node);
-            try {
-              var id = accessor.addZone({
-                afterLineNumber: z.after,
-                heightInLines: Math.max(1, z.lines || 1),
-                domNode: node,
-              });
-              draftZoneIds.push(id);
-            } catch (_) {}
-          }
-        });
-      }
+      applyDraftZones(zones);
+      try { if (getShowInlineDiffs()) _installDraftZoneOrderingHook(); } catch (e) { console.warn('[DraftDiff] Failed to install zone ordering hook', e); }
 
       var tag = 'draft=+' + addLines + ' -' + delLines;
       if (ms != null) tag += ' ' + String(ms) + 'ms';
@@ -1233,9 +1448,7 @@
             } catch (_) {}
           }
           if (theme) {
-            try {
-              monaco.editor.setTheme(theme === 'vs' ? 'vs' : 'vs-dark');
-            } catch (_) {}
+            applyMonacoTheme(theme);
           }
           ensureTouchSelection('prefs');
           _layoutEditors();
@@ -1269,6 +1482,9 @@
           if (String(payload.path) !== String(currentPath)) return;
           if (payload.unsaved === false) {
             clearDraftDiffDecorations();
+            // After a save (drafts cleared), refresh Git baselines so inline git diffs update
+            // and the editor can switch back into diff mode when applicable.
+            try { requestGitBaselines(); } catch (_) {}
             return;
           }
           if (payload.unsaved === true) {
@@ -1330,6 +1546,10 @@
       // NOTE: This is the only supported Monaco source for TE2 right now.
       var base = (apiBase || '') + '/ui/monaco_vscode/esm';
       var langBase = (apiBase || '') + '/ui/monaco_vscode/lang';
+
+      // Register TE2 themes before the editor is created.
+      ensureTe2Themes();
+      ensureTe2DiffTheme();
 
       // Monaco ESM expects a global MonacoEnvironment.getWorker for editor services.
       // Provide worker entrypoints for Monaco language services + editor services.
@@ -1408,9 +1628,7 @@
 
       var monacoNs = await import(base + '/vs/editor/editor.main.js');
       window.monaco = monacoNs;
-      try {
-        monaco.editor.setTheme('vs-dark');
-      } catch (_) {}
+      try { applyMonacoTheme('vs-dark'); } catch (_) {}
 
       // Register tokenizers + language services (typescript/css/html/json) from TE2 language bundles.
       // These modules import from "monaco-editor-core" which is mapped via <script type="importmap">.
