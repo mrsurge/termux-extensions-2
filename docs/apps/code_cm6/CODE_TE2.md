@@ -433,6 +433,10 @@ The iframe builds Monaco options from SSOT preferences (`buildMonacoOptionsFromP
 - font scale → `fontSize`
 - font family (default JetBrains Mono)
 - theme (mapped to `vs` / `vs-dark`)
+  - plus TE2 themes:
+    - `github-dark` → `te2-github-dark`
+    - `github-light` → `te2-github-light`
+    - `dracula` → `te2-dracula`
 
 ### Diff mode behavior
 - Git diff mode uses Monaco DiffEditor in inline mode (not side-by-side).
