@@ -29,21 +29,13 @@ def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
     # Resolve repo root (m_editor_app.py lives at: app/apps/file_editor_cm6/monaco_editor/...)
     repo_root = Path(__file__).resolve().parents[4]
     vscode_monaco_esm_dir = repo_root / "worktrees" / "vscode-te2-diff" / "out-monaco-editor-core" / "esm"
-    if not vscode_monaco_esm_dir.exists():
-        raise FileNotFoundError(
-            f"Missing VS Code monaco-editor-core ESM output at {vscode_monaco_esm_dir}. "
-            "Build it first in `worktrees/vscode-te2-diff` with `gulp editor-distro`."
-        )
+    esm_ok = vscode_monaco_esm_dir.exists()
 
     # Monaco language contributions (syntax + pseudo-LSP).
     # This directory is produced by an esbuild bundle from the pinned monaco-editor sources:
     # `worktrees/vscode-te2-diff/out-monaco-editor-core/te2-lang/`.
     vscode_monaco_lang_dir = repo_root / "worktrees" / "vscode-te2-diff" / "out-monaco-editor-core" / "te2-lang"
-    if not vscode_monaco_lang_dir.exists():
-        raise FileNotFoundError(
-            f"Missing Monaco language bundle output at {vscode_monaco_lang_dir}. "
-            "Build it with the TE2 esbuild step (monaco-editor-mobile-playground sources)."
-        )
+    lang_ok = vscode_monaco_lang_dir.exists()
 
     # IMPORTANT: Monaco's ESM output imports CSS via `import './foo.css'`.
     # Browsers don't support CSS module imports directly, so we serve `.css` as a JS
@@ -88,6 +80,8 @@ export default href;
         include_in_schema=False,
     )
     async def _serve_monaco_vscode_esm(file_path: str, raw: str | None = None):
+        if not esm_ok:
+            return Response("monaco esm not built; run `worktrees/vscode-te2-diff/build_monaco_te2.sh`", status_code=404)
         return await _serve_static_with_css_shim(vscode_monaco_esm_dir, file_path, raw)
 
     @fastapi_app.api_route(
@@ -96,6 +90,8 @@ export default href;
         include_in_schema=False,
     )
     async def _serve_monaco_vscode_lang(file_path: str, raw: str | None = None):
+        if not lang_ok:
+            return Response("te2-lang not built; run `worktrees/vscode-te2-diff/build_monaco_te2.sh`", status_code=404)
         return await _serve_static_with_css_shim(vscode_monaco_lang_dir, file_path, raw)
 
     @fastapi_app.get(f"{mount_path}/monaco_editor/m_editor_app.js", include_in_schema=False)
@@ -105,6 +101,18 @@ export default href;
 
     @fastapi_app.get(f"{mount_path}/nc", include_in_schema=False)
     async def _cm6_fasthtml_monaco_iframe(app_id: str | None = None):
+        if not esm_ok or not lang_ok:
+            missing = []
+            if not esm_ok:
+                missing.append("monaco ESM (out-monaco-editor-core/esm)")
+            if not lang_ok:
+                missing.append("te2-lang (out-monaco-editor-core/te2-lang)")
+            msg = "Missing build artifacts: " + ", ".join(missing)
+            msg += "\\nRun: `cd worktrees/vscode-te2-diff && ./build_monaco_te2.sh`"
+            return HTMLResponse(
+                f"<pre style='white-space:pre-wrap;padding:16px;font-family:ui-monospace'>{msg}</pre>",
+                status_code=503,
+            )
         css = Style(
             """
             @font-face {
@@ -141,12 +149,8 @@ export default href;
             .fh-root, .monaco-editor { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 
             /* Draft diff decorations (Monaco) */
-            .monaco-editor .te2-draft-add-line { background: rgba(56, 139, 253, 0.18) !important; } /* blue */
+            .monaco-editor .te2-draft-add-line { background: rgba(56, 139, 253, 0.22) !important; } /* blue */
             .monaco-editor .te2-draft-del-line { background: rgba(210, 153, 34, 0.18) !important; } /* yellow */
-            .monaco-editor .te2-draft-add-inline {
-              background: rgba(56, 139, 253, 0.28) !important;
-              border-radius: 2px;
-            }
             .monaco-editor .margin-view-overlays .te2-draft-del-marker {
               background: rgba(210, 153, 34, 0.90);
               width: 3px !important;

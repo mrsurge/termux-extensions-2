@@ -1,4 +1,13 @@
 (function() {
+  // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
+  // You can disable at runtime in the iframe console with:
+  //   window.__debugDraftDiffs = false
+  try {
+    if (typeof window.__debugDraftDiffs === 'undefined') {
+      window.__debugDraftDiffs = true;
+    }
+  } catch (_) {}
+
   var editor = null;
   var diffEditor = null;
   var model = null;
@@ -74,6 +83,15 @@
     return false;
   }
 
+  function getUseTrueInlineView() {
+    try {
+      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
+      if (prefs && prefs.editor && typeof prefs.editor.useTrueInlineView === 'boolean') return prefs.editor.useTrueInlineView;
+      if (prefs && typeof prefs.useTrueInlineView === 'boolean') return prefs.useTrueInlineView;
+    } catch (_) {}
+    return false;
+  }
+
   function normalizeLanguage(lang) {
     if (!lang) return 'plaintext';
     var s = String(lang).toLowerCase();
@@ -124,16 +142,35 @@
   }
 
   function disposeDiffEditorOnly() {
+    try {
+      if (diffEditor && diffEditor.setModel) {
+        diffEditor.setModel(null);
+      }
+    } catch (_) {}
     try { if (diffEditor && diffEditor.dispose) diffEditor.dispose(); } catch (_) {}
     diffEditor = null;
+    // Drop any cached decoration collection tied to the disposed editor.
+    draftDecoCollection = null;
+    draftDecoIds = [];
+    draftZoneIds = [];
   }
 
   function disposePlainEditorOnly() {
     try { if (editor && editor.dispose) editor.dispose(); } catch (_) {}
     editor = null;
+    // Drop any cached decoration collection tied to the disposed editor.
+    draftDecoCollection = null;
+    draftDecoIds = [];
+    draftZoneIds = [];
   }
 
   function disposeGitBaselines() {
+    // Ensure diff editor is not still referencing these models.
+    try {
+      if (diffEditor && diffEditor.setModel) {
+        diffEditor.setModel(null);
+      }
+    } catch (_) {}
     try { if (gitHeadModel && gitHeadModel.dispose) gitHeadModel.dispose(); } catch (_) {}
     try { if (gitDiskModel && gitDiskModel.dispose) gitDiskModel.dispose(); } catch (_) {}
     gitHeadModel = null;
@@ -500,7 +537,7 @@
       originalEditable: false,
       enableSplitViewResizing: false,
       automaticLayout: true,
-      experimental: { useTrueInlineView: true },
+      experimental: { useTrueInlineView: false },
       scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
     });
 
@@ -705,6 +742,8 @@
 
       var hunks = Array.isArray(payload.hunks) ? payload.hunks : [];
       var ms = (payload.ms != null) ? payload.ms : null;
+      var debug = false;
+      try { debug = !!window.__debugDraftDiffs; } catch (_) { debug = false; }
 
       var addLines = 0;
       var delLines = 0;
@@ -724,11 +763,20 @@
         return n;
       }
 
+      var debugLines = null;
+      if (debug) {
+        debugLines = [];
+        console.groupCollapsed('[DraftDiff] apply ' + String(payload.path || '') + ' hunks=' + String(hunks.length) + ' lines=' + String(lineCount) + (ms != null ? (' ms=' + String(ms)) : ''));
+      }
+
       for (var hi = 0; hi < hunks.length; hi++) {
         var h = hunks[hi];
         if (!h || !Array.isArray(h.lines)) continue;
         var oldLine = (typeof h.oldStart === 'number' ? h.oldStart : 1);
         var newLine = (typeof h.newStart === 'number' ? h.newStart : 1);
+        if (debug && debugLines) {
+          debugLines.push('hunk#' + hi + ' oldStart=' + oldLine + ' newStart=' + newLine + ' lines=' + h.lines.length);
+        }
 
         for (var li = 0; li < h.lines.length; li++) {
           var ln = h.lines[li];
@@ -747,24 +795,68 @@
             }
             var lineLen = 0;
             try { lineLen = model.getLineLength(lno); } catch (_) { lineLen = 0; }
+            if (debug && debugLines) {
+              let sample = '';
+              try {
+                sample = model.getLineContent(lno);
+                if (sample && sample.length > 140) sample = sample.slice(0, 140) + '…';
+              } catch (_) {}
+              debugLines.push('  add hunk#' + hi + ' line#' + li + ' newLine=' + newLine + ' -> lno=' + lno + ' len=' + lineLen + ' sample=' + JSON.stringify(sample));
+            }
             decorations.push({
               range: new monaco.Range(lno, 1, lno, 1),
               options: { isWholeLine: true, className: 'te2-draft-add-line' },
-            });
-            decorations.push({
-              range: new monaco.Range(lno, 1, lno, Math.max(1, (lineLen || 0) + 1)),
-              options: { inlineClassName: 'te2-draft-add-inline' },
             });
             newLine += 1;
             continue;
           }
           if (t === 'del-draft') {
-            delLines += 1;
+            // Group consecutive deletions into a single marker + zone so we don't
+            // stack multiple decorations on the same anchor line (Monaco will only
+            // show one marker, and ranges overlap heavily).
             var anchor = clampLine(newLine);
             if (anchor < 1 || anchor > lineCount) {
               oldLine += 1;
               continue;
             }
+
+            var delBlock = [];
+            var delBlockPreview = [];
+            var blockStartLi = li;
+            while (li < h.lines.length) {
+              var ln2 = h.lines[li];
+              var t2 = ln2 && ln2.type ? String(ln2.type) : '';
+              if (t2 !== 'del-draft') break;
+              delLines += 1;
+              var txt = (ln2 && typeof ln2.text === 'string') ? ln2.text : '';
+              delBlock.push(txt);
+              if (debug && debugLines) {
+                const prev = txt.length > 140 ? txt.slice(0, 140) + '…' : txt;
+                delBlockPreview.push(prev);
+              }
+              oldLine += 1;
+              li += 1;
+            }
+            // We advanced li one past last del line; outer loop will li++ again.
+            li -= 1;
+
+            if (debug && debugLines) {
+              let sample2 = '';
+              try {
+                sample2 = model.getLineContent(anchor);
+                if (sample2 && sample2.length > 140) sample2 = sample2.slice(0, 140) + '…';
+              } catch (_) {}
+              debugLines.push(
+                '  del-block hunk#' + hi +
+                ' lines#' + blockStartLi + '-' + li +
+                ' newLine=' + newLine +
+                ' anchor=' + anchor +
+                ' count=' + delBlock.length +
+                ' del=' + JSON.stringify(delBlockPreview.join('\\n')) +
+                ' sample=' + JSON.stringify(sample2)
+              );
+            }
+
             decorations.push({
               range: new monaco.Range(anchor, 1, anchor, 1),
               options: {
@@ -775,14 +867,29 @@
             });
             zones.push({
               after: Math.max(1, anchor - 1),
-              text: (ln && typeof ln.text === 'string') ? ln.text : '',
+              text: delBlock.join('\n'),
+              lines: delBlock.length,
             });
-            oldLine += 1;
             continue;
           }
           oldLine += 1;
           newLine += 1;
         }
+      }
+
+      if (debug && debugLines) {
+        // Quick overlap sanity check for line-based decorations.
+        try {
+          const lines = decorations
+            .map(d => (d && d.range) ? d.range.startLineNumber : null)
+            .filter(n => typeof n === 'number')
+            .sort((a,b) => a-b);
+          let overlaps = 0;
+          for (let i=1;i<lines.length;i++) if (lines[i] === lines[i-1]) overlaps++;
+          console.log('[DraftDiff] summary add=' + addLines + ' del=' + delLines + ' decorations=' + decorations.length + ' zones=' + zones.length + ' overlaps=' + overlaps);
+        } catch (_) {}
+        for (let i = 0; i < debugLines.length; i++) console.log('[DraftDiff] ' + debugLines[i]);
+        console.groupEnd();
       }
 
       var coll = _ensureDraftDecoCollection();
@@ -800,11 +907,12 @@
             var node = document.createElement('div');
             node.className = 'te2-draft-del-zone';
             node.textContent = z.text || '';
+            node.style.whiteSpace = 'pre';
             applyEditorTypography(node);
             try {
               var id = accessor.addZone({
                 afterLineNumber: z.after,
-                heightInLines: 1,
+                heightInLines: Math.max(1, z.lines || 1),
                 domNode: node,
               });
               draftZoneIds.push(id);

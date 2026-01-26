@@ -392,6 +392,32 @@ Because the VS Code Monaco ESM imports CSS files, the harness serves `.css` as:
 - `Content-Type: application/javascript` module shim (injects `<link>` to `?raw=1`)
 - raw CSS is available when `?raw=1` is present
 
+### Build procedure (correct)
+There are **two** build outputs that must exist, otherwise `/api/app/file_editor_cm6/ui/nc` will not serve the Monaco iframe correctly:
+
+1) **Pinned Monaco ESM** (VS Code fork)
+- Output dir: `worktrees/vscode-te2-diff/out-monaco-editor-core/esm/`
+- Produced by: `gulp editor-distro` inside `worktrees/vscode-te2-diff`
+
+2) **TE2 language bundles + language-service workers**
+- Output dir: `worktrees/vscode-te2-diff/out-monaco-editor-core/te2-lang/`
+- Produced by: `scripts/build_monaco_language_workers.mjs`
+
+Recommended build command (does both):
+```
+cd worktrees/vscode-te2-diff && ./build_monaco_te2.sh
+```
+
+### Common failure mode: `/ui/nc` 404 but worker is “running”
+Symptom:
+- Browser requests `GET /api/app/file_editor_cm6/ui/nc?...` and gets 404 or falls back to a NiceGUI HTML page.
+
+Cause:
+- `register_monaco_editor_routes(...)` did not mount the FastHTML routes because required build artifacts were missing (most commonly `te2-lang/`).
+
+Fix:
+- Run the build above, restart the `file_editor_cm6` worker, hard refresh.
+
 ---
 
 ## 8) UI “knobs” (what you can safely tune)

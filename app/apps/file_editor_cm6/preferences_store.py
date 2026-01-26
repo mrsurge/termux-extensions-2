@@ -27,6 +27,9 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "readOnly": False,
     "showMinimap": False,
     "stickyScroll": False,  # Added: 2025-12-03 by vectorArc - TE2 Team
+    # Monaco DiffEditor inline rendering: if enabled, uses VS Code's "true inline view".
+    # Default off for stability on mobile; can be toggled later.
+    "useTrueInlineView": False,
     # Optional: path to JetBrains Kotlin LSP entrypoint (kotlin-lsp.sh)
     "kotlinLspPath": "",
     # Kotlin LSP run-mode knobs (useful on Termux/Android where file watching can be restricted)

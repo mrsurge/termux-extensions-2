@@ -476,6 +476,15 @@ function connectExplorerSocket() {
     });
 }
 
+// Ensure lastSha256 exists before any cache-state events fire.
+var lastSha256 = null;
+// `explorer:event` may arrive before helper functions are defined; keep a stable symbol.
+// This is NOT a suppression: we queue the latest indicator payload and replay it once
+// the real implementation is installed.
+var applyCacheIndicator = function (info) {
+  try { window.__fePendingCacheIndicator = info; } catch (_) {}
+};
+
 function _applyEditorCacheState(data) {
   if (!data || typeof data !== 'object') return;
 
@@ -1559,7 +1568,7 @@ let editTrackerWS = null;
 let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 let cm6NiceguiClientId = null;
 let explorerRefreshTimer = null;
-let lastSha256 = null;
+var lastSha256 = null;
 let inflightOpId = null;
 let saveDebounceTimer = null;
 const AUTOSAVE_IDLE_DELAY = 1200; // manual saves / disabled autosave
@@ -2430,7 +2439,7 @@ function setIndicatorInactive(badge) {
   badge.style.display = 'inline-block';
 }
 
-function applyCacheIndicator(info) {
+function _applyCacheIndicatorImpl(info) {
   const badge = document.getElementById('fe-file-draft-badge');
   if (!badge) return;
 
@@ -2460,6 +2469,16 @@ function applyCacheIndicator(info) {
     }
   }
 }
+
+// Install the real implementation and replay any pending payload.
+applyCacheIndicator = _applyCacheIndicatorImpl;
+window.applyCacheIndicator = applyCacheIndicator;
+try {
+  if (window.__fePendingCacheIndicator) {
+    applyCacheIndicator(window.__fePendingCacheIndicator);
+    window.__fePendingCacheIndicator = null;
+  }
+} catch (_) {}
 
 async function openFile(path, options = {}) {
   const { allowOverwrite = true, forceRefresh = false } = options;
