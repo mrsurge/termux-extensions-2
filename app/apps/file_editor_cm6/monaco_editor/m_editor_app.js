@@ -1373,6 +1373,18 @@
             }
             applyLineNumberSizing();
             ensureTouchSelection('open');
+            // Optional open+jump payload (used by agent drawer + explorer + go-to-line).
+            try {
+              if (payload.line != null) {
+                applyJumpToLine({
+                  line: payload.line,
+                  column: payload.column,
+                  focus: payload.focus,
+                  scroll_y: payload.scroll_y,
+                  scroll_to_top: payload.scroll_to_top,
+                });
+              }
+            } catch (_) {}
             try { lastContentSha256 = payload.content_sha256 || lastContentSha256; } catch (_) {}
             emitToHost('editor_cache_state', {
               path: currentPath,
@@ -1389,6 +1401,10 @@
         } catch (e) {
           console.warn('[Monaco] open apply failed', e);
         }
+      });
+
+      editorSocket.on('editor:jump_to_line', function(payload) {
+        try { applyJumpToLine(payload); } catch (e) { console.warn('[Monaco] jump_to_line failed', e); }
       });
 
       editorSocket.on('editor:mirror', function(payload) {
@@ -1517,6 +1533,37 @@
       console.warn('[Monaco] socket connect failed', e);
       return false;
     }
+  }
+
+  function applyJumpToLine(payload) {
+    try {
+      if (!payload) return;
+      if (!editor || !model) return;
+
+      var line = payload.line;
+      var col = payload.column;
+      if (typeof line === 'string' && /^\d+$/.test(line)) line = parseInt(line, 10);
+      if (typeof col === 'string' && /^\d+$/.test(col)) col = parseInt(col, 10);
+      if (!Number.isFinite(line)) return;
+      line = Math.max(1, Math.min(model.getLineCount(), line));
+      if (!Number.isFinite(col)) col = 1;
+      col = Math.max(1, Math.min(model.getLineMaxColumn(line), col));
+
+      var focus = payload.focus;
+      var scrollY = payload.scroll_y;
+      var scrollToTop = payload.scroll_to_top;
+
+      if (scrollToTop) {
+        try { editor.revealLine(line, 0); } catch (_) {}
+      } else if (typeof scrollY === 'string' && String(scrollY).toLowerCase() === 'center') {
+        try { editor.revealLineInCenter(line, 0); } catch (_) {}
+      } else {
+        try { editor.revealLineNearTop(line, 0); } catch (_) {}
+      }
+
+      try { editor.setPosition({ lineNumber: line, column: col }); } catch (_) {}
+      try { if (focus !== false) editor.focus(); } catch (_) {}
+    } catch (_) {}
   }
 
   function applyMirror(data) {

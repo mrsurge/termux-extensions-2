@@ -284,7 +284,11 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         if not project:
             await self.emit("editor:error", {"error": "no_active_project"}, room=sid)
             return
-        path = _normalize_abs_path((data or {}).get("path", ""))
+        payload_in = data or {}
+        if not isinstance(payload_in, dict):
+            payload_in = {}
+
+        path = _normalize_abs_path(payload_in.get("path", ""))
         if not path:
             await self.emit("editor:error", {"error": "missing_path"}, room=sid)
             return
@@ -292,14 +296,92 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             await self.emit("editor:error", {"error": "outside_project"}, room=sid)
             return
 
+        line = payload_in.get("line")
+        column = payload_in.get("column")
+        scroll_y = payload_in.get("scroll_y") or payload_in.get("scrollY")
+        focus = payload_in.get("focus")
+        scroll_to_top = payload_in.get("scroll_to_top") or payload_in.get("scrollToTop")
+
+        if isinstance(line, str) and line.isdigit():
+            line = int(line)
+        if isinstance(column, str) and column.isdigit():
+            column = int(column)
+        if not isinstance(line, int):
+            line = None
+        if not isinstance(column, int):
+            column = None
+        if line is not None and line < 1:
+            line = 1
+        if column is not None and column < 1:
+            column = 1
+        if scroll_y is not None and not isinstance(scroll_y, str):
+            scroll_y = None
+        if focus is not None and not isinstance(focus, bool):
+            focus = None
+        if scroll_to_top is not None and not isinstance(scroll_to_top, bool):
+            scroll_to_top = None
+
         # Update SSOT session state (single-doc model).
         _history_store.update_session_state({"currentPath": path})
         _history_store.set_last_file(project, path)
 
         payload = _read_file_payload(project, path)
         payload["source_client"] = sid
+        if line is not None:
+            payload["line"] = line
+        if column is not None:
+            payload["column"] = column
+        if scroll_y is not None:
+            payload["scroll_y"] = scroll_y
+        if focus is not None:
+            payload["focus"] = focus
+        if scroll_to_top is not None:
+            payload["scroll_to_top"] = scroll_to_top
 
         await self.emit("editor:open", payload, room="file_editor_cm6")
+
+    async def on_editor_jump_to_line_request(self, sid, data):
+        payload_in = data or {}
+        if not isinstance(payload_in, dict):
+            payload_in = {}
+
+        line = payload_in.get("line")
+        column = payload_in.get("column")
+        scroll_y = payload_in.get("scroll_y") or payload_in.get("scrollY")
+        focus = payload_in.get("focus")
+        scroll_to_top = payload_in.get("scroll_to_top") or payload_in.get("scrollToTop")
+
+        if isinstance(line, str) and line.isdigit():
+            line = int(line)
+        if isinstance(column, str) and column.isdigit():
+            column = int(column)
+        if not isinstance(line, int):
+            await self.emit("editor:error", {"error": "missing_line"}, room=sid)
+            return
+        if line < 1:
+            line = 1
+        if not isinstance(column, int) or column < 1:
+            column = 1
+        if scroll_y is not None and not isinstance(scroll_y, str):
+            scroll_y = None
+        if focus is not None and not isinstance(focus, bool):
+            focus = None
+        if scroll_to_top is not None and not isinstance(scroll_to_top, bool):
+            scroll_to_top = None
+
+        # Broadcast to all connected clients (single-doc model).
+        await self.emit(
+            "editor:jump_to_line",
+            {
+                "line": line,
+                "column": column,
+                "scroll_y": scroll_y,
+                "focus": focus,
+                "scroll_to_top": scroll_to_top,
+                "source_client": sid,
+            },
+            room="file_editor_cm6",
+        )
 
     async def on_editor_git_baselines_request(self, sid, data):
         """Return HEAD snapshot + disk snapshot for pinned Git diff baselines.

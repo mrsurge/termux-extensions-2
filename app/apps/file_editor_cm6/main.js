@@ -3383,7 +3383,7 @@ async function jumpToCurrentFileLine(line, options = {}) {
       host.toast('Invalid line number');
       return;
     }
-    const payload = { line: targetLine };
+    const payload = { line: targetLine, path };
     if (options && Object.prototype.hasOwnProperty.call(options, 'focus')) {
       payload.focus = Boolean(options.focus);
     }
@@ -3396,7 +3396,12 @@ async function jumpToCurrentFileLine(line, options = {}) {
         payload.scroll_y = options.scrollY;
       }
     }
-    await apiPost('editor/jump_to_line', payload);
+    if (editorSocket && editorSocket.connected) {
+      editorSocket.emit('editor_jump_to_line_request', payload);
+      return;
+    }
+    // Queue until editor Socket.IO connects.
+    editorPending.push({ type: 'editor_jump_to_line_request', payload });
   } catch (e) {
     host.toast('Failed to jump: ' + (e?.message || 'unknown error'));
   }
