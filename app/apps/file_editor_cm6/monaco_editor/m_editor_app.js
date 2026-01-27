@@ -1322,6 +1322,7 @@
                 model = monaco.editor.createModel(f.content || '', lang);
                 editor.setModel(model);
                 installMirrorPublisher();
+                installScrollPublisher();
               } else {
                 isApplyingRemote = true;
                 try { model.setValue(f.content || ''); } finally { isApplyingRemote = false; }
@@ -1337,6 +1338,13 @@
                 content_sha256: f.content_sha256,
                 auto_save: f.auto_save,
               });
+              // Cold-open restore: if SSOT provides a last scroll line and there is no explicit jump,
+              // restore viewport to that line.
+              try {
+                if (f && f.scroll_line != null && !f.has_draft) {
+                  applyJumpToLine({ line: f.scroll_line, focus: false, scroll_to_top: true });
+                }
+              } catch (_) {}
               if (f.has_draft) {
                 emitToHost('editor_draft_state', { has_draft: true, path: currentPath });
                 requestDraftDiff('ssot');
@@ -1366,6 +1374,7 @@
               model = monaco.editor.createModel(payload.content || '', lang);
               editor.setModel(model);
               installMirrorPublisher();
+              installScrollPublisher();
             } else {
               isApplyingRemote = true;
               try { model.setValue(payload.content || ''); } finally { isApplyingRemote = false; }
@@ -1396,6 +1405,13 @@
             });
             if (payload.has_draft) requestDraftDiff('open');
             else clearDraftDiffDecorations();
+
+            // Restore last scroll line if no explicit open+jump was requested.
+            try {
+              if (payload.line == null && payload.scroll_line != null) {
+                applyJumpToLine({ line: payload.scroll_line, focus: false, scroll_to_top: true });
+              }
+            } catch (_) {}
           });
           requestGitBaselines();
         } catch (e) {
@@ -1563,6 +1579,52 @@
 
       try { editor.setPosition({ lineNumber: line, column: col }); } catch (_) {}
       try { if (focus !== false) editor.focus(); } catch (_) {}
+    } catch (_) {}
+  }
+
+  function installScrollPublisher() {
+    try {
+      if (!editor || !editor.onDidScrollChange || !editor.onDidChangeCursorPosition) return;
+      if (installScrollPublisher._done) return;
+      installScrollPublisher._done = true;
+
+      var lastSentAt = 0;
+      var pendingT = null;
+
+      var send = function() {
+        pendingT = null;
+        try {
+          if (!editorSocket || !editorSocket.connected) return;
+          if (!currentPath || !model) return;
+          var pos = null;
+          try { pos = editor.getPosition(); } catch (_) { pos = null; }
+          var line = pos && pos.lineNumber ? pos.lineNumber : null;
+          var col = pos && pos.column ? pos.column : null;
+          if (!line) return;
+          editorSocket.emit('editor_scroll_state', {
+            path: currentPath,
+            line: line,
+            column: col || 1,
+          });
+          lastSentAt = Date.now();
+        } catch (_) {}
+      };
+
+      var schedule = function() {
+        try {
+          var now = Date.now();
+          // Throttle: at most once every ~400ms.
+          if (now - lastSentAt > 400) {
+            send();
+            return;
+          }
+          if (pendingT) return;
+          pendingT = setTimeout(send, 450);
+        } catch (_) {}
+      };
+
+      editor.onDidScrollChange(schedule);
+      editor.onDidChangeCursorPosition(schedule);
     } catch (_) {}
   }
 

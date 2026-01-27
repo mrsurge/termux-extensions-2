@@ -76,6 +76,14 @@ def _read_file_payload(project: str, abs_path: str) -> Dict[str, Any]:
         auto_save = None
     payload["auto_save"] = auto_save
 
+    # Scroll restore (project sidecar / HistoryStore).
+    try:
+        scroll_line = _history_store.get_file_scroll_line(project, abs_path)
+    except Exception:
+        scroll_line = None
+    if isinstance(scroll_line, (int, float)) and scroll_line and scroll_line > 0:
+        payload["scroll_line"] = float(scroll_line)
+
     cached = _history_store.get_cached_document(project, abs_path)
     if cached and cached.get("unsaved"):
         payload.update(
@@ -215,6 +223,22 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload = data or {}
         if not isinstance(payload, dict):
             return
+
+        project = _active_project()
+        if project:
+            try:
+                path = _normalize_abs_path(payload.get("path") or "")
+            except Exception:
+                path = None
+            line = payload.get("line")
+            if isinstance(line, str) and line.isdigit():
+                line = int(line)
+            if path and _is_under_project(project, path) and isinstance(line, (int, float)) and line and line > 0:
+                try:
+                    _history_store.update_file_scroll_line(project, path, float(line))
+                except Exception:
+                    pass
+
         payload = dict(payload)
         payload["source_client"] = sid
         await self.emit("editor:scroll_state", payload, room="file_editor_cm6")

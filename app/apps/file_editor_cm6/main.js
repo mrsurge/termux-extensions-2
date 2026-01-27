@@ -504,7 +504,10 @@ function _applyEditorCacheState(data) {
     } catch (_) {}
     const nameEl = window.fileNameEl || fileNameEl || null;
     if (nameEl && (pathChanged || !nameEl.textContent || nameEl.textContent === 'Untitled')) {
-      updatePathDisplay();
+      try {
+        if (typeof updatePathDisplay === 'function') updatePathDisplay();
+        else if (typeof window.updatePathDisplay === 'function') window.updatePathDisplay();
+      } catch (_) {}
     }
   }
   if (typeof data.content_sha256 === 'string' && data.content_sha256.length === 64) {
@@ -557,33 +560,48 @@ function _handleEditorScrollState(payload) {
   const data = payload && typeof payload === 'object' ? payload : {};
   if (typeof data.line !== 'number' || data.line < 1) return;
 
-  lastScrollState = {
+  // Avoid TDZ/caching issues by keeping scroll restore state on window.
+  // This can be emitted early by Socket.IO before other module-scope vars are initialized.
+  window.__feLastScrollState = {
     path: currentPath || null,
     line: data.line,
     column: (typeof data.column === 'number' && data.column >= 0) ? data.column : null,
     top: (typeof data.top === 'number' && data.top >= 0) ? data.top : null,
   };
 
-  if (scrollStateTimer) clearTimeout(scrollStateTimer);
-  scrollStateTimer = setTimeout(async () => {
-    scrollStateTimer = null;
+  if (window.__feScrollStateTimer) clearTimeout(window.__feScrollStateTimer);
+  window.__feScrollStateTimer = setTimeout(async () => {
+    window.__feScrollStateTimer = null;
+    const lastScrollState = window.__feLastScrollState || null;
     if (!lastScrollState || !lastScrollState.path) return;
     try {
-      queueSessionStateUpdate({
-        scrollLine: lastScrollState.line,
-        scrollTop: lastScrollState.top != null ? lastScrollState.top : null,
-      });
+      try {
+        const q = (typeof queueSessionStateUpdate === 'function')
+          ? queueSessionStateUpdate
+          : (typeof window.queueSessionStateUpdate === 'function' ? window.queueSessionStateUpdate : null);
+        if (q) {
+          q({
+            scrollLine: lastScrollState.line,
+            scrollTop: lastScrollState.top != null ? lastScrollState.top : null,
+          });
+        }
+      } catch (_) {}
 
       if (lastScrollState.line && lastScrollState.line > 0) {
-        await apiPost('state/file_scroll', {
-          path: lastScrollState.path,
-          scroll_line: lastScrollState.line,
-        });
+        const post = (typeof apiPost === 'function')
+          ? apiPost
+          : (typeof window.apiPost === 'function' ? window.apiPost : null);
+        if (post) {
+          await post('state/file_scroll', {
+            path: lastScrollState.path,
+            scroll_line: lastScrollState.line,
+          });
+        }
       }
     } catch (err) {
       console.warn('Failed to persist scroll state:', err);
     }
-  }, CURSOR_STATE_DEBOUNCE);
+  }, (typeof window.__feCursorStateDebounceMs === 'number' ? window.__feCursorStateDebounceMs : 1000));
 }
 
 function _resolveIssuesDumpWaiter(requestId, dump) {
@@ -1569,6 +1587,10 @@ let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 let cm6NiceguiClientId = null;
 let explorerRefreshTimer = null;
 var lastSha256 = null;
+// Keep early bootstrap handlers from hitting TDZ on debounce constants.
+try {
+  if (typeof window.__feCursorStateDebounceMs !== 'number') window.__feCursorStateDebounceMs = 1000;
+} catch (_) {}
 let inflightOpId = null;
 let saveDebounceTimer = null;
 const AUTOSAVE_IDLE_DELAY = 1200; // manual saves / disabled autosave
@@ -1576,8 +1598,9 @@ const AUTOSAVE_ACTIVE_DELAY = 450; // faster loop while autosave is ON
 let lastSaveTime = 0;
 const SELF_ECHO_GRACE = 1800; // 1.8s grace period after save (avoid cursor jumps on slow typing)
 
-let lastScrollState = null;
-let scrollStateTimer = null;
+// Use `var` so early Socket.IO events can't hit TDZ before initialization.
+var lastScrollState = null;
+var scrollStateTimer = null;
 const CURSOR_STATE_DEBOUNCE = 1000; // ms
 
 function _feUpdateLspSpinner() {
