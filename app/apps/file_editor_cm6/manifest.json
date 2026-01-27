@@ -18,7 +18,8 @@
     "modules": [
       "explorer_transport",
       "lsp_transport",
-      "editor_transport"
+      "editor_transport",
+      "vscode_rpc_transport"
     ]
   },
   "fullscreen": true,

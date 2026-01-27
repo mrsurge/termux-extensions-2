@@ -99,6 +99,16 @@ export default href;
         js_path = Path(__file__).with_name("m_editor_app.js")
         return Response(js_path.read_text(encoding="utf-8"), media_type="application/javascript")
 
+    @fastapi_app.get(mount_path + "/monaco_editor/themes/{file_path:path}", include_in_schema=False)
+    async def _serve_monaco_editor_theme_json(file_path: str):
+        base = Path(__file__).with_name("themes").resolve()
+        target = (base / file_path).resolve()
+        if not str(target).startswith(str(base) + "/") and target != base:
+            return Response("not found", status_code=404, media_type="text/plain")
+        if not target.exists() or not target.is_file():
+            return Response("not found", status_code=404, media_type="text/plain")
+        return FileResponse(str(target), media_type="application/json")
+
     @fastapi_app.get(f"{mount_path}/nc", include_in_schema=False)
     async def _cm6_fasthtml_monaco_iframe(app_id: str | None = None):
         if not esm_ok or not lang_ok:

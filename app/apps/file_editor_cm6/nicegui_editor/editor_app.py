@@ -2381,13 +2381,14 @@ async def update_preference(data: dict = Body(...)):
                 ed.set_indent_guides(bool(value))
         elif key == 'theme':
             theme_value = str(value)
-            try:
-                mapped_theme = _resolve_theme_preference(theme_value)
-            except RuntimeError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
             value = theme_value
-            for ed in editors:
-                ed.set_theme(mapped_theme)
+            # Theme SSOT is now the Monaco theme id set (monaco-editor-themes). The legacy
+            # NiceGUI/CM6 surface can only apply themes it knows about; for unknown theme
+            # keys we still persist SSOT but skip applying to CM6.
+            mapped_theme = THEME_MAP.get(theme_value)
+            if mapped_theme:
+                for ed in editors:
+                    ed.set_theme(mapped_theme)
         elif key == 'fontScale':
             try:
                 scale = _resolve_font_scale(value)

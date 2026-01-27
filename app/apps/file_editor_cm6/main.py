@@ -22,6 +22,7 @@ from .explorer_ws import explorer_websocket
 from .history_store import HistoryStore
 from .preferences_store import PreferencesStore
 from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
+from .vscode_rpc_shell_manager import ensure_vscode_rpc_shell
 from .git_helper import (
     GitError,
     list_branches as git_list_branches,
@@ -418,6 +419,42 @@ async def api_start_lsp(payload: dict = Body(...)):
     if not started:
         return JSONResponse({"ok": False, "error": "Failed to start server (missing binary?)"}, status_code=424)
 
+
+@file_editor_cm6_bp.get("/vscode_rpc/discover")
+async def vscode_rpc_discover():
+    """Discover the browser-facing WS URL for vscode_rpc and ensure the shell is running."""
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    try:
+        record = await ensure_vscode_rpc_shell(project_root)
+    except Exception as exc:
+        # Do not swallow: log loudly and return a structured response so callers
+        # can surface it (and retry).
+        print(f"[vscode_rpc][discover] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    # Main-process service shim will proxy this WS to the framework shell.
+    # Keep it same-origin for browsers (TE2 host provides the proxy route).
+    ws_url = f"/vscode_rpc_ws?shell_id={record.id}"
+
+    # Token is optional in dev mode. For now, return empty and let the proxy be same-origin.
+    return {
+        "ok": True,
+        "data": {
+            "project_root": project_root,
+            "ws_url": ws_url,
+            "token": "",
+            "expires_at": 0,
+            "shell_id": record.id,
+        },
+    }
+
     return {"ok": True, "data": {"serverId": server_id, "started": started}}
 
 
@@ -547,9 +584,24 @@ def init_nicegui_with_app(fastapi_app):
     try:
         from .monaco_editor import register_monaco_editor_routes
         register_monaco_editor_routes(fastapi_app, mount_path=mount)
-    except Exception:
-        # If FastHTML is unavailable for some reason, keep initialization safe.
-        pass
+    except Exception as e:
+        # Don't silently fail: if this throws, the host will see `/api/app/<app>/ui/nc` as 404.
+        import sys
+        import traceback
+        from fastapi.responses import HTMLResponse
+
+        print("[MonacoEditor] Failed to register routes:", repr(e), file=sys.stderr, flush=True)
+        traceback.print_exc()
+
+        # Keep the worker bootable, but make the failure visible (no silent 404s).
+        @fastapi_app.get(f"{mount}/nc", include_in_schema=False)
+        async def _monaco_editor_registration_failed(app_id: str | None = None):
+            return HTMLResponse(
+                f"<pre style='white-space:pre-wrap;padding:16px;font-family:ui-monospace'>"
+                f"Monaco editor routes failed to register:\\n\\n{traceback.format_exc()}"
+                f"</pre>",
+                status_code=503,
+            )
     
     # Critical: Set Socket.IO path BEFORE calling ui.run_with()
     # This ensures the client connects to /ui/_nicegui_ws/socket.io

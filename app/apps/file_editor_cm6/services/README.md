@@ -39,3 +39,5 @@ A service module can export either or both:
   `/explorer_ws/socket.io` (separate from NiceGUI transport).
 - `lsp_transport.py` — Dedicated LSP Socket.IO server mounted at
   `/lsp_ws/socket.io` (separate from NiceGUI transport).
+- `vscode_rpc_transport.py` — Proxy-only WebSocket shim mounted at
+  `/vscode_rpc_ws` that forwards frames to the `vscode_rpc` framework shell.

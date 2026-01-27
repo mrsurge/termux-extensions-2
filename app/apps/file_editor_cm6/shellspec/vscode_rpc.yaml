@@ -1,0 +1,36 @@
+version: "1"
+
+shells:
+  vscode-rpc:
+    backend: proc
+    cwd: ${ctx:VSCODE_WORKTREE}
+    command:
+      - node
+      - te2/vscode_rpc_server.mjs
+      - --port
+      - ${free_port}
+    env:
+      # TE2 conventions
+      TE_APP_ID: ${ctx:APP_ID}
+      TE_VSCODE_RPC_PORT: ${free_port}
+      PROJECT_ROOT: ${ctx:PROJECT_ROOT}
+    subgroups:
+      # IMPORTANT: include the app_id itself so TE2/FWS process-group controls
+      # (e.g. “kill app:file_editor_cm6”) pick this shell up like other
+      # file_editor_cm6 shells (see android_lsp.yaml pattern).
+      - ${ctx:APP_ID}
+      - vscode_rpc
+      - "project:${ctx:PROJECT_HASH}"
+    ui:
+      subgroup_styles:
+        vscode_rpc:
+          bg: rgba(18, 23, 40, 0.92)
+          border: rgba(80, 130, 255, 0.70)
+        project:*:
+          bg: rgba(0, 0, 0, 0.88)
+          border: rgba(29, 70, 126, 0.88)
+    readiness:
+      type: tcp_port
+      host: 127.0.0.1
+      port: ${free_port}
+      timeout: 10
