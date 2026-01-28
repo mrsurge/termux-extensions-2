@@ -936,9 +936,6 @@ const menuEditorBtn = requireEl('#menu-editor-btn');
 const menuEditorDD  = requireEl('#menu-editor-dd');
 const menuViewBtn = requireEl('#menu-view-btn');
 const menuViewDD  = requireEl('#menu-view-dd');
-const menuThemeBtn= requireEl('#menu-theme-btn');
-const menuThemeDD = requireEl('#menu-theme-dd');
-const themeMenuItems = Array.from(menuThemeDD.querySelectorAll('[data-theme]'));
 
 
 const recentFilesBtn = requireEl('#recent-files-btn');
@@ -1178,6 +1175,287 @@ const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
 const miLanguageServers = requireEl('#mi-language-servers');  // Added: 2025-12-08 - LSP settings modal
 const miExportDiagnostics = requireEl('#mi-export-diagnostics');
+const miEditorSettings = requireEl('#mi-editor-settings');
+
+// ---------- Editor Settings modal (VS Code API harness) ----------
+const editorSettingsModal = requireEl('#editor-settings-modal');
+const editorSettingsClose = requireEl('#editor-settings-close');
+const editorSettingsVsixPath = requireEl('#editor-settings-vsix-path');
+const editorSettingsVsixInstall = requireEl('#editor-settings-vsix-install');
+const editorSettingsThemeList = requireEl('#editor-settings-theme-list');
+const editorSettingsExtList = requireEl('#editor-settings-ext-list');
+
+let vscodeApiWs = null;
+let vscodeApiNextId = 1;
+const vscodeApiPending = new Map();
+let vscodeApiConnecting = null;
+
+async function ensureVscodeApiWs() {
+  if (vscodeApiWs && vscodeApiWs.readyState === WebSocket.OPEN) return vscodeApiWs;
+  if (vscodeApiConnecting) return vscodeApiConnecting;
+
+  vscodeApiConnecting = (async () => {
+    const resp = await fetch('/api/app/file_editor_cm6/vscode_api/discover', { cache: 'no-store' });
+    const json = await resp.json();
+    if (!resp.ok || json?.ok === false) {
+      throw new Error(json?.error || json?.detail || `discover failed HTTP ${resp.status}`);
+    }
+    const wsPath = json?.data?.ws_url || json?.ws_url;
+    if (!wsPath) throw new Error('vscode_api discover missing ws_url');
+    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${wsPath}`;
+
+    const ws = new WebSocket(wsUrl);
+    vscodeApiWs = ws;
+
+    ws.onmessage = (ev) => {
+      let msg = null;
+      try { msg = JSON.parse(String(ev.data || '')); } catch { return; }
+      const handleOne = (m) => {
+        const id = m && m.id;
+        if (id == null) return;
+        const pending = vscodeApiPending.get(id);
+        if (!pending) return;
+        vscodeApiPending.delete(id);
+        if (m.error) pending.reject(new Error(m.error.message || 'jsonrpc error'));
+        else pending.resolve(m.result);
+      };
+      if (Array.isArray(msg)) msg.forEach(handleOne);
+      else handleOne(msg);
+    };
+
+    ws.onclose = () => {
+      vscodeApiWs = null;
+      vscodeApiConnecting = null;
+      // Fail all pending calls quickly.
+      for (const [, pending] of vscodeApiPending) {
+        try { pending.reject(new Error('vscode_api ws closed')); } catch {}
+      }
+      vscodeApiPending.clear();
+    };
+
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('vscode_api ws connect timeout')), 8000);
+      ws.onopen = () => { clearTimeout(t); resolve(); };
+      ws.onerror = () => { clearTimeout(t); reject(new Error('vscode_api ws error')); };
+    });
+
+    vscodeApiConnecting = null;
+    return ws;
+  })();
+
+  return vscodeApiConnecting;
+}
+
+async function vscodeApiCall(method, params) {
+  const ws = await ensureVscodeApiWs();
+  const id = vscodeApiNextId++;
+  const payload = { jsonrpc: '2.0', id, method, params: params || {} };
+  const p = new Promise((resolve, reject) => {
+    vscodeApiPending.set(id, { resolve, reject });
+    // Hard timeout so modal never "hangs".
+    setTimeout(() => {
+      if (!vscodeApiPending.has(id)) return;
+      vscodeApiPending.delete(id);
+      reject(new Error(`vscode_api timeout: ${method}`));
+    }, 12000);
+  });
+  ws.send(JSON.stringify(payload));
+  return p;
+}
+
+function openEditorSettingsModal() {
+  editorSettingsModal.classList.add('show');
+  editorSettingsModal.setAttribute('aria-hidden', 'false');
+  void refreshEditorSettingsModal();
+}
+
+function closeEditorSettingsModal() {
+  editorSettingsModal.classList.remove('show');
+  editorSettingsModal.setAttribute('aria-hidden', 'true');
+}
+
+editorSettingsClose.addEventListener('click', closeEditorSettingsModal);
+editorSettingsModal.addEventListener('click', (ev) => {
+  // click outside card closes
+  if (ev.target === editorSettingsModal) closeEditorSettingsModal();
+});
+miEditorSettings.addEventListener('click', () => {
+  closeAllMenus();
+  openEditorSettingsModal();
+});
+
+async function refreshEditorSettingsModal() {
+  // Themes: use existing supported Monaco ids (SSOT is preference_store: editor.theme)
+  // Extensions: list installed VSIXs (global pool) and allow per-project enablement (project sidecar).
+  editorSettingsThemeList.textContent = 'Loading…';
+  editorSettingsExtList.textContent = 'Loading…';
+
+  let installed = [];
+  let enabled = [];
+  try {
+    const installedRes = await vscodeApiCall('vscode.vsix.listInstalled', {});
+    installed = installedRes?.installed || [];
+  } catch (e) {
+    editorSettingsExtList.textContent = `Failed to load extensions: ${e?.message || 'unknown error'}`;
+  }
+  try {
+    const enabledRes = await vscodeApiCall('vscode.vsix.listEnabled', {});
+    enabled = enabledRes?.enabled || [];
+  } catch (e) {
+    // ok to keep enabled empty
+  }
+  const enabledSet = new Set((enabled || []).map(String));
+
+  const currentTheme = editorViewState?.theme || 'vs-dark';
+  const themeOptions = [
+    { id: 'te2-dark', label: 'TE2 Dark (GitHub-ish)' },
+    { id: 'te2-light', label: 'TE2 Light (GitHub-ish)' },
+    { id: 'te2-dracula', label: 'TE2 Dracula' },
+    { id: 'github-dark-default', label: 'GitHub Dark Default' },
+    { id: 'github-light-default', label: 'GitHub Light Default' },
+    { id: 'atom-dark', label: 'Atom One Dark' },
+    { id: 'atom-light', label: 'Atom One Light' },
+    { id: 'one-dark-pro', label: 'One Dark Pro' },
+    { id: 'darcula', label: 'Darcula' },
+    { id: 'material-dark', label: 'Material Theme Dark' },
+    { id: 'material-light', label: 'Material Theme Light' },
+    { id: 'monokai-pro', label: 'Monokai Pro' },
+    { id: 'vs-dark', label: 'VS Code Dark' },
+    { id: 'vs', label: 'VS Code Light' },
+  ];
+
+  editorSettingsThemeList.innerHTML = '';
+  const themeWrap = document.createElement('div');
+  themeWrap.style.display = 'grid';
+  themeWrap.style.gridTemplateColumns = 'repeat(auto-fit, minmax(220px, 1fr))';
+  themeWrap.style.gap = '8px';
+
+  themeOptions.forEach((t) => {
+    const row = document.createElement('label');
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '10px';
+    row.style.padding = '8px 10px';
+    row.style.border = '1px solid var(--border, #333)';
+    row.style.borderRadius = '8px';
+    row.style.cursor = 'pointer';
+
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'te2-theme-radio';
+    input.value = t.id;
+    input.checked = String(currentTheme) === String(t.id);
+
+    const text = document.createElement('div');
+    text.textContent = t.label;
+    text.style.flex = '1';
+
+    row.appendChild(input);
+    row.appendChild(text);
+
+    input.addEventListener('change', async () => {
+      if (!input.checked) return;
+      const ok = await updatePreference('theme', t.id);
+      if (!ok) host.toast('Failed to change theme');
+      // Keep local view_state in sync for subsequent opens.
+      try { editorViewState = editorViewState || {}; editorViewState.theme = t.id; } catch {}
+    });
+
+    themeWrap.appendChild(row);
+  });
+  editorSettingsThemeList.appendChild(themeWrap);
+
+  // Extensions list (checkboxes)
+  editorSettingsExtList.innerHTML = '';
+  if (!installed.length) {
+    const empty = document.createElement('div');
+    empty.style.opacity = '0.8';
+    empty.textContent = 'No VSIX installed yet.';
+    editorSettingsExtList.appendChild(empty);
+  } else {
+    const list = document.createElement('div');
+    list.style.display = 'flex';
+    list.style.flexDirection = 'column';
+    list.style.gap = '6px';
+
+    installed
+      .slice()
+      .sort((a, b) => String(a.display_name || a.id).localeCompare(String(b.display_name || b.id)))
+      .forEach((ext) => {
+        const extId = String(ext.id || '').trim();
+        if (!extId) return;
+        const label = String(ext.display_name || extId);
+        const desc = String(ext.description || '').trim();
+
+        const row = document.createElement('label');
+        row.style.display = 'flex';
+        row.style.alignItems = 'flex-start';
+        row.style.gap = '10px';
+        row.style.padding = '8px 10px';
+        row.style.border = '1px solid var(--border, #333)';
+        row.style.borderRadius = '8px';
+        row.style.cursor = 'pointer';
+
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = enabledSet.has(extId);
+        input.style.marginTop = '3px';
+
+        const text = document.createElement('div');
+        const title = document.createElement('div');
+        title.textContent = `${label} (${extId})`;
+        title.style.fontWeight = '600';
+        const sub = document.createElement('div');
+        sub.textContent = desc || `v${ext.version || ''}`;
+        sub.style.opacity = '0.8';
+        sub.style.fontSize = '12px';
+        text.appendChild(title);
+        text.appendChild(sub);
+
+        row.appendChild(input);
+        row.appendChild(text);
+
+        input.addEventListener('change', async () => {
+          const want = !!input.checked;
+          input.disabled = true;
+          try {
+            await vscodeApiCall(want ? 'vscode.vsix.enable' : 'vscode.vsix.disable', { id: extId });
+            if (want) enabledSet.add(extId);
+            else enabledSet.delete(extId);
+          } catch (e) {
+            host.toast(e?.message || 'Failed to update extension');
+            input.checked = !want;
+          } finally {
+            input.disabled = false;
+          }
+        });
+
+        list.appendChild(row);
+      });
+
+    editorSettingsExtList.appendChild(list);
+  }
+}
+
+editorSettingsVsixInstall.addEventListener('click', async () => {
+  const p = String(editorSettingsVsixPath.value || '').trim();
+  if (!p) {
+    host.toast('Enter an absolute .vsix path');
+    return;
+  }
+  editorSettingsVsixInstall.disabled = true;
+  try {
+    const res = await vscodeApiCall('vscode.vsix.installLocal', { path: p });
+    if (!res?.ok) throw new Error(res?.error || 'VSIX install failed');
+    host.toast(`Installed: ${res.installed?.id || 'ok'}`);
+    editorSettingsVsixPath.value = '';
+    await refreshEditorSettingsModal();
+  } catch (e) {
+    host.toast(e?.message || 'VSIX install failed');
+  } finally {
+    editorSettingsVsixInstall.disabled = false;
+  }
+});
 
 initVirtualKeyboardAdjustments({
   root,
@@ -2001,11 +2279,6 @@ function applyStateToMenus(state) {
   setMenuChecked(miToggleMinimap, state.showMinimap);
   setMenuChecked(miToggleStickyScroll, state.stickyScroll);  // Added: 2025-12-03 by vectorArc - TE2 Team
   setMenuChecked(miTrackEdits, state.trackAgentEdits);
-  
-  // Update theme menu checkmarks
-  themeMenuItems.forEach(item => {
-    setMenuChecked(item, item.dataset.theme === state.theme);
-  });
   
   // Apply font scale to UI
   applyFontScale(state.fontScale ?? 0.85);
@@ -3439,7 +3712,6 @@ function closeAllMenus() {
   menuEditDD.classList.remove('show');
   menuEditorDD.classList.remove('show');
   menuViewDD.classList.remove('show');
-  menuThemeDD.classList.remove('show');
   recentFilesDD.classList.remove('show');
   try {
     if (typeof window.__cm6CloseLspMenus === 'function') {
@@ -3457,29 +3729,11 @@ function bindMenuToggle(el, action) {
   el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); run(); } });
 }
 
-function bindThemeMenu() {
-  themeMenuItems.forEach(item => {
-    item.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const newTheme = item.dataset.theme;
-      if (newTheme && newTheme !== editorViewState?.theme) {
-        // Update preference via unified method
-        const success = await updatePreference('theme', newTheme);
-        if (!success) {
-          host.toast('Failed to change theme');
-        }
-      }
-      menuThemeDD.classList.remove('show');
-    });
-  });
-}
-
-menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-menuEditBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-menuEditorBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditorDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuViewDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuThemeDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-menuThemeBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuThemeDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-recentFilesBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = recentFilesDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); menuThemeDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuEditBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuEditorBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditorDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuViewDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
+recentFilesBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = recentFilesDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
 runActiveBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   runCurrentFile();

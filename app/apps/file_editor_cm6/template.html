@@ -2080,6 +2080,8 @@
         <div class="fe-dd-separator"></div>
         <div class="fe-dd-item" id="mi-language-servers"><span>Language Servers…</span></div>
         <div class="fe-dd-item" id="mi-export-diagnostics"><span>Export Diagnostics…</span></div>
+        <div class="fe-dd-separator"></div>
+        <div class="fe-dd-item" id="mi-editor-settings"><span>Settings…</span></div>
       </div>
     </div>
     <div class="fe-menu" id="menu-view">
@@ -2099,23 +2101,6 @@
         <div class="fe-dd-item" id="mi-toggle-terminal"><span>Toggle Terminal</span><span class="fe-kbd">Ctrl/Cmd+`</span></div>
         <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
         <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
-      </div>
-    </div>
-    <div class="fe-menu" id="menu-theme">
-      <button class="fe-menu-btn" id="menu-theme-btn">Themes</button>
-      <div class="fe-dropdown" id="menu-theme-dd">
-        <div class="fe-dd-item" data-theme="github-dark-default" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>GitHub Dark Default</span></div>
-        <div class="fe-dd-item" data-theme="github-light-default" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>GitHub Light Default</span></div>
-        <div class="fe-dd-item" data-theme="atom-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Atom One Dark</span></div>
-        <div class="fe-dd-item" data-theme="atom-light" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Atom One Light</span></div>
-        <div class="fe-dd-item" data-theme="one-dark-pro" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>One Dark Pro</span></div>
-        <div class="fe-dd-item" data-theme="darcula" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Darcula</span></div>
-        <div class="fe-dd-item" data-theme="material-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Material Theme Dark</span></div>
-        <div class="fe-dd-item" data-theme="material-light" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Material Theme Light</span></div>
-        <div class="fe-dd-item" data-theme="monokai-pro" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>Monokai Pro</span></div>
-        <div class="fe-dd-divider" style="height:1px;background:rgba(255,255,255,0.10);margin:6px 0;"></div>
-        <div class="fe-dd-item" data-theme="te2-dark" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>TE2 Dark</span></div>
-        <div class="fe-dd-item" data-theme="te2-light" data-checkable="true" role="menuitemradio" aria-checked="false" tabindex="0"><span>TE2 Light</span></div>
       </div>
     </div>
     <div class="fe-menu" id="menu-branch" style="margin-left: auto;">
@@ -2660,6 +2645,36 @@
     <div style="display:flex; gap:12px; justify-content:flex-end;">
       <button id="crash-discard" style="padding:8px 16px; background:#475569; color:#f1f5f9; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:500;">Discard</button>
       <button id="crash-restore" style="padding:8px 16px; background:#3b82f6; color:#ffffff; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600;">Restore</button>
+    </div>
+  </div>
+</div>
+
+<!-- Editor Settings Modal (VS Code API harness) -->
+<div id="editor-settings-modal" class="fe-modal" aria-hidden="true" style="z-index: 340;">
+  <div class="fe-modal-card" style="max-width: 760px;">
+    <div class="fe-modal-header">
+      <strong>Editor Settings</strong>
+      <span style="flex:1"></span>
+      <button class="fe-btn" id="editor-settings-close" aria-label="Close">✕</button>
+    </div>
+    <div class="fe-modal-body">
+      <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 14px;">
+        <div style="flex:1; min-width: 240px;">
+          <label for="editor-settings-vsix-path" style="display:block; font-size: 12px; opacity: 0.8; margin-bottom: 6px;">Install VSIX (absolute path)</label>
+          <input id="editor-settings-vsix-path" class="lsp-rootrel-input" type="text" placeholder="/data/data/.../extension.vsix" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </div>
+        <button class="fe-btn fe-btn-primary" id="editor-settings-vsix-install">Install</button>
+      </div>
+
+      <div class="fe-dd-separator" style="margin: 10px 0;"></div>
+
+      <div style="font-weight: 600; margin-bottom: 6px;">Theme (global)</div>
+      <div id="editor-settings-theme-list"></div>
+
+      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
+
+      <div style="font-weight: 600; margin-bottom: 6px;">Extensions (per-project)</div>
+      <div id="editor-settings-ext-list"></div>
     </div>
   </div>
 </div>
