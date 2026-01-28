@@ -432,11 +432,25 @@ The iframe builds Monaco options from SSOT preferences (`buildMonacoOptionsFromP
 - autocompletion toggles (`quickSuggestions`, `suggestOnTriggerCharacters`, etc.)
 - font scale → `fontSize`
 - font family (default JetBrains Mono)
-- theme (mapped to `vs` / `vs-dark`)
-  - plus TE2 themes:
-    - `github-dark` → `te2-github-dark`
-    - `github-light` → `te2-github-light`
-    - `dracula` → `te2-dracula`
+- theme (Monaco base: `vs` / `vs-dark`, plus official `monaco-editor-themes` ids)
+  - `github-dark-default` (preferred)
+  - `github-light-default` (preferred)
+  - `github-dark` (legacy alias → `github-dark-default`)
+  - `github-light` (legacy alias → `github-light-default`)
+  - `atom-dark`
+  - `atom-light`
+  - `material-dark`
+  - `material-light`
+  - `darcula`
+  - `monokai-pro`
+  - `one-dark-pro`
+  - TE2-local extras (optional):
+    - `te2-dark` (diff colors match `github-dark-default`)
+    - `te2-light` (diff colors match `github-light-default`)
+
+Note: TE2 loads Monaco first (`editor.main.js`), then registers official themes from
+`/api/app/file_editor_cm6/ui/monaco_editor/themes/*.json`. If Monaco isn't loaded yet,
+theme registration is skipped (by design) to avoid caching a no-op run.
 
 ### Diff mode behavior
 - Git diff mode uses Monaco DiffEditor in inline mode (not side-by-side).
@@ -453,6 +467,13 @@ The iframe builds Monaco options from SSOT preferences (`buildMonacoOptionsFromP
 - Socket.IO client must connect to:
   - namespace `/editor`
   - path `/editor_ws/socket.io`
+
+### 2) Iframe loads (no `/ui/nc` 404)
+- The Monaco iframe entrypoint is `/api/app/file_editor_cm6/ui/nc?app_id=file_editor_cm6`.
+- If you see a `404` on that URL, it means the worker failed to register the Monaco FastHTML routes.
+  - Check the worker stderr logs for `[MonacoEditor] Failed to register routes`.
+  - The worker now returns a `503` HTML error (instead of silent 404) when registration fails.
+- A common cause is a Python exception inside `app/apps/file_editor_cm6/monaco_editor/m_editor_app.py` during route registration (e.g. bad route string formatting).
 
 ### 2) SSOT is present
 - `GET /api/app/file_editor_cm6/state` returns:
@@ -598,3 +619,141 @@ to take effect in the served Monaco bundle.
 
 ### Debugger note
 If your browser keeps pausing on this, DevTools likely has “Pause on exceptions” enabled; disable it while iterating so the UI remains usable.
+
+---
+
+## 14) Planned: `vscode_rpc` service contract (TE2 “services” + Framework Shell)
+
+This section documents the **target contract** for integrating a VS Code-style server protocol into TE2, without mixing SSOT logic into the host process.
+
+### Goal
+- Run a VS Code-derived JSON-RPC server **server-side** (a “framework shell” process).
+- Expose exactly **one** WebSocket endpoint to the browser (same-origin via TE2 proxy).
+- Keep TE2 main process as **proxy-only**: it should not mutate `file_editor_cm6` SSOT (`_history_store` / `_preference_store`) or interpret RPC payloads.
+- Model this like existing TE2 “services” (see `app/apps/file_editor_cm6/services/README.md`): the service exists to bridge transports, not own app state.
+
+### Pieces
+- **Framework shell runtime**: `framework_shells` (see `/data/data/com.termux/files/home/downloads/agent_log_server/fws_README.md`)
+  - Responsible for starting/stopping the RPC server process and capturing logs.
+- **Service shim (TE2 host)**: a **single** WS proxy route that forwards frames to the shell’s WS.
+- **Discovery endpoint (worker or host)**: returns the browser-facing WS URL + metadata (and token if needed).
+
+### Discovery endpoint (browser-facing)
+Proposed shape (exact mount TBD; keep under `file_editor_cm6`):
+
+`GET /api/app/file_editor_cm6/vscode_rpc/discover`
+
+Response:
+```json
+{
+  "ok": true,
+  "data": {
+    "project_root": "/abs/path/to/project",
+    "ws_url": "/ws/app/file_editor_cm6/vscode_rpc?token=...",
+    "token": "...",
+    "expires_at": 1760000000
+  }
+}
+```
+
+Notes:
+- `ws_url` should be a **same-origin** URL the browser can connect to (TE2 host will proxy it).
+- `token` is optional in dev mode; when present, it is **opaque** to the browser and validated only by the proxy/shim.
+- `project_root` is the SSOT “current project” root as seen by the worker.
+
+### WebSocket proxy endpoint (TE2 host, proxy-only)
+Proposed:
+
+`WS /ws/app/file_editor_cm6/vscode_rpc?token=...`
+
+Contract:
+- Accepts a browser WS connection.
+- Opens a WS connection to the framework shell’s RPC server (local-only).
+- Forwards **all frames verbatim** both directions.
+- Does not parse/transform payloads.
+
+Error handling:
+- If the worker/shell isn’t running: return `503 Service Unavailable`.
+- If token is invalid/expired: return `401/403` (consistent with TE2 auth conventions).
+- If the upstream WS closes unexpectedly: close the downstream WS with a reason and let the browser reconnect.
+
+### RPC payload framing
+Baseline: JSON-RPC 2.0 messages over WS, treated as opaque payloads by TE2.
+
+Non-negotiable invariant:
+- The RPC connection must support **bidirectional** messaging and must not depend on HTTP POST “command” endpoints.
+
+### Process lifecycle (shellspec-first)
+The RPC server process should be started via a shellspec (recommended) and managed by `framework_shells`:
+- A `shellspec/*.yaml` defines how to start the process (cwd, env, args, port).
+- The system can adopt/reuse the shell if already running under the same repo fingerprint/runtime secret.
+
+### Security notes
+- Prefer short-lived tokens for WS discovery (rotated per UI session).
+- The token should not grant access outside the current repo fingerprint / runtime namespace.
+
+### Why we need this (ties back to Monaco vs “VS Code semantics”)
+Monaco’s built-in tokenization is often too coarse to replicate VS Code’s “GitHub Dark Default” semantic coloring (function names/imports/args, etc.) without the broader VS Code service layer (semantic tokens, richer language pipelines).
+
+`vscode_rpc` is the planned bridge to bring those semantics back while staying compatible with TE2’s proxy/service architecture.
+
+### Current status (scaffolding)
+The following pieces exist now (v0, minimal):
+- Worker discovery: `GET /api/app/file_editor_cm6/vscode_rpc/discover`
+  - ensures the framework shell is running
+  - returns `ws_url` like `/vscode_rpc_ws?shell_id=<shell_id>`
+- Host WS shim (service): `WS /vscode_rpc_ws?shell_id=<shell_id>`
+  - proxy-only, forwards frames verbatim to the shell’s WS
+- Shellspec: `app/apps/file_editor_cm6/shellspec/vscode_rpc.yaml#vscode-rpc`
+- Server entrypoint: `worktrees/vscode-te2-diff/te2/vscode_rpc_server.mjs`
+  - currently supports `rpc.ping` + a minimal `initialize`
+
+### Shell grouping / FWS kill semantics
+The `vscode_rpc` shellspec mirrors the Android LSP shellspec subgroup pattern so that:
+- The shell appears under the `file_editor_cm6` group in the FWS dashboard.
+- TE2 process-manager “kill app” operations include the rpc shell.
+
+Specifically, `app/apps/file_editor_cm6/shellspec/vscode_rpc.yaml` includes:
+- `${ctx:APP_ID}` (e.g. `file_editor_cm6`)
+- `vscode_rpc`
+- `project:${ctx:PROJECT_HASH}`
+
+---
+
+## 15) In-progress: `vscode_api` harness (extension host + VSIX pipeline)
+
+`vscode_api` is the next step after `vscode_rpc`.
+
+Goal:
+- Provide a **single** WS JSON-RPC connection that becomes the long-lived “VS Code API harness”.
+- This is the place where TE2 will eventually support:
+  - VSIX install/registry
+  - TextMate grammars + themes from installed extensions
+  - Extension host services (vscode.* APIs) where needed
+  - Language feature providers (semantic tokens, diagnostics, completions, etc.)
+
+Important invariant:
+- TE2 main process is **proxy-only**; all SSOT interaction remains in the worker.
+
+### Current scaffolding (v0)
+- Worker discovery: `GET /api/app/file_editor_cm6/vscode_api/discover`
+  - starts/adopts a framework shell
+  - returns `ws_url` like `/vscode_api_ws?shell_id=<shell_id>`
+- Host WS shim (service): `WS /vscode_api_ws?shell_id=<shell_id>`
+  - proxy-only, forwards frames verbatim to the shell’s WS
+- Shellspec: `app/apps/file_editor_cm6/shellspec/vscode_api.yaml#vscode-api`
+- Server entrypoint: `worktrees/vscode-te2-diff/te2/vscode_api_server.mjs`
+  - currently supports:
+    - `rpc.ping`
+    - `vscode_api.version`
+    - `vscode_api.capabilities`
+    - `vscode.vsix.*` (registry + per-project enable/disable)
+    - `vscode.themes.*` (list/load raw theme json)
+    - `vscode.textmate.*` (list/load raw grammars)
+
+Storage:
+- Global VSIX install pool: `~/.local/share/termux-extensions-2/code-te2-extensions/`
+- Per-project enablement SSOT: `ProjectSidecar.vscode_api.enabled_extensions`
+
+Next step:
+- Replace the placeholder server implementation with a real extension-host-backed JSON-RPC surface and keep *all* future VSIX-related integration behind this API.
