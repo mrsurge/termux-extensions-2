@@ -34,3 +34,4 @@ android/app/build
 # Local worktrees (not tracked)
 worktrees/monaco-editor-mobile-playground
 worktrees/vscode-te2-diff
+worktrees/monaco-vscode-api
