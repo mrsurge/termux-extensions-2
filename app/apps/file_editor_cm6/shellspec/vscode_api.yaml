@@ -1,0 +1,34 @@
+version: "1"
+
+shells:
+  vscode-api:
+    backend: proc
+    cwd: ${ctx:VSCODE_WORKTREE}
+    command:
+      - node
+      - te2/vscode_api_server.mjs
+      - --port
+      - ${free_port}
+    env:
+      TE_APP_ID: ${ctx:APP_ID}
+      TE_VSCODE_API_PORT: ${free_port}
+      PROJECT_ROOT: ${ctx:PROJECT_ROOT}
+      TE2_EXT_ROOT: ${env:TE2_EXT_ROOT}
+      TE2_WORKER_API_BASE: ${env:TE2_WORKER_API_BASE}
+    subgroups:
+      - ${ctx:APP_ID}
+      - vscode_api
+      - "project:${ctx:PROJECT_HASH}"
+    ui:
+      subgroup_styles:
+        vscode_api:
+          bg: rgba(18, 23, 40, 0.92)
+          border: rgba(220, 160, 40, 0.70)
+        project:*:
+          bg: rgba(0, 0, 0, 0.88)
+          border: rgba(29, 70, 126, 0.88)
+    readiness:
+      type: tcp_port
+      host: 127.0.0.1
+      port: ${free_port}
+      timeout: 10

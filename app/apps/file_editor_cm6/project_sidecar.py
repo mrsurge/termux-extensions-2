@@ -159,6 +159,12 @@ class ProjectSidecar:
                     "repoFingerprint": None,
                 }
             },
+            # VS Code API harness state (project-scoped SSOT).
+            "vscode_api": {
+                # List[str] of globally-installed extension ids enabled for this project.
+                # Format: "publisher.name"
+                "enabled_extensions": [],
+            },
         }
 
     # --------------------------------------------------------------------- #
@@ -904,6 +910,74 @@ class ProjectSidecar:
             "lspKotlinAndroidModule": str(android_cfg.get("module") or "app"),
             "lspKotlinAndroidVariant": str(android_cfg.get("variant") or "GeckoDebug"),
         }
+
+    # --------------------------------------------------------------------- #
+    # VS Code API harness config (project-scoped SSOT)
+    # --------------------------------------------------------------------- #
+
+    def _ensure_vscode_api_schema(self) -> dict:
+        cfg = self._data.get("vscode_api")
+        if not isinstance(cfg, dict):
+            cfg = {}
+        enabled = cfg.get("enabled_extensions")
+        if not isinstance(enabled, list):
+            enabled = []
+        # Normalize + de-dupe.
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for item in enabled:
+            try:
+                text = str(item).strip()
+            except Exception:
+                continue
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        cfg["enabled_extensions"] = normalized
+        self._data["vscode_api"] = cfg
+        return cfg
+
+    def get_vscode_api_enabled_extensions(self) -> List[str]:
+        cfg = self._ensure_vscode_api_schema()
+        enabled = cfg.get("enabled_extensions")
+        return list(enabled) if isinstance(enabled, list) else []
+
+    def set_vscode_api_enabled_extensions(self, enabled: List[str]) -> List[str]:
+        cfg = self._ensure_vscode_api_schema()
+        cfg["enabled_extensions"] = []
+        try:
+            for item in enabled or []:
+                text = str(item).strip()
+                if not text:
+                    continue
+                if text in cfg["enabled_extensions"]:
+                    continue
+                cfg["enabled_extensions"].append(text)
+        except Exception:
+            pass
+        self._data["vscode_api"] = cfg
+        return self.get_vscode_api_enabled_extensions()
+
+    def enable_vscode_api_extension(self, extension_id: str) -> List[str]:
+        cfg = self._ensure_vscode_api_schema()
+        text = str(extension_id).strip()
+        if text and text not in cfg["enabled_extensions"]:
+            cfg["enabled_extensions"].append(text)
+        self._data["vscode_api"] = cfg
+        return self.get_vscode_api_enabled_extensions()
+
+    def disable_vscode_api_extension(self, extension_id: str) -> List[str]:
+        cfg = self._ensure_vscode_api_schema()
+        text = str(extension_id).strip()
+        if not text:
+            return self.get_vscode_api_enabled_extensions()
+        try:
+            cfg["enabled_extensions"] = [x for x in cfg["enabled_extensions"] if x != text]
+        except Exception:
+            pass
+        self._data["vscode_api"] = cfg
+        return self.get_vscode_api_enabled_extensions()
 
 
 def clear_project_state(project_path: str) -> bool:

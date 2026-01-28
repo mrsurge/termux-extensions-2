@@ -1,0 +1,23 @@
+{
+  "scopes": {
+    "documentation.injection.js.jsx": "typescript.jsdoc.js.injection.tmLanguage.json",
+    "documentation.injection.ts": "typescript.jsdoc.ts.injection.tmLanguage.json",
+    "source.c": "cpp.c.tmLanguage.json",
+    "source.cpp": "cpp.cpp.tmLanguage.json",
+    "source.css": "css.css.tmLanguage.json",
+    "source.java": "java.java.tmLanguage.json",
+    "source.js": "javascript.JavaScript.tmLanguage.json",
+    "source.js.jsx": "javascript.JavaScriptReact.tmLanguage.json",
+    "source.js.regexp": "javascript.RegularExpressions.tmLanguage",
+    "source.json": "json.JSON.tmLanguage.json",
+    "source.json.comments": "json.JSONC.tmLanguage.json",
+    "source.python": "python.MagicPython.tmLanguage.json",
+    "source.rust": "rust.rust.tmLanguage.json",
+    "source.shell": "shellscript.shell-unix-bash.tmLanguage.json",
+    "source.ts": "typescript.TypeScript.tmLanguage.json",
+    "source.tsx": "typescript.TypeScriptReact.tmLanguage.json",
+    "text.html.basic": "html.html.tmLanguage.json",
+    "text.html.derivative": "html.html-derivative.tmLanguage.json",
+    "text.html.markdown": "markdown.markdown.tmLanguage.json"
+  }
+}

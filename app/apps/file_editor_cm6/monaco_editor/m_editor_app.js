@@ -54,6 +54,154 @@
   var vscodeRpcDocVersion = 1;
   var vscodeRpcChangeDebounceT = null;
 
+  // TextMate tokenization (VS Code grammars) - client-side only.
+  // Uses UMD globals loaded by m_editor_app.py:
+  //   - window.onig (vscode-oniguruma)
+  //   - window.vscodetextmate (vscode-textmate)
+  var tmRegistry = null;
+  var tmGrammarIndex = null; // { scopes: { scopeName: fileName } }
+  var tmInstalled = Object.create(null); // languageId -> true
+
+  function _uiUrl(relPath) {
+    var p = String(relPath || '').replace(/^\/+/, '');
+    return (apiBase || '') + '/ui/' + p;
+  }
+
+  async function ensureTextmateReady() {
+    if (tmRegistry) return tmRegistry;
+    if (!window.vscodetextmate || !window.onig) {
+      throw new Error('TextMate deps missing (vscodetextmate/onig)');
+    }
+    if (!tmGrammarIndex) {
+      tmGrammarIndex = await fetchJson('/ui/monaco_editor/textmate/grammar_index.json', { cache: 'no-store' });
+    }
+
+    // Load Oniguruma WASM once.
+    try {
+      var wasmResp = await fetch(_uiUrl('monaco_editor/textmate/onig.wasm'), { cache: 'force-cache' });
+      if (!wasmResp.ok) throw new Error('onig.wasm HTTP ' + wasmResp.status);
+      var wasmBuf = await wasmResp.arrayBuffer();
+      await window.onig.loadWASM(wasmBuf);
+    } catch (e) {
+      console.warn('[TextMate] loadWASM failed', e);
+      throw e;
+    }
+
+    var registry = new window.vscodetextmate.Registry({
+      onigLib: Promise.resolve({
+        createOnigScanner: function (sources) { return new window.onig.OnigScanner(sources); },
+        createOnigString: function (str) { return new window.onig.OnigString(str); },
+      }),
+      loadGrammar: async function (scopeName) {
+        try {
+          var scopes = tmGrammarIndex && tmGrammarIndex.scopes ? tmGrammarIndex.scopes : null;
+          var fileName = scopes ? scopes[String(scopeName || '')] : null;
+          if (!fileName) return null;
+          var url = _uiUrl('monaco_editor/textmate/grammars/' + fileName);
+          var resp = await fetch(url, { cache: 'force-cache' });
+          if (!resp.ok) return null;
+          var content = await resp.text();
+          return window.vscodetextmate.parseRawGrammar(content, url);
+        } catch (e) {
+          console.warn('[TextMate] loadGrammar failed', scopeName, e);
+          return null;
+        }
+      },
+    });
+
+    tmRegistry = registry;
+    console.log('[TextMate] ready');
+    return tmRegistry;
+  }
+
+  function _scopeNameForLanguage(languageId, filePath) {
+    var lang = normalizeLanguage(languageId);
+    var p = String(filePath || '');
+    if (lang === 'javascript') {
+      if (/\\.jsx$/i.test(p)) return 'source.js.jsx';
+      return 'source.js';
+    }
+    if (lang === 'typescript') {
+      if (/\\.tsx$/i.test(p)) return 'source.tsx';
+      return 'source.ts';
+    }
+    if (lang === 'python') return 'source.python';
+    if (lang === 'json') return 'source.json';
+    if (lang === 'jsonc') return 'source.json.comments';
+    if (lang === 'html') return 'text.html.basic';
+    if (lang === 'css') return 'source.css';
+    if (lang === 'markdown') return 'text.html.markdown';
+    if (lang === 'shell') return 'source.shell';
+    if (lang === 'c') return 'source.c';
+    if (lang === 'cpp') return 'source.cpp';
+    if (lang === 'java') return 'source.java';
+    if (lang === 'rust') return 'source.rust';
+    return null;
+  }
+
+  function _makeTextmateState(ruleStack) {
+    return {
+      _rs: ruleStack,
+      clone: function () { return _makeTextmateState(this._rs); },
+      equals: function (other) { return !!other && this._rs === other._rs; },
+    };
+  }
+
+  async function ensureTextmateTokenization(languageId, filePath) {
+    try {
+      if (!window.monaco || !window.monaco.languages || !window.monaco.languages.setTokensProvider) return false;
+      var lang = normalizeLanguage(languageId);
+      if (tmInstalled[lang]) return true;
+
+      var scopeName = _scopeNameForLanguage(lang, filePath);
+      if (!scopeName) return false;
+
+      var registry = await ensureTextmateReady();
+      var grammar = await registry.loadGrammar(scopeName);
+      if (!grammar) {
+        console.warn('[TextMate] missing grammar for', lang, scopeName);
+        return false;
+      }
+
+      window.monaco.languages.setTokensProvider(lang, {
+        getInitialState: function () { return _makeTextmateState(window.vscodetextmate.INITIAL); },
+        tokenize: function (line, state) {
+          var rs = state && state._rs ? state._rs : window.vscodetextmate.INITIAL;
+          var res = grammar.tokenizeLine(String(line || ''), rs);
+          var tokens = [];
+          for (var i = 0; i < res.tokens.length; i++) {
+            var t = res.tokens[i];
+            var scopes = t.scopes || [];
+            var last = scopes.length ? scopes[scopes.length - 1] : '';
+            tokens.push({ startIndex: t.startIndex, scopes: last });
+          }
+          return { tokens: tokens, endState: _makeTextmateState(res.ruleStack) };
+        },
+      });
+
+      tmInstalled[lang] = true;
+      console.log('[TextMate] installed', lang, '->', scopeName);
+      return true;
+    } catch (e) {
+      console.warn('[TextMate] install failed', languageId, e);
+      return false;
+    }
+  }
+
+  function applyLanguageToModel(nextModel, languageId, filePath) {
+    try {
+      if (!nextModel || !window.monaco || !window.monaco.editor) return;
+      var lang = normalizeLanguage(languageId);
+      // Apply immediately so Monaco can proceed. Once TextMate is installed (async),
+      // re-apply the language to force retokenization for the active model.
+      try { window.monaco.editor.setModelLanguage(nextModel, lang); } catch (_) {}
+      ensureTextmateTokenization(lang, filePath).then(function (ok) {
+        if (!ok) return;
+        try { window.monaco.editor.setModelLanguage(nextModel, lang); } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
   function getEditorContainer() {
     try { return document.getElementById('fh-monaco'); } catch (_) { return null; }
   }
@@ -460,14 +608,20 @@
       value: '',
       language: 'plaintext',
       theme: theme,
-      // Enable semantic highlighting globally (it will only apply for languages
-      // that have a semantic tokens provider registered).
-      // See VS Code standalone editor option `editor.semanticHighlighting.enabled`.
-      'semanticHighlighting.enabled': true,
+      // IMPORTANT:
+      // - TextMate scope theming is now enabled (VS Code grammars).
+      // - Semantic tokens can override TextMate colors. Until we implement full
+      //   VS Code-style `semanticTokenColors` mapping, keep semantic highlighting
+      //   theme-controlled to avoid "overriding" scope colors with defaults.
+      //
+      // VS Code accepts: true | false | "configuredByTheme". The pinned Monaco/VSCode
+      // build supports the same option shape.
+      'semanticHighlighting.enabled': 'configuredByTheme',
       automaticLayout: true,
       contextmenu: false,
       readOnly: readOnly,
       lineNumbers: showLineNumbers ? 'on' : 'off',
+      showFoldingControls: 'always',
       wordWrap: wordWrap ? 'on' : 'off',
       minimap: { enabled: !!showMinimap },
       renderIndentGuides: !!showIndentGuides,
@@ -688,8 +842,6 @@
     loadOfficialThemes._promise = (async function () {
       try {
         var themeIds = [
-          'github-dark-default',
-          'github-light-default',
           // Legacy ids (kept for backwards compatibility with old prefs)
           'github-dark',
           'github-light',
@@ -722,6 +874,210 @@
       }
     })();
     return loadOfficialThemes._promise;
+  }
+
+  function _getVscodeThemeJsonUrl(themeId) {
+    var id = String(themeId || '');
+    if (id === 'github-dark-default') return _uiUrl('monaco_editor/textmate/themes/github-dark-default.vscode.json');
+    if (id === 'github-light-default') return _uiUrl('monaco_editor/textmate/themes/github-light-default.vscode.json');
+    return null;
+  }
+
+  function _toMonacoColorHex(hex) {
+    if (!hex) return null;
+    var s = String(hex).trim();
+    if (!s) return null;
+    // Monaco expects no leading '#'
+    if (s[0] === '#') s = s.slice(1);
+    // VS Code themes sometimes use 8-digit ARGB; Monaco supports 8-digit too.
+    if (!/^[0-9a-fA-F]{3,8}$/.test(s)) return null;
+    return s.toUpperCase();
+  }
+
+  function _vscodeTokenColorsToMonacoRules(tokenColors) {
+    var rules = [];
+    if (!Array.isArray(tokenColors)) return rules;
+    for (var i = 0; i < tokenColors.length; i++) {
+      var tc = tokenColors[i];
+      if (!tc || !tc.settings) continue;
+      var fg = _toMonacoColorHex(tc.settings.foreground);
+      var bg = _toMonacoColorHex(tc.settings.background);
+      var fontStyle = null;
+      if (typeof tc.settings.fontStyle === 'string') {
+        // VS Code uses space-separated: "italic bold underline". Monaco expects same.
+        fontStyle = tc.settings.fontStyle.trim();
+      }
+      var scopes = tc.scope;
+      var scopeList = [];
+      if (Array.isArray(scopes)) {
+        scopeList = scopes;
+      } else if (typeof scopes === 'string') {
+        scopeList = scopes.split(',');
+      } else {
+        continue;
+      }
+      for (var j = 0; j < scopeList.length; j++) {
+        var scope = String(scopeList[j] || '').trim();
+        if (!scope) continue;
+        var rule = { token: scope };
+        if (fg) rule.foreground = fg;
+        if (bg) rule.background = bg;
+        if (fontStyle) rule.fontStyle = fontStyle;
+        // Only keep rules that actually set something.
+        if (rule.foreground || rule.background || rule.fontStyle) rules.push(rule);
+      }
+    }
+    return rules;
+  }
+
+  function _vscodeThemeToMonacoTheme(themeId, vscodeJson) {
+    var isLight = String(themeId || '').includes('light');
+    var tokenColors = vscodeJson && vscodeJson.tokenColors ? vscodeJson.tokenColors : [];
+    var colorsIn = vscodeJson && vscodeJson.colors ? vscodeJson.colors : {};
+    var colors = {};
+    try {
+      for (var k in colorsIn) {
+        if (!Object.prototype.hasOwnProperty.call(colorsIn, k)) continue;
+        var v = colorsIn[k];
+        if (typeof v === 'string') {
+          colors[k] = v;
+        }
+      }
+    } catch (_) {}
+    return {
+      base: isLight ? 'vs' : 'vs-dark',
+      inherit: true,
+      rules: _vscodeTokenColorsToMonacoRules(tokenColors),
+      colors: colors,
+    };
+  }
+
+  async function loadVscodeTextmateThemes() {
+    if (loadVscodeTextmateThemes._done) return;
+    if (!window.monaco || !window.monaco.editor || !window.monaco.editor.defineTheme) return;
+    if (loadVscodeTextmateThemes._promise) return loadVscodeTextmateThemes._promise;
+    loadVscodeTextmateThemes._promise = (async function () {
+      var themeIds = ['github-dark-default', 'github-light-default'];
+      for (var i = 0; i < themeIds.length; i++) {
+        var id = themeIds[i];
+        var url = _getVscodeThemeJsonUrl(id);
+        if (!url) continue;
+        try {
+          var res = await fetch(url, { cache: 'no-store' });
+          if (!res.ok) {
+            console.warn('[MonacoTheme] missing vscode theme', id, res.status);
+            continue;
+          }
+          var json = await res.json();
+          var monacoTheme = _vscodeThemeToMonacoTheme(id, json);
+          window.monaco.editor.defineTheme(id, monacoTheme);
+          console.log('[MonacoTheme] loaded vscode theme', id, 'rules=', monacoTheme.rules.length);
+
+          // Also (re)define TE2 themes to use the same TextMate scope rule-set as
+          // GitHub Dark/Light Default, while preserving TE2 UI colors (esp. the
+          // editor background). This gives TE2 themes "real" VS Code scope coloring.
+          //
+          // NOTE: We intentionally do not attempt to map VS Code semanticTokenColors
+          // here; semantic tokens remain theme-controlled via
+          // `editor.semanticHighlighting.enabled = "configuredByTheme"`.
+          try {
+            if (id === 'github-dark-default') {
+              var rules = (monacoTheme.rules || []).slice();
+              // Ensure function identifiers stay purple.
+              rules.push({ token: 'entity.name.function', foreground: 'D2A8FF' });
+              window.monaco.editor.defineTheme('te2-dark', {
+                base: 'vs-dark',
+                inherit: true,
+                rules: rules,
+                colors: {
+                  'editor.background': '#06080cff',
+                  'editor.foreground': '#e6edf3',
+                  'editorLineNumber.foreground': '#6e7681',
+                  'editorLineNumber.activeForeground': '#e6edf3',
+                  'editorCursor.foreground': '#2f81f7',
+                  'editor.selectionBackground': '#264f78',
+                  'editor.inactiveSelectionBackground': '#264f7840',
+                  'editorIndentGuide.background': '#30363d',
+                  'editorIndentGuide.activeBackground': '#6e7681',
+                  'editorWhitespace.foreground': '#484f58',
+                  'editorGutter.background': '#0d1117',
+                  'editorWidget.background': '#161b22',
+                  'editorHoverWidget.background': '#161b22',
+                  'editorSuggestWidget.background': '#161b22',
+                  'editorSuggestWidget.border': '#30363d',
+                  'editorSuggestWidget.foreground': '#e6edf3',
+                  'dropdown.background': '#161b22',
+                  'dropdown.border': '#30363d',
+                  'input.background': '#0d1117',
+                  'input.border': '#30363d',
+                  'input.foreground': '#e6edf3',
+                  'scrollbar.shadow': '#00000000',
+                  'scrollbarSlider.background': '#484f5833',
+                  'scrollbarSlider.hoverBackground': '#484f5866',
+                  'scrollbarSlider.activeBackground': '#484f5899',
+
+                  // Git diff colors: match GitHub Dark Default.
+                  'diffEditor.insertedLineBackground': '#23863626',
+                  'diffEditor.insertedTextBackground': '#3fb9504d',
+                  'diffEditor.removedLineBackground': '#da363326',
+                  'diffEditor.removedTextBackground': '#ff7b724d',
+                },
+              });
+            }
+
+            if (id === 'github-light-default') {
+              var rulesL = (monacoTheme.rules || []).slice();
+              // Ensure function identifiers stay purple (light).
+              rulesL.push({ token: 'entity.name.function', foreground: '8250DF' });
+              window.monaco.editor.defineTheme('te2-light', {
+                base: 'vs',
+                inherit: true,
+                rules: rulesL,
+                colors: {
+                  'editor.background': '#ffffff',
+                  'editor.foreground': '#24292f',
+                  'editorLineNumber.foreground': '#8c959f',
+                  'editorLineNumber.activeForeground': '#24292f',
+                  'editorCursor.foreground': '#0969da',
+                  'editor.selectionBackground': '#add6ff',
+                  'editor.inactiveSelectionBackground': '#add6ff66',
+                  'editorIndentGuide.background': '#d0d7de',
+                  'editorIndentGuide.activeBackground': '#8c959f',
+                  'editorWhitespace.foreground': '#d0d7de',
+                  'editorGutter.background': '#ffffff',
+                  'editorWidget.background': '#f6f8fa',
+                  'editorHoverWidget.background': '#f6f8fa',
+                  'editorSuggestWidget.background': '#f6f8fa',
+                  'editorSuggestWidget.border': '#d0d7de',
+                  'editorSuggestWidget.foreground': '#24292f',
+                  'dropdown.background': '#ffffff',
+                  'dropdown.border': '#d0d7de',
+                  'input.background': '#ffffff',
+                  'input.border': '#d0d7de',
+                  'input.foreground': '#24292f',
+                  'scrollbar.shadow': '#00000000',
+                  'scrollbarSlider.background': '#8c959f33',
+                  'scrollbarSlider.hoverBackground': '#8c959f66',
+                  'scrollbarSlider.activeBackground': '#8c959f99',
+
+                  // Git diff colors: match GitHub Light Default.
+                  'diffEditor.insertedLineBackground': '#aceebb4d',
+                  'diffEditor.insertedTextBackground': '#6fdd8b80',
+                  'diffEditor.removedLineBackground': '#ffcecb4d',
+                  'diffEditor.removedTextBackground': '#ff818266',
+                },
+              });
+            }
+          } catch (e3) {
+            console.warn('[MonacoTheme] failed to sync te2 themes from github defaults', e3);
+          }
+        } catch (e) {
+          console.warn('[MonacoTheme] failed vscode theme', id, e);
+        }
+      }
+      loadVscodeTextmateThemes._done = true;
+    })();
+    return loadVscodeTextmateThemes._promise;
   }
 
   function _resolveMonacoThemeId(themeKey) {
@@ -759,6 +1115,7 @@
       if (!window.monaco || !window.monaco.editor || !window.monaco.editor.setTheme) return;
       ensureTe2Themes();
       ensureTe2DiffTheme();
+      try { await loadVscodeTextmateThemes(); } catch (_) {}
       try { await loadOfficialThemes(); } catch (_) {}
       window.monaco.editor.setTheme(_resolveMonacoThemeId(themeKey));
     } catch (e) {
@@ -1505,6 +1862,7 @@
         // Keep a single model to avoid editor/plugin teardown between files.
         model = createFileModel(content, lang, nextPath);
         editor.setModel(model);
+        applyLanguageToModel(model, lang, nextPath);
         vscodeRpcDidOpenIfReady();
         installVscodeRpcChangePublisher();
       } catch (e) {
@@ -1513,7 +1871,7 @@
       }
     } else {
       try { model.setValue(content); } catch (_) { editor.setValue(content); }
-      try { monaco.editor.setModelLanguage(model, lang); } catch (_) {}
+      applyLanguageToModel(model, lang, nextPath);
     }
     currentPath = nextPath;
     try { lastContentSha256 = data.content_sha256 || lastContentSha256; } catch (_) {}
@@ -1568,6 +1926,7 @@
     if (!model) {
       model = createFileModel(content || '', lang, absPath);
       editor.setModel(model);
+      applyLanguageToModel(model, lang, absPath);
       installMirrorPublisher();
       installScrollPublisher();
       vscodeRpcDidOpenIfReady();
@@ -1579,17 +1938,18 @@
           try { model.dispose(); } catch (_) {}
           model = createFileModel(content || '', lang, absPath);
           editor.setModel(model);
+          applyLanguageToModel(model, lang, absPath);
           installMirrorPublisher();
           installScrollPublisher();
           vscodeRpcDidOpenIfReady();
           installVscodeRpcChangePublisher();
         } else {
           try { isApplyingRemote = true; model.setValue(content || ''); } catch (_) { editor.setValue(content || ''); } finally { isApplyingRemote = false; }
-          try { monaco.editor.setModelLanguage(model, lang); } catch (_) {}
+          applyLanguageToModel(model, lang, absPath);
         }
       } catch (_) {
         try { isApplyingRemote = true; model.setValue(content || ''); } catch (_) { editor.setValue(content || ''); } finally { isApplyingRemote = false; }
-        try { monaco.editor.setModelLanguage(model, lang); } catch (_) {}
+        applyLanguageToModel(model, lang, absPath);
       }
     }
     currentPath = absPath;
@@ -1664,6 +2024,7 @@
               if (!model) {
                 model = createFileModel(f.content || '', lang, currentPath);
                 editor.setModel(model);
+                applyLanguageToModel(model, lang, currentPath);
                 installMirrorPublisher();
                 installScrollPublisher();
                 vscodeRpcDidOpenIfReady();
@@ -1677,6 +2038,7 @@
                     try { model.dispose(); } catch (_) {}
                     model = createFileModel(f.content || '', lang, currentPath);
                     editor.setModel(model);
+                    applyLanguageToModel(model, lang, currentPath);
                     installMirrorPublisher();
                     installScrollPublisher();
                     vscodeRpcDidOpenIfReady();
@@ -1684,12 +2046,12 @@
                   } else {
                     isApplyingRemote = true;
                     try { model.setValue(f.content || ''); } finally { isApplyingRemote = false; }
-                    try { monaco.editor.setModelLanguage(model, lang); } catch (_) {}
+                    applyLanguageToModel(model, lang, currentPath);
                   }
                 } catch (_) {
                   isApplyingRemote = true;
                   try { model.setValue(f.content || ''); } finally { isApplyingRemote = false; }
-                  try { monaco.editor.setModelLanguage(model, lang); } catch (_) {}
+                  applyLanguageToModel(model, lang, currentPath);
                 }
               }
               ensureTouchSelection('ssot');
@@ -1737,6 +2099,7 @@
             if (!model) {
               model = createFileModel(payload.content || '', lang, currentPath);
               editor.setModel(model);
+              applyLanguageToModel(model, lang, currentPath);
               installMirrorPublisher();
               installScrollPublisher();
               vscodeRpcDidOpenIfReady();
@@ -1748,6 +2111,7 @@
                   try { model.dispose(); } catch (_) {}
                   model = createFileModel(payload.content || '', lang, currentPath);
                   editor.setModel(model);
+                  applyLanguageToModel(model, lang, currentPath);
                   installMirrorPublisher();
                   installScrollPublisher();
                   vscodeRpcDidOpenIfReady();
@@ -1755,12 +2119,12 @@
                 } else {
                   isApplyingRemote = true;
                   try { model.setValue(payload.content || ''); } finally { isApplyingRemote = false; }
-                  try { monaco.editor.setModelLanguage(model, lang); } catch (_) {}
+                  applyLanguageToModel(model, lang, currentPath);
                 }
               } catch (_) {
                 isApplyingRemote = true;
                 try { model.setValue(payload.content || ''); } finally { isApplyingRemote = false; }
-                try { monaco.editor.setModelLanguage(model, lang); } catch (_) {}
+                applyLanguageToModel(model, lang, currentPath);
               }
             }
             applyLineNumberSizing();
@@ -2150,7 +2514,7 @@
 
       try {
         if (window.monaco && model && currentPath) {
-          monaco.editor.setModelLanguage(model, languageFromPath(currentPath));
+          applyLanguageToModel(model, languageFromPath(currentPath), currentPath);
         }
         var langs = (window.monaco && monaco.languages && monaco.languages.getLanguages)
           ? monaco.languages.getLanguages().map(function(l){ return l && l.id; }).filter(Boolean)

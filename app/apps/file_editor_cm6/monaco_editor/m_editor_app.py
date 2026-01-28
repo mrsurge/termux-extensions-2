@@ -109,6 +109,18 @@ export default href;
             return Response("not found", status_code=404, media_type="text/plain")
         return FileResponse(str(target), media_type="application/json")
 
+    @fastapi_app.get(mount_path + "/monaco_editor/textmate/{file_path:path}", include_in_schema=False)
+    async def _serve_monaco_editor_textmate(file_path: str):
+        # TextMate grammars + Oniguruma WASM used by the Monaco iframe (client-side tokenization).
+        base = Path(__file__).with_name("textmate").resolve()
+        target = (base / file_path).resolve()
+        if not str(target).startswith(str(base) + "/") and target != base:
+            return Response("not found", status_code=404, media_type="text/plain")
+        if not target.exists() or not target.is_file():
+            return Response("not found", status_code=404, media_type="text/plain")
+        # Let FileResponse infer content type for .js/.json/.wasm.
+        return FileResponse(str(target))
+
     @fastapi_app.get(f"{mount_path}/nc", include_in_schema=False)
     async def _cm6_fasthtml_monaco_iframe(app_id: str | None = None):
         if not esm_ok or not lang_ok:
@@ -173,6 +185,16 @@ export default href;
               line-height: inherit;
               white-space: pre;
             }
+
+            /* Keep folding controls + diff revert arrows visible (disable hover-hide) */
+            .monaco-editor .margin-view-overlays .codicon-folding-expanded,
+            .monaco-editor .margin-view-overlays .codicon-folding-collapsed,
+            .monaco-editor .margin-view-overlays .codicon-folding-manual-expanded,
+            .monaco-editor .margin-view-overlays .codicon-folding-manual-collapsed,
+            .monaco-editor .arrow-revert-change {
+              opacity: 1 !important;
+              visibility: visible !important;
+            }
             """
         )
 
@@ -231,6 +253,9 @@ export default href;
                 Script(
                     src="/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js"
                 ),
+                # TextMate tokenization dependencies (UMD globals): `window.onig`, `window.vscodetextmate`.
+                Script(src="monaco_editor/textmate/vscode-oniguruma.umd.js"),
+                Script(src="monaco_editor/textmate/vscode-textmate.umd.js"),
                 Script(src="/static/vendor/socket.io.min.js"),
                 # Monaco editor harness (SSOT-first + editor socket transport).
                 Script(src="monaco_editor/m_editor_app.js"),

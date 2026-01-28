@@ -22,6 +22,7 @@ from .explorer_ws import explorer_websocket
 from .history_store import HistoryStore
 from .preferences_store import PreferencesStore
 from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
+from .vscode_api_shell_manager import ensure_vscode_api_shell
 from .vscode_rpc_shell_manager import ensure_vscode_rpc_shell
 from .git_helper import (
     GitError,
@@ -456,6 +457,113 @@ async def vscode_rpc_discover():
     }
 
     return {"ok": True, "data": {"serverId": server_id, "started": started}}
+
+
+@file_editor_cm6_bp.get("/vscode_api/discover")
+async def vscode_api_discover():
+    """Discover the browser-facing WS URL for vscode_api and ensure the shell is running."""
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    try:
+        record = await ensure_vscode_api_shell(project_root)
+    except Exception as exc:
+        print(f"[vscode_api][discover] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    ws_url = f"/vscode_api_ws?shell_id={record.id}"
+    return {
+        "ok": True,
+        "data": {
+            "project_root": project_root,
+            "ws_url": ws_url,
+            "token": "",
+            "expires_at": 0,
+            "shell_id": record.id,
+        },
+    }
+
+
+@file_editor_cm6_bp.get("/vscode_api/extensions/enabled")
+async def vscode_api_get_enabled_extensions():
+    """Return the list of globally-installed VSIX extensions enabled for the active project.
+
+    SSOT: ProjectSidecar (project-scoped).
+    """
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    sidecar = _history_store.get_project_sidecar(project_root)
+    if not sidecar:
+        raise HTTPException(status_code=500, detail="Failed to load project sidecar")
+
+    enabled = []
+    try:
+        enabled = sidecar.get_vscode_api_enabled_extensions()
+    except Exception:
+        enabled = []
+
+    return {"ok": True, "data": {"project_root": project_root, "enabled": enabled}}
+
+
+@file_editor_cm6_bp.post("/vscode_api/extensions/enabled")
+async def vscode_api_set_enabled_extensions(payload: dict = Body(...)):
+    """Set or toggle enabled extensions for the active project.
+
+    Accepts either:
+    - {"enabled": ["publisher.name", ...]}
+    - {"id": "publisher.name", "enabled": true|false}
+    """
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    sidecar = _history_store.get_project_sidecar(project_root)
+    if not sidecar:
+        raise HTTPException(status_code=500, detail="Failed to load project sidecar")
+
+    # Bulk set.
+    if isinstance(payload.get("enabled"), list):
+        items = payload.get("enabled") or []
+        enabled: list[str] = []
+        for item in items:
+            try:
+                text = str(item).strip()
+            except Exception:
+                continue
+            if not text or text in enabled:
+                continue
+            enabled.append(text)
+        try:
+            sidecar.set_vscode_api_enabled_extensions(enabled)
+            sidecar.save()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to save enabled extensions: {exc}")
+        return {"ok": True, "data": {"project_root": project_root, "enabled": sidecar.get_vscode_api_enabled_extensions()}}
+
+    # Toggle.
+    ext_id = payload.get("id")
+    if not ext_id:
+        raise HTTPException(status_code=400, detail="Expected 'enabled' list or ('id' + 'enabled') payload")
+    flag = bool(payload.get("enabled", False))
+    try:
+        if flag:
+            sidecar.enable_vscode_api_extension(str(ext_id))
+        else:
+            sidecar.disable_vscode_api_extension(str(ext_id))
+        sidecar.save()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save enabled extensions: {exc}")
+
+    return {"ok": True, "data": {"project_root": project_root, "enabled": sidecar.get_vscode_api_enabled_extensions()}}
 
 
 @file_editor_cm6_bp.post("/api/lsp/stop")
