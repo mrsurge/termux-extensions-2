@@ -1387,6 +1387,7 @@
       automaticLayout: true,
       experimental: { useTrueInlineView: false },
       scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+      renderGutterMenu: false
     });
 
     // Apply SSOT-derived options to both editors (original gutter must follow font size).
