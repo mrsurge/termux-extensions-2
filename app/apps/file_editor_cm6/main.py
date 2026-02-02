@@ -24,6 +24,8 @@ from .preferences_store import PreferencesStore
 from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
 from .vscode_api_shell_manager import ensure_vscode_api_shell
 from .vscode_rpc_shell_manager import ensure_vscode_rpc_shell
+from .vscode_server_shell_manager import ensure_vscode_server_shell
+from .code_server_shell_manager import ensure_code_server_shell
 from .git_helper import (
     GitError,
     list_branches as git_list_branches,
@@ -481,6 +483,136 @@ async def vscode_api_discover():
         "ok": True,
         "data": {
             "project_root": project_root,
+            # Future-proofing: support multiple backend instances per project.
+            # For now we run a single instance and fan out to multiple clients.
+            "instance_id": "primary",
+            "ws_url": ws_url,
+            "token": "",
+            "expires_at": 0,
+            "shell_id": record.id,
+        },
+    }
+
+
+@file_editor_cm6_bp.get("/vscode_server/discover")
+async def vscode_server_discover():
+    """Start/adopt the VS Code server (server-main) shell and return its local URL.
+
+    NOTE: This is a stepping-stone for wiring `vscode_api_ws` to the real VS Code
+    backend. For now, it is primarily for sanity-checking that the server can
+    boot in this Termux environment.
+    """
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    try:
+        record = await ensure_vscode_server_shell(project_root)
+    except Exception as exc:
+        print(f"[vscode_server][discover] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    port_s = (record.env_overrides or {}).get("TE_VSCODE_SERVER_PORT") or ""
+    try:
+        port = int(str(port_s))
+    except Exception:
+        port = 0
+
+    return {
+        "ok": True,
+        "data": {
+            "project_root": project_root,
+            "url": f"http://127.0.0.1:{port}" if port else "",
+            "port": port,
+            "shell_id": record.id,
+        },
+    }
+
+
+@file_editor_cm6_bp.get("/code_server/discover")
+async def code_server_discover():
+    """Start/adopt code-server and return its local URL.
+
+    This is the canonical backend extension host runtime for TE2.
+    """
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    try:
+        record = await ensure_code_server_shell(project_root)
+    except Exception as exc:
+        print(f"[code_server][discover] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    port_s = (record.env_overrides or {}).get("TE_CODE_SERVER_PORT") or ""
+    try:
+        port = int(str(port_s))
+    except Exception:
+        port = 0
+
+    return {
+        "ok": True,
+        "data": {
+            "project_root": project_root,
+            "url": f"http://127.0.0.1:{port}" if port else "",
+            "port": port,
+            "shell_id": record.id,
+        },
+    }
+
+
+@file_editor_cm6_bp.get("/vscode_api/resolve")
+async def vscode_api_resolve(path: str):
+    """Resolve the correct vscode_api instance for an absolute file path.
+
+    Today TE2 has a single active project, so this is a strict check:
+    - if the path is under the active project root, return the running/adopted shell
+    - otherwise return 404
+
+    This keeps the contract stable so we can later support multiple projects and/or
+    multiple instances per project (code-server session registry pattern).
+    """
+
+    if not path:
+        raise HTTPException(status_code=400, detail="Missing required query param: path")
+
+    project_root_raw = _history_store.get_active_project() or str(get_project_root())
+    if not project_root_raw:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    try:
+        project_root_path = Path(project_root_raw).expanduser().resolve(strict=False)
+        abs_path = Path(str(path)).expanduser().resolve(strict=False)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not str(abs_path).startswith(str(project_root_path)):
+        raise HTTPException(status_code=404, detail="No vscode_api instance for path (outside active project)")
+
+    try:
+        record = await ensure_vscode_api_shell(str(project_root_path))
+    except Exception as exc:
+        print(f"[vscode_api][resolve] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    ws_url = f"/vscode_api_ws?shell_id={record.id}"
+    return {
+        "ok": True,
+        "data": {
+            "project_root": str(project_root_path),
+            "instance_id": "primary",
             "ws_url": ws_url,
             "token": "",
             "expires_at": 0,

@@ -61,6 +61,12 @@
   var tmRegistry = null;
   var tmGrammarIndex = null; // { scopes: { scopeName: fileName } }
   var tmInstalled = Object.create(null); // languageId -> true
+  var tmGrammarByLang = Object.create(null); // languageId -> vscode-textmate grammar (debug use)
+  // TextMate grammar index from installed VSIX (via vscode_api).
+  // Structure:
+  // - byScope: {scopeName -> {id, scopeName, language}}
+  // - byLanguage: {languageId -> {preferred: scopeName, scopes: [scopeName,...]}}
+  var tmVscodeIndex = null;
 
   function _uiUrl(relPath) {
     var p = String(relPath || '').replace(/^\/+/, '');
@@ -72,8 +78,21 @@
     if (!window.vscodetextmate || !window.onig) {
       throw new Error('TextMate deps missing (vscodetextmate/onig)');
     }
+    // Prefer grammars from installed VSIX via vscode_api (global pool),
+    // but keep the legacy static grammar_index.json as a fallback.
+    if (!tmVscodeIndex) {
+      try {
+        tmVscodeIndex = await _refreshVscodeGrammarIndex();
+      } catch (e0) {
+        tmVscodeIndex = null;
+      }
+    }
     if (!tmGrammarIndex) {
-      tmGrammarIndex = await fetchJson('/ui/monaco_editor/textmate/grammar_index.json', { cache: 'no-store' });
+      try {
+        tmGrammarIndex = await fetchJson('/ui/monaco_editor/textmate/grammar_index.json', { cache: 'no-store' });
+      } catch (_) {
+        tmGrammarIndex = null;
+      }
     }
 
     // Load Oniguruma WASM once.
@@ -94,14 +113,32 @@
       }),
       loadGrammar: async function (scopeName) {
         try {
+          var sn = String(scopeName || '');
+
+          // 1) Prefer vscode_api grammar (installed VSIX).
+          try {
+            if (!tmVscodeIndex) tmVscodeIndex = await _refreshVscodeGrammarIndex();
+            var entry = tmVscodeIndex && tmVscodeIndex.byScope ? tmVscodeIndex.byScope[sn] : null;
+            if (entry && entry.id) {
+              var res = await vscodeApiCall('vscode.textmate.grammars.load', { id: entry.id });
+              if (res && res.ok && res.raw) {
+                var url = 'vscode_api://textmate/' + encodeURIComponent(entry.id);
+                return window.vscodetextmate.parseRawGrammar(String(res.raw), url);
+              }
+            }
+          } catch (e1) {
+            // fall through to legacy
+          }
+
+          // 2) Legacy static grammars.
           var scopes = tmGrammarIndex && tmGrammarIndex.scopes ? tmGrammarIndex.scopes : null;
-          var fileName = scopes ? scopes[String(scopeName || '')] : null;
+          var fileName = scopes ? scopes[sn] : null;
           if (!fileName) return null;
-          var url = _uiUrl('monaco_editor/textmate/grammars/' + fileName);
-          var resp = await fetch(url, { cache: 'force-cache' });
+          var url2 = _uiUrl('monaco_editor/textmate/grammars/' + fileName);
+          var resp = await fetch(url2, { cache: 'force-cache' });
           if (!resp.ok) return null;
           var content = await resp.text();
-          return window.vscodetextmate.parseRawGrammar(content, url);
+          return window.vscodetextmate.parseRawGrammar(content, url2);
         } catch (e) {
           console.warn('[TextMate] loadGrammar failed', scopeName, e);
           return null;
@@ -116,6 +153,30 @@
 
   function _scopeNameForLanguage(languageId, filePath) {
     var lang = normalizeLanguage(languageId);
+    try {
+      if (!tmVscodeIndex) {
+        // Don't block: refresh lazily.
+        _refreshVscodeGrammarIndex().then(function (idx) { tmVscodeIndex = idx; }).catch(function () {});
+      } else if (tmVscodeIndex.byLanguage && tmVscodeIndex.byLanguage[lang]) {
+        // Prefer extension-specific scopes when present.
+        var entry = tmVscodeIndex.byLanguage[lang];
+        if (entry && entry.scopes && filePath) {
+          var p = String(filePath || '');
+          // JSX/TSX special cases under monaco's "javascript"/"typescript" language ids.
+          if (lang === 'javascript' && /\\.jsx$/i.test(p)) {
+            if (entry.scopes.indexOf('source.js.jsx') >= 0) return 'source.js.jsx';
+            if (entry.scopes.indexOf('source.jsx') >= 0) return 'source.jsx';
+          }
+          if (lang === 'typescript' && /\\.tsx$/i.test(p)) {
+            if (entry.scopes.indexOf('source.tsx') >= 0) return 'source.tsx';
+          }
+          if (lang === 'markdown') {
+            if (entry.scopes.indexOf('text.html.markdown') >= 0) return 'text.html.markdown';
+          }
+        }
+        if (entry && entry.preferred) return entry.preferred;
+      }
+    } catch (_) {}
     var p = String(filePath || '');
     if (lang === 'javascript') {
       if (/\\.jsx$/i.test(p)) return 'source.js.jsx';
@@ -137,6 +198,67 @@
     if (lang === 'java') return 'source.java';
     if (lang === 'rust') return 'source.rust';
     return null;
+  }
+
+  async function _refreshVscodeGrammarIndex() {
+    // Build a tiny in-memory index so TextMate registry can resolve scope -> raw grammar.
+    var idx = { byScope: Object.create(null), byLanguage: Object.create(null) };
+    try {
+      var res = await vscodeApiCall('vscode.textmate.grammars.list', {});
+      var arr = res && res.grammars ? res.grammars : [];
+      if (!Array.isArray(arr)) arr = [];
+      var byLangScopes = Object.create(null); // lang -> Set(scope)
+      for (var i = 0; i < arr.length; i++) {
+        var g = arr[i];
+        if (!g) continue;
+        var scope = String(g.scopeName || '').trim();
+        var id = String(g.id || '').trim();
+        if (!scope || !id) continue;
+        var glang = String(g.language || '').trim();
+        idx.byScope[scope] = { id: id, scopeName: scope, language: glang };
+        var lang = normalizeLanguage(glang);
+        if (!lang) continue;
+        if (!byLangScopes[lang]) byLangScopes[lang] = new Set();
+        byLangScopes[lang].add(scope);
+      }
+
+      function pickPreferred(lang, scopesArr) {
+        // Prefer canonical scopes for the languageId, then "source.<lang>".
+        var prefer = [];
+        if (lang === 'javascript') prefer = ['source.js', 'source.jsx', 'source.js.jsx'];
+        else if (lang === 'typescript') prefer = ['source.ts', 'source.tsx'];
+        else if (lang === 'python') prefer = ['source.python'];
+        else if (lang === 'json') prefer = ['source.json', 'source.json.comments'];
+        else if (lang === 'html') prefer = ['text.html.basic'];
+        else if (lang === 'css') prefer = ['source.css'];
+        else if (lang === 'markdown') prefer = ['text.html.markdown'];
+        else if (lang === 'shell') prefer = ['source.shell'];
+        else if (lang === 'c') prefer = ['source.c'];
+        else if (lang === 'cpp') prefer = ['source.cpp'];
+        else if (lang === 'java') prefer = ['source.java'];
+        else if (lang === 'rust') prefer = ['source.rust'];
+        for (var i = 0; i < prefer.length; i++) {
+          if (scopesArr.indexOf(prefer[i]) >= 0) return prefer[i];
+        }
+        var fallback = 'source.' + lang;
+        if (scopesArr.indexOf(fallback) >= 0) return fallback;
+        // Else first scope (stable sort).
+        return scopesArr.length ? scopesArr[0] : null;
+      }
+
+      // Materialize byLanguage entries.
+      for (var lang2 in byLangScopes) {
+        if (!Object.prototype.hasOwnProperty.call(byLangScopes, lang2)) continue;
+        var set = byLangScopes[lang2];
+        var scopes = Array.from(set);
+        scopes.sort();
+        var preferred = pickPreferred(lang2, scopes);
+        idx.byLanguage[lang2] = { preferred: preferred, scopes: scopes };
+      }
+    } catch (_) {
+      // ignore
+    }
+    return idx;
   }
 
   function _makeTextmateState(ruleStack) {
@@ -162,6 +284,7 @@
         console.warn('[TextMate] missing grammar for', lang, scopeName);
         return false;
       }
+      try { tmGrammarByLang[lang] = grammar; } catch (_) {}
 
       window.monaco.languages.setTokensProvider(lang, {
         getInitialState: function () { return _makeTextmateState(window.vscodetextmate.INITIAL); },
@@ -173,6 +296,13 @@
             var t = res.tokens[i];
             var scopes = t.scopes || [];
             var last = scopes.length ? scopes[scopes.length - 1] : '';
+            try {
+              if (window.__debugTextmateScopes) {
+                // Keep Monaco behavior unchanged (we still return last scope as token class),
+                // but expose full scope stacks for debugging.
+                if (!t._te2_scopeStack) t._te2_scopeStack = scopes.slice();
+              }
+            } catch (_) {}
             tokens.push({ startIndex: t.startIndex, scopes: last });
           }
           return { tokens: tokens, endState: _makeTextmateState(res.ruleStack) };
@@ -188,17 +318,182 @@
     }
   }
 
+  function _te2DumpTextmateScopesForLine(lang, text, ruleStack) {
+    try {
+      var grammar = tmGrammarByLang[lang];
+      if (!grammar) return null;
+      var rs = ruleStack || window.vscodetextmate.INITIAL;
+      var res = grammar.tokenizeLine(String(text || ''), rs);
+      var out = [];
+      for (var i = 0; i < res.tokens.length; i++) {
+        var t = res.tokens[i];
+        out.push({
+          startIndex: t.startIndex,
+          endIndex: t.endIndex,
+          scopes: (t.scopes || []).slice(),
+        });
+      }
+      return { tokens: out, ruleStack: res.ruleStack };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Debug helper:
+  //   window.__debugTextmateScopes = true;
+  //   window.__te2DumpTextmateAtCursor(); // logs scopes for cursor line (active editor/model)
+  //   window.__te2DumpTextmateLine(1); // logs scopes for a specific line
+  //   window.__te2DumpTextmateScopes(); // scans for import/def/class (active editor/model)
+  function _te2GetActiveEditorAndModel() {
+    try {
+      // Prefer the DiffEditor's modified editor when present, since that's the editable buffer.
+      if (diffEditor && diffEditor.getModifiedEditor) {
+        var me = diffEditor.getModifiedEditor();
+        if (me && me.getModel) return { editor: me, model: me.getModel(), side: 'diff:modified' };
+      }
+    } catch (_) {}
+    try {
+      if (editor && editor.getModel) return { editor: editor, model: editor.getModel(), side: 'single' };
+    } catch (_) {}
+    return { editor: null, model: null, side: 'none' };
+  }
+
+  function _te2AdvanceRuleStackToLine(grammar, model, targetLine) {
+    try {
+      var maxLines = Math.min(Math.max(1, targetLine | 0), model.getLineCount());
+      var rs = window.vscodetextmate.INITIAL;
+      for (var ln = 1; ln < maxLines; ln++) {
+        var line = model.getLineContent(ln);
+        var step = grammar.tokenizeLine(String(line || ''), rs);
+        rs = step.ruleStack;
+      }
+      return rs;
+    } catch (_) {
+      return window.vscodetextmate.INITIAL;
+    }
+  }
+
+  function _te2DumpTextmateLine(ln) {
+    try {
+      var ctx = _te2GetActiveEditorAndModel();
+      if (!ctx.model) return;
+      var activeModel = ctx.model;
+      var lang = normalizeLanguage(activeModel.getLanguageId ? activeModel.getLanguageId() : languageFromPath(currentPath));
+      if (!lang) return;
+      var grammar = tmGrammarByLang[lang];
+      if (!grammar) {
+        console.warn('[TextMate][Debug] no grammar loaded for', lang, { side: ctx.side, uri: String(activeModel && activeModel.uri) });
+        return;
+      }
+
+      var lineNo = Math.min(Math.max(1, ln | 0), activeModel.getLineCount());
+      var ruleStack = _te2AdvanceRuleStackToLine(grammar, activeModel, lineNo);
+      var line = activeModel.getLineContent(lineNo);
+      var dump = _te2DumpTextmateScopesForLine(lang, line, ruleStack);
+      console.log('[TextMate][Debug]', {
+        side: ctx.side,
+        uri: String(activeModel && activeModel.uri),
+        lang: lang,
+        ln: lineNo,
+        line: line,
+        tokens: dump ? dump.tokens : null,
+      });
+    } catch (e) {
+      console.warn('[TextMate][Debug] failed', e);
+    }
+  }
+
+  window.__te2DumpTextmateLine = _te2DumpTextmateLine;
+
+  window.__te2DumpTextmateAtCursor = function () {
+    try {
+      var ctx = _te2GetActiveEditorAndModel();
+      if (!ctx.editor || !ctx.model) return;
+      var pos = ctx.editor.getPosition ? ctx.editor.getPosition() : null;
+      var ln = (pos && pos.lineNumber) ? pos.lineNumber : 1;
+      _te2DumpTextmateLine(ln);
+    } catch (e) {
+      console.warn('[TextMate][Debug] failed', e);
+    }
+  };
+
+  window.__te2DumpTextmateScopes = function () {
+    try {
+      var ctx = _te2GetActiveEditorAndModel();
+      if (!ctx.model) return;
+      var activeModel = ctx.model;
+      var lang = normalizeLanguage(activeModel.getLanguageId ? activeModel.getLanguageId() : languageFromPath(currentPath));
+      if (!lang) return;
+      var grammar = tmGrammarByLang[lang];
+      if (!grammar) {
+        console.warn('[TextMate][Debug] no grammar loaded for', lang, { side: ctx.side, uri: String(activeModel && activeModel.uri) });
+        return;
+      }
+
+      var maxLines = Math.min(activeModel.getLineCount(), 200);
+      var ruleStack = window.vscodetextmate.INITIAL;
+      var printed = 0;
+      for (var ln = 1; ln <= maxLines; ln++) {
+        var line = activeModel.getLineContent(ln);
+        var isImport = /^(\\s*from\\s+\\S+\\s+import\\s+|\\s*import\\s+\\S+)/.test(line);
+        var isDef = /^\\s*def\\s+\\w+|^\\s*class\\s+\\w+/.test(line);
+        if (!isImport && !isDef) {
+          // Still advance rule stack so scopes are accurate.
+          var step = grammar.tokenizeLine(String(line || ''), ruleStack);
+          ruleStack = step.ruleStack;
+          continue;
+        }
+        var dump = _te2DumpTextmateScopesForLine(lang, line, ruleStack);
+        if (!dump) continue;
+        ruleStack = dump.ruleStack;
+        console.log('[TextMate][Debug]', {
+          side: ctx.side,
+          uri: String(activeModel && activeModel.uri),
+          lang: lang,
+          ln: ln,
+          line: line,
+          tokens: dump.tokens,
+        });
+        printed += 1;
+        if (printed >= 12) break;
+      }
+      if (!printed) console.log('[TextMate][Debug] no import/def/class lines found in first', maxLines, 'lines');
+    } catch (e) {
+      console.warn('[TextMate][Debug] failed', e);
+    }
+  };
+
   function applyLanguageToModel(nextModel, languageId, filePath) {
     try {
       if (!nextModel || !window.monaco || !window.monaco.editor) return;
       var lang = normalizeLanguage(languageId);
-      // Apply immediately so Monaco can proceed. Once TextMate is installed (async),
-      // re-apply the language to force retokenization for the active model.
+      if ((!lang || lang === 'plaintext') && filePath) lang = languageFromPath(filePath);
+
+      // Apply immediately so Monaco can proceed. Once VSIX languages / TextMate are
+      // installed (async), re-apply the best language id to force retokenization.
       try { window.monaco.editor.setModelLanguage(nextModel, lang); } catch (_) {}
-      ensureTextmateTokenization(lang, filePath).then(function (ok) {
-        if (!ok) return;
-        try { window.monaco.editor.setModelLanguage(nextModel, lang); } catch (_) {}
-      });
+
+      // VSIX language contributions (registration + configuration) are best-effort.
+      Promise.resolve()
+        .then(function () { return ensureVscodeLanguagesInstalled(); })
+        .then(function () {
+          // Re-resolve after VSIX languages are installed (can introduce new ids).
+          try {
+            if (filePath) {
+              var resolved = normalizeLanguage(languageFromPath(filePath));
+              if (resolved && resolved !== lang) {
+                lang = resolved;
+                try { window.monaco.editor.setModelLanguage(nextModel, lang); } catch (_) {}
+              }
+            }
+          } catch (_) {}
+          return ensureTextmateTokenization(lang, filePath);
+        })
+        .then(function (ok) {
+          if (!ok) return;
+          try { window.monaco.editor.setModelLanguage(nextModel, lang); } catch (_) {}
+        })
+        .catch(function () { /* ignore */ });
     } catch (_) {}
   }
 
@@ -266,6 +561,30 @@
   function languageFromPath(path) {
     try {
       var p = String(path || '').toLowerCase();
+      // Prefer VSIX-provided language contributions (when enabled) so we can
+      // resolve non-builtin language ids and apply their configuration.
+      try {
+        var full = String(path || '');
+        var base = full.split('/').pop() || full;
+        if (vscodeLanguageByFilename && vscodeLanguageByFilename.size) {
+          var byName = vscodeLanguageByFilename.get(base);
+          if (byName) return normalizeLanguage(byName);
+        }
+        if (vscodeLanguageByExtension && vscodeLanguageByExtension.size) {
+          // Prefer longest extension match (e.g. ".d.ts" over ".ts").
+          var best = null;
+          var bestLen = 0;
+          for (const [ext, langId] of vscodeLanguageByExtension.entries()) {
+            if (!ext || typeof ext !== 'string') continue;
+            if (!langId) continue;
+            if (p.endsWith(ext.toLowerCase()) && ext.length > bestLen) {
+              best = langId;
+              bestLen = ext.length;
+            }
+          }
+          if (best) return normalizeLanguage(best);
+        }
+      } catch (_) {}
       if (p.endsWith('.py') || p.endsWith('.pyw')) return 'python';
       if (p.endsWith('.js') || p.endsWith('.mjs') || p.endsWith('.cjs')) return 'javascript';
       if (p.endsWith('.ts') || p.endsWith('.tsx')) return 'typescript';
@@ -418,6 +737,55 @@
     return { start: _lspPositionFromMonaco({ lineNumber: range.startLineNumber, column: range.startColumn }), end: _lspPositionFromMonaco({ lineNumber: range.endLineNumber, column: range.endColumn }) };
   }
 
+  function _monacoRangeFromLsp(range) {
+    try {
+      var s = range && range.start ? range.start : { line: 0, character: 0 };
+      var e = range && range.end ? range.end : { line: 0, character: 0 };
+      return new monaco.Range(
+        (Number(s.line) || 0) + 1,
+        (Number(s.character) || 0) + 1,
+        (Number(e.line) || 0) + 1,
+        (Number(e.character) || 0) + 1
+      );
+    } catch (_) {
+      return new monaco.Range(1, 1, 1, 1);
+    }
+  }
+
+  function _applyLspDiagnostics(params) {
+    try {
+      if (!window.monaco || !window.monaco.editor) return;
+      if (!model) return;
+      var uri = params && params.textDocument && params.textDocument.uri ? String(params.textDocument.uri) : '';
+      var diags = params && Array.isArray(params.diagnostics) ? params.diagnostics : [];
+      if (!uri) return;
+      if (!model.uri || String(model.uri.toString()) !== uri) return;
+
+      var markers = diags.map(function(d) {
+        var sev = d && d.severity != null ? Number(d.severity) : 3; // default info
+        var ms = monaco.MarkerSeverity.Info;
+        if (sev === 1) ms = monaco.MarkerSeverity.Error;
+        else if (sev === 2) ms = monaco.MarkerSeverity.Warning;
+        else if (sev === 3) ms = monaco.MarkerSeverity.Info;
+        else if (sev === 4) ms = monaco.MarkerSeverity.Hint;
+
+        var r = _monacoRangeFromLsp(d && d.range ? d.range : null);
+        return {
+          severity: ms,
+          message: (d && d.message) ? String(d.message) : '',
+          startLineNumber: r.startLineNumber,
+          startColumn: r.startColumn,
+          endLineNumber: r.endLineNumber,
+          endColumn: r.endColumn,
+          source: (d && d.source) ? String(d.source) : 'lsp',
+          code: (d && d.code != null) ? String(d.code) : undefined,
+        };
+      });
+
+      try { monaco.editor.setModelMarkers(model, 'vscode_api', markers); } catch (_) {}
+    } catch (_) {}
+  }
+
   function vscodeRpcDidOpenIfReady() {
     try {
       if (!model || !currentPath) return;
@@ -451,6 +819,146 @@
               },
             },
           }));
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
+  // ------------------------------------------------------------------
+  // vscode_api LSP (POC): diagnostics via stdio LSP processes behind vscode_api_ws
+  // ------------------------------------------------------------------
+
+  var vscodeApiLspLanguages = null; // Set<string> | null
+  var vscodeApiLspLanguagesPromise = null;
+  var vscodeApiDocUri = null;
+  var vscodeApiDocLang = null;
+
+  function _maybeSetFromArray(arr) {
+    try {
+      var s = new Set();
+      if (!Array.isArray(arr)) return s;
+      arr.forEach(function (x) {
+        try {
+          var t = String(x || '').trim();
+          if (t) s.add(t);
+        } catch (_) {}
+      });
+      return s;
+    } catch (_) {
+      return new Set();
+    }
+  }
+
+  function _defaultLspLangsFallback() {
+    return new Set(['typescript', 'typescriptreact', 'javascript', 'javascriptreact', 'python']);
+  }
+
+  function _lspEnabledForLanguage(lang) {
+    try {
+      var s = String(lang || '').trim();
+      if (!s) return false;
+      if (vscodeApiLspLanguages && vscodeApiLspLanguages.has(s)) return true;
+      // If the server hasn't responded yet, keep a conservative fallback.
+      return _defaultLspLangsFallback().has(s);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function ensureVscodeApiLspLanguages() {
+    try {
+      if (vscodeApiLspLanguages) return Promise.resolve(vscodeApiLspLanguages);
+      if (vscodeApiLspLanguagesPromise) return vscodeApiLspLanguagesPromise;
+      vscodeApiLspLanguagesPromise = vscodeApiCall('vscode.lsp.languages', {})
+        .then(function (res) {
+          try {
+            if (res && res.ok && Array.isArray(res.languages)) {
+              vscodeApiLspLanguages = _maybeSetFromArray(res.languages);
+            }
+          } catch (_) {}
+          if (!vscodeApiLspLanguages || !vscodeApiLspLanguages.size) {
+            vscodeApiLspLanguages = _defaultLspLangsFallback();
+          }
+          return vscodeApiLspLanguages;
+        })
+        .catch(function () {
+          vscodeApiLspLanguages = _defaultLspLangsFallback();
+          return vscodeApiLspLanguages;
+        })
+        .finally(function () {
+          vscodeApiLspLanguagesPromise = null;
+        });
+      return vscodeApiLspLanguagesPromise;
+    } catch (_) {
+      vscodeApiLspLanguages = _defaultLspLangsFallback();
+      return Promise.resolve(vscodeApiLspLanguages);
+    }
+  }
+
+  function vscodeApiDidOpenIfReady() {
+    try {
+      if (!model || !currentPath) return;
+      var lang = String(model.getLanguageId ? model.getLanguageId() : languageFromPath(currentPath));
+      if (!model.uri || !model.uri.toString) return;
+      var uri = String(model.uri.toString());
+      if (!uri || !uri.startsWith('file://')) return;
+
+      ensureVscodeApiWs().then(function() {
+        try {
+          ensureVscodeApiLspLanguages().then(function () {
+            try {
+              if (!_lspEnabledForLanguage(lang)) return;
+
+              // Close previous doc if switching.
+              if (vscodeApiDocUri && vscodeApiDocUri !== uri) {
+                try {
+                  _vscodeApiNotify('vscode.lsp.didClose', {
+                    uri: vscodeApiDocUri,
+                    languageId: String(vscodeApiDocLang || ''),
+                  });
+                } catch (_) {}
+              }
+
+              vscodeApiDocUri = uri;
+              vscodeApiDocLang = lang;
+
+              _vscodeApiNotify('vscode.lsp.didOpen', {
+                uri: uri,
+                languageId: lang,
+                version: Number(model.getVersionId ? model.getVersionId() : 1) || 1,
+                text: model.getValue ? model.getValue() : '',
+              });
+            } catch (_) {}
+          }).catch(function(){});
+        } catch (_) {}
+      }).catch(function(){});
+    } catch (_) {}
+  }
+
+  function installVscodeApiChangePublisher() {
+    try {
+      if (!model || model.__te2VscodeApiLspInstalled) return;
+      model.__te2VscodeApiLspInstalled = true;
+
+      model.onDidChangeContent(function(e) {
+        try {
+          if (!vscodeApiWs || vscodeApiWs.readyState !== WebSocket.OPEN) return;
+          if (!model || !model.uri) return;
+          if (!e || !e.changes || !e.changes.length) return;
+
+          var lang = String(model.getLanguageId ? model.getLanguageId() : '');
+          if (!_lspEnabledForLanguage(lang)) return;
+          var uri = String(model.uri.toString());
+          var changes = e.changes.map(function(ch) {
+            return { range: _lspRangeFromMonaco(ch.range), text: ch.text };
+          });
+
+          _vscodeApiNotify('vscode.lsp.didChange', {
+            uri: uri,
+            languageId: lang,
+            version: Number(model.getVersionId ? model.getVersionId() : 1) || 1,
+            contentChanges: changes,
+          });
         } catch (_) {}
       });
     } catch (_) {}
@@ -601,8 +1109,23 @@
       }
     } catch (_) {}
 
-    // Theme mapping: CM6 theme keys map to Monaco theme ids.
-    var theme = _resolveMonacoThemeId(editorPrefs.theme);
+    // Theme:
+    // - For built-in/known themes, we can pass the resolved Monaco theme id directly.
+    // - For VSIX themes (`vscode:*`), Monaco requires the theme to be defined before use.
+    //   We load/define the theme asynchronously in applyMonacoTheme(), so keep the
+    //   initial theme as a safe built-in to avoid fallback-to-light behavior.
+    var rawThemeKey = '';
+    try { rawThemeKey = String(editorPrefs.theme || ''); } catch (_) { rawThemeKey = ''; }
+    var theme = 'vs-dark';
+    try {
+      if (rawThemeKey && rawThemeKey.toLowerCase().startsWith('vscode:')) {
+        theme = 'vs-dark';
+      } else {
+        theme = _resolveMonacoThemeId(rawThemeKey);
+      }
+    } catch (_) {
+      theme = 'vs-dark';
+    }
 
     return {
       value: '',
@@ -917,21 +1440,48 @@
         continue;
       }
       for (var j = 0; j < scopeList.length; j++) {
-        var scope = String(scopeList[j] || '').trim();
-        if (!scope) continue;
-        var rule = { token: scope };
-        if (fg) rule.foreground = fg;
-        if (bg) rule.background = bg;
-        if (fontStyle) rule.fontStyle = fontStyle;
-        // Only keep rules that actually set something.
-        if (rule.foreground || rule.background || rule.fontStyle) rules.push(rule);
+        var rawScope = scopeList[j];
+        if (rawScope == null) continue;
+        var scopeStr = String(rawScope || '').trim();
+        if (!scopeStr) continue;
+
+        // VS Code tokenColors allow "compound" scope selectors (e.g.
+        // "meta.import.python keyword.control.import.python"). Monaco's standalone
+        // token theming does not understand full TextMate selector semantics, and our
+        // TextMate tokenization currently feeds Monaco the last scope as the token id.
+        //
+        // To stay compatible, split on whitespace and register each scope segment as
+        // a possible token id. This provides a best-effort mapping for common themes.
+        var parts = scopeStr.split(/\s+/g);
+        for (var p = 0; p < parts.length; p++) {
+          var scope = String(parts[p] || '').trim();
+          if (!scope) continue;
+          var rule = { token: scope };
+          if (fg) rule.foreground = fg;
+          if (bg) rule.background = bg;
+          if (fontStyle) rule.fontStyle = fontStyle;
+          // Only keep rules that actually set something.
+          if (rule.foreground || rule.background || rule.fontStyle) rules.push(rule);
+        }
       }
     }
     return rules;
   }
 
   function _vscodeThemeToMonacoTheme(themeId, vscodeJson) {
-    var isLight = String(themeId || '').includes('light');
+    var themeKey = String(themeId || '');
+    var uiTheme = null;
+    try {
+      uiTheme = vscodeJson && typeof vscodeJson.uiTheme === 'string' ? vscodeJson.uiTheme : null;
+    } catch (_) {}
+    var isLight = false;
+    try {
+      if (uiTheme) {
+        isLight = String(uiTheme).toLowerCase().includes('light');
+      } else {
+        isLight = themeKey.toLowerCase().includes('light');
+      }
+    } catch (_) { isLight = themeKey.toLowerCase().includes('light'); }
     var tokenColors = vscodeJson && vscodeJson.tokenColors ? vscodeJson.tokenColors : [];
     var colorsIn = vscodeJson && vscodeJson.colors ? vscodeJson.colors : {};
     var colors = {};
@@ -950,6 +1500,290 @@
       rules: _vscodeTokenColorsToMonacoRules(tokenColors),
       colors: colors,
     };
+  }
+
+  // ------------------------------------------------------------------
+  // VS Code API (vscode_api) theme loading for installed VSIX themes.
+  // Theme preference key uses SSOT string: "vscode:<extensionId>:<relPath>".
+  // ------------------------------------------------------------------
+
+  var vscodeApiWs = null;
+  var vscodeApiConnecting = null;
+  var vscodeApiNextId = 1;
+  var vscodeApiPending = new Map();
+  var vscodeApiHandlers = new Map(); // method -> (params)=>void
+  var vscodeThemeIdMap = new Map(); // themeKey -> monacoThemeId
+  var vscodeThemeLoaded = new Set(); // monacoThemeId
+  // VSIX language contributions (per-project enablement).
+  var vscodeLanguagesInstalled = false;
+  var vscodeLanguageIds = new Set();
+  var vscodeLanguageByExtension = new Map(); // ".py" -> "python"
+  var vscodeLanguageByFilename = new Map(); // "Dockerfile" -> "dockerfile"
+
+  function _vscodeThemeKeyToMonacoId(themeKey) {
+    try {
+      if (vscodeThemeIdMap.has(themeKey)) return vscodeThemeIdMap.get(themeKey);
+      var id = String(themeKey || '');
+      if (id.startsWith('vscode:')) id = id.slice('vscode:'.length);
+      // Monaco standalone theme names are restricted to /^[a-z0-9\\-]+$/i.
+      // Keep them lowercase and hyphen-only to avoid "Illegal theme name!"
+      // from StandaloneThemeService.defineTheme().
+      id = id
+        .replace(/\\/g, '/')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-+|-+$/g, '');
+
+      // Keep names reasonably short to avoid pathological theme keys.
+      if (id.length > 120) {
+        var h = 0;
+        for (var i = 0; i < id.length; i++) {
+          h = ((h << 5) - h) + id.charCodeAt(i);
+          h |= 0;
+        }
+        var suffix = String(Math.abs(h));
+        id = id.slice(0, 100).replace(/-+$/g, '') + '-' + suffix;
+      }
+
+      var monacoId = 'vscode-theme-' + (id || 'unknown');
+      vscodeThemeIdMap.set(themeKey, monacoId);
+      return monacoId;
+    } catch (_) {
+      return 'vscode-theme-unknown';
+    }
+  }
+
+  async function ensureVscodeApiWs() {
+    if (vscodeApiWs && vscodeApiWs.readyState === WebSocket.OPEN) return vscodeApiWs;
+    if (vscodeApiConnecting) return vscodeApiConnecting;
+
+    vscodeApiConnecting = (async function () {
+      var resp = await fetch('/api/app/file_editor_cm6/vscode_api/discover', { cache: 'no-store' });
+      var json = null;
+      try { json = await resp.json(); } catch (_) {}
+      if (!resp.ok || (json && json.ok === false)) {
+        var msg = (json && (json.error || json.detail)) ? (json.error || json.detail) : ('HTTP ' + resp.status);
+        throw new Error(msg);
+      }
+      var wsPath = null;
+      try { wsPath = (json && json.data && json.data.ws_url) ? json.data.ws_url : (json && json.ws_url ? json.ws_url : null); } catch (_) {}
+      if (!wsPath) throw new Error('vscode_api discover missing ws_url');
+      var proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+      var wsUrl = proto + '://' + location.host + wsPath;
+
+      var ws = new WebSocket(wsUrl);
+      vscodeApiWs = ws;
+
+      // Register notification handlers.
+      try {
+        vscodeApiHandlers.set('textDocument/publishDiagnostics', _applyLspDiagnostics);
+      } catch (_) {}
+
+      ws.onmessage = function (ev) {
+        var msg2 = null;
+        try { msg2 = JSON.parse(String(ev.data || '')); } catch (_) { return; }
+        var handleOne = function (m) {
+          if (!m) return;
+          var id = m.id;
+          if (id != null) {
+            var pending = vscodeApiPending.get(id);
+            if (!pending) return;
+            vscodeApiPending.delete(id);
+            if (m.error) pending.reject(new Error(m.error.message || 'jsonrpc error'));
+            else pending.resolve(m.result);
+            return;
+          }
+
+          // Notifications (e.g. LSP publishDiagnostics) from vscode_api
+          try {
+            if (m.method && vscodeApiHandlers && vscodeApiHandlers.has(m.method)) {
+              vscodeApiHandlers.get(m.method)(m.params);
+            }
+          } catch (_) {}
+        };
+        if (Array.isArray(msg2)) msg2.forEach(handleOne);
+        else handleOne(msg2);
+      };
+
+      ws.onclose = function () {
+        vscodeApiWs = null;
+        vscodeApiConnecting = null;
+        try {
+          vscodeApiPending.forEach(function (p) { try { p.reject(new Error('vscode_api ws closed')); } catch (_) {} });
+          vscodeApiPending.clear();
+        } catch (_) {}
+      };
+
+      await new Promise(function (resolve, reject) {
+        var t = setTimeout(function () { reject(new Error('vscode_api ws connect timeout')); }, 8000);
+        ws.onopen = function () { clearTimeout(t); resolve(); };
+        ws.onerror = function () { clearTimeout(t); reject(new Error('vscode_api ws error')); };
+      });
+
+      vscodeApiConnecting = null;
+      try { ensureVscodeApiLspLanguages(); } catch (_) {}
+      return ws;
+    })();
+
+    return vscodeApiConnecting;
+  }
+
+  async function vscodeApiCall(method, params) {
+    var ws = await ensureVscodeApiWs();
+    var id = vscodeApiNextId++;
+    var payload = { jsonrpc: '2.0', id: id, method: String(method || ''), params: params || {} };
+    var p = new Promise(function (resolve, reject) {
+      vscodeApiPending.set(id, { resolve: resolve, reject: reject });
+      setTimeout(function () {
+        if (!vscodeApiPending.has(id)) return;
+        vscodeApiPending.delete(id);
+        reject(new Error('vscode_api timeout: ' + method));
+      }, 12000);
+    });
+    ws.send(JSON.stringify(payload));
+    return p;
+  }
+
+  function _vscodeApiNotify(method, params) {
+    try {
+      if (!vscodeApiWs || vscodeApiWs.readyState !== WebSocket.OPEN) return false;
+      vscodeApiWs.send(JSON.stringify({ jsonrpc: '2.0', method: String(method || ''), params: params || {} }));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function ensureVscodeApiThemeLoaded(themeKey) {
+    if (!themeKey || typeof themeKey !== 'string' || !themeKey.startsWith('vscode:')) return null;
+    if (!window.monaco || !window.monaco.editor || !window.monaco.editor.defineTheme) return null;
+
+    var monacoThemeId = _vscodeThemeKeyToMonacoId(themeKey);
+    if (vscodeThemeLoaded.has(monacoThemeId)) return monacoThemeId;
+
+    var themeId = themeKey.slice('vscode:'.length);
+    var res = await vscodeApiCall('vscode.themes.load', { id: themeId });
+    if (!res || res.ok === false) throw new Error((res && (res.error || res.detail)) || 'theme load failed');
+
+    var raw = res.raw;
+    if (!raw) throw new Error('theme missing raw');
+    var vscodeJson = null;
+    try { vscodeJson = _parseJsonc(String(raw)); } catch (e) { throw new Error('theme json parse failed'); }
+
+    // Preserve uiTheme hint if the extension provided it.
+    try {
+      if (res.uiTheme && typeof res.uiTheme === 'string') {
+        vscodeJson.uiTheme = res.uiTheme;
+      }
+    } catch (_) {}
+
+    var monacoTheme = _vscodeThemeToMonacoTheme(themeId, vscodeJson);
+    window.monaco.editor.defineTheme(monacoThemeId, monacoTheme);
+    vscodeThemeLoaded.add(monacoThemeId);
+    return monacoThemeId;
+  }
+
+  function _parseJsonc(text) {
+    // Minimal JSONC parser (supports // and /* */ comments + trailing commas).
+    // This is needed because many VS Code themes ship as jsonc.
+    var s = String(text || '');
+    // Strip BOM
+    if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1);
+    // Remove /* */ comments
+    s = s.replace(/\/\*[\s\S]*?\*\//g, '');
+    // Remove // comments (line)
+    s = s.replace(/(^|[^:])\/\/.*$/gm, '$1');
+    // Remove trailing commas
+    s = s.replace(/,\s*([}\]])/g, '$1');
+    return JSON.parse(s);
+  }
+
+  async function ensureVscodeLanguagesInstalled() {
+    if (vscodeLanguagesInstalled) return true;
+    if (!window.monaco || !window.monaco.languages) return false;
+
+    try {
+      // Prefer bootstrap snapshot languages when available (single request at boot),
+      // otherwise query vscode_api directly.
+      var langs = null;
+      try {
+        if (window.__te2VscodeBootstrap && Array.isArray(window.__te2VscodeBootstrap.languages)) {
+          langs = window.__te2VscodeBootstrap.languages;
+        }
+      } catch (_) {}
+      if (!Array.isArray(langs)) {
+        const res = await vscodeApiCall('vscode.languages.list', {});
+        langs = res && res.languages ? res.languages : [];
+      }
+      if (!Array.isArray(langs)) return false;
+
+      // Reset matchers each time we build them (future-proof for re-install).
+      try { vscodeLanguageByExtension.clear(); } catch (_) {}
+      try { vscodeLanguageByFilename.clear(); } catch (_) {}
+
+      for (let i = 0; i < langs.length; i++) {
+        const l = langs[i];
+        if (!l || !l.id) continue;
+        const langId = normalizeLanguage(l.id);
+        if (!langId) continue;
+
+        // Register language id if it isn't already known.
+        try {
+          if (!vscodeLanguageIds.has(langId)) {
+            try {
+              window.monaco.languages.register({
+                id: langId,
+                aliases: Array.isArray(l.aliases) ? l.aliases : undefined,
+                extensions: Array.isArray(l.extensions) ? l.extensions : undefined,
+                filenames: Array.isArray(l.filenames) ? l.filenames : undefined,
+                mimetypes: Array.isArray(l.mimetypes) ? l.mimetypes : undefined,
+              });
+            } catch (_) {}
+            vscodeLanguageIds.add(langId);
+          }
+        } catch (_) {}
+
+        // Build filename/extension matchers for languageFromPath().
+        try {
+          if (Array.isArray(l.extensions)) {
+            for (let j = 0; j < l.extensions.length; j++) {
+              const ext = String(l.extensions[j] || '').trim();
+              if (!ext) continue;
+              vscodeLanguageByExtension.set(ext, langId);
+            }
+          }
+        } catch (_) {}
+        try {
+          if (Array.isArray(l.filenames)) {
+            for (let j = 0; j < l.filenames.length; j++) {
+              const name = String(l.filenames[j] || '').trim();
+              if (!name) continue;
+              vscodeLanguageByFilename.set(name, langId);
+            }
+          }
+        } catch (_) {}
+
+        // Apply language configuration if provided (jsonc).
+        try {
+          if (l.configuration_raw) {
+            const cfg = _parseJsonc(String(l.configuration_raw));
+            if (cfg && typeof cfg === 'object') {
+              try { window.monaco.languages.setLanguageConfiguration(langId, cfg); } catch (_) {}
+            }
+          }
+        } catch (e) {
+          console.warn('[VSIX][Languages] config parse failed', langId, e);
+        }
+      }
+
+      vscodeLanguagesInstalled = true;
+      console.log('[VSIX][Languages] installed', langs.length, 'ext=', vscodeLanguageByExtension.size, 'files=', vscodeLanguageByFilename.size);
+      return true;
+    } catch (e) {
+      console.warn('[VSIX][Languages] list failed', e);
+      return false;
+    }
   }
 
   async function loadVscodeTextmateThemes() {
@@ -1083,6 +1917,7 @@
   function _resolveMonacoThemeId(themeKey) {
     try {
       var t = String(themeKey || '').toLowerCase();
+      if (t.startsWith('vscode:')) return _vscodeThemeKeyToMonacoId(String(themeKey || ''));
       var official = [
         'github-dark-default',
         'github-light-default',
@@ -1117,6 +1952,14 @@
       ensureTe2DiffTheme();
       try { await loadVscodeTextmateThemes(); } catch (_) {}
       try { await loadOfficialThemes(); } catch (_) {}
+      var tk = String(themeKey || '');
+      if (tk.startsWith('vscode:')) {
+        var monacoId = await ensureVscodeApiThemeLoaded(tk);
+        if (monacoId) {
+          window.monaco.editor.setTheme(monacoId);
+          return;
+        }
+      }
       window.monaco.editor.setTheme(_resolveMonacoThemeId(themeKey));
     } catch (e) {
       console.warn('[Monaco] applyMonacoTheme failed', e);
@@ -1866,6 +2709,8 @@
         applyLanguageToModel(model, lang, nextPath);
         vscodeRpcDidOpenIfReady();
         installVscodeRpcChangePublisher();
+        vscodeApiDidOpenIfReady();
+        installVscodeApiChangePublisher();
       } catch (e) {
         console.warn('[Monaco] createModel failed, falling back to setValue', e);
         editor.setValue(content);
@@ -1873,6 +2718,8 @@
     } else {
       try { model.setValue(content); } catch (_) { editor.setValue(content); }
       applyLanguageToModel(model, lang, nextPath);
+      vscodeApiDidOpenIfReady();
+      installVscodeApiChangePublisher();
     }
     currentPath = nextPath;
     try { lastContentSha256 = data.content_sha256 || lastContentSha256; } catch (_) {}
@@ -1932,6 +2779,8 @@
       installScrollPublisher();
       vscodeRpcDidOpenIfReady();
       installVscodeRpcChangePublisher();
+      vscodeApiDidOpenIfReady();
+      installVscodeApiChangePublisher();
     } else {
       try {
         var want = _fileUri(absPath);
@@ -1944,13 +2793,19 @@
           installScrollPublisher();
           vscodeRpcDidOpenIfReady();
           installVscodeRpcChangePublisher();
+          vscodeApiDidOpenIfReady();
+          installVscodeApiChangePublisher();
         } else {
           try { isApplyingRemote = true; model.setValue(content || ''); } catch (_) { editor.setValue(content || ''); } finally { isApplyingRemote = false; }
           applyLanguageToModel(model, lang, absPath);
+          vscodeApiDidOpenIfReady();
+          installVscodeApiChangePublisher();
         }
       } catch (_) {
         try { isApplyingRemote = true; model.setValue(content || ''); } catch (_) { editor.setValue(content || ''); } finally { isApplyingRemote = false; }
         applyLanguageToModel(model, lang, absPath);
+        vscodeApiDidOpenIfReady();
+        installVscodeApiChangePublisher();
       }
     }
     currentPath = absPath;
@@ -2207,7 +3062,8 @@
           if (!editor) return;
           var opts = buildMonacoOptionsFromPrefs({ preferences: nextPrefs });
           var theme = null;
-          try { theme = opts && opts.theme ? opts.theme : null; } catch (_) { theme = null; }
+          // Theme must be the raw SSOT key (supports `vscode:*`).
+          try { theme = nextPrefs && nextPrefs.editor && nextPrefs.editor.theme ? nextPrefs.editor.theme : null; } catch (_) { theme = null; }
           try { if (opts) delete opts.theme; } catch (_) {}
 
           try { editor.updateOptions(opts || {}); } catch (e) { console.warn('[Monaco] updateOptions failed', e); }
@@ -2514,6 +3370,16 @@
       if (pending) applyContent(pending);
 
       try {
+        // vscode_api bootstrap snapshot (installed VSIX, themes, grammars, enabled list).
+        // This is used for TextMate apply (grammars) today, and will become the basis
+        // for extension host bootstrapping in later phases.
+        try {
+          window.__te2VscodeBootstrap = await vscodeApiCall('vscode.bootstrap.snapshot', {});
+        } catch (_) {}
+        try {
+          tmVscodeIndex = await _refreshVscodeGrammarIndex();
+        } catch (_) {}
+
         if (window.monaco && model && currentPath) {
           applyLanguageToModel(model, languageFromPath(currentPath), currentPath);
         }

@@ -1,31 +1,36 @@
 version: "1"
 
 shells:
-  vscode-api:
+  vscode-server:
     backend: proc
     cwd: ${ctx:VSCODE_WORKTREE}
     command:
-      - node
-      - te2/vscode_api_server.mjs
-      - --port
-      - ${free_port}
+      - sh
+      - -lc
+      - >-
+        mkdir -p "$HOME/.vscode-server-oss/data/logs" &&
+        node out-build/server-main.js
+        --accept-server-license-terms
+        --without-connection-token
+        --host 127.0.0.1
+        --port ${free_port}
     env:
+      # TE2 conventions
       TE_APP_ID: ${ctx:APP_ID}
-      TE_VSCODE_API_PORT: ${free_port}
+      TE_VSCODE_SERVER_PORT: ${free_port}
       PROJECT_ROOT: ${ctx:PROJECT_ROOT}
       TE_INSTANCE_ID: ${ctx:INSTANCE_ID}
       TE2_EXT_ROOT: ${env:TE2_EXT_ROOT}
       TE2_WORKER_API_BASE: ${env:TE2_WORKER_API_BASE}
-      TE2_CODE_SERVER_ROOT: ${ctx:CODE_SERVER_ROOT}
     subgroups:
       - ${ctx:APP_ID}
-      - vscode_api
+      - vscode_server
       - "project:${ctx:PROJECT_HASH}"
     ui:
       subgroup_styles:
-        vscode_api:
+        vscode_server:
           bg: rgba(18, 23, 40, 0.92)
-          border: rgba(220, 160, 40, 0.70)
+          border: rgba(140, 220, 120, 0.70)
         project:*:
           bg: rgba(0, 0, 0, 0.88)
           border: rgba(29, 70, 126, 0.88)
@@ -33,4 +38,4 @@ shells:
       type: tcp_port
       host: 127.0.0.1
       port: ${free_port}
-      timeout: 10
+      timeout: 20

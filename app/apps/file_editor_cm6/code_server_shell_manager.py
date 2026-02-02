@@ -8,7 +8,7 @@ from framework_shells.record import ShellRecord
 
 APP_ID = "file_editor_cm6"
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
-SHELLSPEC_REF = "vscode_api.yaml#vscode-api"
+SHELLSPEC_REF = "code_server.yaml#code-server"
 
 _active_shell_id: Optional[str] = None
 
@@ -17,9 +17,9 @@ def _project_hash(project_root: str) -> str:
     return hashlib.sha1(project_root.encode("utf-8")).hexdigest()[:8]
 
 
-def _label(project_root: str) -> str:
-    project_hash = _project_hash(project_root)
-    return f"vscode_api:{APP_ID}:{project_hash}"
+def _label() -> str:
+    # Global instance (single active project invariant is enforced in TE2).
+    return f"code_server:{APP_ID}:global"
 
 
 async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
@@ -30,11 +30,12 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
     return None
 
 
-async def ensure_vscode_api_shell(project_root: str) -> ShellRecord:
-    """Ensure the vscode_api framework shell is running.
+async def ensure_code_server_shell(project_root: str) -> ShellRecord:
+    """Ensure code-server is running as a framework shell.
 
-    This is the future home of the VS Code API harness (extension host, theming,
-    grammars, etc). For now it is a thin WS JSON-RPC server process.
+    This is the backend "extension host" runtime we will integrate with TE2.
+
+    For now we start a single global instance (one active project at a time).
     """
 
     global _active_shell_id
@@ -42,25 +43,23 @@ async def ensure_vscode_api_shell(project_root: str) -> ShellRecord:
     mgr = await get_manager()
     orch = Orchestrator(mgr)
 
-    label = _label(project_root)
+    label = _label()
 
-    # Fast path: cached id.
     if _active_shell_id:
         cached = await _get_alive(_active_shell_id)
         if cached and cached.label == label:
             return cached
         _active_shell_id = None
 
-    # Adopt by label (preferred).
     existing = await mgr.find_shell_by_label(label, status="running")
     if existing:
         _active_shell_id = existing.id
         return existing
 
     repo_root = Path(project_root).resolve(strict=False)
-    vscode_worktree = (repo_root / "worktrees" / "vscode-te2-diff").resolve(strict=False)
-    if not vscode_worktree.exists():
-        raise RuntimeError(f"Missing VS Code worktree: {vscode_worktree}")
+
+    # Persist code-server state under TE2's global data dir.
+    data_dir = Path.home() / ".local" / "share" / "termux-extensions-2" / "code-server"
 
     shell = await orch.start_from_ref(
         SHELLSPEC_REF,
@@ -69,16 +68,11 @@ async def ensure_vscode_api_shell(project_root: str) -> ShellRecord:
             "APP_ID": APP_ID,
             "PROJECT_ROOT": str(repo_root),
             "PROJECT_HASH": _project_hash(str(repo_root)),
-            "VSCODE_WORKTREE": str(vscode_worktree),
-            # Default instance id (future-proofing for multi-instance support).
             "INSTANCE_ID": "primary",
-            # Share code-server data dir path with the vscode_api harness.
-            "CODE_SERVER_ROOT": str(
-                (Path.home() / ".local" / "share" / "termux-extensions-2" / "code-server").resolve(strict=False)
-            ),
+            "CODE_SERVER_DATA_DIR": str(data_dir),
         },
         label=label,
-        record_spec_id=f"service:{APP_ID}:vscode_api",
+        record_spec_id=f"service:{APP_ID}:code_server",
         wait_ready=True,
     )
 

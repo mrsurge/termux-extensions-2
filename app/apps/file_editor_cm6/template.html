@@ -354,7 +354,6 @@
   .fe-dropdown.show { display: block; }
   /* Dropdowns inside modals need to stack above modal content. */
   .fe-dropdown--modal { z-index: 500; }
-  #menu-theme-dd { max-height: calc(80vh - 60px); overflow-y: auto; }
   #recent-files-dd { left: auto; right: 0; }
   #menu-branch-dd { left: auto; right: 0; max-height: calc(80vh - 60px); overflow-y: auto; }
   #menu-branch-btn { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2655,6 +2654,7 @@
     <div class="fe-modal-header">
       <strong>Editor Settings</strong>
       <span style="flex:1"></span>
+      <button class="fe-btn" id="editor-settings-menu" aria-label="Manage extensions">☰</button>
       <button class="fe-btn" id="editor-settings-close" aria-label="Close">✕</button>
     </div>
     <div class="fe-modal-body">
@@ -2663,6 +2663,7 @@
           <label for="editor-settings-vsix-path" style="display:block; font-size: 12px; opacity: 0.8; margin-bottom: 6px;">Install VSIX (absolute path)</label>
           <input id="editor-settings-vsix-path" class="lsp-rootrel-input" type="text" placeholder="/data/data/.../extension.vsix" autocomplete="off" autocapitalize="off" spellcheck="false" />
         </div>
+        <button class="fe-btn" id="editor-settings-vsix-browse">Browse</button>
         <button class="fe-btn fe-btn-primary" id="editor-settings-vsix-install">Install</button>
       </div>
 
@@ -2675,6 +2676,20 @@
 
       <div style="font-weight: 600; margin-bottom: 6px;">Extensions (per-project)</div>
       <div id="editor-settings-ext-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Extensions Manager Modal (all installed VSIX) -->
+<div id="editor-ext-manager-modal" class="fe-modal" aria-hidden="true" style="z-index: 350;">
+  <div class="fe-modal-card" style="max-width: 760px;">
+    <div class="fe-modal-header">
+      <strong>Installed Extensions</strong>
+      <span style="flex:1"></span>
+      <button class="fe-btn" id="editor-ext-manager-close" aria-label="Close">✕</button>
+    </div>
+    <div class="fe-modal-body">
+      <div id="editor-ext-manager-list"></div>
     </div>
   </div>
 </div>

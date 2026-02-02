@@ -8,7 +8,7 @@ from framework_shells.record import ShellRecord
 
 APP_ID = "file_editor_cm6"
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
-SHELLSPEC_REF = "vscode_api.yaml#vscode-api"
+SHELLSPEC_REF = "vscode_server.yaml#vscode-server"
 
 _active_shell_id: Optional[str] = None
 
@@ -19,7 +19,7 @@ def _project_hash(project_root: str) -> str:
 
 def _label(project_root: str) -> str:
     project_hash = _project_hash(project_root)
-    return f"vscode_api:{APP_ID}:{project_hash}"
+    return f"vscode_server:{APP_ID}:{project_hash}"
 
 
 async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
@@ -30,11 +30,12 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
     return None
 
 
-async def ensure_vscode_api_shell(project_root: str) -> ShellRecord:
-    """Ensure the vscode_api framework shell is running.
+async def ensure_vscode_server_shell(project_root: str) -> ShellRecord:
+    """Ensure the VS Code server (server-main) framework shell is running.
 
-    This is the future home of the VS Code API harness (extension host, theming,
-    grammars, etc). For now it is a thin WS JSON-RPC server process.
+    This is the server-side building block for the TE2 VS Code API harness.
+    It intentionally runs in a framework shell (worker-owned), so the main
+    process stays proxy-only.
     """
 
     global _active_shell_id
@@ -51,7 +52,7 @@ async def ensure_vscode_api_shell(project_root: str) -> ShellRecord:
             return cached
         _active_shell_id = None
 
-    # Adopt by label (preferred).
+    # Adopt by label.
     existing = await mgr.find_shell_by_label(label, status="running")
     if existing:
         _active_shell_id = existing.id
@@ -62,6 +63,12 @@ async def ensure_vscode_api_shell(project_root: str) -> ShellRecord:
     if not vscode_worktree.exists():
         raise RuntimeError(f"Missing VS Code worktree: {vscode_worktree}")
 
+    out_build = (vscode_worktree / "out-build" / "server-main.js").resolve(strict=False)
+    if not out_build.exists():
+        raise RuntimeError(
+            f"Missing VS Code server build output: {out_build} (run gulp compile-build-without-mangling)"
+        )
+
     shell = await orch.start_from_ref(
         SHELLSPEC_REF,
         base_dir=SHELLSPEC_DIR,
@@ -70,17 +77,13 @@ async def ensure_vscode_api_shell(project_root: str) -> ShellRecord:
             "PROJECT_ROOT": str(repo_root),
             "PROJECT_HASH": _project_hash(str(repo_root)),
             "VSCODE_WORKTREE": str(vscode_worktree),
-            # Default instance id (future-proofing for multi-instance support).
             "INSTANCE_ID": "primary",
-            # Share code-server data dir path with the vscode_api harness.
-            "CODE_SERVER_ROOT": str(
-                (Path.home() / ".local" / "share" / "termux-extensions-2" / "code-server").resolve(strict=False)
-            ),
         },
         label=label,
-        record_spec_id=f"service:{APP_ID}:vscode_api",
+        record_spec_id=f"service:{APP_ID}:vscode_server",
         wait_ready=True,
     )
 
     _active_shell_id = shell.id
     return shell
+

@@ -1180,10 +1180,16 @@ const miEditorSettings = requireEl('#mi-editor-settings');
 // ---------- Editor Settings modal (VS Code API harness) ----------
 const editorSettingsModal = requireEl('#editor-settings-modal');
 const editorSettingsClose = requireEl('#editor-settings-close');
+const editorSettingsMenuBtn = requireEl('#editor-settings-menu');
 const editorSettingsVsixPath = requireEl('#editor-settings-vsix-path');
+const editorSettingsVsixBrowse = requireEl('#editor-settings-vsix-browse');
 const editorSettingsVsixInstall = requireEl('#editor-settings-vsix-install');
 const editorSettingsThemeList = requireEl('#editor-settings-theme-list');
 const editorSettingsExtList = requireEl('#editor-settings-ext-list');
+
+const editorExtManagerModal = requireEl('#editor-ext-manager-modal');
+const editorExtManagerClose = requireEl('#editor-ext-manager-close');
+const editorExtManagerList = requireEl('#editor-ext-manager-list');
 
 let vscodeApiWs = null;
 let vscodeApiNextId = 1;
@@ -1284,6 +1290,23 @@ miEditorSettings.addEventListener('click', () => {
   openEditorSettingsModal();
 });
 
+function openEditorExtManagerModal() {
+  editorExtManagerModal.classList.add('show');
+  editorExtManagerModal.setAttribute('aria-hidden', 'false');
+  void refreshEditorExtManagerModal();
+}
+function closeEditorExtManagerModal() {
+  editorExtManagerModal.classList.remove('show');
+  editorExtManagerModal.setAttribute('aria-hidden', 'true');
+}
+editorExtManagerClose.addEventListener('click', closeEditorExtManagerModal);
+editorExtManagerModal.addEventListener('click', (ev) => {
+  if (ev.target === editorExtManagerModal) closeEditorExtManagerModal();
+});
+editorSettingsMenuBtn.addEventListener('click', () => {
+  openEditorExtManagerModal();
+});
+
 async function refreshEditorSettingsModal() {
   // Themes: use existing supported Monaco ids (SSOT is preference_store: editor.theme)
   // Extensions: list installed VSIXs (global pool) and allow per-project enablement (project sidecar).
@@ -1292,6 +1315,7 @@ async function refreshEditorSettingsModal() {
 
   let installed = [];
   let enabled = [];
+  let vscodeThemes = [];
   try {
     const installedRes = await vscodeApiCall('vscode.vsix.listInstalled', {});
     installed = installedRes?.installed || [];
@@ -1303,6 +1327,12 @@ async function refreshEditorSettingsModal() {
     enabled = enabledRes?.enabled || [];
   } catch (e) {
     // ok to keep enabled empty
+  }
+  try {
+    const themesRes = await vscodeApiCall('vscode.themes.list', {});
+    vscodeThemes = themesRes?.themes || [];
+  } catch (e) {
+    // ok: keep empty, still show built-ins
   }
   const enabledSet = new Set((enabled || []).map(String));
 
@@ -1323,6 +1353,22 @@ async function refreshEditorSettingsModal() {
     { id: 'vs-dark', label: 'VS Code Dark' },
     { id: 'vs', label: 'VS Code Light' },
   ];
+
+  // Append VSIX-provided themes (global). Use a stable SSOT key:
+  // `theme = "vscode:<extensionId>:<relPath>"`.
+  try {
+    (vscodeThemes || []).forEach((t) => {
+      const tid = String(t?.id || '').trim();
+      if (!tid) return;
+      const label = String(t?.label || tid);
+      const extId = String(t?.extensionId || '').trim();
+      const suffix = extId ? ` — ${extId}` : '';
+      themeOptions.push({
+        id: `vscode:${tid}`,
+        label: `${label}${suffix}`,
+      });
+    });
+  } catch (_) {}
 
   editorSettingsThemeList.innerHTML = '';
   const themeWrap = document.createElement('div');
@@ -1367,10 +1413,36 @@ async function refreshEditorSettingsModal() {
 
   // Extensions list (checkboxes)
   editorSettingsExtList.innerHTML = '';
-  if (!installed.length) {
+  // Exclude *pure* theme packs from per-project enablement list.
+  // IMPORTANT: most real language extensions contribute grammars; they must remain enable-able.
+  const projectExtensions = (installed || []).filter((ext) => {
+    try {
+      const contributes = ext?.contributes || {};
+      const themes = contributes?.themes;
+      const iconThemes = contributes?.iconThemes;
+      const productIconThemes = contributes?.productIconThemes;
+      const grammars = contributes?.grammars;
+      const languages = contributes?.languages;
+      const commands = contributes?.commands;
+
+      const hasThemes = Array.isArray(themes) && themes.length > 0;
+      const hasIconThemes = Array.isArray(iconThemes) && iconThemes.length > 0;
+      const hasProductIconThemes = Array.isArray(productIconThemes) && productIconThemes.length > 0;
+      const hasGrammars = Array.isArray(grammars) && grammars.length > 0;
+      const hasLanguages = Array.isArray(languages) && languages.length > 0;
+      const hasCommands = Array.isArray(commands) && commands.length > 0;
+
+      const onlyVisualThemes = (hasThemes || hasIconThemes || hasProductIconThemes) && !hasLanguages && !hasCommands && !hasGrammars;
+      return !onlyVisualThemes;
+    } catch (_) {
+      return true;
+    }
+  });
+
+  if (!projectExtensions.length) {
     const empty = document.createElement('div');
     empty.style.opacity = '0.8';
-    empty.textContent = 'No VSIX installed yet.';
+    empty.textContent = installed.length ? 'No project-scoped extensions installed.' : 'No VSIX installed yet.';
     editorSettingsExtList.appendChild(empty);
   } else {
     const list = document.createElement('div');
@@ -1378,7 +1450,7 @@ async function refreshEditorSettingsModal() {
     list.style.flexDirection = 'column';
     list.style.gap = '6px';
 
-    installed
+    projectExtensions
       .slice()
       .sort((a, b) => String(a.display_name || a.id).localeCompare(String(b.display_name || b.id)))
       .forEach((ext) => {
@@ -1437,6 +1509,108 @@ async function refreshEditorSettingsModal() {
   }
 }
 
+async function refreshEditorExtManagerModal() {
+  editorExtManagerList.textContent = 'Loading…';
+  let installed = [];
+  try {
+    const installedRes = await vscodeApiCall('vscode.vsix.listInstalled', {});
+    installed = installedRes?.installed || [];
+  } catch (e) {
+    editorExtManagerList.textContent = `Failed to load: ${e?.message || 'unknown error'}`;
+    return;
+  }
+
+  editorExtManagerList.innerHTML = '';
+  if (!installed.length) {
+    const empty = document.createElement('div');
+    empty.style.opacity = '0.8';
+    empty.textContent = 'No VSIX installed yet.';
+    editorExtManagerList.appendChild(empty);
+    return;
+  }
+
+  const list = document.createElement('div');
+  list.style.display = 'flex';
+  list.style.flexDirection = 'column';
+  list.style.gap = '8px';
+
+  installed
+    .slice()
+    .sort((a, b) => String(a.display_name || a.id).localeCompare(String(b.display_name || b.id)))
+    .forEach((ext) => {
+      const extId = String(ext.id || '').trim();
+      if (!extId) return;
+      const label = String(ext.display_name || extId);
+      const version = String(ext.version || '');
+      const desc = String(ext.description || '').trim();
+        const hasThemes = Array.isArray(ext?.contributes?.themes) && ext.contributes.themes.length > 0;
+        const hasGrammars = Array.isArray(ext?.contributes?.grammars) && ext.contributes.grammars.length > 0;
+        const hasLanguages = Array.isArray(ext?.contributes?.languages) && ext.contributes.languages.length > 0;
+        const hasCommands = Array.isArray(ext?.contributes?.commands) && ext.contributes.commands.length > 0;
+        const tags = [];
+        if (hasThemes) tags.push('themes');
+        if (hasGrammars) tags.push('grammars');
+        if (hasLanguages) tags.push('languages');
+        if (hasCommands) tags.push('commands');
+
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.alignItems = 'flex-start';
+      row.style.gap = '10px';
+      row.style.padding = '10px 12px';
+      row.style.border = '1px solid var(--border, #333)';
+      row.style.borderRadius = '10px';
+
+      const text = document.createElement('div');
+      text.style.flex = '1';
+      const title = document.createElement('div');
+      title.textContent = `${label} (${extId})${version ? ` v${version}` : ''}`;
+      title.style.fontWeight = '700';
+      const sub = document.createElement('div');
+      sub.textContent = desc || (tags.length ? tags.join(', ') : '');
+      sub.style.opacity = '0.8';
+      sub.style.fontSize = '12px';
+      text.appendChild(title);
+      text.appendChild(sub);
+
+      const trash = document.createElement('button');
+      trash.className = 'fe-btn fe-btn-secondary';
+      trash.textContent = '🗑';
+      trash.title = 'Uninstall';
+
+      trash.addEventListener('click', async () => {
+        if (!window.confirm(`Uninstall ${extId}?`)) return;
+        trash.disabled = true;
+        try {
+          const res = await vscodeApiCall('vscode.vsix.uninstall', { id: extId });
+          if (!res?.ok) throw new Error(res?.error || 'uninstall failed');
+
+          // If the active theme belongs to the uninstalled extension, revert to te2-dark.
+          try {
+            const t = String(editorViewState?.theme || '');
+            if (t.startsWith('vscode:') && t.slice('vscode:'.length).startsWith(extId + ':')) {
+              await updatePreference('theme', 'te2-dark');
+            }
+          } catch (_) {}
+
+          host.toast(`Uninstalled: ${extId}`);
+          await refreshEditorExtManagerModal();
+          await refreshEditorSettingsModal();
+        } catch (e) {
+          host.toast(e?.message || 'Uninstall failed');
+        } finally {
+          trash.disabled = false;
+        }
+      });
+
+      row.appendChild(text);
+      row.appendChild(trash);
+      list.appendChild(row);
+    });
+
+  editorExtManagerList.appendChild(list);
+}
+
 editorSettingsVsixInstall.addEventListener('click', async () => {
   const p = String(editorSettingsVsixPath.value || '').trim();
   if (!p) {
@@ -1455,6 +1629,17 @@ editorSettingsVsixInstall.addEventListener('click', async () => {
   } finally {
     editorSettingsVsixInstall.disabled = false;
   }
+});
+
+editorSettingsVsixBrowse.addEventListener('click', async () => {
+  const start = lastPickerPath || HOME_DIR;
+  const picked = await pickFile(start);
+  if (!picked) return;
+  if (!picked.toLowerCase().endsWith('.vsix')) {
+    host.toast('Not a .vsix file');
+    return;
+  }
+  editorSettingsVsixPath.value = picked;
 });
 
 initVirtualKeyboardAdjustments({
@@ -4162,7 +4347,7 @@ async function main() {
 
   // Load menu state from backend (backend already configured editor at page render)
   await refreshMenuState();
-  bindThemeMenu();
+  // Theme selection is handled via Editor → Settings… modal (vscode_api harness).
 
   // Ask backend to resend cache state so draft indicator is accurate
   try {
