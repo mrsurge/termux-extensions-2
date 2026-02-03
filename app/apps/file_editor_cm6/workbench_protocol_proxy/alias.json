@@ -1,0 +1,46 @@
+{
+  "connect": {
+    "method": "vscode.connect",
+    "params": {}
+  },
+  "status": {
+    "method": "te2.status",
+    "params": {}
+  },
+  "trace": {
+    "method": "te2.trace_stats",
+    "params": {}
+  },
+  "bootstrap": {
+    "method": "vscode.bootstrap_from_trace",
+    "params": {
+      "max_frames": 200
+    }
+  },
+  "bootstrap2k": {
+    "method": "vscode.bootstrap_from_trace",
+    "params": {
+      "max_frames": 2000
+    }
+  },
+  "bootstrap2k_mgmt": {
+    "method": "vscode.bootstrap_from_trace",
+    "params": {
+      "max_frames": 2000,
+      "include_mgmt": true,
+      "mgmt_max_frames": 2000
+    }
+  },
+  "hover": {
+    "method": "vscode.hover",
+    "params_from_args": {
+      "uri": 0,
+      "lineNumber": 1,
+      "column": 2
+    },
+    "casts": {
+      "lineNumber": "int",
+      "column": "int"
+    }
+  }
+}
