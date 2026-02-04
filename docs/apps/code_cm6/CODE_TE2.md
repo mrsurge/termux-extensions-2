@@ -739,6 +739,7 @@ Important invariant:
 - Worker discovery: `GET /api/app/file_editor_cm6/vscode_api/discover`
   - starts/adopts a framework shell
   - returns `ws_url` like `/vscode_api_ws?shell_id=<shell_id>`
+  - returns `instance_id` (currently always `"primary"`)
 - Host WS shim (service): `WS /vscode_api_ws?shell_id=<shell_id>`
   - proxy-only, forwards frames verbatim to the shell’s WS
 - Shellspec: `app/apps/file_editor_cm6/shellspec/vscode_api.yaml#vscode-api`
@@ -750,10 +751,311 @@ Important invariant:
     - `vscode.vsix.*` (registry + per-project enable/disable)
     - `vscode.themes.*` (list/load raw theme json)
     - `vscode.textmate.*` (list/load raw grammars)
+    - `vscode.languages.list` (enabled extensions only; includes `configuration_raw`)
 
 Storage:
 - Global VSIX install pool: `~/.local/share/termux-extensions-2/code-te2-extensions/`
 - Per-project enablement SSOT: `ProjectSidecar.vscode_api.enabled_extensions`
 
+Resolve by path (future multi-instance hook):
+- `GET /api/app/file_editor_cm6/vscode_api/resolve?path=<abs>`
+  - Today: only resolves if `path` is under the active project root.
+  - Future: selects the best running instance by workspace-folder match (code-server session registry pattern).
+
+Themes (global SSOT):
+- Theme selection is stored in `_preference_store` using the existing `theme` preference key.
+- Built-in themes use simple ids like `te2-dark`, `te2-light`, `github-dark-default`, etc.
+- VSIX-provided themes use: `vscode:<extensionId>:<relPath>`
+  - Example: `vscode:GitHub.github-vscode-theme:extension/themes/dark-default.json`
+- The Monaco iframe converts VS Code theme `tokenColors` into Monaco theme rules and applies it after loading via `vscode_api` (`vscode.themes.load`).
+
+TextMate apply (grammars from VSIX):
+- Monaco iframe uses `vscode-oniguruma` + `vscode-textmate` (UMD globals) to tokenize lines using TextMate grammars.
+- Grammar resolution prefers `vscode_api` (`vscode.textmate.grammars.list` + `vscode.textmate.grammars.load`) and falls back to legacy static assets under `monaco_editor/textmate/` when present.
+- Boot-time prefetch:
+  - `vscode.bootstrap.snapshot` (cached on `window.__te2VscodeBootstrap`)
+    - includes `languages` (enabled extensions only), plus `themes` and `grammars`
+  - `_refreshVscodeGrammarIndex()` (cached for scopeName/language mapping)
+- Scope selection:
+  - Uses VSIX grammar `language` field when available to map to Monaco `languageId`.
+  - Supports extension-sensitive scopes for `.jsx`/`.tsx` when present.
+  - Falls back to the previous hard-coded scope map when no VSIX grammar matches.
+
+VSIX language configuration (per-project):
+- `vscode.languages.list` returns `contributes.languages` (only for enabled extensions) plus `configuration_raw` (jsonc).
+- Monaco iframe calls `monaco.languages.setLanguageConfiguration(languageId, cfg)` so bracket auto-closing, comments, etc. follow VSIX language configs.
+
 Next step:
 - Replace the placeholder server implementation with a real extension-host-backed JSON-RPC surface and keep *all* future VSIX-related integration behind this API.
+
+Language providers (POC stage):
+- `vscode_api` also hosts a minimal **stdio LSP bridge** (diagnostics-first) over the same `vscode_api_ws` IPC:
+  - Client → `vscode_api` JSON-RPC notifications:
+    - `vscode.lsp.didOpen` `{uri, languageId, version, text}`
+    - `vscode.lsp.didChange` `{uri, languageId, version, contentChanges:[{range,text}]}`
+    - `vscode.lsp.didClose` `{uri, languageId}`
+  - Client (request): `vscode.lsp.languages` → `{languages:[...]}`
+    - Used by the iframe to decide which `languageId`s should emit LSP traffic.
+  - Server spawns **one stdio LSP process per configured server key** and broadcasts raw notifications
+    (notably `textDocument/publishDiagnostics`) to all connected clients.
+  - Monaco iframe consumes `textDocument/publishDiagnostics` and applies markers via:
+    `monaco.editor.setModelMarkers(..., 'vscode_api', markers)`
+
+LSP server mapping (POC contract):
+- The bridge is driven by a json mapping file:
+  - default path: `~/.local/share/termux-extensions-2/code-te2-extensions/lsp_servers.json`
+  - override: `TE2_LSP_CONFIG_PATH=/abs/path/to/lsp_servers.json`
+- Format:
+  - `servers.<languageId>.cmd` is an argv array (first item is executable).
+  - Optional: `servers.<languageId>.key` lets multiple languageIds share one spawned server.
+  - Optional: `servers.<languageId>.env` and `servers.<languageId>.initializationOptions`.
+  - Template vars inside `cmd` strings:
+    - `${project_root}` → active project root
+    - `${ext:<publisher.name>}` → VSIX install content root for that extension (e.g. `${ext:ms-python.python}`)
+- Minimal built-ins:
+  - JS/TS uses vendored `app/static/vendor/lsp_servers/node_modules/.bin/typescript-language-server --stdio`
+  - Python uses `pyright-langserver --stdio` **only if present on PATH**
+
+Example `lsp_servers.json`:
+```json
+{
+  "version": 1,
+  "servers": {
+    "typescript": { "key": "ts", "cmd": ["typescript-language-server", "--stdio"] },
+    "javascript": { "key": "ts", "cmd": ["typescript-language-server", "--stdio"] },
+    "python": { "key": "pyright", "cmd": ["pyright-langserver", "--stdio"] }
+  }
+}
+```
+
+Example (use a VSIX-bundled language server binary):
+```json
+{
+  "version": 1,
+  "servers": {
+    "python": {
+      "key": "pyright",
+      "cmd": ["${ext:ms-python.python}/node_modules/.bin/pyright-langserver", "--stdio"]
+    }
+  }
+}
+```
+
+---
+
+## 16) Multi-client fanout + future multi-instance (code-server pattern)
+
+### Goal (TE2 direction)
+Maintain **multiple clients → single backend instance** fanout as the default:
+- Many browser clients (desktop/mobile, multiple tabs, GeckoView, etc.) can attach to the same active project editor.
+- The backend is the authority for “workspace-ish” runtime state (enabled extensions, indexing, language services, etc.).
+- SSOT remains worker-owned (`_history_store`/ProjectSidecar + `_preferences_store`).
+
+Keep the option open to support **multiple editor instances** later (e.g. two projects, or two “workspaces” under one project) without redesign.
+
+### Why this is the right default
+- TE2 already uses a SSOT model and atomic persistence (drafts + writes).
+- Multi-client fanout is easier to reason about than multi-instance from day 1:
+  - one set of indexes
+  - one extension host
+  - one language-service hub
+  - one source of truth for “what is enabled”
+
+### The minimal invariant to keep multi-instance possible later
+Make instance identity explicit **now**, even if we only run one instance:
+
+- `project_root`: absolute path for the active project
+- `instance_id`: stable string for a backend instance (default: `"primary"`)
+- `client_id`: stable per-browser/tab id (already exists in other TE2 transports)
+
+Every client→server request should carry at least `{project_root, instance_id, client_id}` so later we can add parallel instances without changing payload formats.
+
+### Discovery & routing contract (recommended)
+Two related but distinct problems:
+
+1) **Discover**: “Start or adopt an instance for the *current* active project.”
+   - This is what `GET /api/app/file_editor_cm6/vscode_api/discover` does today (returns `ws_url` with a `shell_id`).
+
+2) **Resolve**: “Given a file path, which running instance should handle it?”
+   - This is the missing piece that enables “open file from outside,” multi-tab/multi-instance, and clean attach behavior.
+
+Recommended resolve endpoint (worker-owned API, host proxy-only):
+- `GET /api/app/file_editor_cm6/vscode_api/resolve?path=<abs>`
+  - returns `{ws_url, token, project_root, instance_id, shell_id}`
+
+### Reference pattern (code-server)
+The code-server project solved the “which instance should handle this file?” problem by maintaining a session registry:
+
+- Patch: `../mrselect6-2/code-server/patches/store-socket.diff`
+  - The extension host registers its IPC socket + workspace folders into a local session manager server.
+- Implementation: `../mrselect6-2/code-server/src/node/vscodeSocket.ts`
+  - Keeps a Map of active sessions.
+  - Selects the best session by:
+    - “workspace folder prefix match” against the file path
+    - “can connect” probing to prune dead sockets
+
+The TE2 analogue is:
+- A registry of active `vscode_api` shells keyed by `{project_root, instance_id}` (and optionally workspace folders).
+- A resolve routine that selects the right backend for a given absolute path.
+
+### Storage / collision notes (important for multi-client)
+If multiple workspaces can be served under the same origin, avoid browser-storage collisions:
+- Reference: `../mrselect6-2/code-server/patches/unique-db.diff`
+  - Hashes by `location.pathname` to prevent IndexedDB collisions between `/workspace1` and `/workspace2`.
+
+TE2 should apply the same principle anywhere we persist client-side state:
+- per-app localStorage keys
+- IndexedDB keys (if used)
+- caches related to `client_id`
+
+### What stays where (TE2 boundary rule)
+- **Main framework**: proxy-only (services provide WS shims, no SSOT writes).
+- **App worker**: SSOT owner (preferences/history/project sidecar).
+- **vscode_api shell**: heavy work (VSIX, TextMate, LSP / language features, indexing).
+- **Browser iframe**: thin renderer (Monaco UI + provider shims that call backend).
+
+### Immediate follow-ups (ties to your priorities)
+1) **TextMate/grammars/tokens/styling**
+   - Move grammar/theme indexing fully into `vscode_api` (already started).
+   - Keep TextMate as baseline tokenization; semantic detail comes from language features.
+2) **Language servers**
+   - Provide document symbols, diagnostics, semantic tokens over the same WS JSON-RPC surface.
+3) **Extension UI iframes**
+   - Defer; this becomes “webviews” and CSP/origin problems (see code-server `patches/webview.diff`).
+
+---
+
+## 12) Workbench protocol proxy plan (code-server “black box”)
+
+Goal: **avoid rebuilding** VS Code / code-server workbench JS while still extracting language “gold” (diagnostics, hover, completion, symbols) into TE2.
+
+Approach:
+- Run stock code-server as-is.
+- Put a small **WS mirror+decode proxy** in front of it (transparent relay).
+- Decode the workbench protocol frames (Mgmt + ExtHost) and publish a **TE2-friendly side channel**.
+
+### Key reference
+- `../mrselect6-2/vscode-protocol/README.md`
+  - Documents the **wire framing protocol** (Regular/Ack/KeepAlive/etc) and the **two WS connections**:
+    - renderer-Management (channel protocol)
+    - renderer-ExtensionHost (RPC protocol)
+
+### Offline decoder (protocol discovery)
+Tooling (TE2):
+- `scripts/vscode_ws_decode_har.py`
+  - Decodes Firefox HAR `_webSocketMessages` and prints:
+    - handshake type counts (auth/sign/connectionType/ok)
+    - wire frame type counts
+    - management channel top methods
+    - extension host top methods
+  - Recent improvements:
+    - tolerates “comment line” prefix before JSON in HAR files
+    - decodes ExtHost **mixed-args** frames (RequestMixedArgs / RequestMixedArgsWithCancellation)
+
+Captured HARs (examples):
+- `newwsdata1.har`, `newwsdata2-oneclient.har`, `newwsdata3-oneclient-second_stream.har`
+- `newestws1.har`, `newestws2.har`
+
+### What we know works from HARs (important findings)
+
+#### Two websockets per session (invariant)
+Each captured HAR contains **2 WS URLs** (same base path, different reconnection tokens):
+- one Management stream
+- one ExtensionHost stream
+
+#### Language features seen on ExtensionHost stream
+These are already present in the traces (so proxy extraction is feasible):
+- `$provideHover`
+- `$provideCompletionItems`
+- `$provideDocumentSymbols`
+- `$provideCodeActions`
+
+#### Diagnostics payload shape (confirmed)
+Diagnostics are pushed via ExtensionHost method:
+- **`$changeMany`**
+
+Decoded example (normalized):
+```json
+[
+  "python",
+  [
+    [
+      {"scheme":"vscode-remote","authority":"localhost:8080","path":"/.../agent_bridge.py"},
+      [
+        {
+          "startLineNumber":12,"startColumn":11,"endLineNumber":12,"endColumn":16,
+          "message":"SyntaxError: invalid syntax (agent_bridge.py, line 12)",
+          "source":"compile","severity":8,
+          "modelVersionId":1
+        }
+      ]
+    ]
+  ]
+]
+```
+
+Interpretation:
+- arg0: marker owner / source id (here: `"python"`)
+- arg1: list of `[resourceUri, markers[]]`
+
+This is the payload we want to convert into TE2 diagnostics to render in Monaco.
+
+#### Hover request/response (confirmed)
+Hover is served via ExtensionHost method:
+- **`$provideHover`**
+
+Observed request shape (from `maximal-hover-scrape.hal` via `scripts/vscode_ws_decode_har.py --extract-te2 --extract-method '$provideHover'`):
+```json
+{
+  "type": "ext/request",
+  "method": "$provideHover",
+  "args": [
+    25,
+    {"scheme":"vscode-remote","authority":"localhost:8080","path":"/.../agent_bridge.py"},
+    {"lineNumber": 25, "column": 16},
+    {}
+  ]
+}
+```
+
+Observed reply shapes:
+- `ReplyOKEmpty` when nothing applies
+- `ReplyOKJSON` with a payload like:
+```json
+{
+  "range": {"startLineNumber":25,"startColumn":8,"endLineNumber":25,"endColumn":18},
+  "contents": [{"value": "```python\\n...```\\n---\\n```text\\n...```", "isTrusted": false}],
+  "id": 0
+}
+```
+
+Important: the first argument (`25` in the example) is a **provider handle/id** chosen by the workbench session.
+It is **not stable across sessions** unless we derive it by observing provider registrations (e.g. `$registerHoverProvider`)
+or by piggybacking on real workbench requests.
+
+### Proxy POC (do this first)
+**POC v0** (“observe-only”):
+- proxy WS frames untouched (browser ↔ proxy ↔ code-server)
+- decode ExtHost frames and stream TE2 events:
+  - `diagnostics/changed` (from `$changeMany`)
+  - `hover/response`, `completion/response`, `symbols/response` (observe-only for now)
+
+**POC v1** (“inject one request”):
+- pick a single predetermined opened file in code-server session
+- inject exactly one request and wait for response:
+  - hover request → hover response
+
+Notes:
+- For injection, the document must already exist in code-server’s model.
+- Later we can drive open/close via Management channel (workbench actions) or by reproducing doc/editor delta traffic, but that is out of scope for v0/v1.
+
+### TE2 integration surface (target)
+Expose a TE2-side channel (format is intentionally boring):
+- A single WS endpoint (or long-poll) that emits normalized events:
+  - `diagnostics/update { uri, owner, markers[] }`
+  - `hover/result { uri, pos, hover }`
+  - `completion/result { uri, pos, items[] }`
+  - `symbols/result { uri, symbols[] }`
+
+The UI (Monaco iframe) remains a thin renderer:
+- It subscribes to TE2 events, updates Monaco markers/hover providers, and never runs an extension host itself.

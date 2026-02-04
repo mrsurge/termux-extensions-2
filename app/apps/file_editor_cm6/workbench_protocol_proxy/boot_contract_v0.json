@@ -1,0 +1,215 @@
+{
+  "version": 1,
+  "notes": "Derived from a real browser session; used as a minimal headless ExtHost bootstrap contract (not full session replay).",
+  "ext": {
+    "calls": [
+      {
+        "rpcId": 80,
+        "method": "$initializeConfiguration",
+        "args": [
+          {
+            "defaults": {
+              "contents": {
+                "[plaintext]": {
+                  "editor.unicodeHighlight.ambiguousCharacters": false,
+                  "editor.unicodeHighlight.invisibleCharacters": false
+                }
+              },
+              "overrides": [],
+              "keys": []
+            },
+            "policy": {
+              "contents": {},
+              "overrides": [],
+              "keys": []
+            },
+            "application": {
+              "contents": {},
+              "overrides": [],
+              "keys": []
+            },
+            "userLocal": {
+              "contents": {
+                "workbench": {
+                  "startupEditor": "none"
+                }
+              },
+              "overrides": [],
+              "keys": [
+                "workbench.startupEditor"
+              ]
+            },
+            "userRemote": {
+              "contents": {},
+              "overrides": [],
+              "keys": []
+            },
+            "workspace": {
+              "contents": {},
+              "overrides": [],
+              "keys": []
+            },
+            "folders": [
+              [
+                {
+                  "$mid": 1,
+                  "fsPath": "__WORKSPACE_PATH__",
+                  "external": "vscode-remote://__AUTHORITY____WORKSPACE_PATH__",
+                  "path": "__WORKSPACE_PATH__",
+                  "scheme": "vscode-remote",
+                  "authority": "__AUTHORITY__"
+                },
+                {
+                  "contents": {},
+                  "overrides": [],
+                  "keys": []
+                }
+              ]
+            ],
+            "configurationScopes": []
+          },
+          {
+            "keys": [
+              "terminal.integrated.defaultProfile.linux",
+              "terminal.integrated.defaultProfile.osx",
+              "terminal.integrated.defaultProfile.windows"
+            ],
+            "overrides": []
+          }
+        ]
+      },
+      {
+        "rpcId": 91,
+        "method": "$acceptProviderInfos",
+        "args": [
+          {
+            "$mid": 1,
+            "path": "/dummy",
+            "scheme": "vscode-remote"
+          },
+          517150
+        ]
+      },
+      {
+        "rpcId": 91,
+        "method": "$acceptProviderInfos",
+        "args": [
+          {
+            "$mid": 1,
+            "path": "/dummy",
+            "scheme": "vscode-userdata"
+          },
+          1026
+        ]
+      },
+      {
+        "rpcId": 91,
+        "method": "$acceptProviderInfos",
+        "args": [
+          {
+            "$mid": 1,
+            "path": "/dummy",
+            "scheme": "vscode-log"
+          },
+          1026
+        ]
+      },
+      {
+        "rpcId": 94,
+        "method": "$acceptInlineCompletionsUnificationState",
+        "args": [
+          {
+            "codeUnification": false,
+            "modelUnification": false,
+            "extensionUnification": false,
+            "expAssignments": []
+          }
+        ]
+      },
+      {
+        "rpcId": 93,
+        "method": "$acceptLanguageIds",
+        "args": [
+          [
+            "plaintext",
+            "python",
+            "json",
+            "jsonc",
+            "markdown"
+          ]
+        ]
+      },
+      {
+        "rpcId": 97,
+        "method": "$acceptStaticEntries",
+        "args": [
+          []
+        ]
+      },
+      {
+        "rpcId": 146,
+        "method": "$initializeTelemetryLevel",
+        "args": [
+          3,
+          true,
+          null
+        ]
+      },
+      {
+        "rpcId": 140,
+        "method": "$onColorThemeChange",
+        "args": [
+          "dark"
+        ]
+      },
+      {
+        "rpcId": 99,
+        "method": "$activateByEvent",
+        "args": [
+          "onLanguage:python",
+          0
+        ]
+      },
+      {
+        "rpcId": 99,
+        "method": "$activateByEvent",
+        "args": [
+          "onLanguage",
+          0
+        ]
+      },
+      {
+        "rpcId": 106,
+        "method": "$initializeWorkspace",
+        "args": [
+          {
+            "isUntitled": false,
+            "folders": [
+              {
+                "uri": {
+                  "$mid": 1,
+                  "fsPath": "__WORKSPACE_PATH__",
+                  "external": "vscode-remote://__AUTHORITY____WORKSPACE_PATH__",
+                  "path": "__WORKSPACE_PATH__",
+                  "scheme": "vscode-remote",
+                  "authority": "__AUTHORITY__"
+                },
+                "name": "__WORKSPACE_NAME__",
+                "index": 0
+              }
+            ],
+            "id": "__WORKSPACE_ID__",
+            "name": "__WORKSPACE_NAME__",
+            "transient": false
+          },
+          true
+        ]
+      }
+    ],
+    "documentSymbols": {
+      "rpcId": 94,
+      "registerRpcId": 25
+    }
+  }
+}
+

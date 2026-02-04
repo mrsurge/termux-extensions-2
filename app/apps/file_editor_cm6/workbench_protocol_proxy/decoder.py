@@ -150,14 +150,19 @@ class WireFrame:
 
 
 def try_decode_handshake(buf: bytes) -> Optional[Dict[str, Any]]:
-    # Observed on code-server: 0x02 + 11x 0x00 + <u8 len> + <json>
-    if len(buf) < 14:
+    """
+    Try decode a code-server/VS Code handshake message.
+
+    This is a normal VS Code wire frame of type Control (2):
+      TYPE(u8=2) + ID(u32be=0) + ACK(u32be=0) + LEN(u32be) + JSON(utf-8)
+    """
+    if len(buf) < 13:
         return None
-    if buf[0] != 0x02:
+    if buf[0] != 0x02:  # Control
         return None
-    if any(x != 0 for x in buf[1:12]):
-        return None
-    ln = buf[12]
+    msg_id = _u32be(buf, 1)
+    ack = _u32be(buf, 5)
+    ln = _u32be(buf, 9)
     if 13 + ln > len(buf):
         return None
     raw = buf[13 : 13 + ln]
