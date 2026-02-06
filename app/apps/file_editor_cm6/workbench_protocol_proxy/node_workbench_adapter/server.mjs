@@ -244,7 +244,36 @@ const state = {
 
 const wsClients = new Set();
 const eventLog = [];
-const EVENT_LOG_MAX = Number(process.env.TE2_EVENT_LOG_MAX ?? "2000");
+const EVENT_LOG_MAX = Number(process.env.TE2_EVENT_LOG_MAX ?? "200");
+const EVENT_TRUNC_STR_MAX = Number(process.env.TE2_EVENT_TRUNC_STR_MAX ?? "4096");
+const EVENT_TRUNC_ARR_MAX = Number(process.env.TE2_EVENT_TRUNC_ARR_MAX ?? "200");
+
+function _truncateEvent(ev) {
+  if (!ev || typeof ev !== "object") return ev;
+  const out = { ...ev };
+  for (const k of ["result", "error", "body", "data"]) {
+    const v = out[k];
+    if (typeof v === "string" && v.length > EVENT_TRUNC_STR_MAX) {
+      out[k] = `${v.slice(0, EVENT_TRUNC_STR_MAX)}…(truncated ${v.length - EVENT_TRUNC_STR_MAX} chars)`;
+    }
+  }
+  if (Array.isArray(out.args) && out.args.length > EVENT_TRUNC_ARR_MAX) {
+    out.args = [...out.args.slice(0, EVENT_TRUNC_ARR_MAX), `…(truncated ${out.args.length - EVENT_TRUNC_ARR_MAX} items)`];
+  }
+  // Common hot path: openFile sends huge document line arrays; never retain them in server event log.
+  try {
+    if (Array.isArray(out.args)) {
+      for (let i = 0; i < out.args.length; i++) {
+        const a = out.args[i];
+        if (a && typeof a === "object" && Array.isArray(a?.addedDocuments)) {
+          const docs = a.addedDocuments.map((d) => (d && typeof d === "object" ? { ...d, lines: d.lines ? `…(${d.lines.length} lines omitted)` : d.lines } : d));
+          out.args[i] = { ...a, addedDocuments: docs };
+        }
+      }
+    }
+  } catch {}
+  return out;
+}
 
 const HEAP_SNAPSHOT_ENABLE = String(process.env.TE2_HEAP_SNAPSHOT_ENABLE || "") === "1";
 const HEAP_SNAPSHOT_RATIO = Number(process.env.TE2_HEAP_SNAPSHOT_RATIO ?? "0.9");
@@ -265,10 +294,12 @@ function wsBroadcastNotification(method, params) {
 
 const wb = new WorkbenchClient({
   onEvent: (ev) => {
-    eventLog.push(ev);
+    if (!(Number.isFinite(EVENT_LOG_MAX) && EVENT_LOG_MAX > 0)) return;
+    const safeEv = _truncateEvent(ev);
+    eventLog.push(safeEv);
     while (eventLog.length > EVENT_LOG_MAX) eventLog.shift();
     // Mirror to WS clients as TE2 events; HTTP clients can poll via adapter.status.
-    wsBroadcastNotification("te2.event", ev);
+    wsBroadcastNotification("te2.event", safeEv);
   },
 });
 
@@ -402,6 +433,11 @@ async function handleJsonRpc(reqObj) {
     const used = usage.heapUsed || 0;
     const file = v8.writeHeapSnapshot(outPath);
     return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs(), file, heap_used: used, heap_limit: limit } };
+  }
+
+  if (method === "adapter.providers") {
+    const result = wb.providers?.() ?? { hover: [], documentSymbols: [] };
+    return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs(), ...result } };
   }
 
   if (method === "vscode.openFile") {

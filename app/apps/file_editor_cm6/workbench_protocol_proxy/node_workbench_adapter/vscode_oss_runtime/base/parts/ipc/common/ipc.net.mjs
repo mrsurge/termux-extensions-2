@@ -33,7 +33,9 @@ const IPC_MAX_UNACK = Number(process?.env?.TE2_IPC_MAX_UNACK ?? "512");
 const IPC_FLUSH_BYTES = Number(process?.env?.TE2_IPC_FLUSH_BYTES ?? String(256 * 1024));
 const IPC_WRITE_TRACE = String(process?.env?.TE2_IPC_WRITE_TRACE || "") === "1";
 const IPC_WRITE_TRACE_HIGH_WATER = Number(process?.env?.TE2_IPC_WRITE_TRACE_HIGH_WATER ?? String(1024 * 1024));
-const IPC_YIELD_EVERY = Number(process?.env?.TE2_IPC_YIELD_EVERY ?? "0");
+// Drain loops can become very large during extension activation (thousands of IPC messages)
+// which can starve timers/HTTP handlers and amplify memory spikes. Yield periodically by default.
+const IPC_YIELD_EVERY = Number(process?.env?.TE2_IPC_YIELD_EVERY ?? "2000");
 let _traceMsgCount = 0;
 let _traceBytes = 0;
 let _traceMax = 0;

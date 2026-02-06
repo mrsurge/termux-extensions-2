@@ -238,6 +238,34 @@ Without Framework Shells, Code CM6 would need custom process management for term
 - (Done) **Remote Branch Checkout:** Extend branch menu to list and checkout remote branches
 - (Done) **Agent Drawer Mobile UX:** Fix transcript/chat layout on mobile browsers
 - 📋 **Git Jobs Progress:** Framework jobs library integration for long-running git operations
+
+### Roadmap Update: Monaco + Workbench Language Integration
+- ✅ Keep TE2 as the **editing and save authority** (drafts, autosave, dirty state, sidecar persistence stay in TE2).
+- ✅ Treat workbench/code-server protocol as a **language-intelligence sidecar**, not as document/save authority.
+- ✅ Maintain a thin Monaco frontend and bridge language features through normalized TE2 RPC/events (hover, symbols, diagnostics, completion).
+- ✅ Keep transport boundaries explicit:
+  - `editor_ws` for editor/session/draft state.
+  - `vscode_api` / adapter channel for extension-host language features.
+- ✅ Use TypeScript/JavaScript built-in VS Code language service behavior as baseline control.
+- 🚧 Validate extension parity across three external language ecosystems:
+  - Python
+  - C++
+  - Rust
+- 🚧 Improve watcher scalability for large repos:
+  - Move away from high-cardinality per-file watch assumptions.
+  - Favor coalesced events, selective watch scope, and reconciliation fallbacks.
+- 🚧 Preserve current custom UX:
+  - draft overlays (blue/yellow insertion/deletion cues)
+  - unsaved indicators in explorer
+  - fast autosave semantics
+  while layering language features from extension-host sidecar.
+
+Roadmap references:
+- `docs/apps/code_cm6/CODE_TE2.md`
+- `docs/apps/code_cm6/MONACO_WORKBENCH_SPRINT_PLAN.md`
+- `docs/apps/code_cm6/VSCODE_API_CONTRACT.md`
+- `docs/apps/code_cm6/VSCODE_API_STATE_OWNERSHIP.md`
+- `docs/apps/code_cm6/VSCODE_API_DEPRECATIONS.md`
 - (Done) **External File Explorer:** "Open in external explorer" action for directories
 - (Done) **Copy From/Move From:** Additional batch operations in explorer context menus
 

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -29,12 +30,53 @@ const REPLY_NULL_METHODS = new Set(
     .map((s) => s.trim())
     .filter(Boolean)
 );
-const SKIP_ARGS_PARSE_METHODS = new Set(
-  String(process.env.TE2_SKIP_ARGS_PARSE_METHODS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-);
+const PARSE_ALL_ARGS = String(process.env.TE2_PARSE_ALL_ARGS || "") === "1";
+const PARSE_ARGS_ONLY_METHODS = new Set([
+  // Provider registration + minimal main-thread contract methods.
+  "$registerHoverProvider",
+  "$registerDocumentSymbolProvider",
+  "$registerCompletionsProvider",
+  "$registerDocumentLinkProvider",
+  "$registerCodeActionSupport",
+  "$registerCodeLensesProvider",
+  "$registerFoldingRangeProvider",
+  "$registerSignatureHelpProvider",
+  "$registerDefinitionProvider",
+  "$registerTypeDefinitionProvider",
+  "$registerImplementationProvider",
+  "$registerReferenceProvider",
+  "$registerWorkspaceSymbolProvider",
+  "$registerRenameProvider",
+  "$registerDocumentFormattingSupport",
+  "$registerDocumentRangeFormattingSupport",
+  "$registerOnTypeFormattingSupport",
+
+  "$getInitialState",
+  "$checkExists",
+  "$requestWorkspaceTrust",
+  "$initializeExtensionStorage",
+  "$registerLogger",
+
+  // Keep diagnostics/hover requests parseable when we need them later.
+  "$provideHover",
+  "$provideDocumentSymbols",
+]);
+for (const s of String(process.env.TE2_PARSE_ARGS_ONLY_METHODS || "").split(",")) {
+  const v = s.trim();
+  if (v) PARSE_ARGS_ONLY_METHODS.add(v);
+}
+
+const SKIP_ARGS_PARSE_METHODS = new Set();
+for (const s of String(process.env.TE2_SKIP_ARGS_PARSE_METHODS || "").split(",")) {
+  const v = s.trim();
+  if (v) SKIP_ARGS_PARSE_METHODS.add(v);
+}
+
+function _shouldParseArgsForMethod(method) {
+  if (PARSE_ALL_ARGS) return true;
+  if (SKIP_ARGS_PARSE_METHODS.has(method)) return false;
+  return PARSE_ARGS_ONLY_METHODS.has(method);
+}
 const MAX_JSON_BYTES = Number(process.env.TE2_MAX_JSON_BYTES ?? String(8 * 1024 * 1024));
 const SPAN_TRACE_ENABLE = String(process.env.TE2_SPAN_TRACE || "") === "1";
 const SPAN_TRACE_MAX = Number(process.env.TE2_SPAN_TRACE_MAX ?? "200");
@@ -440,7 +482,7 @@ function decodeExtHostRpc(payload) {
     if (msgType === 1 || msgType === 2) {
       const rpcId = readU8();
       const method = readShortString();
-      if (SKIP_ARGS_PARSE_METHODS.has(method)) {
+      if (!_shouldParseArgsForMethod(method)) {
         const argsRawLen = skipLongString();
         return {
           kind: "ext",
@@ -477,7 +519,7 @@ function decodeExtHostRpc(payload) {
     if (msgType === 3 || msgType === 4) {
       const rpcId = readU8();
       const method = readShortString();
-      if (SKIP_ARGS_PARSE_METHODS.has(method)) {
+      if (!_shouldParseArgsForMethod(method)) {
         const meta = skipMixedArray();
         return {
           kind: "ext",
@@ -537,6 +579,7 @@ export class WorkbenchClient {
     this._nextModelNumber = 1;
     this._useRemote = true;
     this._authority = "localhost:8000";
+    this._productVersion = null;
     this._metricsTimer = null;
     this._extMsgTrace = {
       enabled: EXT_MSG_TRACE,
@@ -544,6 +587,10 @@ export class WorkbenchClient {
       bytes: 0,
       maxBytes: 0,
       lastTs: 0,
+    };
+    this._providers = {
+      hover: new Map(), // handle -> { handle, selector, label }
+      documentSymbols: new Map(), // handle -> { handle, selector, label }
     };
     this.state = {
       connected: false,
@@ -567,6 +614,24 @@ export class WorkbenchClient {
         this._metricsTimer.unref?.();
       } catch {}
     }
+  }
+
+  async _loadProductVersionFromAppRoot(envData) {
+    if (this._productVersion) return this._productVersion;
+    try {
+      const appRoot = envData?.appRoot;
+      const appRootPath = (appRoot && typeof appRoot === "object") ? (appRoot.path ?? appRoot.fsPath ?? null) : null;
+      if (!appRootPath) return null;
+      const productPath = path.join(String(appRootPath), "product.json");
+      const raw = await fs.readFile(productPath, "utf8");
+      const obj = JSON.parse(raw);
+      const v = (obj && typeof obj === "object") ? obj.version : null;
+      if (typeof v === "string" && v.trim()) {
+        this._productVersion = v.trim();
+        return this._productVersion;
+      }
+    } catch {}
+    return null;
   }
 
   _allocExtReqId() {
@@ -672,6 +737,8 @@ export class WorkbenchClient {
     const publisher = manifest?.publisher;
     const version = manifest?.version;
     const engines = manifest?.engines;
+    const main = typeof manifest?.main === "string" ? manifest.main : undefined;
+    const browser = typeof manifest?.browser === "string" ? manifest.browser : undefined;
     const activationEvents = Array.isArray(manifest?.activationEvents) ? manifest.activationEvents : (Array.isArray(ext?.activationEvents) ? ext.activationEvents : []);
 
     // Location normalization: prefer explicit extensionLocation if present.
@@ -702,11 +769,19 @@ export class WorkbenchClient {
       publisher,
       version,
       engines,
+      main,
+      browser,
       activationEvents,
       contributes,
       // VS Code extension shape fields used by init data + scanner outputs
       id,
-      identifier: { value: String(id), _lower: String(id).toLowerCase() },
+      identifier: {
+        // Some code paths expect `{value,_lower}` while others expect `{id,uuid}`.
+        value: String(id),
+        _lower: String(id).toLowerCase(),
+        id: String(id),
+        uuid: ext?.identifier?.uuid ?? ext?.uuid ?? undefined,
+      },
       uuid: ext?.identifier?.uuid ?? ext?.uuid ?? undefined,
       isBuiltin: Boolean(ext?.isBuiltin),
       isUserBuiltin: Boolean(ext?.isUserBuiltin),
@@ -740,7 +815,7 @@ export class WorkbenchClient {
     for (const entry of entries) {
       try {
         const loc = entry?.location;
-        const locPath = loc?.path;
+        const locPath = loc?.path ?? loc?.fsPath;
         if (!locPath) continue;
         const pkgPath = path.join(locPath, "package.json");
         const pkgRaw = await fs.readFile(pkgPath, "utf8");
@@ -763,7 +838,13 @@ export class WorkbenchClient {
         const rawExt = {
           ...manifest,
           id: entry?.identifier?.id || `${manifest.publisher}.${manifest.name}`,
-          identifier: entry?.identifier,
+          identifier: {
+            ...(entry?.identifier && typeof entry.identifier === "object" ? entry.identifier : {}),
+            // Some extension registry entries omit uuid under `identifier`; in practice it is present
+            // under `metadata.id` (see extensions.json). VS Code internals expect `{id,uuid}`.
+            uuid: entry?.identifier?.uuid ?? entry?.metadata?.id ?? undefined,
+          },
+          uuid: entry?.identifier?.uuid ?? entry?.metadata?.id ?? undefined,
           location: loc,
           extensionLocation: loc,
           metadata: entry?.metadata,
@@ -838,12 +919,55 @@ export class WorkbenchClient {
 
   _buildConfigurationInitData(folder, authority) {
     const empty = this._emptyConfigSection();
+
+    // Force a deterministic Python LS path for headless mode.
+    // `ms-python.python` can provide hover/symbols via Jedi without Pylance, but it requires:
+    // - a valid interpreter, and
+    // - a non-None language server selection (see atlas msg #674).
+    const pythonPathCandidates = [
+      String(process.env.TE2_PYTHON_PATH || ""),
+      "/data/data/com.termux/files/usr/bin/python",
+      "/data/data/com.termux/files/usr/bin/python3",
+      "/usr/bin/python3",
+      "/usr/bin/python",
+    ].map((p) => p.trim()).filter(Boolean);
+    let defaultInterpreterPath = "python";
+    for (const p of pythonPathCandidates) {
+      try {
+        if (existsSync(p)) {
+          defaultInterpreterPath = p;
+          break;
+        }
+      } catch {}
+    }
+
+    const defaults = {
+      contents: {
+        python: {
+          languageServer: "Jedi",
+          defaultInterpreterPath,
+        },
+      },
+      overrides: [],
+      keys: ["python.languageServer", "python.defaultInterpreterPath"],
+    };
+    const userRemote = {
+      contents: {
+        python: {
+          languageServer: "Jedi",
+          defaultInterpreterPath,
+        },
+      },
+      overrides: [],
+      keys: ["python.languageServer", "python.defaultInterpreterPath"],
+    };
+
     const data = {
-      defaults: empty,
+      defaults,
       policy: empty,
       application: empty,
       userLocal: empty,
-      userRemote: empty,
+      userRemote,
       workspace: empty,
       folders: [],
       configurationScopes: [],
@@ -856,11 +980,13 @@ export class WorkbenchClient {
     return data;
   }
 
-  _buildExtHostInitData({ authority, commit, envData, scannedExtensions, folder, useRemote }) {
+  _buildExtHostInitData({ authority, commit, envData, scannedExtensions, folder, useRemote, productVersion }) {
     // Best-effort minimal IExtensionHostInitData, sufficient for remote Extension Host handshake.
     const nowIso = new Date().toISOString();
     const initData = {
-      version: "0",
+      // Some extensions (e.g. ms-pyright.pyright) validate vscode.version and crash if it is "0".
+      // Use real VS Code version when available from appRoot/product.json.
+      version: (typeof productVersion === "string" && productVersion.trim()) ? productVersion.trim() : "0",
       quality: "stable",
       commit: commit ?? undefined,
       date: nowIso,
@@ -1028,6 +1154,7 @@ export class WorkbenchClient {
       const extArgs = { language: "en", break: false, port: null, env: { VSCODE_PROXY_URI: proxyUri } };
 
       const workspaceRoot = params.workspaceFolder ?? params.folder ?? folder ?? null;
+      const productVersion = await spanTraceAsync("connect.loadProductVersion", () => this._loadProductVersionFromAppRoot(envData));
       const extInitData = spanTrace("connect.buildExtHostInitData", () => this._buildExtHostInitData({
         authority: useRemote ? authority : null,
         commit,
@@ -1035,6 +1162,7 @@ export class WorkbenchClient {
         scannedExtensions,
         folder: workspaceRoot,
         useRemote,
+        productVersion,
       }));
 
       const ext = await spanTraceAsync("connect.remoteAgent.ext", () => connectToRemoteAgent({
@@ -1164,6 +1292,8 @@ export class WorkbenchClient {
             this._debugExtReqSeen++;
             const ev = { type: "ext/request", ts_ms: Date.now(), req: msg.req, rpcId: msg.rpcId, method: msg.method };
             const logArgsMethods = new Set([
+              "$registerLogger",
+              "$checkExists",
               "$onWillActivateExtension",
               "$onDidActivateExtension",
               "$onExtensionActivationError",
@@ -1187,7 +1317,11 @@ export class WorkbenchClient {
           if (msg.method === "$registerDocumentSymbolProvider" && Array.isArray(msg.args) && msg.args.length >= 2) {
             const handle = Number(msg.args[0]);
             const selector = msg.args[1];
+            const label = (typeof msg.args[2] === "string") ? msg.args[2] : null;
             if (Number.isFinite(handle) && Array.isArray(selector)) {
+              try {
+                this._providers.documentSymbols.set(handle, { handle, selector, label });
+              } catch {}
               for (const s of selector) {
                 if (s && typeof s === "object" && s.language === "python") {
                   this.state.docSymbolsProviderHandle = handle;
@@ -1201,7 +1335,11 @@ export class WorkbenchClient {
           if (msg.method === "$registerHoverProvider" && Array.isArray(msg.args) && msg.args.length >= 2) {
             const handle = Number(msg.args[0]);
             const selector = msg.args[1];
+            const label = (typeof msg.args[2] === "string") ? msg.args[2] : null;
             if (Number.isFinite(handle) && Array.isArray(selector)) {
+              try {
+                this._providers.hover.set(handle, { handle, selector, label });
+              } catch {}
               for (const s of selector) {
                 if (s && typeof s === "object" && s.language === "python") {
                   this.state.hoverProviderHandle = handle;
@@ -1300,8 +1438,64 @@ export class WorkbenchClient {
       // Minimal ExtHost bootstrap (enough to get language providers registered).
       const configInit = spanTrace("connect.buildConfigurationInitData", () => this._buildConfigurationInitData(workspaceRoot, useRemote ? authority : null));
       this._sendExt(80, "$initializeConfiguration", [configInit], false);
+      try {
+        // In a real workbench session, configuration is then synced via `$acceptConfigurationChanged`.
+        // Some extensions (including ms-python.python) appear to rely on this to observe settings.
+        this._sendExt(80, "$acceptConfigurationChanged", [configInit, { keys: ["python.languageServer", "python.defaultInterpreterPath"], overrides: [] }], false);
+      } catch {}
+
+      // Mirror the browser workbench bootstrap sequence that appears to gate provider registration
+      // (e.g. ms-python/python doesn't register hover/symbol providers until these arrive).
+      //
+      // Based on Go decoder trace: `$acceptProviderInfos`, `$setWordDefinitions`, `$setVisibleChannel`,
+      // `$acceptStaticEntries`, `$acceptEditorTabModel`, `$activateByEvent("onLanguage")`, then `$initializeWorkspace`.
+      try {
+        const providerInfos = [
+          // uri.scheme -> capabilities bitmask observed in trace
+          ["vscode-log", 1026],
+          ["vscode-userdata", 1026],
+          ["file", 1042],
+          ["tmp", 1026],
+          ["vscode-remote", 517150],
+          ["http", 3074],
+          ["https", 3074],
+          ["vscode", 2050],
+          ["trustedDomains", 2],
+          ["vscode-local-history", 2050],
+          ["vscode-chat-response-resource", 19474],
+          ["mcp-resource", 19474],
+          ["chat-editing-notebook-snapshot-model", 18434],
+        ];
+        for (const [scheme, caps] of providerInfos) {
+          this._sendExt(91, "$acceptProviderInfos", [{ $mid: 1, path: "/dummy", scheme }, caps], false);
+        }
+      } catch {}
+      try {
+        const regexSource = "(-?\\d*\\.\\d\\w*)|([^\\`\\~\\!\\@\\#\\$\\%\\^\\&\\*\\(\\)\\-\\=\\+\\[\\{\\]\\}\\\\\\|\\;\\:\\'\\\"\\,\\.\\<\\>\\/\\?\\s]+)";
+        const defs = BOOTSTRAP_LANGUAGE_IDS.map((languageId) => ({ languageId, regexSource, regexFlags: "g" }));
+        this._sendExt(94, "$setWordDefinitions", [defs], false);
+      } catch {}
+      try {
+        this._sendExt(94, "$acceptInlineCompletionsUnificationState", [{ codeUnification: false, modelUnification: false, extensionUnification: false, expAssignments: [] }], false);
+      } catch {}
       // Provide language ids early so onLanguage:* activation works like in a real workbench.
       this._sendExt(93, "$acceptLanguageIds", [BOOTSTRAP_LANGUAGE_IDS], false);
+      try {
+        this._sendExt(122, "$setVisibleChannel", [null], false);
+      } catch {}
+      try {
+        this._sendExt(97, "$acceptStaticEntries", [[]], false);
+      } catch {}
+      try {
+        // Mirror trace: workbench clears active editor before restoring tabs/editors.
+        this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [{ newActiveEditor: null }], false);
+      } catch {}
+      try {
+        this._sendExt(113, "$acceptEditorTabModel", [[{ groupId: 0, isActive: true, viewColumn: 0, tabs: [] }]], false);
+      } catch {}
+      try {
+        this._sendExt(99, "$activateByEvent", ["onLanguage", 0], false);
+      } catch {}
       if (workspaceRoot) {
         const rootPath = String(workspaceRoot);
         const name = rootPath.split("/").filter(Boolean).slice(-1)[0] || rootPath;
@@ -1347,11 +1541,45 @@ export class WorkbenchClient {
     const uriObj = spanTrace("openFile.uriForPath", () => this._uriForPath(path, authority));
 
     const modelN = this._nextModelNumber++;
-    const editorId = `vs.editor.ICodeEditor:1,$model${modelN}`;
-    const delta = spanTrace("openFile.buildDelta", () => ({
+    const editorId = `vs.editor.ICodeEditor:${modelN},$model${modelN}`;
+    const visibleEndLineNumber = Math.min(lines.length || 1, 31);
+    const visibleEndColumn = Math.max(1, Math.min((lines[visibleEndLineNumber - 1] ?? "").length + 1, 1000));
+
+    // Mirror the trace: tab model first (preview tab), then delta with addedDocuments,
+    // then delta with addedEditors + newActiveEditor.
+    const tabId = `0~default-workbench.editors.files.fileEditorInput-${uriObj.external} `;
+    const tab = {
+      id: tabId,
+      label: path.split("/").filter(Boolean).slice(-1)[0] || path,
+      editorId: "default",
+      input: { kind: 1, uri: uriObj },
+      isPinned: false,
+      isPreview: true,
+      isActive: true,
+      isDirty: false,
+    };
+    const tabModel = [
+      {
+        groupId: 0,
+        isActive: true,
+        viewColumn: 0,
+        tabs: [tab],
+      },
+    ];
+    spanTrace("openFile.send.tabModel", () => this._sendExt(113, "$acceptEditorTabModel", [tabModel], false));
+
+    const docDelta = spanTrace("openFile.buildDelta.addedDocuments", () => ({
+      // Mirror workbench behavior: opening a file is not dirty by default.
+      addedDocuments: [{ uri: uriObj, versionId: 1, lines, EOL: "\n", languageId, isDirty: false, encoding: "utf8" }],
+    }));
+    const reqDocs = spanTrace("openFile.send.delta.addedDocuments", () => this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [docDelta], false));
+    // Allow GC to collect the large `lines` array after JSON encoding.
+    try {
+      if (docDelta?.addedDocuments?.[0]) docDelta.addedDocuments[0].lines = null;
+    } catch {}
+
+    const editorDelta = spanTrace("openFile.buildDelta.addedEditors", () => ({
       newActiveEditor: editorId,
-      addedDocuments: [{ uri: uriObj, versionId: 1, lines, EOL: "\n", languageId, isDirty: true, encoding: "utf8" }],
-      removedDocuments: [],
       addedEditors: [
         {
           id: editorId,
@@ -1369,43 +1597,15 @@ export class WorkbenchClient {
               positionColumn: 1,
             },
           ],
-          visibleRanges: [{ startLineNumber: 1, startColumn: 1, endLineNumber: Math.min(lines.length || 1, 30), endColumn: 1 }],
+          visibleRanges: [{ startLineNumber: 1, startColumn: 1, endLineNumber: visibleEndLineNumber, endColumn: visibleEndColumn }],
           editorPosition: 0,
         },
       ],
-      removedEditors: [],
     }));
+    spanTrace("openFile.send.delta.addedEditors", () => this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [editorDelta], false));
 
-    const req = spanTrace("openFile.send.acceptDocumentsAndEditorsDelta", () =>
-      this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [delta], false)
-    );
-    // Allow GC to collect the large `lines` array after JSON encoding.
-    try {
-      if (delta?.addedDocuments?.[0]) delta.addedDocuments[0].lines = null;
-    } catch {}
-    // Mirror minimal editor/tab state updates seen in a real workbench session.
-    const tabId = `0~default-workbench.editors.files.fileEditorInput-${uriObj.external} `;
-    const tab = {
-      id: tabId,
-      label: path.split("/").filter(Boolean).slice(-1)[0] || path,
-      editorId: "default",
-      input: { kind: 1, uri: uriObj },
-      isPinned: false,
-      isPreview: false,
-      isActive: true,
-      isDirty: true,
-    };
-    const tabModel = [
-      {
-        groupId: 0,
-        isActive: true,
-        viewColumn: 0,
-        tabs: [tab],
-      },
-    ];
     spanTrace("openFile.send.editorState", () => {
       this._sendExt(88, "$acceptEditorDiffInformation", [editorId, []], false);
-      this._sendExt(113, "$acceptEditorTabModel", [tabModel], false);
       this._sendExt(
         88,
         "$acceptEditorPropertiesChanged",
@@ -1433,12 +1633,14 @@ export class WorkbenchClient {
         ],
         false
       );
-      this._sendExt(85, "$acceptDirtyStateChanged", [uriObj, true], false);
+      // Editor position metadata (seen in the real workbench trace).
+      this._sendExt(88, "$acceptEditorPositionData", [{ [editorId]: 0 }], false);
+      this._sendExt(85, "$acceptDirtyStateChanged", [uriObj, false], false);
     });
     // Trigger activation for deterministic provider registration.
-    // Some builds send this as a mixed-args message; use mixed encoding to avoid silent drops.
-    spanTrace("openFile.send.activateByEvent", () => this._sendExtMixed(99, "$activateByEvent", [`onLanguage:${languageId}`, 0], false));
-    return { ok: true, req };
+    // In the workbench trace this is sent as a normal JSON-args request.
+    spanTrace("openFile.send.activateByEvent", () => this._sendExt(99, "$activateByEvent", [`onLanguage:${languageId}`, 0], false));
+    return { ok: true, req: reqDocs };
   }
 
   async documentSymbols(params = {}) {
@@ -1458,7 +1660,8 @@ export class WorkbenchClient {
     const uriObj = this._uriForPath(path, authority);
 
     const req = this._allocExtReqId();
-    const payload = encodeExtRequestJsonArgs({ req, rpcId: 94, method: "$provideDocumentSymbols", args: [providerHandle, uriObj], cancellable: false });
+    const token = { isCancellationRequested: false };
+    const payload = encodeExtRequestJsonArgs({ req, rpcId: 94, method: "$provideDocumentSymbols", args: [providerHandle, uriObj, token], cancellable: false });
 
     const fut = new Promise((resolve, reject) => {
       this._pendingExt.set(req, { resolve, reject });
@@ -1494,11 +1697,12 @@ export class WorkbenchClient {
     const uriObj = this._uriForPath(path, authority);
 
     const req = this._allocExtReqId();
+    const token = { isCancellationRequested: false };
     const payload = encodeExtRequestJsonArgs({
       req,
       rpcId: 94,
       method: "$provideHover",
-      args: [providerHandle, uriObj, { lineNumber, column }, {}],
+      args: [providerHandle, uriObj, { lineNumber, column }, {}, token],
       cancellable: false,
     });
 
@@ -1551,5 +1755,19 @@ export class WorkbenchClient {
     this.state.hoverProviderHandle = null;
     this._extHandshake = { readySeen: false, initSent: false, initialized: false };
     this._connecting = false;
+  }
+
+  providers() {
+    const toList = (m) => {
+      try {
+        return Array.from(m.values());
+      } catch {
+        return [];
+      }
+    };
+    return {
+      hover: toList(this._providers.hover),
+      documentSymbols: toList(this._providers.documentSymbols),
+    };
   }
 }

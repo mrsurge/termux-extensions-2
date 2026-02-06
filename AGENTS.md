@@ -71,3 +71,113 @@ It is always a good idea for me to at least check the last few messages before b
 # **There is no "we can't do this unless we do that, so we're not doing it". there is only, "we can't do this unless we do that... so we're going to do that".**
 -
 **FOR TE2 AGENTS (THIS PROBABLY MEANS YOU) IN 'CODE CM6'... DO NOT USE *CHEAP* NATIVE BROWSER DROP-DOWNS. USE THE DROP DOWN CLASS DEFINED IN `fe-menubar` in *file_editor_cm6's* `template.html`**
+
+# Minified Code Search Policy
+
+## Deterministic tools for your “stream-only / no clutter” style (minified JS)
+
+* **Prettier to stdout** (file → formatted stdout) is the core; it’s a normal CLI usage pattern. ([Prettier][1])
+* **`rg` line numbers on piped stdin are not a solid contract** (it’s intentionally debatable/quirky), so if you need deterministic line numbers in a pipeline, insert **`nl -ba`** and then grep/rg on that numbered stream. ([GitHub][2])
+* **`rg -l`** (list matching files) is the clean way to solve “idk which file.” ([Docs.rs][3])
+* **`prettier --stdin-filepath <name>`** is the deterministic way to force parser inference when formatting from stdin. ([Prettier][4])
+
+---
+
+# Agent policy (minified JS, no git, no temp files): **Known-file first**, then **unknown-file**
+
+### 1) Known file policy
+
+**1.1. Default “quick hit” (fast, may not give stable line numbers on stdin)**
+
+```bash
+prettier /path/to/file.js 2>/dev/null | rg "someCode" | head -3
+```
+
+**1.2. Deterministic line numbers (recommended contract)**
+Always do this when you intend to copy/paste locations or do follow-up extraction:
+
+```bash
+prettier /path/to/file.js 2>/dev/null | nl -ba | rg -n "someCode" | head -3
+```
+
+Rationale: `nl` is explicitly a line-numbering filter; numbering mode is configurable and deterministic. ([The Open Group][5])
+Also, relying on `rg -n` against stdin as a stable “line number” signal is not guaranteed/encouraged. ([GitHub][2])
+
+**1.3. Deterministic context extraction once you have the numbered hit**
+If the output line starts with `12345<TAB>...`, extract context by re-running and slicing:
+
+```bash
+prettier /path/to/file.js 2>/dev/null | nl -ba | sed -n '12320,12380p'
+```
+
+(Keep everything stream-only; no files written.)
+
+**1.4. Parser forcing (only when needed)**
+If you ever switch to feeding file contents on stdin (or Prettier guesses wrong), force parser inference:
+
+```bash
+cat /path/to/file.js | prettier --stdin-filepath file.js 2>/dev/null | nl -ba | rg -n "someCode" | head -3
+```
+
+`--stdin-filepath` exists specifically to infer the parser from a filename. ([Prettier][4])
+
+**Stop condition for “known-file mode”**
+If you don’t get a hit after:
+
+* trying both raw pattern and a slightly loosened one (e.g. `rg -F` for literal, then regex), and
+* confirming Prettier actually outputs (no silent parse failure),
+  …then move to unknown-file mode.
+
+---
+
+### 2) Unknown file policy (“idk which file it’s in”)
+
+Goal: keep the *same* prettify→search shape, but only run it on candidate files.
+
+**2.1. Candidate discovery (fast, no Prettier yet)**
+Use ripgrep to list matching files:
+
+```bash
+rg -l --hidden --no-ignore -g'*.js' -g'!*.map' "someCode" /path/to/installed/code
+```
+
+`rg` is a line-oriented recursive search tool; using it to locate where patterns occur is its primary use. ([IEPathos][6])
+
+**2.2. Candidate execution loop (your pipeline, but per file)**
+Run your exact workflow on each candidate, with deterministic line numbers and filename tagging:
+
+```bash
+rg -l --hidden --no-ignore -g'*.js' -g'!*.map' "someCode" /path/to/installed/code \
+| while IFS= read -r f; do
+    prettier "$f" 2>/dev/null \
+    | nl -ba \
+    | rg -n "someCode" \
+    | head -3 \
+    | sed "s|^|$f:|"
+  done
+```
+
+**2.3. If you need “pretty-search even when raw string isn’t present”**
+Sometimes minified code obscures whitespace/newlines such that your *intended* snippet only appears after formatting. In that case, discovery becomes two-stage:
+
+* Stage A: narrow candidates with a cheaper anchor (a function name, string literal, import-ish token).
+* Stage B: prettify candidates and search the prettified stream for the real pattern.
+
+Same loop as above; just change the Stage A pattern.
+
+**2.4. Hard cap policy (avoid runaway on huge install trees)**
+If the candidate list is massive, cap it deterministically before looping:
+
+```bash
+rg -l --hidden --no-ignore -g'*.js' -g'!*.map' "someCode" /path/to/installed/code \
+| head -200 \
+| while IFS= read -r f; do
+    prettier "$f" 2>/dev/null | nl -ba | rg -n "someCode" | head -3 | sed "s|^|$f:|"
+  done
+```
+
+(“No clutter” maintained; you’re just bounding work.)
+
+
+see `CTAG-ANNOTATIONS.md` for tagging prettified functions
+

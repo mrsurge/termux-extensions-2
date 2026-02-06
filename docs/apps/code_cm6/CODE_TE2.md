@@ -934,6 +934,9 @@ Approach:
 - Put a small **WS mirror+decode proxy** in front of it (transparent relay).
 - Decode the workbench protocol frames (Mgmt + ExtHost) and publish a **TE2-friendly side channel**.
 
+### Important non-goal
+- **Do not** treat any “trace replay” as a production protocol. Traces/HARs are for discovery + debugging only.
+
 ### Key reference
 - `../mrselect6-2/vscode-protocol/README.md`
   - Documents the **wire framing protocol** (Regular/Ack/KeepAlive/etc) and the **two WS connections**:
@@ -955,6 +958,19 @@ Tooling (TE2):
 Captured HARs (examples):
 - `newwsdata1.har`, `newwsdata2-oneclient.har`, `newwsdata3-oneclient-second_stream.har`
 - `newestws1.har`, `newestws2.har`
+
+### Live decoder proxy (Go, current)
+For live interception + decoding (browser or headless client → proxy → code-server):
+- Upstream proxy/decoder: `../mrselect6-2/vscode-protocol/proxy.go`
+  - Can emit TE2-friendly JSON events (`-te2-json`) and optionally write a capped JSONL trace (`-trace-out ... -trace-max-bytes ...`).
+- Example trace file (repo-local): `tmp/go_te2_decoder_trace.jsonl`
+
+Use this as:
+- a transparent relay
+- a deterministic “ground truth” logger/decoder for what the real workbench does
+
+Do not use it as:
+- a “replay engine” that pretends to be the workbench
 
 ### What we know works from HARs (important findings)
 
@@ -1048,6 +1064,58 @@ or by piggybacking on real workbench requests.
 Notes:
 - For injection, the document must already exist in code-server’s model.
 - Later we can drive open/close via Management channel (workbench actions) or by reproducing doc/editor delta traffic, but that is out of scope for v0/v1.
+
+### Headless workbench adapter (Node, in-progress)
+There is an in-repo headless “workbench-ish” client intended to replace “open a hidden iframe” for bootstrapping:
+- Server: `app/apps/file_editor_cm6/workbench_protocol_proxy/node_workbench_adapter/server.mjs`
+  - Exposes HTTP JSON-RPC (dev-only ergonomics) for driving the adapter: `adapter.connect`, `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`, etc.
+- Client core: `app/apps/file_editor_cm6/workbench_protocol_proxy/node_workbench_adapter/workbench_client.mjs`
+  - Uses VS Code OSS remote agent connection/runtime code (`remoteAgentConnection`, `browserSocketFactory`, IPC runtime) to connect in **remote mode**
+  - Sends the ExtensionHost init JSON over the ExtHost websocket
+  - Sends the minimal editor/document delta events required to “open” a file (`$acceptDocumentsAndEditorsDelta`, tab model, editor properties, dirty state)
+  - Learns provider handles by observing `$register*Provider` frames (when present)
+
+Current status (facts observed in adapter runs):
+- Adapter can establish remote-mode mgmt+ext connections and keep them alive.
+- `vscode.openFile`, `vscode.documentSymbols`, and `vscode.hover` are wired end-to-end through the adapter server.
+- Python provider flow is validated with `ms-pyright.pyright` in the current dev setup:
+  - provider registration observed
+  - symbols and hover requests return results via the proxy/adapter surface
+- Keepalive/ack handling is stable enough for iterative feature validation, but bootstrap parity work remains for broader extension compatibility.
+
+### Extension validation milestones (current track)
+Goal: verify deterministic language-feature parity (open file -> symbols/hover/diagnostics) across popular ecosystems before broadening scope.
+
+Execution reference:
+- `docs/apps/code_cm6/MONACO_WORKBENCH_SPRINT_PLAN.md`
+- `docs/apps/code_cm6/README.md` (Roadmap Update section)
+- `docs/apps/code_cm6/VSCODE_API_CONTRACT.md`
+- `docs/apps/code_cm6/VSCODE_API_STATE_OWNERSHIP.md`
+- `docs/apps/code_cm6/VSCODE_API_DEPRECATIONS.md`
+
+1. Python (`ms-pyright.pyright`) - in progress / partially validated
+   - validated: open file, document symbols, hover
+   - pending: sustained diagnostics/completions stability under longer sessions
+2. C++ (candidate extension under test) - pending
+   - target checks: provider registration, document symbols, hover, diagnostics
+3. Rust (candidate extension under test) - pending
+   - target checks: provider registration, document symbols, hover, diagnostics
+
+Baseline note:
+- TypeScript/JavaScript language intelligence is built into the VS Code stack (TypeScript service), so TS/JS acts as a baseline control in this milestone plan rather than an external-extension test case.
+
+Planning boundary:
+- `CODE_TE2.md` remains architecture/protocol truth.
+- `MONACO_WORKBENCH_SPRINT_PLAN.md` remains the actionable sprint execution plan.
+
+### Minified code reverse engineering workflow (policy)
+When we need to learn the “real” sequence from installed/minified code-server JS, use a stream-only workflow:
+- Prefer: `prettier <file> 2>/dev/null | nl -ba | rg -n '<pattern>'` for deterministic line numbers
+- Then: re-run and extract context with `sed -n '<start>,<end>p'`
+
+See:
+- `AGENTS.md` (“Minified Code Search Policy”)
+- `CTAG-ANNOTATIONS.md` (tagging prettified functions for later lookup)
 
 ### TE2 integration surface (target)
 Expose a TE2-side channel (format is intentionally boring):
