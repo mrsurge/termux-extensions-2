@@ -202,6 +202,10 @@ export default href;
             rel="stylesheet",
             href="/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.css",
         )
+        bootstrap_bundle_css = Link(
+            rel="stylesheet",
+            href="/api/app/file_editor_cm6/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css?raw=1",
+        )
 
         # NOTE: Import map URLs are resolved relative to the iframe document.
         # Use the absolute /api/app/<app_id>/ui/... path to avoid any ambiguity.
@@ -223,6 +227,7 @@ export default href;
                 Meta(name="viewport", content="width=device-width, initial-scale=1"),
                 css,
                 touch_css,
+                bootstrap_bundle_css,
                 import_map,
                 # Debug: prove CSS is loaded inside the iframe
                 Style(

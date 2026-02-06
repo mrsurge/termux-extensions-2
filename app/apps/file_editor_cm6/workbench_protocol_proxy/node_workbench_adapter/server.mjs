@@ -106,6 +106,53 @@ function nowMs() {
   return Date.now();
 }
 
+function pathFromUri(uri) {
+  if (typeof uri !== "string" || !uri.trim()) return null;
+  try {
+    const u = new URL(uri);
+    if (u.protocol === "file:") return decodeURIComponent(u.pathname);
+    if (u.protocol === "vscode-remote:") return decodeURIComponent(u.pathname);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function authorityFromUri(uri) {
+  if (typeof uri !== "string" || !uri.trim()) return null;
+  try {
+    const u = new URL(uri);
+    return u.host || null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePathParam(params) {
+  const p = (params && typeof params === "object") ? params : {};
+  if (typeof p.path === "string" && p.path.trim()) return p.path;
+  if (typeof p.uri === "string" && p.uri.trim()) {
+    const fromUri = pathFromUri(p.uri);
+    if (typeof fromUri === "string" && fromUri.trim()) return fromUri;
+  }
+  return "";
+}
+
+function normalizeAuthorityParam(params, fallback = "localhost:8000") {
+  const p = (params && typeof params === "object") ? params : {};
+  if (typeof p.authority === "string" && p.authority.trim()) return p.authority;
+  if (typeof p.uri === "string" && p.uri.trim()) {
+    const fromUri = authorityFromUri(p.uri);
+    if (typeof fromUri === "string" && fromUri.trim()) return fromUri;
+  }
+  return fallback;
+}
+
+function vscodeRemoteUri(authority, fsPath) {
+  const pathPart = String(fsPath || "");
+  return `vscode-remote://${authority}${pathPart}`;
+}
+
 function jsonResponse(res, code, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(code, {
@@ -292,14 +339,69 @@ function wsBroadcastNotification(method, params) {
   }
 }
 
+function emitTe2Event(ev) {
+  if (Number.isFinite(EVENT_LOG_MAX) && EVENT_LOG_MAX > 0) {
+    eventLog.push(ev);
+    while (eventLog.length > EVENT_LOG_MAX) eventLog.shift();
+  }
+  wsBroadcastNotification("te2.event", ev);
+}
+
+function uriObjToString(uriObj) {
+  if (!uriObj || typeof uriObj !== "object") return null;
+  const scheme = typeof uriObj.scheme === "string" ? uriObj.scheme : "";
+  const authority = typeof uriObj.authority === "string" ? uriObj.authority : "";
+  const path = typeof uriObj.path === "string" ? uriObj.path : "";
+  if (!scheme || !path) return null;
+  return `${scheme}://${authority}${path}`;
+}
+
+function diagnosticsFromChangeMany(args) {
+  if (!Array.isArray(args) || args.length < 2) return null;
+  const owner = typeof args[0] === "string" ? args[0] : "unknown";
+  const pairs = Array.isArray(args[1]) ? args[1] : [];
+  const items = [];
+  for (const pair of pairs) {
+    if (!Array.isArray(pair) || pair.length < 2) continue;
+    const uriObj = pair[0];
+    const markers = Array.isArray(pair[1]) ? pair[1] : [];
+    const uri = uriObjToString(uriObj);
+    if (!uri) continue;
+    items.push({ uri, markers });
+  }
+  return { owner, items };
+}
+
+function buildStatusResult() {
+  const s = wb.status();
+  state.session.connected = !!s.connected;
+  state.session.ready = !!s.ready;
+  state.session.docSymbolsProviderHandle = s.docSymbolsProviderHandle ?? null;
+  state.session.hoverProviderHandle = s.hoverProviderHandle ?? null;
+  return {
+    ok: true,
+    ts_ms: nowMs(),
+    config: state.config,
+    session: state.session,
+  };
+}
+
 const wb = new WorkbenchClient({
   onEvent: (ev) => {
-    if (!(Number.isFinite(EVENT_LOG_MAX) && EVENT_LOG_MAX > 0)) return;
     const safeEv = _truncateEvent(ev);
-    eventLog.push(safeEv);
-    while (eventLog.length > EVENT_LOG_MAX) eventLog.shift();
-    // Mirror to WS clients as TE2 events; HTTP clients can poll via adapter.status.
-    wsBroadcastNotification("te2.event", safeEv);
+    emitTe2Event(safeEv);
+
+    if (safeEv?.type === "diagnostics/changeMany" && Array.isArray(safeEv?.args)) {
+      const norm = diagnosticsFromChangeMany(safeEv.args);
+      if (norm) {
+        emitTe2Event({
+          type: "diagnostics/update",
+          ts_ms: nowMs(),
+          owner: norm.owner,
+          items: norm.items,
+        });
+      }
+    }
   },
 });
 
@@ -357,22 +459,8 @@ async function handleJsonRpc(reqObj) {
     return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs() } };
   }
 
-  if (method === "adapter.status") {
-    const s = wb.status();
-    state.session.connected = !!s.connected;
-    state.session.ready = !!s.ready;
-    state.session.docSymbolsProviderHandle = s.docSymbolsProviderHandle ?? null;
-    state.session.hoverProviderHandle = s.hoverProviderHandle ?? null;
-    return {
-      jsonrpc: "2.0",
-      id,
-      result: {
-        ok: true,
-        ts_ms: nowMs(),
-        config: state.config,
-        session: state.session,
-      },
-    };
+  if (method === "te2.status" || method === "adapter.status") {
+    return { jsonrpc: "2.0", id, result: buildStatusResult() };
   }
 
   if (method === "adapter.events") {
@@ -402,11 +490,7 @@ async function handleJsonRpc(reqObj) {
       commit: p.commit,
       proxyUri: p.proxyUri,
     });
-    const s = wb.status();
-    state.session.connected = !!s.connected;
-    state.session.ready = !!s.ready;
-    state.session.docSymbolsProviderHandle = s.docSymbolsProviderHandle ?? null;
-    state.session.hoverProviderHandle = s.hoverProviderHandle ?? null;
+    buildStatusResult();
     return { jsonrpc: "2.0", id, result };
   }
 
@@ -442,6 +526,11 @@ async function handleJsonRpc(reqObj) {
 
   if (method === "vscode.openFile") {
     const p = (params && typeof params === "object") ? params : {};
+    const resolvedPath = normalizePathParam(p);
+    if (!resolvedPath) {
+      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
+    }
+    const authority = normalizeAuthorityParam(p, "localhost:8000");
 
     const openFileSnapEnabled =
       String(process.env.TE2_OPENFILE_SNAPSHOT_ENABLE || "") === "1"
@@ -479,31 +568,43 @@ async function handleJsonRpc(reqObj) {
     }
 
     const result = await wb.openFile({
-      path: p.path,
+      path: resolvedPath,
       languageId: p.languageId,
-      authority: p.authority ?? "localhost:8000",
+      authority,
     });
-    return { jsonrpc: "2.0", id, result };
+    return { jsonrpc: "2.0", id, result: { ...result, path: resolvedPath, uri: vscodeRemoteUri(authority, resolvedPath) } };
   }
 
   if (method === "vscode.documentSymbols") {
     const p = (params && typeof params === "object") ? params : {};
+    const resolvedPath = normalizePathParam(p);
+    if (!resolvedPath) {
+      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
+    }
+    const authority = normalizeAuthorityParam(p, "localhost:8000");
     const result = await wb.documentSymbols({
-      path: p.path,
-      authority: p.authority ?? "localhost:8000",
+      path: resolvedPath,
+      authority,
       providerHandle: p.providerHandle,
+      timeoutMs: p.timeoutMs,
     });
     return { jsonrpc: "2.0", id, result };
   }
 
   if (method === "vscode.hover") {
     const p = (params && typeof params === "object") ? params : {};
+    const resolvedPath = normalizePathParam(p);
+    if (!resolvedPath) {
+      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
+    }
+    const authority = normalizeAuthorityParam(p, "localhost:8000");
     const result = await wb.hover({
-      path: p.path,
-      authority: p.authority ?? "localhost:8000",
+      path: resolvedPath,
+      authority,
       providerHandle: p.providerHandle,
       lineNumber: p.lineNumber,
       column: p.column,
+      timeoutMs: p.timeoutMs,
     });
     return { jsonrpc: "2.0", id, result };
   }
@@ -540,7 +641,7 @@ const server = http.createServer(async (req, res) => {
           "",
           "Try:",
           `  curl -s -X POST -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"te2.ping\"}' http://${HOST}:${PORT}/cmd`,
-          `  curl -s -X POST -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"adapter.status\"}' http://${HOST}:${PORT}/cmd`,
+          `  curl -s -X POST -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"te2.status\"}' http://${HOST}:${PORT}/cmd`,
           "",
         ].join("\n"),
       );
