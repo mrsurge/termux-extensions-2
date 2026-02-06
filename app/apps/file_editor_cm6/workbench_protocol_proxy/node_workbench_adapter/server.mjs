@@ -1,10 +1,106 @@
 import http from "node:http";
 import crypto from "node:crypto";
+import v8 from "node:v8";
+import path from "node:path";
 
 import { WorkbenchClient } from "./workbench_client.mjs";
 
 const HOST = process.env.TE2_ADAPTER_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.TE2_ADAPTER_PORT ?? "8001");
+
+const SYNC_TRACE_ENABLE = String(process.env.TE2_SYNC_TRACE || "") === "1";
+const SYNC_TRACE_MAX = Number(process.env.TE2_SYNC_TRACE_MAX ?? "200");
+const SYNC_TRACE_MIN_MS = Number(process.env.TE2_SYNC_TRACE_MIN_MS ?? "20");
+const SYNC_TRACE_MIN_BYTES = Number(process.env.TE2_SYNC_TRACE_MIN_BYTES ?? String(256 * 1024));
+
+const _BASE_JSON_STRINGIFY = JSON.stringify;
+
+function _stackTop(skip = 2, limit = 6) {
+  try {
+    const s = new Error().stack || "";
+    return s.split("\n").slice(skip, skip + limit).map((l) => l.trim());
+  } catch {
+    return [];
+  }
+}
+
+function installSyncTrace() {
+  if (!SYNC_TRACE_ENABLE) return;
+  let remaining = Number.isFinite(SYNC_TRACE_MAX) ? SYNC_TRACE_MAX : 0;
+  if (remaining <= 0) return;
+
+  const log = (ev) => {
+    if (remaining <= 0) return;
+    remaining -= 1;
+    try {
+      // Use the baseline stringify to avoid recursion if JSON.stringify is patched.
+      console.log(_BASE_JSON_STRINGIFY({ type: "sync/trace", ts_ms: Date.now(), ...ev }));
+    } catch {}
+  };
+
+  // JSON.parse
+  try {
+    const origParse = JSON.parse;
+    JSON.parse = function te2Parse(str, ...rest) {
+      const start = Date.now();
+      const s = typeof str === "string" ? str : "";
+      try {
+        return origParse.call(this, str, ...rest);
+      } finally {
+        const dur = Date.now() - start;
+        const bytes = s ? Buffer.byteLength(s, "utf8") : 0;
+        if (dur >= SYNC_TRACE_MIN_MS || bytes >= SYNC_TRACE_MIN_BYTES) {
+          log({ op: "JSON.parse", dur_ms: dur, bytes, stack: _stackTop(3) });
+        }
+      }
+    };
+  } catch {}
+
+  // JSON.stringify
+  try {
+    const origStringify = JSON.stringify;
+    JSON.stringify = function te2Stringify(value, replacer, space) {
+      const start = Date.now();
+      let out = null;
+      try {
+        out = origStringify.call(this, value, replacer, space);
+        return out;
+      } finally {
+        const dur = Date.now() - start;
+        const bytes = typeof out === "string" ? Buffer.byteLength(out, "utf8") : 0;
+        if (dur >= SYNC_TRACE_MIN_MS || bytes >= SYNC_TRACE_MIN_BYTES) {
+          let kind = typeof value;
+          if (value && typeof value === "object") kind = Array.isArray(value) ? "array" : "object";
+          log({ op: "JSON.stringify", dur_ms: dur, out_bytes: bytes, in_kind: kind, stack: _stackTop(3) });
+        }
+      }
+    };
+  } catch {}
+
+  // Buffer.concat
+  try {
+    const origConcat = Buffer.concat;
+    Buffer.concat = function te2Concat(list, totalLength) {
+      const start = Date.now();
+      let out = null;
+      try {
+        out = origConcat.call(this, list, totalLength);
+        return out;
+      } finally {
+        const dur = Date.now() - start;
+        const outBytes = out?.length ?? 0;
+        let inBytes = 0;
+        try {
+          if (Number.isFinite(totalLength)) inBytes = Number(totalLength) || 0;
+          else if (Array.isArray(list)) inBytes = list.reduce((a, b) => a + (b?.length ?? 0), 0);
+        } catch {}
+        if (dur >= SYNC_TRACE_MIN_MS || outBytes >= SYNC_TRACE_MIN_BYTES) {
+          log({ op: "Buffer.concat", dur_ms: dur, in_bytes: inBytes, out_bytes: outBytes, stack: _stackTop(3) });
+        }
+      }
+    };
+  } catch {}
+}
 
 function nowMs() {
   return Date.now();
@@ -150,7 +246,15 @@ const wsClients = new Set();
 const eventLog = [];
 const EVENT_LOG_MAX = Number(process.env.TE2_EVENT_LOG_MAX ?? "2000");
 
+const HEAP_SNAPSHOT_ENABLE = String(process.env.TE2_HEAP_SNAPSHOT_ENABLE || "") === "1";
+const HEAP_SNAPSHOT_RATIO = Number(process.env.TE2_HEAP_SNAPSHOT_RATIO ?? "0.9");
+const HEAP_SNAPSHOT_INTERVAL_MS = Number(process.env.TE2_HEAP_SNAPSHOT_INTERVAL_MS ?? "1000");
+const HEAP_SNAPSHOT_PATH = process.env.TE2_HEAP_SNAPSHOT_PATH || "";
+const HEAP_SNAPSHOT_DIR = process.env.TE2_HEAP_SNAPSHOT_DIR || "";
+let _heapSnapTimer = null;
+
 function wsBroadcastNotification(method, params) {
+  if (wsClients.size === 0) return;
   const msg = JSON.stringify({ jsonrpc: "2.0", method, params });
   for (const sock of wsClients) {
     try {
@@ -167,6 +271,40 @@ const wb = new WorkbenchClient({
     wsBroadcastNotification("te2.event", ev);
   },
 });
+
+installSyncTrace();
+
+if (HEAP_SNAPSHOT_ENABLE) {
+  try {
+    _heapSnapTimer = setInterval(() => {
+      const usage = process.memoryUsage();
+      const limit = v8.getHeapStatistics().heap_size_limit || 0;
+      const used = usage.heapUsed || 0;
+      if (!limit || !used) return;
+      const ratio = used / limit;
+      if (ratio < HEAP_SNAPSHOT_RATIO) return;
+
+      const outPath = HEAP_SNAPSHOT_PATH || undefined;
+      const file = v8.writeHeapSnapshot(outPath);
+      try {
+        console.log(
+          JSON.stringify({
+            type: "metrics/heap_snapshot",
+            ts_ms: nowMs(),
+            heap_used: used,
+            heap_limit: limit,
+            ratio,
+            file,
+          })
+        );
+      } catch {}
+
+      clearInterval(_heapSnapTimer);
+      _heapSnapTimer = null;
+    }, Math.max(200, HEAP_SNAPSHOT_INTERVAL_MS));
+    _heapSnapTimer.unref?.();
+  } catch {}
+}
 
 async function handleJsonRpc(reqObj) {
   // We accept either JSON-RPC 2.0, or a simple {cmd,args} convenience envelope.
@@ -214,6 +352,14 @@ async function handleJsonRpc(reqObj) {
     return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs(), count: eventLog.length, events: slice } };
   }
 
+  if (method === "adapter.shutdown") {
+    // Graceful shutdown (useful for heap-profiling runs).
+    setTimeout(() => {
+      process.exit(0);
+    }, 50).unref?.();
+    return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs() } };
+  }
+
   if (method === "adapter.connect") {
     const p = (params && typeof params === "object") ? params : {};
     const result = await wb.connect({
@@ -233,8 +379,69 @@ async function handleJsonRpc(reqObj) {
     return { jsonrpc: "2.0", id, result };
   }
 
+  if (method === "adapter.disconnect") {
+    try {
+      wb.disconnect?.();
+    } catch {}
+    state.session.connected = false;
+    state.session.ready = false;
+    state.session.docSymbolsProviderHandle = null;
+    state.session.hoverProviderHandle = null;
+    return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs() } };
+  }
+
+  if (method === "adapter.heapSnapshot") {
+    const p = (params && typeof params === "object") ? params : {};
+    const label = typeof p.label === "string" ? p.label : "manual";
+    const dir = HEAP_SNAPSHOT_DIR || (HEAP_SNAPSHOT_PATH ? path.dirname(HEAP_SNAPSHOT_PATH) : "");
+    const outPath = typeof p.path === "string"
+      ? p.path
+      : (dir ? path.join(dir, `te2-${label}-${nowMs()}.heapsnapshot`) : undefined);
+    const usage = process.memoryUsage();
+    const limit = v8.getHeapStatistics().heap_size_limit || 0;
+    const used = usage.heapUsed || 0;
+    const file = v8.writeHeapSnapshot(outPath);
+    return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs(), file, heap_used: used, heap_limit: limit } };
+  }
+
   if (method === "vscode.openFile") {
     const p = (params && typeof params === "object") ? params : {};
+
+    const openFileSnapEnabled =
+      String(process.env.TE2_OPENFILE_SNAPSHOT_ENABLE || "") === "1"
+      || Object.hasOwn(process.env, "TE2_OPENFILE_SNAPSHOT_AFTER_MS")
+      || Object.hasOwn(process.env, "TE2_OPENFILE_SNAPSHOT_PATH");
+    if (openFileSnapEnabled) {
+      const snapAfterMs = Number(process.env.TE2_OPENFILE_SNAPSHOT_AFTER_MS ?? "0");
+      const snapExit = String(process.env.TE2_OPENFILE_SNAPSHOT_EXIT || "") === "1";
+      if (Number.isFinite(snapAfterMs) && snapAfterMs >= 0) {
+        const snapDir = HEAP_SNAPSHOT_DIR || (HEAP_SNAPSHOT_PATH ? path.dirname(HEAP_SNAPSHOT_PATH) : "");
+        const snapPath = process.env.TE2_OPENFILE_SNAPSHOT_PATH
+          || (snapDir ? path.join(snapDir, `te2-openFile-${nowMs()}.heapsnapshot`) : undefined);
+        const timer = setTimeout(() => {
+          try {
+            const usage = process.memoryUsage();
+            const limit = v8.getHeapStatistics().heap_size_limit || 0;
+            const used = usage.heapUsed || 0;
+            const file = v8.writeHeapSnapshot(snapPath);
+            console.log(
+              JSON.stringify({
+                type: "metrics/heap_snapshot",
+                ts_ms: nowMs(),
+                reason: "openFile",
+                after_ms: snapAfterMs,
+                heap_used: used,
+                heap_limit: limit,
+                file,
+              })
+            );
+          } catch {}
+          if (snapExit) process.exit(0);
+        }, snapAfterMs);
+        timer.unref?.();
+      }
+    }
+
     const result = await wb.openFile({
       path: p.path,
       languageId: p.languageId,

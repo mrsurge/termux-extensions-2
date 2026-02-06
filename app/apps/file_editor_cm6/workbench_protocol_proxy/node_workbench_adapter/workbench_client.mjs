@@ -7,8 +7,232 @@ import { NodeSocketFactory } from "./vscode_oss_runtime/platform/remote/browser/
 import { ConnectionType, connectToRemoteAgent, createNoopSignService } from "./vscode_oss_runtime/platform/remote/common/remoteAgentConnection.mjs";
 import { IpcPromiseClient } from "./vscode_oss_runtime/base/parts/ipc/common/ipc.mjs";
 
+const DEBUG_METRICS = String(process.env.TE2_DEBUG_METRICS || "") === "1";
+const INIT_SIZE_PROFILE = String(process.env.TE2_INIT_SIZE_PROFILE || "") === "1";
+const INIT_SIZE_MAX_ITEMS = Number(process.env.TE2_INIT_SIZE_MAX_ITEMS ?? "500");
+const EXT_EXCLUDE_IDS = String(process.env.TE2_EXT_EXCLUDE_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
+const REPLY_DROP_METHODS = new Set(
+  String(process.env.TE2_REPLY_DROP_METHODS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+const REPLY_EMPTY_METHODS = new Set(
+  String(process.env.TE2_REPLY_EMPTY_METHODS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+const REPLY_NULL_METHODS = new Set(
+  String(process.env.TE2_REPLY_NULL_METHODS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+const SKIP_ARGS_PARSE_METHODS = new Set(
+  String(process.env.TE2_SKIP_ARGS_PARSE_METHODS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+const MAX_JSON_BYTES = Number(process.env.TE2_MAX_JSON_BYTES ?? String(8 * 1024 * 1024));
+const SPAN_TRACE_ENABLE = String(process.env.TE2_SPAN_TRACE || "") === "1";
+const SPAN_TRACE_MAX = Number(process.env.TE2_SPAN_TRACE_MAX ?? "200");
+const SPAN_TRACE_MIN_MS = Number(process.env.TE2_SPAN_TRACE_MIN_MS ?? "5");
+let _spanTraceRemaining = SPAN_TRACE_MAX;
+
+const EXT_MSG_TRACE = String(process.env.TE2_EXT_MSG_TRACE || "") === "1";
+const EXT_MSG_TRACE_EVERY = Number(process.env.TE2_EXT_MSG_TRACE_EVERY ?? "100");
+const EXT_MSG_TRACE_MAX = Number(process.env.TE2_EXT_MSG_TRACE_MAX ?? "2000");
+
+// Derived from a real code-server workbench session trace. This is used to bootstrap the
+// remote extension host with a language id universe so onLanguage:* activation works.
+const BOOTSTRAP_LANGUAGE_IDS = [
+  "plaintext",
+  "code-text-binary",
+  "scminput",
+  "Log",
+  "log",
+  "bat",
+  "clojure",
+  "coffeescript",
+  "jsonc",
+  "json",
+  "c",
+  "cpp",
+  "cuda-cpp",
+  "csharp",
+  "css",
+  "dart",
+  "diff",
+  "dockerfile",
+  "dotenv",
+  "ignore",
+  "fsharp",
+  "git-commit",
+  "git-rebase",
+  "go",
+  "groovy",
+  "handlebars",
+  "hlsl",
+  "html",
+  "ini",
+  "properties",
+  "java",
+  "javascriptreact",
+  "javascript",
+  "jsx-tags",
+  "jsonl",
+  "snippets",
+  "julia",
+  "juliamarkdown",
+  "tex",
+  "latex",
+  "bibtex",
+  "cpp_embedded_latex",
+  "markdown_latex_combined",
+  "less",
+  "lua",
+  "makefile",
+  "markdown",
+  "markdown-math",
+  "wat",
+  "objective-c",
+  "objective-cpp",
+  "perl",
+  "raku",
+  "php",
+  "powershell",
+  "prompt",
+  "instructions",
+  "chatagent",
+  "jade",
+  "python",
+  "r",
+  "razor",
+  "restructuredtext",
+  "ruby",
+  "rust",
+  "scss",
+  "search-result",
+  "shaderlab",
+  "shellscript",
+  "sql",
+  "swift",
+  "typescript",
+  "typescriptreact",
+  "vb",
+  "xml",
+  "xsl",
+  "dockercompose",
+  "yaml",
+  "jinja",
+  "pip-requirements",
+  "toml",
+];
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+async function waitFor(pred, { timeoutMs = 8000, intervalMs = 50 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      if (pred()) return true;
+    } catch {}
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(intervalMs);
+  }
+  return false;
+}
+
+function memSnapshot() {
+  const m = process.memoryUsage();
+  return {
+    rss: m.rss,
+    heap_total: m.heapTotal,
+    heap_used: m.heapUsed,
+    external: m.external,
+    array_buffers: m.arrayBuffers ?? 0,
+  };
+}
+
+function logMetrics(type, data) {
+  if (!DEBUG_METRICS) return;
+  try {
+    console.log(JSON.stringify({ type, ts_ms: Date.now(), ...data }));
+  } catch {}
+}
+
+function spanTrace(name, fn) {
+  if (!SPAN_TRACE_ENABLE || _spanTraceRemaining <= 0) return fn();
+  const start = Date.now();
+  let ok = false;
+  try {
+    const out = fn();
+    ok = true;
+    return out;
+  } finally {
+    const dur = Date.now() - start;
+    if (dur >= SPAN_TRACE_MIN_MS) {
+      _spanTraceRemaining -= 1;
+      try {
+        console.log(
+          JSON.stringify({
+            type: "span",
+            ts_ms: Date.now(),
+            name,
+            dur_ms: dur,
+            ok,
+            mem: memSnapshot(),
+          })
+        );
+      } catch {}
+    }
+  }
+}
+
+async function spanTraceAsync(name, fn) {
+  if (!SPAN_TRACE_ENABLE || _spanTraceRemaining <= 0) return await fn();
+  const start = Date.now();
+  try {
+    const out = await fn();
+    const dur = Date.now() - start;
+    if (dur >= SPAN_TRACE_MIN_MS) {
+      _spanTraceRemaining -= 1;
+      try {
+        console.log(JSON.stringify({ type: "span", ts_ms: Date.now(), name, dur_ms: dur, ok: true, mem: memSnapshot() }));
+      } catch {}
+    }
+    return out;
+  } catch (e) {
+    const dur = Date.now() - start;
+    if (dur >= SPAN_TRACE_MIN_MS) {
+      _spanTraceRemaining -= 1;
+      try {
+        console.log(JSON.stringify({ type: "span", ts_ms: Date.now(), name, dur_ms: dur, ok: false, err: String(e?.message ?? e), mem: memSnapshot() }));
+      } catch {}
+    }
+    throw e;
+  }
+}
+
+function _shouldSkipSize(obj, maxItems) {
+  if (!obj || typeof obj !== "object") return false;
+  if (Array.isArray(obj)) return obj.length > maxItems;
+  return Object.keys(obj).length > maxItems;
+}
+
+function _jsonSizeOrSkip(obj, maxItems) {
+  if (!INIT_SIZE_PROFILE) return { skipped: true };
+  if (_shouldSkipSize(obj, maxItems)) return { skipped: true, reason: "too_many_items" };
+  try {
+    const s = JSON.stringify(obj);
+    return { size: s.length };
+  } catch (e) {
+    return { skipped: true, reason: "stringify_error" };
+  }
 }
 
 function u32be(n) {
@@ -146,6 +370,11 @@ function decodeExtHostRpc(payload) {
     const ln = readU32();
     return readBytes(ln).toString("utf8");
   };
+  const skipLongString = () => {
+    const ln = readU32();
+    readBytes(ln);
+    return ln >>> 0;
+  };
   const readMixedArray = () => {
     const count = readU32();
     const out = [];
@@ -170,27 +399,117 @@ function decodeExtHostRpc(payload) {
     }
     return out;
   };
+  const skipMixedArray = () => {
+    const count = readU32();
+    let totalJsonBytes = 0;
+    let totalStringBytes = 0;
+    let totalBuffers = 0;
+    for (let i = 0; i < count; i++) {
+      const argType = readU8();
+      if (argType === 1) {
+        const ln = readU32();
+        readBytes(ln);
+        totalStringBytes += ln;
+        continue;
+      }
+      if (argType === 2) {
+        const ln = readU32();
+        readBytes(ln);
+        totalJsonBytes += ln;
+        continue;
+      }
+      if (argType === 3) {
+        const bufCount = readU32();
+        const ln = readU32();
+        readBytes(ln);
+        totalJsonBytes += ln;
+        for (let j = 0; j < bufCount; j++) {
+          const bln = readU32();
+          readBytes(bln);
+          totalBuffers += 1;
+        }
+        continue;
+      }
+      if (argType === 4) continue;
+      // unknown: can't reliably skip, but do nothing (will likely fail later)
+    }
+    return { count, totalJsonBytes, totalStringBytes, totalBuffers };
+  };
 
   try {
     if (msgType === 1 || msgType === 2) {
       const rpcId = readU8();
       const method = readShortString();
-      const argsRaw = readLongString();
+      if (SKIP_ARGS_PARSE_METHODS.has(method)) {
+        const argsRawLen = skipLongString();
+        return {
+          kind: "ext",
+          type: msgType,
+          req,
+          rpcId,
+          method,
+          args: [],
+          argsRawLen,
+          cancellable: msgType === 2,
+          skippedArgsParse: true,
+        };
+      }
+      const argsRawLen = readU32();
+      if (MAX_JSON_BYTES > 0 && argsRawLen > MAX_JSON_BYTES) {
+        readBytes(argsRawLen);
+        return {
+          kind: "ext",
+          type: msgType,
+          req,
+          rpcId,
+          method,
+          args: [],
+          argsRawLen,
+          cancellable: msgType === 2,
+          skippedArgsParse: true,
+          skipReason: "too_large",
+        };
+      }
+      const argsRaw = readBytes(argsRawLen).toString("utf8");
       const args = argsRaw ? JSON.parse(argsRaw) : [];
-      return { kind: "ext", type: msgType, req, rpcId, method, args, cancellable: msgType === 2 };
+      return { kind: "ext", type: msgType, req, rpcId, method, args, argsRawLen, cancellable: msgType === 2 };
     }
     if (msgType === 3 || msgType === 4) {
       const rpcId = readU8();
       const method = readShortString();
+      if (SKIP_ARGS_PARSE_METHODS.has(method)) {
+        const meta = skipMixedArray();
+        return {
+          kind: "ext",
+          type: msgType,
+          req,
+          rpcId,
+          method,
+          args: [],
+          cancellable: msgType === 4,
+          skippedArgsParse: true,
+          argsMeta: { encoding: "mixed", ...meta },
+        };
+      }
       const args = readMixedArray();
       return { kind: "ext", type: msgType, req, rpcId, method, args, cancellable: msgType === 4 };
     }
     if (msgType === 9) {
-      const resRaw = readLongString();
+      const resLen = readU32();
+      if (MAX_JSON_BYTES > 0 && resLen > MAX_JSON_BYTES) {
+        readBytes(resLen);
+        return { kind: "ext", type: msgType, req, skippedResultParse: true, resultRawLen: resLen, skipReason: "too_large" };
+      }
+      const resRaw = readBytes(resLen).toString("utf8");
       return { kind: "ext", type: msgType, req, result: resRaw ? JSON.parse(resRaw) : null };
     }
     if (msgType === 11) {
-      const errRaw = readLongString();
+      const errLen = readU32();
+      if (MAX_JSON_BYTES > 0 && errLen > MAX_JSON_BYTES) {
+        readBytes(errLen);
+        return { kind: "ext", type: msgType, req, skippedErrorParse: true, errorRawLen: errLen, skipReason: "too_large" };
+      }
+      const errRaw = readBytes(errLen).toString("utf8");
       return { kind: "ext", type: msgType, req, error: errRaw ? JSON.parse(errRaw) : null };
     }
     return { kind: "ext", type: msgType, req };
@@ -218,12 +537,36 @@ export class WorkbenchClient {
     this._nextModelNumber = 1;
     this._useRemote = true;
     this._authority = "localhost:8000";
+    this._metricsTimer = null;
+    this._extMsgTrace = {
+      enabled: EXT_MSG_TRACE,
+      seen: 0,
+      bytes: 0,
+      maxBytes: 0,
+      lastTs: 0,
+    };
     this.state = {
       connected: false,
       ready: false,
       docSymbolsProviderHandle: null,
       hoverProviderHandle: null,
     };
+
+    if (DEBUG_METRICS) {
+      try {
+        this._metricsTimer = setInterval(() => {
+          logMetrics("metrics/heartbeat", {
+            mem: memSnapshot(),
+            state: { ...this.state },
+            ext_req_seen: this._debugExtReqSeen,
+            ext_reply_seen: this._debugExtReplySeen,
+            pending_ext: this._pendingExt?.size ?? 0,
+            sent_ext_meta: this._sentExtMeta?.size ?? 0,
+          });
+        }, 1000);
+        this._metricsTimer.unref?.();
+      } catch {}
+    }
   }
 
   _allocExtReqId() {
@@ -287,9 +630,15 @@ export class WorkbenchClient {
 
   _buildExtensionsSnapshot(scannedExtensions) {
     const includeBuiltin = String(process.env.TE2_INCLUDE_BUILTIN_EXTS || "").toLowerCase() === "1";
-    const all = Array.isArray(scannedExtensions)
+    const base = Array.isArray(scannedExtensions)
       ? scannedExtensions.filter((ext) => includeBuiltin || ext?.isBuiltin === false)
       : [];
+    const all = EXT_EXCLUDE_IDS.length
+      ? base.filter((ext) => {
+          const ident = this._extensionIdentifierFrom(ext) ?? "";
+          return !EXT_EXCLUDE_IDS.includes(String(ident));
+        })
+      : base;
     const activationEvents = {};
     const myExtensions = [];
     const seenMy = new Set();
@@ -311,6 +660,67 @@ export class WorkbenchClient {
     return { versionId: 1, allExtensions: all, activationEvents, myExtensions };
   }
 
+  _sanitizeExtensionForInit(ext, authority) {
+    if (!ext || typeof ext !== "object") return null;
+
+    // Keep only the fields that ExtensionHost init actually needs (lean JSON-only object).
+    // IMPORTANT: strip non-enumerable/symbol/buffer fields that might exist on objects coming
+    // from the mgmt scan RPC (those can blow up memory even if JSON.stringify stays small).
+    const identifier = this._extensionIdentifierFrom(ext);
+    const manifest = (ext.packageJSON && typeof ext.packageJSON === "object") ? ext.packageJSON : ext;
+    const name = manifest?.name;
+    const publisher = manifest?.publisher;
+    const version = manifest?.version;
+    const engines = manifest?.engines;
+    const activationEvents = Array.isArray(manifest?.activationEvents) ? manifest.activationEvents : (Array.isArray(ext?.activationEvents) ? ext.activationEvents : []);
+
+    // Location normalization: prefer explicit extensionLocation if present.
+    const loc = ext.extensionLocation ?? ext.location ?? manifest?.extensionLocation ?? null;
+    const locPath = (loc && typeof loc === "object") ? (loc.path ?? loc.fsPath ?? null) : null;
+    const locScheme = (loc && typeof loc === "object") ? (loc.scheme ?? null) : null;
+    const locAuthority = (loc && typeof loc === "object") ? (loc.authority ?? null) : null;
+
+    let extensionLocation = null;
+    if (authority) {
+      const p = (locPath && typeof locPath === "string") ? locPath : null;
+      if (p) {
+        extensionLocation = { $mid: 1, scheme: "vscode-remote", authority, path: p, query: loc?.query, fragment: loc?.fragment };
+      }
+    } else if (loc && typeof loc === "object" && typeof locScheme === "string" && typeof locPath === "string") {
+      extensionLocation = { $mid: 1, scheme: locScheme, authority: locAuthority ?? undefined, path: locPath, query: loc?.query, fragment: loc?.fragment };
+    }
+
+    const id = ext?.id || ext?.extensionId || (publisher && name ? `${publisher}.${name}` : null) || identifier;
+    const targetPlatform = ext?.metadata?.targetPlatform || ext?.targetPlatform || "unknown";
+
+    const includeContributes = String(process.env.TE2_EXT_INCLUDE_CONTRIB || "") === "1";
+    const contributes = includeContributes ? (manifest?.contributes ?? undefined) : undefined;
+
+    return {
+      // core manifest identity
+      name,
+      publisher,
+      version,
+      engines,
+      activationEvents,
+      contributes,
+      // VS Code extension shape fields used by init data + scanner outputs
+      id,
+      identifier: { value: String(id), _lower: String(id).toLowerCase() },
+      uuid: ext?.identifier?.uuid ?? ext?.uuid ?? undefined,
+      isBuiltin: Boolean(ext?.isBuiltin),
+      isUserBuiltin: Boolean(ext?.isUserBuiltin),
+      isUnderDevelopment: Boolean(ext?.isUnderDevelopment),
+      publisherDisplayName: ext?.metadata?.publisherDisplayName ?? ext?.publisherDisplayName,
+      targetPlatform,
+      extensionLocation,
+      preRelease: Boolean(ext?.metadata?.preRelease ?? ext?.preRelease),
+      // keep a few optional fields sometimes used by activation logic
+      extensionDependencies: Array.isArray(manifest?.extensionDependencies) ? manifest.extensionDependencies : undefined,
+      extensionPack: Array.isArray(manifest?.extensionPack) ? manifest.extensionPack : undefined,
+    };
+  }
+
   async _scanExtensionsFromDisk(authority) {
     const home = process.env.HOME || process.env.USERPROFILE || "";
     const jsonPath =
@@ -321,6 +731,12 @@ export class WorkbenchClient {
     const entries = JSON.parse(raw);
     if (!Array.isArray(entries)) return [];
     const out = [];
+    let pkgCount = 0;
+    let totalPkgBytes = 0;
+    let maxPkgBytes = 0;
+    let maxPkgPath = null;
+    let totalActivationEvents = 0;
+    let totalContribKeys = 0;
     for (const entry of entries) {
       try {
         const loc = entry?.location;
@@ -328,30 +744,49 @@ export class WorkbenchClient {
         if (!locPath) continue;
         const pkgPath = path.join(locPath, "package.json");
         const pkgRaw = await fs.readFile(pkgPath, "utf8");
+        const pkgBytes = Buffer.byteLength(pkgRaw, "utf8");
+        totalPkgBytes += pkgBytes;
+        pkgCount += 1;
+        if (pkgBytes > maxPkgBytes) {
+          maxPkgBytes = pkgBytes;
+          maxPkgPath = pkgPath;
+        }
         const manifest = JSON.parse(pkgRaw);
-        const id = entry?.identifier?.id || `${manifest.publisher}.${manifest.name}`;
-        const identifier = { value: id, _lower: String(id).toLowerCase() };
-        const targetPlatform = entry?.metadata?.targetPlatform || entry?.targetPlatform || "unknown";
-        const remoteLoc = authority
-          ? { scheme: "vscode-remote", authority, path: locPath, query: loc?.query, fragment: loc?.fragment }
-          : loc;
-        out.push({
+        if (Array.isArray(manifest?.activationEvents)) {
+          totalActivationEvents += manifest.activationEvents.length;
+        }
+        if (manifest?.contributes && typeof manifest.contributes === "object") {
+          try {
+            totalContribKeys += Object.keys(manifest.contributes).length;
+          } catch {}
+        }
+        const rawExt = {
           ...manifest,
-          id,
-          identifier,
-          uuid: entry?.identifier?.uuid,
-          publisherDisplayName: entry?.metadata?.publisherDisplayName,
-          targetPlatform,
+          id: entry?.identifier?.id || `${manifest.publisher}.${manifest.name}`,
+          identifier: entry?.identifier,
+          location: loc,
+          extensionLocation: loc,
+          metadata: entry?.metadata,
+          targetPlatform: entry?.targetPlatform,
           isBuiltin: false,
           isUserBuiltin: false,
           isUnderDevelopment: false,
-          extensionLocation: remoteLoc,
-          preRelease: Boolean(entry?.metadata?.preRelease),
-        });
+        };
+        const sanitized = this._sanitizeExtensionForInit(rawExt, authority);
+        if (sanitized) out.push(sanitized);
       } catch {
         // Skip malformed entries.
       }
     }
+    logMetrics("metrics/extensions_scan", {
+      count: pkgCount,
+      total_pkg_bytes: totalPkgBytes,
+      max_pkg_bytes: maxPkgBytes,
+      max_pkg_path: maxPkgPath,
+      total_activation_events: totalActivationEvents,
+      total_contrib_keys: totalContribKeys,
+      mem: memSnapshot(),
+    });
     return out;
   }
 
@@ -424,7 +859,7 @@ export class WorkbenchClient {
   _buildExtHostInitData({ authority, commit, envData, scannedExtensions, folder, useRemote }) {
     // Best-effort minimal IExtensionHostInitData, sufficient for remote Extension Host handshake.
     const nowIso = new Date().toISOString();
-    return {
+    const initData = {
       version: "0",
       quality: "stable",
       commit: commit ?? undefined,
@@ -462,6 +897,14 @@ export class WorkbenchClient {
       autoStart: true,
       uiKind: useRemote ? 2 : 1, // Web vs Desktop/Node
     };
+    const extSnap = initData.extensions ?? {};
+    logMetrics("metrics/ext_init", {
+      all_extensions: Array.isArray(extSnap.allExtensions) ? extSnap.allExtensions.length : 0,
+      my_extensions: Array.isArray(extSnap.myExtensions) ? extSnap.myExtensions.length : 0,
+      activation_events_keys: extSnap.activationEvents ? Object.keys(extSnap.activationEvents).length : 0,
+      mem: memSnapshot(),
+    });
+    return initData;
   }
 
   async connect(params = {}) {
@@ -473,7 +916,7 @@ export class WorkbenchClient {
       const folder = params.folder ?? null;
       const authority = params.authority ?? "localhost:8000";
       const useRemote = params.useRemote ?? (String(process.env.TE2_USE_REMOTE || "1") === "1");
-      const serverRootPath = params.serverRootPath ?? (await this._discoverServerRootPath(proxyHttp, folder));
+      const serverRootPath = params.serverRootPath ?? (await spanTraceAsync("connect.discoverServerRootPath", () => this._discoverServerRootPath(proxyHttp, folder)));
       const commit = params.commit ?? this._commitFromServerRootPath(serverRootPath);
       const workspaceTrusted = params.workspaceTrusted ?? true;
 
@@ -488,7 +931,7 @@ export class WorkbenchClient {
         port: Number(proxyUrl.port || (proxyUrl.protocol === "https:" ? 443 : 80)),
       };
 
-      const mgmt = await connectToRemoteAgent({
+      const mgmt = await spanTraceAsync("connect.remoteAgent.mgmt", () => connectToRemoteAgent({
         socketFactory,
         connectTo,
         serverRootPath,
@@ -500,16 +943,20 @@ export class WorkbenchClient {
         signService: this._signService,
         timeoutMs: 15000,
         debugLabel: `renderer-Management-${crypto.randomUUID().slice(0, 8)}`,
-      });
+      }));
       this.mgmt = { protocol: mgmt.protocol };
 
       // Bootstrap mgmt IPC using the same serialization as VS Code IPCClient.
       this._mgmtIpc?.dispose?.();
       this._mgmtIpc = new IpcPromiseClient(this.mgmt.protocol, { remoteAuthority: authority, clientId: "renderer" });
-      await this._mgmtIpc.whenInitialized(15000);
+      await spanTraceAsync("connect.mgmtIpc.whenInitialized", () => this._mgmtIpc.whenInitialized(15000));
       let envData = null;
       try {
-        envData = await this._mgmtIpc.call("remoteextensionsenvironment", "getEnvironmentData", { remoteAuthority: authority });
+        if (String(process.env.TE2_SKIP_MGMT_ENV || "") !== "1") {
+          envData = await spanTraceAsync("connect.mgmtIpc.getEnvironmentData", () =>
+            this._mgmtIpc.call("remoteextensionsenvironment", "getEnvironmentData", { remoteAuthority: authority })
+          );
+        }
         this.onEvent({ type: "mgmt/getEnvironmentData", ts_ms: Date.now(), ok: true, pid: envData?.pid ?? null });
       } catch (e) {
         this.onEvent({ type: "mgmt/getEnvironmentData", ts_ms: Date.now(), ok: false, error: String(e?.message ?? e) });
@@ -517,25 +964,62 @@ export class WorkbenchClient {
 
       let scannedExtensions = [];
       try {
-        const source = String(process.env.TE2_EXTENSIONS_SOURCE || "scan").toLowerCase();
-        if (source === "disk") {
-          scannedExtensions = await this._scanExtensionsFromDisk(useRemote ? authority : null);
-          this.onEvent({ type: "mgmt/scanExtensions", ts_ms: Date.now(), ok: true, count: Array.isArray(scannedExtensions) ? scannedExtensions.length : null, source: "disk" });
+        if (String(process.env.TE2_SKIP_MGMT_SCAN || "") === "1") {
+          scannedExtensions = [];
+          this.onEvent({ type: "mgmt/scanExtensions", ts_ms: Date.now(), ok: true, count: 0, source: "skipped" });
         } else {
-          // Mirror VS Code RemoteExtensionsScannerService.scanExtensions() argument order.
-          scannedExtensions = await this._mgmtIpc.call("remoteExtensionsScanner", "scanExtensions", ["en", null, [], null, null]);
-          const includeBuiltin = String(process.env.TE2_INCLUDE_BUILTIN_EXTS || "").toLowerCase() === "1";
-          if (Array.isArray(scannedExtensions)) {
-            scannedExtensions = scannedExtensions.filter((ext) => includeBuiltin || ext?.isBuiltin === false);
+          const source = String(process.env.TE2_EXTENSIONS_SOURCE || "scan").toLowerCase();
+          if (source === "disk") {
+            scannedExtensions = await spanTraceAsync("connect.scanExtensions.disk", () => this._scanExtensionsFromDisk(useRemote ? authority : null));
+            this.onEvent({ type: "mgmt/scanExtensions", ts_ms: Date.now(), ok: true, count: Array.isArray(scannedExtensions) ? scannedExtensions.length : null, source: "disk" });
+          } else {
+            // Mirror VS Code RemoteExtensionsScannerService.scanExtensions() argument order.
+            scannedExtensions = await spanTraceAsync("connect.scanExtensions.rpc", () =>
+              this._mgmtIpc.call("remoteExtensionsScanner", "scanExtensions", ["en", null, [], null, null])
+            );
+            const includeBuiltin = String(process.env.TE2_INCLUDE_BUILTIN_EXTS || "").toLowerCase() === "1";
+            if (Array.isArray(scannedExtensions)) {
+              scannedExtensions = scannedExtensions.filter((ext) => includeBuiltin || ext?.isBuiltin === false);
+            }
+            this.onEvent({ type: "mgmt/scanExtensions", ts_ms: Date.now(), ok: true, count: Array.isArray(scannedExtensions) ? scannedExtensions.length : null, source: "scan" });
           }
-          this.onEvent({ type: "mgmt/scanExtensions", ts_ms: Date.now(), ok: true, count: Array.isArray(scannedExtensions) ? scannedExtensions.length : null, source: "scan" });
         }
       } catch (e) {
         this.onEvent({ type: "mgmt/scanExtensions", ts_ms: Date.now(), ok: false, error: String(e?.message ?? e) });
       }
+      // Always sanitize scanned extensions into a lean JSON-only shape to avoid retaining
+      // huge non-enumerable/symbol/buffer fields from the mgmt scan RPC.
       try {
-        await this._mgmtIpc.call("remoteExtensionsScanner", "whenExtensionsReady", undefined);
-        this.onEvent({ type: "mgmt/whenExtensionsReady", ts_ms: Date.now(), ok: true });
+        if (String(process.env.TE2_DEBUG_SCAN_SHAPE || "") === "1" && Array.isArray(scannedExtensions)) {
+          const sample = scannedExtensions.slice(0, 5).map((ext) => {
+            const id = this._extensionIdentifierFrom(ext) ?? ext?.id ?? ext?.identifier?.id ?? null;
+            const loc = ext?.extensionLocation ?? ext?.location ?? ext?.packageJSON?.extensionLocation ?? null;
+            return {
+              id,
+              keys: ext && typeof ext === "object" ? Object.keys(ext).slice(0, 20) : [],
+              loc: (loc && typeof loc === "object")
+                ? { $mid: loc.$mid ?? null, scheme: loc.scheme ?? null, authority: loc.authority ?? null, path: loc.path ?? null, fsPath: loc.fsPath ?? null }
+                : null,
+            };
+          });
+          this.onEvent({ type: "mgmt/scanExtensions_shape", ts_ms: Date.now(), sample });
+        }
+        const authForLoc = useRemote ? authority : null;
+        if (Array.isArray(scannedExtensions)) {
+          scannedExtensions = scannedExtensions
+            .map((ext) => this._sanitizeExtensionForInit(ext, authForLoc))
+            .filter(Boolean);
+        } else {
+          scannedExtensions = [];
+        }
+      } catch {
+        scannedExtensions = [];
+      }
+      try {
+        if (String(process.env.TE2_SKIP_MGMT_SCAN || "") !== "1") {
+          await spanTraceAsync("connect.whenExtensionsReady", () => this._mgmtIpc.call("remoteExtensionsScanner", "whenExtensionsReady", undefined));
+          this.onEvent({ type: "mgmt/whenExtensionsReady", ts_ms: Date.now(), ok: true });
+        }
       } catch (e) {
         this.onEvent({ type: "mgmt/whenExtensionsReady", ts_ms: Date.now(), ok: false, error: String(e?.message ?? e) });
       }
@@ -544,16 +1028,16 @@ export class WorkbenchClient {
       const extArgs = { language: "en", break: false, port: null, env: { VSCODE_PROXY_URI: proxyUri } };
 
       const workspaceRoot = params.workspaceFolder ?? params.folder ?? folder ?? null;
-      const extInitData = this._buildExtHostInitData({
+      const extInitData = spanTrace("connect.buildExtHostInitData", () => this._buildExtHostInitData({
         authority: useRemote ? authority : null,
         commit,
         envData,
         scannedExtensions,
         folder: workspaceRoot,
         useRemote,
-      });
+      }));
 
-      const ext = await connectToRemoteAgent({
+      const ext = await spanTraceAsync("connect.remoteAgent.ext", () => connectToRemoteAgent({
         socketFactory,
         connectTo,
         serverRootPath,
@@ -565,7 +1049,7 @@ export class WorkbenchClient {
         signService: this._signService,
         timeoutMs: 15000,
         debugLabel: `renderer-ExtensionHost-${crypto.randomUUID().slice(0, 8)}`,
-      });
+      }));
       this.ext = { protocol: ext.protocol };
 
       this.state.connected = true;
@@ -589,8 +1073,24 @@ export class WorkbenchClient {
               this._extHandshake.initSent = true;
               this.onEvent({ type: "ext/handshake_ready", ts_ms: Date.now(), after_ms: Date.now() - startMs });
               try {
-                this.ext?.protocol.send(VSBuffer.fromString(JSON.stringify(extInitData)));
-                this.onEvent({ type: "ext/handshake_init_sent", ts_ms: Date.now(), bytes: JSON.stringify(extInitData).length });
+                logMetrics("metrics/pre_ext_init_send", { mem: memSnapshot() });
+                const initJson = spanTrace("connect.JSON.stringify(extInitData)", () => JSON.stringify(extInitData));
+                if (INIT_SIZE_PROFILE) {
+                  const extSnap = extInitData?.extensions ?? {};
+                  logMetrics("metrics/ext_init_size", {
+                    init_bytes: initJson.length,
+                    env: _jsonSizeOrSkip(extInitData?.environment, INIT_SIZE_MAX_ITEMS),
+                    workspace: _jsonSizeOrSkip(extInitData?.workspace, INIT_SIZE_MAX_ITEMS),
+                    extensions: {
+                      all_len: Array.isArray(extSnap?.allExtensions) ? extSnap.allExtensions.length : 0,
+                      my_len: Array.isArray(extSnap?.myExtensions) ? extSnap.myExtensions.length : 0,
+                      activation_keys: extSnap?.activationEvents ? Object.keys(extSnap.activationEvents).length : 0,
+                      size: _jsonSizeOrSkip(extSnap, INIT_SIZE_MAX_ITEMS),
+                    },
+                  });
+                }
+                this.ext?.protocol.send(VSBuffer.fromString(initJson));
+                this.onEvent({ type: "ext/handshake_init_sent", ts_ms: Date.now(), bytes: initJson.length });
               } catch (e) {
                 clearTimeout(t);
                 d.dispose?.();
@@ -620,11 +1120,46 @@ export class WorkbenchClient {
           // Ignore any non-handshake payloads until extension host is initialized.
           return;
         }
+
+        if (this._extMsgTrace.enabled && this._extMsgTrace.seen < EXT_MSG_TRACE_MAX) {
+          const ln = b0?.length ?? 0;
+          this._extMsgTrace.seen += 1;
+          this._extMsgTrace.bytes += ln;
+          if (ln > this._extMsgTrace.maxBytes) this._extMsgTrace.maxBytes = ln;
+          if (EXT_MSG_TRACE_EVERY > 0 && (this._extMsgTrace.seen % EXT_MSG_TRACE_EVERY) === 0) {
+            try {
+              console.log(
+                JSON.stringify({
+                  type: "ext/msg_trace",
+                  ts_ms: Date.now(),
+                  seen: this._extMsgTrace.seen,
+                  total_bytes: this._extMsgTrace.bytes,
+                  max_bytes: this._extMsgTrace.maxBytes,
+                  last_len: ln,
+                  mem: memSnapshot(),
+                })
+              );
+            } catch {}
+          }
+        }
         const msg = decodeExtHostRpc(payloadVsBuf.buffer);
         if (msg.kind !== "ext") return;
+        if (this._extMsgTrace.enabled && msg?.error && this._extMsgTrace.seen < EXT_MSG_TRACE_MAX) {
+          try {
+            console.log(JSON.stringify({ type: "ext/msg_decode_error", ts_ms: Date.now(), error: msg.error, req: msg.req ?? null, msgType: msg.type ?? null }));
+          } catch {}
+        }
 
         // server->client request
         if (msg.type === 1 || msg.type === 2 || msg.type === 3 || msg.type === 4) {
+          if (this._extMsgTrace.enabled && this._extMsgTrace.seen < EXT_MSG_TRACE_MAX) {
+            // Log only the metadata; avoid args blobs.
+            const meta = { type: "ext/request_meta", ts_ms: Date.now(), req: msg.req, rpcId: msg.rpcId, method: msg.method, encoding: (msg.type === 3 || msg.type === 4) ? "mixed" : "json" };
+            if (typeof msg.argsRawLen === "number") meta.argsRawLen = msg.argsRawLen;
+            if (msg.argsMeta && typeof msg.argsMeta === "object") meta.argsMeta = msg.argsMeta;
+            if (msg.skipReason) meta.skipReason = msg.skipReason;
+            try { console.log(JSON.stringify(meta)); } catch {}
+          }
           if (this._debugExtReqSeen < 200) {
             this._debugExtReqSeen++;
             const ev = { type: "ext/request", ts_ms: Date.now(), req: msg.req, rpcId: msg.rpcId, method: msg.method };
@@ -684,8 +1219,16 @@ export class WorkbenchClient {
           }
 
           // Reply to required calls with correct result shape (based on browser trace).
+          if (REPLY_DROP_METHODS.has(msg.method)) {
+            this.onEvent({ type: "ext/reply_drop", ts_ms: Date.now(), req: msg.req, method: msg.method });
+            return;
+          }
           let replyPayload;
-          if (msg.method === "$getInitialState") {
+          if (REPLY_EMPTY_METHODS.has(msg.method)) {
+            replyPayload = encodeExtReplyOkEmpty(msg.req);
+          } else if (REPLY_NULL_METHODS.has(msg.method)) {
+            replyPayload = encodeExtReplyOkJson(msg.req, null);
+          } else if (msg.method === "$getInitialState") {
             replyPayload = encodeExtReplyOkJson(msg.req, { isFocused: true, isActive: true });
           } else if (msg.method === "$checkExists") {
             replyPayload = encodeExtReplyOkJson(msg.req, false);
@@ -755,8 +1298,10 @@ export class WorkbenchClient {
       await extHandshakeReady;
 
       // Minimal ExtHost bootstrap (enough to get language providers registered).
-      const configInit = this._buildConfigurationInitData(workspaceRoot, useRemote ? authority : null);
+      const configInit = spanTrace("connect.buildConfigurationInitData", () => this._buildConfigurationInitData(workspaceRoot, useRemote ? authority : null));
       this._sendExt(80, "$initializeConfiguration", [configInit], false);
+      // Provide language ids early so onLanguage:* activation works like in a real workbench.
+      this._sendExt(93, "$acceptLanguageIds", [BOOTSTRAP_LANGUAGE_IDS], false);
       if (workspaceRoot) {
         const rootPath = String(workspaceRoot);
         const name = rootPath.split("/").filter(Boolean).slice(-1)[0] || rootPath;
@@ -786,13 +1331,24 @@ export class WorkbenchClient {
     const path = String(params.path ?? "");
     const languageId = String(params.languageId ?? "python");
     const authority = String(params.authority ?? this._authority ?? "localhost:8000");
-    const text = await fs.readFile(path, "utf8");
-    const lines = text.split(/\r?\n/);
-    const uriObj = this._uriForPath(path, authority);
+    const text = await spanTraceAsync("openFile.fs.readFile", () => fs.readFile(path, "utf8"));
+    const lines = spanTrace("openFile.text.splitLines", () => text.split(/\r?\n/));
+    let maxLineLen = 0;
+    for (const line of lines) {
+      if (line.length > maxLineLen) maxLineLen = line.length;
+    }
+    logMetrics("metrics/open_file", {
+      path,
+      text_bytes: Buffer.byteLength(text, "utf8"),
+      lines: lines.length,
+      max_line_len: maxLineLen,
+      mem: memSnapshot(),
+    });
+    const uriObj = spanTrace("openFile.uriForPath", () => this._uriForPath(path, authority));
 
     const modelN = this._nextModelNumber++;
     const editorId = `vs.editor.ICodeEditor:1,$model${modelN}`;
-    const delta = {
+    const delta = spanTrace("openFile.buildDelta", () => ({
       newActiveEditor: editorId,
       addedDocuments: [{ uri: uriObj, versionId: 1, lines, EOL: "\n", languageId, isDirty: true, encoding: "utf8" }],
       removedDocuments: [],
@@ -818,9 +1374,15 @@ export class WorkbenchClient {
         },
       ],
       removedEditors: [],
-    };
+    }));
 
-    const req = this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [delta], false);
+    const req = spanTrace("openFile.send.acceptDocumentsAndEditorsDelta", () =>
+      this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [delta], false)
+    );
+    // Allow GC to collect the large `lines` array after JSON encoding.
+    try {
+      if (delta?.addedDocuments?.[0]) delta.addedDocuments[0].lines = null;
+    } catch {}
     // Mirror minimal editor/tab state updates seen in a real workbench session.
     const tabId = `0~default-workbench.editors.files.fileEditorInput-${uriObj.external} `;
     const tab = {
@@ -841,39 +1403,41 @@ export class WorkbenchClient {
         tabs: [tab],
       },
     ];
-    this._sendExt(88, "$acceptEditorDiffInformation", [editorId, []], false);
-    this._sendExt(113, "$acceptEditorTabModel", [tabModel], false);
-    this._sendExt(
-      88,
-      "$acceptEditorPropertiesChanged",
-      [
-        editorId,
-        {
-          options: null,
-          selections: {
-            selections: [
-              {
-                startLineNumber: 1,
-                startColumn: 1,
-                endLineNumber: 1,
-                endColumn: 1,
-                selectionStartLineNumber: 1,
-                selectionStartColumn: 1,
-                positionLineNumber: 1,
-                positionColumn: 1,
-              },
-            ],
-            source: "mouse",
+    spanTrace("openFile.send.editorState", () => {
+      this._sendExt(88, "$acceptEditorDiffInformation", [editorId, []], false);
+      this._sendExt(113, "$acceptEditorTabModel", [tabModel], false);
+      this._sendExt(
+        88,
+        "$acceptEditorPropertiesChanged",
+        [
+          editorId,
+          {
+            options: null,
+            selections: {
+              selections: [
+                {
+                  startLineNumber: 1,
+                  startColumn: 1,
+                  endLineNumber: 1,
+                  endColumn: 1,
+                  selectionStartLineNumber: 1,
+                  selectionStartColumn: 1,
+                  positionLineNumber: 1,
+                  positionColumn: 1,
+                },
+              ],
+              source: "mouse",
+            },
+            visibleRanges: null,
           },
-          visibleRanges: null,
-        },
-      ],
-      false
-    );
-    this._sendExt(85, "$acceptDirtyStateChanged", [uriObj, true], false);
+        ],
+        false
+      );
+      this._sendExt(85, "$acceptDirtyStateChanged", [uriObj, true], false);
+    });
     // Trigger activation for deterministic provider registration.
     // Some builds send this as a mixed-args message; use mixed encoding to avoid silent drops.
-    this._sendExtMixed(99, "$activateByEvent", [`onLanguage:${languageId}`, 0], false);
+    spanTrace("openFile.send.activateByEvent", () => this._sendExtMixed(99, "$activateByEvent", [`onLanguage:${languageId}`, 0], false));
     return { ok: true, req };
   }
 
@@ -881,8 +1445,15 @@ export class WorkbenchClient {
     if (!this.ext?.protocol) throw new Error("not connected");
     const authority = String(params.authority ?? this._authority ?? "localhost:8000");
     const path = String(params.path ?? "");
-    const providerHandle = params.providerHandle ?? this.state.docSymbolsProviderHandle;
-    if (typeof providerHandle !== "number") throw new Error("no document symbols provider handle learned yet");
+    const timeoutMs = Number(params.timeoutMs ?? 8000);
+    let providerHandle = params.providerHandle ?? this.state.docSymbolsProviderHandle;
+    if (typeof providerHandle !== "number") {
+      await waitFor(() => typeof this.state.docSymbolsProviderHandle === "number", { timeoutMs, intervalMs: 50 });
+      providerHandle = params.providerHandle ?? this.state.docSymbolsProviderHandle;
+    }
+    if (typeof providerHandle !== "number") {
+      return { ok: false, error: "no document symbols provider handle learned yet" };
+    }
 
     const uriObj = this._uriForPath(path, authority);
 
@@ -912,8 +1483,13 @@ export class WorkbenchClient {
     const path = String(params.path ?? "");
     const lineNumber = Number(params.lineNumber ?? 1);
     const column = Number(params.column ?? 1);
-    const providerHandle = params.providerHandle ?? this.state.hoverProviderHandle;
-    if (typeof providerHandle !== "number") throw new Error("no hover provider handle learned yet");
+    const timeoutMs = Number(params.timeoutMs ?? 8000);
+    let providerHandle = params.providerHandle ?? this.state.hoverProviderHandle;
+    if (typeof providerHandle !== "number") {
+      await waitFor(() => typeof this.state.hoverProviderHandle === "number", { timeoutMs, intervalMs: 50 });
+      providerHandle = params.providerHandle ?? this.state.hoverProviderHandle;
+    }
+    if (typeof providerHandle !== "number") return { ok: false, error: "no hover provider handle learned yet" };
 
     const uriObj = this._uriForPath(path, authority);
 
@@ -941,5 +1517,39 @@ export class WorkbenchClient {
     if (rep.type === 9) return { ok: true, result: rep.result };
     if (rep.type === 11) return { ok: false, error: rep.error };
     return { ok: false, error: rep };
+  }
+
+  disconnect() {
+    try {
+      for (const [req, pending] of this._pendingExt.entries()) {
+        try {
+          pending?.reject?.(new Error("disconnected"));
+        } catch {}
+      }
+    } catch {}
+    try {
+      this._pendingExt?.clear?.();
+    } catch {}
+
+    try {
+      this._mgmtIpc?.dispose?.();
+    } catch {}
+    this._mgmtIpc = null;
+
+    try {
+      this.mgmt?.protocol?.dispose?.();
+    } catch {}
+    try {
+      this.ext?.protocol?.dispose?.();
+    } catch {}
+    this.mgmt = null;
+    this.ext = null;
+
+    this.state.connected = false;
+    this.state.ready = false;
+    this.state.docSymbolsProviderHandle = null;
+    this.state.hoverProviderHandle = null;
+    this._extHandshake = { readySeen: false, initSent: false, initialized: false };
+    this._connecting = false;
   }
 }

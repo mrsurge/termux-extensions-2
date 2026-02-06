@@ -23,6 +23,39 @@ export const ProtocolConstants = Object.freeze({
   KeepAliveSendTime: 5000,
 });
 
+const IPC_TRACE = String(process?.env?.TE2_IPC_TRACE || "") === "1";
+const IPC_TRACE_EVERY = Number(process?.env?.TE2_IPC_TRACE_EVERY ?? "200");
+const IPC_TRACE_CHUNK_EVERY = Number(process?.env?.TE2_IPC_TRACE_CHUNK_EVERY ?? "200");
+const IPC_ACK_TRACE = String(process?.env?.TE2_IPC_ACK_TRACE || "") === "1";
+const IPC_ACK_TRACE_EVERY = Number(process?.env?.TE2_IPC_ACK_TRACE_EVERY ?? "50");
+const IPC_LOOP_GUARD = Number(process?.env?.TE2_IPC_LOOP_GUARD ?? "200000");
+const IPC_MAX_UNACK = Number(process?.env?.TE2_IPC_MAX_UNACK ?? "512");
+const IPC_FLUSH_BYTES = Number(process?.env?.TE2_IPC_FLUSH_BYTES ?? String(256 * 1024));
+const IPC_WRITE_TRACE = String(process?.env?.TE2_IPC_WRITE_TRACE || "") === "1";
+const IPC_WRITE_TRACE_HIGH_WATER = Number(process?.env?.TE2_IPC_WRITE_TRACE_HIGH_WATER ?? String(1024 * 1024));
+const IPC_YIELD_EVERY = Number(process?.env?.TE2_IPC_YIELD_EVERY ?? "0");
+let _traceMsgCount = 0;
+let _traceBytes = 0;
+let _traceMax = 0;
+let _traceLoopIters = 0;
+let _traceLastCount = 0;
+let _traceChunkCount = 0;
+let _traceChunkBytes = 0;
+let _traceAckCount = 0;
+let _traceLastAckCount = 0;
+
+if (IPC_TRACE) {
+  try {
+    console.log(
+      JSON.stringify({
+        type: "ipc/trace_load",
+        ts_ms: Date.now(),
+        module: "ipc.net",
+      })
+    );
+  } catch {}
+}
+
 function getEmptyBuffer() {
   return VSBuffer.alloc(0);
 }
@@ -120,14 +153,64 @@ class ProtocolReader extends Disposable {
     this._onMessage = this._register(new Emitter());
     this.onMessage = this._onMessage.event;
     this._state = { readHead: true, readLen: ProtocolConstants.HeaderLength, messageType: ProtocolMessageType.None, id: 0, ack: 0 };
+    this._draining = false;
+    this._drainScheduled = false;
     this._register(this._socket.onData((data) => this.acceptChunk(data)));
   }
 
   acceptChunk(data) {
-    if (!data || data.byteLength === 0) return;
-    this.lastReadTime = Date.now();
-    this._incomingData.acceptChunk(data);
+    if (data && data.byteLength > 0) {
+      this.lastReadTime = Date.now();
+      this._incomingData.acceptChunk(data);
+    }
+    if (IPC_TRACE) {
+      _traceChunkCount++;
+      _traceChunkBytes += data?.byteLength ?? 0;
+      if (_traceChunkCount % IPC_TRACE_CHUNK_EVERY === 0) {
+        try {
+          console.log(
+            JSON.stringify({
+              type: "ipc/trace_chunk",
+              ts_ms: Date.now(),
+              chunk_count: _traceChunkCount,
+              total_chunk_bytes: _traceChunkBytes,
+              last_chunk_bytes: data.byteLength,
+              buf_bytes: this._incomingData.byteLength,
+            })
+          );
+        } catch {}
+      }
+    }
+    if (this._draining || this._drainScheduled) return;
+    this._drain();
+  }
+
+  _scheduleDrain() {
+    if (this._drainScheduled) return;
+    this._drainScheduled = true;
+    setImmediate(() => {
+      this._drainScheduled = false;
+      this._drain();
+    });
+  }
+
+  _drain() {
+    if (this._draining) return;
+    this._draining = true;
+    let loopIters = 0;
     while (this._incomingData.byteLength >= this._state.readLen) {
+      loopIters++;
+      if (IPC_LOOP_GUARD > 0 && loopIters > IPC_LOOP_GUARD) {
+        this._draining = false;
+        throw new Error(
+          `ipc.net ProtocolReader runaway loop: iters=${loopIters} buf_bytes=${this._incomingData.byteLength} read_len=${this._state.readLen} read_head=${this._state.readHead}`
+        );
+      }
+      if (this._state.readHead && this._state.readLen === 0) {
+        // Guard against invalid header length to avoid a tight loop.
+        this._state.readLen = ProtocolConstants.HeaderLength;
+        break;
+      }
       const buff = this._incomingData.read(this._state.readLen);
       if (this._state.readHead) {
         this._state.readHead = false;
@@ -144,7 +227,42 @@ class ProtocolReader extends Disposable {
         this._state.messageType = ProtocolMessageType.None;
         this._state.id = 0;
         this._state.ack = 0;
+        if (IPC_TRACE) {
+          _traceMsgCount++;
+          _traceBytes += buff.byteLength;
+          if (buff.byteLength > _traceMax) _traceMax = buff.byteLength;
+        }
         this._onMessage.fire(new ProtocolMessage(messageType, id, ack, buff));
+      }
+
+      if (IPC_YIELD_EVERY > 0 && loopIters >= IPC_YIELD_EVERY) {
+        // Yield to the event loop to avoid long synchronous drains (can block HTTP handlers / timers).
+        this._draining = false;
+        this._scheduleDrain();
+        if (IPC_TRACE) _traceLoopIters += loopIters;
+        return;
+      }
+    }
+    this._draining = false;
+    if (IPC_TRACE && loopIters > 0) {
+      _traceLoopIters += loopIters;
+      if (_traceMsgCount - _traceLastCount >= IPC_TRACE_EVERY) {
+        _traceLastCount = _traceMsgCount;
+        try {
+          console.log(
+            JSON.stringify({
+              type: "ipc/trace",
+              ts_ms: Date.now(),
+              msg_count: _traceMsgCount,
+              total_bytes: _traceBytes,
+              max_bytes: _traceMax,
+              loop_iters: _traceLoopIters,
+              buf_bytes: this._incomingData.byteLength,
+              read_len: this._state.readLen,
+              read_head: this._state.readHead,
+            })
+          );
+        } catch {}
       }
     }
   }
@@ -162,6 +280,7 @@ class ProtocolWriter {
     this._isPaused = false;
     this._writeNowTimeout = null;
     this.lastWriteTime = 0;
+    this._traceWriteHighSeen = 0;
   }
 
   pause() {
@@ -197,6 +316,22 @@ class ProtocolWriter {
     const wasEmpty = this._totalLength === 0;
     this._data.push(head, body);
     this._totalLength += head.byteLength + body.byteLength;
+    if (IPC_WRITE_TRACE && this._totalLength >= IPC_WRITE_TRACE_HIGH_WATER) {
+      this._traceWriteHighSeen++;
+      if (this._traceWriteHighSeen <= 5 || this._traceWriteHighSeen % 50 === 0) {
+        try {
+          console.log(
+            JSON.stringify({
+              type: "ipc/write_buffer_high",
+              ts_ms: Date.now(),
+              socket_label: this._socket?.debugLabel ?? null,
+              total_len: this._totalLength,
+              chunks: this._data.length,
+            })
+          );
+        } catch {}
+      }
+    }
     return wasEmpty;
   }
 
@@ -208,7 +343,17 @@ class ProtocolWriter {
   }
 
   _writeSoon(header, data) {
-    if (this._bufferAdd(header, data)) this._scheduleWriting();
+    const wasEmpty = this._bufferAdd(header, data);
+    if (IPC_FLUSH_BYTES > 0 && this._totalLength >= IPC_FLUSH_BYTES) {
+      // Avoid unbounded buffering and huge concat allocations in _bufferTake().
+      if (this._writeNowTimeout) {
+        clearTimeout(this._writeNowTimeout);
+        this._writeNowTimeout = null;
+      }
+      this._writeNow();
+      return;
+    }
+    if (wasEmpty) this._scheduleWriting();
   }
 
   _scheduleWriting() {
@@ -254,6 +399,19 @@ export class PersistentProtocol {
 
     this._socketDisposables = new DisposableStore();
     this._socket = opts.socket;
+    this._socketLabel = this._socket?.debugLabel ?? null;
+    if (IPC_TRACE) {
+      try {
+        console.log(
+          JSON.stringify({
+            type: "ipc/protocol_ctor",
+            ts_ms: Date.now(),
+            has_initial_chunk: !!opts.initialChunk,
+            socket_label: this._socket?.debugLabel ?? null,
+          })
+        );
+      } catch {}
+    }
     this._socketWriter = this._socketDisposables.add(new ProtocolWriter(this._socket));
     this._socketReader = this._socketDisposables.add(new ProtocolReader(this._socket));
     this._socketDisposables.add(this._socketReader.onMessage((msg) => this._receiveMessage(msg)));
@@ -283,6 +441,32 @@ export class PersistentProtocol {
     this._incomingAckId = this._incomingMsgId;
     const msg = new ProtocolMessage(ProtocolMessageType.Regular, myId, this._incomingAckId, buffer);
     this._outgoingUnackMsg.push(msg);
+    if (IPC_MAX_UNACK > 0) {
+      while (this._outgoingUnackMsg.length > IPC_MAX_UNACK) {
+        this._outgoingUnackMsg.shift();
+      }
+    }
+    if (IPC_ACK_TRACE) {
+      _traceAckCount++;
+      if (_traceAckCount - _traceLastAckCount >= IPC_ACK_TRACE_EVERY) {
+        _traceLastAckCount = _traceAckCount;
+        try {
+          console.log(
+            JSON.stringify({
+              type: "ipc/ack_trace",
+              ts_ms: Date.now(),
+              note: "send",
+              socket_label: this._socketLabel,
+              outgoing_len: this._outgoingUnackMsg.length,
+              outgoing_msg_id: this._outgoingMsgId,
+              outgoing_ack_id: this._outgoingAckId,
+              incoming_msg_id: this._incomingMsgId,
+              incoming_ack_id: this._incomingAckId,
+            })
+          );
+        } catch {}
+      }
+    }
     if (!this._isReconnecting) {
       this._socketWriter.write(msg);
       this._recvAckCheck();
@@ -300,6 +484,27 @@ export class PersistentProtocol {
         const first = this._outgoingUnackMsg[0];
         if (first && first.id <= msg.ack) this._outgoingUnackMsg.shift();
         else break;
+      }
+      if (IPC_ACK_TRACE) {
+        _traceAckCount++;
+        if (_traceAckCount - _traceLastAckCount >= IPC_ACK_TRACE_EVERY) {
+          _traceLastAckCount = _traceAckCount;
+          try {
+            console.log(
+              JSON.stringify({
+                type: "ipc/ack_trace",
+                ts_ms: Date.now(),
+                note: "ack",
+                socket_label: this._socketLabel,
+                outgoing_len: this._outgoingUnackMsg.length,
+                outgoing_msg_id: this._outgoingMsgId,
+                outgoing_ack_id: this._outgoingAckId,
+                incoming_msg_id: this._incomingMsgId,
+                incoming_ack_id: this._incomingAckId,
+              })
+            );
+          } catch {}
+        }
       }
     }
     switch (msg.type) {
