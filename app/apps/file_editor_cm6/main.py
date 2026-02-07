@@ -1105,6 +1105,33 @@ try:
 except Exception:
     _active_project_sidecar = None
 
+
+async def _eager_start_adapter():
+    """Best-effort eager start of code-server + workbench adapter at worker boot."""
+    try:
+        pr = _history_store.get_active_project() or str(get_project_root())
+        if not pr:
+            return
+        cs = await ensure_code_server_shell(pr)
+        cs_env = (cs.env_overrides or {})
+        pr = str(cs_env.get("PROJECT_ROOT") or pr)
+        port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
+        try:
+            cs_port = int(str(port_s))
+        except Exception:
+            cs_port = 0
+        cs_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
+        await ensure_workbench_adapter_shell(pr, code_server_http=cs_http)
+        print(f"[file_editor_cm6] eager adapter startup OK (project={pr})", flush=True)
+    except Exception as exc:
+        print(f"[file_editor_cm6] eager adapter startup failed: {exc}", flush=True)
+
+
+@file_editor_cm6_bp.on_event("startup")
+async def _on_startup():
+    asyncio.ensure_future(_eager_start_adapter())
+
+
 def _get_active_project_root() -> Path:
     project_path = _history_store.get_active_project()
     if not project_path:

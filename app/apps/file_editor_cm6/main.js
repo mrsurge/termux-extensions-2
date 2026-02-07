@@ -665,6 +665,26 @@ function connectEditorSocket() {
         console.warn('[EditorSIO] Connect error', err);
       });
 
+      editorSocket.on('editor:ssot', (snapshot) => {
+        // Host receives its own SSOT on connect — extract currentPath so the
+        // toolbar shows the filename even if the iframe's cache_state broadcast
+        // arrived before the host Socket.IO was connected (race fix).
+        try {
+          const p = snapshot && typeof snapshot === 'object' ? snapshot : {};
+          const filePath = (p.file && p.file.path) || p.currentPath || null;
+          if (filePath && typeof filePath === 'string') {
+            _applyEditorCacheState({
+              path: filePath,
+              state: (p.file && p.file.state) || 'clean',
+              unsaved: !!(p.file && p.file.unsaved),
+              reason: (p.file && p.file.reason) || 'ssot',
+              content_sha256: (p.file && p.file.content_sha256) || null,
+              auto_save: (p.file && p.file.auto_save) != null ? p.file.auto_save : null,
+            });
+          }
+        } catch (_) {}
+      });
+
       editorSocket.on('editor:cache_state', (payload) => {
         _applyEditorCacheState(payload);
       });

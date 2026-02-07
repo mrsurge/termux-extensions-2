@@ -736,62 +736,7 @@
     }
   }
 
-  function _lspPositionFromMonaco(pos) {
-    return { line: (pos.lineNumber || 1) - 1, character: (pos.column || 1) - 1 };
-  }
 
-  function _lspRangeFromMonaco(range) {
-    return { start: _lspPositionFromMonaco({ lineNumber: range.startLineNumber, column: range.startColumn }), end: _lspPositionFromMonaco({ lineNumber: range.endLineNumber, column: range.endColumn }) };
-  }
-
-  function _monacoRangeFromLsp(range) {
-    try {
-      var s = range && range.start ? range.start : { line: 0, character: 0 };
-      var e = range && range.end ? range.end : { line: 0, character: 0 };
-      return new monaco.Range(
-        (Number(s.line) || 0) + 1,
-        (Number(s.character) || 0) + 1,
-        (Number(e.line) || 0) + 1,
-        (Number(e.character) || 0) + 1
-      );
-    } catch (_) {
-      return new monaco.Range(1, 1, 1, 1);
-    }
-  }
-
-  function _applyLspDiagnostics(params) {
-    try {
-      if (!window.monaco || !window.monaco.editor) return;
-      if (!model) return;
-      var uri = params && params.textDocument && params.textDocument.uri ? String(params.textDocument.uri) : '';
-      var diags = params && Array.isArray(params.diagnostics) ? params.diagnostics : [];
-      if (!uri) return;
-      if (!model.uri || String(model.uri.toString()) !== uri) return;
-
-      var markers = diags.map(function(d) {
-        var sev = d && d.severity != null ? Number(d.severity) : 3; // default info
-        var ms = monaco.MarkerSeverity.Info;
-        if (sev === 1) ms = monaco.MarkerSeverity.Error;
-        else if (sev === 2) ms = monaco.MarkerSeverity.Warning;
-        else if (sev === 3) ms = monaco.MarkerSeverity.Info;
-        else if (sev === 4) ms = monaco.MarkerSeverity.Hint;
-
-        var r = _monacoRangeFromLsp(d && d.range ? d.range : null);
-        return {
-          severity: ms,
-          message: (d && d.message) ? String(d.message) : '',
-          startLineNumber: r.startLineNumber,
-          startColumn: r.startColumn,
-          endLineNumber: r.endLineNumber,
-          endColumn: r.endColumn,
-          source: (d && d.source) ? String(d.source) : 'lsp',
-          code: (d && d.code != null) ? String(d.code) : undefined,
-        };
-      });
-
-      try { monaco.editor.setModelMarkers(model, 'vscode_api', markers); } catch (_) {}
-    } catch (_) {}
-  }
 
   function _applyDiagnosticsUpdate(params) {
     try {
@@ -1168,145 +1113,7 @@
     } catch (_) {}
   }
 
-  // ------------------------------------------------------------------
-  // vscode_api LSP (POC): diagnostics via stdio LSP processes behind vscode_api_ws
-  // ------------------------------------------------------------------
 
-  var vscodeApiLspLanguages = null; // Set<string> | null
-  var vscodeApiLspLanguagesPromise = null;
-  var vscodeApiDocUri = null;
-  var vscodeApiDocLang = null;
-
-  function _maybeSetFromArray(arr) {
-    try {
-      var s = new Set();
-      if (!Array.isArray(arr)) return s;
-      arr.forEach(function (x) {
-        try {
-          var t = String(x || '').trim();
-          if (t) s.add(t);
-        } catch (_) {}
-      });
-      return s;
-    } catch (_) {
-      return new Set();
-    }
-  }
-
-  function _defaultLspLangsFallback() {
-    return new Set(['typescript', 'typescriptreact', 'javascript', 'javascriptreact', 'python']);
-  }
-
-  function _lspEnabledForLanguage(lang) {
-    try {
-      var s = String(lang || '').trim();
-      if (!s) return false;
-      if (vscodeApiLspLanguages && vscodeApiLspLanguages.has(s)) return true;
-      // If the server hasn't responded yet, keep a conservative fallback.
-      return _defaultLspLangsFallback().has(s);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function ensureVscodeApiLspLanguages() {
-    try {
-      if (vscodeApiLspLanguages) return Promise.resolve(vscodeApiLspLanguages);
-      if (vscodeApiLspLanguagesPromise) return vscodeApiLspLanguagesPromise;
-      vscodeApiLspLanguagesPromise = vscodeApiCall('vscode.lsp.languages', {})
-        .then(function (res) {
-          try {
-            if (res && res.ok && Array.isArray(res.languages)) {
-              vscodeApiLspLanguages = _maybeSetFromArray(res.languages);
-            }
-          } catch (_) {}
-          if (!vscodeApiLspLanguages || !vscodeApiLspLanguages.size) {
-            vscodeApiLspLanguages = _defaultLspLangsFallback();
-          }
-          return vscodeApiLspLanguages;
-        })
-        .catch(function () {
-          vscodeApiLspLanguages = _defaultLspLangsFallback();
-          return vscodeApiLspLanguages;
-        })
-        .finally(function () {
-          vscodeApiLspLanguagesPromise = null;
-        });
-      return vscodeApiLspLanguagesPromise;
-    } catch (_) {
-      vscodeApiLspLanguages = _defaultLspLangsFallback();
-      return Promise.resolve(vscodeApiLspLanguages);
-    }
-  }
-
-  function vscodeApiDidOpenIfReady() {
-    try {
-      if (!model || !currentPath) return;
-      var lang = String(model.getLanguageId ? model.getLanguageId() : languageFromPath(currentPath));
-      if (!model.uri || !model.uri.toString) return;
-      var uri = String(model.uri.toString());
-      if (!uri || !uri.startsWith('file://')) return;
-
-      ensureVscodeApiWs().then(function() {
-        try {
-          ensureVscodeApiLspLanguages().then(function () {
-            try {
-              if (!_lspEnabledForLanguage(lang)) return;
-
-              // Close previous doc if switching.
-              if (vscodeApiDocUri && vscodeApiDocUri !== uri) {
-                try {
-                  _vscodeApiNotify('vscode.lsp.didClose', {
-                    uri: vscodeApiDocUri,
-                    languageId: String(vscodeApiDocLang || ''),
-                  });
-                } catch (_) {}
-              }
-
-              vscodeApiDocUri = uri;
-              vscodeApiDocLang = lang;
-
-              _vscodeApiNotify('vscode.lsp.didOpen', {
-                uri: uri,
-                languageId: lang,
-                version: Number(model.getVersionId ? model.getVersionId() : 1) || 1,
-                text: model.getValue ? model.getValue() : '',
-              });
-            } catch (_) {}
-          }).catch(function(){});
-        } catch (_) {}
-      }).catch(function(){});
-    } catch (_) {}
-  }
-
-  function installVscodeApiChangePublisher() {
-    try {
-      if (!model || model.__te2VscodeApiLspInstalled) return;
-      model.__te2VscodeApiLspInstalled = true;
-
-      model.onDidChangeContent(function(e) {
-        try {
-          if (!vscodeApiWs || vscodeApiWs.readyState !== WebSocket.OPEN) return;
-          if (!model || !model.uri) return;
-          if (!e || !e.changes || !e.changes.length) return;
-
-          var lang = String(model.getLanguageId ? model.getLanguageId() : '');
-          if (!_lspEnabledForLanguage(lang)) return;
-          var uri = String(model.uri.toString());
-          var changes = e.changes.map(function(ch) {
-            return { range: _lspRangeFromMonaco(ch.range), text: ch.text };
-          });
-
-          _vscodeApiNotify('vscode.lsp.didChange', {
-            uri: uri,
-            languageId: lang,
-            version: Number(model.getVersionId ? model.getVersionId() : 1) || 1,
-            contentChanges: changes,
-          });
-        } catch (_) {}
-      });
-    } catch (_) {}
-  }
 
   function installVscodeRpcChangePublisher() {
     try {
@@ -1321,7 +1128,8 @@
 
           vscodeRpcDocVersion += 1;
           var changes = e.changes.map(function(ch) {
-            return { range: _lspRangeFromMonaco(ch.range), text: ch.text };
+            var r = ch.range;
+            return { range: { start: { line: (r.startLineNumber || 1) - 1, character: (r.startColumn || 1) - 1 }, end: { line: (r.endLineNumber || 1) - 1, character: (r.endColumn || 1) - 1 } }, text: ch.text };
           });
 
           var payload = {
@@ -1942,15 +1750,9 @@
       vscodeApiWs = ws;
 
       // Register notification handlers.
-      try {
-        vscodeApiHandlers.set('textDocument/publishDiagnostics', _applyLspDiagnostics);
-        vscodeApiHandlers.set('te2.event', function (params) {
-          try {
-            if (!params || typeof params !== 'object') return;
-            if (params.type === 'diagnostics/update') _applyDiagnosticsUpdate(params);
-          } catch (_) {}
-        });
-      } catch (_) {}
+      // Diagnostics are now routed through editor Socket.IO (diagnostics_bridge),
+      // so we no longer handle them here. Other te2.event types can be added if needed.
+      try {} catch (_) {}
 
       ws.onmessage = function (ev) {
         var msg2 = null;
@@ -1967,7 +1769,7 @@
             return;
           }
 
-          // Notifications (e.g. LSP publishDiagnostics) from vscode_api
+          // Notifications from vscode_api (workbench adapter events)
           try {
             if (m.method && vscodeApiHandlers && vscodeApiHandlers.has(m.method)) {
               vscodeApiHandlers.get(m.method)(m.params);
@@ -1994,7 +1796,6 @@
       });
 
       vscodeApiConnecting = null;
-      try { ensureVscodeApiLspLanguages(); } catch (_) {}
       return ws;
     })();
 
@@ -3092,8 +2893,6 @@
         applyLanguageToModel(model, lang, nextPath);
         vscodeRpcDidOpenIfReady();
         installVscodeRpcChangePublisher();
-        vscodeApiDidOpenIfReady();
-        installVscodeApiChangePublisher();
       } catch (e) {
         console.warn('[Monaco] createModel failed, falling back to setValue', e);
         editor.setValue(content);
@@ -3101,8 +2900,6 @@
     } else {
       try { model.setValue(content); } catch (_) { editor.setValue(content); }
       applyLanguageToModel(model, lang, nextPath);
-      vscodeApiDidOpenIfReady();
-      installVscodeApiChangePublisher();
     }
     currentPath = nextPath;
     try { lastContentSha256 = data.content_sha256 || lastContentSha256; } catch (_) {}
@@ -3162,8 +2959,6 @@
       installScrollPublisher();
       vscodeRpcDidOpenIfReady();
       installVscodeRpcChangePublisher();
-      vscodeApiDidOpenIfReady();
-      installVscodeApiChangePublisher();
     } else {
       try {
         var want = _fileUri(absPath);
@@ -3176,19 +2971,13 @@
           installScrollPublisher();
           vscodeRpcDidOpenIfReady();
           installVscodeRpcChangePublisher();
-          vscodeApiDidOpenIfReady();
-          installVscodeApiChangePublisher();
         } else {
           try { isApplyingRemote = true; model.setValue(content || ''); } catch (_) { editor.setValue(content || ''); } finally { isApplyingRemote = false; }
           applyLanguageToModel(model, lang, absPath);
-          vscodeApiDidOpenIfReady();
-          installVscodeApiChangePublisher();
         }
       } catch (_) {
         try { isApplyingRemote = true; model.setValue(content || ''); } catch (_) { editor.setValue(content || ''); } finally { isApplyingRemote = false; }
         applyLanguageToModel(model, lang, absPath);
-        vscodeApiDidOpenIfReady();
-        installVscodeApiChangePublisher();
       }
     }
     currentPath = absPath;
@@ -3533,6 +3322,20 @@
           }
           if (payload.unsaved === true) {
             requestDraftDiff('cache_state');
+          }
+        } catch (_) {}
+      });
+
+      // Diagnostics from workbench adapter via server-side bridge (editor_ws).
+      // This arrives over the already-connected Socket.IO, avoiding the vscode_api_ws race.
+      editorSocket.on('editor:diagnostics', function(payload) {
+        try {
+          if (!payload || typeof payload !== 'object') return;
+          console.log('[editor:diagnostics] rx', payload.type, 'path=' + (payload.path || '?'), 'markers=' + ((payload.markers || []).length), 'currentPath=' + currentPath);
+          if (payload.type === 'diagnostics/update') {
+            // Convert server-side bridge format to the format _applyDiagnosticsUpdate expects.
+            var items = [{ uri: 'file://' + (payload.path || ''), markers: payload.markers || [] }];
+            _applyDiagnosticsUpdate({ owner: payload.owner || 'workbench', items: items });
           }
         } catch (_) {}
       });

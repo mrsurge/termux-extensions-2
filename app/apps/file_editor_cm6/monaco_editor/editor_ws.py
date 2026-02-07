@@ -205,6 +205,38 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
 
         await self.emit("editor:ssot", snapshot, room=sid)
 
+        # Diagnostics bridge: send cached diagnostics + nudge for fresh ones.
+        try:
+            from ..diagnostics_bridge import (
+                get_cached_diagnostics,
+                nudge_diagnostics_for_file,
+                send_cached_diagnostics_to_sid,
+                start_bridge,
+            )
+            from .editor_socketio import EDITOR_SIO
+
+            # Ensure the bridge background task is running.
+            start_bridge(EDITOR_SIO)
+
+            if current_path:
+                abs_path = _normalize_abs_path(str(current_path))
+                print(f"[editor_ws] on_connect diag bridge: current_path={current_path} abs_path={abs_path}", flush=True)
+                if abs_path:
+                    # Send any cached diagnostics immediately (no wait).
+                    await send_cached_diagnostics_to_sid(self.server, sid, abs_path)
+                    # Nudge the adapter to re-emit diagnostics (best-effort, non-blocking).
+                    import asyncio
+                    lang = ""
+                    try:
+                        ext = Path(abs_path).suffix.lstrip(".")
+                        _ext_map = {"py": "python", "js": "javascript", "ts": "typescript", "jsx": "javascriptreact", "tsx": "typescriptreact", "rs": "rust", "cpp": "cpp", "c": "c", "go": "go"}
+                        lang = _ext_map.get(ext, ext)
+                    except Exception:
+                        pass
+                    asyncio.ensure_future(nudge_diagnostics_for_file(abs_path, lang))
+        except Exception:
+            pass
+
     async def on_disconnect(self, sid):
         try:
             await self.leave_room(sid, "file_editor_cm6")
