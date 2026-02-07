@@ -43,7 +43,8 @@ async def ensure_vscode_server_shell(project_root: str) -> ShellRecord:
     mgr = await get_manager()
     orch = Orchestrator(mgr)
 
-    label = _label(project_root)
+    project_root_abs = str(Path(project_root).resolve(strict=False))
+    label = _label(project_root_abs)
 
     # Fast path: cached id.
     if _active_shell_id:
@@ -58,8 +59,9 @@ async def ensure_vscode_server_shell(project_root: str) -> ShellRecord:
         _active_shell_id = existing.id
         return existing
 
-    repo_root = Path(project_root).resolve(strict=False)
-    vscode_worktree = (repo_root / "worktrees" / "vscode-te2-diff").resolve(strict=False)
+    # IMPORTANT: VS Code worktree lives in the TE2 repo, not inside the user's project.
+    te2_repo_root = Path(__file__).resolve().parents[3]
+    vscode_worktree = (te2_repo_root / "worktrees" / "vscode-te2-diff").resolve(strict=False)
     if not vscode_worktree.exists():
         raise RuntimeError(f"Missing VS Code worktree: {vscode_worktree}")
 
@@ -74,8 +76,8 @@ async def ensure_vscode_server_shell(project_root: str) -> ShellRecord:
         base_dir=SHELLSPEC_DIR,
         ctx={
             "APP_ID": APP_ID,
-            "PROJECT_ROOT": str(repo_root),
-            "PROJECT_HASH": _project_hash(str(repo_root)),
+            "PROJECT_ROOT": project_root_abs,
+            "PROJECT_HASH": _project_hash(project_root_abs),
             "VSCODE_WORKTREE": str(vscode_worktree),
             "INSTANCE_ID": "primary",
         },
@@ -86,4 +88,3 @@ async def ensure_vscode_server_shell(project_root: str) -> ShellRecord:
 
     _active_shell_id = shell.id
     return shell
-

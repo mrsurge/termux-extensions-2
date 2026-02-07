@@ -14,7 +14,7 @@ from pathlib import Path
 import shutil
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 import asyncio
 import anyio
 from .agent_ws import agent_websocket
@@ -26,6 +26,7 @@ from .vscode_api_shell_manager import ensure_vscode_api_shell
 from .vscode_rpc_shell_manager import ensure_vscode_rpc_shell
 from .vscode_server_shell_manager import ensure_vscode_server_shell
 from .code_server_shell_manager import ensure_code_server_shell
+from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
 from .git_helper import (
     GitError,
     list_branches as git_list_branches,
@@ -463,14 +464,27 @@ async def vscode_rpc_discover():
 
 @file_editor_cm6_bp.get("/vscode_api/discover")
 async def vscode_api_discover():
-    """Discover the browser-facing WS URL for vscode_api and ensure the shell is running."""
+    """Discover the browser-facing WS URL for vscode_api.
+
+    This endpoint is intentionally "read-only": it will not start the shell.
+    Use /vscode_api/start to start and wait for readiness.
+    """
 
     project_root = _history_store.get_active_project() or str(get_project_root())
     if not project_root:
         raise HTTPException(status_code=400, detail="No active project root")
 
     try:
-        record = await ensure_vscode_api_shell(project_root)
+        from app.apps.file_editor_cm6.vscode_api_shell_manager import (
+            get_vscode_api_shell_if_running,
+        )
+
+        record = await get_vscode_api_shell_if_running(project_root)
+        if not record:
+            return JSONResponse(
+                {"ok": False, "error": "vscode_api not running (call /vscode_api/start)"},
+                status_code=503,
+            )
     except Exception as exc:
         print(f"[vscode_api][discover] failed: {type(exc).__name__}: {exc}", flush=True)
         return JSONResponse(
@@ -489,6 +503,32 @@ async def vscode_api_discover():
             "ws_url": ws_url,
             "token": "",
             "expires_at": 0,
+            "shell_id": record.id,
+        },
+    }
+
+
+@file_editor_cm6_bp.get("/vscode_api/start")
+async def vscode_api_start():
+    """Start/adopt vscode_api and wait for readiness."""
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    try:
+        record = await ensure_vscode_api_shell(project_root)
+    except Exception as exc:
+        print(f"[vscode_api][start] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    return {
+        "ok": True,
+        "data": {
+            "project_root": project_root,
             "shell_id": record.id,
         },
     }
@@ -568,6 +608,116 @@ async def code_server_discover():
             "shell_id": record.id,
         },
     }
+
+
+@file_editor_cm6_bp.get("/workbench_adapter/discover")
+async def workbench_adapter_discover():
+    """Start/adopt the Node workbench adapter and return a same-origin cmd URL.
+
+    The adapter itself binds to 127.0.0.1 on a deterministic port, but browsers
+    must not depend on localhost direct access (remote clients). We expose a
+    worker-owned proxy endpoint at `/workbench_adapter/cmd`.
+    """
+
+    # Ensure code-server backend exists first (adapter connects to it) and
+    # use code-server's PROJECT_ROOT as the canonical active workspace.
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    try:
+        cs = await ensure_code_server_shell(project_root)
+    except Exception as exc:
+        print(f"[code_server][discover] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    cs_env = (cs.env_overrides or {})
+    project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
+    port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
+    try:
+        cs_port = int(str(port_s))
+    except Exception:
+        cs_port = 0
+    code_server_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
+
+    try:
+        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
+    except Exception as exc:
+        print(f"[workbench_adapter][discover] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    port_s = (record.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
+    try:
+        port = int(str(port_s))
+    except Exception:
+        port = 0
+
+    return {
+        "ok": True,
+        "data": {
+            "project_root": project_root,
+            "port": port,
+            "shell_id": record.id,
+            "cmd_url": "/api/app/file_editor_cm6/workbench_adapter/cmd",
+        },
+    }
+
+
+@file_editor_cm6_bp.post("/workbench_adapter/cmd")
+async def workbench_adapter_cmd(request: Request):
+    """Same-origin JSON-RPC proxy to the Node workbench adapter /cmd endpoint."""
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    # Ensure adapter is running (and code-server behind it). Use code-server env
+    # as the canonical workspace root for the adapter.
+    cs = await ensure_code_server_shell(project_root)
+    cs_env = (cs.env_overrides or {})
+    project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
+    cs_port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
+    try:
+        cs_port = int(str(cs_port_s))
+    except Exception:
+        cs_port = 0
+    code_server_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
+    rec = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
+
+    port_s = (rec.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
+    try:
+        port = int(str(port_s))
+    except Exception:
+        port = 0
+    if not port:
+        raise HTTPException(status_code=503, detail="workbench adapter not ready (missing port)")
+
+    # Proxy request body to adapter.
+    try:
+        body = await request.body()
+    except Exception:
+        body = b""
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{port}/cmd",
+                content=body,
+                headers={"content-type": request.headers.get("content-type", "application/json")},
+            )
+    except Exception as exc:
+        print(f"[workbench_adapter][cmd] proxy failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=503)
+
+    return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type", "application/json"))
 
 
 @file_editor_cm6_bp.get("/vscode_api/resolve")

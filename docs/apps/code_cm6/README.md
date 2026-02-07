@@ -247,10 +247,29 @@ Without Framework Shells, Code CM6 would need custom process management for term
   - `editor_ws` for editor/session/draft state.
   - `vscode_api` / adapter channel for extension-host language features.
 - ✅ Use TypeScript/JavaScript built-in VS Code language service behavior as baseline control.
+- ✅ Run code-server as a **framework shell** (backend extension host runtime) with deterministic settings:
+  - Fixed port: `127.0.0.1:18180` (avoid port discovery churn in tests)
+  - `--disable-workspace-trust` (avoid trust-gated behavior until the trust automation path is fully proven)
+  - Discover endpoint: `GET /api/app/file_editor_cm6/code_server/discover`
+  - Implementation: `app/apps/file_editor_cm6/code_server_shell_manager.py`, `app/apps/file_editor_cm6/shellspec/code_server.yaml`
+- ✅ Prefer a Node “workbench adapter” to be the **canonical connection initiator** (no trace replay as protocol):
+  - Implements remote-agent handshake (mgmt + ext WS) and a minimal main-thread contract surface.
+  - Exposes TE2-facing JSON-RPC (connect/openFile/hover/symbols/diagnostics).
+  - Entry points: `app/apps/file_editor_cm6/workbench_protocol_proxy/node_workbench_adapter/server.mjs`,
+    `app/apps/file_editor_cm6/workbench_protocol_proxy/node_workbench_adapter/workbench_client.mjs`
+- ✅ Keep the Go decoder proxy as an optional **debugging/tracing** tool, not production transport.
+- ✅ Speed up Monaco iteration by bundling the iframe bootstrap (avoid reloading hundreds of modules per test):
+  - Monaco iframe entry: `app/apps/file_editor_cm6/monaco_editor/m_editor_app.py`, `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
+  - Bundle build script: `scripts/build_monaco_iframe_bootstrap_bundle.mjs`
 - 🚧 Validate extension parity across three external language ecosystems:
   - Python
   - C++
   - Rust
+- 🚧 Track a concrete validation matrix (extensions + deterministic feature checks):
+  - Python: baseline `ms-pyright` (plus optional `ms-python.python` / Pylance variants)
+  - C++: baseline `ms-vscode.cpptools`
+  - Rust: baseline `rust-lang.rust-analyzer`
+  - Control/baseline (built-in): TypeScript/JavaScript language service
 - 🚧 Improve watcher scalability for large repos:
   - Move away from high-cardinality per-file watch assumptions.
   - Favor coalesced events, selective watch scope, and reconciliation fallbacks.

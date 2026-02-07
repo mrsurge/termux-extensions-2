@@ -9,23 +9,23 @@ shells:
       - -lc
       - >-
         code-server
-        --bind-addr 127.0.0.1:${free_port}
+        --bind-addr 127.0.0.1:${ctx:CODE_SERVER_PORT}
         --auth none
         --config /dev/null
         --disable-telemetry
         --disable-update-check
-        --user-data-dir "${ctx:CODE_SERVER_DATA_DIR}/user-data"
+        --disable-workspace-trust
+        --user-data-dir "${ctx:CODE_SERVER_DATA_DIR}"
         --extensions-dir "${ctx:CODE_SERVER_DATA_DIR}/extensions"
         "${ctx:PROJECT_ROOT}"
     env:
       TE_APP_ID: ${ctx:APP_ID}
-      TE_CODE_SERVER_PORT: ${free_port}
+      TE_CODE_SERVER_PORT: ${ctx:CODE_SERVER_PORT}
       PROJECT_ROOT: ${ctx:PROJECT_ROOT}
       TE_INSTANCE_ID: ${ctx:INSTANCE_ID}
       TE2_EXT_ROOT: ${env:TE2_EXT_ROOT}
       TE2_WORKER_API_BASE: ${env:TE2_WORKER_API_BASE}
       TE2_PROBE_OUT: ${ctx:CODE_SERVER_DATA_DIR}/te2-probe.jsonl
-      NODE_OPTIONS: --require ${ctx:CODE_SERVER_DATA_DIR}/android-as-linux.js
     subgroups:
       - ${ctx:APP_ID}
       - code_server
@@ -41,5 +41,5 @@ shells:
     readiness:
       type: tcp_port
       host: 127.0.0.1
-      port: ${free_port}
+      port: ${ctx:CODE_SERVER_PORT}
       timeout: 60

@@ -10,6 +10,38 @@ This is intentionally written as a “wiring + protocol” reference: what runs 
 
 ---
 
+## Roadmap (Monaco + Workbench Sidecar)
+
+This is the current direction:
+- TE2 remains the **only** authority for edit/save/draft/autosave/versioning (SSOT).
+- VS Code compatible language intelligence is provided by a **sidecar** that talks to a real `code-server` extension host.
+- Monaco stays thin and consumes normalized requests/events over a dedicated transport.
+
+Cross references:
+- `docs/apps/code_cm6/MONACO_WORKBENCH_SPRINT_PLAN.md`
+- `docs/apps/code_cm6/VSCODE_API_CONTRACT.md`
+- `docs/apps/code_cm6/VSCODE_API_STATE_OWNERSHIP.md`
+- `docs/apps/code_cm6/VSCODE_API_DEPRECATIONS.md`
+
+### Current milestone (read-only language intelligence)
+Status: implemented and working for the deterministic read-only subset:
+- `code-server` runs as a framework shell on fixed port `127.0.0.1:18180` with `--disable-workspace-trust`.
+- Node workbench adapter runs as a framework shell on fixed port `127.0.0.1:18181`.
+- `vscode_api` is a WS JSON-RPC server that bridges Monaco requests to the adapter and forwards diagnostics events.
+- Working end-to-end (over `vscode_api_ws`): `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`.
+
+Known limitation (expected right now):
+- “Live typing” diagnostics will not be fully correct until we add a `didChange` sync path. Today, the sidecar becomes accurate at `openFile` time (and can be extended to update on save).
+
+### Extension validation matrix (next milestone)
+We will validate at least 2 deterministic features (hover + symbols + diagnostics) per language:
+- Python: `ms-pyright` (baseline), optionally compare against `ms-python.python` / Pylance variants later.
+- C++: `ms-vscode.cpptools`.
+- Rust: `rust-lang.rust-analyzer`.
+- Control: TypeScript/JavaScript (VS Code ships a built-in TS/JS language service as part of the OSS workbench/extensions set).
+
+---
+
 ## 0) High‑level map
 
 ```
@@ -35,9 +67,41 @@ App worker process (app/apps/file_editor_cm6/main.py)
   ├─ Monaco iframe routes under /ui/*
   ├─ Worker‑owned Socket.IO server mounted at /editor_ws/socket.io (ASGI subapp)
   └─ SSOT stores: _history_store (project sidecar), _preferences_store
+
+Framework shells (service processes owned by the framework_shells orchestrator)
+  ├─ code-server: real VS Code-compatible backend + remote extension host
+  ├─ workbench adapter (Node): initiates remote-agent WS connection; decodes/encodes workbench protocol
+  └─ vscode_api (Node): browser-facing JSON-RPC bridge (Monaco → adapter), plus event fanout (diagnostics)
 ```
 
 ---
+
+## 0.5) Framework Shells (Transport vs Execution)
+
+Terminology used in TE2:
+- A **framework shell** is a long-lived subprocess managed by `framework_shells` (start/adopt/terminate + readiness).
+- **Transport level** is “how bytes move” (Socket.IO/WS/HTTP proxies). It must stay proxy-only.
+- **Execution level** is “who runs logic/state” (worker SSOT, extension host, adapter decode/encode).
+
+For `file_editor_cm6`, we intentionally separate responsibilities:
+- **Editor SSOT transport (existing)**: `/editor_ws/socket.io` (main process proxies to worker).
+- **Language sidecar transport (new)**: `/vscode_api_ws` (main process proxies to `vscode_api` shell).
+- **Execution**:
+  - Worker owns drafts/saves/versioning (`HistoryStore`/sidecar).
+  - `code-server` owns extension execution (remote extension host).
+  - Node workbench adapter owns the remote-agent WS session and workbench protocol encoding/decoding.
+
+Deterministic ports (current):
+- `code-server`: `127.0.0.1:18180` (framework shell)
+  - `--user-data-dir ~/.config/code-server`
+  - `--extensions-dir ~/.config/code-server/extensions`
+  - `--disable-workspace-trust`
+- workbench adapter: `127.0.0.1:18181` (framework shell)
+
+Discovery endpoints (worker, proxied via main process):
+- `GET /api/app/file_editor_cm6/code_server/discover`
+- `GET /api/app/file_editor_cm6/workbench_adapter/discover`
+- `GET /api/app/file_editor_cm6/vscode_api/discover`
 
 ## 1) Key files (where to look)
 

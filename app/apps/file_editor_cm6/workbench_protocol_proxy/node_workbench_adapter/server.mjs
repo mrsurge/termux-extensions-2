@@ -7,6 +7,8 @@ import { WorkbenchClient } from "./workbench_client.mjs";
 
 const HOST = process.env.TE2_ADAPTER_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.TE2_ADAPTER_PORT ?? "8001");
+const DEFAULT_CODE_SERVER_HTTP = process.env.TE2_CODE_SERVER_HTTP ?? "http://127.0.0.1:18180";
+const DEFAULT_REMOTE_AUTHORITY = process.env.TE2_REMOTE_AUTHORITY ?? "localhost:18180";
 
 const SYNC_TRACE_ENABLE = String(process.env.TE2_SYNC_TRACE || "") === "1";
 const SYNC_TRACE_MAX = Number(process.env.TE2_SYNC_TRACE_MAX ?? "200");
@@ -138,7 +140,7 @@ function normalizePathParam(params) {
   return "";
 }
 
-function normalizeAuthorityParam(params, fallback = "localhost:8000") {
+function normalizeAuthorityParam(params, fallback = DEFAULT_REMOTE_AUTHORITY) {
   const p = (params && typeof params === "object") ? params : {};
   if (typeof p.authority === "string" && p.authority.trim()) return p.authority;
   if (typeof p.uri === "string" && p.uri.trim()) {
@@ -278,8 +280,8 @@ const state = {
   // - go decoder proxy URL (optional)
   // - mgmt/ext connection status
   config: {
-    upstreamHttp: process.env.TE2_UPSTREAM_HTTP ?? "http://127.0.0.1:8080",
-    proxyHttp: process.env.TE2_PROXY_HTTP ?? "http://127.0.0.1:8000",
+    upstreamHttp: process.env.TE2_UPSTREAM_HTTP ?? DEFAULT_CODE_SERVER_HTTP,
+    proxyHttp: process.env.TE2_PROXY_HTTP ?? DEFAULT_CODE_SERVER_HTTP,
   },
   session: {
     connected: false,
@@ -485,7 +487,7 @@ async function handleJsonRpc(reqObj) {
       proxyHttp: p.proxyHttp ?? state.config.proxyHttp,
       token: p.token,
       folder: p.folder,
-      authority: p.authority ?? "localhost:8000",
+      authority: p.authority ?? DEFAULT_REMOTE_AUTHORITY,
       serverRootPath: p.serverRootPath,
       commit: p.commit,
       proxyUri: p.proxyUri,
@@ -530,7 +532,7 @@ async function handleJsonRpc(reqObj) {
     if (!resolvedPath) {
       return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
     }
-    const authority = normalizeAuthorityParam(p, "localhost:8000");
+    const authority = normalizeAuthorityParam(p, DEFAULT_REMOTE_AUTHORITY);
 
     const openFileSnapEnabled =
       String(process.env.TE2_OPENFILE_SNAPSHOT_ENABLE || "") === "1"
@@ -581,7 +583,7 @@ async function handleJsonRpc(reqObj) {
     if (!resolvedPath) {
       return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
     }
-    const authority = normalizeAuthorityParam(p, "localhost:8000");
+    const authority = normalizeAuthorityParam(p, DEFAULT_REMOTE_AUTHORITY);
     const result = await wb.documentSymbols({
       path: resolvedPath,
       authority,
@@ -597,7 +599,7 @@ async function handleJsonRpc(reqObj) {
     if (!resolvedPath) {
       return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
     }
-    const authority = normalizeAuthorityParam(p, "localhost:8000");
+    const authority = normalizeAuthorityParam(p, DEFAULT_REMOTE_AUTHORITY);
     const result = await wb.hover({
       path: resolvedPath,
       authority,

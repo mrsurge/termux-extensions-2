@@ -8,6 +8,8 @@ import { NodeSocketFactory } from "./vscode_oss_runtime/platform/remote/browser/
 import { ConnectionType, connectToRemoteAgent, createNoopSignService } from "./vscode_oss_runtime/platform/remote/common/remoteAgentConnection.mjs";
 import { IpcPromiseClient } from "./vscode_oss_runtime/base/parts/ipc/common/ipc.mjs";
 
+const DEFAULT_CODE_SERVER_HTTP = process.env.TE2_CODE_SERVER_HTTP ?? "http://127.0.0.1:18180";
+const DEFAULT_REMOTE_AUTHORITY = process.env.TE2_REMOTE_AUTHORITY ?? "localhost:18180";
 const DEBUG_METRICS = String(process.env.TE2_DEBUG_METRICS || "") === "1";
 const INIT_SIZE_PROFILE = String(process.env.TE2_INIT_SIZE_PROFILE || "") === "1";
 const INIT_SIZE_MAX_ITEMS = Number(process.env.TE2_INIT_SIZE_MAX_ITEMS ?? "500");
@@ -58,6 +60,7 @@ const PARSE_ARGS_ONLY_METHODS = new Set([
   "$registerLogger",
 
   // Keep diagnostics/hover requests parseable when we need them later.
+  "$changeMany",
   "$provideHover",
   "$provideDocumentSymbols",
 ]);
@@ -578,7 +581,7 @@ export class WorkbenchClient {
     this._sentExtMetaOrder = [];
     this._nextModelNumber = 1;
     this._useRemote = true;
-    this._authority = "localhost:8000";
+    this._authority = DEFAULT_REMOTE_AUTHORITY;
     this._productVersion = null;
     this._metricsTimer = null;
     this._extMsgTrace = {
@@ -1037,10 +1040,10 @@ export class WorkbenchClient {
     if (this._connecting) throw new Error("already connecting");
     this._connecting = true;
     try {
-      const proxyHttp = params.proxyHttp ?? "http://127.0.0.1:8000";
+      const proxyHttp = params.proxyHttp ?? DEFAULT_CODE_SERVER_HTTP;
       const token = params.token ?? "00000000000000000000";
       const folder = params.folder ?? null;
-      const authority = params.authority ?? "localhost:8000";
+      const authority = params.authority ?? DEFAULT_REMOTE_AUTHORITY;
       const useRemote = params.useRemote ?? (String(process.env.TE2_USE_REMOTE || "1") === "1");
       const serverRootPath = params.serverRootPath ?? (await spanTraceAsync("connect.discoverServerRootPath", () => this._discoverServerRootPath(proxyHttp, folder)));
       const commit = params.commit ?? this._commitFromServerRootPath(serverRootPath);
@@ -1524,7 +1527,7 @@ export class WorkbenchClient {
     if (!this.ext?.protocol) throw new Error("not connected");
     const path = String(params.path ?? "");
     const languageId = String(params.languageId ?? "python");
-    const authority = String(params.authority ?? this._authority ?? "localhost:8000");
+    const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
     const text = await spanTraceAsync("openFile.fs.readFile", () => fs.readFile(path, "utf8"));
     const lines = spanTrace("openFile.text.splitLines", () => text.split(/\r?\n/));
     let maxLineLen = 0;
@@ -1645,7 +1648,7 @@ export class WorkbenchClient {
 
   async documentSymbols(params = {}) {
     if (!this.ext?.protocol) throw new Error("not connected");
-    const authority = String(params.authority ?? this._authority ?? "localhost:8000");
+    const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
     const path = String(params.path ?? "");
     const timeoutMs = Number(params.timeoutMs ?? 8000);
     let providerHandle = params.providerHandle ?? this.state.docSymbolsProviderHandle;
@@ -1682,7 +1685,7 @@ export class WorkbenchClient {
 
   async hover(params = {}) {
     if (!this.ext?.protocol) throw new Error("not connected");
-    const authority = String(params.authority ?? this._authority ?? "localhost:8000");
+    const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
     const path = String(params.path ?? "");
     const lineNumber = Number(params.lineNumber ?? 1);
     const column = Number(params.column ?? 1);

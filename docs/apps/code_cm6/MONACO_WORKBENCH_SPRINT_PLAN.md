@@ -12,6 +12,12 @@ Cross references:
 - `docs/apps/code_cm6/CODE_TE2.md`
 - `docs/apps/code_cm6/README.md`
 
+Implementation anchors (where to look first):
+- Code-server framework shell: `app/apps/file_editor_cm6/code_server_shell_manager.py`, `app/apps/file_editor_cm6/shellspec/code_server.yaml`
+- Node adapter: `app/apps/file_editor_cm6/workbench_protocol_proxy/node_workbench_adapter/server.mjs`,
+  `app/apps/file_editor_cm6/workbench_protocol_proxy/node_workbench_adapter/workbench_client.mjs`
+- Monaco iframe: `app/apps/file_editor_cm6/monaco_editor/m_editor_app.py`, `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
+
 ## Sprint 1 - Contract and Bridge Hardening
 Goal: Lock API contracts and wire a stable frontend language bridge without changing TE2 draft/save authority.
 
@@ -21,6 +27,9 @@ Steps:
 - `vscode.documentSymbols`
 - diagnostics event payload
 - completion payload
+2. Make the backend runtime deterministic for integration tests:
+- code-server runs as a framework shell on `127.0.0.1:18180` with `--disable-workspace-trust`
+- adapter defaults assume `http://127.0.0.1:18180` and authority `localhost:18180`
 2. Implement/clean `language_bridge` integration in Monaco iframe lifecycle:
 - connect on editor ready
 - bind per-model open/change/close notifications
@@ -43,9 +52,10 @@ Goal: Validate deterministic language feature behavior across three major ecosys
 
 Steps:
 1. Define extension test matrix:
-- Python extension set
-- C++ extension set
-- Rust extension set
+- Python: baseline `ms-pyright` (plus optional `ms-python.python` / Pylance variants)
+- C++: baseline `ms-vscode.cpptools`
+- Rust: baseline `rust-lang.rust-analyzer`
+- Control: built-in TypeScript/JavaScript service behavior
 2. For each language, run deterministic test sequence:
 - connect adapter
 - open file

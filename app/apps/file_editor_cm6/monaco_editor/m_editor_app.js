@@ -35,7 +35,7 @@
   var _ignoreNextModifiedViewZonesEvent = false;
   var _reapplyDraftZonesScheduled = false;
   var layoutObserver = null;
-  var debugParts = { git: null, draft: null, extra: null };
+  var debugParts = { git: null, draft: null, diag: null, extra: null };
   var apiBase = (function() {
     try {
       var p = String(window.location && window.location.pathname ? window.location.pathname : '');
@@ -646,8 +646,14 @@
     });
   }
 
+  // vscode_rpc is a legacy/optional side-channel (stdio LSP + semantic tokens POC).
+  // It is NOT required for the workbench-sidecar (code-server) language features.
+  // Default it off to avoid noisy failures when local LSP binaries are not present.
+  var ENABLE_VSCODE_RPC = false;
+
   async function ensureVscodeRpcConnected() {
     try {
+      if (!ENABLE_VSCODE_RPC) return false;
       if (vscodeRpcWs && vscodeRpcWs.readyState === 1) return true;
       var disc = await fetchJson('/vscode_rpc/discover', { cache: 'no-store' });
       if (!disc || !disc.ws_url) return false;
@@ -690,7 +696,8 @@
 
       return true;
     } catch (e) {
-      console.warn('[vscode_rpc] connect failed', e);
+      // Keep this quiet by default; users can opt-in when debugging local LSP.
+      if (ENABLE_VSCODE_RPC) console.warn('[vscode_rpc] connect failed', e);
       return false;
     }
   }
@@ -783,6 +790,343 @@
       });
 
       try { monaco.editor.setModelMarkers(model, 'vscode_api', markers); } catch (_) {}
+    } catch (_) {}
+  }
+
+  function _applyDiagnosticsUpdate(params) {
+    try {
+      if (!window.monaco || !window.monaco.editor) return;
+      if (!_diagState) _diagState = { rx: 0, apply: 0, drop_no_path: 0, drop_no_model: 0, drop_mismatch: 0 };
+      _diagState.rx += 1;
+
+      // Diagnostics may arrive in file:// or vscode-remote:// form depending on backend.
+      // Normalize to an absolute path key so we can apply markers to the active model.
+      var activeUri = (model && model.uri) ? String(model.uri.toString()) : '';
+      var activePath = currentPath ? String(currentPath) : (activeUri ? _absPathFromVscodeUri(activeUri) : '');
+      var items = params && Array.isArray(params.items) ? params.items : [];
+      var didApply = false;
+
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        if (!item) continue;
+        var itemPath = _absPathFromVscodeUri(item.uri || item && item.resource || '');
+        if (!itemPath) {
+          _diagState.drop_no_path += 1;
+          try {
+            if (window.__debugVscodeApiDiag) console.log('[vscode_api] diag drop_no_path item.uri=', item && item.uri);
+          } catch (_) {}
+          continue;
+        }
+        var markers = Array.isArray(item.markers) ? item.markers : [];
+        var outMarkers = [];
+        for (var j = 0; j < markers.length; j++) {
+          var m = markers[j] || {};
+          var sev = Number(m.severity || 3);
+          // VS Code MarkerSeverity: 1 Hint, 2 Info, 4 Warning, 8 Error.
+          var ms = monaco.MarkerSeverity.Info;
+          if (sev === 8) ms = monaco.MarkerSeverity.Error;
+          else if (sev === 4) ms = monaco.MarkerSeverity.Warning;
+          else if (sev === 2) ms = monaco.MarkerSeverity.Info;
+          else if (sev === 1 && monaco.MarkerSeverity.Hint) ms = monaco.MarkerSeverity.Hint;
+          // Normalize code (VS Code may send {value,target} object).
+          var code = undefined;
+          try {
+            if (typeof m.code === 'string' || typeof m.code === 'number') code = String(m.code);
+            else if (m.code && typeof m.code === 'object' && m.code.value != null) code = String(m.code.value);
+          } catch (_) {}
+          outMarkers.push({
+            severity: ms,
+            message: (m.message != null) ? String(m.message) : '',
+            startLineNumber: Math.max(1, Number(m.startLineNumber || 1)),
+            startColumn: Math.max(1, Number(m.startColumn || 1)),
+            endLineNumber: Math.max(1, Number(m.endLineNumber || m.startLineNumber || 1)),
+            endColumn: Math.max(1, Number(m.endColumn || m.startColumn || 1)),
+            source: (m.source != null) ? String(m.source) : 'vscode',
+            code: code,
+          });
+        }
+
+        // Cache per-path (so we can apply after model/currentPath is ready).
+        try {
+          if (!_diagCache) _diagCache = new Map();
+          _diagCache.set(itemPath, { ts_ms: Date.now(), markers: outMarkers });
+          while (_diagCache.size > DIAG_CACHE_MAX) {
+            var firstKey = _diagCache.keys().next().value;
+            _diagCache.delete(firstKey);
+          }
+        } catch (_) {}
+
+        // Apply to active model if it matches.
+        if (model && model.uri && activePath && itemPath === activePath) {
+          try { monaco.editor.setModelMarkers(model, 'vscode_api', outMarkers); } catch (_) {}
+          didApply = true;
+          _diagState.apply += 1;
+        } else if (model && model.uri && activePath && itemPath !== activePath) {
+          _diagState.drop_mismatch += 1;
+          try {
+            if (window.__debugVscodeApiDiag) console.log('[vscode_api] diag mismatch itemPath=', itemPath, 'activePath=', activePath);
+          } catch (_) {}
+        } else if (!model || !model.uri) {
+          _diagState.drop_no_model += 1;
+        }
+      }
+
+      try { setDebugDiag('diag=rx' + _diagState.rx + '/ap' + _diagState.apply + '/np' + _diagState.drop_no_path + '/nm' + _diagState.drop_no_model + '/mm' + _diagState.drop_mismatch); } catch (_) {}
+
+      if (!didApply) {
+        try { _applyCachedDiagnosticsForActive(); } catch (_) {}
+        // Mobile/WebView timing: diagnostics can land before the model swap completes.
+        // Retry a few times after caching without spamming.
+        try { _scheduleDiagReapply(); } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  var _diagCache = null; // Map(absPath -> {ts_ms, markers})
+  var _diagState = null; // counters
+  var DIAG_CACHE_MAX = 50;
+  var _diagReapplyScheduled = false;
+
+  function _scheduleDiagReapply() {
+    if (_diagReapplyScheduled) return;
+    _diagReapplyScheduled = true;
+    var delays = [0, 50, 250];
+    delays.forEach(function (ms) {
+      try {
+        setTimeout(function () {
+          try { _applyCachedDiagnosticsForActive(); } catch (_) {}
+        }, ms);
+      } catch (_) {}
+    });
+    try { setTimeout(function () { _diagReapplyScheduled = false; }, 300); } catch (_) { _diagReapplyScheduled = false; }
+  }
+
+  function _applyCachedDiagnosticsForActive() {
+    try {
+      if (!window.monaco || !window.monaco.editor) return;
+      if (!_diagCache || !_diagCache.size) return;
+      if (!model || !model.uri) return;
+      var activeUri = String(model.uri.toString());
+      var activePath = currentPath ? String(currentPath) : _absPathFromVscodeUri(activeUri);
+      if (!activePath) return;
+      var cached = _diagCache.get(activePath);
+      if (!cached) return;
+      var markers = Array.isArray(cached.markers) ? cached.markers : [];
+      monaco.editor.setModelMarkers(model, 'vscode_api', markers);
+      if (_diagState) _diagState.apply += 1;
+      try { setDebugDiag('diag=rx' + (_diagState ? _diagState.rx : 0) + '/ap' + (_diagState ? _diagState.apply : 0) + '/np' + (_diagState ? _diagState.drop_no_path : 0) + '/nm' + (_diagState ? _diagState.drop_no_model : 0) + '/mm' + (_diagState ? _diagState.drop_mismatch : 0)); } catch (_) {}
+    } catch (_) {}
+  }
+
+  function _absPathFromVscodeUri(raw) {
+    try {
+      if (!raw) return '';
+      // vscode-api and workbench sometimes send URI objects (revived) not strings.
+      if (typeof raw === 'object') {
+        if (raw.fsPath) return String(raw.fsPath);
+        if (raw.path) return String(raw.path);
+        if (raw.external) return _absPathFromVscodeUri(String(raw.external));
+        if (raw.scheme && raw.authority && raw.path) return String(raw.path);
+        if (raw.scheme && raw.path) return String(raw.path);
+        return '';
+      }
+      var s = String(raw);
+      // Fast path: avoid URL() differences across mobile/webview implementations.
+      if (s.indexOf('file://') === 0) {
+        return decodeURIComponent(s.slice('file://'.length));
+      }
+      if (s.indexOf('vscode-remote://') === 0) {
+        // vscode-remote://authority/<abs-path>
+        var rest = s.slice('vscode-remote://'.length);
+        var slash = rest.indexOf('/');
+        if (slash === -1) return '';
+        return decodeURIComponent(rest.slice(slash));
+      }
+      // Fallback: try URL parser for any other scheme that includes a pathname.
+      var u = new URL(s);
+      if (u && u.pathname) return decodeURIComponent(u.pathname || '');
+    } catch (_) {}
+    return '';
+  }
+
+  function _currentLanguageContext() {
+    try {
+      if (!model || !model.uri) return null;
+      var uri = String(model.uri.toString());
+      if (!uri) return null;
+      var p = currentPath ? String(currentPath) : _pathFromUriString(uri);
+      var lang = String(model.getLanguageId ? model.getLanguageId() : languageFromPath(p));
+      var v = Number(model.getVersionId ? model.getVersionId() : 1) || 1;
+      return { uri: uri, path: p, languageId: lang, version: v };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function _monacoRangeFromProtoRange(range) {
+    try {
+      if (!range || !window.monaco || !window.monaco.Range) return null;
+      var sl = Math.max(1, Number(range.startLineNumber || 1));
+      var sc = Math.max(1, Number(range.startColumn || 1));
+      var el = Math.max(1, Number(range.endLineNumber || sl));
+      var ec = Math.max(1, Number(range.endColumn || sc));
+      return new monaco.Range(sl, sc, el, ec);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function _toMonacoHoverContents(raw) {
+    var out = [];
+    if (!Array.isArray(raw)) return out;
+    for (var i = 0; i < raw.length; i++) {
+      var c = raw[i];
+      if (typeof c === 'string') {
+        out.push({ value: c });
+      } else if (c && typeof c === 'object') {
+        if (typeof c.value === 'string') out.push({ value: c.value });
+        else if (typeof c.language === 'string' && typeof c.value === 'string') out.push({ value: '```' + c.language + '\n' + c.value + '\n```' });
+      }
+    }
+    return out;
+  }
+
+  var languageBridge = {
+    hoverSeq: 0,
+    symbolsSeq: 0,
+    registeredHover: new Set(),
+    registeredSymbols: new Set(),
+  };
+
+  function _isContextCurrent(ctx) {
+    try {
+      var now = _currentLanguageContext();
+      if (!ctx || !now) return false;
+      return String(now.uri) === String(ctx.uri) && Number(now.version || 0) === Number(ctx.version || -1);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function _callVscodeApiGuarded(kind, method, params, ctx, opts) {
+    var timeoutMs = (opts && Number(opts.timeoutMs)) ? Number(opts.timeoutMs) : 5000;
+    var cancelToken = (opts && opts.cancelToken) ? opts.cancelToken : null;
+    var seq = 0;
+    if (kind === 'hover') seq = ++languageBridge.hoverSeq;
+    else if (kind === 'symbols') seq = ++languageBridge.symbolsSeq;
+    return vscodeApiCall(method, params, { timeoutMs: timeoutMs }).then(function (res) {
+      if (cancelToken && cancelToken.isCancellationRequested) return { ok: false, stale: true, canceled: true };
+      if (!_isContextCurrent(ctx)) return { ok: false, stale: true };
+      if (kind === 'hover' && seq !== languageBridge.hoverSeq) return { ok: false, stale: true };
+      if (kind === 'symbols' && seq !== languageBridge.symbolsSeq) return { ok: false, stale: true };
+      return { ok: true, result: res };
+    }).catch(function (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e || 'error') };
+    });
+  }
+
+  function _normalizeDocumentSymbols(raw) {
+    if (!Array.isArray(raw) || !window.monaco || !monaco.languages) return [];
+    var defaultKind = monaco.languages.SymbolKind ? monaco.languages.SymbolKind.Function : 11;
+    var mapOne = function (s) {
+      var range = _monacoRangeFromProtoRange(s && s.range ? s.range : null);
+      var sel = _monacoRangeFromProtoRange(s && s.selectionRange ? s.selectionRange : (s && s.range ? s.range : null));
+      var kids = Array.isArray(s && s.children) ? s.children.map(mapOne) : [];
+      return {
+        name: String((s && s.name) || ''),
+        detail: (s && s.detail != null) ? String(s.detail) : '',
+        kind: Number((s && s.kind) || defaultKind),
+        tags: Array.isArray(s && s.tags) ? s.tags : [],
+        range: range || new monaco.Range(1, 1, 1, 1),
+        selectionRange: sel || range || new monaco.Range(1, 1, 1, 1),
+        children: kids,
+      };
+    };
+    return raw.map(mapOne);
+  }
+
+  function installVscodeApiLanguageBridgeProviders() {
+    try {
+      if (!window.monaco || !window.monaco.languages) return;
+      ensureVscodeLanguagesInstalled().then(function () {
+        try {
+          var targets = new Set();
+          try {
+            vscodeLanguageIds.forEach(function (id) { if (id) targets.add(id); });
+          } catch (_) {}
+          try {
+            var ctx = _currentLanguageContext();
+            if (ctx && ctx.languageId) targets.add(String(ctx.languageId));
+          } catch (_) {}
+
+          targets.forEach(function (langId) {
+            if (!langId) return;
+            if (!languageBridge.registeredHover.has(langId) && monaco.languages.registerHoverProvider) {
+              monaco.languages.registerHoverProvider(langId, {
+                provideHover: function (m, pos, token) {
+                  try {
+                    var ctx = _currentLanguageContext();
+                    if (!ctx || !m || !m.uri || String(m.uri.toString()) !== String(ctx.uri)) return null;
+                    return _callVscodeApiGuarded(
+                      'hover',
+                      'vscode.hover',
+                      {
+                        uri: ctx.uri,
+                        path: ctx.path,
+                        lineNumber: Number(pos && pos.lineNumber ? pos.lineNumber : 1),
+                        column: Number(pos && pos.column ? pos.column : 1),
+                        timeoutMs: 4500,
+                      },
+                      ctx,
+                      { timeoutMs: 5000, cancelToken: token },
+                    ).then(function (out) {
+                      if (!out || !out.ok || !out.result || out.result.ok === false) return null;
+                      var payload = out.result.result || out.result.hover || null;
+                      if (!payload) return null;
+                      var range = _monacoRangeFromProtoRange(payload.range);
+                      var contents = _toMonacoHoverContents(payload.contents);
+                      if (!contents.length) return null;
+                      return { range: range || undefined, contents: contents };
+                    });
+                  } catch (_) {
+                    return null;
+                  }
+                },
+              });
+              languageBridge.registeredHover.add(langId);
+            }
+
+            if (!languageBridge.registeredSymbols.has(langId) && monaco.languages.registerDocumentSymbolProvider) {
+              monaco.languages.registerDocumentSymbolProvider(langId, {
+                provideDocumentSymbols: function (m, token) {
+                  try {
+                    var ctx = _currentLanguageContext();
+                    if (!ctx || !m || !m.uri || String(m.uri.toString()) !== String(ctx.uri)) return [];
+                    return _callVscodeApiGuarded(
+                      'symbols',
+                      'vscode.documentSymbols',
+                      {
+                        uri: ctx.uri,
+                        path: ctx.path,
+                        timeoutMs: 6000,
+                      },
+                      ctx,
+                      { timeoutMs: 6500, cancelToken: token },
+                    ).then(function (out) {
+                      if (!out || !out.ok || !out.result || out.result.ok === false) return [];
+                      var payload = out.result.result || [];
+                      return _normalizeDocumentSymbols(payload);
+                    });
+                  } catch (_) {
+                    return [];
+                  }
+                },
+              });
+              languageBridge.registeredSymbols.add(langId);
+            }
+          });
+        } catch (_) {}
+      }).catch(function () {});
     } catch (_) {}
   }
 
@@ -1559,12 +1903,34 @@
     if (vscodeApiConnecting) return vscodeApiConnecting;
 
     vscodeApiConnecting = (async function () {
-      var resp = await fetch('/api/app/file_editor_cm6/vscode_api/discover', { cache: 'no-store' });
+      // 1) Start the service explicitly (separate endpoint), then 2) discover WS url.
+      // This avoids racy "discover starts the service" behavior.
+      var startResp = await fetch('/api/app/file_editor_cm6/vscode_api/start', { cache: 'no-store' });
+      var startJson = null;
+      try { startJson = await startResp.json(); } catch (_) {}
+      if (!startResp.ok || (startJson && startJson.ok === false)) {
+        var startMsg = (startJson && (startJson.error || startJson.detail)) ? (startJson.error || startJson.detail) : ('HTTP ' + startResp.status);
+        throw new Error('vscode_api start failed: ' + startMsg);
+      }
+
+      // Discover can still briefly 503 while the shell proxy route is wiring up; retry lightly.
       var json = null;
-      try { json = await resp.json(); } catch (_) {}
-      if (!resp.ok || (json && json.ok === false)) {
-        var msg = (json && (json.error || json.detail)) ? (json.error || json.detail) : ('HTTP ' + resp.status);
-        throw new Error(msg);
+      var resp = null;
+      for (var attempt = 0; attempt < 25; attempt++) {
+        resp = await fetch('/api/app/file_editor_cm6/vscode_api/discover', { cache: 'no-store' });
+        json = null;
+        try { json = await resp.json(); } catch (_) {}
+        if (resp.ok && !(json && json.ok === false)) break;
+        if (resp.status === 503) {
+          await new Promise(function (r) { setTimeout(r, 120); });
+          continue;
+        }
+        var msg0 = (json && (json.error || json.detail)) ? (json.error || json.detail) : ('HTTP ' + resp.status);
+        throw new Error(msg0);
+      }
+      if (!resp || !resp.ok || (json && json.ok === false)) {
+        var msg = (json && (json.error || json.detail)) ? (json.error || json.detail) : (resp ? ('HTTP ' + resp.status) : 'unknown');
+        throw new Error('vscode_api discover failed: ' + msg);
       }
       var wsPath = null;
       try { wsPath = (json && json.data && json.data.ws_url) ? json.data.ws_url : (json && json.ws_url ? json.ws_url : null); } catch (_) {}
@@ -1578,6 +1944,12 @@
       // Register notification handlers.
       try {
         vscodeApiHandlers.set('textDocument/publishDiagnostics', _applyLspDiagnostics);
+        vscodeApiHandlers.set('te2.event', function (params) {
+          try {
+            if (!params || typeof params !== 'object') return;
+            if (params.type === 'diagnostics/update') _applyDiagnosticsUpdate(params);
+          } catch (_) {}
+        });
       } catch (_) {}
 
       ws.onmessage = function (ev) {
@@ -1629,17 +2001,21 @@
     return vscodeApiConnecting;
   }
 
-  async function vscodeApiCall(method, params) {
+  async function vscodeApiCall(method, params, opts) {
     var ws = await ensureVscodeApiWs();
     var id = vscodeApiNextId++;
     var payload = { jsonrpc: '2.0', id: id, method: String(method || ''), params: params || {} };
+    var timeoutMs = 12000;
+    try {
+      if (opts && Number.isFinite(Number(opts.timeoutMs))) timeoutMs = Math.max(250, Number(opts.timeoutMs));
+    } catch (_) {}
     var p = new Promise(function (resolve, reject) {
       vscodeApiPending.set(id, { resolve: resolve, reject: reject });
       setTimeout(function () {
         if (!vscodeApiPending.has(id)) return;
         vscodeApiPending.delete(id);
         reject(new Error('vscode_api timeout: ' + method));
-      }, 12000);
+      }, timeoutMs);
     });
     ws.send(JSON.stringify(payload));
     return p;
@@ -1778,6 +2154,7 @@
       }
 
       vscodeLanguagesInstalled = true;
+      try { installVscodeApiLanguageBridgeProviders(); } catch (_) {}
       console.log('[VSIX][Languages] installed', langs.length, 'ext=', vscodeLanguageByExtension.size, 'files=', vscodeLanguageByFilename.size);
       return true;
     } catch (e) {
@@ -2328,6 +2705,7 @@
       if (extra) debugParts.extra = extra;
       if (debugParts.git) msg += ' ' + debugParts.git;
       if (debugParts.draft) msg += ' ' + debugParts.draft;
+      if (debugParts.diag) msg += ' ' + debugParts.diag;
       if (debugParts.extra) msg += ' ' + debugParts.extra;
       dbg.textContent = msg;
     } catch (_) {}
@@ -2340,6 +2718,11 @@
 
   function setDebugDraft(s) {
     debugParts.draft = s || null;
+    updateDebug();
+  }
+
+  function setDebugDiag(s) {
+    debugParts.diag = s || null;
     updateDebug();
   }
 
@@ -2935,6 +3318,20 @@
               }
               updateDebug('ws=ssot');
               requestGitBaselines();
+
+              // IMPORTANT: SSOT restore does not currently emit `editor:open`.
+              // Trigger the workbench language sidecar anyway so code-server can
+              // activate extensions and register providers for the active file.
+              try {
+                vscodeApiCall(
+                  'vscode.openFile',
+                  { path: currentPath, languageId: lang, uri: (model && model.uri) ? String(model.uri.toString()) : '' },
+                  { timeoutMs: 8000 }
+                ).then(function () {}).catch(function () {});
+              } catch (_) {}
+
+              // If diagnostics arrived early (before model/currentPath), apply from cache now.
+              try { _applyCachedDiagnosticsForActive(); } catch (_) {}
             });
           } else {
             updateDebug('ws=ssot-empty');
@@ -2985,6 +3382,15 @@
             }
             applyLineNumberSizing();
             ensureTouchSelection('open');
+            // Notify the language sidecar so extension activation + provider registration can happen.
+            // This is intentionally best-effort and must not block the editor UI.
+            try {
+              vscodeApiCall('vscode.openFile', { path: currentPath, languageId: lang, uri: (model && model.uri) ? String(model.uri.toString()) : '' }, { timeoutMs: 8000 })
+                .then(function () {})
+                .catch(function () {});
+            } catch (_) {}
+            // Apply cached diagnostics for this file immediately after open/model swap.
+            try { _applyCachedDiagnosticsForActive(); } catch (_) {}
             // Optional open+jump payload (used by agent drawer + explorer + go-to-line).
             try {
               if (payload.line != null) {
@@ -3383,6 +3789,7 @@
 
       // Initialize editor strictly from SSOT.
       await ensureEditorWithPrefs();
+      try { installVscodeApiLanguageBridgeProviders(); } catch (_) {}
       if (pending) applyContent(pending);
 
       try {

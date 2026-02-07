@@ -1,6 +1,7 @@
 import hashlib
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from framework_shells import get_manager
 from framework_shells.orchestrator import Orchestrator
@@ -8,8 +9,9 @@ from framework_shells.record import ShellRecord
 
 APP_ID = "file_editor_cm6"
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
-SHELLSPEC_REF = "code_server.yaml#code-server"
-CODE_SERVER_FIXED_PORT = 18180
+SHELLSPEC_REF = "workbench_adapter.yaml#workbench-adapter"
+
+WORKBENCH_ADAPTER_FIXED_PORT = 18181
 
 _active_shell_id: Optional[str] = None
 
@@ -20,16 +22,16 @@ def _project_hash(project_root: str) -> str:
 
 def _label() -> str:
     # Global instance (single active project invariant is enforced in TE2).
-    return f"code_server:{APP_ID}:global"
+    return f"workbench_adapter:{APP_ID}:global"
 
 
 def _expected_port() -> str:
-    return str(CODE_SERVER_FIXED_PORT)
+    return str(WORKBENCH_ADAPTER_FIXED_PORT)
 
 
 def _matches_expected_port(record: ShellRecord) -> bool:
     env = record.env_overrides or {}
-    return str(env.get("TE_CODE_SERVER_PORT") or "").strip() == _expected_port()
+    return str(env.get("TE2_ADAPTER_PORT") or "").strip() == _expected_port()
 
 
 async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
@@ -40,12 +42,11 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
     return None
 
 
-async def ensure_code_server_shell(project_root: str) -> ShellRecord:
-    """Ensure code-server is running as a framework shell.
+async def ensure_workbench_adapter_shell(project_root: str, code_server_http: str) -> ShellRecord:
+    """Ensure the Node workbench adapter framework shell is running.
 
-    This is the backend "extension host" runtime we will integrate with TE2.
-
-    For now we start a single global instance (one active project at a time).
+    This is the browser-facing control plane for read-only language intelligence:
+    openFile → (hover/symbols/diagnostics) via code-server remote extension host.
     """
 
     global _active_shell_id
@@ -70,25 +71,30 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
             return existing
         await mgr.terminate_shell(existing.id, force=True)
 
-    repo_root = Path(project_root).resolve(strict=False)
-
-    # Use the user's existing code-server profile so extensions/settings match
-    # what the user already runs manually.
-    data_dir = Path.home() / ".config" / "code-server"
+    # IMPORTANT: adapter command path is relative to the TE2 repo, not the user's project.
+    repo_root = Path(__file__).resolve().parents[3]
+    project_root_abs = Path(project_root).resolve(strict=False)
+    adapter_entry = (repo_root / "app" / "apps" / "file_editor_cm6" / "workbench_protocol_proxy" / "node_workbench_adapter" / "server.mjs").resolve(strict=False)
+    u = urlparse(str(code_server_http))
+    code_server_port = u.port or (443 if u.scheme == "https" else 80)
+    remote_authority = f"localhost:{code_server_port}"
 
     shell = await orch.start_from_ref(
         SHELLSPEC_REF,
         base_dir=SHELLSPEC_DIR,
         ctx={
             "APP_ID": APP_ID,
-            "PROJECT_ROOT": str(repo_root),
-            "PROJECT_HASH": _project_hash(str(repo_root)),
+            "REPO_ROOT": str(repo_root),
+            "PROJECT_ROOT": str(project_root_abs),
+            "PROJECT_HASH": _project_hash(str(project_root_abs)),
             "INSTANCE_ID": "primary",
-            "CODE_SERVER_DATA_DIR": str(data_dir),
-            "CODE_SERVER_PORT": str(CODE_SERVER_FIXED_PORT),
+            "WORKBENCH_ADAPTER_PORT": str(WORKBENCH_ADAPTER_FIXED_PORT),
+            "WORKBENCH_ADAPTER_ENTRY": str(adapter_entry),
+            "CODE_SERVER_HTTP": str(code_server_http),
+            "REMOTE_AUTHORITY": remote_authority,
         },
         label=label,
-        record_spec_id=f"service:{APP_ID}:code_server",
+        record_spec_id=f"service:{APP_ID}:workbench_adapter",
         wait_ready=True,
     )
 

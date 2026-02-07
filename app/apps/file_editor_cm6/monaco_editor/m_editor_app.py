@@ -123,6 +123,23 @@ export default href;
 
     @fastapi_app.get(f"{mount_path}/nc", include_in_schema=False)
     async def _cm6_fasthtml_monaco_iframe(app_id: str | None = None):
+        # Best-effort: start the backend shells early so the iframe can immediately
+        # use the language sidecar without an extra "warm up" round-trip.
+        try:
+            from ..stores import _history_store
+            from ..explorer_helper import get_project_root
+            from ..code_server_shell_manager import ensure_code_server_shell
+            from ..vscode_api_shell_manager import ensure_vscode_api_shell
+
+            project_root = _history_store.get_active_project() or str(get_project_root())
+            if project_root:
+                await ensure_code_server_shell(project_root)
+                # vscode_api is used by the iframe for grammars/themes/LSP and now sidecar bridging.
+                await ensure_vscode_api_shell(project_root)
+        except Exception:
+            # Do not block editor load on shell orchestration failures.
+            pass
+
         if not esm_ok or not lang_ok:
             missing = []
             if not esm_ok:

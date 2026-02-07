@@ -64,19 +64,20 @@ Connection/runtime:
 
 3. `te2.status`
 - Result: active ws/session/provider state snapshot.
+- Compatibility alias: `adapter.status` (deprecated name; same payload).
 
 Document lifecycle:
 1. `vscode.openFile`
-- Params: canonical path + authority/context.
+- Params: `path` or `uri`, plus optional `authority`, `languageId`.
 - Result: `{ok:true, uri, ...}`
 
 Language features:
 1. `vscode.hover`
-- Params: `uri`, `lineNumber`, `column` (plus optional timeout/cancel hints).
+- Params: `uri` or `path`, `lineNumber`, `column` (plus optional `authority`, `timeoutMs`, `providerHandle`).
 - Result: normalized hover payload.
 
 2. `vscode.documentSymbols`
-- Params: `uri` (or path + authority).
+- Params: `uri` or `path` (plus optional `authority`, `timeoutMs`, `providerHandle`).
 - Result: normalized symbol tree/list.
 
 3. `vscode.completion` (targeted)
@@ -86,6 +87,7 @@ Language features:
 Event stream:
 1. diagnostics update events
 - `te2.event` -> `diagnostics/update` normalized payload.
+- Shape: `{ type: "diagnostics/update", owner, items: [{ uri, markers[] }] }`
 
 ## Normalization rules
 
