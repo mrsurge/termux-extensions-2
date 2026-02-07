@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 import anyio
 import socketio
+from urllib.parse import parse_qs
 
 from ..draft_diff_helper import compute_draft_diff
 from ..core_read import emit_diff_changed, init_watcher, push_save_ack
@@ -59,6 +60,25 @@ def _is_under_project(project: str, abs_path: str) -> bool:
         return str(p).startswith(str(root) + os.sep)
     except Exception:
         return False
+
+
+def _role_from_environ(environ: dict) -> str:
+    """Best-effort role extraction from Socket.IO connect environ."""
+    try:
+        qs = environ.get("QUERY_STRING")
+        if not qs:
+            scope = environ.get("asgi.scope")
+            if isinstance(scope, dict):
+                qs_bytes = scope.get("query_string")
+                if isinstance(qs_bytes, (bytes, bytearray)):
+                    qs = qs_bytes.decode("utf-8", errors="ignore")
+        if not qs:
+            return ""
+        params = parse_qs(qs, keep_blank_values=True)
+        role = params.get("role", [""])[0]
+        return str(role or "")
+    except Exception:
+        return ""
 
 
 def _read_file_payload(project: str, abs_path: str) -> Dict[str, Any]:
@@ -186,6 +206,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         project = _active_project()
         session_state = _history_store.get_session_state()
         prefs = _preferences_store.get_preferences(project) if project else {}
+        role = _role_from_environ(environ)
 
         current_path = session_state.get("currentPath")
         if not current_path and project:
@@ -198,7 +219,9 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             "currentPath": current_path,
         }
 
-        if project and current_path:
+        # Avoid sending large file content to the host shell on initial connect.
+        # The host only needs the path to show the filename; the iframe loads content.
+        if role != "host" and project and current_path:
             abs_path = _normalize_abs_path(str(current_path))
             if abs_path and _is_under_project(project, abs_path):
                 snapshot["file"] = _read_file_payload(project, abs_path)

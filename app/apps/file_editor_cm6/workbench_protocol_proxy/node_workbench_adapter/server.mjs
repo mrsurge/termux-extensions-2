@@ -395,6 +395,7 @@ const wb = new WorkbenchClient({
 
     if (safeEv?.type === "diagnostics/changeMany" && Array.isArray(safeEv?.args)) {
       const norm = diagnosticsFromChangeMany(safeEv.args);
+      console.log(`[server] diagnostics/changeMany -> norm=${norm ? `owner=${norm.owner} items=${norm.items.length} markerCounts=[${norm.items.map(i => (i.markers||[]).length).join(',')}]` : 'null'}`);
       if (norm) {
         emitTe2Event({
           type: "diagnostics/update",

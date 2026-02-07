@@ -1356,6 +1356,14 @@ export class WorkbenchClient {
 
           // Diagnostics.
           if (msg.method === "$changeMany") {
+            const argsSummary = Array.isArray(msg.args) ? `args.length=${msg.args.length}` : `args=${typeof msg.args}`;
+            const pairs = Array.isArray(msg.args) && Array.isArray(msg.args[1]) ? msg.args[1] : [];
+            const markerCounts = pairs.map(p => Array.isArray(p) && Array.isArray(p[1]) ? p[1].length : '?');
+            console.log(`[wb_client] $changeMany owner=${msg.args?.[0]} pairs=${pairs.length} markerCounts=[${markerCounts.join(',')}]`);
+            if (pairs.length > 0 && Array.isArray(pairs[0]) && pairs[0].length >= 2) {
+              const sampleMarkers = Array.isArray(pairs[0][1]) ? pairs[0][1].slice(0, 1) : [];
+              if (sampleMarkers.length) console.log(`[wb_client] $changeMany sample marker keys:`, Object.keys(sampleMarkers[0]));
+            }
             this.onEvent({ type: "diagnostics/changeMany", ts_ms: Date.now(), args: msg.args });
           }
 

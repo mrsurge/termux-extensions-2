@@ -10,6 +10,8 @@ sys.path.insert(0, str(vendor_dir))
 
 import os
 import json
+import time
+import hashlib
 from pathlib import Path
 import shutil
 from typing import Optional
@@ -70,6 +72,51 @@ IGNORE_PATTERNS = [
     '.pytest_cache', '.mypy_cache', '.tox', 'dist', 'build',
     '*.egg-info', '.DS_Store'
 ]
+
+# Workbench adapter baton (startup handshake)
+_workbench_baton = {
+    "token": None,
+    "project_root": None,
+    "created_ms": 0.0,
+    "last_seen_ms": 0.0,
+}
+_WORKBENCH_BATON_TTL_MS = 15 * 60 * 1000
+
+
+def _now_ms() -> float:
+    return time.time() * 1000.0
+
+
+def _get_or_create_workbench_baton(project_root: str) -> str:
+    token = _workbench_baton.get("token")
+    created_ms = float(_workbench_baton.get("created_ms") or 0.0)
+    if token and _workbench_baton.get("project_root") == project_root:
+        if (_now_ms() - created_ms) < _WORKBENCH_BATON_TTL_MS:
+            return str(token)
+    token = hashlib.sha1(f"{project_root}:{_now_ms()}".encode("utf-8")).hexdigest()[:16]
+    _workbench_baton.update(
+        {
+            "token": token,
+            "project_root": project_root,
+            "created_ms": _now_ms(),
+            "last_seen_ms": _now_ms(),
+        }
+    )
+    return str(token)
+
+
+def _validate_workbench_baton(token: str, project_root: str) -> bool:
+    if not token:
+        return False
+    if _workbench_baton.get("project_root") != project_root:
+        return False
+    if _workbench_baton.get("token") != token:
+        return False
+    created_ms = float(_workbench_baton.get("created_ms") or 0.0)
+    if (_now_ms() - created_ms) > _WORKBENCH_BATON_TTL_MS:
+        return False
+    _workbench_baton["last_seen_ms"] = _now_ms()
+    return True
 
 CHANGE_RESULT_LIMIT = 40
 STATUS_TEXT_MAP = {
@@ -669,6 +716,119 @@ async def workbench_adapter_discover():
     }
 
 
+@file_editor_cm6_bp.get("/workbench_adapter/start")
+async def workbench_adapter_start():
+    """Start/adopt the workbench adapter and return a baton token."""
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    try:
+        cs = await ensure_code_server_shell(project_root)
+    except Exception as exc:
+        print(f"[code_server][start] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    cs_env = (cs.env_overrides or {})
+    project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
+    port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
+    try:
+        cs_port = int(str(port_s))
+    except Exception:
+        cs_port = 0
+    code_server_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
+
+    try:
+        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
+    except Exception as exc:
+        print(f"[workbench_adapter][start] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    token = _get_or_create_workbench_baton(project_root)
+    port_s = (record.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
+    try:
+        port = int(str(port_s))
+    except Exception:
+        port = 0
+
+    return {
+        "ok": True,
+        "data": {
+            "token": token,
+            "state": "starting",
+            "project_root": project_root,
+            "port": port,
+            "shell_id": record.id,
+            "cmd_url": "/api/app/file_editor_cm6/workbench_adapter/cmd",
+        },
+    }
+
+
+@file_editor_cm6_bp.get("/workbench_adapter/status")
+async def workbench_adapter_status(token: str = ""):
+    """Return workbench adapter readiness state (requires baton token)."""
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    if not _validate_workbench_baton(token, project_root):
+        return JSONResponse({"ok": False, "error": "Invalid or expired baton token"}, status_code=403)
+
+    # Ensure adapter shell exists (but don't force reconnect).
+    try:
+        cs = await ensure_code_server_shell(project_root)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=503)
+
+    cs_env = (cs.env_overrides or {})
+    project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
+    port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
+    try:
+        cs_port = int(str(port_s))
+    except Exception:
+        cs_port = 0
+    code_server_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
+
+    try:
+        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=503)
+
+    port_s = (record.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
+    try:
+        port = int(str(port_s))
+    except Exception:
+        port = 0
+    if not port:
+        return {"ok": True, "state": "starting", "session": {"connected": False, "ready": False}}
+
+    # Probe adapter status via JSON-RPC.
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{port}/cmd",
+                json={"jsonrpc": "2.0", "id": 1, "method": "te2.status", "params": {}},
+            )
+        payload = resp.json() if resp.content else {}
+        session = (payload.get("result") or {}).get("session") or {}
+        connected = bool(session.get("connected"))
+        ready = bool(session.get("ready"))
+        state = "ready" if ready else ("connected" if connected else "starting")
+        return {"ok": True, "state": state, "session": session}
+    except Exception:
+        return {"ok": True, "state": "starting", "session": {"connected": False, "ready": False}}
+
+
 @file_editor_cm6_bp.post("/workbench_adapter/cmd")
 async def workbench_adapter_cmd(request: Request):
     """Same-origin JSON-RPC proxy to the Node workbench adapter /cmd endpoint."""
@@ -682,6 +842,10 @@ async def workbench_adapter_cmd(request: Request):
     cs = await ensure_code_server_shell(project_root)
     cs_env = (cs.env_overrides or {})
     project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
+
+    token = request.headers.get("x-te2-baton") or request.query_params.get("token") or ""
+    if not _validate_workbench_baton(token, project_root):
+        return JSONResponse({"ok": False, "error": "Invalid or expired baton token"}, status_code=403)
     cs_port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
     try:
         cs_port = int(str(cs_port_s))

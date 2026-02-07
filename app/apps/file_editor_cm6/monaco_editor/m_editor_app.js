@@ -803,7 +803,14 @@
 
         // Apply to active model if it matches.
         if (model && model.uri && activePath && itemPath === activePath) {
-          try { monaco.editor.setModelMarkers(model, 'vscode_api', outMarkers); } catch (_) {}
+          try {
+            console.log('[vscode_api] setModelMarkers count=' + outMarkers.length + ' sevs=[' + outMarkers.map(function(m){ return m.severity; }).join(',') + '] lines=[' + outMarkers.map(function(m){ return m.startLineNumber; }).join(',') + ']');
+            if (outMarkers.length > 0) console.log('[vscode_api] marker[0]:', JSON.stringify(outMarkers[0]));
+            monaco.editor.setModelMarkers(model, 'vscode_api', outMarkers);
+            // Verify markers actually stuck
+            var verify = monaco.editor.getModelMarkers({ resource: model.uri });
+            console.log('[vscode_api] verify getModelMarkers count=' + (verify ? verify.length : 'null'));
+          } catch (ex) { console.error('[vscode_api] setModelMarkers THREW:', ex); }
           didApply = true;
           _diagState.apply += 1;
         } else if (model && model.uri && activePath && itemPath !== activePath) {
@@ -876,6 +883,10 @@
         return '';
       }
       var s = String(raw);
+      // Plain absolute paths are already normalized (no scheme).
+      if (s[0] === '/' || /^[A-Za-z]:[\\/]/.test(s)) {
+        return s;
+      }
       // Fast path: avoid URL() differences across mobile/webview implementations.
       if (s.indexOf('file://') === 0) {
         return decodeURIComponent(s.slice('file://'.length));
@@ -2488,9 +2499,41 @@
       // If Monaco rebuilt the editor DOM (common on language switches), re-install.
       var hasUI = !!dom.querySelector('.monaco-editor-touch-selections');
       if (!hasUI) {
-        window['monaco-touch-selection'].editorTouchSelectionHelp(editor);
+        window['monaco-touch-selection'].editorTouchSelectionHelp(editor, {
+          tools: function (ctx) {
+            try {
+              var defaultTools = ctx && ctx.defaultTools ? ctx.defaultTools : null;
+              if (!defaultTools || typeof defaultTools.set !== 'function') return defaultTools && defaultTools.values ? defaultTools.values() : undefined;
+              if (!defaultTools.has('hover')) {
+                defaultTools.set('hover', {
+                  name: 'hover',
+                  innerHTML: 'Hover',
+                  action: async function () {
+                    try { if (ctx && ctx.closeMenu) ctx.closeMenu(); } catch (_) {}
+                    try {
+                      if (!editor) return true;
+                      var sel = editor.getSelection ? editor.getSelection() : null;
+                      if (sel && sel.getStartPosition) {
+                        try { editor.setPosition(sel.getStartPosition()); } catch (_) {}
+                      }
+                      var action = editor.getAction ? editor.getAction('editor.action.showHover') : null;
+                      if (action && action.run) action.run();
+                      else editor.trigger('touch', 'editor.action.showHover', null);
+                      updateDebug('touch=hover:menu');
+                    } catch (_) {}
+                    return true;
+                  },
+                });
+              }
+              return defaultTools.values();
+            } catch (_) {
+              return ctx && ctx.defaultTools && ctx.defaultTools.values ? ctx.defaultTools.values() : undefined;
+            }
+          },
+        });
         updateDebug('touch=reinit' + (reason ? ':' + reason : ''));
       }
+      // Long-press hover path disabled (use touch menu Hover instead).
     } catch (e) {
       console.warn('[MonacoTouchSelection] ensure failed', e);
     }
@@ -3331,7 +3374,16 @@
       editorSocket.on('editor:diagnostics', function(payload) {
         try {
           if (!payload || typeof payload !== 'object') return;
-          console.log('[editor:diagnostics] rx', payload.type, 'path=' + (payload.path || '?'), 'markers=' + ((payload.markers || []).length), 'currentPath=' + currentPath);
+          var modelUri = (model && model.uri) ? String(model.uri.toString()) : '';
+          var activePath = currentPath ? String(currentPath) : _absPathFromVscodeUri(modelUri);
+          var payloadPath = payload.path ? String(payload.path) : '';
+          console.log('[editor:diagnostics] rx', payload.type,
+            'path=' + (payloadPath || '?'),
+            'markers=' + ((payload.markers || []).length),
+            'currentPath=' + currentPath,
+            'modelUri=' + modelUri,
+            'activePath=' + activePath
+          );
           if (payload.type === 'diagnostics/update') {
             // Convert server-side bridge format to the format _applyDiagnosticsUpdate expects.
             var items = [{ uri: 'file://' + (payload.path || ''), markers: payload.markers || [] }];

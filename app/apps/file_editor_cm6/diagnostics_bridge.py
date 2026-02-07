@@ -32,6 +32,8 @@ def _abs_path_from_vscode_uri(raw: Any) -> str:
     if not raw:
         return ""
     s = str(raw)
+    if s.startswith("/") or (len(s) > 2 and s[1:3] == ":/"):
+        return s
     if s.startswith("file://"):
         from urllib.parse import unquote
         return unquote(s[len("file://"):])

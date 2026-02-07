@@ -1215,6 +1215,59 @@ let vscodeApiWs = null;
 let vscodeApiNextId = 1;
 const vscodeApiPending = new Map();
 let vscodeApiConnecting = null;
+const _sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function ensureWorkbenchAdapterReady() {
+  try {
+    if (!window.__feLspSpinnerUi) {
+      window.__feLspSpinnerUi = {
+        lspShow: false,
+        lspTitle: '',
+        busyShow: false,
+        busyTitle: '',
+        busyLanguageId: '',
+        busyActivity: '',
+      };
+    }
+    const ui = window.__feLspSpinnerUi;
+    ui.busyShow = true;
+    ui.busyTitle = 'Starting workbench adapter...';
+    _feUpdateLspSpinner();
+
+    const startResp = await fetch('/api/app/file_editor_cm6/workbench_adapter/start', { cache: 'no-store' });
+    const startJson = await startResp.json();
+    if (!startResp.ok || startJson?.ok === false) {
+      throw new Error(startJson?.error || startJson?.detail || `start failed HTTP ${startResp.status}`);
+    }
+    const token = startJson?.data?.token || '';
+    if (!token) throw new Error('start missing token');
+
+    const deadline = Date.now() + 20000;
+    let lastState = 'starting';
+    while (Date.now() < deadline) {
+      try {
+        const stResp = await fetch(`/api/app/file_editor_cm6/workbench_adapter/status?token=${encodeURIComponent(token)}`, { cache: 'no-store' });
+        const stJson = await stResp.json();
+        if (stResp.ok && stJson?.ok !== false) {
+          lastState = stJson?.state || lastState;
+          if (lastState === 'ready' || lastState === 'connected') break;
+        }
+      } catch (_) {}
+      ui.busyTitle = 'Waiting for workbench adapter...';
+      _feUpdateLspSpinner();
+      await _sleepMs(250);
+    }
+  } catch (e) {
+    console.warn('[workbench_adapter] readiness failed', e);
+  } finally {
+    try {
+      if (window.__feLspSpinnerUi) {
+        window.__feLspSpinnerUi.busyShow = false;
+        _feUpdateLspSpinner();
+      }
+    } catch (_) {}
+  }
+}
 
 async function ensureVscodeApiWs() {
   if (vscodeApiWs && vscodeApiWs.readyState === WebSocket.OPEN) return vscodeApiWs;
@@ -4342,6 +4395,13 @@ async function main() {
     connectEditorSocket();
   } catch (e) {
     console.warn('Failed to connect editor Socket.IO channel:', e);
+  }
+
+  // Deterministic workbench adapter startup (prevents early 502/500).
+  try {
+    await ensureWorkbenchAdapterReady();
+  } catch (e) {
+    console.warn('Workbench adapter readiness failed:', e);
   }
 
   branchMenuHandle = initBranchMenu();
