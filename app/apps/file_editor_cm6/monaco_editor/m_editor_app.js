@@ -810,6 +810,17 @@
             // Verify markers actually stuck
             var verify = monaco.editor.getModelMarkers({ resource: model.uri });
             console.log('[vscode_api] verify getModelMarkers count=' + (verify ? verify.length : 'null'));
+            // Emit marker counts to host for toolbar badges.
+            try {
+              var errors = 0, warnings = 0, hints = 0;
+              for (var k = 0; k < outMarkers.length; k++) {
+                var s = outMarkers[k].severity;
+                if (s === monaco.MarkerSeverity.Error) errors++;
+                else if (s === monaco.MarkerSeverity.Warning) warnings++;
+                else hints++;
+              }
+              emitToHost('editor_diagnostics_counts', { errors: errors, warnings: warnings, hints: hints, total: outMarkers.length, path: itemPath });
+            } catch (_) {}
           } catch (ex) { console.error('[vscode_api] setModelMarkers THREW:', ex); }
           didApply = true;
           _diagState.apply += 1;

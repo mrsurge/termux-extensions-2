@@ -648,6 +648,8 @@ async function handleJsonRpc(reqObj) {
     });
     buildStatusResult();
     logStatus("adapter_connected");
+    // Broadcast adapter readiness via WS so the diagnostics bridge can relay it.
+    emitTe2Event({ type: "adapter/ready", ts_ms: nowMs(), session: state.session });
     return { jsonrpc: "2.0", id, result };
   }
 

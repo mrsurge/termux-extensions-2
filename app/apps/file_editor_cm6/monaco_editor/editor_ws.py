@@ -353,6 +353,12 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload["source_client"] = sid
         await self.emit("editor:ready", payload, room="file_editor_cm6")
 
+    async def on_editor_diagnostics_counts(self, sid, data):
+        payload = data if isinstance(data, dict) else {}
+        payload = dict(payload)
+        payload["source_client"] = sid
+        await self.emit("editor:diagnostics_counts", payload, room="file_editor_cm6")
+
     async def on_editor_issues_dump_request(self, sid, data):
         payload = data or {}
         if not isinstance(payload, dict):

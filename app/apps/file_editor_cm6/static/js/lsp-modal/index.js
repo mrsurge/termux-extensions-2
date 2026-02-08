@@ -397,8 +397,12 @@ export function initLspModal(ctx) {
 
       const recomputeSpinner = () => {
         const anyBusy = busyUi.tasks && typeof busyUi.tasks.size === 'number' ? busyUi.tasks.size > 0 : false;
+        // Respect busyActivity ownership — don't stomp diagnostics or workbench_adapter spinner.
+        const currentOwner = feSpinnerUi.busyActivity || '';
+        if (currentOwner && currentOwner !== 'cm6_lsp_busy') return;
         feSpinnerUi.busyShow = anyBusy;
-        feSpinnerUi.busyTitle = anyBusy ? (busyUi.lastHeadline || feSpinnerUi.busyTitle) : '';
+        feSpinnerUi.busyTitle = anyBusy ? (busyUi.lastHeadline || '') : '';
+        feSpinnerUi.busyActivity = anyBusy ? 'cm6_lsp_busy' : '';
         if (typeof updateLspSpinner === 'function') updateLspSpinner();
       };
 

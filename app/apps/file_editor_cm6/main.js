@@ -776,9 +776,18 @@ function connectEditorSocket() {
             window.__feDiagBaton = null;
             if (window.__feLspSpinnerUi) {
               window.__feLspSpinnerUi.busyShow = false;
-              if (window.__feLspSpinnerUi.busyActivity === 'diagnostics') window.__feLspSpinnerUi.busyActivity = '';
+              window.__feLspSpinnerUi.busyActivity = '';
               window.__feLspSpinnerUi.busyTitle = '';
             }
+            // Force-hide: bypass anti-flicker.
+            try {
+              if (window.__feLspSpinnerState && window.__feLspSpinnerState.hideTimer) {
+                clearTimeout(window.__feLspSpinnerState.hideTimer);
+                window.__feLspSpinnerState.hideTimer = null;
+              }
+              var _sp = document.getElementById('fe-lsp-spinner');
+              if (_sp) { _sp.style.display = 'none'; _sp.title = ''; }
+            } catch (_) {}
             _feUpdateLspSpinner();
           }, 45000);
         } catch (_) {}
@@ -805,12 +814,56 @@ function connectEditorSocket() {
             }
             if (window.__feLspSpinnerUi) {
               window.__feLspSpinnerUi.busyShow = false;
-              if (window.__feLspSpinnerUi.busyActivity === 'diagnostics') window.__feLspSpinnerUi.busyActivity = '';
+              window.__feLspSpinnerUi.busyActivity = '';
               window.__feLspSpinnerUi.busyTitle = '';
             }
             console.log(_feTs(), '[spinner] STOP request_id=' + (readyRequestId || '-') + ' path=' + readyPath + ' reason=diagnostics_ready');
+            // Force-hide: bypass anti-flicker to avoid race where delayed hide gets cancelled.
+            try {
+              if (window.__feLspSpinnerState && window.__feLspSpinnerState.hideTimer) {
+                clearTimeout(window.__feLspSpinnerState.hideTimer);
+                window.__feLspSpinnerState.hideTimer = null;
+              }
+              var _sp = document.getElementById('fe-lsp-spinner');
+              if (_sp) { _sp.style.display = 'none'; _sp.title = ''; }
+            } catch (_) {}
             _feUpdateLspSpinner();
           }
+        } catch (_) {}
+      });
+
+      // Diagnostics counts from iframe → update toolbar badges.
+      editorSocket.on('editor:diagnostics_counts', (payload) => {
+        try {
+          const p = payload && typeof payload === 'object' ? payload : {};
+          const errors = Number(p.errors || 0);
+          const warnings = Number(p.warnings || 0);
+          const hints = Number(p.hints || 0);
+          const total = errors + warnings + hints;
+          const el = document.getElementById('fe-issues-badges');
+          if (!el) return;
+          el.innerHTML = '';
+          if (errors > 0) {
+            const d = document.createElement('span');
+            d.className = 'fe-issues-dot error';
+            d.textContent = String(errors);
+            d.title = errors + ' error' + (errors !== 1 ? 's' : '');
+            el.appendChild(d);
+          }
+          if (warnings > 0) {
+            const d = document.createElement('span');
+            d.className = 'fe-issues-dot warning';
+            d.textContent = String(warnings);
+            d.title = warnings + ' warning' + (warnings !== 1 ? 's' : '');
+            el.appendChild(d);
+          }
+          // Enable/disable issues nav buttons.
+          const toggleBtn = document.getElementById('fe-issues-toggle');
+          const prevBtn = document.getElementById('fe-issues-prev');
+          const nextBtn = document.getElementById('fe-issues-next');
+          if (toggleBtn) toggleBtn.disabled = (total === 0);
+          if (prevBtn) prevBtn.disabled = (total === 0);
+          if (nextBtn) nextBtn.disabled = (total === 0);
         } catch (_) {}
       });
     })
@@ -1317,10 +1370,18 @@ let workbenchAdapterConnecting = null;
 let workbenchAdapterReadyOk = false;
 const _sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function _feHostTs() {
+  try {
+    const t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+      ? Math.round(performance.now() * 10) / 10
+      : null;
+    return (t != null ? ('t=' + t + 'ms ') : '') + 'now=' + Date.now();
+  } catch (_) {
+    return 'now=' + Date.now();
+  }
+}
+
 async function ensureWorkbenchAdapterReady() {
-  // Ensure only one readiness loop runs at a time. Multiple concurrent loops were
-  // observed to keep the spinner stuck on "Starting workbench adapter..." even after
-  // diagnostics baton completes.
   try {
     if (workbenchAdapterReadyOk) return;
     if (workbenchAdapterConnecting) return await workbenchAdapterConnecting;
@@ -1339,42 +1400,41 @@ async function ensureWorkbenchAdapterReady() {
           };
         }
         const ui = window.__feLspSpinnerUi;
-        // Spinner ownership: this loop must not fight the diagnostics baton.
         ui.busyShow = true;
         ui.busyActivity = 'workbench_adapter';
-        ui.busyTitle = 'Starting workbench adapter...';
-        try { console.log(_feTs(), '[spinner] START request_id=- path=- reason=workbench_adapter_start'); } catch (_) {}
+        ui.busyTitle = 'Starting workbench adapter…';
+        try { console.log(_feHostTs(), '[spinner] START request_id=- path=- reason=workbench_adapter_start'); } catch (_) {}
         _feUpdateLspSpinner();
 
+        // Fire the start request (one-shot HTTP).
         const startResp = await fetch('/api/app/file_editor_cm6/workbench_adapter/start', { cache: 'no-store' });
         const startJson = await startResp.json();
         if (!startResp.ok || startJson?.ok === false) {
           throw new Error(startJson?.error || startJson?.detail || `start failed HTTP ${startResp.status}`);
         }
-        const token = startJson?.data?.token || '';
-        if (!token) throw new Error('start missing token');
 
-        const deadline = Date.now() + 20000;
-        let lastState = 'starting';
-        while (Date.now() < deadline) {
-          try {
-            const stResp = await fetch(`/api/app/file_editor_cm6/workbench_adapter/status?token=${encodeURIComponent(token)}`, { cache: 'no-store' });
-            const stJson = await stResp.json();
-            if (stResp.ok && stJson?.ok !== false) {
-              lastState = stJson?.state || lastState;
-              if (lastState === 'ready' || lastState === 'connected') {
-                ok = true;
-                break;
+        // Wait for adapter/ready via editor Socket.IO (relayed by diagnostics_bridge).
+        ok = await new Promise((resolve) => {
+          const timeout = setTimeout(() => {
+            resolve(false);
+          }, 30000);
+          const handler = () => {
+            clearTimeout(timeout);
+            resolve(true);
+          };
+          if (editorSocket && editorSocket.connected) {
+            editorSocket.once('editor:adapter_ready', handler);
+          } else {
+            // If socket isn't connected yet, also listen for when it connects.
+            const checkInterval = setInterval(() => {
+              if (editorSocket && editorSocket.connected) {
+                clearInterval(checkInterval);
+                editorSocket.once('editor:adapter_ready', handler);
               }
-            }
-          } catch (_) {}
-          // Don't stomp the diagnostics baton if it currently owns the spinner.
-          if (ui.busyActivity === 'workbench_adapter') {
-            ui.busyTitle = 'Waiting for workbench adapter...';
-            _feUpdateLspSpinner();
+            }, 200);
+            setTimeout(() => clearInterval(checkInterval), 30000);
           }
-          await _sleepMs(250);
-        }
+        });
       } catch (e) {
         console.warn('[workbench_adapter] readiness failed', e);
       } finally {
@@ -1382,12 +1442,21 @@ async function ensureWorkbenchAdapterReady() {
           workbenchAdapterReadyOk = Boolean(ok);
           if (!window.__feLspSpinnerUi) return;
           const ui = window.__feLspSpinnerUi;
-          // Only release spinner if we still own it.
-          if (ui.busyActivity === 'workbench_adapter') {
+          // Always clean up adapter spinner if we own it or nobody else does.
+          const ours = ui.busyActivity === 'workbench_adapter' || ui.busyActivity === '';
+          if (ours) {
             ui.busyShow = false;
             ui.busyTitle = '';
             ui.busyActivity = '';
-            try { console.log(_feTs(), '[spinner] STOP request_id=- path=- reason=workbench_adapter_ready'); } catch (_) {}
+            try { console.log(_feHostTs(), '[spinner] STOP request_id=- path=- reason=workbench_adapter_' + (ok ? 'ready' : 'timeout')); } catch (_) {}
+            try {
+              if (window.__feLspSpinnerState && window.__feLspSpinnerState.hideTimer) {
+                clearTimeout(window.__feLspSpinnerState.hideTimer);
+                window.__feLspSpinnerState.hideTimer = null;
+              }
+              var _sp = document.getElementById('fe-lsp-spinner');
+              if (_sp) { _sp.style.display = 'none'; _sp.title = ''; }
+            } catch (_) {}
             _feUpdateLspSpinner();
           }
         } catch (_) {}
@@ -1397,7 +1466,6 @@ async function ensureWorkbenchAdapterReady() {
 
     return await workbenchAdapterConnecting;
   } finally {
-    // Always release the singleton promise handle once it settles.
     try { workbenchAdapterConnecting = null; } catch (_) {}
   }
 }
@@ -2312,7 +2380,7 @@ function _feUpdateLspSpinner() {
         spinner.style.display = 'inline-block';
         st.shownAtMs = now;
       }
-      spinner.title = title || spinner.title;
+      spinner.title = title || '';
       return;
     }
 
@@ -2325,14 +2393,23 @@ function _feUpdateLspSpinner() {
         try {
           st.hideTimer = null;
           spinner.style.display = 'none';
-          spinner.title = title || spinner.title;
+          // Clear title on hide; otherwise stale titles (e.g. "Starting workbench adapter...")
+          // persist and make debugging impossible.
+          spinner.title = title || '';
         } catch { }
       }, wait);
       return;
     }
 
     spinner.style.display = 'none';
-    spinner.title = title || spinner.title;
+    spinner.title = title || '';
+    try {
+      const ui = window.__feLspSpinnerUi || {};
+      const computed = (typeof getComputedStyle === 'function') ? getComputedStyle(spinner).display : '';
+      if (computed && computed !== 'none') {
+        console.log(_feHostTs(), '[spinner] WARN hide_failed anyShow=0 lspShow=' + (ui.lspShow ? '1' : '0') + ' busyShow=' + (ui.busyShow ? '1' : '0') + ' busyActivity=' + String(ui.busyActivity || '') + ' style=' + String(spinner.style.display || '') + ' computed=' + String(computed || '') + ' title=' + String(spinner.title || ''));
+      }
+    } catch (_) {}
   } catch { }
 }
 
