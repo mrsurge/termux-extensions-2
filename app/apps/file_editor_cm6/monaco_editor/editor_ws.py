@@ -359,6 +359,39 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload["source_client"] = sid
         await self.emit("editor:diagnostics_counts", payload, room="file_editor_cm6")
 
+    async def on_editor_diagnostics_consumer_pending(self, sid, data):
+        """Client (Monaco iframe) announces it is about to open/switch a file but is not ready yet.
+
+        This is used to gate workbench diagnostics forwarding to avoid a race where diagnostics
+        arrive before the Monaco model/marker plumbing is ready.
+        """
+        payload = data if isinstance(data, dict) else {}
+        path = _normalize_abs_path(str(payload.get("path") or "")) or ""
+        request_id = str(payload.get("request_id") or payload.get("requestId") or "")
+        if not path:
+            return
+        try:
+            from ..diagnostics_bridge import set_consumer_pending
+
+            set_consumer_pending(path, request_id)
+        except Exception:
+            pass
+
+    async def on_editor_diagnostics_consumer_ready(self, sid, data):
+        """Client (Monaco iframe) announces it is ready to consume diagnostics for a file."""
+        payload = data if isinstance(data, dict) else {}
+        path = _normalize_abs_path(str(payload.get("path") or "")) or ""
+        request_id = str(payload.get("request_id") or payload.get("requestId") or "")
+        if not path:
+            return
+        try:
+            from ..diagnostics_bridge import set_consumer_ready
+            from .editor_socketio import EDITOR_SIO
+
+            await set_consumer_ready(EDITOR_SIO, path, request_id)
+        except Exception:
+            pass
+
     async def on_editor_issues_dump_request(self, sid, data):
         payload = data or {}
         if not isinstance(payload, dict):

@@ -3174,13 +3174,30 @@
               // Trigger the workbench language sidecar anyway so code-server can
               // activate extensions and register providers for the active file.
               try {
+                var ssotReqId = (f && f.request_id) ? String(f.request_id) : ('diag_' + Date.now() + '_ssot');
+                // Diagnostics consumer gating: tell the server we are about to request diagnostics,
+                // but only consider emitting diagnostics/update once we declare ready for this request.
+                try {
+                  if (editorSocket && editorSocket.connected && currentPath) {
+                    editorSocket.emit('editor_diagnostics_consumer_pending', { path: currentPath, request_id: ssotReqId });
+                  }
+                } catch (_) {}
+                try {
+                  if (editorSocket && editorSocket.connected && currentPath) {
+                    // At this point, model/currentPath exist and marker wiring is installed.
+                    editorSocket.emit('editor_diagnostics_consumer_ready', { path: currentPath, request_id: ssotReqId });
+                  }
+                } catch (_) {}
                 vscodeApiCall(
                   'vscode.openFile',
                   {
                     path: currentPath,
                     languageId: lang,
                     uri: (model && model.uri) ? String(model.uri.toString()) : '',
-                    requestId: (f && f.request_id) ? String(f.request_id) : '',
+                    requestId: ssotReqId,
+                    // On refresh/new-client attach the adapter may already have this file active.
+                    // Force a real open cycle so the extension host re-emits diagnostics.
+                    forceRefresh: true,
                   },
                   { timeoutMs: 8000 }
                 ).then(function () {}).catch(function () {});
@@ -3247,13 +3264,27 @@
             // Notify the language sidecar so extension activation + provider registration can happen.
             // This is intentionally best-effort and must not block the editor UI.
             try {
+              var openReqId = (payload && payload.request_id) ? String(payload.request_id) : ('diag_' + Date.now() + '_open');
+              // Diagnostics consumer gating for open: ensure the bridge won't forward diagnostics
+              // until the editor model/marker plumbing is ready for this request.
+              try {
+                if (editorSocket && editorSocket.connected && currentPath) {
+                  editorSocket.emit('editor_diagnostics_consumer_pending', { path: currentPath, request_id: openReqId });
+                }
+              } catch (_) {}
+              try {
+                if (editorSocket && editorSocket.connected && currentPath) {
+                  editorSocket.emit('editor_diagnostics_consumer_ready', { path: currentPath, request_id: openReqId });
+                }
+              } catch (_) {}
               vscodeApiCall(
                 'vscode.openFile',
                 {
                   path: currentPath,
                   languageId: lang,
                   uri: (model && model.uri) ? String(model.uri.toString()) : '',
-                  requestId: (payload && payload.request_id) ? String(payload.request_id) : '',
+                  requestId: openReqId,
+                  forceRefresh: true,
                 },
                 { timeoutMs: 8000 }
               )

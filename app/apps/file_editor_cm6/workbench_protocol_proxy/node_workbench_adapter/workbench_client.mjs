@@ -1582,6 +1582,7 @@ export class WorkbenchClient {
     const path = String(params.path ?? "");
     const languageId = String(params.languageId ?? "python");
     const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
+    const forceRefresh = params.forceRefresh === true;
     const prevEditorId = this._activeEditorId;
     const prevUriObj = this._activeUriObj;
     const prevTab = this._activeTab;
@@ -1611,10 +1612,11 @@ export class WorkbenchClient {
 		    //   tabModel → removedDocuments → addedDocuments → addedEditors(+newActiveEditor)
 		    // NOTE: The trace does NOT send `removedEditors` here; sending it with the wrong editor id
 		    // can break subsequent diagnostics.
+		    const prevAbs = (prevUriObj?.fsPath ?? prevUriObj?.path) ? String(prevUriObj?.fsPath ?? prevUriObj?.path) : "";
 		    const shouldClosePrev = !!(
 		      prevUriObj &&
-		      (prevUriObj?.fsPath ?? prevUriObj?.path) &&
-		      (prevUriObj?.fsPath ?? prevUriObj?.path) !== path
+		      prevAbs &&
+		      (forceRefresh || prevAbs !== path)
 		    );
 
 	    const modelN = this._nextModelNumber++;
@@ -1673,7 +1675,7 @@ export class WorkbenchClient {
     spanTrace("openFile.send.tabModel", () => this._sendExt(113, "$acceptEditorTabModel", [tabModel], false));
     try {
       const prevPath = (prevUriObj && typeof prevUriObj === "object") ? String(prevUriObj.fsPath || prevUriObj.path || "") : "";
-      console.log(`[openFile] ts=${Date.now()} path=${path} lang=${languageId} editorId=${editorId} shouldClosePrev=${shouldClosePrev} prevEditorId=${prevEditorId || ""} prevPath=${prevPath}`);
+      console.log(`[openFile] ts=${Date.now()} path=${path} lang=${languageId} editorId=${editorId} forceRefresh=${forceRefresh ? 1 : 0} shouldClosePrev=${shouldClosePrev} prevEditorId=${prevEditorId || ""} prevPath=${prevPath}`);
     } catch {}
 
 	    // Close the previous document first (mirror trace).

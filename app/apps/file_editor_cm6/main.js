@@ -1406,35 +1406,45 @@ async function ensureWorkbenchAdapterReady() {
         try { console.log(_feHostTs(), '[spinner] START request_id=- path=- reason=workbench_adapter_start'); } catch (_) {}
         _feUpdateLspSpinner();
 
-        // Fire the start request (one-shot HTTP).
-        const startResp = await fetch('/api/app/file_editor_cm6/workbench_adapter/start', { cache: 'no-store' });
-        const startJson = await startResp.json();
-        if (!startResp.ok || startJson?.ok === false) {
-          throw new Error(startJson?.error || startJson?.detail || `start failed HTTP ${startResp.status}`);
+        // Attach (idempotent HTTP): does not perturb an already-running adapter and
+        // returns immediate readiness state so page refresh doesn't miss one-shot events.
+        const attachResp = await fetch('/api/app/file_editor_cm6/workbench_adapter/attach', { cache: 'no-store' });
+        const attachJson = await attachResp.json();
+        if (!attachResp.ok || attachJson?.ok === false) {
+          throw new Error(attachJson?.error || attachJson?.detail || `attach failed HTTP ${attachResp.status}`);
         }
 
-        // Wait for adapter/ready via editor Socket.IO (relayed by diagnostics_bridge).
-        ok = await new Promise((resolve) => {
-          const timeout = setTimeout(() => {
-            resolve(false);
-          }, 30000);
-          const handler = () => {
-            clearTimeout(timeout);
-            resolve(true);
-          };
-          if (editorSocket && editorSocket.connected) {
-            editorSocket.once('editor:adapter_ready', handler);
-          } else {
-            // If socket isn't connected yet, also listen for when it connects.
-            const checkInterval = setInterval(() => {
-              if (editorSocket && editorSocket.connected) {
-                clearInterval(checkInterval);
-                editorSocket.once('editor:adapter_ready', handler);
-              }
-            }, 200);
-            setTimeout(() => clearInterval(checkInterval), 30000);
+        try {
+          const st = attachJson && attachJson.data ? attachJson.data.state : '';
+          if (st === 'ready') {
+            ok = true;
           }
-        });
+        } catch (_) {}
+
+        // If not already ready, wait for adapter/ready via editor Socket.IO (relayed by diagnostics_bridge).
+        if (!ok) {
+          ok = await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+              resolve(false);
+            }, 30000);
+            const handler = () => {
+              clearTimeout(timeout);
+              resolve(true);
+            };
+            if (editorSocket && editorSocket.connected) {
+              editorSocket.once('editor:adapter_ready', handler);
+            } else {
+              // If socket isn't connected yet, also listen for when it connects.
+              const checkInterval = setInterval(() => {
+                if (editorSocket && editorSocket.connected) {
+                  clearInterval(checkInterval);
+                  editorSocket.once('editor:adapter_ready', handler);
+                }
+              }, 200);
+              setTimeout(() => clearInterval(checkInterval), 30000);
+            }
+          });
+        }
       } catch (e) {
         console.warn('[workbench_adapter] readiness failed', e);
       } finally {

@@ -82,6 +82,16 @@ _workbench_baton = {
 }
 _WORKBENCH_BATON_TTL_MS = 15 * 60 * 1000
 
+# Workbench adapter boot record (per worker process).
+# Purpose: make `/workbench_adapter/start` idempotent for page refresh / new clients
+# by reusing the adapter shell that was started at worker boot, when still alive.
+_workbench_adapter_boot = {
+    "worker_shell_id": None,
+    "project_root": None,
+    "adapter_shell_id": None,
+    "boot_ts_ms": 0.0,
+}
+
 
 def _now_ms() -> float:
     return time.time() * 1000.0
@@ -742,14 +752,43 @@ async def workbench_adapter_start():
         cs_port = 0
     code_server_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
 
+    # If the adapter was already started at worker boot and is still alive, reuse it.
+    # This keeps page refresh / new clients from accidentally perturbing the live session.
+    record = None
     try:
-        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
-    except Exception as exc:
-        print(f"[workbench_adapter][start] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
+        boot_worker_id = str(_workbench_adapter_boot.get("worker_shell_id") or "")
+        boot_project = str(_workbench_adapter_boot.get("project_root") or "")
+        boot_shell_id = str(_workbench_adapter_boot.get("adapter_shell_id") or "")
+        this_worker_id = os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown")
+        if boot_shell_id and boot_worker_id and boot_worker_id == this_worker_id and boot_project == project_root:
+            from framework_shells import get_manager
+            mgr = await get_manager()
+            maybe = await mgr.get_shell(boot_shell_id)
+            if maybe and getattr(maybe, "pid", None) and getattr(maybe, "status", None) == "running":
+                record = maybe
+    except Exception:
+        record = None
+
+    if record is None:
+        try:
+            record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
+            try:
+                _workbench_adapter_boot.update(
+                    {
+                        "worker_shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
+                        "project_root": project_root,
+                        "adapter_shell_id": getattr(record, "id", None),
+                        "boot_ts_ms": _now_ms(),
+                    }
+                )
+            except Exception:
+                pass
+        except Exception as exc:
+            print(f"[workbench_adapter][start] failed: {type(exc).__name__}: {exc}", flush=True)
+            return JSONResponse(
+                {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+                status_code=503,
+            )
 
     token = _get_or_create_workbench_baton(project_root)
     port_s = (record.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
@@ -767,6 +806,135 @@ async def workbench_adapter_start():
             "port": port,
             "shell_id": record.id,
             "cmd_url": "/api/app/file_editor_cm6/workbench_adapter/cmd",
+        },
+    }
+
+
+@file_editor_cm6_bp.get("/workbench_adapter/attach")
+async def workbench_adapter_attach():
+    """Attach to the workbench adapter without perturbing an already-running session.
+
+    Contract:
+    - Always returns a baton token (same as /start)
+    - Returns best-effort readiness state *immediately* so new clients/page refresh
+      don't have to wait for a one-shot adapter/ready event they may have missed.
+    """
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    try:
+        cs = await ensure_code_server_shell(project_root)
+    except Exception as exc:
+        print(f"[code_server][attach] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    cs_env = (cs.env_overrides or {})
+    project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
+    port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
+    try:
+        cs_port = int(str(port_s))
+    except Exception:
+        cs_port = 0
+    code_server_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
+
+    # Ensure shell exists (this is idempotent; uses cached running shell if present).
+    try:
+        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
+    except Exception as exc:
+        print(f"[workbench_adapter][attach] failed: {type(exc).__name__}: {exc}", flush=True)
+        return JSONResponse(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            status_code=503,
+        )
+
+    token = _get_or_create_workbench_baton(project_root)
+    port_s = (record.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
+    try:
+        port = int(str(port_s))
+    except Exception:
+        port = 0
+
+    # Probe adapter status via JSON-RPC (best-effort).
+    state = "starting"
+    session = {"connected": False, "ready": False}
+    if port:
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.post(
+                    f"http://127.0.0.1:{port}/cmd",
+                    json={"jsonrpc": "2.0", "id": 1, "method": "te2.status", "params": {}},
+                )
+            payload = resp.json() if resp.content else {}
+            session = (payload.get("result") or {}).get("session") or session
+            connected = bool(session.get("connected"))
+            ready = bool(session.get("ready"))
+            state = "ready" if ready else ("connected" if connected else "starting")
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "data": {
+            "token": token,
+            "state": state,
+            "session": session,
+            "project_root": project_root,
+            "port": port,
+            "shell_id": record.id,
+            "cmd_url": "/api/app/file_editor_cm6/workbench_adapter/cmd",
+        },
+    }
+
+
+@file_editor_cm6_bp.get("/workbench_adapter/nudge")
+async def workbench_adapter_nudge(path: str = ""):
+    """Request a workbench adapter "change file" (openFile) for the active path.
+
+    Intended for new/refreshing clients: nudge the adapter to re-emit diagnostics
+    for the current SSOT file without re-running a full init sequence.
+    """
+
+    project_root = _history_store.get_active_project() or str(get_project_root())
+    if not project_root:
+        raise HTTPException(status_code=400, detail="No active project root")
+
+    abs_path = str(path or "").strip()
+    if not abs_path:
+        try:
+            session_state = _history_store.get_session_state() or {}
+            abs_path = str(session_state.get("currentPath") or "").strip()
+        except Exception:
+            abs_path = ""
+    if not abs_path:
+        return JSONResponse({"ok": False, "error": "missing_path"}, status_code=400)
+
+    try:
+        project_root_path = Path(project_root).expanduser().resolve(strict=False)
+        abs_path_resolved = Path(abs_path).expanduser().resolve(strict=False)
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid_path"}, status_code=400)
+
+    if not str(abs_path_resolved).startswith(str(project_root_path)):
+        return JSONResponse({"ok": False, "error": "outside_project"}, status_code=400)
+
+    try:
+        from .diagnostics_bridge import nudge_diagnostics_for_file
+        ok = await nudge_diagnostics_for_file(str(abs_path_resolved))
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=500)
+
+    return {
+        "ok": True,
+        "data": {
+            "path": str(abs_path_resolved),
+            "requested": bool(ok),
         },
     }
 
@@ -1285,7 +1453,20 @@ async def _eager_start_adapter():
         except Exception:
             cs_port = 0
         cs_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
-        await ensure_workbench_adapter_shell(pr, code_server_http=cs_http)
+        rec = await ensure_workbench_adapter_shell(pr, code_server_http=cs_http)
+        # Record the boot shell_id so later `/workbench_adapter/start` calls can "attach"
+        # instead of accidentally perturbing an already-running adapter session.
+        try:
+            _workbench_adapter_boot.update(
+                {
+                    "worker_shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
+                    "project_root": pr,
+                    "adapter_shell_id": getattr(rec, "id", None),
+                    "boot_ts_ms": _now_ms(),
+                }
+            )
+        except Exception:
+            pass
         print(f"[file_editor_cm6] eager adapter startup OK (project={pr})", flush=True)
     except Exception as exc:
         print(f"[file_editor_cm6] eager adapter startup failed: {exc}", flush=True)

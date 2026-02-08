@@ -351,7 +351,7 @@ function _cancelDiagBatonJob(reason = "cancelled") {
 
 function _startDiagBatonJob(absPath, requestId) {
   // Cancel previous job without emitting diagnostics/ready for it.
-  if (_diagBatonJob && _diagBatonJob.absPath !== absPath) {
+  if (_diagBatonJob && (_diagBatonJob.absPath !== absPath || _diagBatonJob.requestId !== requestId)) {
     batonLog(`cancelling stale job for ${_diagBatonJob.absPath}`);
     _cancelDiagBatonJob("superseded");
   }
@@ -694,38 +694,22 @@ async function handleJsonRpc(reqObj) {
     const p = (params && typeof params === "object") ? params : {};
     const resolvedPath = normalizePathParam(p);
     const requestId = (typeof p.requestId === "string" && p.requestId) ? p.requestId : null;
-    batonLog(`vscode.openFile ENTER path=${resolvedPath} id=${id} requestId=${requestId || "-"}`);
+    const forceRefreshReq = p.forceRefresh === true;
     if (!resolvedPath) {
       return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
     }
     const authority = normalizeAuthorityParam(p, DEFAULT_REMOTE_AUTHORITY);
 
-    // Dedup: if this file is already the active document and was opened recently,
-    // skip wb.openFile() to prevent a close→reopen cycle that kills Pyright analysis.
-    // The first caller already opened the file; just join the existing baton.
-    const DEDUP_WINDOW_MS = 5000;
     const alreadyActive = resolvedPath === wb.state?.activePath;
-    const openAge = wb.state?.lastOpenTs ? (Date.now() - wb.state.lastOpenTs) : Infinity;
-    if (alreadyActive && openAge < DEDUP_WINDOW_MS) {
-      batonLog(`vscode.openFile DEDUP skip path=${resolvedPath} (active, opened ${openAge}ms ago)`);
-      // Still participate in the baton so diagnostics/ready fires for this request id.
-      (async () => {
-        const r = await _startDiagBatonJob(resolvedPath, requestId);
-        if (r && r.status === "cancelled") return;
-        const error = r && r.status === "timeout";
-        emitTe2Event({
-          type: "diagnostics/ready",
-          ts_ms: nowMs(),
-          path: resolvedPath,
-          request_id: requestId,
-          error: error || undefined,
-          reason: r?.status || undefined,
-          markers: (r && typeof r.markers === "number") ? r.markers : undefined,
-          owner: r?.owner,
-        });
-      })();
-      return { jsonrpc: "2.0", id, result: { ok: true, path: resolvedPath, uri: vscodeRemoteUri(authority, resolvedPath), dedup: true } };
-    }
+    // IMPORTANT:
+    // The editor can reconnect/refresh and re-request openFile for the already-active path.
+    // If we skip the open cycle, the ext host may not re-emit diagnostics for the new client.
+    // To make "change file" requests deterministic for *every* client, treat alreadyActive
+    // + requestId as an explicit refresh request.
+    const forceRefreshEff = forceRefreshReq || (alreadyActive && !!requestId);
+    batonLog(
+      `vscode.openFile ENTER path=${resolvedPath} id=${id} requestId=${requestId || "-"} alreadyActive=${alreadyActive ? 1 : 0} forceRefresh_req=${forceRefreshReq ? 1 : 0} forceRefresh_eff=${forceRefreshEff ? 1 : 0}`
+    );
 
     const openFileSnapEnabled =
       String(process.env.TE2_OPENFILE_SNAPSHOT_ENABLE || "") === "1"
@@ -766,6 +750,7 @@ async function handleJsonRpc(reqObj) {
       path: resolvedPath,
       languageId: p.languageId,
       authority,
+      forceRefresh: forceRefreshEff,
     });
     batonLog(`wb.openFile returned for ${resolvedPath}`);
     logStatus("open_file", { path: resolvedPath });

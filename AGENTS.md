@@ -181,3 +181,4 @@ rg -l --hidden --no-ignore -g'*.js' -g'!*.map' "someCode" /path/to/installed/cod
 
 see `CTAG-ANNOTATIONS.md` for tagging prettified functions
 
+NEVER EVER IN 100 MILLION YEARS EVER WRITE A FALLBACK WITHOUT EXPLICIT APPROVAL... THIS MEANS ***YOU***

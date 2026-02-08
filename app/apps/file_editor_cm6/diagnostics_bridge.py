@@ -1,10 +1,12 @@
 """Diagnostics bridge: adapter WS → editor Socket.IO.
 
 Subscribes to the workbench adapter event stream (WS on port 18181) and
-forwards diagnostics/update events through the editor Socket.IO channel so
-the browser receives them over the already-connected transport.
+forwards diagnostics/update events through the editor Socket.IO channel.
 
-Server-side cache ensures newly connecting clients get immediate diagnostics.
+Important: we only forward diagnostics/update once the Monaco iframe tells us
+it is ready to consume markers for the active open request. This eliminates a
+real race where workbench diagnostics can arrive before the editor model/marker
+plumbing is initialized (especially on refresh / worker restart).
 """
 
 import asyncio
@@ -21,6 +23,16 @@ DIAG_CACHE_MAX = 100
 
 # Server-side diagnostics cache: abs_path -> {ts_ms, owner, markers}
 _diag_cache: Dict[str, Dict[str, Any]] = {}
+
+# Diagnostics gating state (single-doc model).
+# The editor (Monaco iframe) emits consumer_pending/consumer_ready over Socket.IO.
+_consumer_expected_path: Optional[str] = None
+_consumer_expected_request_id: str = ""
+_consumer_ready: bool = False
+_pending_entry: Optional[Dict[str, Any]] = None
+
+# Keep an sio ref so consumer_ready can flush without waiting for a new adapter frame.
+_SIO_REF = None
 
 # Background task handle
 _bridge_task: Optional[asyncio.Task] = None
@@ -69,6 +81,7 @@ async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bo
     """Ask the adapter to re-open a file, forcing the extension host to re-emit diagnostics."""
     try:
         import httpx
+        request_id = f"diag_{int(time.time() * 1000)}_nudge"
         payload = {
             "jsonrpc": "2.0",
             "id": int(time.time() * 1000),
@@ -76,6 +89,8 @@ async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bo
             "params": {
                 "path": abs_path,
                 "languageId": language_id or "",
+                "requestId": request_id,
+                "forceRefresh": True,
             },
         }
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -137,6 +152,58 @@ def _process_diagnostics_update(params: dict):
         del _diag_cache[oldest_key]
 
     return result
+
+
+def set_consumer_pending(abs_path: str, request_id: str = ""):
+    """Set the expected active document and mark consumer not-ready yet."""
+    global _consumer_expected_path, _consumer_expected_request_id, _consumer_ready, _pending_entry
+    _consumer_expected_path = abs_path or None
+    _consumer_expected_request_id = str(request_id or "")
+    _consumer_ready = False
+    _pending_entry = None
+    try:
+        print(
+            f"[diag_bridge] consumer_pending path={_consumer_expected_path or '?'} request_id={_consumer_expected_request_id or '-'}",
+            flush=True,
+        )
+    except Exception:
+        pass
+
+
+async def set_consumer_ready(sio, abs_path: str, request_id: str = ""):
+    """Mark the consumer as ready; flush any buffered diagnostics for the expected file."""
+    global _consumer_expected_path, _consumer_expected_request_id, _consumer_ready, _pending_entry
+    _consumer_expected_path = abs_path or None
+    _consumer_expected_request_id = str(request_id or "")
+    _consumer_ready = True
+    try:
+        print(
+            f"[diag_bridge] consumer_ready path={_consumer_expected_path or '?'} request_id={_consumer_expected_request_id or '-'} pending={'1' if _pending_entry else '0'}",
+            flush=True,
+        )
+    except Exception:
+        pass
+
+    if not _pending_entry or not _consumer_expected_path:
+        return
+    if str(_pending_entry.get("path", "")) != str(_consumer_expected_path):
+        return
+
+    try:
+        await sio.emit(
+            "editor:diagnostics",
+            _pending_entry,
+            room="file_editor_cm6",
+            namespace="/editor",
+        )
+        print(
+            f"[diag_bridge] flush OK path={_pending_entry.get('path','?')} markers={len(_pending_entry.get('markers',[]) or [])}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[diag_bridge] flush FAIL: {exc}", flush=True)
+    finally:
+        _pending_entry = None
 
 
 async def _adapter_ws_loop(sio):
@@ -211,15 +278,33 @@ async def _adapter_ws_loop(sio):
                     print(f"[diag_bridge] rx {len(entries)} entries, paths={[e.get('path','?') for e in entries]}", flush=True)
                     for entry in entries:
                         try:
-                            await sio.emit(
-                                "editor:diagnostics",
-                                entry,
-                                room="file_editor_cm6",
-                                namespace="/editor",
-                            )
-                            print(f"[diag_bridge] emit OK path={entry.get('path','?')} markers={len(entry.get('markers',[]))}", flush=True)
+                            path = str(entry.get("path", ""))
+                            # Gate forwarding until the editor consumer is ready for the active open.
+                            if _consumer_expected_path and path == str(_consumer_expected_path):
+                                if _consumer_ready:
+                                    await sio.emit(
+                                        "editor:diagnostics",
+                                        entry,
+                                        room="file_editor_cm6",
+                                        namespace="/editor",
+                                    )
+                                    print(
+                                        f"[diag_bridge] emit OK path={path} markers={len(entry.get('markers',[]) or [])}",
+                                        flush=True,
+                                    )
+                                else:
+                                    # Buffer only the latest entry for the expected file.
+                                    global _pending_entry
+                                    _pending_entry = entry
+                                    print(
+                                        f"[diag_bridge] buffer path={path} markers={len(entry.get('markers',[]) or [])}",
+                                        flush=True,
+                                    )
+                            else:
+                                # Not the active doc (single-doc model): do not forward to the editor.
+                                pass
                         except Exception as exc:
-                            print(f"[diag_bridge] emit FAIL: {exc}", flush=True)
+                            print(f"[diag_bridge] emit/buffer FAIL: {exc}", flush=True)
 
         except asyncio.CancelledError:
             break
@@ -235,6 +320,9 @@ async def _adapter_ws_loop(sio):
 def start_bridge(sio):
     """Start the background diagnostics bridge task. Safe to call multiple times."""
     global _bridge_task, _bridge_running
+    global _SIO_REF
+
+    _SIO_REF = sio
 
     if _bridge_task and not _bridge_task.done():
         return  # already running
