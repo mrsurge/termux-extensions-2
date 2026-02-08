@@ -580,6 +580,8 @@ export class WorkbenchClient {
     this._sentExtMeta = new Map(); // req -> {rpcId, method, ts_ms}
     this._sentExtMetaOrder = [];
     this._nextModelNumber = 1;
+    this._activeEditorId = null;   // track current editor for close-before-open
+    this._activeUriObj = null;     // track current URI object for close-before-open
     this._useRemote = true;
     this._authority = DEFAULT_REMOTE_AUTHORITY;
     this._productVersion = null;
@@ -598,6 +600,17 @@ export class WorkbenchClient {
     this.state = {
       connected: false,
       ready: false,
+      mgmtConnected: false,
+      extConnected: false,
+      useRemote: null,
+      authority: null,
+      serverRootPath: null,
+      commit: null,
+      workspaceFolder: null,
+      activePath: null,
+      activeUri: null,
+      activeLanguageId: null,
+      lastOpenTs: null,
       docSymbolsProviderHandle: null,
       hoverProviderHandle: null,
     };
@@ -1074,6 +1087,7 @@ export class WorkbenchClient {
         debugLabel: `renderer-Management-${crypto.randomUUID().slice(0, 8)}`,
       }));
       this.mgmt = { protocol: mgmt.protocol };
+      this.state.mgmtConnected = true;
 
       // Bootstrap mgmt IPC using the same serialization as VS Code IPCClient.
       this._mgmtIpc?.dispose?.();
@@ -1185,6 +1199,16 @@ export class WorkbenchClient {
 
       this.state.connected = true;
       this.state.ready = false;
+      this.state.extConnected = true;
+      this.state.useRemote = !!useRemote;
+      this.state.authority = authority ?? null;
+      this.state.serverRootPath = serverRootPath ?? null;
+      this.state.commit = commit ?? null;
+      this.state.workspaceFolder = workspaceRoot ?? null;
+      this.state.activePath = null;
+      this.state.activeUri = null;
+      this.state.activeLanguageId = null;
+      this.state.lastOpenTs = null;
       this.state.docSymbolsProviderHandle = null;
       this.state.hoverProviderHandle = null;
       this._nextExtReqId = 1;
@@ -1550,6 +1574,26 @@ export class WorkbenchClient {
       mem: memSnapshot(),
     });
     const uriObj = spanTrace("openFile.uriForPath", () => this._uriForPath(path, authority));
+    try {
+      this.state.activePath = path;
+      this.state.activeUri = uriObj?.external ?? uriObjToString(uriObj);
+      this.state.activeLanguageId = languageId ?? null;
+      this.state.lastOpenTs = Date.now();
+    } catch {}
+
+    // Close the previous file/editor so the extension host drops its diagnostics context.
+    if (this._activeEditorId && this._activeUriObj) {
+      try {
+        spanTrace("openFile.closePrev", () => {
+          this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [{
+            removedEditors: [this._activeEditorId],
+          }], false);
+          this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [{
+            removedDocuments: [this._activeUriObj],
+          }], false);
+        });
+      } catch (e) { /* best-effort */ }
+    }
 
     const modelN = this._nextModelNumber++;
     const editorId = `vs.editor.ICodeEditor:${modelN},$model${modelN}`;
@@ -1651,6 +1695,8 @@ export class WorkbenchClient {
     // Trigger activation for deterministic provider registration.
     // In the workbench trace this is sent as a normal JSON-args request.
     spanTrace("openFile.send.activateByEvent", () => this._sendExt(99, "$activateByEvent", [`onLanguage:${languageId}`, 0], false));
+    this._activeEditorId = editorId;
+    this._activeUriObj = uriObj;
     return { ok: true, req: reqDocs };
   }
 
@@ -1669,6 +1715,12 @@ export class WorkbenchClient {
     }
 
     const uriObj = this._uriForPath(path, authority);
+    try {
+      this.state.activePath = path;
+      this.state.activeUri = uriObj?.external ?? uriObjToString(uriObj);
+      this.state.activeLanguageId = languageFromPath(path) ?? null;
+      this.state.lastOpenTs = Date.now();
+    } catch {}
 
     const req = this._allocExtReqId();
     const token = { isCancellationRequested: false };
@@ -1706,6 +1758,12 @@ export class WorkbenchClient {
     if (typeof providerHandle !== "number") return { ok: false, error: "no hover provider handle learned yet" };
 
     const uriObj = this._uriForPath(path, authority);
+    try {
+      this.state.activePath = path;
+      this.state.activeUri = uriObj?.external ?? uriObjToString(uriObj);
+      this.state.activeLanguageId = languageFromPath(path) ?? null;
+      this.state.lastOpenTs = Date.now();
+    } catch {}
 
     const req = this._allocExtReqId();
     const token = { isCancellationRequested: false };
@@ -1762,6 +1820,12 @@ export class WorkbenchClient {
 
     this.state.connected = false;
     this.state.ready = false;
+    this.state.mgmtConnected = false;
+    this.state.extConnected = false;
+    this.state.activePath = null;
+    this.state.activeUri = null;
+    this.state.activeLanguageId = null;
+    this.state.lastOpenTs = null;
     this.state.docSymbolsProviderHandle = null;
     this.state.hoverProviderHandle = null;
     this._extHandshake = { readySeen: false, initSent: false, initialized: false };

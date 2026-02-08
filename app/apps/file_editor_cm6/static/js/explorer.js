@@ -57,6 +57,18 @@ let diagWarningDirs = new Set();
 function setActiveFileRel(nextRel) {
   activeFileRel = typeof nextRel === 'string' && nextRel.trim() ? nextRel : null;
   applyActiveFileMarker();
+  // Update toolbar filename immediately — explorer connects before main.js finishes booting.
+  try {
+    var el = document.getElementById('fe-file-name');
+    if (el && activeFileRel) {
+      var i = activeFileRel.lastIndexOf('/');
+      var name = i >= 0 ? activeFileRel.slice(i + 1) : activeFileRel;
+      if (name && (!el.textContent || el.textContent === 'Untitled')) {
+        el.textContent = name;
+        el.title = activeFileRel;
+      }
+    }
+  } catch (_) {}
 }
 
 function applyActiveFileMarker() {

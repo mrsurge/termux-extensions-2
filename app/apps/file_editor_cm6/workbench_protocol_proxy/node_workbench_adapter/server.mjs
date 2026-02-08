@@ -286,6 +286,17 @@ const state = {
   session: {
     connected: false,
     ready: false,
+    mgmtConnected: false,
+    extConnected: false,
+    useRemote: null,
+    authority: null,
+    serverRootPath: null,
+    commit: null,
+    workspaceFolder: null,
+    activePath: null,
+    activeUri: null,
+    activeLanguageId: null,
+    lastOpenTs: null,
     docSymbolsProviderHandle: null,
     hoverProviderHandle: null,
   },
@@ -294,6 +305,50 @@ const state = {
 const wsClients = new Set();
 const eventLog = [];
 const EVENT_LOG_MAX = Number(process.env.TE2_EVENT_LOG_MAX ?? "200");
+
+// Diagnostics baton: a pending Promise resolved when $changeMany includes the target path.
+// Map<absPath, { resolve: Function, timer: NodeJS.Timeout }>
+const _diagBatonWaiters = new Map();
+const DIAG_BATON_TIMEOUT_MS = 10000;
+
+function _absPathFromUri(uri) {
+  if (!uri) return "";
+  if (uri.startsWith("/")) return uri;
+  if (uri.startsWith("file://")) return uri.slice(7);
+  if (uri.startsWith("vscode-remote://")) {
+    const slash = uri.indexOf("/", "vscode-remote://".length);
+    return slash !== -1 ? uri.slice(slash) : "";
+  }
+  return "";
+}
+
+function _resolveDiagBaton(absPath) {
+  const waiter = _diagBatonWaiters.get(absPath);
+  if (!waiter) return;
+  clearTimeout(waiter.timer);
+  _diagBatonWaiters.delete(absPath);
+  waiter.resolve();
+}
+
+function _waitForDiagnostics(absPath) {
+  // Cancel any previous waiter for a different path.
+  for (const [p, w] of _diagBatonWaiters) {
+    if (p !== absPath) { clearTimeout(w.timer); _diagBatonWaiters.delete(p); }
+  }
+  // If already waiting for this path, return existing promise.
+  if (_diagBatonWaiters.has(absPath)) return _diagBatonWaiters.get(absPath).promise;
+
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  const timer = setTimeout(() => {
+    console.log(`[server] diagnostics baton timeout for ${absPath}`);
+    _diagBatonWaiters.delete(absPath);
+    resolve(); // resolve anyway so spinner hides
+  }, DIAG_BATON_TIMEOUT_MS);
+  _diagBatonWaiters.set(absPath, { resolve, timer, promise });
+  return promise;
+}
+
 const EVENT_TRUNC_STR_MAX = Number(process.env.TE2_EVENT_TRUNC_STR_MAX ?? "4096");
 const EVENT_TRUNC_ARR_MAX = Number(process.env.TE2_EVENT_TRUNC_ARR_MAX ?? "200");
 
@@ -378,14 +433,41 @@ function buildStatusResult() {
   const s = wb.status();
   state.session.connected = !!s.connected;
   state.session.ready = !!s.ready;
+  state.session.mgmtConnected = !!s.mgmtConnected;
+  state.session.extConnected = !!s.extConnected;
+  state.session.useRemote = s.useRemote ?? null;
+  state.session.authority = s.authority ?? null;
+  state.session.serverRootPath = s.serverRootPath ?? null;
+  state.session.commit = s.commit ?? null;
+  state.session.workspaceFolder = s.workspaceFolder ?? null;
+  state.session.activePath = s.activePath ?? null;
+  state.session.activeUri = s.activeUri ?? null;
+  state.session.activeLanguageId = s.activeLanguageId ?? null;
+  state.session.lastOpenTs = s.lastOpenTs ?? null;
   state.session.docSymbolsProviderHandle = s.docSymbolsProviderHandle ?? null;
   state.session.hoverProviderHandle = s.hoverProviderHandle ?? null;
   return {
     ok: true,
     ts_ms: nowMs(),
     config: state.config,
+    clients: { ws: wsClients.size },
     session: state.session,
   };
+}
+
+function logStatus(reason, extra = null) {
+  try {
+    const snap = buildStatusResult();
+    const payload = {
+      type: "adapter/status",
+      ts_ms: nowMs(),
+      reason: String(reason || "update"),
+      clients: snap.clients,
+      session: snap.session,
+    };
+    if (extra && typeof extra === "object") payload.extra = extra;
+    console.log(JSON.stringify(payload));
+  } catch {}
 }
 
 const wb = new WorkbenchClient({
@@ -403,6 +485,23 @@ const wb = new WorkbenchClient({
           owner: norm.owner,
           items: norm.items,
         });
+
+        // Diagnostics baton: resolve if any item URI matches a pending waiter.
+        // Only resolve on real results (non-zero markers), not the initial Pyright "clear" (0 markers, owner "Pyright").
+        if (_diagBatonWaiters.size > 0) {
+          for (const item of norm.items) {
+            const itemPath = _absPathFromUri(item.uri || "");
+            if (itemPath && _diagBatonWaiters.has(itemPath)) {
+              const markerCount = (item.markers || []).length;
+              // Owner "Pyright" with 0 markers = clear event (skip).
+              // Owner "Pyright0"/"Pyright1"/etc or any owner with markers > 0 = real result.
+              if (markerCount > 0 || (norm.owner !== "Pyright")) {
+                console.log(`[server] diagnostics baton resolved: path=${itemPath} owner=${norm.owner} markers=${markerCount}`);
+                _resolveDiagBaton(itemPath);
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -494,6 +593,7 @@ async function handleJsonRpc(reqObj) {
       proxyUri: p.proxyUri,
     });
     buildStatusResult();
+    logStatus("adapter_connected");
     return { jsonrpc: "2.0", id, result };
   }
 
@@ -503,8 +603,15 @@ async function handleJsonRpc(reqObj) {
     } catch {}
     state.session.connected = false;
     state.session.ready = false;
+    state.session.mgmtConnected = false;
+    state.session.extConnected = false;
+    state.session.activePath = null;
+    state.session.activeUri = null;
+    state.session.activeLanguageId = null;
+    state.session.lastOpenTs = null;
     state.session.docSymbolsProviderHandle = null;
     state.session.hoverProviderHandle = null;
+    logStatus("adapter_disconnected");
     return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs() } };
   }
 
@@ -575,6 +682,23 @@ async function handleJsonRpc(reqObj) {
       languageId: p.languageId,
       authority,
     });
+    logStatus("open_file", { path: resolvedPath });
+
+    // Diagnostics baton: wait for $changeMany to include this file's URI.
+    // The Promise resolves when onEvent sees a matching $changeMany with real markers,
+    // or on timeout (10s). Non-blocking to the HTTP response — fires async.
+    (async () => {
+      try {
+        console.log(`[server] diagnostics baton: waiting for $changeMany matching ${resolvedPath}`);
+        await _waitForDiagnostics(resolvedPath);
+        console.log(`[server] diagnostics/ready path=${resolvedPath}`);
+        emitTe2Event({ type: "diagnostics/ready", ts_ms: nowMs(), path: resolvedPath });
+      } catch (e) {
+        console.log(`[server] diagnostics baton error for ${resolvedPath}: ${e?.message || e}`);
+        emitTe2Event({ type: "diagnostics/ready", ts_ms: nowMs(), path: resolvedPath, error: true });
+      }
+    })();
+
     return { jsonrpc: "2.0", id, result: { ...result, path: resolvedPath, uri: vscodeRemoteUri(authority, resolvedPath) } };
   }
 
@@ -699,7 +823,11 @@ server.on("upgrade", (req, socket) => {
     );
 
     wsClients.add(socket);
-    const drop = () => { wsClients.delete(socket); };
+    logStatus("ws_client_open");
+    const drop = () => {
+      wsClients.delete(socket);
+      logStatus("ws_client_close");
+    };
     socket.on("close", drop);
     socket.on("end", drop);
     socket.on("error", drop);

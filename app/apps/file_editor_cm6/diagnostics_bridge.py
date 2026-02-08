@@ -166,7 +166,23 @@ async def _adapter_ws_loop(sio):
                     ev = msg.get("params")
                     if not isinstance(ev, dict):
                         continue
-                    if ev.get("type") != "diagnostics/update":
+                    ev_type = ev.get("type")
+
+                    # Forward diagnostics/ready (baton resolution) to browser.
+                    if ev_type == "diagnostics/ready":
+                        try:
+                            await sio.emit(
+                                "editor:diagnostics_ready",
+                                {"path": ev.get("path", ""), "markers": ev.get("markers", 0), "ts_ms": ev.get("ts_ms", 0)},
+                                room="file_editor_cm6",
+                                namespace="/editor",
+                            )
+                            print(f"[diag_bridge] diagnostics/ready path={ev.get('path','?')} markers={ev.get('markers',0)}", flush=True)
+                        except Exception as exc:
+                            print(f"[diag_bridge] diagnostics/ready emit FAIL: {exc}", flush=True)
+                        continue
+
+                    if ev_type != "diagnostics/update":
                         continue
 
                     entries = _process_diagnostics_update(ev)

@@ -446,6 +446,23 @@ function connectExplorerSocket() {
           handleAgentOpen(payload);
           return;
         }
+        // The explorer websocket is THE authority for which file is active.
+        // Update host toolbar whenever the active file changes.
+        if (type === 'explorer:activeFile' && payload.rel) {
+          try {
+            const projRoot = cachedProjectRoot || null;
+            if (projRoot) {
+              const abs = toAbsolute(payload.rel, projRoot, HOME_DIR);
+              if (abs && abs !== currentPath) {
+                currentPath = abs;
+                currentPathExists = true;
+                lastPickerPath = parentDir(abs);
+                currentModeLanguage = detectLanguageFromFilename(abs);
+                updatePathDisplay();
+              }
+            }
+          } catch (_) {}
+        }
         if (type && typeof window.__explorerBusDispatch === 'function') {
           window.__explorerBusDispatch(type, payload);
         }
@@ -712,6 +729,54 @@ function connectEditorSocket() {
           const requestId = payload && (payload.requestId || payload.request_id) ? String(payload.requestId || payload.request_id) : '';
           if (!requestId) return;
           _resolveIssuesDumpWaiter(requestId, payload.dump);
+        } catch (_) {}
+      });
+
+      // Diagnostics baton: show spinner while waiting for analysis of newly opened file.
+      editorSocket.on('editor:diagnostics_pending', (payload) => {
+        try {
+          const p = payload && typeof payload === 'object' ? payload : {};
+          const pendingPath = p.path || '';
+          console.log('[diag_baton] pending path=' + pendingPath);
+          window.__feDiagBaton = { path: pendingPath, ts: Date.now() };
+          // Show the LSP spinner.
+          if (window.__feLspSpinnerUi) {
+            window.__feLspSpinnerUi.busyShow = true;
+            window.__feLspSpinnerUi.busyTitle = 'Analyzing ' + (pendingPath.split('/').pop() || 'file') + '…';
+          }
+          _feUpdateLspSpinner();
+          // Safety timeout: auto-hide after 8s if no ready event.
+          if (window.__feDiagBatonTimer) clearTimeout(window.__feDiagBatonTimer);
+          window.__feDiagBatonTimer = setTimeout(() => {
+            console.log('[diag_baton] timeout, hiding spinner');
+            window.__feDiagBaton = null;
+            if (window.__feLspSpinnerUi) {
+              window.__feLspSpinnerUi.busyShow = false;
+              window.__feLspSpinnerUi.busyTitle = '';
+            }
+            _feUpdateLspSpinner();
+          }, 8000);
+        } catch (_) {}
+      });
+
+      editorSocket.on('editor:diagnostics_ready', (payload) => {
+        try {
+          const p = payload && typeof payload === 'object' ? payload : {};
+          const readyPath = p.path || '';
+          console.log('[diag_baton] ready path=' + readyPath + ' markers=' + (p.markers || 0));
+          // Only resolve if it matches the pending baton.
+          if (window.__feDiagBaton && window.__feDiagBaton.path === readyPath) {
+            window.__feDiagBaton = null;
+            if (window.__feDiagBatonTimer) {
+              clearTimeout(window.__feDiagBatonTimer);
+              window.__feDiagBatonTimer = null;
+            }
+            if (window.__feLspSpinnerUi) {
+              window.__feLspSpinnerUi.busyShow = false;
+              window.__feLspSpinnerUi.busyTitle = '';
+            }
+            _feUpdateLspSpinner();
+          }
         } catch (_) {}
       });
     })
@@ -990,15 +1055,14 @@ function setIssuesButtonsEnabled(enabled) {
 function sendIssuesCmd(action) {
   try {
     if (!editorSocket || !editorSocket.connected) return;
-    // Monaco editor currently doesn't implement issues navigation, but keep the hook
-    // on the editor websocket channel (no postMessage bridge).
+    // Monaco issues navigation runs inside the editor iframe via editor Socket.IO.
     editorSocket.emit('editor_issues_cmd', { action: String(action || '') });
   } catch (err) {
     console.warn('[Issues] Failed to send via editor socket:', err);
   }
 }
 
-issuesToggleBtn.addEventListener('click', () => sendIssuesCmd('toggle'));
+issuesToggleBtn.addEventListener('click', () => sendIssuesCmd('next'));
 issuesPrevBtn.addEventListener('click', () => sendIssuesCmd('prev'));
 issuesNextBtn.addEventListener('click', () => sendIssuesCmd('next'));
 
@@ -2426,7 +2490,12 @@ async function apiPost(path, body) {
 
 // Live draft/autosave propagation is handled by the dedicated editor Socket.IO channel.
 
-async function triggerEditorSearchPanel(reason = 'menu') {
+async function triggerEditorSearchPanel(reason = 'menu', opts = {}) {
+  const action = opts && opts.replace ? 'replace' : 'find';
+  if (editorSocket && editorSocket.connected) {
+    editorSocket.emit('editor_find_cmd', { action, reason });
+    return;
+  }
   const payload = {
     path: currentPath || null,
     project: cachedProjectRoot || null,
@@ -4220,7 +4289,7 @@ if (miFontLarge) {
   miFontLarge.addEventListener('click', () => setFontScale('large'));
 }
 
-bindMenuToggle(miFind, () => { triggerEditorSearchPanel('menu'); });
+bindMenuToggle(miFind, () => { triggerEditorSearchPanel('menu', { replace: true }); });
 bindMenuToggle(miGoto, async () => {
   const input = window.prompt('Go to line:');
   if (!input) return;
@@ -4271,7 +4340,7 @@ document.addEventListener('keydown', (e) => {
   // Ctrl/Cmd+F: Search
   if (cmdOrCtrl && e.key === 'f') {
     e.preventDefault();
-    triggerEditorSearchPanel('shortcut');
+    triggerEditorSearchPanel('shortcut', { replace: false });
   }
 
   // Ctrl/Cmd+N: New
@@ -4323,7 +4392,7 @@ document.addEventListener('keydown', (e) => {
 
 
 // ---------- State load/init ----------
-host.setTitle('Code CM6');
+// host.setTitle('Code CM6');
 
 // Set up global file opening hooks for explorer.js
 window.appOpenFile = (absPath) => {
@@ -4444,7 +4513,8 @@ async function main() {
   createView(initialDoc);
   lastSavedContent = getText();
   markUnsaved(false);
-  updatePathDisplay();
+  // Don't call updatePathDisplay() here — currentPath is empty so it would flash "Untitled".
+  // The real path will arrive from editor:ssot (Socket.IO) or restoredPath (HTTP) below.
 
   if (!serverState || !serverState.activeProject || !serverState.activeProjectExists) {
     statusEl.textContent = serverState?.activeProjectMessage || 'Select a project to begin.';
@@ -4453,13 +4523,17 @@ async function main() {
     return;
   }
 
-  // Open file via URL param or saved state
+  // Open file via URL param or saved state.
+  // Prefer currentPath (session_state, synced by on_connect from history_store.last_file).
+  // Fall back to lastFile for compatibility.
   const params = new URLSearchParams(window.location.search);
   const fileFromUrl = params.get('file');
-  const restoredPath = serverState.lastFile;
+  const restoredPath = serverState.currentPath || serverState.lastFile;
   const restoredSha = serverState.lastFileSha256 || null;
 
-  // Sync host bookkeeping with backend SSOT - the iframe already loaded the file
+  // Sync host bookkeeping with backend SSOT - the iframe already loaded the file.
+  // Don't call updatePathDisplay() here — the explorer socket's explorer:activeFile
+  // handler will set the toolbar when the authoritative value arrives.
   if (restoredPath) {
     currentPath = restoredPath;
     currentPathExists = !!serverState.lastFileExists;
@@ -4467,32 +4541,22 @@ async function main() {
     lastSha256 = restoredSha;
     currentModeLanguage = detectLanguageFromFilename(restoredPath);
     setText(''); // NiceGUI iframe owns the real buffer
-    updatePathDisplay();
     syncSessionPath();
-
-    // Ensure explorer knows the active file even on a cold refresh (the iframe
-    // may have already restored it without calling openFile()).
-    try {
-      if (typeof window.__explorerBusDispatch === 'function') {
-        const projectRoot = serverState?.activeProject || cachedProjectRoot || null;
-        const rootAbs = projectRoot
-          ? toAbsolute(projectRoot, null, HOME_DIR).replace(/\/+$/, '')
-          : null;
-        const resolved = toAbsolute(restoredPath, null, HOME_DIR);
-        let rel = null;
-        if (rootAbs && resolved.startsWith(rootAbs + '/')) {
-          rel = resolved.slice(rootAbs.length + 1);
-        }
-        window.__explorerBusDispatch('explorer:activeFile', { rel });
-      }
-    } catch (e) {
-      // Ignore explorer notification errors.
-    }
 
     // Open WebSocket for file watching
     openWebSocket(restoredPath);
 
     console.log('[BOOT] Synced with backend SSOT:', restoredPath);
+
+    // Safety: if explorer socket hasn't updated the toolbar within 2s, do it ourselves.
+    setTimeout(() => {
+      try {
+        const el = document.getElementById('fe-file-name');
+        if (el && currentPath && (!el.textContent || el.textContent === 'Untitled')) {
+          updatePathDisplay();
+        }
+      } catch (_) {}
+    }, 2000);
   }
 
   // Only call openFile() for explicit URL parameter - user wants a specific file

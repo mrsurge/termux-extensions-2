@@ -208,9 +208,16 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         prefs = _preferences_store.get_preferences(project) if project else {}
         role = _role_from_environ(environ)
 
-        current_path = session_state.get("currentPath")
-        if not current_path and project:
+        # Single source of truth: history_store.get_last_file() is authoritative.
+        # session_state["currentPath"] is a mirror written by on_editor_open_request.
+        current_path = None
+        if project:
             current_path = _history_store.get_last_file(project)
+        if not current_path:
+            current_path = session_state.get("currentPath")
+        # Sync session_state so both stores agree.
+        if current_path and session_state.get("currentPath") != current_path:
+            _history_store.update_session_state({"currentPath": current_path})
 
         snapshot: Dict[str, Any] = {
             "project": project,
@@ -227,6 +234,32 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 snapshot["file"] = _read_file_payload(project, abs_path)
 
         await self.emit("editor:ssot", snapshot, room=sid)
+
+        # Broadcast explorer:activeFile from the worker (the authority for which
+        # file is open) to all explorer clients via the forward-broadcast endpoint.
+        if current_path and project:
+            try:
+                from ..explorer_ws import abs_to_rel, _schedule_forward_broadcast
+                rel = abs_to_rel(str(current_path), str(project))
+                if rel and rel != ".":
+                    _schedule_forward_broadcast(
+                        str(project),
+                        {"type": "explorer:activeFile", "payload": {"rel": rel}},
+                    )
+            except Exception:
+                pass
+
+        # Diagnostics baton on SSOT restore: signal pending for the current file.
+        try:
+            if current_path:
+                import time as _time
+                await self.emit(
+                    "editor:diagnostics_pending",
+                    {"path": current_path, "ts_ms": int(_time.time() * 1000)},
+                    room="file_editor_cm6",
+                )
+        except Exception:
+            pass
 
         # Diagnostics bridge: send cached diagnostics + nudge for fresh ones.
         try:
@@ -313,6 +346,22 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload = dict(payload)
         payload["source_client"] = sid
         await self.emit("editor:notify", payload, room="file_editor_cm6")
+
+    async def on_editor_issues_cmd(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            return
+        payload = dict(payload)
+        payload["source_client"] = sid
+        await self.emit("editor:issues_cmd", payload, room="file_editor_cm6")
+
+    async def on_editor_find_cmd(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            return
+        payload = dict(payload)
+        payload["source_client"] = sid
+        await self.emit("editor:find_cmd", payload, room="file_editor_cm6")
 
     async def on_editor_ready(self, sid, data):
         payload = data or {}
@@ -418,6 +467,43 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             payload["scroll_to_top"] = scroll_to_top
 
         await self.emit("editor:open", payload, room="file_editor_cm6")
+
+        # Broadcast explorer:activeFile so every explorer/host client updates.
+        try:
+            from ..explorer_ws import manager as _explorer_mgr, abs_to_rel
+            rel = abs_to_rel(path, project)
+            if rel and rel != ".":
+                await _explorer_mgr.broadcast(project, {"type": "explorer:activeFile", "payload": {"rel": rel}})
+        except Exception:
+            pass
+
+        # Diagnostics baton: tell browser to show spinner while we wait for analysis.
+        try:
+            import time as _time
+            await self.emit("editor:diagnostics_pending", {"path": path, "ts_ms": int(_time.time() * 1000)}, room="file_editor_cm6")
+        except Exception:
+            pass
+
+        # Diagnostics bridge: send cached diagnostics for the new file + nudge for fresh ones.
+        try:
+            from ..diagnostics_bridge import (
+                nudge_diagnostics_for_file,
+                send_cached_diagnostics_to_sid,
+            )
+            abs_path = path
+            if abs_path:
+                await send_cached_diagnostics_to_sid(self.server, sid, abs_path)
+                lang = ""
+                try:
+                    ext = Path(abs_path).suffix.lstrip(".")
+                    _ext_map = {"py": "python", "js": "javascript", "ts": "typescript", "jsx": "javascriptreact", "tsx": "typescriptreact", "rs": "rust", "cpp": "cpp", "c": "c", "go": "go"}
+                    lang = _ext_map.get(ext, ext)
+                except Exception:
+                    pass
+                import asyncio
+                asyncio.ensure_future(nudge_diagnostics_for_file(abs_path, lang))
+        except Exception:
+            pass
 
     async def on_editor_jump_to_line_request(self, sid, data):
         payload_in = data or {}

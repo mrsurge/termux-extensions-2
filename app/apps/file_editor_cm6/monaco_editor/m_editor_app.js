@@ -838,7 +838,6 @@
   var _diagState = null; // counters
   var DIAG_CACHE_MAX = 50;
   var _diagReapplyScheduled = false;
-
   function _scheduleDiagReapply() {
     if (_diagReapplyScheduled) return;
     _diagReapplyScheduled = true;
@@ -1168,6 +1167,7 @@
     // Editor creation MUST be driven by SSOT (HistoryStore/PreferencesStore).
     // This function is only used as a last-resort guard; prefer ensureEditorWithPrefs().
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
+    try { _installMarkerNavBindings(editor); } catch (_) {}
     try {
       var dom = editor.getDomNode();
       if (dom) {
@@ -2346,6 +2346,7 @@
     }
 
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
+    try { _installMarkerNavBindings(editor); } catch (_) {}
     try {
       var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
       var t = prefs && prefs.editor && prefs.editor.theme ? prefs.editor.theme : '';
@@ -2376,6 +2377,7 @@
     if (!el || !window.monaco) return null;
 
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
+    try { _installMarkerNavBindings(editor); } catch (_) {}
     try {
       var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
       var t = prefs && prefs.editor && prefs.editor.theme ? prefs.editor.theme : '';
@@ -3411,11 +3413,97 @@
         }
       });
 
+      editorSocket.on('editor:issues_cmd', function(payload) {
+        try {
+          var action = payload && payload.action ? String(payload.action) : '';
+          if (!action) return;
+          _runIssuesCommand(action);
+        } catch (_) {}
+      });
+
+      editorSocket.on('editor:find_cmd', function(payload) {
+        try {
+          var action = payload && payload.action ? String(payload.action) : 'find';
+          _runFindCommand(action);
+        } catch (_) {}
+      });
+
       return true;
     } catch (e) {
       console.warn('[Monaco] socket connect failed', e);
       return false;
     }
+  }
+
+  function _runIssuesCommand(action) {
+    try {
+      if (!editor) return;
+      var id = 'editor.action.marker.next';
+      if (action === 'toggle') action = 'next';
+      if (action === 'prev') id = 'editor.action.marker.prev';
+      var act = editor.getAction ? editor.getAction(id) : null;
+      if (act && act.run) {
+        act.run();
+      }
+    } catch (_) {}
+  }
+
+  function _runFindCommand(action) {
+    try {
+      if (!editor) return;
+      var id = action === 'replace' ? 'editor.action.startFindReplaceAction' : 'actions.find';
+      var act = editor.getAction ? editor.getAction(id) : null;
+      if (act && act.run) {
+        act.run();
+      } else {
+        editor.trigger('keyboard', id, null);
+      }
+    } catch (_) {}
+  }
+
+  function _installMarkerNavBindings(ed) {
+    try {
+      if (!ed || ed.__te2MarkerNavBound || !window.monaco || !monaco.KeyMod || !monaco.KeyCode) return;
+      ed.__te2MarkerNavBound = true;
+      ed.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.F8, function () { _jumpToMarker(1); });
+      ed.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.F8, function () { _jumpToMarker(-1); });
+    } catch (_) {}
+  }
+
+  function _jumpToMarker(dir) {
+    try {
+      if (!editor || !model || !window.monaco) return;
+      var markers = monaco.editor.getModelMarkers({ resource: model.uri }) || [];
+      if (!markers.length) return;
+      markers.sort(function (a, b) {
+        if (a.startLineNumber !== b.startLineNumber) return a.startLineNumber - b.startLineNumber;
+        return a.startColumn - b.startColumn;
+      });
+      var pos = editor.getPosition ? editor.getPosition() : null;
+      var line = pos && pos.lineNumber ? pos.lineNumber : 1;
+      var col = pos && pos.column ? pos.column : 1;
+      var idx = -1;
+      if (dir > 0) {
+        for (var i = 0; i < markers.length; i++) {
+          var m = markers[i];
+          if (m.startLineNumber > line || (m.startLineNumber === line && m.startColumn > col)) { idx = i; break; }
+        }
+        if (idx === -1) idx = 0;
+      } else {
+        for (var j = markers.length - 1; j >= 0; j--) {
+          var m2 = markers[j];
+          if (m2.startLineNumber < line || (m2.startLineNumber === line && m2.startColumn < col)) { idx = j; break; }
+        }
+        if (idx === -1) idx = markers.length - 1;
+      }
+      var hit = markers[idx];
+      if (!hit) return;
+      var targetLine = Math.max(1, Number(hit.startLineNumber || 1));
+      var targetCol = Math.max(1, Number(hit.startColumn || 1));
+      try { editor.setPosition({ lineNumber: targetLine, column: targetCol }); } catch (_) {}
+      try { editor.revealLineInCenter(targetLine, 0); } catch (_) {}
+      try { editor.focus(); } catch (_) {}
+    } catch (_) {}
   }
 
   function applyJumpToLine(payload) {

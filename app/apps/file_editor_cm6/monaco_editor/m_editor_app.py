@@ -239,7 +239,7 @@ export default href;
 
         html = Html(
             Head(
-                Title("Code CM6"),
+                Title("Code TE2"),
                 Meta(charset="utf-8"),
                 Meta(name="viewport", content="width=device-width, initial-scale=1"),
                 css,
@@ -249,7 +249,7 @@ export default href;
                 # Debug: prove CSS is loaded inside the iframe
                 Style(
                     """
-                    .__fh_debug_badge {
+            .__fh_debug_badge {
                       position: fixed;
                       left: 8px;
                       bottom: 8px;
@@ -262,6 +262,7 @@ export default href;
                       font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
                       pointer-events: none;
                     }
+
                     """
                 ),
             ),
