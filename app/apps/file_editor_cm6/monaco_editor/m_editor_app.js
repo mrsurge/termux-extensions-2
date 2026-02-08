@@ -3461,6 +3461,10 @@
             'modelUri=' + modelUri,
             'activePath=' + activePath
           );
+          // Full diagnostic objects for severity inspection
+          if (payload.markers && payload.markers.length) {
+            console.log('[editor:diagnostics] first 5 markers:', payload.markers.slice(0, 5));
+          }
           if (payload.type === 'diagnostics/update') {
             // Convert server-side bridge format to the format _applyDiagnosticsUpdate expects.
             var items = [{ uri: 'file://' + (payload.path || ''), markers: payload.markers || [] }];

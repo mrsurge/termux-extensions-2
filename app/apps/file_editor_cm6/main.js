@@ -5,6 +5,7 @@
 // CM6 import removed - now using NiceGUI's ui.codemirror in iframe
 // import * as CM from '/static/vendor/codemirror.3/cm6.bundle.js';
 //some comment
+// #ts-check
 import { initExplorerUI } from './static/js/explorer.js';
 import { createDiffController } from './static/js/diff_decorations.js';
 import { createTerminalDrawer } from './static/js/terminal.js';

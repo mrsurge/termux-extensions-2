@@ -58,6 +58,10 @@ const PARSE_ARGS_ONLY_METHODS = new Set([
   "$requestWorkspaceTrust",
   "$initializeExtensionStorage",
   "$registerLogger",
+  "$ensureActivation",
+  "$onWillActivateExtension",
+  "$onDidActivateExtension",
+  "$onExtensionActivationError",
 
   // Keep diagnostics/hover requests parseable when we need them later.
   "$changeMany",
@@ -379,6 +383,47 @@ function encodeExtRequestMixedArgs({ req, rpcId, method, args, cancellable }) {
 
 function encodeExtReplyOkEmpty(req) {
   return Buffer.concat([Buffer.from([7]), u32be(req)]);
+}
+
+const _EXT_TO_LANG = {
+  ".py": "python", ".pyi": "python", ".pyw": "python",
+  ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+  ".jsx": "javascriptreact",
+  ".ts": "typescript", ".mts": "typescript", ".cts": "typescript",
+  ".tsx": "typescriptreact",
+  ".json": "json", ".jsonc": "jsonc", ".json5": "json5",
+  ".html": "html", ".htm": "html",
+  ".css": "css", ".scss": "scss", ".less": "less",
+  ".md": "markdown", ".markdown": "markdown",
+  ".yaml": "yaml", ".yml": "yaml",
+  ".xml": "xml", ".svg": "xml",
+  ".sh": "shellscript", ".bash": "shellscript", ".zsh": "shellscript",
+  ".c": "c", ".h": "c",
+  ".cpp": "cpp", ".cxx": "cpp", ".cc": "cpp", ".hpp": "cpp",
+  ".java": "java",
+  ".go": "go",
+  ".rs": "rust",
+  ".rb": "ruby",
+  ".php": "php",
+  ".lua": "lua",
+  ".r": "r", ".R": "r",
+  ".sql": "sql",
+  ".swift": "swift",
+  ".kt": "kotlin", ".kts": "kotlin",
+  ".toml": "toml",
+  ".ini": "ini", ".cfg": "ini",
+  ".dockerfile": "dockerfile",
+  ".bat": "bat", ".cmd": "bat",
+  ".ps1": "powershell",
+  ".vue": "vue",
+};
+function _languageIdFromPath(filePath) {
+  if (!filePath) return "";
+  const base = String(filePath).split("/").pop() || "";
+  if (base.toLowerCase() === "dockerfile") return "dockerfile";
+  const dot = base.lastIndexOf(".");
+  if (dot < 0) return "";
+  return _EXT_TO_LANG[base.slice(dot).toLowerCase()] || "";
 }
 
 function encodeExtAck(req) {
@@ -710,16 +755,47 @@ export class WorkbenchClient {
   }
 
   _buildExtensionsSnapshot(scannedExtensions) {
-    const includeBuiltin = String(process.env.TE2_INCLUDE_BUILTIN_EXTS || "").toLowerCase() === "1";
+    const raw = String(process.env.TE2_INCLUDE_BUILTIN_EXTS || "").toLowerCase().trim();
+    const includeBuiltin = !(raw === "0" || raw === "false" || raw === "no");
     const base = Array.isArray(scannedExtensions)
       ? scannedExtensions.filter((ext) => includeBuiltin || ext?.isBuiltin === false)
       : [];
-    const all = EXT_EXCLUDE_IDS.length
+    const afterExclude = EXT_EXCLUDE_IDS.length
       ? base.filter((ext) => {
           const ident = this._extensionIdentifierFrom(ext) ?? "";
           return !EXT_EXCLUDE_IDS.includes(String(ident));
         })
       : base;
+    // Filter builtins to only language-feature extensions (grammars, language configs,
+    // language-features, themes) and always keep user extensions.
+    // Extensions like git-base, emmet, npm, etc. try filesystem/process ops that hang.
+    const all = afterExclude.filter((ext) => {
+      if (ext?.isBuiltin === false) return true; // always keep user extensions
+      const ident = String(this._extensionIdentifierFrom(ext) ?? "").toLowerCase();
+      // Keep: language grammars (vscode.python, vscode.javascript, vscode.typescript, etc.)
+      // Keep: language features (vscode.typescript-language-features, vscode.css-language-features, etc.)
+      // Keep: themes (vscode.theme-*, GitHub.github-vscode-theme, etc.)
+      // Keep: configuration-editing (provides json schema completions)
+      if (ident.endsWith("-language-features")) return true;
+      if (ident.startsWith("vscode.theme-")) return true;
+      if (ident === "vscode.configuration-editing") return true;
+      // Language grammar/config extensions contribute grammars/languages but not activationEvents
+      const manifest = ext?.packageJSON ?? ext;
+      const contributes = manifest?.contributes;
+      if (contributes && (contributes.grammars || contributes.languages)) {
+        // Has grammar/language contributions — keep unless it also has problematic activation
+        const ae = Array.isArray(ext?.activationEvents) ? ext.activationEvents : [];
+        const hasStarActivation = ae.includes("*");
+        const hasOnLanguage = ae.some(e => typeof e === "string" && e.startsWith("onLanguage"));
+        // Grammar-only extensions (no activation events or only onLanguage) are safe
+        if (ae.length === 0 || (!hasStarActivation && hasOnLanguage) || ae.every(e => e.startsWith?.("onLanguage"))) return true;
+      }
+      // Theme-only extensions
+      if (contributes && contributes.themes && !contributes.commands) return true;
+      // Non-builtin fallthrough — already handled above
+      return false;
+    });
+    console.log(`[extensions] snapshot: ${base.length} scanned → ${afterExclude.length} after exclude → ${all.length} after language filter`);
     const activationEvents = {};
     const myExtensions = [];
     const seenMy = new Set();
@@ -1120,7 +1196,8 @@ export class WorkbenchClient {
             scannedExtensions = await spanTraceAsync("connect.scanExtensions.rpc", () =>
               this._mgmtIpc.call("remoteExtensionsScanner", "scanExtensions", ["en", null, [], null, null])
             );
-            const includeBuiltin = String(process.env.TE2_INCLUDE_BUILTIN_EXTS || "").toLowerCase() === "1";
+            const raw = String(process.env.TE2_INCLUDE_BUILTIN_EXTS || "").toLowerCase().trim();
+            const includeBuiltin = !(raw === "0" || raw === "false" || raw === "no");
             if (Array.isArray(scannedExtensions)) {
               scannedExtensions = scannedExtensions.filter((ext) => includeBuiltin || ext?.isBuiltin === false);
             }
@@ -1158,6 +1235,13 @@ export class WorkbenchClient {
       } catch {
         scannedExtensions = [];
       }
+      // Log loaded extensions to stdout
+      try {
+        const extIds = (scannedExtensions || []).map((ext) => this._extensionIdentifierFrom(ext) ?? "?").sort();
+        const builtinCount = (scannedExtensions || []).filter((ext) => ext?.isBuiltin === true).length;
+        const userCount = extIds.length - builtinCount;
+        console.log(`[extensions] loaded ${extIds.length} extensions (${builtinCount} builtin, ${userCount} user): ${extIds.join(", ")}`);
+      } catch {}
       try {
         if (String(process.env.TE2_SKIP_MGMT_SCAN || "") !== "1") {
           await spanTraceAsync("connect.whenExtensionsReady", () => this._mgmtIpc.call("remoteExtensionsScanner", "whenExtensionsReady", undefined));
@@ -1227,6 +1311,7 @@ export class WorkbenchClient {
             if (!this._extHandshake.initSent) {
               this._extHandshake.initSent = true;
               this.onEvent({ type: "ext/handshake_ready", ts_ms: Date.now(), after_ms: Date.now() - startMs });
+              console.log(`[ext_handshake] READY after ${Date.now() - startMs}ms`);
               try {
                 logMetrics("metrics/pre_ext_init_send", { mem: memSnapshot() });
                 const initJson = spanTrace("connect.JSON.stringify(extInitData)", () => JSON.stringify(extInitData));
@@ -1246,6 +1331,7 @@ export class WorkbenchClient {
                 }
                 this.ext?.protocol.send(VSBuffer.fromString(initJson));
                 this.onEvent({ type: "ext/handshake_init_sent", ts_ms: Date.now(), bytes: initJson.length });
+                console.log(`[ext_handshake] INIT_SENT bytes=${initJson.length} extensions=${extInitData?.extensions?.allExtensions?.length ?? '?'}`);
               } catch (e) {
                 clearTimeout(t);
                 d.dispose?.();
@@ -1257,13 +1343,16 @@ export class WorkbenchClient {
             clearTimeout(t);
             d.dispose?.();
             this.onEvent({ type: "ext/handshake_initialized", ts_ms: Date.now(), after_ms: Date.now() - startMs });
+            console.log(`[ext_handshake] INITIALIZED after ${Date.now() - startMs}ms`);
             resolve();
           } else if (v === 3) {
             // Terminate
+            console.log(`[ext_handshake] TERMINATE received — ext host shutting down`);
           }
         });
       });
 
+      this._extMsgCount = 0;
       this.ext.protocol.onMessage((payloadVsBuf) => {
         // Extension Host handshake messages are single-byte payloads (Ready/Initialized/Terminate).
         const b0 = payloadVsBuf?.buffer;
@@ -1274,6 +1363,10 @@ export class WorkbenchClient {
         if (!this._extHandshake.initialized) {
           // Ignore any non-handshake payloads until extension host is initialized.
           return;
+        }
+        this._extMsgCount++;
+        if (this._extMsgCount <= 500) {
+          console.log(`[ext_msg] #${this._extMsgCount} len=${b0?.length ?? 0}`);
         }
 
         if (this._extMsgTrace.enabled && this._extMsgTrace.seen < EXT_MSG_TRACE_MAX) {
@@ -1298,6 +1391,9 @@ export class WorkbenchClient {
           }
         }
         const msg = decodeExtHostRpc(payloadVsBuf.buffer);
+        if (this._extMsgCount <= 500) {
+          console.log(`[ext_msg] #${this._extMsgCount} kind=${msg.kind} type=${msg.type} rpcId=${msg.rpcId ?? '-'} method=${msg.method ?? '-'} req=${msg.req ?? '-'}`);
+        }
         if (msg.kind !== "ext") return;
         if (this._extMsgTrace.enabled && msg?.error && this._extMsgTrace.seen < EXT_MSG_TRACE_MAX) {
           try {
@@ -1334,10 +1430,38 @@ export class WorkbenchClient {
             }
             this.onEvent(ev);
           }
+          // Log activation lifecycle to stdout
+          if (msg.method === "$onWillActivateExtension" || msg.method === "$onDidActivateExtension" || msg.method === "$onExtensionActivationError") {
+            const raw0 = msg.args?.[0];
+            const extId = raw0?.value?.id ?? raw0?.id ?? raw0?.identifier?.id ?? (typeof raw0 === 'string' ? raw0 : JSON.stringify(raw0)?.slice(0, 200));
+            console.log(`[ext_activation] ${msg.method} extId=${extId}`);
+          }
+          if (msg.method === "$ensureActivation") {
+            console.log(`[ext_activation] $ensureActivation args=${JSON.stringify(msg.args ?? [])}`);
+          }
+          if (msg.method === "$initializeExtensionStorage") {
+            console.log(`[ext_activation] $initializeExtensionStorage args=${JSON.stringify(msg.args ?? []).slice(0, 200)}`);
+          }
 
           // RPCProtocol expects an immediate ACK for every request.
           try {
             this.ext?.protocol.send(VSBuffer.wrap(encodeExtAck(msg.req)));
+          } catch {}
+          // Reply with appropriate data for methods that expect specific return types.
+          // $initializeExtensionStorage → {} (empty Record<string,string>)
+          // $getInitialState → undefined (no previous state)
+          // $getTools → [] (empty tools array)
+          // Everything else → ReplyOkEmpty (resolves promise with undefined)
+          try {
+            let replyBuf;
+            if (msg.method === "$initializeExtensionStorage") {
+              replyBuf = encodeExtReplyOkJson(msg.req, {});
+            } else if (msg.method === "$getTools") {
+              replyBuf = encodeExtReplyOkJson(msg.req, []);
+            } else {
+              replyBuf = encodeExtReplyOkEmpty(msg.req);
+            }
+            this.ext?.protocol.send(VSBuffer.wrap(replyBuf));
           } catch {}
 
           // Learn provider handles.
@@ -1409,6 +1533,15 @@ export class WorkbenchClient {
             if (pairs.length > 0 && Array.isArray(pairs[0]) && pairs[0].length >= 2) {
               const sampleMarkers = Array.isArray(pairs[0][1]) ? pairs[0][1].slice(0, 1) : [];
               if (sampleMarkers.length) console.log(`[wb_client] ts=${Date.now()} $changeMany sample marker keys:`, Object.keys(sampleMarkers[0]));
+              // Full dump of first 3 diagnostics for severity inspection
+              const allMarkers = Array.isArray(pairs[0][1]) ? pairs[0][1] : [];
+              const dump = allMarkers.slice(0, 3).map(m => ({
+                severity: m.severity, code: m.code, source: m.source, message: String(m.message ?? '').slice(0, 120),
+                startLineNumber: m.startLineNumber, startColumn: m.startColumn,
+                endLineNumber: m.endLineNumber, endColumn: m.endColumn,
+                tags: m.tags, relatedInformation: m.relatedInformation?.length ?? 0
+              }));
+              console.log(`[diagnostics_dump] total=${allMarkers.length} first3=` + JSON.stringify(dump));
             }
             this.onEvent({ type: "diagnostics/changeMany", ts_ms: Date.now(), args: msg.args });
           }
@@ -1553,6 +1686,9 @@ export class WorkbenchClient {
       try {
         this._sendExt(99, "$activateByEvent", ["onLanguage", 0], false);
       } catch {}
+      // NOTE: removed $activateByEvent("*") — it activates non-language extensions
+      // (emmet, git-base, etc.) that try filesystem ops our adapter can't handle,
+      // causing the ext host to hang. Language extensions activate via onLanguage:xxx.
       if (workspaceRoot) {
         const rootPath = String(workspaceRoot);
         const name = rootPath.split("/").filter(Boolean).slice(-1)[0] || rootPath;
@@ -1580,7 +1716,7 @@ export class WorkbenchClient {
   async openFile(params = {}) {
     if (!this.ext?.protocol) throw new Error("not connected");
     const path = String(params.path ?? "");
-    const languageId = String(params.languageId ?? "python");
+    const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
     const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
     const forceRefresh = params.forceRefresh === true;
     const prevEditorId = this._activeEditorId;
