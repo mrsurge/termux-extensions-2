@@ -27,7 +27,9 @@ Cross references:
 Status: implemented and working for the deterministic read-only subset:
 - `code-server` runs as a framework shell on fixed port `127.0.0.1:18180` with `--disable-workspace-trust`.
 - Node workbench adapter runs as a framework shell on fixed port `127.0.0.1:18181`.
-- `vscode_api` is a WS JSON-RPC server that bridges Monaco requests to the adapter and forwards diagnostics events.
+- `vscode_api` is a WS JSON-RPC server that bridges Monaco RPC requests (hover, symbols, openFile) to the adapter.
+- Diagnostics flow through a **server-side bridge** (`diagnostics_bridge.py`) over the editor Socket.IO channel, not `vscode_api_ws`.
+- The workbench adapter and code-server are started eagerly at worker boot (no lazy `/discover` needed for diagnostics).
 - Working end-to-end (over `vscode_api_ws`): `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`.
 
 Known limitation (expected right now):
@@ -71,7 +73,10 @@ App worker process (app/apps/file_editor_cm6/main.py)
 Framework shells (service processes owned by the framework_shells orchestrator)
   ├─ code-server: real VS Code-compatible backend + remote extension host
   ├─ workbench adapter (Node): initiates remote-agent WS connection; decodes/encodes workbench protocol
-  └─ vscode_api (Node): browser-facing JSON-RPC bridge (Monaco → adapter), plus event fanout (diagnostics)
+  └─ vscode_api (Node): browser-facing JSON-RPC bridge (Monaco → adapter) for RPC (hover, symbols, openFile)
+
+Diagnostics pipeline (server-side bridge, not browser WS):
+  adapter WS (18181) → diagnostics_bridge.py → editor Socket.IO → browser
 ```
 
 ---
@@ -102,6 +107,22 @@ Discovery endpoints (worker, proxied via main process):
 - `GET /api/app/file_editor_cm6/code_server/discover`
 - `GET /api/app/file_editor_cm6/workbench_adapter/discover`
 - `GET /api/app/file_editor_cm6/vscode_api/discover`
+
+Workbench adapter baton (deterministic startup):
+- `GET /api/app/file_editor_cm6/workbench_adapter/start`
+  - Starts/adopts code-server + adapter and returns a **baton token**.
+- `GET /api/app/file_editor_cm6/workbench_adapter/status?token=...`
+  - Poll until `state` is `connected` or `ready`.
+- `POST /api/app/file_editor_cm6/workbench_adapter/cmd`
+  - **Requires** header `x-te2-baton: <token>` (or `?token=` query).
+  - Prevents early 502/500 races by ensuring the adapter is up before commands.
+
+Spinner ownership (host UI):
+- The host UI uses a single spinner element (`#fe-lsp-spinner`) for multiple async flows.
+- To avoid competing writers, the spinner has an explicit "activity owner" (`window.__feLspSpinnerUi.busyActivity`):
+  - `workbench_adapter`: `ensureWorkbenchAdapterReady()` owns the spinner while starting/polling the adapter.
+  - `diagnostics`: the diagnostics baton owns the spinner while waiting for per-file analysis.
+- `ensureWorkbenchAdapterReady()` must not overwrite the spinner title while `busyActivity === 'diagnostics'`.
 
 ## 1) Key files (where to look)
 
@@ -853,20 +874,45 @@ Next step:
 - Replace the placeholder server implementation with a real extension-host-backed JSON-RPC surface and keep *all* future VSIX-related integration behind this API.
 
 Language providers (POC stage):
-- `vscode_api` also hosts a minimal **stdio LSP bridge** (diagnostics-first) over the same `vscode_api_ws` IPC:
-  - Client → `vscode_api` JSON-RPC notifications:
-    - `vscode.lsp.didOpen` `{uri, languageId, version, text}`
-    - `vscode.lsp.didChange` `{uri, languageId, version, contentChanges:[{range,text}]}`
-    - `vscode.lsp.didClose` `{uri, languageId}`
-  - Client (request): `vscode.lsp.languages` → `{languages:[...]}`
-    - Used by the iframe to decide which `languageId`s should emit LSP traffic.
-  - Server spawns **one stdio LSP process per configured server key** and broadcasts raw notifications
-    (notably `textDocument/publishDiagnostics`) to all connected clients.
-  - Monaco iframe consumes `textDocument/publishDiagnostics` and applies markers via:
-    `monaco.editor.setModelMarkers(..., 'vscode_api', markers)`
+- **Stdio LSP bridge has been removed** (2026-02-07). It caused marker owner collisions with the workbench adapter path.
+- Diagnostics now flow exclusively through the **server-side diagnostics bridge** (`diagnostics_bridge.py`):
+  - Subscribes to adapter WS (`127.0.0.1:18181/ws`) for `diagnostics/update` events
+  - Caches per-path (max 100 entries) and broadcasts via editor Socket.IO (`editor:diagnostics`)
+  - On client connect (`on_connect`): sends cached diagnostics + nudges adapter for fresh ones
+  - On file switch (`on_editor_open_request`): sends cached diagnostics for the new file + nudges adapter
+  - Nudge mechanism: POST `vscode.openFile` to adapter `/cmd` to force extension host re-emit
+  - Monaco iframe handler converts bridge payload to `_applyDiagnosticsUpdate()` format
+- RPC features (hover, symbols, openFile) still flow through `vscode_api_ws` → `vscode_api_server` → adapter
 
-LSP server mapping (POC contract):
-- The bridge is driven by a json mapping file:
+Socket.IO relay handlers (`editor_ws.py`):
+- `on_editor_issues_cmd` → `editor:issues_cmd` — relays marker navigation commands (next/prev) to iframe
+- `on_editor_find_cmd` → `editor:find_cmd` — relays find/replace commands to iframe
+
+Diagnostics debug overlay + logs (current):
+- Debug overlay text (lower-left): `ext=yes/no og=yes/no diag=rx/ap/np/nm/mm` plus optional `touch=reinit:*`.
+  - `ext`: `monaco-touch-selection` helper detected.
+  - `og`: `.overflow-guard` element present in current editor DOM.
+  - `diag=rx/ap/np/nm/mm` counters:
+    - `rx`: diagnostics events received by Monaco iframe.
+    - `ap`: `setModelMarkers` calls performed (includes cache reapply and empty arrays).
+    - `np`: dropped because path could not be derived from URI.
+    - `nm`: dropped because no model available.
+    - `mm`: dropped because item path != active model path.
+  - Counters are cumulative for the iframe lifetime (not per file).
+  - `touch=reinit:*` appears when touch-selection UI re-installs after editor DOM rebuild.
+- Frontend console logs (Monaco iframe):
+  - `[editor:diagnostics] rx diagnostics/update path=... markers=N currentPath=...`
+  - `[vscode_api] setModelMarkers count=... sevs=[...] lines=[...]`
+  - `[vscode_api] verify getModelMarkers count=...`
+- Adapter-side console logs (Node workbench adapter):
+  - `[wb_client] $changeMany owner=... pairs=... markerCounts=[...]`
+  - `[server] diagnostics/changeMany -> norm=owner=... items=... markerCounts=[...]`
+
+
+Legacy LSP config (`lsp_servers.json`) is no longer used. The following section is preserved for reference only:
+
+LSP server mapping (legacy — removed):
+- The bridge was driven by a json mapping file:
   - default path: `~/.local/share/termux-extensions-2/code-te2-extensions/lsp_servers.json`
   - override: `TE2_LSP_CONFIG_PATH=/abs/path/to/lsp_servers.json`
 - Format:
@@ -1181,13 +1227,16 @@ See:
 - `AGENTS.md` (“Minified Code Search Policy”)
 - `CTAG-ANNOTATIONS.md` (tagging prettified functions for later lookup)
 
-### TE2 integration surface (target)
-Expose a TE2-side channel (format is intentionally boring):
-- A single WS endpoint (or long-poll) that emits normalized events:
-  - `diagnostics/update { uri, owner, markers[] }`
-  - `hover/result { uri, pos, hover }`
-  - `completion/result { uri, pos, items[] }`
-  - `symbols/result { uri, symbols[] }`
+### TE2 integration surface (current)
+Diagnostics use a **server-side bridge** over the existing editor Socket.IO channel:
+- `editor:diagnostics` event: `{ type: "diagnostics/update", path, owner, markers[], ts_ms }`
+- Server-side cache in `diagnostics_bridge.py` (per-path, max 100 entries)
+- Nudge-on-connect: adapter receives `vscode.openFile` to force fresh diagnostics
+
+RPC features use `vscode_api_ws` (separate WS, JSON-RPC):
+- `vscode.hover` `{ uri, pos }` → `{ hover }`
+- `vscode.documentSymbols` `{ uri }` → `{ symbols[] }`
+- `vscode.openFile` `{ path, languageId }` → `{ ok }`
 
 The UI (Monaco iframe) remains a thin renderer:
 - It subscribes to TE2 events, updates Monaco markers/hover providers, and never runs an extension host itself.
