@@ -1383,10 +1383,32 @@ export class WorkbenchClient {
             const argsSummary = Array.isArray(msg.args) ? `args.length=${msg.args.length}` : `args=${typeof msg.args}`;
             const pairs = Array.isArray(msg.args) && Array.isArray(msg.args[1]) ? msg.args[1] : [];
             const markerCounts = pairs.map(p => Array.isArray(p) && Array.isArray(p[1]) ? p[1].length : '?');
-            console.log(`[wb_client] $changeMany owner=${msg.args?.[0]} pairs=${pairs.length} markerCounts=[${markerCounts.join(',')}]`);
+            console.log(`[wb_client] ts=${Date.now()} $changeMany owner=${msg.args?.[0]} pairs=${pairs.length} markerCounts=[${markerCounts.join(',')}]`);
+            // If decoding produced a non-array markers payload, print the pair shape to debug.
+            // Keep this bounded: only log the first pair and only when it's suspicious.
+            try {
+              if (markerCounts.includes('?') && pairs.length > 0 && Array.isArray(pairs[0])) {
+                const u0 = pairs[0][0];
+                const m0 = pairs[0][1];
+                const uKeys = (u0 && typeof u0 === "object") ? Object.keys(u0).slice(0, 12) : [];
+                const mKeys = (m0 && typeof m0 === "object") ? Object.keys(m0).slice(0, 12) : [];
+                let mPreview = "";
+                try {
+                  if (m0 && typeof m0 === "object") mPreview = JSON.stringify(m0).slice(0, 240);
+                } catch {}
+                let uPath = "";
+                try {
+                  if (u0 && typeof u0 === "object") uPath = String(u0.path || u0.fsPath || "");
+                } catch {}
+                console.log(
+                  `[wb_client] ts=${Date.now()} $changeMany suspicious pair0 uriType=${typeof u0} uriPath=${uPath} uriKeys=${JSON.stringify(uKeys)} ` +
+                  `markersType=${Array.isArray(m0) ? "array" : typeof m0} markersKeys=${JSON.stringify(mKeys)} markersPreview=${mPreview}`
+                );
+              }
+            } catch {}
             if (pairs.length > 0 && Array.isArray(pairs[0]) && pairs[0].length >= 2) {
               const sampleMarkers = Array.isArray(pairs[0][1]) ? pairs[0][1].slice(0, 1) : [];
-              if (sampleMarkers.length) console.log(`[wb_client] $changeMany sample marker keys:`, Object.keys(sampleMarkers[0]));
+              if (sampleMarkers.length) console.log(`[wb_client] ts=${Date.now()} $changeMany sample marker keys:`, Object.keys(sampleMarkers[0]));
             }
             this.onEvent({ type: "diagnostics/changeMany", ts_ms: Date.now(), args: msg.args });
           }
@@ -1560,6 +1582,9 @@ export class WorkbenchClient {
     const path = String(params.path ?? "");
     const languageId = String(params.languageId ?? "python");
     const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
+    const prevEditorId = this._activeEditorId;
+    const prevUriObj = this._activeUriObj;
+    const prevTab = this._activeTab;
     const text = await spanTraceAsync("openFile.fs.readFile", () => fs.readFile(path, "utf8"));
     const lines = spanTrace("openFile.text.splitLines", () => text.split(/\r?\n/));
     let maxLineLen = 0;
@@ -1581,27 +1606,24 @@ export class WorkbenchClient {
       this.state.lastOpenTs = Date.now();
     } catch {}
 
-    // Close the previous file/editor so the extension host drops its diagnostics context.
-    if (this._activeEditorId && this._activeUriObj) {
-      try {
-        spanTrace("openFile.closePrev", () => {
-          this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [{
-            removedEditors: [this._activeEditorId],
-          }], false);
-          this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [{
-            removedDocuments: [this._activeUriObj],
-          }], false);
-        });
-      } catch (e) { /* best-effort */ }
-    }
+		    // When switching files, treat the previous document as removed and the new one as added in
+		    // the same *sequence* as the real code-server workbench frontend:
+		    //   tabModel → removedDocuments → addedDocuments → addedEditors(+newActiveEditor)
+		    // NOTE: The trace does NOT send `removedEditors` here; sending it with the wrong editor id
+		    // can break subsequent diagnostics.
+		    const shouldClosePrev = !!(
+		      prevUriObj &&
+		      (prevUriObj?.fsPath ?? prevUriObj?.path) &&
+		      (prevUriObj?.fsPath ?? prevUriObj?.path) !== path
+		    );
 
-    const modelN = this._nextModelNumber++;
-    const editorId = `vs.editor.ICodeEditor:${modelN},$model${modelN}`;
+	    const modelN = this._nextModelNumber++;
+	    // Match code-server trace format: constant ICodeEditor:2, variable $modelN.
+	    const editorId = `vs.editor.ICodeEditor:2,$model${modelN}`;
     const visibleEndLineNumber = Math.min(lines.length || 1, 31);
     const visibleEndColumn = Math.max(1, Math.min((lines[visibleEndLineNumber - 1] ?? "").length + 1, 1000));
 
-    // Mirror the trace: tab model first (preview tab), then delta with addedDocuments,
-    // then delta with addedEditors + newActiveEditor.
+    // Mirror the trace: tab operations first, then tab model, then document/editor delta.
     const tabId = `0~default-workbench.editors.files.fileEditorInput-${uriObj.external} `;
     const tab = {
       id: tabId,
@@ -1613,6 +1635,8 @@ export class WorkbenchClient {
       isActive: true,
       isDirty: false,
     };
+    const tabInactive = { ...tab, isActive: false };
+    const tabActive = { ...tab, isActive: true };
     const tabModel = [
       {
         groupId: 0,
@@ -1620,48 +1644,95 @@ export class WorkbenchClient {
         viewColumn: 0,
         tabs: [tab],
       },
-    ];
-    spanTrace("openFile.send.tabModel", () => this._sendExt(113, "$acceptEditorTabModel", [tabModel], false));
+	    ];
 
+    // The workbench emits a small tab lifecycle stream before the tab model:
+    // - First open: kind 0 (add inactive) then kind 2 (activate)
+    // - Switch: kind 1 (close/replace old) then kind 0 (add inactive) then kind 2 (activate)
+    try {
+      if (shouldClosePrev && prevTab) {
+        spanTrace("openFile.send.tabOp.closePrev", () =>
+          this._sendExt(113, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: prevTab, kind: 1 }], false)
+        );
+        console.log(`[openFile] ts=${Date.now()} tabOp kind=1 closePrev tab=${String(prevTab?.label || "")}`);
+      }
+    } catch {}
+    try {
+      spanTrace("openFile.send.tabOp.addInactive", () =>
+        this._sendExt(113, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: tabInactive, kind: 0 }], false)
+      );
+      console.log(`[openFile] ts=${Date.now()} tabOp kind=0 addInactive tab=${String(tabInactive?.label || "")}`);
+    } catch {}
+    try {
+      spanTrace("openFile.send.tabOp.activate", () =>
+        this._sendExt(113, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: tabActive, kind: 2 }], false)
+      );
+      console.log(`[openFile] ts=${Date.now()} tabOp kind=2 activate tab=${String(tabActive?.label || "")}`);
+    } catch {}
+
+    spanTrace("openFile.send.tabModel", () => this._sendExt(113, "$acceptEditorTabModel", [tabModel], false));
+    try {
+      const prevPath = (prevUriObj && typeof prevUriObj === "object") ? String(prevUriObj.fsPath || prevUriObj.path || "") : "";
+      console.log(`[openFile] ts=${Date.now()} path=${path} lang=${languageId} editorId=${editorId} shouldClosePrev=${shouldClosePrev} prevEditorId=${prevEditorId || ""} prevPath=${prevPath}`);
+    } catch {}
+
+	    // Close the previous document first (mirror trace).
+	    if (shouldClosePrev) {
+	      try {
+	        spanTrace("openFile.send.delta.removedDocuments", () =>
+	          this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [{ removedDocuments: [prevUriObj] }], false)
+	        );
+        try {
+          const prevPath = (prevUriObj && typeof prevUriObj === "object") ? String(prevUriObj.fsPath || prevUriObj.path || "") : "";
+          console.log(`[openFile] ts=${Date.now()} removedDocuments=[${prevPath}]`);
+        } catch {
+          console.log(`[openFile] ts=${Date.now()} removedDocuments=[?]`);
+        }
+      } catch {}
+    }
+
+    // Added document (with full line payload).
     const docDelta = spanTrace("openFile.buildDelta.addedDocuments", () => ({
-      // Mirror workbench behavior: opening a file is not dirty by default.
       addedDocuments: [{ uri: uriObj, versionId: 1, lines, EOL: "\n", languageId, isDirty: false, encoding: "utf8" }],
     }));
-    const reqDocs = spanTrace("openFile.send.delta.addedDocuments", () => this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [docDelta], false));
+    spanTrace("openFile.send.delta.addedDocuments", () => this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [docDelta], false));
+    try { console.log(`[openFile] ts=${Date.now()} addedDocuments=[${path}] lineCount=${lines.length}`); } catch {}
     // Allow GC to collect the large `lines` array after JSON encoding.
     try {
       if (docDelta?.addedDocuments?.[0]) docDelta.addedDocuments[0].lines = null;
     } catch {}
 
+	    // Added editor + activate it (newActiveEditor included on this delta in the trace).
     const editorDelta = spanTrace("openFile.buildDelta.addedEditors", () => ({
       newActiveEditor: editorId,
       addedEditors: [
-        {
-          id: editorId,
-          documentUri: uriObj,
-          options: { insertSpaces: true, tabSize: 4, indentSize: 4, originalIndentSize: "tabSize", cursorStyle: 1, lineNumbers: 1 },
-          selections: [
-            {
-              startLineNumber: 1,
-              startColumn: 1,
-              endLineNumber: 1,
-              endColumn: 1,
-              selectionStartLineNumber: 1,
-              selectionStartColumn: 1,
-              positionLineNumber: 1,
-              positionColumn: 1,
-            },
-          ],
-          visibleRanges: [{ startLineNumber: 1, startColumn: 1, endLineNumber: visibleEndLineNumber, endColumn: visibleEndColumn }],
-          editorPosition: 0,
-        },
-      ],
+	        {
+	          id: editorId,
+	          documentUri: uriObj,
+	          options: { insertSpaces: true, tabSize: 4, indentSize: 4, originalIndentSize: "tabSize", cursorStyle: 1, lineNumbers: 1 },
+	          selections: [
+	            {
+	              startLineNumber: 1,
+	              startColumn: 1,
+	              endLineNumber: 1,
+	              endColumn: 1,
+	              selectionStartLineNumber: 1,
+	              selectionStartColumn: 1,
+	              positionLineNumber: 1,
+	              positionColumn: 1,
+	            },
+	          ],
+	          visibleRanges: [{ startLineNumber: 1, startColumn: 1, endLineNumber: visibleEndLineNumber, endColumn: visibleEndColumn }],
+	          editorPosition: 0,
+	        },
+	      ],
     }));
-    spanTrace("openFile.send.delta.addedEditors", () => this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [editorDelta], false));
+    const reqDocs = spanTrace("openFile.send.delta.addedEditors", () => this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [editorDelta], false));
+    try { console.log(`[openFile] ts=${Date.now()} addedEditors=[${editorId}] newActiveEditor=${editorId}`); } catch {}
 
     spanTrace("openFile.send.editorState", () => {
       this._sendExt(88, "$acceptEditorDiffInformation", [editorId, []], false);
-      this._sendExt(
+	      this._sendExt(
         88,
         "$acceptEditorPropertiesChanged",
         [
@@ -1697,6 +1768,7 @@ export class WorkbenchClient {
     spanTrace("openFile.send.activateByEvent", () => this._sendExt(99, "$activateByEvent", [`onLanguage:${languageId}`, 0], false));
     this._activeEditorId = editorId;
     this._activeUriObj = uriObj;
+    this._activeTab = tabActive;
     return { ok: true, req: reqDocs };
   }
 

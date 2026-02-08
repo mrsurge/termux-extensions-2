@@ -207,6 +207,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         session_state = _history_store.get_session_state()
         prefs = _preferences_store.get_preferences(project) if project else {}
         role = _role_from_environ(environ)
+        connect_request_id = f"diag_{int(time.time() * 1000)}_{str(sid)[-6:]}"
 
         # Single source of truth: history_store.get_last_file() is authoritative.
         # session_state["currentPath"] is a mirror written by on_editor_open_request.
@@ -232,6 +233,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             abs_path = _normalize_abs_path(str(current_path))
             if abs_path and _is_under_project(project, abs_path):
                 snapshot["file"] = _read_file_payload(project, abs_path)
+                snapshot["file"]["request_id"] = connect_request_id
 
         await self.emit("editor:ssot", snapshot, room=sid)
 
@@ -255,41 +257,21 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 import time as _time
                 await self.emit(
                     "editor:diagnostics_pending",
-                    {"path": current_path, "ts_ms": int(_time.time() * 1000)},
+                    {"path": current_path, "request_id": connect_request_id, "ts_ms": int(_time.time() * 1000)},
                     room="file_editor_cm6",
                 )
         except Exception:
             pass
 
-        # Diagnostics bridge: send cached diagnostics + nudge for fresh ones.
+        # Diagnostics bridge: ensure the background adapter→editor bridge is running.
         try:
             from ..diagnostics_bridge import (
-                get_cached_diagnostics,
-                nudge_diagnostics_for_file,
-                send_cached_diagnostics_to_sid,
                 start_bridge,
             )
             from .editor_socketio import EDITOR_SIO
 
             # Ensure the bridge background task is running.
             start_bridge(EDITOR_SIO)
-
-            if current_path:
-                abs_path = _normalize_abs_path(str(current_path))
-                print(f"[editor_ws] on_connect diag bridge: current_path={current_path} abs_path={abs_path}", flush=True)
-                if abs_path:
-                    # Send any cached diagnostics immediately (no wait).
-                    await send_cached_diagnostics_to_sid(self.server, sid, abs_path)
-                    # Nudge the adapter to re-emit diagnostics (best-effort, non-blocking).
-                    import asyncio
-                    lang = ""
-                    try:
-                        ext = Path(abs_path).suffix.lstrip(".")
-                        _ext_map = {"py": "python", "js": "javascript", "ts": "typescript", "jsx": "javascriptreact", "tsx": "typescriptreact", "rs": "rust", "cpp": "cpp", "c": "c", "go": "go"}
-                        lang = _ext_map.get(ext, ext)
-                    except Exception:
-                        pass
-                    asyncio.ensure_future(nudge_diagnostics_for_file(abs_path, lang))
         except Exception:
             pass
 
@@ -408,6 +390,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             return
 
     async def on_editor_open_request(self, sid, data):
+        print(f"[editor_ws] on_editor_open_request: sid={sid} data={data}", flush=True)
         project = _active_project()
         if not project:
             await self.emit("editor:error", {"error": "no_active_project"}, room=sid)
@@ -417,6 +400,9 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             payload_in = {}
 
         path = _normalize_abs_path(payload_in.get("path", ""))
+        request_id = payload_in.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            request_id = f"diag_{int(time.time() * 1000)}_{str(sid)[-6:]}"
         if not path:
             await self.emit("editor:error", {"error": "missing_path"}, room=sid)
             return
@@ -455,6 +441,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
 
         payload = _read_file_payload(project, path)
         payload["source_client"] = sid
+        payload["request_id"] = request_id
         if line is not None:
             payload["line"] = line
         if column is not None:
@@ -480,30 +467,18 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         # Diagnostics baton: tell browser to show spinner while we wait for analysis.
         try:
             import time as _time
-            await self.emit("editor:diagnostics_pending", {"path": path, "ts_ms": int(_time.time() * 1000)}, room="file_editor_cm6")
-        except Exception:
-            pass
-
-        # Diagnostics bridge: send cached diagnostics for the new file + nudge for fresh ones.
-        try:
-            from ..diagnostics_bridge import (
-                nudge_diagnostics_for_file,
-                send_cached_diagnostics_to_sid,
+            print(f"[editor_ws] on_editor_open_request: emitting editor:diagnostics_pending path={path}", flush=True)
+            await self.emit(
+                "editor:diagnostics_pending",
+                {"path": path, "request_id": request_id, "ts_ms": int(_time.time() * 1000)},
+                room="file_editor_cm6",
             )
-            abs_path = path
-            if abs_path:
-                await send_cached_diagnostics_to_sid(self.server, sid, abs_path)
-                lang = ""
-                try:
-                    ext = Path(abs_path).suffix.lstrip(".")
-                    _ext_map = {"py": "python", "js": "javascript", "ts": "typescript", "jsx": "javascriptreact", "tsx": "typescriptreact", "rs": "rust", "cpp": "cpp", "c": "c", "go": "go"}
-                    lang = _ext_map.get(ext, ext)
-                except Exception:
-                    pass
-                import asyncio
-                asyncio.ensure_future(nudge_diagnostics_for_file(abs_path, lang))
-        except Exception:
-            pass
+        except Exception as _e:
+            print(f"[editor_ws] on_editor_open_request: diagnostics_pending emit FAILED: {_e}", flush=True)
+
+        # Diagnostics bridge: send cached diagnostics for the new file.
+        # NOTE: do not replay cached diagnostics on open. Diagnostics should be driven
+        # by live workbench adapter events for the active document.
 
     async def on_editor_jump_to_line_request(self, sid, data):
         payload_in = data or {}

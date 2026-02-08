@@ -307,12 +307,29 @@ const eventLog = [];
 const EVENT_LOG_MAX = Number(process.env.TE2_EVENT_LOG_MAX ?? "200");
 
 // Diagnostics baton: a pending Promise resolved when $changeMany includes the target path.
-// Map<absPath, { resolve: Function, timer: NodeJS.Timeout }>
-const _diagBatonWaiters = new Map();
-const DIAG_BATON_TIMEOUT_MS = 10000;
+//
+// Robustness rules:
+// - Only one in-flight "open file -> wait for diagnostics for that file" job at a time.
+// - A new open cancels the previous job without emitting diagnostics/ready for the cancelled job.
+// - We resolve on the first diagnostics/update that matches the target path, regardless of marker count.
+//   (Clean files still need the spinner to stop.)
+const DIAG_BATON_TIMEOUT_MS = Number(process.env.TE2_DIAG_BATON_TIMEOUT_MS ?? "45000");
+let _diagBatonJob = null; // { absPath, requestId, startMs, timer, resolve, promise }
+
+function batonLog(msg) {
+  console.log(`[baton] ts=${Date.now()} ${msg}`);
+}
 
 function _absPathFromUri(uri) {
   if (!uri) return "";
+  if (typeof uri === "object") {
+    // Support URI objects (revived) as well as strings.
+    if (typeof uri.fsPath === "string" && uri.fsPath) return uri.fsPath;
+    if (typeof uri.path === "string" && uri.path && uri.path.startsWith("/")) return uri.path;
+    if (typeof uri.external === "string" && uri.external) return _absPathFromUri(uri.external);
+    return "";
+  }
+  if (typeof uri !== "string") return "";
   if (uri.startsWith("/")) return uri;
   if (uri.startsWith("file://")) return uri.slice(7);
   if (uri.startsWith("vscode-remote://")) {
@@ -322,30 +339,40 @@ function _absPathFromUri(uri) {
   return "";
 }
 
-function _resolveDiagBaton(absPath) {
-  const waiter = _diagBatonWaiters.get(absPath);
-  if (!waiter) return;
-  clearTimeout(waiter.timer);
-  _diagBatonWaiters.delete(absPath);
-  waiter.resolve();
+function _cancelDiagBatonJob(reason = "cancelled") {
+  if (!_diagBatonJob) return;
+  try { clearTimeout(_diagBatonJob.timer); } catch {}
+  const job = _diagBatonJob;
+  _diagBatonJob = null;
+  try {
+    job.resolve({ status: "cancelled", reason, absPath: job.absPath, requestId: job.requestId });
+  } catch {}
 }
 
-function _waitForDiagnostics(absPath) {
-  // Cancel any previous waiter for a different path.
-  for (const [p, w] of _diagBatonWaiters) {
-    if (p !== absPath) { clearTimeout(w.timer); _diagBatonWaiters.delete(p); }
+function _startDiagBatonJob(absPath, requestId) {
+  // Cancel previous job without emitting diagnostics/ready for it.
+  if (_diagBatonJob && _diagBatonJob.absPath !== absPath) {
+    batonLog(`cancelling stale job for ${_diagBatonJob.absPath}`);
+    _cancelDiagBatonJob("superseded");
   }
-  // If already waiting for this path, return existing promise.
-  if (_diagBatonWaiters.has(absPath)) return _diagBatonWaiters.get(absPath).promise;
+  if (_diagBatonJob && _diagBatonJob.absPath === absPath && _diagBatonJob.requestId === requestId) {
+    batonLog(`reusing existing job for ${absPath}`);
+    return _diagBatonJob.promise;
+  }
 
+  batonLog(`CREATED job for ${absPath} requestId=${requestId || "-"}`);
+  const startMs = Date.now();
   let resolve;
-  const promise = new Promise(r => { resolve = r; });
+  const promise = new Promise((r) => { resolve = r; });
   const timer = setTimeout(() => {
-    console.log(`[server] diagnostics baton timeout for ${absPath}`);
-    _diagBatonWaiters.delete(absPath);
-    resolve(); // resolve anyway so spinner hides
-  }, DIAG_BATON_TIMEOUT_MS);
-  _diagBatonWaiters.set(absPath, { resolve, timer, promise });
+    const elapsed = Date.now() - startMs;
+    batonLog(`TIMEOUT path=${absPath} requestId=${requestId || "-"} after ${elapsed}ms`);
+    if (_diagBatonJob && _diagBatonJob.absPath === absPath && _diagBatonJob.requestId === requestId) {
+      _diagBatonJob = null;
+    }
+    resolve({ status: "timeout", absPath, requestId, elapsed_ms: elapsed });
+  }, Math.max(1000, DIAG_BATON_TIMEOUT_MS));
+  _diagBatonJob = { absPath, requestId, startMs, timer, resolve, promise };
   return promise;
 }
 
@@ -405,7 +432,15 @@ function emitTe2Event(ev) {
 }
 
 function uriObjToString(uriObj) {
-  if (!uriObj || typeof uriObj !== "object") return null;
+  if (!uriObj) return null;
+  if (typeof uriObj === "string") return uriObj;
+  if (typeof uriObj !== "object") return null;
+
+  // Prefer VS Code's computed external form when present.
+  if (typeof uriObj.external === "string" && uriObj.external) return uriObj.external;
+  // Some uri objects carry fsPath but not scheme; treat as a file URI string.
+  if (typeof uriObj.fsPath === "string" && uriObj.fsPath) return `file://${uriObj.fsPath}`;
+
   const scheme = typeof uriObj.scheme === "string" ? uriObj.scheme : "";
   const authority = typeof uriObj.authority === "string" ? uriObj.authority : "";
   const path = typeof uriObj.path === "string" ? uriObj.path : "";
@@ -421,7 +456,17 @@ function diagnosticsFromChangeMany(args) {
   for (const pair of pairs) {
     if (!Array.isArray(pair) || pair.length < 2) continue;
     const uriObj = pair[0];
-    const markers = Array.isArray(pair[1]) ? pair[1] : [];
+    // Markers are usually an array, but in mixed-arg payloads they may show up wrapped
+    // as { __json_with_buffers__: <json>, buffers: <n> }. Unwrap defensively.
+    let markersRaw = pair[1];
+    if (markersRaw && typeof markersRaw === "object" && !Array.isArray(markersRaw)) {
+      if (Object.prototype.hasOwnProperty.call(markersRaw, "__json_with_buffers__")) {
+        markersRaw = markersRaw.__json_with_buffers__;
+      } else if (Object.prototype.hasOwnProperty.call(markersRaw, "markers")) {
+        markersRaw = markersRaw.markers;
+      }
+    }
+    const markers = Array.isArray(markersRaw) ? markersRaw : [];
     const uri = uriObjToString(uriObj);
     if (!uri) continue;
     items.push({ uri, markers });
@@ -486,19 +531,28 @@ const wb = new WorkbenchClient({
           items: norm.items,
         });
 
-        // Diagnostics baton: resolve if any item URI matches a pending waiter.
-        // Only resolve on real results (non-zero markers), not the initial Pyright "clear" (0 markers, owner "Pyright").
-        if (_diagBatonWaiters.size > 0) {
+        // Diagnostics baton: resolve the current in-flight job when any item URI matches its path.
+        // We intentionally resolve on the first match, regardless of marker count, so clean files
+        // do not spin forever and late-arriving diagnostics for previous files won't block.
+        if (_diagBatonJob) {
+          const wantPath = _diagBatonJob.absPath;
           for (const item of norm.items) {
             const itemPath = _absPathFromUri(item.uri || "");
-            if (itemPath && _diagBatonWaiters.has(itemPath)) {
+            try {
+              // Minimal debug to see why a match is missed without dumping huge payloads.
+              batonLog(`diag item uri=${typeof item.uri === "string" ? item.uri : "[obj]"} itemPath=${itemPath} wantPath=${wantPath} markers=${(item.markers || []).length}`);
+            } catch {}
+            if (itemPath && wantPath && itemPath === wantPath) {
               const markerCount = (item.markers || []).length;
-              // Owner "Pyright" with 0 markers = clear event (skip).
-              // Owner "Pyright0"/"Pyright1"/etc or any owner with markers > 0 = real result.
-              if (markerCount > 0 || (norm.owner !== "Pyright")) {
-                console.log(`[server] diagnostics baton resolved: path=${itemPath} owner=${norm.owner} markers=${markerCount}`);
-                _resolveDiagBaton(itemPath);
-              }
+              const elapsed = Date.now() - (_diagBatonJob.startMs || Date.now());
+              batonLog(`MATCH path=${itemPath} owner=${norm.owner} markers=${markerCount} elapsed=${elapsed}ms`);
+              try { clearTimeout(_diagBatonJob.timer); } catch {}
+              const job = _diagBatonJob;
+              _diagBatonJob = null;
+              try {
+                job.resolve({ status: "matched", absPath: itemPath, requestId: job.requestId, owner: norm.owner, markers: markerCount, elapsed_ms: elapsed });
+              } catch {}
+              break;
             }
           }
         }
@@ -637,10 +691,39 @@ async function handleJsonRpc(reqObj) {
   if (method === "vscode.openFile") {
     const p = (params && typeof params === "object") ? params : {};
     const resolvedPath = normalizePathParam(p);
+    const requestId = (typeof p.requestId === "string" && p.requestId) ? p.requestId : null;
+    batonLog(`vscode.openFile ENTER path=${resolvedPath} id=${id} requestId=${requestId || "-"}`);
     if (!resolvedPath) {
       return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
     }
     const authority = normalizeAuthorityParam(p, DEFAULT_REMOTE_AUTHORITY);
+
+    // Dedup: if this file is already the active document and was opened recently,
+    // skip wb.openFile() to prevent a close→reopen cycle that kills Pyright analysis.
+    // The first caller already opened the file; just join the existing baton.
+    const DEDUP_WINDOW_MS = 5000;
+    const alreadyActive = resolvedPath === wb.state?.activePath;
+    const openAge = wb.state?.lastOpenTs ? (Date.now() - wb.state.lastOpenTs) : Infinity;
+    if (alreadyActive && openAge < DEDUP_WINDOW_MS) {
+      batonLog(`vscode.openFile DEDUP skip path=${resolvedPath} (active, opened ${openAge}ms ago)`);
+      // Still participate in the baton so diagnostics/ready fires for this request id.
+      (async () => {
+        const r = await _startDiagBatonJob(resolvedPath, requestId);
+        if (r && r.status === "cancelled") return;
+        const error = r && r.status === "timeout";
+        emitTe2Event({
+          type: "diagnostics/ready",
+          ts_ms: nowMs(),
+          path: resolvedPath,
+          request_id: requestId,
+          error: error || undefined,
+          reason: r?.status || undefined,
+          markers: (r && typeof r.markers === "number") ? r.markers : undefined,
+          owner: r?.owner,
+        });
+      })();
+      return { jsonrpc: "2.0", id, result: { ok: true, path: resolvedPath, uri: vscodeRemoteUri(authority, resolvedPath), dedup: true } };
+    }
 
     const openFileSnapEnabled =
       String(process.env.TE2_OPENFILE_SNAPSHOT_ENABLE || "") === "1"
@@ -682,21 +765,28 @@ async function handleJsonRpc(reqObj) {
       languageId: p.languageId,
       authority,
     });
+    batonLog(`wb.openFile returned for ${resolvedPath}`);
     logStatus("open_file", { path: resolvedPath });
 
     // Diagnostics baton: wait for $changeMany to include this file's URI.
-    // The Promise resolves when onEvent sees a matching $changeMany with real markers,
-    // or on timeout (10s). Non-blocking to the HTTP response — fires async.
+    // The Promise resolves when onEvent sees a matching diagnostics/update for this file,
+    // or on timeout. Non-blocking to the HTTP response — fires async.
     (async () => {
-      try {
-        console.log(`[server] diagnostics baton: waiting for $changeMany matching ${resolvedPath}`);
-        await _waitForDiagnostics(resolvedPath);
-        console.log(`[server] diagnostics/ready path=${resolvedPath}`);
-        emitTe2Event({ type: "diagnostics/ready", ts_ms: nowMs(), path: resolvedPath });
-      } catch (e) {
-        console.log(`[server] diagnostics baton error for ${resolvedPath}: ${e?.message || e}`);
-        emitTe2Event({ type: "diagnostics/ready", ts_ms: nowMs(), path: resolvedPath, error: true });
-      }
+      batonLog(`waiting for diagnostics for ${resolvedPath} requestId=${requestId || "-"}`);
+      const r = await _startDiagBatonJob(resolvedPath, requestId);
+      if (r && r.status === "cancelled") return;
+      const error = r && r.status === "timeout";
+      batonLog(`emitting diagnostics/ready path=${resolvedPath} status=${r?.status || "?"}`);
+      emitTe2Event({
+        type: "diagnostics/ready",
+        ts_ms: nowMs(),
+        path: resolvedPath,
+        request_id: requestId,
+        error: error || undefined,
+        reason: r?.status || undefined,
+        markers: (r && typeof r.markers === "number") ? r.markers : undefined,
+        owner: r?.owner,
+      });
     })();
 
     return { jsonrpc: "2.0", id, result: { ...result, path: resolvedPath, uri: vscodeRemoteUri(authority, resolvedPath) } };

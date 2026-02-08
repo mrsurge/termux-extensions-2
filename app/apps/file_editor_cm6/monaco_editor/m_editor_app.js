@@ -3086,6 +3086,12 @@
 
       editorSocket.on('editor:ssot', function(snapshot) {
         try {
+          try {
+            var _t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+              ? (Math.round(performance.now() * 10) / 10)
+              : null;
+            console.log((_t != null ? ('t=' + _t + 'ms ') : '') + 'now=' + Date.now(), '[editor:ssot] rx', { hasFile: !!(snapshot && snapshot.file), currentPath: snapshot && snapshot.currentPath });
+          } catch (_) {}
           cachedPrefs = snapshot;
           if (snapshot && snapshot.file) {
             var f = snapshot.file;
@@ -3159,7 +3165,12 @@
               try {
                 vscodeApiCall(
                   'vscode.openFile',
-                  { path: currentPath, languageId: lang, uri: (model && model.uri) ? String(model.uri.toString()) : '' },
+                  {
+                    path: currentPath,
+                    languageId: lang,
+                    uri: (model && model.uri) ? String(model.uri.toString()) : '',
+                    requestId: (f && f.request_id) ? String(f.request_id) : '',
+                  },
                   { timeoutMs: 8000 }
                 ).then(function () {}).catch(function () {});
               } catch (_) {}
@@ -3178,6 +3189,12 @@
       editorSocket.on('editor:open', function(payload) {
         try {
           if (!payload || !payload.path) return;
+          try {
+            var _t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+              ? (Math.round(performance.now() * 10) / 10)
+              : null;
+            console.log((_t != null ? ('t=' + _t + 'ms ') : '') + 'now=' + Date.now(), '[editor:open] rx', { path: payload.path, request_id: payload.request_id || '' });
+          } catch (_) {}
           // Always follow SSOT open across clients.
           baseSha256 = payload.base_sha256 || baseSha256;
           currentPath = payload.path;
@@ -3219,7 +3236,16 @@
             // Notify the language sidecar so extension activation + provider registration can happen.
             // This is intentionally best-effort and must not block the editor UI.
             try {
-              vscodeApiCall('vscode.openFile', { path: currentPath, languageId: lang, uri: (model && model.uri) ? String(model.uri.toString()) : '' }, { timeoutMs: 8000 })
+              vscodeApiCall(
+                'vscode.openFile',
+                {
+                  path: currentPath,
+                  languageId: lang,
+                  uri: (model && model.uri) ? String(model.uri.toString()) : '',
+                  requestId: (payload && payload.request_id) ? String(payload.request_id) : '',
+                },
+                { timeoutMs: 8000 }
+              )
                 .then(function () {})
                 .catch(function () {});
             } catch (_) {}
@@ -3376,10 +3402,17 @@
       editorSocket.on('editor:diagnostics', function(payload) {
         try {
           if (!payload || typeof payload !== 'object') return;
+          var _ts = '';
+          try {
+            var _t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+              ? (Math.round(performance.now() * 10) / 10)
+              : null;
+            _ts = (_t != null ? ('t=' + _t + 'ms ') : '') + 'now=' + Date.now();
+          } catch (_) { _ts = 'now=' + Date.now(); }
           var modelUri = (model && model.uri) ? String(model.uri.toString()) : '';
           var activePath = currentPath ? String(currentPath) : _absPathFromVscodeUri(modelUri);
           var payloadPath = payload.path ? String(payload.path) : '';
-          console.log('[editor:diagnostics] rx', payload.type,
+          console.log(_ts, '[editor:diagnostics] rx', payload.type,
             'path=' + (payloadPath || '?'),
             'markers=' + ((payload.markers || []).length),
             'currentPath=' + currentPath,

@@ -732,30 +732,55 @@ function connectEditorSocket() {
         } catch (_) {}
       });
 
+      function _feTs() {
+        try {
+          const t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+            ? Math.round(performance.now() * 10) / 10
+            : null;
+          return (t != null ? ('t=' + t + 'ms ') : '') + 'now=' + Date.now();
+        } catch (_) {
+          return 'now=' + Date.now();
+        }
+      }
+
       // Diagnostics baton: show spinner while waiting for analysis of newly opened file.
       editorSocket.on('editor:diagnostics_pending', (payload) => {
         try {
           const p = payload && typeof payload === 'object' ? payload : {};
           const pendingPath = p.path || '';
-          console.log('[diag_baton] pending path=' + pendingPath);
-          window.__feDiagBaton = { path: pendingPath, ts: Date.now() };
+          const pendingRequestId = p.request_id || '';
+          console.log(_feTs(), '[diag_baton] pending path=' + pendingPath + ' request_id=' + (pendingRequestId || '-'));
+          try {
+            const prev = window.__feDiagBaton;
+            const prevRid = prev && prev.requestId ? String(prev.requestId) : '';
+            const prevPath = prev && prev.path ? String(prev.path) : '';
+            if (prevRid && prevRid !== pendingRequestId) {
+              console.log(_feTs(), '[spinner] REPLACE old=' + prevRid + ' new=' + pendingRequestId + ' path=' + pendingPath + ' prevPath=' + prevPath);
+            }
+            console.log(_feTs(), '[spinner] START request_id=' + (pendingRequestId || '-') + ' path=' + pendingPath + ' reason=diagnostics_pending');
+          } catch (_) {}
+          window.__feDiagBaton = { path: pendingPath, requestId: pendingRequestId, ts: Date.now() };
           // Show the LSP spinner.
           if (window.__feLspSpinnerUi) {
             window.__feLspSpinnerUi.busyShow = true;
+            window.__feLspSpinnerUi.busyActivity = 'diagnostics';
             window.__feLspSpinnerUi.busyTitle = 'Analyzing ' + (pendingPath.split('/').pop() || 'file') + '…';
           }
           _feUpdateLspSpinner();
-          // Safety timeout: auto-hide after 8s if no ready event.
+          // Safety timeout: auto-hide after 45s if no ready event.
+          // Must be longer than adapter connect (~30s) + Pyright analysis (~10s).
           if (window.__feDiagBatonTimer) clearTimeout(window.__feDiagBatonTimer);
           window.__feDiagBatonTimer = setTimeout(() => {
-            console.log('[diag_baton] timeout, hiding spinner');
+            console.log(_feTs(), '[diag_baton] timeout, hiding spinner');
+            console.log(_feTs(), '[spinner] STOP request_id=' + (pendingRequestId || '-') + ' path=' + pendingPath + ' reason=timeout');
             window.__feDiagBaton = null;
             if (window.__feLspSpinnerUi) {
               window.__feLspSpinnerUi.busyShow = false;
+              if (window.__feLspSpinnerUi.busyActivity === 'diagnostics') window.__feLspSpinnerUi.busyActivity = '';
               window.__feLspSpinnerUi.busyTitle = '';
             }
             _feUpdateLspSpinner();
-          }, 8000);
+          }, 45000);
         } catch (_) {}
       });
 
@@ -763,9 +788,16 @@ function connectEditorSocket() {
         try {
           const p = payload && typeof payload === 'object' ? payload : {};
           const readyPath = p.path || '';
-          console.log('[diag_baton] ready path=' + readyPath + ' markers=' + (p.markers || 0));
-          // Only resolve if it matches the pending baton.
-          if (window.__feDiagBaton && window.__feDiagBaton.path === readyPath) {
+          const readyRequestId = p.request_id || '';
+          console.log(_feTs(), '[diag_baton] ready path=' + readyPath + ' request_id=' + (readyRequestId || '-') + ' markers=' + (p.markers || 0) + (p.reason ? (' reason=' + p.reason) : '') + (p.error ? ' error=1' : ''));
+          const baton = window.__feDiagBaton;
+          const matchByRequest = !!(baton && baton.requestId && readyRequestId && baton.requestId === readyRequestId);
+          const matchByPath = !!(baton && baton.path && baton.path === readyPath);
+          try {
+            const pendingRid = baton && baton.requestId ? String(baton.requestId) : '';
+            console.log(_feTs(), '[spinner] READY request_id=' + (readyRequestId || '-') + ' pending=' + (pendingRid || '-') + ' match=' + ((matchByRequest || matchByPath) ? '1' : '0') + ' path=' + readyPath);
+          } catch (_) {}
+          if (matchByRequest || matchByPath) {
             window.__feDiagBaton = null;
             if (window.__feDiagBatonTimer) {
               clearTimeout(window.__feDiagBatonTimer);
@@ -773,8 +805,10 @@ function connectEditorSocket() {
             }
             if (window.__feLspSpinnerUi) {
               window.__feLspSpinnerUi.busyShow = false;
+              if (window.__feLspSpinnerUi.busyActivity === 'diagnostics') window.__feLspSpinnerUi.busyActivity = '';
               window.__feLspSpinnerUi.busyTitle = '';
             }
+            console.log(_feTs(), '[spinner] STOP request_id=' + (readyRequestId || '-') + ' path=' + readyPath + ' reason=diagnostics_ready');
             _feUpdateLspSpinner();
           }
         } catch (_) {}
@@ -1279,57 +1313,92 @@ let vscodeApiWs = null;
 let vscodeApiNextId = 1;
 const vscodeApiPending = new Map();
 let vscodeApiConnecting = null;
+let workbenchAdapterConnecting = null;
+let workbenchAdapterReadyOk = false;
 const _sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function ensureWorkbenchAdapterReady() {
+  // Ensure only one readiness loop runs at a time. Multiple concurrent loops were
+  // observed to keep the spinner stuck on "Starting workbench adapter..." even after
+  // diagnostics baton completes.
   try {
-    if (!window.__feLspSpinnerUi) {
-      window.__feLspSpinnerUi = {
-        lspShow: false,
-        lspTitle: '',
-        busyShow: false,
-        busyTitle: '',
-        busyLanguageId: '',
-        busyActivity: '',
-      };
-    }
-    const ui = window.__feLspSpinnerUi;
-    ui.busyShow = true;
-    ui.busyTitle = 'Starting workbench adapter...';
-    _feUpdateLspSpinner();
+    if (workbenchAdapterReadyOk) return;
+    if (workbenchAdapterConnecting) return await workbenchAdapterConnecting;
 
-    const startResp = await fetch('/api/app/file_editor_cm6/workbench_adapter/start', { cache: 'no-store' });
-    const startJson = await startResp.json();
-    if (!startResp.ok || startJson?.ok === false) {
-      throw new Error(startJson?.error || startJson?.detail || `start failed HTTP ${startResp.status}`);
-    }
-    const token = startJson?.data?.token || '';
-    if (!token) throw new Error('start missing token');
-
-    const deadline = Date.now() + 20000;
-    let lastState = 'starting';
-    while (Date.now() < deadline) {
+    workbenchAdapterConnecting = (async () => {
+      let ok = false;
       try {
-        const stResp = await fetch(`/api/app/file_editor_cm6/workbench_adapter/status?token=${encodeURIComponent(token)}`, { cache: 'no-store' });
-        const stJson = await stResp.json();
-        if (stResp.ok && stJson?.ok !== false) {
-          lastState = stJson?.state || lastState;
-          if (lastState === 'ready' || lastState === 'connected') break;
+        if (!window.__feLspSpinnerUi) {
+          window.__feLspSpinnerUi = {
+            lspShow: false,
+            lspTitle: '',
+            busyShow: false,
+            busyTitle: '',
+            busyLanguageId: '',
+            busyActivity: '',
+          };
         }
-      } catch (_) {}
-      ui.busyTitle = 'Waiting for workbench adapter...';
-      _feUpdateLspSpinner();
-      await _sleepMs(250);
-    }
-  } catch (e) {
-    console.warn('[workbench_adapter] readiness failed', e);
-  } finally {
-    try {
-      if (window.__feLspSpinnerUi) {
-        window.__feLspSpinnerUi.busyShow = false;
+        const ui = window.__feLspSpinnerUi;
+        // Spinner ownership: this loop must not fight the diagnostics baton.
+        ui.busyShow = true;
+        ui.busyActivity = 'workbench_adapter';
+        ui.busyTitle = 'Starting workbench adapter...';
+        try { console.log(_feTs(), '[spinner] START request_id=- path=- reason=workbench_adapter_start'); } catch (_) {}
         _feUpdateLspSpinner();
+
+        const startResp = await fetch('/api/app/file_editor_cm6/workbench_adapter/start', { cache: 'no-store' });
+        const startJson = await startResp.json();
+        if (!startResp.ok || startJson?.ok === false) {
+          throw new Error(startJson?.error || startJson?.detail || `start failed HTTP ${startResp.status}`);
+        }
+        const token = startJson?.data?.token || '';
+        if (!token) throw new Error('start missing token');
+
+        const deadline = Date.now() + 20000;
+        let lastState = 'starting';
+        while (Date.now() < deadline) {
+          try {
+            const stResp = await fetch(`/api/app/file_editor_cm6/workbench_adapter/status?token=${encodeURIComponent(token)}`, { cache: 'no-store' });
+            const stJson = await stResp.json();
+            if (stResp.ok && stJson?.ok !== false) {
+              lastState = stJson?.state || lastState;
+              if (lastState === 'ready' || lastState === 'connected') {
+                ok = true;
+                break;
+              }
+            }
+          } catch (_) {}
+          // Don't stomp the diagnostics baton if it currently owns the spinner.
+          if (ui.busyActivity === 'workbench_adapter') {
+            ui.busyTitle = 'Waiting for workbench adapter...';
+            _feUpdateLspSpinner();
+          }
+          await _sleepMs(250);
+        }
+      } catch (e) {
+        console.warn('[workbench_adapter] readiness failed', e);
+      } finally {
+        try {
+          workbenchAdapterReadyOk = Boolean(ok);
+          if (!window.__feLspSpinnerUi) return;
+          const ui = window.__feLspSpinnerUi;
+          // Only release spinner if we still own it.
+          if (ui.busyActivity === 'workbench_adapter') {
+            ui.busyShow = false;
+            ui.busyTitle = '';
+            ui.busyActivity = '';
+            try { console.log(_feTs(), '[spinner] STOP request_id=- path=- reason=workbench_adapter_ready'); } catch (_) {}
+            _feUpdateLspSpinner();
+          }
+        } catch (_) {}
       }
-    } catch (_) {}
+      return ok;
+    })();
+
+    return await workbenchAdapterConnecting;
+  } finally {
+    // Always release the singleton promise handle once it settles.
+    try { workbenchAdapterConnecting = null; } catch (_) {}
   }
 }
 
