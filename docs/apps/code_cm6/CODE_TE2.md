@@ -24,23 +24,25 @@ Cross references:
 - `docs/apps/code_cm6/VSCODE_API_DEPRECATIONS.md`
 
 ### Current milestone (read-only language intelligence)
-Status: implemented and working for the deterministic read-only subset:
+Status: implemented and working for **all built-in languages** (Python, TypeScript, JavaScript, CSS, HTML, JSON, etc.):
 - `code-server` runs as a framework shell on fixed port `127.0.0.1:18180` with `--disable-workspace-trust`.
 - Node workbench adapter runs as a framework shell on fixed port `127.0.0.1:18181`.
 - `vscode_api` is a WS JSON-RPC server that bridges Monaco RPC requests (hover, symbols, openFile) to the adapter.
 - Diagnostics flow through a **server-side bridge** (`diagnostics_bridge.py`) over the editor Socket.IO channel, not `vscode_api_ws`.
 - The workbench adapter and code-server are started eagerly at worker boot (no lazy `/discover` needed for diagnostics).
 - Working end-to-end (over `vscode_api_ws`): `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`.
+- **Builtin extensions** are loaded by default (95 scanned from code-server, filtered to ~30 language-related).
+- **LanguageId detection**: the adapter infers language from file extension when not provided (supports 40+ extensions including `.mjs`, `.cjs`, `.mts`, `.cts`, `.jsx`, `.tsx`).
 
 Known limitation (expected right now):
 - “Live typing” diagnostics will not be fully correct until we add a `didChange` sync path. Today, the sidecar becomes accurate at `openFile` time (and can be extended to update on save).
 
 ### Extension validation matrix (next milestone)
 We will validate at least 2 deterministic features (hover + symbols + diagnostics) per language:
-- Python: `ms-pyright` (baseline), optionally compare against `ms-python.python` / Pylance variants later.
-- C++: `ms-vscode.cpptools`.
-- Rust: `rust-lang.rust-analyzer`.
-- Control: TypeScript/JavaScript (VS Code ships a built-in TS/JS language service as part of the OSS workbench/extensions set).
+- Python: `ms-pyright` (baseline) — **validated**: open file, document symbols, hover, diagnostics.
+- TypeScript/JavaScript: built-in TS language service — **validated**: diagnostics working for `.ts`, `.js`, `.mjs`, `.tsx`, `.jsx` files. JS files get JavaScript-level strictness (lenient), TS files get full type checking.
+- C++: `ms-vscode.cpptools` — pending.
+- Rust: `rust-lang.rust-analyzer` — pending.
 
 ---
 
@@ -873,7 +875,7 @@ VSIX language configuration (per-project):
 Next step:
 - Replace the placeholder server implementation with a real extension-host-backed JSON-RPC surface and keep *all* future VSIX-related integration behind this API.
 
-Language providers (POC stage):
+Language providers (working):
 - **Stdio LSP bridge has been removed** (2026-02-07). It caused marker owner collisions with the workbench adapter path.
 - Diagnostics now flow exclusively through the **server-side diagnostics bridge** (`diagnostics_bridge.py`):
   - Subscribes to adapter WS (`127.0.0.1:18181/ws`) for `diagnostics/update` events
@@ -882,6 +884,8 @@ Language providers (POC stage):
   - On file switch (`on_editor_open_request`): sends cached diagnostics for the new file + nudges adapter
   - Nudge mechanism: POST `vscode.openFile` to adapter `/cmd` to force extension host re-emit
   - Monaco iframe handler converts bridge payload to `_applyDiagnosticsUpdate()` format
+- **All built-in language extensions** are loaded (filtered to language-only subset, ~30 of 95 scanned).
+- Diagnostics work for Python, TypeScript, JavaScript, CSS, HTML, JSON, and all other languages with built-in VS Code support.
 - RPC features (hover, symbols, openFile) still flow through `vscode_api_ws` → `vscode_api_server` → adapter
 
 Socket.IO relay handlers (`editor_ws.py`):
@@ -1188,10 +1192,42 @@ There is an in-repo headless “workbench-ish” client intended to replace “o
 Current status (facts observed in adapter runs):
 - Adapter can establish remote-mode mgmt+ext connections and keep them alive.
 - `vscode.openFile`, `vscode.documentSymbols`, and `vscode.hover` are wired end-to-end through the adapter server.
-- Python provider flow is validated with `ms-pyright.pyright` in the current dev setup:
-  - provider registration observed
-  - symbols and hover requests return results via the proxy/adapter surface
-- Keepalive/ack handling is stable enough for iterative feature validation, but bootstrap parity work remains for broader extension compatibility.
+- **All built-in language extensions** are loaded and activated (TypeScript, JavaScript, Python, CSS, HTML, JSON, etc.)
+- Python provider flow is validated with `ms-pyright.pyright` in the current dev setup.
+- TS/JS provider flow validated via built-in `typescript-language-features` — diagnostics, hover, symbols all working.
+- Keepalive/ack handling is stable enough for iterative feature validation.
+
+### Extension host protocol findings (important for future work)
+
+#### Builtin extension loading
+- code-server scans ~95 builtin extensions. Including all of them causes the ext host to hang.
+- **Root cause**: non-language extensions (git-base, emmet, npm, etc.) activate on `"*"` event and try filesystem operations (`$ensureActivation("file")`) that the headless adapter cannot serve. This blocks the serial activation queue.
+- **Solution**: `_buildExtensionsSnapshot()` applies a language-only filter that keeps:
+  - All user-installed extensions (always)
+  - `*-language-features` extensions (typescript-language-features, css-language-features, etc.)
+  - Grammar/language extensions (vscode.python, vscode.javascript, etc.) without `"*"` activation
+  - Theme extensions
+  - `vscode.configuration-editing` (JSON schema completions)
+- This reduces ~95 → ~30 extensions and allows full activation in under 2 seconds.
+- Controlled via env: `TE2_INCLUDE_BUILTIN_EXTS=0` reverts to user-extensions-only mode.
+
+#### Extension host RPC reply requirements
+Not all ext host requests can be answered with `ReplyOkEmpty`. Key methods that need typed replies:
+- `$initializeExtensionStorage` → `ReplyOkJson({})` (empty storage object; `undefined` causes silent activation failure)
+- `$getTools` → `ReplyOkJson([])` (empty tools array)
+- `$getInitialState` → `ReplyOkJson({ isFocused: true, isActive: true })`
+- `$checkExists` → `ReplyOkJson(false)`
+- `$requestWorkspaceTrust` → `ReplyOkJson(true)` (followed by `$onDidGrantWorkspaceTrust`)
+
+#### Activation events
+- `$activateByEvent("*")` must NOT be sent — it activates problematic non-language extensions.
+- `$activateByEvent("onLanguage")` is sent at bootstrap (generic).
+- `$activateByEvent("onLanguage:<id>")` is sent per-file at openFile time (e.g. `"onLanguage:python"`).
+
+#### LanguageId detection
+- `workbench_client.mjs` includes a `_languageIdFromPath()` helper (40+ file extensions → VS Code language IDs).
+- Falls back to path-based detection when `params.languageId` is empty/missing.
+- Critical for correct activation: `$activateByEvent("onLanguage:javascript")` vs `"onLanguage:typescript"` determines which extensions activate and what strictness level applies.
 
 ### Extension validation milestones (current track)
 Goal: verify deterministic language-feature parity (open file -> symbols/hover/diagnostics) across popular ecosystems before broadening scope.
@@ -1203,12 +1239,16 @@ Execution reference:
 - `docs/apps/code_cm6/VSCODE_API_STATE_OWNERSHIP.md`
 - `docs/apps/code_cm6/VSCODE_API_DEPRECATIONS.md`
 
-1. Python (`ms-pyright.pyright`) - in progress / partially validated
-   - validated: open file, document symbols, hover
+1. Python (`ms-pyright.pyright`) - **validated**
+   - validated: open file, document symbols, hover, diagnostics
    - pending: sustained diagnostics/completions stability under longer sessions
-2. C++ (candidate extension under test) - pending
+2. TypeScript/JavaScript (built-in TS service) - **validated**
+   - validated: diagnostics for `.ts`, `.js`, `.mjs`, `.jsx`, `.tsx` files
+   - JS files receive JavaScript-level strictness (lenient); TS files receive full type checking
+   - pending: hover, symbols, completions verification
+3. C++ (candidate extension under test) - pending
    - target checks: provider registration, document symbols, hover, diagnostics
-3. Rust (candidate extension under test) - pending
+4. Rust (candidate extension under test) - pending
    - target checks: provider registration, document symbols, hover, diagnostics
 
 Baseline note:
@@ -1237,6 +1277,11 @@ RPC features use `vscode_api_ws` (separate WS, JSON-RPC):
 - `vscode.hover` `{ uri, pos }` → `{ hover }`
 - `vscode.documentSymbols` `{ uri }` → `{ symbols[] }`
 - `vscode.openFile` `{ path, languageId }` → `{ ok }`
+
+Planned: **eliminate `vscode_api_ws`** and route all RPC through editor Socket.IO (`editor_ws`):
+- `vscode.openFile` will be sent via `editor_ws` instead of `vscode_api_ws`
+- Goal: only 2 WebSockets to the frontend (explorer Socket.IO + editor Socket.IO)
+- `vscode_api_ws` will be deprecated once all RPC methods are routed through `editor_ws`
 
 The UI (Monaco iframe) remains a thin renderer:
 - It subscribes to TE2 events, updates Monaco markers/hover providers, and never runs an extension host itself.

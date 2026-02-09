@@ -790,6 +790,7 @@ async function handleJsonRpc(reqObj) {
       path: resolvedPath,
       authority,
       providerHandle: p.providerHandle,
+      languageId: p.languageId,
       timeoutMs: p.timeoutMs,
     });
     return { jsonrpc: "2.0", id, result };
@@ -806,6 +807,7 @@ async function handleJsonRpc(reqObj) {
       path: resolvedPath,
       authority,
       providerHandle: p.providerHandle,
+      languageId: p.languageId,
       lineNumber: p.lineNumber,
       column: p.column,
       timeoutMs: p.timeoutMs,

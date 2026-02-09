@@ -1474,10 +1474,9 @@ export class WorkbenchClient {
                 this._providers.documentSymbols.set(handle, { handle, selector, label });
               } catch {}
               for (const s of selector) {
-                if (s && typeof s === "object" && s.language === "python") {
-                  this.state.docSymbolsProviderHandle = handle;
+                if (s && typeof s === "object" && s.language) {
                   this.state.ready = true;
-                  this.onEvent({ type: "provider/documentSymbols", ts_ms: Date.now(), handle, language: "python" });
+                  this.onEvent({ type: "provider/documentSymbols", ts_ms: Date.now(), handle, language: s.language });
                   break;
                 }
               }
@@ -1487,18 +1486,19 @@ export class WorkbenchClient {
             const handle = Number(msg.args[0]);
             const selector = msg.args[1];
             const label = (typeof msg.args[2] === "string") ? msg.args[2] : null;
+            console.log(`[providers] $registerHoverProvider handle=${handle} selector=${JSON.stringify(selector)?.slice(0,200)} isArr=${Array.isArray(selector)} isFinite=${Number.isFinite(handle)}`);
             if (Number.isFinite(handle) && Array.isArray(selector)) {
               try {
                 this._providers.hover.set(handle, { handle, selector, label });
               } catch {}
               for (const s of selector) {
-                if (s && typeof s === "object" && s.language === "python") {
-                  this.state.hoverProviderHandle = handle;
+                if (s && typeof s === "object" && s.language) {
                   this.state.ready = true;
-                  this.onEvent({ type: "provider/hover", ts_ms: Date.now(), handle, language: "python" });
+                  this.onEvent({ type: "provider/hover", ts_ms: Date.now(), handle, language: s.language });
                   break;
                 }
               }
+              console.log(`[providers] hover map size=${this._providers.hover.size} languages=[${Array.from(this._providers.hover.values()).map(e => e.selector?.map(s => s?.language).filter(Boolean)).flat().join(',')}]`);
             }
           }
 
@@ -1915,13 +1915,15 @@ export class WorkbenchClient {
     const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
     const path = String(params.path ?? "");
     const timeoutMs = Number(params.timeoutMs ?? 8000);
-    let providerHandle = params.providerHandle ?? this.state.docSymbolsProviderHandle;
+    const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
+
+    let providerHandle = params.providerHandle ?? this._findProviderHandle("documentSymbols", languageId);
     if (typeof providerHandle !== "number") {
-      await waitFor(() => typeof this.state.docSymbolsProviderHandle === "number", { timeoutMs, intervalMs: 50 });
-      providerHandle = params.providerHandle ?? this.state.docSymbolsProviderHandle;
+      await waitFor(() => this._findProviderHandle("documentSymbols", languageId) != null, { timeoutMs, intervalMs: 50 });
+      providerHandle = params.providerHandle ?? this._findProviderHandle("documentSymbols", languageId);
     }
     if (typeof providerHandle !== "number") {
-      return { ok: false, error: "no document symbols provider handle learned yet" };
+      return { ok: false, error: `no document symbols provider for language '${languageId}'` };
     }
 
     const uriObj = this._uriForPath(path, authority);
@@ -1960,12 +1962,15 @@ export class WorkbenchClient {
     const lineNumber = Number(params.lineNumber ?? 1);
     const column = Number(params.column ?? 1);
     const timeoutMs = Number(params.timeoutMs ?? 8000);
-    let providerHandle = params.providerHandle ?? this.state.hoverProviderHandle;
+    const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
+    console.log(`[hover] path=${path} languageId=${languageId} hoverMapSize=${this._providers.hover.size} immediate=${this._findProviderHandle("hover", languageId)}`);
+
+    let providerHandle = params.providerHandle ?? this._findProviderHandle("hover", languageId);
     if (typeof providerHandle !== "number") {
-      await waitFor(() => typeof this.state.hoverProviderHandle === "number", { timeoutMs, intervalMs: 50 });
-      providerHandle = params.providerHandle ?? this.state.hoverProviderHandle;
+      await waitFor(() => this._findProviderHandle("hover", languageId) != null, { timeoutMs, intervalMs: 50 });
+      providerHandle = params.providerHandle ?? this._findProviderHandle("hover", languageId);
     }
-    if (typeof providerHandle !== "number") return { ok: false, error: "no hover provider handle learned yet" };
+    if (typeof providerHandle !== "number") return { ok: false, error: `no hover provider for language '${languageId}'` };
 
     const uriObj = this._uriForPath(path, authority);
     try {
@@ -2054,5 +2059,18 @@ export class WorkbenchClient {
       hover: toList(this._providers.hover),
       documentSymbols: toList(this._providers.documentSymbols),
     };
+  }
+
+  /** Find provider handle matching a languageId by scanning selector arrays. */
+  _findProviderHandle(type, languageId) {
+    const map = this._providers[type];
+    if (!map || !languageId) return null;
+    for (const entry of map.values()) {
+      if (!Array.isArray(entry.selector)) continue;
+      for (const s of entry.selector) {
+        if (s && typeof s === "object" && s.language === languageId) return entry.handle;
+      }
+    }
+    return null;
   }
 }

@@ -1039,6 +1039,7 @@
                       {
                         uri: ctx.uri,
                         path: ctx.path,
+                        languageId: ctx.languageId,
                         lineNumber: Number(pos && pos.lineNumber ? pos.lineNumber : 1),
                         column: Number(pos && pos.column ? pos.column : 1),
                         timeoutMs: 4500,
@@ -1074,6 +1075,7 @@
                       {
                         uri: ctx.uri,
                         path: ctx.path,
+                        languageId: ctx.languageId,
                         timeoutMs: 6000,
                       },
                       ctx,
@@ -3195,8 +3197,6 @@
                     languageId: lang,
                     uri: (model && model.uri) ? String(model.uri.toString()) : '',
                     requestId: ssotReqId,
-                    // On refresh/new-client attach the adapter may already have this file active.
-                    // Force a real open cycle so the extension host re-emits diagnostics.
                     forceRefresh: true,
                   },
                   { timeoutMs: 8000 }
