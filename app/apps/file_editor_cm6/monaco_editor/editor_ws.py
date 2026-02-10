@@ -17,6 +17,9 @@ from ..explorer_helper import _normalize_rel_path, mark_draft_cache_dirty, mark_
 from ..git_helper import _run_git_optional, is_git_repository
 from ..stores import _history_store, _preferences_store
 
+import logging as _logging
+_wb_log = _logging.getLogger("editor_ws.workbench")
+
 _ISSUES_DUMP_WAITING: dict[str, str] = {}
 _ISSUES_DUMP_TTL_S = 20.0
 
@@ -862,3 +865,133 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         )
 
         return {"ok": True, "data": file_meta}
+
+    async def on_editor_workbench_open_file(self, sid, data):
+        """Open a file via the workbench adapter (stdio pipe). Triggers adapter bootstrap."""
+        payload = data if isinstance(data, dict) else {}
+        abs_path = payload.get("path", "")
+        request_id = payload.get("request_id", f"wb_{int(time.time() * 1000)}")
+
+        project = _active_project()
+        if not project or not abs_path:
+            await self.emit(
+                "editor:workbench_open_file_response",
+                {"request_id": request_id, "error": "missing_path_or_project"},
+                room=sid,
+            )
+            return
+
+        if not _is_under_project(project, abs_path):
+            await self.emit(
+                "editor:workbench_open_file_response",
+                {"request_id": request_id, "error": "outside_project"},
+                room=sid,
+            )
+            return
+
+        try:
+            from ..workbench_adapter_shell_manager import adapter_rpc
+
+            resp = await adapter_rpc(
+                "vscode.openFile",
+                {
+                    "path": abs_path,
+                    "languageId": payload.get("languageId", ""),
+                    "requestId": request_id,
+                    "forceRefresh": payload.get("forceRefresh", False),
+                },
+            )
+            result = resp.get("result", resp)
+            await self.emit(
+                "editor:workbench_open_file_response",
+                {"request_id": request_id, "result": result},
+                room=sid,
+            )
+        except Exception as exc:
+            _wb_log.error("[workbench] open_file failed: %s", exc)
+            await self.emit(
+                "editor:workbench_open_file_response",
+                {"request_id": request_id, "error": str(exc)},
+                room=sid,
+            )
+
+    async def on_editor_workbench_hover(self, sid, data):
+        """Hover request via workbench adapter (stdio pipe)."""
+        payload = data if isinstance(data, dict) else {}
+        request_id = payload.get("request_id", f"hv_{int(time.time() * 1000)}")
+        abs_path = payload.get("path", "")
+        print(f"[editor_ws] hover request_id={request_id} path={abs_path} line={payload.get('lineNumber')} col={payload.get('column')} lang={payload.get('languageId')}", flush=True)
+
+        project = _active_project()
+        if not project or not abs_path:
+            await self.emit(
+                "editor:workbench_hover_response",
+                {"request_id": request_id, "error": "missing_path_or_project"},
+                room=sid,
+            )
+            return
+
+        try:
+            from ..workbench_adapter_shell_manager import adapter_rpc
+
+            resp = await adapter_rpc(
+                "vscode.hover",
+                {
+                    "path": abs_path,
+                    "lineNumber": payload.get("lineNumber", payload.get("line", 1)),
+                    "column": payload.get("column", payload.get("character", 1)),
+                    "languageId": payload.get("languageId", ""),
+                },
+            )
+            result = resp.get("result", resp)
+            await self.emit(
+                "editor:workbench_hover_response",
+                {"request_id": request_id, "result": result},
+                room=sid,
+            )
+        except Exception as exc:
+            _wb_log.error("[workbench] hover failed: %s", exc)
+            await self.emit(
+                "editor:workbench_hover_response",
+                {"request_id": request_id, "error": str(exc)},
+                room=sid,
+            )
+
+    async def on_editor_workbench_symbols(self, sid, data):
+        """Document symbols request via workbench adapter (stdio pipe)."""
+        payload = data if isinstance(data, dict) else {}
+        request_id = payload.get("request_id", f"sym_{int(time.time() * 1000)}")
+        abs_path = payload.get("path", "")
+
+        project = _active_project()
+        if not project or not abs_path:
+            await self.emit(
+                "editor:workbench_symbols_response",
+                {"request_id": request_id, "error": "missing_path_or_project"},
+                room=sid,
+            )
+            return
+
+        try:
+            from ..workbench_adapter_shell_manager import adapter_rpc
+
+            resp = await adapter_rpc(
+                "vscode.documentSymbols",
+                {
+                    "path": abs_path,
+                    "languageId": payload.get("languageId", ""),
+                },
+            )
+            result = resp.get("result", resp)
+            await self.emit(
+                "editor:workbench_symbols_response",
+                {"request_id": request_id, "result": result},
+                room=sid,
+            )
+        except Exception as exc:
+            _wb_log.error("[workbench] symbols failed: %s", exc)
+            await self.emit(
+                "editor:workbench_symbols_response",
+                {"request_id": request_id, "error": str(exc)},
+                room=sid,
+            )

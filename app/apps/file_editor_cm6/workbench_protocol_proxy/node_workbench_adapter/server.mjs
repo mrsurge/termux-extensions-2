@@ -2,6 +2,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import v8 from "node:v8";
 import path from "node:path";
+import readline from "node:readline";
 
 import { WorkbenchClient } from "./workbench_client.mjs";
 
@@ -16,6 +17,10 @@ const SYNC_TRACE_MIN_MS = Number(process.env.TE2_SYNC_TRACE_MIN_MS ?? "20");
 const SYNC_TRACE_MIN_BYTES = Number(process.env.TE2_SYNC_TRACE_MIN_BYTES ?? String(256 * 1024));
 
 const _BASE_JSON_STRINGIFY = JSON.stringify;
+// With pipe backend, stdout is reserved for <<<RPC>>> responses.
+// Redirect all console.log to stderr so logs remain visible in framework shells UI.
+const _origConsoleLog = console.log;
+console.log = (...args) => console.error(...args);
 
 function _stackTop(skip = 2, limit = 6) {
   try {
@@ -960,6 +965,40 @@ server.on("upgrade", (req, socket) => {
 });
 
 server.listen(PORT, HOST, () => {
-  // eslint-disable-next-line no-console
-  console.log(JSON.stringify({ type: "adapter/start", ts_ms: nowMs(), listen: `http://${HOST}:${PORT}`, config: state.config }));
+  // Startup beacon MUST go to stdout (not stderr) for the shellspec stdout_regex readiness probe.
+  process.stdout.write(JSON.stringify({ type: "adapter/start", ts_ms: nowMs(), listen: `http://${HOST}:${PORT}`, config: state.config }) + "\n");
+});
+
+// ── stdio JSON-RPC transport ────────────────────────────────────────
+// Allows the Python worker (editor_ws.py) to call handleJsonRpc over
+// a pipe instead of HTTP, eliminating a network hop.
+// Protocol: one JSON object per line on stdin → <<<RPC>>> {json}\n on stdout.
+// Non-RPC output (console.log, etc.) is unchanged — Python splits on prefix.
+
+const _stdinRl = readline.createInterface({ input: process.stdin, terminal: false });
+
+_stdinRl.on("line", async (line) => {
+  if (!line.trim()) return;
+  let msg;
+  try {
+    msg = JSON.parse(line);
+  } catch {
+    const err = { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } };
+    process.stdout.write("<<<RPC>>> " + JSON.stringify(err) + "\n");
+    return;
+  }
+  try {
+    const reply = await handleJsonRpc(msg);
+    if (reply && reply.id != null) {
+      process.stdout.write("<<<RPC>>> " + JSON.stringify(reply) + "\n");
+    }
+  } catch (e) {
+    const err = { jsonrpc: "2.0", id: msg?.id ?? null, error: { code: -32000, message: String(e?.message ?? e) } };
+    process.stdout.write("<<<RPC>>> " + JSON.stringify(err) + "\n");
+  }
+});
+
+_stdinRl.on("close", () => {
+  // stdin closed — parent process gone. Graceful shutdown.
+  setTimeout(() => process.exit(0), 100).unref?.();
 });

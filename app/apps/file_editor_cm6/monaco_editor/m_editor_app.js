@@ -611,11 +611,15 @@
   }
 
   function createFileModel(content, lang, absPath) {
+    var m;
     try {
       var uri = _fileUri(absPath);
-      if (uri) return monaco.editor.createModel(content || '', lang || 'plaintext', uri);
+      if (uri) m = monaco.editor.createModel(content || '', lang || 'plaintext', uri);
     } catch (_) {}
-    return monaco.editor.createModel(content || '', lang || 'plaintext');
+    if (!m) m = monaco.editor.createModel(content || '', lang || 'plaintext');
+    // Ensure hover/symbols providers are registered for this language.
+    try { setTimeout(function () { installVscodeApiLanguageBridgeProviders(); }, 0); } catch (_) {}
+    return m;
   }
 
   function _wsUrlFromPath(p) {
@@ -974,13 +978,46 @@
     }
   }
 
+  // ── Workbench RPC over editor Socket.IO ──────────────────────────
+  // Routes hover/symbols/openFile through editor_ws.py → adapter stdio pipe.
+  // Replaces the old vscode_api_ws raw WebSocket path.
+  var _wbPending = new Map(); // request_id -> {resolve, reject, timer}
+  var _wbNextId = 1;
+
+  function editorWorkbenchCall(method, params, opts) {
+    var timeoutMs = (opts && Number.isFinite(Number(opts.timeoutMs))) ? Number(opts.timeoutMs) : 12000;
+    var requestId = 'wb_' + (_wbNextId++) + '_' + Date.now();
+    var eventName = 'editor_workbench_' + method; // e.g. editor_workbench_hover
+    var responseEvent = 'editor:workbench_' + method + '_response';
+
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () {
+        if (!_wbPending.has(requestId)) return;
+        _wbPending.delete(requestId);
+        reject(new Error('workbench timeout: ' + method));
+      }, timeoutMs);
+
+      _wbPending.set(requestId, { resolve: resolve, reject: reject, timer: timer });
+
+      if (!editorSocket || !editorSocket.connected) {
+        clearTimeout(timer);
+        _wbPending.delete(requestId);
+        reject(new Error('editor socket not connected'));
+        return;
+      }
+
+      var payload = Object.assign({}, params || {}, { request_id: requestId });
+      editorSocket.emit(eventName, payload);
+    });
+  }
+
   function _callVscodeApiGuarded(kind, method, params, ctx, opts) {
     var timeoutMs = (opts && Number(opts.timeoutMs)) ? Number(opts.timeoutMs) : 5000;
     var cancelToken = (opts && opts.cancelToken) ? opts.cancelToken : null;
     var seq = 0;
     if (kind === 'hover') seq = ++languageBridge.hoverSeq;
     else if (kind === 'symbols') seq = ++languageBridge.symbolsSeq;
-    return vscodeApiCall(method, params, { timeoutMs: timeoutMs }).then(function (res) {
+    return editorWorkbenchCall(kind, params, { timeoutMs: timeoutMs }).then(function (res) {
       if (cancelToken && cancelToken.isCancellationRequested) return { ok: false, stale: true, canceled: true };
       if (!_isContextCurrent(ctx)) return { ok: false, stale: true };
       if (kind === 'hover' && seq !== languageBridge.hoverSeq) return { ok: false, stale: true };
@@ -1014,17 +1051,10 @@
   function installVscodeApiLanguageBridgeProviders() {
     try {
       if (!window.monaco || !window.monaco.languages) return;
-      ensureVscodeLanguagesInstalled().then(function () {
-        try {
-          var targets = new Set();
-          try {
-            vscodeLanguageIds.forEach(function (id) { if (id) targets.add(id); });
-          } catch (_) {}
-          try {
-            var ctx = _currentLanguageContext();
-            if (ctx && ctx.languageId) targets.add(String(ctx.languageId));
-          } catch (_) {}
 
+      // Register for the current language context immediately (no async dependency).
+      var _doRegister = function (targets) {
+        try {
           targets.forEach(function (langId) {
             if (!langId) return;
             if (!languageBridge.registeredHover.has(langId) && monaco.languages.registerHoverProvider) {
@@ -1093,6 +1123,27 @@
               languageBridge.registeredSymbols.add(langId);
             }
           });
+        } catch (_) {}
+      };
+
+      // Immediate: register for current language context right now
+      var immediate = new Set();
+      try {
+        var ctx = _currentLanguageContext();
+        if (ctx && ctx.languageId) immediate.add(String(ctx.languageId));
+      } catch (_) {}
+      if (immediate.size) _doRegister(immediate);
+
+      // Deferred: also register for all known VSIX languages once loaded
+      ensureVscodeLanguagesInstalled().then(function () {
+        try {
+          var all = new Set();
+          try { vscodeLanguageIds.forEach(function (id) { if (id) all.add(id); }); } catch (_) {}
+          try {
+            var ctx2 = _currentLanguageContext();
+            if (ctx2 && ctx2.languageId) all.add(String(ctx2.languageId));
+          } catch (_) {}
+          _doRegister(all);
         } catch (_) {}
       }).catch(function () {});
     } catch (_) {}
@@ -3190,8 +3241,8 @@
                     editorSocket.emit('editor_diagnostics_consumer_ready', { path: currentPath, request_id: ssotReqId });
                   }
                 } catch (_) {}
-                vscodeApiCall(
-                  'vscode.openFile',
+                editorWorkbenchCall(
+                  'open_file',
                   {
                     path: currentPath,
                     languageId: lang,
@@ -3277,8 +3328,8 @@
                   editorSocket.emit('editor_diagnostics_consumer_ready', { path: currentPath, request_id: openReqId });
                 }
               } catch (_) {}
-              vscodeApiCall(
-                'vscode.openFile',
+              editorWorkbenchCall(
+                'open_file',
                 {
                   path: currentPath,
                   languageId: lang,
@@ -3470,6 +3521,42 @@
             var items = [{ uri: 'file://' + (payload.path || ''), markers: payload.markers || [] }];
             _applyDiagnosticsUpdate({ owner: payload.owner || 'workbench', items: items });
           }
+        } catch (_) {}
+      });
+
+      editorSocket.on('editor:workbench_open_file_response', function (data) {
+        try {
+          var rid = data && data.request_id;
+          var entry = _wbPending.get(rid);
+          if (!entry) return;
+          _wbPending.delete(rid);
+          clearTimeout(entry.timer);
+          if (data.error) entry.reject(new Error(String(data.error)));
+          else entry.resolve(data.result || data);
+        } catch (_) {}
+      });
+
+      editorSocket.on('editor:workbench_hover_response', function (data) {
+        try {
+          var rid = data && data.request_id;
+          var entry = _wbPending.get(rid);
+          if (!entry) return;
+          _wbPending.delete(rid);
+          clearTimeout(entry.timer);
+          if (data.error) entry.reject(new Error(String(data.error)));
+          else entry.resolve(data.result || data);
+        } catch (_) {}
+      });
+
+      editorSocket.on('editor:workbench_symbols_response', function (data) {
+        try {
+          var rid = data && data.request_id;
+          var entry = _wbPending.get(rid);
+          if (!entry) return;
+          _wbPending.delete(rid);
+          clearTimeout(entry.timer);
+          if (data.error) entry.reject(new Error(String(data.error)));
+          else entry.resolve(data.result || data);
         } catch (_) {}
       });
 

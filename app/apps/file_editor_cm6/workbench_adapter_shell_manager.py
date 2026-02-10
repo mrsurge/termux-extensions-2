@@ -2,9 +2,13 @@ import hashlib
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
+import asyncio
+import json
+import logging
 
 from framework_shells import get_manager
 from framework_shells.orchestrator import Orchestrator
+from framework_shells.pty import PipeState
 from framework_shells.record import ShellRecord
 
 APP_ID = "file_editor_cm6"
@@ -13,7 +17,13 @@ SHELLSPEC_REF = "workbench_adapter.yaml#workbench-adapter"
 
 WORKBENCH_ADAPTER_FIXED_PORT = 18181
 
+log = logging.getLogger("workbench_adapter_shell_manager")
+
 _active_shell_id: Optional[str] = None
+_pipe_state: Optional[PipeState] = None
+_rpc_counter: int = 0
+_rpc_pending: dict[int, asyncio.Future] = {}
+_stdout_reader_task: Optional[asyncio.Task] = None
 
 
 def _project_hash(project_root: str) -> str:
@@ -42,6 +52,73 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
     return None
 
 
+async def _stdout_reader_loop(proc: asyncio.subprocess.Process) -> None:
+    """Read adapter stdout, route RPC responses to pending futures, log the rest."""
+    RPC_PREFIX = "<<<RPC>>> "
+    # asyncio subprocess default limit is 64KB which is too small for hover responses.
+    # Read raw chunks and split on newlines ourselves.
+    buf = b""
+    try:
+        while True:
+            chunk = await proc.stdout.read(1024 * 1024)  # 1MB reads
+            if not chunk:
+                break
+            buf += chunk
+            while b"\n" in buf:
+                line_bytes, buf = buf.split(b"\n", 1)
+                line = line_bytes.decode("utf-8", errors="replace")
+                if line.startswith(RPC_PREFIX):
+                    payload = line[len(RPC_PREFIX):]
+                    try:
+                        obj = json.loads(payload)
+                        rid = obj.get("id")
+                        fut = _rpc_pending.pop(rid, None)
+                        if fut and not fut.done():
+                            fut.set_result(obj)
+                        else:
+                            log.debug("[adapter_stdio] unmatched RPC response id=%s", rid)
+                    except json.JSONDecodeError:
+                        log.warning("[adapter_stdio] bad RPC JSON: %s", payload[:200])
+                else:
+                    log.debug("[adapter_stdout] %s", line[:500])
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        log.error("[adapter_stdio] reader crashed: %s", exc)
+
+
+async def adapter_rpc(method: str, params: Optional[dict] = None, timeout: float = 30.0) -> dict:
+    """Send a JSON-RPC request to the adapter over stdio and await the response.
+
+    Returns the full JSON-RPC response object (with 'result' or 'error').
+    Raises RuntimeError if the pipe is not available or on timeout.
+    """
+    global _rpc_counter
+
+    if _pipe_state is None or _pipe_state.process.stdin is None:
+        raise RuntimeError("Adapter pipe not available — shell not started or stdin closed")
+
+    _rpc_counter += 1
+    rid = _rpc_counter
+    msg = {"jsonrpc": "2.0", "id": rid, "method": method}
+    if params is not None:
+        msg["params"] = params
+
+    fut: asyncio.Future = asyncio.get_event_loop().create_future()
+    _rpc_pending[rid] = fut
+
+    line = json.dumps(msg) + "\n"
+    _pipe_state.process.stdin.write(line.encode("utf-8"))
+    await _pipe_state.process.stdin.drain()
+
+    try:
+        result = await asyncio.wait_for(fut, timeout=timeout)
+        return result
+    except asyncio.TimeoutError:
+        _rpc_pending.pop(rid, None)
+        raise RuntimeError(f"adapter_rpc timeout: method={method} id={rid} after {timeout}s")
+
+
 async def ensure_workbench_adapter_shell(project_root: str, code_server_http: str) -> ShellRecord:
     """Ensure the Node workbench adapter framework shell is running.
 
@@ -49,7 +126,7 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
     openFile → (hover/symbols/diagnostics) via code-server remote extension host.
     """
 
-    global _active_shell_id
+    global _active_shell_id, _pipe_state, _stdout_reader_task
 
     mgr = await get_manager()
     orch = Orchestrator(mgr)
@@ -60,16 +137,27 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
         cached = await _get_alive(_active_shell_id)
         if cached and cached.label == label:
             if _matches_expected_port(cached):
-                return cached
-            await mgr.terminate_shell(cached.id, force=True)
+                if _pipe_state is not None:
+                    return cached
+                # Pipe state lost (process restart) — kill and re-spawn for fresh pipe
+                log.info("[adapter] cached shell alive but pipe lost, re-spawning")
+                await mgr.terminate_shell(cached.id, force=True)
+                await asyncio.sleep(1.5)  # let port 18181 release
+            else:
+                await mgr.terminate_shell(cached.id, force=True)
+                await asyncio.sleep(1.5)
         _active_shell_id = None
 
     existing = await mgr.find_shell_by_label(label, status="running")
     if existing:
         if _matches_expected_port(existing):
-            _active_shell_id = existing.id
-            return existing
+            if _pipe_state is not None:
+                _active_shell_id = existing.id
+                return existing
+            # Pipe state lost — kill and re-spawn
+            log.info("[adapter] existing shell alive but pipe lost, re-spawning")
         await mgr.terminate_shell(existing.id, force=True)
+        await asyncio.sleep(1.5)  # let port 18181 release
 
     # IMPORTANT: adapter command path is relative to the TE2 repo, not the user's project.
     repo_root = Path(__file__).resolve().parents[3]
@@ -95,8 +183,50 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
         },
         label=label,
         record_spec_id=f"service:{APP_ID}:workbench_adapter",
-        wait_ready=True,
+        wait_ready=False,  # We do our own readiness check via stdio ping
     )
 
     _active_shell_id = shell.id
+    # Stash pipe state and start stdout reader
+    mgr_inst = await get_manager()
+    ps = mgr_inst.get_pipe_state(shell.id)
+    if ps is not None:
+        _pipe_state = ps
+        if _stdout_reader_task is None or _stdout_reader_task.done():
+            _stdout_reader_task = asyncio.create_task(
+                _stdout_reader_loop(ps.process),
+                name="adapter_stdout_reader",
+            )
+        log.info("[adapter] pipe state stashed, stdout reader started for shell=%s", shell.id)
+
+        # Readiness: ping the adapter over stdio until it responds
+        for attempt in range(20):
+            try:
+                ping_resp = await adapter_rpc("te2.ping", timeout=2.0)
+                if ping_resp.get("result"):
+                    print(f"[adapter_shell_mgr] stdio ping OK on attempt {attempt + 1}")
+                    break
+            except Exception as exc:
+                print(f"[adapter_shell_mgr] stdio ping attempt {attempt + 1} failed: {exc}")
+                await asyncio.sleep(0.5)
+        else:
+            print("[adapter_shell_mgr] stdio ping failed after 20 attempts")
+
+        # Bootstrap: connect adapter to code-server
+        try:
+            print(f"[adapter_shell_mgr] calling adapter.connect proxyHttp={code_server_http} authority={remote_authority}")
+            connect_resp = await adapter_rpc(
+                "adapter.connect",
+                {
+                    "proxyHttp": code_server_http,
+                    "authority": remote_authority,
+                    "folder": str(project_root_abs),
+                },
+                timeout=15.0,
+            )
+            print(f"[adapter_shell_mgr] bootstrap connect resp: {connect_resp}")
+        except Exception as exc:
+            print(f"[adapter_shell_mgr] bootstrap adapter.connect FAILED: {exc}")
+    else:
+        log.warning("[adapter] no pipe state for shell=%s — stdio RPC unavailable", shell.id)
     return shell

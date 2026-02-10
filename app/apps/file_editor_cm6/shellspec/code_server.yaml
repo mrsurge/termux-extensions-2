@@ -2,7 +2,7 @@ version: "1"
 
 shells:
   code-server:
-    backend: proc
+    backend: pipe
     cwd: ${ctx:PROJECT_ROOT}
     command:
       - sh
@@ -18,6 +18,7 @@ shells:
         --user-data-dir "${ctx:CODE_SERVER_DATA_DIR}"
         --extensions-dir "${ctx:CODE_SERVER_DATA_DIR}/extensions"
         "${ctx:PROJECT_ROOT}"
+        2>&1 | while IFS= read -r line; do printf '%s\n' "$line"; printf '%s\n' "$line" >&2; done
     env:
       TE_APP_ID: ${ctx:APP_ID}
       TE_CODE_SERVER_PORT: ${ctx:CODE_SERVER_PORT}
@@ -43,3 +44,6 @@ shells:
       host: 127.0.0.1
       port: ${ctx:CODE_SERVER_PORT}
       timeout: 60
+      # NOTE: readiness is skipped (wait_ready=False) because pipe backend
+      # sends stdout to the PIPE, not the log file. Python code reads the
+      # pipe directly for the "HTTP server listening" line.

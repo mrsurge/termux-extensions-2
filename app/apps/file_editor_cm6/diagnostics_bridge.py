@@ -80,25 +80,18 @@ def get_all_cached_diagnostics() -> Dict[str, Dict[str, Any]]:
 async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bool:
     """Ask the adapter to re-open a file, forcing the extension host to re-emit diagnostics."""
     try:
-        import httpx
+        from .workbench_adapter_shell_manager import adapter_rpc
         request_id = f"diag_{int(time.time() * 1000)}_nudge"
-        payload = {
-            "jsonrpc": "2.0",
-            "id": int(time.time() * 1000),
-            "method": "vscode.openFile",
-            "params": {
+        await adapter_rpc(
+            "vscode.openFile",
+            {
                 "path": abs_path,
                 "languageId": language_id or "",
                 "requestId": request_id,
                 "forceRefresh": True,
             },
-        }
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"http://127.0.0.1:{ADAPTER_PORT}/cmd",
-                json=payload,
-            )
-            return resp.status_code == 200
+        )
+        return True
     except Exception as exc:
         logger.debug("[diag_bridge] nudge failed: %s", exc)
         return False
