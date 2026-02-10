@@ -1830,9 +1830,7 @@ function handleExplorerEvent(type, payload) {
       // Step 2: Apply file statuses to nodes that exist in DOM
       Object.entries(statuses).forEach(([rel, status]) => {
         if (!status || status === 'clean') return;
-        const li = root.querySelector(
-          `li.fe-tree-node[data-rel="${rel}"]`
-        );
+        const li = _queryNodeByRel(root, 'file', rel);
         if (li) {
           li.dataset.gitStatus = status;
           li.classList.add(`fe-git-${status}`);
@@ -1865,9 +1863,7 @@ function handleExplorerEvent(type, payload) {
       // Step 4: Apply directory flags
       const allDirRels = new Set([...modifiedDirs, ...stagedDirs, ...untrackedDirs]);
       allDirRels.forEach((dirRel) => {
-        const li = root.querySelector(
-          `li.fe-tree-node[data-kind="dir"][data-rel="${dirRel}"]`
-        );
+        const li = _queryNodeByRel(root, 'dir', dirRel);
         if (!li) return;
         
         if (modifiedDirs.has(dirRel)) {

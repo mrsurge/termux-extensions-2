@@ -25,12 +25,12 @@ Cross references:
 
 ### Current milestone (read-only language intelligence)
 Status: implemented and working for **all built-in languages** (Python, TypeScript, JavaScript, CSS, HTML, JSON, etc.):
-- `code-server` runs as a framework shell on fixed port `127.0.0.1:18180` with `--disable-workspace-trust`.
-- Node workbench adapter runs as a framework shell on fixed port `127.0.0.1:18181`.
-- `vscode_api` is a WS JSON-RPC server that bridges Monaco RPC requests (hover, symbols, openFile) to the adapter.
-- Diagnostics flow through a **server-side bridge** (`diagnostics_bridge.py`) over the editor Socket.IO channel, not `vscode_api_ws`.
-- The workbench adapter and code-server are started eagerly at worker boot (no lazy `/discover` needed for diagnostics).
-- Working end-to-end (over `vscode_api_ws`): `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`.
+- `code-server` runs as a **pipe-backend** framework shell on fixed port `127.0.0.1:18180` with `--disable-workspace-trust`. Stdout is read by the Python shell manager for readiness detection ("HTTP server listening" regex). The pipe backend ensures code-server terminates automatically with the app worker.
+- Node **workbench adapter** runs as a **pipe-backend** framework shell. All RPC (hover, symbols, openFile, diagnostics nudge) flows over **stdio JSON-RPC** (stdin/stdout pipe), not HTTP. The adapter's HTTP server on port `18181` is vestigial and will be removed.
+- **No HTTP in the editor data flow.** The old `vscode_api` WS JSON-RPC bridge is bypassed. All language-feature requests go: browser → Socket.IO → `editor_ws.py` → stdin pipe → adapter → extension host → stdout pipe → browser.
+- Diagnostics flow through a **server-side bridge** (`diagnostics_bridge.py`) over the editor Socket.IO channel. The diagnostics nudge (`vscode.openFile`) also uses the stdio pipe.
+- The workbench adapter and code-server are started eagerly at worker boot. Code-server readiness (pipe stdout regex) **gates** adapter startup, eliminating race conditions.
+- Working end-to-end (over stdio pipe): `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`.
 - **Builtin extensions** are loaded by default (95 scanned from code-server, filtered to ~30 language-related).
 - **LanguageId detection**: the adapter infers language from file extension when not provided (supports 40+ extensions including `.mjs`, `.cjs`, `.mts`, `.cts`, `.jsx`, `.tsx`).
 
@@ -73,12 +73,19 @@ App worker process (app/apps/file_editor_cm6/main.py)
   └─ SSOT stores: _history_store (project sidecar), _preferences_store
 
 Framework shells (service processes owned by the framework_shells orchestrator)
-  ├─ code-server: real VS Code-compatible backend + remote extension host
-  ├─ workbench adapter (Node): initiates remote-agent WS connection; decodes/encodes workbench protocol
-  └─ vscode_api (Node): browser-facing JSON-RPC bridge (Monaco → adapter) for RPC (hover, symbols, openFile)
+  ├─ code-server (pipe backend): real VS Code-compatible backend + remote extension host
+  │     stdout piped to Python for readiness detection; stderr fanned to UI via shell wrapper
+  ├─ workbench adapter (pipe backend, Node): initiates remote-agent WS connection; decodes/encodes workbench protocol
+  │     stdin/stdout = JSON-RPC transport (<<<RPC>>> prefix on responses)
+  │     stderr = adapter logs (console.log redirected to console.error)
+  └─ vscode_api (Node): browser-facing JSON-RPC bridge for VSIX/themes/grammars (NOT used for hover/symbols/openFile)
 
 Diagnostics pipeline (server-side bridge, not browser WS):
   adapter WS (18181) → diagnostics_bridge.py → editor Socket.IO → browser
+
+Language feature pipeline (stdio pipe, no HTTP):
+  browser → Socket.IO (editor_workbench_*) → editor_ws.py → adapter stdin pipe → extension host
+  extension host → adapter stdout pipe (<<<RPC>>>) → editor_ws.py → Socket.IO → browser
 ```
 
 ---
@@ -92,18 +99,22 @@ Terminology used in TE2:
 
 For `file_editor_cm6`, we intentionally separate responsibilities:
 - **Editor SSOT transport (existing)**: `/editor_ws/socket.io` (main process proxies to worker).
-- **Language sidecar transport (new)**: `/vscode_api_ws` (main process proxies to `vscode_api` shell).
+- **Language feature transport (stdio pipe)**: `editor_ws.py` handlers → `adapter_rpc()` over stdin/stdout pipe to workbench adapter. No HTTP hop.
+- **VSIX/grammar/theme transport (WS)**: `/vscode_api_ws` (main process proxies to `vscode_api` shell). Only used for extension management, NOT for hover/symbols/openFile.
 - **Execution**:
   - Worker owns drafts/saves/versioning (`HistoryStore`/sidecar).
   - `code-server` owns extension execution (remote extension host).
   - Node workbench adapter owns the remote-agent WS session and workbench protocol encoding/decoding.
 
 Deterministic ports (current):
-- `code-server`: `127.0.0.1:18180` (framework shell)
+- `code-server`: `127.0.0.1:18180` (pipe-backend framework shell)
   - `--user-data-dir ~/.config/code-server`
   - `--extensions-dir ~/.config/code-server/extensions`
   - `--disable-workspace-trust`
-- workbench adapter: `127.0.0.1:18181` (framework shell)
+  - stdout piped to Python; stderr visible in framework shells UI via `2>&1 | while read` wrapper
+- workbench adapter: `127.0.0.1:18181` (pipe-backend framework shell, HTTP port is vestigial)
+  - stdin/stdout = JSON-RPC pipe transport
+  - console.log redirected to console.error for UI visibility
 
 Discovery endpoints (worker, proxied via main process):
 - `GET /api/app/file_editor_cm6/code_server/discover`
@@ -1179,19 +1190,34 @@ Notes:
 - For injection, the document must already exist in code-server’s model.
 - Later we can drive open/close via Management channel (workbench actions) or by reproducing doc/editor delta traffic, but that is out of scope for v0/v1.
 
-### Headless workbench adapter (Node, in-progress)
-There is an in-repo headless “workbench-ish” client intended to replace “open a hidden iframe” for bootstrapping:
+### Headless workbench adapter (Node, stdio pipe transport)
+The adapter is a headless workbench client that replaces browser-based bootstrapping:
 - Server: `app/apps/file_editor_cm6/workbench_protocol_proxy/node_workbench_adapter/server.mjs`
-  - Exposes HTTP JSON-RPC (dev-only ergonomics) for driving the adapter: `adapter.connect`, `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`, etc.
+  - Exposes **stdio JSON-RPC** (production transport): Python writes JSON-RPC to stdin, reads `<<<RPC>>>` prefixed responses from stdout.
+  - Also exposes HTTP JSON-RPC on port 18181 (vestigial, will be removed).
+  - `console.log` is redirected to `console.error` so adapter logs go to stderr (visible in framework shells UI) while stdout is reserved for the pipe protocol.
 - Client core: `app/apps/file_editor_cm6/workbench_protocol_proxy/node_workbench_adapter/workbench_client.mjs`
   - Uses VS Code OSS remote agent connection/runtime code (`remoteAgentConnection`, `browserSocketFactory`, IPC runtime) to connect in **remote mode**
   - Sends the ExtensionHost init JSON over the ExtHost websocket
-  - Sends the minimal editor/document delta events required to “open” a file (`$acceptDocumentsAndEditorsDelta`, tab model, editor properties, dirty state)
+  - Sends the minimal editor/document delta events required to open a file (`$acceptDocumentsAndEditorsDelta`, tab model, editor properties, dirty state)
   - Learns provider handles by observing `$register*Provider` frames (when present)
+  - Universal provider lookup: `_findProviderHandle(type, languageId)` searches registered providers by language
+
+Python-side integration:
+- `workbench_adapter_shell_manager.py`:
+  - `adapter_rpc(method, params, timeout)` — sends JSON-RPC over stdin, awaits `<<<RPC>>>` response from stdout reader
+  - `_stdout_reader_loop()` — reads adapter stdout in 1MB chunks (no line length limit), routes `<<<RPC>>>` lines to pending futures, logs the rest
+  - `ensure_workbench_adapter_shell()` — spawns adapter (pipe backend, `wait_ready=False`), does stdio ping readiness loop, then calls `adapter.connect` bootstrap with code-server URL
+- `editor_ws.py` handlers:
+  - `on_editor_workbench_open_file` → `adapter_rpc("vscode.openFile", ...)`
+  - `on_editor_workbench_hover` → `adapter_rpc("vscode.hover", ...)`
+  - `on_editor_workbench_symbols` → `adapter_rpc("vscode.documentSymbols", ...)`
+- `diagnostics_bridge.py`:
+  - `nudge_diagnostics_for_file()` → `adapter_rpc("vscode.openFile", ...)` (replaced old httpx POST)
 
 Current status (facts observed in adapter runs):
 - Adapter can establish remote-mode mgmt+ext connections and keep them alive.
-- `vscode.openFile`, `vscode.documentSymbols`, and `vscode.hover` are wired end-to-end through the adapter server.
+- `vscode.openFile`, `vscode.documentSymbols`, and `vscode.hover` are wired end-to-end through the stdio pipe.
 - **All built-in language extensions** are loaded and activated (TypeScript, JavaScript, Python, CSS, HTML, JSON, etc.)
 - Python provider flow is validated with `ms-pyright.pyright` in the current dev setup.
 - TS/JS provider flow validated via built-in `typescript-language-features` — diagnostics, hover, symbols all working.
@@ -1271,17 +1297,15 @@ See:
 Diagnostics use a **server-side bridge** over the existing editor Socket.IO channel:
 - `editor:diagnostics` event: `{ type: "diagnostics/update", path, owner, markers[], ts_ms }`
 - Server-side cache in `diagnostics_bridge.py` (per-path, max 100 entries)
-- Nudge-on-connect: adapter receives `vscode.openFile` to force fresh diagnostics
+- Nudge-on-connect: `adapter_rpc("vscode.openFile", ...)` over stdio pipe to force fresh diagnostics
 
-RPC features use `vscode_api_ws` (separate WS, JSON-RPC):
-- `vscode.hover` `{ uri, pos }` → `{ hover }`
-- `vscode.documentSymbols` `{ uri }` → `{ symbols[] }`
-- `vscode.openFile` `{ path, languageId }` → `{ ok }`
+RPC features use **editor Socket.IO → stdio pipe** (no separate WS):
+- `editor_workbench_open_file` → `adapter_rpc("vscode.openFile", { path, languageId })` → `{ ok }`
+- `editor_workbench_hover` → `adapter_rpc("vscode.hover", { path, lineNumber, column, languageId })` → `{ hover }`
+- `editor_workbench_symbols` → `adapter_rpc("vscode.documentSymbols", { path, languageId })` → `{ symbols[] }`
 
-Planned: **eliminate `vscode_api_ws`** and route all RPC through editor Socket.IO (`editor_ws`):
-- `vscode.openFile` will be sent via `editor_ws` instead of `vscode_api_ws`
-- Goal: only 2 WebSockets to the frontend (explorer Socket.IO + editor Socket.IO)
-- `vscode_api_ws` will be deprecated once all RPC methods are routed through `editor_ws`
+The old `vscode_api_ws` WS path is **bypassed** for all language feature RPC. It remains only for VSIX/grammar/theme management.
 
 The UI (Monaco iframe) remains a thin renderer:
 - It subscribes to TE2 events, updates Monaco markers/hover providers, and never runs an extension host itself.
+- Hover and symbol providers are registered immediately for the current file's language (no async dependency on VSIX language list).
