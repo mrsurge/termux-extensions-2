@@ -4190,48 +4190,14 @@
       };
 
       var monacoNs = null;
-      try {
-        // Preferred path: one bundled Monaco bootstrap module (editor core + contribs).
-        var bundled = await import(langBase + '/bootstrap/monaco.bootstrap.bundle.js');
-        if (bundled && typeof bundled.loadMonaco === 'function') {
-          monacoNs = await bundled.loadMonaco();
-          console.log('[Monaco] loaded bundled bootstrap');
-        }
-      } catch (eBundled) {
-        console.warn('[Monaco] bundled bootstrap unavailable, falling back', eBundled);
-      }
+      var bundled = await import(langBase + '/bootstrap/monaco.bootstrap.bundle.js');
+      monacoNs = await bundled.loadMonaco();
+      console.log('[Monaco] loaded bundled bootstrap');
 
-      if (!monacoNs) {
-        monacoNs = await import(base + '/vs/editor/editor.main.js');
-      }
       window.monaco = monacoNs;
       ensureTe2DiffTheme();
       try { await loadOfficialThemes(); } catch (_) {}
       try { await applyMonacoTheme('vs-dark'); } catch (_) {}
-
-      if (!window.monaco || !window.monaco.languages || window.monaco.languages.getLanguages().length <= 1) {
-        // Fallback: load tokenizers + language services (typescript/css/html/json) from TE2 language bundles.
-        // These modules import from "monaco-editor-core" which is mapped via <script type="importmap">.
-        try {
-          await import(langBase + '/basic-languages/monaco.contribution.js');
-          await import(langBase + '/language/typescript/monaco.contribution.js');
-          await import(langBase + '/language/json/monaco.contribution.js');
-          await import(langBase + '/language/css/monaco.contribution.js');
-          await import(langBase + '/language/html/monaco.contribution.js');
-        } catch (e) {
-          console.warn('[Monaco] Failed to load language bundles', e);
-          try {
-            var bust = '?ts=' + Date.now();
-            await import(langBase + '/basic-languages/monaco.contribution.js' + bust);
-            await import(langBase + '/language/typescript/monaco.contribution.js' + bust);
-            await import(langBase + '/language/json/monaco.contribution.js' + bust);
-            await import(langBase + '/language/css/monaco.contribution.js' + bust);
-            await import(langBase + '/language/html/monaco.contribution.js' + bust);
-          } catch (e2) {
-            console.warn('[Monaco] Forced language bundle load failed', e2);
-          }
-        }
-      }
 
       // Initialize editor strictly from SSOT.
       await ensureEditorWithPrefs();

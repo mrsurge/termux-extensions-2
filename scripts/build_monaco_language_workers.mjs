@@ -17,12 +17,12 @@ const { build } = await import(pathToFileURL(esbuildEntry).href);
 
 const vscodeMonacoEsmRoot = path.resolve(
   repoRoot,
-  'worktrees/vscode-te2-diff/out-monaco-editor-core/esm',
+  'app/static/vendor/monaco-editor-core/esm',
 );
 
 const outLangRoot = path.resolve(
   repoRoot,
-  'worktrees/vscode-te2-diff/out-monaco-editor-core/te2-lang',
+  'app/static/vendor/monaco-editor-core/te2-lang',
 );
 
 const outWorkersRoot = path.resolve(outLangRoot, 'workers');

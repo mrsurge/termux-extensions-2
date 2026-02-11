@@ -24,17 +24,16 @@ def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
 
     from fasthtml.common import Body, Div, Head, Html, Link, Meta, Script, Style, Title, to_xml
 
-    # Use the pinned VS Code monaco-editor-core build output (ESM) directly.
-    # This directory is produced by: `worktrees/vscode-te2-diff` -> `gulp editor-distro`.
-    # Resolve repo root (m_editor_app.py lives at: app/apps/file_editor_cm6/monaco_editor/...)
+    # Use the vendored Monaco build artifacts (JS + CSS only, no sourcemaps).
+    # These are committed to the repo under app/static/vendor/monaco-editor-core/.
+    # To rebuild: run `worktrees/vscode-te2-diff/build_monaco_te2.sh`.
     repo_root = Path(__file__).resolve().parents[4]
-    vscode_monaco_esm_dir = repo_root / "worktrees" / "vscode-te2-diff" / "out-monaco-editor-core" / "esm"
+    vendored_monaco = repo_root / "app" / "static" / "vendor" / "monaco-editor-core"
+    vscode_monaco_esm_dir = vendored_monaco / "esm"
     esm_ok = vscode_monaco_esm_dir.exists()
 
-    # Monaco language contributions (syntax + pseudo-LSP).
-    # This directory is produced by an esbuild bundle from the pinned monaco-editor sources:
-    # `worktrees/vscode-te2-diff/out-monaco-editor-core/te2-lang/`.
-    vscode_monaco_lang_dir = repo_root / "worktrees" / "vscode-te2-diff" / "out-monaco-editor-core" / "te2-lang"
+    # Monaco language contributions (syntax + pseudo-LSP workers).
+    vscode_monaco_lang_dir = vendored_monaco / "te2-lang"
     lang_ok = vscode_monaco_lang_dir.exists()
 
     # IMPORTANT: Monaco's ESM output imports CSS via `import './foo.css'`.
