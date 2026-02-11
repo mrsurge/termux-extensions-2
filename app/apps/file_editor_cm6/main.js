@@ -469,21 +469,34 @@ function connectExplorerSocket() {
         }
       });
 
-      explorerSocket.on('explorer:navigate', (payload) => {
+      explorerSocket.on('explorer:navigate', async (payload) => {
         // Breadcrumb directory click → list the directory + open drawer
+        console.log('[explorer:navigate] received:', payload);
         try {
           const p = payload && typeof payload === 'object' ? payload : {};
           const rel = p.rel || '.';
-          if (typeof window.__explorerBusSend === 'function') {
-            window.__explorerBusSend('explorer:list', { rel });
-          }
-          if (p.open_drawer) {
-            const drawer = document.getElementById('fe-drawer');
-            if (drawer && !drawer.classList.contains('open')) {
-              drawer.classList.add('open');
-              const bd = document.getElementById('fe-drawer-backdrop');
-              if (bd) bd.classList.add('show');
+
+          if (p.is_external && p.abs_path) {
+            // Out-of-repo directory → deep link to file_explorer app
+            const resp = await fetch('/api/apps/file_explorer/open', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ params: { path: p.abs_path } }),
+            });
+            const json = await resp.json();
+            if (json && json.ok && json.data && json.data.url) {
+              window.location.href = json.data.url;
             }
+            return;
+          }
+
+          if (p.open_drawer) {
+            const root = document.querySelector('.fe-root');
+            if (root) root.classList.add('drawer-open');
+          }
+          // Scroll explorer tree to the currently open file
+          if (typeof window.__explorerScrollToActiveFile === 'function') {
+            window.__explorerScrollToActiveFile();
           }
         } catch (_) {}
       });

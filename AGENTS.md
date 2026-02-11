@@ -182,3 +182,17 @@ rg -l --hidden --no-ignore -g'*.js' -g'!*.map' "someCode" /path/to/installed/cod
 see `CTAG-ANNOTATIONS.md` for tagging prettified functions
 
 NEVER EVER IN 100 MILLION YEARS EVER WRITE A FALLBACK WITHOUT EXPLICIT APPROVAL... THIS MEANS ***YOU***
+
+---
+
+# Code Reuse Policy
+
+## Existing Methods First
+
+1. **If the user mentions existing methods, functions, or patterns** — I will always reuse them exactly as described. I will not reimplement, wrap, or "improve" them. I use what exists.
+
+2. **If the user hasn't mentioned any existing methods** — I will ask: "Are there existing methods I should reuse for this?" before writing new code.
+
+3. **If the user is unsure whether relevant methods exist** — I will ask: "Would you like me to search the codebase for existing methods that handle this?" and only proceed after approval.
+
+4. **I will never invent my own version of something that already exists in the codebase.** If a drawer has a toggle, I use that toggle. If an explorer has a scroll-to method, I use that method. I do not write `classList.add('open')` when the codebase uses `classList.add('drawer-open')` on a different element.

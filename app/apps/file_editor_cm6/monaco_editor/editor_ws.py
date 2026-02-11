@@ -240,16 +240,17 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
 
         await self.emit("editor:ssot", snapshot, room=sid)
 
-        # Broadcast explorer:activeFile from the worker (the authority for which
-        # file is open) to all explorer clients via the forward-broadcast endpoint.
+        # Broadcast explorer:activeFile so explorer highlights the open file.
         if current_path and project:
             try:
-                from ..explorer_ws import abs_to_rel, _schedule_forward_broadcast
+                from ..explorer_socketio import EXPLORER_SIO
+                from ..explorer_ws import abs_to_rel
                 rel = abs_to_rel(str(current_path), str(project))
                 if rel and rel != ".":
-                    _schedule_forward_broadcast(
-                        str(project),
+                    await EXPLORER_SIO.emit(
+                        "explorer:event",
                         {"type": "explorer:activeFile", "payload": {"rel": rel}},
+                        namespace="/explorer",
                     )
             except Exception:
                 pass
@@ -499,10 +500,15 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
 
         # Broadcast explorer:activeFile so every explorer/host client updates.
         try:
-            from ..explorer_ws import manager as _explorer_mgr, abs_to_rel
+            from ..explorer_socketio import EXPLORER_SIO
+            from ..explorer_ws import abs_to_rel
             rel = abs_to_rel(path, project)
             if rel and rel != ".":
-                await _explorer_mgr.broadcast(project, {"type": "explorer:activeFile", "payload": {"rel": rel}})
+                await EXPLORER_SIO.emit(
+                    "explorer:event",
+                    {"type": "explorer:activeFile", "payload": {"rel": rel}},
+                    namespace="/explorer",
+                )
         except Exception:
             pass
 
@@ -1034,22 +1040,27 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
 
         project = _active_project()
         rel = abs_path
+        is_external = True
         if project and abs_path.startswith(project):
             rel = abs_path[len(project):]
             if rel.startswith("/"):
                 rel = rel[1:]
             if not rel:
                 rel = "."
+            is_external = False
 
         # Relay to explorer socket (cross-transport, same worker process)
         try:
-            from ..explorer_ws import EXPLORER_SIO
+            from ..explorer_socketio import EXPLORER_SIO
+            _wb_log.info("[bc-navigate] rel=%s abs=%s external=%s drawer=%s", rel, abs_path, is_external, open_drawer)
             await EXPLORER_SIO.emit(
                 "explorer:navigate",
-                {"rel": rel, "open_drawer": open_drawer},
+                {"rel": rel, "abs_path": abs_path, "is_external": is_external, "open_drawer": open_drawer},
+                namespace="/explorer",
             )
-        except Exception:
-            pass
+            _wb_log.info("[bc-navigate] emit OK")
+        except Exception as exc:
+            _wb_log.error("[bc-navigate] emit FAILED: %s", exc)
 
     async def on_editor_workbench_did_change(self, sid, data):
         """Push buffer content to extension host for live diagnostics (fire-and-forget)."""

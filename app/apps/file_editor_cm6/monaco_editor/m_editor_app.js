@@ -4089,6 +4089,7 @@
       if (isFile) return; // file segment = no-op (already open)
       // Directory click → emit to editor socket, which relays to explorer
       var absDir = el.dataset.path || '';
+      console.log('[BC] path click:', absDir, 'socket connected:', !!(editorSocket && editorSocket.connected));
       if (editorSocket && editorSocket.connected) {
         editorSocket.emit('editor_breadcrumb_navigate', { path: absDir, open_drawer: true });
       }

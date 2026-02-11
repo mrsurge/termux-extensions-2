@@ -3378,6 +3378,8 @@ export async function initExplorerUI() {
   }
 
   // Wire up global dispatch hook for the Socket.IO bus in main.js
+  window.__explorerScrollToActiveFile = scrollToActiveFile;
+
   window.__explorerBusDispatch = (type, payload) => {
     try {
       handleExplorerEvent(type, payload || {});

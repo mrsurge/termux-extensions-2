@@ -386,7 +386,7 @@
 }
 
 .fe-tree-node.fe-git-untracked {
-  border-left-color: #f59e0b;
+  border-left-color: #00aaff;
 }
 
 .fe-tree-node.fe-git-ignored {
@@ -420,7 +420,7 @@
    precise per-node fe-git-* classes. */
 
 .fe-tree-node[data-kind="dir"].fe-dir-has-modified {
-  border-color: rgba(249, 115, 22, 0.85);        /* strong orange border */
+  border-color: rgb(149, 72, 17);        /* strong orange border */
 }
 
 .fe-tree-node[data-kind="dir"].fe-dir-has-conflict {
@@ -429,7 +429,7 @@
 
 /* Untracked descendants: solid blue background (when no staged). */
 .fe-tree-node[data-kind="dir"].fe-dir-has-untracked:not(.fe-dir-has-staged) {
-  background: rgb(15, 49, 101);
+  background: rgb(39, 50, 75);
 }
 
 /* Staged descendants: solid green background (when no untracked). */
@@ -455,7 +455,7 @@
 
 /* Untracked files: blue background. */
 .fe-tree-node.fe-git-untracked[data-kind="file"] {
-  background: rgba(49, 80, 129, 0.7);
+  background: rgb(56, 81, 121);
 }
 
 /* Staged files: green background. */
