@@ -211,6 +211,11 @@ class ProjectSidecar:
         defaults["version"] = self.VERSION
         self._data = defaults
 
+    def reload(self) -> None:
+        """Re-read sidecar data from disk (picks up cross-process writes)."""
+        self._data = self._default_data()
+        self._load()
+
     def save(self) -> None:
         """Atomically persist current sidecar state to disk."""
         _ensure_dir(self._path.parent)

@@ -742,6 +742,8 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             worker_pid=meta["worker_pid"],
         )
 
+        is_unsaved = bool(entry.get("unsaved"))
+
         await self.emit(
             "editor:mirror",
             {
@@ -749,11 +751,30 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 "content": content,
                 "base_sha256": base_sha256,
                 "content_sha256": entry.get("content_sha256"),
-                "unsaved": bool(entry.get("unsaved")),
+                "unsaved": is_unsaved,
                 "source_client": sid,
             },
             room="file_editor_cm6",
         )
+
+        # Notify toolbar badge and explorer decorations of draft state change.
+        await self.emit(
+            "editor:cache_state",
+            {
+                "path": path,
+                "state": "mid_session" if is_unsaved else "clean",
+                "unsaved": is_unsaved,
+                "reason": "mirror",
+                "content_sha256": entry.get("content_sha256"),
+                "source_client": sid,
+            },
+            room="file_editor_cm6",
+        )
+        try:
+            from ..explorer_ws import notify_draft_state_changed
+            notify_draft_state_changed(project)
+        except Exception:
+            pass
 
     async def on_editor_save_request(self, sid, data):
         payload = data or {}
@@ -995,3 +1016,55 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 {"request_id": request_id, "error": str(exc)},
                 room=sid,
             )
+
+    async def on_editor_breadcrumb_navigate(self, sid, data):
+        """Breadcrumb directory click → relay to explorer socket + open drawer."""
+        payload = data if isinstance(data, dict) else {}
+        abs_path = payload.get("path", "")
+        open_drawer = payload.get("open_drawer", False)
+        if not abs_path:
+            return
+
+        project = _active_project()
+        rel = abs_path
+        if project and abs_path.startswith(project):
+            rel = abs_path[len(project):]
+            if rel.startswith("/"):
+                rel = rel[1:]
+            if not rel:
+                rel = "."
+
+        # Relay to explorer socket (cross-transport, same worker process)
+        try:
+            from ..explorer_ws import EXPLORER_SIO
+            await EXPLORER_SIO.emit(
+                "explorer:navigate",
+                {"rel": rel, "open_drawer": open_drawer},
+            )
+        except Exception:
+            pass
+
+    async def on_editor_workbench_did_change(self, sid, data):
+        """Push buffer content to extension host for live diagnostics (fire-and-forget)."""
+        payload = data if isinstance(data, dict) else {}
+        abs_path = payload.get("path", "")
+        text = payload.get("text", "")
+        language_id = payload.get("languageId", "")
+
+        project = _active_project()
+        if not project or not abs_path:
+            return
+
+        try:
+            from ..workbench_adapter_shell_manager import adapter_rpc
+
+            await adapter_rpc(
+                "vscode.didChange",
+                {
+                    "path": abs_path,
+                    "text": text,
+                    "languageId": language_id,
+                },
+            )
+        except Exception as exc:
+            _wb_log.error("[workbench] didChange failed: %s", exc)

@@ -183,8 +183,25 @@ export default href;
               font-display: swap;
             }
             html, body { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; background: #0b0f14; }
-            .fh-root { height: 100%; width: 100%; margin: 0; padding: 0; display: flex; }
-            #fh-monaco { flex: 1; min-height: 0; min-width: 0; width: 100%; height: 100%; -webkit-touch-callout: none; user-select: none; }
+            .fh-root { height: 100%; width: 100%; margin: 0; padding: 0; display: flex; flex-direction: column; }
+            #te2-breadcrumbs {
+              display: flex; align-items: center; padding: 2px 8px;
+              background: #0b0f1a; border-bottom: 1px solid #333;
+              font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+              min-height: 22px; max-height: 22px; flex-shrink: 0;
+              color: #ccc; overflow-x: auto; overflow-y: hidden;
+              flex-wrap: nowrap; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+            }
+            #te2-breadcrumbs::-webkit-scrollbar { display: none; }
+            #te2-breadcrumbs:empty { display: none; }
+            #te2-breadcrumbs .monaco-breadcrumbs { flex: 1; min-width: 0; }
+            .te2-bc-item { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; opacity: 0.8; cursor: pointer; white-space: nowrap; }
+            .te2-bc-item:hover { opacity: 1; color: #e5e7eb; }
+            .te2-bc-icon { display: inline-flex; align-items: center; width: 18px; height: 18px; flex-shrink: 0; filter: brightness(1.5); }
+            .te2-bc-icon svg { width: 18px; height: 18px; }
+            .te2-bc-sym-icon { font-size: 14px; line-height: 1; opacity: 0.85; margin-right: 2px; }
+            .te2-bc-sep { opacity: 0.4; padding: 0 2px; }
+            #fh-monaco { flex: 1; min-height: 0; min-width: 0; width: 100%; -webkit-touch-callout: none; user-select: none; }
             .fh-root, .monaco-editor { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 
             /* Draft diff decorations (Monaco) */
@@ -223,6 +240,10 @@ export default href;
             rel="stylesheet",
             href="/api/app/file_editor_cm6/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css?raw=1",
         )
+        breadcrumbs_css = Link(
+            rel="stylesheet",
+            href="/apps/file_editor_cm6/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
+        )
 
         # NOTE: Import map URLs are resolved relative to the iframe document.
         # Use the absolute /api/app/<app_id>/ui/... path to avoid any ambiguity.
@@ -245,6 +266,7 @@ export default href;
                 css,
                 touch_css,
                 bootstrap_bundle_css,
+                breadcrumbs_css,
                 import_map,
                 # Debug: prove CSS is loaded inside the iframe
                 Style(
@@ -268,6 +290,7 @@ export default href;
             ),
             Body(
                 Div(
+                    Div("", id="te2-breadcrumbs"),
                     Div("", id="fh-monaco"),
                     Div("loading…", id="fh-debug", cls="__fh_debug_badge"),
                     cls="fh-root",

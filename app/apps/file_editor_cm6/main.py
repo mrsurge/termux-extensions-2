@@ -1373,8 +1373,13 @@ NICEGUI_INIT_HOOK = init_nicegui_with_app
 # The main framework process proxies /editor_ws/socket.io to this worker endpoint.
 from app.apps.file_editor_cm6.monaco_editor.editor_socketio import EDITOR_ASGI_APP
 
+# --- Explorer Socket.IO (worker-owned) ---
+# The main framework process proxies /explorer_ws/socket.io to this worker endpoint.
+from app.apps.file_editor_cm6.explorer_socketio import EXPLORER_ASGI_APP
+
 SUBAPPS = [
     ("/editor_ws/socket.io", EDITOR_ASGI_APP),
+    ("/explorer_ws/socket.io", EXPLORER_ASGI_APP),
 ]
 
 # Import singleton store instances

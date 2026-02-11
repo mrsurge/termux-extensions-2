@@ -469,6 +469,25 @@ function connectExplorerSocket() {
         }
       });
 
+      explorerSocket.on('explorer:navigate', (payload) => {
+        // Breadcrumb directory click → list the directory + open drawer
+        try {
+          const p = payload && typeof payload === 'object' ? payload : {};
+          const rel = p.rel || '.';
+          if (typeof window.__explorerBusSend === 'function') {
+            window.__explorerBusSend('explorer:list', { rel });
+          }
+          if (p.open_drawer) {
+            const drawer = document.getElementById('fe-drawer');
+            if (drawer && !drawer.classList.contains('open')) {
+              drawer.classList.add('open');
+              const bd = document.getElementById('fe-drawer-backdrop');
+              if (bd) bd.classList.add('show');
+            }
+          }
+        } catch (_) {}
+      });
+
       window.__explorerBusSend = (type, payload) => {
         const msg = { type, payload: payload || {} };
         if (explorerSocket && explorerSocket.connected) {

@@ -627,6 +627,9 @@ export class WorkbenchClient {
     this._nextModelNumber = 1;
     this._activeEditorId = null;   // track current editor for close-before-open
     this._activeUriObj = null;     // track current URI object for close-before-open
+    this._docVersions = new Map(); // path -> versionId for didChange tracking
+    this._docLineCount = new Map(); // path -> line count for didChange range
+    this._docCharCount = new Map(); // path -> char count for didChange rangeLength
     this._useRemote = true;
     this._authority = DEFAULT_REMOTE_AUTHORITY;
     this._productVersion = null;
@@ -1835,6 +1838,9 @@ export class WorkbenchClient {
     }));
     spanTrace("openFile.send.delta.addedDocuments", () => this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [docDelta], false));
     try { console.log(`[openFile] ts=${Date.now()} addedDocuments=[${path}] lineCount=${lines.length}`); } catch {}
+    this._docVersions.set(path, 1); // reset version tracking for didChange
+    this._docLineCount.set(path, lines.length);
+    this._docCharCount.set(path, text.length);
     // Allow GC to collect the large `lines` array after JSON encoding.
     try {
       if (docDelta?.addedDocuments?.[0]) docDelta.addedDocuments[0].lines = null;
@@ -1908,6 +1914,53 @@ export class WorkbenchClient {
     this._activeUriObj = uriObj;
     this._activeTab = tabActive;
     return { ok: true, req: reqDocs };
+  }
+
+  /**
+   * Push a full-text buffer update to the extension host for live diagnostics.
+   * Uses $acceptModelChanged on ExtHostDocuments (rpcId 85) with isFlush:true.
+   */
+  didChange(params = {}) {
+    if (!this.ext?.protocol) throw new Error("not connected");
+    const path = String(params.path ?? "");
+    const text = String(params.text ?? "");
+    const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
+    const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
+
+    // Monotonically increasing versionId per document
+    const prevVersion = this._docVersions.get(path) ?? 1;
+    const nextVersion = prevVersion + 1;
+    this._docVersions.set(path, nextVersion);
+
+    const uriObj = this._uriForPath(path, authority);
+
+    // ISerializedModelContentChangedEvent — full content replacement.
+    // The mirror model does _acceptDeleteRange(range) then _acceptInsertText(start, text),
+    // so the range MUST span the entire existing document to delete it first.
+    const prevLines = this._docLineCount.get(path) ?? 1;
+    const newLines = text.split(/\r?\n/);
+    this._docLineCount.set(path, newLines.length);
+
+    const event = {
+      changes: [{
+        range: { startLineNumber: 1, startColumn: 1, endLineNumber: prevLines, endColumn: 2147483647 },
+        rangeOffset: 0,
+        rangeLength: this._docCharCount.get(path) ?? 0,
+        text,
+      }],
+      eol: "\n",
+      versionId: nextVersion,
+      isUndoing: false,
+      isRedoing: false,
+      isFlush: true,
+      isEolChange: false,
+    };
+
+    // rpcId 85 = ExtHostDocuments, $acceptModelChanged(uri, event, isDirty)
+    this._sendExt(85, "$acceptModelChanged", [uriObj, event, true], false);
+    this._docCharCount.set(path, text.length);
+    console.log(`[didChange] ts=${Date.now()} path=${path} ver=${nextVersion} bytes=${text.length} prevLines=${prevLines} newLines=${newLines.length}`);
+    return { ok: true, versionId: nextVersion };
   }
 
   async documentSymbols(params = {}) {

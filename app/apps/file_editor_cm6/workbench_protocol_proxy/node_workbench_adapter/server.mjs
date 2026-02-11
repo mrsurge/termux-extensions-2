@@ -820,6 +820,20 @@ async function handleJsonRpc(reqObj) {
     return { jsonrpc: "2.0", id, result };
   }
 
+  if (method === "vscode.didChange") {
+    const p = (params && typeof params === "object") ? params : {};
+    const resolvedPath = normalizePathParam(p);
+    if (!resolvedPath) {
+      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
+    }
+    const result = wb.didChange({
+      path: resolvedPath,
+      text: String(p.text ?? ""),
+      languageId: p.languageId,
+    });
+    return { jsonrpc: "2.0", id, result };
+  }
+
   if (method === "adapter.configure") {
     const obj = (params && typeof params === "object") ? params : {};
     if (typeof obj.upstreamHttp === "string") state.config.upstreamHttp = obj.upstreamHttp;

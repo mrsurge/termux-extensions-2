@@ -867,6 +867,16 @@
     try { setTimeout(function () { _diagReapplyScheduled = false; }, 300); } catch (_) { _diagReapplyScheduled = false; }
   }
 
+  /** Clear markers and emit zero diagnostic counts (used on file switch). */
+  function _clearDiagnosticsForSwitch() {
+    try {
+      if (model && window.monaco && window.monaco.editor) {
+        monaco.editor.setModelMarkers(model, 'vscode_api', []);
+      }
+      emitToHost('editor_diagnostics_counts', { errors: 0, warnings: 0, hints: 0, total: 0, path: currentPath || '' });
+    } catch (_) {}
+  }
+
   function _applyCachedDiagnosticsForActive() {
     try {
       if (!window.monaco || !window.monaco.editor) return;
@@ -2547,6 +2557,11 @@
               content: content,
               base_sha256: baseSha256,
             });
+            editorSocket.emit('editor_workbench_did_change', {
+              path: currentPath,
+              text: content,
+              languageId: model.getLanguageId ? model.getLanguageId() : '',
+            });
           } catch (_) {}
           requestDraftDiff('local');
         }, 120);
@@ -3021,6 +3036,7 @@
 
   async function openPathFromBackend(absPath, preferredLanguage) {
     if (!absPath) return;
+    _clearDiagnosticsForSwitch();
     try {
       await ensureEditorWithPrefs();
     } catch (e) {
@@ -3090,6 +3106,7 @@
       }
     }
     currentPath = absPath;
+    try { bcUpdatePath(currentPath); } catch (_) {}
     baseSha256 = sha256;
 
     // Emit SSOT-derived telemetry to host (draft badge + autosave toggle sync).
@@ -3162,6 +3179,7 @@
             // Apply directly from SSOT payload (draft wins).
             baseSha256 = f.base_sha256 || baseSha256;
             currentPath = f.path || currentPath;
+            try { bcUpdatePath(currentPath); } catch (_) {}
             ensureEditorWithPrefs().then(function() {
               var lang = languageFromPath(currentPath);
               if (!model) {
@@ -3251,7 +3269,20 @@
                     forceRefresh: true,
                   },
                   { timeoutMs: 8000 }
-                ).then(function () {}).catch(function () {});
+                ).then(function () {
+                  try {
+                    if (model && editorSocket && editorSocket.connected && currentPath) {
+                      var content = model.getValue();
+                      if (content) {
+                        editorSocket.emit('editor_workbench_did_change', {
+                          path: currentPath,
+                          text: content,
+                          languageId: model.getLanguageId ? model.getLanguageId() : '',
+                        });
+                      }
+                    }
+                  } catch (_) {}
+                }).catch(function () {});
               } catch (_) {}
 
               // If diagnostics arrived early (before model/currentPath), apply from cache now.
@@ -3277,6 +3308,7 @@
           // Always follow SSOT open across clients.
           baseSha256 = payload.base_sha256 || baseSha256;
           currentPath = payload.path;
+          try { bcUpdatePath(currentPath); } catch (_) {}
           ensureEditorWithPrefs().then(function() {
             var lang = languageFromPath(currentPath);
             if (!model) {
@@ -3339,7 +3371,21 @@
                 },
                 { timeoutMs: 8000 }
               )
-                .then(function () {})
+                .then(function () {
+                  // If model has a draft applied, push it to extension host for live diagnostics
+                  try {
+                    if (model && editorSocket && editorSocket.connected && currentPath) {
+                      var content = model.getValue();
+                      if (content) {
+                        editorSocket.emit('editor_workbench_did_change', {
+                          path: currentPath,
+                          text: content,
+                          languageId: model.getLanguageId ? model.getLanguageId() : '',
+                        });
+                      }
+                    }
+                  } catch (_) {}
+                })
                 .catch(function () {});
             } catch (_) {}
             // Apply cached diagnostics for this file immediately after open/model swap.
@@ -3728,6 +3774,7 @@
             column: col || 1,
           });
           lastSentAt = Date.now();
+          try { bcUpdateCursor(line); } catch (_) {}
         } catch (_) {}
       };
 
@@ -3769,6 +3816,231 @@
   }
 
   // No host↔iframe postMessage bridge: all runtime communication uses /editor Socket.IO.
+
+  // ─── TE2 Breadcrumb Bar ──────────────────────────────────
+  var _bcEl = null;
+  var _bcSymbols = [];
+  var _bcLastPath = null;
+  var _bcSymbolsSeq = 0;
+  var _bcGetIcon = null; // seti-icons getIcon (loaded async)
+
+  function bcInit() {
+    _bcEl = document.getElementById('te2-breadcrumbs');
+    // Load seti-icons ESM module for file icons
+    import('/static/vendor/seti-icons/seti-icons.js').then(function(mod) {
+      mod.ensureLoaded();
+      _bcGetIcon = mod.getIcon;
+      // Re-render if we already have a path (icons were missing on first render)
+      if (_bcLastPath) _bcRender();
+    }).catch(function(e) { console.warn('[BC] seti-icons load failed:', e); });
+  }
+
+  function bcUpdatePath(absPath) {
+    if (!_bcEl || !absPath) return;
+    if (absPath === _bcLastPath) return;
+    _bcLastPath = absPath;
+    _bcSymbols = [];
+    _bcRender();
+    _bcRequestSymbols(absPath);
+  }
+
+  function _bcRequestSymbols(absPath) {
+    if (!editorSocket || !editorSocket.connected) return;
+    var seq = ++_bcSymbolsSeq;
+    editorWorkbenchCall('symbols', {
+      path: absPath,
+      languageId: model ? (model.getLanguageId ? model.getLanguageId() : '') : '',
+    }, { timeoutMs: 8000 }).then(function(result) {
+      if (seq !== _bcSymbolsSeq) return; // stale
+      // Unwrap adapter response: {ok, result: [...]} or raw array
+      var symbols = result;
+      if (symbols && typeof symbols === 'object' && !Array.isArray(symbols)) {
+        symbols = symbols.result || symbols.symbols || [];
+      }
+      _bcSymbols = Array.isArray(symbols) ? symbols : [];
+      console.log('[BC] symbols received:', _bcSymbols.length, _bcSymbols.slice(0, 2));
+      _bcRender();
+    }).catch(function(e) { console.warn('[BC] symbols request failed:', e); });
+  }
+
+  function bcUpdateCursor(line) {
+    if (!_bcEl || !_bcLastPath) return;
+    _bcRender(line);
+  }
+
+  function _bcFindSymbolChain(symbols, line) {
+    var chain = [];
+    var cur = symbols;
+    while (cur && cur.length) {
+      var found = null;
+      for (var i = 0; i < cur.length; i++) {
+        var s = cur[i];
+        var r = s.range || (s.location && s.location.range);
+        if (!r) continue;
+        // Handle both Monaco (1-indexed) and LSP (0-indexed) range formats
+        var startLine, endLine;
+        if (typeof r.startLineNumber === 'number') {
+          startLine = r.startLineNumber;
+          endLine = r.endLineNumber || 999999;
+        } else if (r.start && typeof r.start.line === 'number') {
+          startLine = r.start.line + 1; // LSP is 0-indexed
+          endLine = (r.end && typeof r.end.line === 'number') ? r.end.line + 1 : 999999;
+        } else if (typeof r.startLine === 'number') {
+          startLine = r.startLine;
+          endLine = r.endLine || 999999;
+        } else {
+          // Try array format [startLine, startCol, endLine, endCol]
+          if (Array.isArray(r) && r.length >= 3) {
+            startLine = r[0] + 1;
+            endLine = r[2] + 1;
+          } else continue;
+        }
+        if (line >= startLine && line <= endLine) { found = s; break; }
+      }
+      if (!found) break;
+      chain.push(found);
+      cur = found.children || [];
+    }
+    return chain;
+  }
+
+  // Symbol kind → icon (LSP SymbolKind values)
+  var _BC_SYM_ICONS = {
+    1: '\u{1F4C4}', // File
+    2: '{M}',       // Module
+    3: '{N}',       // Namespace
+    4: '\u{1F4E6}', // Package 📦
+    5: '\u25C7',    // Class ◇
+    6: '\u0192',    // Method ƒ
+    7: '\u25AB',    // Property ▫
+    8: '\u25AB',    // Field ▫
+    9: '\u0192',    // Constructor ƒ
+    10: '\u2630',   // Enum ☰
+    11: '\u25C7',   // Interface ◇
+    12: '\u0192',   // Function ƒ
+    13: 'x',        // Variable
+    14: '\u03C0',   // Constant π
+    15: '"',        // String
+    16: '#',        // Number
+    17: '\u25CF',   // Boolean ●
+    18: '[]',       // Array
+    19: '{}',       // Object
+    22: '\u2630',   // EnumMember ☰
+    23: '\u25C7',   // Struct ◇
+    25: '\u00B1',   // Operator ±
+    26: 'T',        // TypeParameter
+  };
+  function _bcSymbolIcon(kind) { return _BC_SYM_ICONS[kind] || '\u25B8'; } // ▸ default
+
+  function _bcRender(cursorLine) {
+    if (!_bcEl) return;
+    _bcEl.innerHTML = '';
+    if (!_bcLastPath) return;
+
+    var parts = _bcLastPath.split('/').filter(Boolean);
+    var accum = '';
+
+    for (var i = 0; i < parts.length; i++) {
+      accum += '/' + parts[i];
+      if (i > 0) {
+        var sep = document.createElement('span');
+        sep.className = 'te2-bc-sep';
+        sep.textContent = '\u203A'; // ›
+        _bcEl.appendChild(sep);
+      }
+      var isFile = (i === parts.length - 1);
+      var item = document.createElement('span');
+      item.className = 'te2-bc-item';
+      item.dataset.path = accum;
+      item.dataset.isFile = isFile ? '1' : '0';
+      // Add seti icon for the file segment
+      if (isFile && _bcGetIcon) {
+        var iconSpan = document.createElement('span');
+        iconSpan.className = 'te2-bc-icon';
+        item.appendChild(iconSpan);
+        (function(span, name) {
+          var brightTheme = {
+            blue: '#4da6ff', green: '#a6e22e', red: '#f85149',
+            orange: '#f0883e', yellow: '#e3b341', purple: '#bc8cff',
+            pink: '#f778ba', white: '#e6edf3', grey: '#8b949e',
+            'grey-light': '#b1bac4', ignore: '#6e7681',
+          };
+          _bcGetIcon(name, brightTheme).then(function(ic) {
+            if (ic && ic.svg) span.innerHTML = ic.svg;
+            if (ic && ic.color) span.style.color = ic.color;
+          }).catch(function() {});
+        })(iconSpan, parts[i]);
+      }
+      var label = document.createElement('span');
+      label.textContent = parts[i];
+      item.appendChild(label);
+      item.addEventListener('click', _bcOnPathClick);
+      _bcEl.appendChild(item);
+    }
+
+    // Symbol chain based on cursor
+    if (_bcSymbols.length && typeof cursorLine === 'number' && cursorLine > 0) {
+      var chain = _bcFindSymbolChain(_bcSymbols, cursorLine);
+      for (var j = 0; j < chain.length; j++) {
+        var ssep = document.createElement('span');
+        ssep.className = 'te2-bc-sep';
+        ssep.textContent = '\u203A';
+        _bcEl.appendChild(ssep);
+
+        var sitem = document.createElement('span');
+        sitem.className = 'te2-bc-item';
+        // Symbol kind icon
+        var symIcon = _bcSymbolIcon(chain[j].kind);
+        if (symIcon) {
+          var si = document.createElement('span');
+          si.className = 'te2-bc-sym-icon';
+          si.textContent = symIcon;
+          sitem.appendChild(si);
+        }
+        var slabel = document.createElement('span');
+        slabel.textContent = chain[j].name || '';
+        sitem.appendChild(slabel);
+        sitem.dataset.symIdx = String(j);
+        var symRange = chain[j].selectionRange || chain[j].range;
+        if (symRange) {
+          var sl = symRange.startLineNumber || symRange.startLine || (symRange.start && typeof symRange.start.line === 'number' ? symRange.start.line + 1 : null) || 1;
+          var sc = symRange.startColumn || (symRange.start && typeof symRange.start.character === 'number' ? symRange.start.character + 1 : null) || 1;
+          if (Array.isArray(symRange) && symRange.length >= 2) { sl = symRange[0] + 1; sc = symRange[1] + 1; }
+          sitem.dataset.line = String(sl);
+          sitem.dataset.col = String(sc);
+        }
+        sitem.addEventListener('click', _bcOnSymbolClick);
+        _bcEl.appendChild(sitem);
+      }
+    }
+    // Auto-scroll to show the rightmost (active) item
+    _bcEl.scrollLeft = _bcEl.scrollWidth;
+  }
+
+  function _bcOnPathClick(ev) {
+    try {
+      var el = ev.currentTarget;
+      var isFile = el.dataset.isFile === '1';
+      if (isFile) return; // file segment = no-op (already open)
+      // Directory click → emit to editor socket, which relays to explorer
+      var absDir = el.dataset.path || '';
+      if (editorSocket && editorSocket.connected) {
+        editorSocket.emit('editor_breadcrumb_navigate', { path: absDir, open_drawer: true });
+      }
+    } catch (_) {}
+  }
+
+  function _bcOnSymbolClick(ev) {
+    try {
+      var el = ev.currentTarget;
+      var line = parseInt(el.dataset.line, 10);
+      var col = parseInt(el.dataset.col, 10) || 1;
+      if (Number.isFinite(line)) {
+        applyJumpToLine({ line: line, column: col, focus: true, scroll_y: 'center' });
+      }
+    } catch (_) {}
+  }
+  // ─── End Breadcrumb ──────────────────────────────────────
 
   async function bootMonaco() {
     try {
@@ -3941,5 +4213,6 @@
   }
 
   updateDebug('boot=init');
+  bcInit();
   bootMonaco();
 })();

@@ -23,19 +23,21 @@ Cross references:
 - `docs/apps/code_cm6/VSCODE_API_STATE_OWNERSHIP.md`
 - `docs/apps/code_cm6/VSCODE_API_DEPRECATIONS.md`
 
-### Current milestone (read-only language intelligence)
+### Current milestone (read-only language intelligence + live diagnostics)
 Status: implemented and working for **all built-in languages** (Python, TypeScript, JavaScript, CSS, HTML, JSON, etc.):
 - `code-server` runs as a **pipe-backend** framework shell on fixed port `127.0.0.1:18180` with `--disable-workspace-trust`. Stdout is read by the Python shell manager for readiness detection ("HTTP server listening" regex). The pipe backend ensures code-server terminates automatically with the app worker.
-- Node **workbench adapter** runs as a **pipe-backend** framework shell. All RPC (hover, symbols, openFile, diagnostics nudge) flows over **stdio JSON-RPC** (stdin/stdout pipe), not HTTP. The adapter's HTTP server on port `18181` is vestigial and will be removed.
+- Node **workbench adapter** runs as a **pipe-backend** framework shell. All RPC (hover, symbols, openFile, didChange, diagnostics nudge) flows over **stdio JSON-RPC** (stdin/stdout pipe), not HTTP. The adapter's HTTP server on port `18181` is vestigial and will be removed.
 - **No HTTP in the editor data flow.** The old `vscode_api` WS JSON-RPC bridge is bypassed. All language-feature requests go: browser → Socket.IO → `editor_ws.py` → stdin pipe → adapter → extension host → stdout pipe → browser.
 - Diagnostics flow through a **server-side bridge** (`diagnostics_bridge.py`) over the editor Socket.IO channel. The diagnostics nudge (`vscode.openFile`) also uses the stdio pipe.
+- **Live typing diagnostics** via `vscode.didChange`: Monaco’s 120ms debounced `onDidChangeModelContent` pushes the full buffer to the extension host via `$acceptModelChanged` (rpcId 85, `isFlush: true`). The ext host updates its mirror model, Pyright/TS re-analyzes, and fresh diagnostics flow back through the existing bridge. No file I/O, no save required.
+- **Diagnostics counter** (toolbar badge) resets to zero on file switch, then updates when new diagnostics arrive for the new file.
 - The workbench adapter and code-server are started eagerly at worker boot. Code-server readiness (pipe stdout regex) **gates** adapter startup, eliminating race conditions.
-- Working end-to-end (over stdio pipe): `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`.
+- Working end-to-end (over stdio pipe): `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`, `vscode.didChange`.
 - **Builtin extensions** are loaded by default (95 scanned from code-server, filtered to ~30 language-related).
 - **LanguageId detection**: the adapter infers language from file extension when not provided (supports 40+ extensions including `.mjs`, `.cjs`, `.mts`, `.cts`, `.jsx`, `.tsx`).
 
 Known limitation (expected right now):
-- “Live typing” diagnostics will not be fully correct until we add a `didChange` sync path. Today, the sidecar becomes accurate at `openFile` time (and can be extended to update on save).
+- Files without an LSP extension (e.g. Markdown) won’t get live diagnostics — the toolbar badge clears to zero on switch.
 
 ### Extension validation matrix (next milestone)
 We will validate at least 2 deterministic features (hover + symbols + diagnostics) per language:
@@ -86,6 +88,12 @@ Diagnostics pipeline (server-side bridge, not browser WS):
 Language feature pipeline (stdio pipe, no HTTP):
   browser → Socket.IO (editor_workbench_*) → editor_ws.py → adapter stdin pipe → extension host
   extension host → adapter stdout pipe (<<<RPC>>>) → editor_ws.py → Socket.IO → browser
+
+Live diagnostics pipeline (didChange, stdio pipe):
+  Monaco onDidChangeModelContent (120ms debounce) → editor_workbench_did_change
+    → editor_ws.py → adapter stdin → $acceptModelChanged (rpcId 85, isFlush:true)
+    → ext host mirror model update → Pyright/TS re-analysis
+    → $changeMany → diagnostics_bridge.py → editor Socket.IO → browser markers
 ```
 
 ---
@@ -1212,12 +1220,13 @@ Python-side integration:
   - `on_editor_workbench_open_file` → `adapter_rpc("vscode.openFile", ...)`
   - `on_editor_workbench_hover` → `adapter_rpc("vscode.hover", ...)`
   - `on_editor_workbench_symbols` → `adapter_rpc("vscode.documentSymbols", ...)`
+  - `on_editor_workbench_did_change` → `adapter_rpc("vscode.didChange", ...)` (fire-and-forget)
 - `diagnostics_bridge.py`:
   - `nudge_diagnostics_for_file()` → `adapter_rpc("vscode.openFile", ...)` (replaced old httpx POST)
 
 Current status (facts observed in adapter runs):
 - Adapter can establish remote-mode mgmt+ext connections and keep them alive.
-- `vscode.openFile`, `vscode.documentSymbols`, and `vscode.hover` are wired end-to-end through the stdio pipe.
+- `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`, and `vscode.didChange` are wired end-to-end through the stdio pipe.
 - **All built-in language extensions** are loaded and activated (TypeScript, JavaScript, Python, CSS, HTML, JSON, etc.)
 - Python provider flow is validated with `ms-pyright.pyright` in the current dev setup.
 - TS/JS provider flow validated via built-in `typescript-language-features` — diagnostics, hover, symbols all working.
@@ -1303,6 +1312,12 @@ RPC features use **editor Socket.IO → stdio pipe** (no separate WS):
 - `editor_workbench_open_file` → `adapter_rpc("vscode.openFile", { path, languageId })` → `{ ok }`
 - `editor_workbench_hover` → `adapter_rpc("vscode.hover", { path, lineNumber, column, languageId })` → `{ hover }`
 - `editor_workbench_symbols` → `adapter_rpc("vscode.documentSymbols", { path, languageId })` → `{ symbols[] }`
+- `editor_workbench_did_change` → `adapter_rpc("vscode.didChange", { path, text, languageId })` → fire-and-forget (diagnostics arrive via bridge)
+
+Live diagnostics data flow:
+- User types in Monaco → 120ms debounce → `editor_workbench_did_change` → `editor_ws.py` → adapter stdin → `$acceptModelChanged` (rpcId 85, full text replace via `isFlush: true`) → extension host re-analyzes → `$changeMany` → diagnostics bridge → browser
+- The adapter tracks per-document `versionId` (monotonically increasing, reset to 1 on `openFile`) and previous line/char counts for correct range replacement
+- File watchers handle post-save diagnostics automatically (Pyright/TS detect disk changes without `didChange`)
 
 The old `vscode_api_ws` WS path is **bypassed** for all language feature RPC. It remains only for VSIX/grammar/theme management.
 

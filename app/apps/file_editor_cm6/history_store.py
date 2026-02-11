@@ -949,6 +949,7 @@ class HistoryStore:
         normalized_project = self._normalize_project_path(project_path)
         try:
             sidecar = ProjectSidecar.load_or_create(normalized_project)
+            sidecar.reload()
             return sidecar.get_cached_document(file_path)
         except Exception:
             return None
@@ -1037,6 +1038,9 @@ class HistoryStore:
         normalized_project = self._normalize_project_path(project_path)
         try:
             sidecar = ProjectSidecar.load_or_create(normalized_project)
+            # Reload from disk to pick up writes from the worker process
+            # (explorer runs in the main process, drafts are written by the worker).
+            sidecar.reload()
             return sidecar.list_project_drafts()
         except Exception:
             return []

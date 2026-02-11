@@ -579,9 +579,10 @@ async def _refresh_explorer_directory(project_path: str, rel_dir: str):
 
 
 async def _broadcast_draft_decorations(project_path: str):
-    """Broadcasts explorer:updateDecorations with current draft state."""
+    """Broadcasts explorer:updateDecorations and review:setEntries with current draft state."""
     try:
         from pathlib import Path
+        from .explorer import review
         # Normalize to absolute path to match how connections are registered
         normalized_path = str(Path(project_path).resolve())
         # Fast path: use disk-backed DraftIndexSidecar (avoid parsing ProjectSidecar.session_cache content).
@@ -600,6 +601,11 @@ async def _broadcast_draft_decorations(project_path: str):
         draft_decorations = {rel: {"hasDraft": True} for rel in draft_files}
         msg = {"type": "explorer:updateDecorations", "payload": {"drafts": draft_decorations}}
         await manager.broadcast(normalized_path, msg)
+
+        # Also update review list so the overlay auto-refreshes.
+        reviews = await review.list_reviews(Path(normalized_path), lightweight=False)
+        review_msg = {"type": "review:setEntries", "payload": {"entries": reviews}}
+        await manager.broadcast(normalized_path, review_msg)
     except Exception as e:
         logger.warning(f"Failed to broadcast draft decorations: {e}")
 
@@ -1588,10 +1594,6 @@ class ExplorerDispatcher:
     async def handle_review_list(self, payload: dict, msg_id: str):
         lightweight = payload.get("lightweight", False)
         res = await review.list_reviews(self.project_root, lightweight)
-        # This might be personal or broadcast? Usually review list is personal viewing,
-        # but the *state* of drafts is global.
-        # We emitted "review:setEntries" in broadcast_review_state.
-        # Let's match that.
         await self.emit_personal("review:setEntries", {"entries": res}, msg_id)
 
     async def handle_review_save(self, payload: dict, msg_id: str):
@@ -1604,6 +1606,8 @@ class ExplorerDispatcher:
         mark_draft_cache_dirty(self.project_root)
         await self.broadcast_git_status()
         await self.broadcast_review_state()
+        # Notify editor toolbar badge that drafts were saved (cleared).
+        await self._notify_editor_draft_cleared(files)
 
     async def handle_review_discard(self, payload: dict, msg_id: str):
         files = payload.get("files", [])
@@ -1612,6 +1616,27 @@ class ExplorerDispatcher:
         from .explorer_helper import mark_draft_cache_dirty
         mark_draft_cache_dirty(self.project_root)
         await self.broadcast_review_state()
+        # Notify editor toolbar badge that drafts were discarded (cleared).
+        await self._notify_editor_draft_cleared(files)
+
+    async def _notify_editor_draft_cleared(self, rel_files: list):
+        """Emit editor:cache_state via the editor Socket.IO for cleared drafts."""
+        try:
+            from .monaco_editor.editor_socketio import EDITOR_SIO
+            for rel in rel_files:
+                abs_path = str(self.project_root / rel)
+                await EDITOR_SIO.emit(
+                    "editor:cache_state",
+                    {
+                        "path": abs_path,
+                        "state": "clean",
+                        "unsaved": False,
+                        "reason": "discard_external",
+                    },
+                    namespace="/editor",
+                )
+        except Exception:
+            pass
 
     async def handle_pulse_alive(self, payload: dict, msg_id: str):
         """Handle client heartbeat response (silently)."""

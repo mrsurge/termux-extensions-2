@@ -4297,7 +4297,7 @@ function renderReviewResults(container, data) {
       entries.forEach(e => selectedReviewFiles.add(e.rel));
     }
     // Update checkboxes
-    container.querySelectorAll('.fe-review-checkbox input').forEach(cb => {
+    container.querySelectorAll('.fe-review-checkbox').forEach(cb => {
       cb.checked = selectedReviewFiles.has(cb.dataset.rel);
     });
     updateSelectAllLabel();
