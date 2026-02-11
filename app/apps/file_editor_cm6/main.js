@@ -1401,6 +1401,52 @@ function _feHostTs() {
   }
 }
 
+// Readiness spinner step labels.
+const _readinessLabels = {
+  iframe_ready: 'Editor iframe ready',
+  code_server: 'Code-server backend',
+  adapter_launched: 'Workbench adapter',
+  baton: 'Session ready',
+};
+
+function _spinnerSetStep(title, failed) {
+  try {
+    if (!window.__feLspSpinnerUi) {
+      window.__feLspSpinnerUi = {
+        lspShow: false, lspTitle: '', busyShow: false,
+        busyTitle: '', busyLanguageId: '', busyActivity: '',
+      };
+    }
+    const ui = window.__feLspSpinnerUi;
+    ui.busyShow = true;
+    ui.busyActivity = 'readiness';
+    ui.busyTitle = (failed ? '\u2718 ' : '') + title;
+    _feUpdateLspSpinner();
+  } catch (_) {}
+}
+
+function _spinnerHide(ok) {
+  try {
+    if (!window.__feLspSpinnerUi) return;
+    const ui = window.__feLspSpinnerUi;
+    if (ui.busyActivity === 'readiness' || ui.busyActivity === 'workbench_adapter' || ui.busyActivity === '') {
+      ui.busyShow = false;
+      ui.busyTitle = '';
+      ui.busyActivity = '';
+      try { console.log(_feHostTs(), '[spinner] STOP request_id=- path=- reason=readiness_' + (ok ? 'ok' : 'fail')); } catch (_) {}
+      try {
+        if (window.__feLspSpinnerState && window.__feLspSpinnerState.hideTimer) {
+          clearTimeout(window.__feLspSpinnerState.hideTimer);
+          window.__feLspSpinnerState.hideTimer = null;
+        }
+        var _sp = document.getElementById('fe-lsp-spinner');
+        if (_sp) { _sp.style.display = 'none'; _sp.title = ''; }
+      } catch (_) {}
+      _feUpdateLspSpinner();
+    }
+  } catch (_) {}
+}
+
 async function ensureWorkbenchAdapterReady() {
   try {
     if (workbenchAdapterReadyOk) return;
@@ -1409,87 +1455,67 @@ async function ensureWorkbenchAdapterReady() {
     workbenchAdapterConnecting = (async () => {
       let ok = false;
       try {
-        if (!window.__feLspSpinnerUi) {
-          window.__feLspSpinnerUi = {
-            lspShow: false,
-            lspTitle: '',
-            busyShow: false,
-            busyTitle: '',
-            busyLanguageId: '',
-            busyActivity: '',
-          };
-        }
-        const ui = window.__feLspSpinnerUi;
-        ui.busyShow = true;
-        ui.busyActivity = 'workbench_adapter';
-        ui.busyTitle = 'Starting workbench adapter…';
-        try { console.log(_feHostTs(), '[spinner] START request_id=- path=- reason=workbench_adapter_start'); } catch (_) {}
-        _feUpdateLspSpinner();
+        _spinnerSetStep('Waiting for editor\u2026');
+        try { console.log(_feHostTs(), '[spinner] START request_id=- path=- reason=readiness_chain'); } catch (_) {}
 
-        // Attach (idempotent HTTP): does not perturb an already-running adapter and
-        // returns immediate readiness state so page refresh doesn't miss one-shot events.
-        const attachResp = await fetch('/api/app/file_editor_cm6/workbench_adapter/attach', { cache: 'no-store' });
-        const attachJson = await attachResp.json();
-        if (!attachResp.ok || attachJson?.ok === false) {
-          throw new Error(attachJson?.error || attachJson?.detail || `attach failed HTTP ${attachResp.status}`);
-        }
+        // Wait for readiness steps relayed from iframe via postMessage/editorSocket.
+        // The iframe triggers the chain (editor_readiness_check) on connect,
+        // and relays editor:readiness_step events to us.
+        ok = await new Promise((resolve) => {
+          const timeout = setTimeout(() => {
+            _spinnerSetStep('Readiness timeout', true);
+            resolve(false);
+          }, 60000);
 
-        try {
-          const st = attachJson && attachJson.data ? attachJson.data.state : '';
-          if (st === 'ready') {
-            ok = true;
-          }
-        } catch (_) {}
+          const stepHandler = (ev) => {
+            const step = ev && ev.step || '';
+            const stepOk = ev && ev.ok;
+            const label = _readinessLabels[step] || step;
 
-        // If not already ready, wait for adapter/ready via editor Socket.IO (relayed by diagnostics_bridge).
-        if (!ok) {
-          ok = await new Promise((resolve) => {
-            const timeout = setTimeout(() => {
+            if (!stepOk) {
+              _spinnerSetStep(label + ': failed' + (ev.error ? ' (' + ev.error.slice(0, 60) + ')' : ''), true);
+              clearTimeout(timeout);
               resolve(false);
-            }, 30000);
-            const handler = () => {
+              return;
+            }
+
+            if (step === 'baton') {
+              _spinnerSetStep(label);
               clearTimeout(timeout);
               resolve(true);
-            };
-            if (editorSocket && editorSocket.connected) {
-              editorSocket.once('editor:adapter_ready', handler);
-            } else {
-              // If socket isn't connected yet, also listen for when it connects.
-              const checkInterval = setInterval(() => {
-                if (editorSocket && editorSocket.connected) {
-                  clearInterval(checkInterval);
-                  editorSocket.once('editor:adapter_ready', handler);
-                }
-              }, 200);
-              setTimeout(() => clearInterval(checkInterval), 30000);
+              return;
             }
-          });
-        }
-      } catch (e) {
-        console.warn('[workbench_adapter] readiness failed', e);
-      } finally {
-        try {
-          workbenchAdapterReadyOk = Boolean(ok);
-          if (!window.__feLspSpinnerUi) return;
-          const ui = window.__feLspSpinnerUi;
-          // Always clean up adapter spinner if we own it or nobody else does.
-          const ours = ui.busyActivity === 'workbench_adapter' || ui.busyActivity === '';
-          if (ours) {
-            ui.busyShow = false;
-            ui.busyTitle = '';
-            ui.busyActivity = '';
-            try { console.log(_feHostTs(), '[spinner] STOP request_id=- path=- reason=workbench_adapter_' + (ok ? 'ready' : 'timeout')); } catch (_) {}
-            try {
-              if (window.__feLspSpinnerState && window.__feLspSpinnerState.hideTimer) {
-                clearTimeout(window.__feLspSpinnerState.hideTimer);
-                window.__feLspSpinnerState.hideTimer = null;
+
+            _spinnerSetStep(label + '\u2026');
+          };
+
+          // Listen for steps via editorSocket (from iframe relay).
+          if (editorSocket && editorSocket.connected) {
+            editorSocket.on('editor:readiness_step', stepHandler);
+          } else {
+            const check = setInterval(() => {
+              if (editorSocket && editorSocket.connected) {
+                clearInterval(check);
+                editorSocket.on('editor:readiness_step', stepHandler);
               }
-              var _sp = document.getElementById('fe-lsp-spinner');
-              if (_sp) { _sp.style.display = 'none'; _sp.title = ''; }
-            } catch (_) {}
-            _feUpdateLspSpinner();
+            }, 200);
+            setTimeout(() => clearInterval(check), 60000);
           }
-        } catch (_) {}
+
+          // Also listen for editor:adapter_ready (from diagnostics_bridge, backwards compat).
+          const adapterHandler = () => {
+            clearTimeout(timeout);
+            if (!ok) resolve(true);
+          };
+          if (editorSocket && editorSocket.connected) {
+            editorSocket.once('editor:adapter_ready', adapterHandler);
+          }
+        });
+      } catch (e) {
+        console.warn('[readiness] chain failed', e);
+      } finally {
+        workbenchAdapterReadyOk = Boolean(ok);
+        _spinnerHide(ok);
       }
       return ok;
     })();

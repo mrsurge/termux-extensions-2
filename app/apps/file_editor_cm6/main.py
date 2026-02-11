@@ -11,7 +11,6 @@ sys.path.insert(0, str(vendor_dir))
 import os
 import json
 import time
-import hashlib
 from pathlib import Path
 import shutil
 from typing import Optional
@@ -25,8 +24,6 @@ from .history_store import HistoryStore
 from .preferences_store import PreferencesStore
 from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
 from .vscode_api_shell_manager import ensure_vscode_api_shell
-from .vscode_rpc_shell_manager import ensure_vscode_rpc_shell
-from .vscode_server_shell_manager import ensure_vscode_server_shell
 from .code_server_shell_manager import ensure_code_server_shell
 from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
 from .git_helper import (
@@ -73,15 +70,6 @@ IGNORE_PATTERNS = [
     '*.egg-info', '.DS_Store'
 ]
 
-# Workbench adapter baton (startup handshake)
-_workbench_baton = {
-    "token": None,
-    "project_root": None,
-    "created_ms": 0.0,
-    "last_seen_ms": 0.0,
-}
-_WORKBENCH_BATON_TTL_MS = 15 * 60 * 1000
-
 # Workbench adapter boot record (per worker process).
 # Purpose: make `/workbench_adapter/start` idempotent for page refresh / new clients
 # by reusing the adapter shell that was started at worker boot, when still alive.
@@ -95,38 +83,6 @@ _workbench_adapter_boot = {
 
 def _now_ms() -> float:
     return time.time() * 1000.0
-
-
-def _get_or_create_workbench_baton(project_root: str) -> str:
-    token = _workbench_baton.get("token")
-    created_ms = float(_workbench_baton.get("created_ms") or 0.0)
-    if token and _workbench_baton.get("project_root") == project_root:
-        if (_now_ms() - created_ms) < _WORKBENCH_BATON_TTL_MS:
-            return str(token)
-    token = hashlib.sha1(f"{project_root}:{_now_ms()}".encode("utf-8")).hexdigest()[:16]
-    _workbench_baton.update(
-        {
-            "token": token,
-            "project_root": project_root,
-            "created_ms": _now_ms(),
-            "last_seen_ms": _now_ms(),
-        }
-    )
-    return str(token)
-
-
-def _validate_workbench_baton(token: str, project_root: str) -> bool:
-    if not token:
-        return False
-    if _workbench_baton.get("project_root") != project_root:
-        return False
-    if _workbench_baton.get("token") != token:
-        return False
-    created_ms = float(_workbench_baton.get("created_ms") or 0.0)
-    if (_now_ms() - created_ms) > _WORKBENCH_BATON_TTL_MS:
-        return False
-    _workbench_baton["last_seen_ms"] = _now_ms()
-    return True
 
 CHANGE_RESULT_LIMIT = 40
 STATUS_TEXT_MAP = {
@@ -481,44 +437,6 @@ async def api_start_lsp(payload: dict = Body(...)):
         return JSONResponse({"ok": False, "error": "Failed to start server (missing binary?)"}, status_code=424)
 
 
-@file_editor_cm6_bp.get("/vscode_rpc/discover")
-async def vscode_rpc_discover():
-    """Discover the browser-facing WS URL for vscode_rpc and ensure the shell is running."""
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    try:
-        record = await ensure_vscode_rpc_shell(project_root)
-    except Exception as exc:
-        # Do not swallow: log loudly and return a structured response so callers
-        # can surface it (and retry).
-        print(f"[vscode_rpc][discover] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
-
-    # Main-process service shim will proxy this WS to the framework shell.
-    # Keep it same-origin for browsers (TE2 host provides the proxy route).
-    ws_url = f"/vscode_rpc_ws?shell_id={record.id}"
-
-    # Token is optional in dev mode. For now, return empty and let the proxy be same-origin.
-    return {
-        "ok": True,
-        "data": {
-            "project_root": project_root,
-            "ws_url": ws_url,
-            "token": "",
-            "expires_at": 0,
-            "shell_id": record.id,
-        },
-    }
-
-    return {"ok": True, "data": {"serverId": server_id, "started": started}}
-
-
 @file_editor_cm6_bp.get("/vscode_api/discover")
 async def vscode_api_discover():
     """Discover the browser-facing WS URL for vscode_api.
@@ -586,82 +504,6 @@ async def vscode_api_start():
         "ok": True,
         "data": {
             "project_root": project_root,
-            "shell_id": record.id,
-        },
-    }
-
-
-@file_editor_cm6_bp.get("/vscode_server/discover")
-async def vscode_server_discover():
-    """Start/adopt the VS Code server (server-main) shell and return its local URL.
-
-    NOTE: This is a stepping-stone for wiring `vscode_api_ws` to the real VS Code
-    backend. For now, it is primarily for sanity-checking that the server can
-    boot in this Termux environment.
-    """
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    try:
-        record = await ensure_vscode_server_shell(project_root)
-    except Exception as exc:
-        print(f"[vscode_server][discover] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
-
-    port_s = (record.env_overrides or {}).get("TE_VSCODE_SERVER_PORT") or ""
-    try:
-        port = int(str(port_s))
-    except Exception:
-        port = 0
-
-    return {
-        "ok": True,
-        "data": {
-            "project_root": project_root,
-            "url": f"http://127.0.0.1:{port}" if port else "",
-            "port": port,
-            "shell_id": record.id,
-        },
-    }
-
-
-@file_editor_cm6_bp.get("/code_server/discover")
-async def code_server_discover():
-    """Start/adopt code-server and return its local URL.
-
-    This is the canonical backend extension host runtime for TE2.
-    """
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    try:
-        record = await ensure_code_server_shell(project_root)
-    except Exception as exc:
-        print(f"[code_server][discover] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
-
-    port_s = (record.env_overrides or {}).get("TE_CODE_SERVER_PORT") or ""
-    try:
-        port = int(str(port_s))
-    except Exception:
-        port = 0
-
-    return {
-        "ok": True,
-        "data": {
-            "project_root": project_root,
-            "url": f"http://127.0.0.1:{port}" if port else "",
-            "port": port,
             "shell_id": record.id,
         },
     }
@@ -790,7 +632,6 @@ async def workbench_adapter_start():
                 status_code=503,
             )
 
-    token = _get_or_create_workbench_baton(project_root)
     port_s = (record.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
     try:
         port = int(str(port_s))
@@ -800,7 +641,6 @@ async def workbench_adapter_start():
     return {
         "ok": True,
         "data": {
-            "token": token,
             "state": "starting",
             "project_root": project_root,
             "port": port,
@@ -852,7 +692,6 @@ async def workbench_adapter_attach():
             status_code=503,
         )
 
-    token = _get_or_create_workbench_baton(project_root)
     port_s = (record.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
     try:
         port = int(str(port_s))
@@ -882,7 +721,6 @@ async def workbench_adapter_attach():
     return {
         "ok": True,
         "data": {
-            "token": token,
             "state": state,
             "session": session,
             "project_root": project_root,
@@ -940,15 +778,12 @@ async def workbench_adapter_nudge(path: str = ""):
 
 
 @file_editor_cm6_bp.get("/workbench_adapter/status")
-async def workbench_adapter_status(token: str = ""):
-    """Return workbench adapter readiness state (requires baton token)."""
+async def workbench_adapter_status():
+    """Return workbench adapter readiness state."""
 
     project_root = _history_store.get_active_project() or str(get_project_root())
     if not project_root:
         raise HTTPException(status_code=400, detail="No active project root")
-
-    if not _validate_workbench_baton(token, project_root):
-        return JSONResponse({"ok": False, "error": "Invalid or expired baton token"}, status_code=403)
 
     # Ensure adapter shell exists (but don't force reconnect).
     try:
@@ -1012,8 +847,6 @@ async def workbench_adapter_cmd(request: Request):
     project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
 
     token = request.headers.get("x-te2-baton") or request.query_params.get("token") or ""
-    if not _validate_workbench_baton(token, project_root):
-        return JSONResponse({"ok": False, "error": "Invalid or expired baton token"}, status_code=403)
     cs_port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
     try:
         cs_port = int(str(cs_port_s))
@@ -1443,8 +1276,13 @@ except Exception:
     _active_project_sidecar = None
 
 
-async def _eager_start_adapter():
-    """Best-effort eager start of code-server + workbench adapter at worker boot."""
+async def _eager_start_code_server():
+    """Best-effort eager start of code-server at worker boot.
+
+    Only starts code-server (the extension host backend). The workbench adapter
+    is launched later, triggered by the frontend readiness chain:
+    editor iframe ready -> code-server confirmed -> adapter launch -> baton fan-out.
+    """
     try:
         pr = _history_store.get_active_project() or str(get_project_root())
         if not pr:
@@ -1452,34 +1290,14 @@ async def _eager_start_adapter():
         cs = await ensure_code_server_shell(pr)
         cs_env = (cs.env_overrides or {})
         pr = str(cs_env.get("PROJECT_ROOT") or pr)
-        port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
-        try:
-            cs_port = int(str(port_s))
-        except Exception:
-            cs_port = 0
-        cs_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
-        rec = await ensure_workbench_adapter_shell(pr, code_server_http=cs_http)
-        # Record the boot shell_id so later `/workbench_adapter/start` calls can "attach"
-        # instead of accidentally perturbing an already-running adapter session.
-        try:
-            _workbench_adapter_boot.update(
-                {
-                    "worker_shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
-                    "project_root": pr,
-                    "adapter_shell_id": getattr(rec, "id", None),
-                    "boot_ts_ms": _now_ms(),
-                }
-            )
-        except Exception:
-            pass
-        print(f"[file_editor_cm6] eager adapter startup OK (project={pr})", flush=True)
+        print(f"[file_editor_cm6] eager code-server startup OK (project={pr})", flush=True)
     except Exception as exc:
-        print(f"[file_editor_cm6] eager adapter startup failed: {exc}", flush=True)
+        print(f"[file_editor_cm6] eager code-server startup failed: {exc}", flush=True)
 
 
 @file_editor_cm6_bp.on_event("startup")
 async def _on_startup():
-    asyncio.ensure_future(_eager_start_adapter())
+    asyncio.ensure_future(_eager_start_code_server())
 
 
 def _get_active_project_root() -> Path:

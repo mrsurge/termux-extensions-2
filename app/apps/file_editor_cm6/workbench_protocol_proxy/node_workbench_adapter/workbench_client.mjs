@@ -1970,14 +1970,19 @@ export class WorkbenchClient {
     const timeoutMs = Number(params.timeoutMs ?? 8000);
     const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
 
+    console.log(`[symbols] request path=${path} lang=${languageId} registeredProviders=${[...this._providers.documentSymbols.values()].map(e => JSON.stringify(e.selector.map(s => s.language))).join(", ")}`);
+
     let providerHandle = params.providerHandle ?? this._findProviderHandle("documentSymbols", languageId);
     if (typeof providerHandle !== "number") {
+      console.log(`[symbols] no provider yet for '${languageId}', waiting up to ${timeoutMs}ms...`);
       await waitFor(() => this._findProviderHandle("documentSymbols", languageId) != null, { timeoutMs, intervalMs: 50 });
       providerHandle = params.providerHandle ?? this._findProviderHandle("documentSymbols", languageId);
     }
     if (typeof providerHandle !== "number") {
+      console.log(`[symbols] STILL no provider for '${languageId}' after timeout`);
       return { ok: false, error: `no document symbols provider for language '${languageId}'` };
     }
+    console.log(`[symbols] using providerHandle=${providerHandle} for '${languageId}'`);
 
     const uriObj = this._uriForPath(path, authority);
     try {
@@ -1988,8 +1993,7 @@ export class WorkbenchClient {
     } catch {}
 
     const req = this._allocExtReqId();
-    const token = { isCancellationRequested: false };
-    const payload = encodeExtRequestJsonArgs({ req, rpcId: 94, method: "$provideDocumentSymbols", args: [providerHandle, uriObj, token], cancellable: false });
+    const payload = encodeExtRequestJsonArgs({ req, rpcId: 94, method: "$provideDocumentSymbols", args: [providerHandle, uriObj], cancellable: true });
 
     const fut = new Promise((resolve, reject) => {
       this._pendingExt.set(req, { resolve, reject });
@@ -2003,8 +2007,10 @@ export class WorkbenchClient {
 
     this.ext.protocol.send(VSBuffer.wrap(payload));
     const rep = await fut;
+    const symCount = (rep.type === 9 && Array.isArray(rep.result)) ? rep.result.length : 'n/a';
+    console.log(`[symbols] response path=${path} lang=${languageId} type=${rep.type} count=${symCount}`);
     if (rep.type === 9) return { ok: true, result: rep.result };
-    if (rep.type === 11) return { ok: false, error: rep.error };
+    if (rep.type === 11) { console.log(`[symbols] error reply:`, rep.error); return { ok: false, error: rep.error }; }
     return { ok: false, error: rep };
   }
 
@@ -2034,13 +2040,12 @@ export class WorkbenchClient {
     } catch {}
 
     const req = this._allocExtReqId();
-    const token = { isCancellationRequested: false };
     const payload = encodeExtRequestJsonArgs({
       req,
       rpcId: 94,
       method: "$provideHover",
-      args: [providerHandle, uriObj, { lineNumber, column }, {}, token],
-      cancellable: false,
+      args: [providerHandle, uriObj, { lineNumber, column }, {}],
+      cancellable: true,
     });
 
     const fut = new Promise((resolve, reject) => {

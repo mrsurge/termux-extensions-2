@@ -993,6 +993,9 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             )
             return
 
+        lang_id = payload.get("languageId", "")
+        _wb_log.info("[symbols] request path=%s lang=%s", abs_path, lang_id)
+
         try:
             from ..workbench_adapter_shell_manager import adapter_rpc
 
@@ -1000,17 +1003,21 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 "vscode.documentSymbols",
                 {
                     "path": abs_path,
-                    "languageId": payload.get("languageId", ""),
+                    "languageId": lang_id,
                 },
             )
             result = resp.get("result", resp)
+            sym_count = len(result) if isinstance(result, list) else "non-list"
+            _wb_log.info("[symbols] response path=%s lang=%s count=%s ok=%s", abs_path, lang_id, sym_count, resp.get("ok"))
+            if not isinstance(result, list) or not result:
+                _wb_log.warning("[symbols] raw adapter resp keys=%s", list(resp.keys()) if isinstance(resp, dict) else type(resp))
             await self.emit(
                 "editor:workbench_symbols_response",
                 {"request_id": request_id, "result": result},
                 room=sid,
             )
         except Exception as exc:
-            _wb_log.error("[workbench] symbols failed: %s", exc)
+            _wb_log.error("[symbols] FAILED path=%s lang=%s err=%s", abs_path, lang_id, exc)
             await self.emit(
                 "editor:workbench_symbols_response",
                 {"request_id": request_id, "error": str(exc)},
@@ -1068,3 +1075,80 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             )
         except Exception as exc:
             _wb_log.error("[workbench] didChange failed: %s", exc)
+
+    async def on_editor_readiness_check(self, sid, data):
+        """Sequential readiness chain triggered by the editor iframe.
+
+        Runs: code-server ready? -> launch adapter -> adapter ready? -> fan out baton.
+        Emits step-by-step status events to all clients in the room.
+        """
+        room = "file_editor_cm6"
+        project = _active_project()
+        if not project:
+            await self.emit("editor:readiness_step", {"step": "code_server", "ok": False, "error": "No active project"}, room=room)
+            return
+
+        # Step 1: Confirm code-server is running (should already be up from eager boot).
+        try:
+            from ..code_server_shell_manager import ensure_code_server_shell
+            cs = await ensure_code_server_shell(project)
+            cs_env = (cs.env_overrides or {})
+            project = str(cs_env.get("PROJECT_ROOT") or project)
+            port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
+            try:
+                cs_port = int(str(port_s))
+            except Exception:
+                cs_port = 0
+            await self.emit("editor:readiness_step", {"step": "code_server", "ok": True, "project_root": project}, room=room)
+        except Exception as exc:
+            await self.emit("editor:readiness_step", {"step": "code_server", "ok": False, "error": str(exc)}, room=room)
+            return
+
+        # Step 2: Launch workbench adapter (sequential — only after code-server confirmed).
+        try:
+            from ..workbench_adapter_shell_manager import ensure_workbench_adapter_shell
+            cs_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
+            rec = await ensure_workbench_adapter_shell(project, code_server_http=cs_http)
+            await self.emit("editor:readiness_step", {"step": "adapter_launched", "ok": True}, room=room)
+        except Exception as exc:
+            await self.emit("editor:readiness_step", {"step": "adapter_launched", "ok": False, "error": str(exc)}, room=room)
+            return
+
+        # Step 3: Probe adapter status (best-effort, may still be connecting).
+        port_s = (rec.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
+        try:
+            port = int(str(port_s))
+        except Exception:
+            port = 0
+
+        state = "starting"
+        if port:
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.post(
+                        f"http://127.0.0.1:{port}/cmd",
+                        json={"jsonrpc": "2.0", "id": 1, "method": "te2.status", "params": {}},
+                    )
+                payload = resp.json() if resp.content else {}
+                session = (payload.get("result") or {}).get("session") or {}
+                if bool(session.get("ready")):
+                    state = "ready"
+                elif bool(session.get("connected")):
+                    state = "connected"
+            except Exception:
+                pass
+
+        # Fan out the baton: readiness complete.
+        await self.emit("editor:readiness_step", {
+            "step": "baton",
+            "ok": True,
+            "state": state,
+            "project_root": project,
+        }, room=room)
+
+        # Also broadcast adapter_ready for backwards compatibility (diagnostics_bridge path).
+        try:
+            await self.emit("editor:adapter_ready", {"ts_ms": int(time.time() * 1000)}, room=room)
+        except Exception:
+            pass

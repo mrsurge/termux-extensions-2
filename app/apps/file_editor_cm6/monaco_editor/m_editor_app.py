@@ -123,19 +123,16 @@ export default href;
 
     @fastapi_app.get(f"{mount_path}/nc", include_in_schema=False)
     async def _cm6_fasthtml_monaco_iframe(app_id: str | None = None):
-        # Best-effort: start the backend shells early so the iframe can immediately
-        # use the language sidecar without an extra "warm up" round-trip.
+        # Best-effort: confirm code-server backend is ready so the readiness chain
+        # (triggered by iframe JS) can skip the cold-start wait.
         try:
             from ..stores import _history_store
             from ..explorer_helper import get_project_root
             from ..code_server_shell_manager import ensure_code_server_shell
-            from ..vscode_api_shell_manager import ensure_vscode_api_shell
 
             project_root = _history_store.get_active_project() or str(get_project_root())
             if project_root:
                 await ensure_code_server_shell(project_root)
-                # vscode_api is used by the iframe for grammars/themes/LSP and now sidecar bridging.
-                await ensure_vscode_api_shell(project_root)
         except Exception:
             # Do not block editor load on shell orchestration failures.
             pass
@@ -197,9 +194,10 @@ export default href;
             #te2-breadcrumbs .monaco-breadcrumbs { flex: 1; min-width: 0; }
             .te2-bc-item { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; opacity: 0.8; cursor: pointer; white-space: nowrap; }
             .te2-bc-item:hover { opacity: 1; color: #e5e7eb; }
-            .te2-bc-icon { display: inline-flex; align-items: center; width: 18px; height: 18px; flex-shrink: 0; filter: brightness(1.5); }
-            .te2-bc-icon svg { width: 18px; height: 18px; }
-            .te2-bc-sym-icon { font-size: 14px; line-height: 1; opacity: 0.85; margin-right: 2px; }
+            .te2-bc-icon { display: inline-flex; align-items: center; width: 16px; height: 16px; flex-shrink: 0; }
+            .te2-bc-icon svg { width: 16px; height: 16px; fill: currentColor; }
+            .te2-bc-sym-icon { display: inline-flex; align-items: center; width: 14px; height: 14px; flex-shrink: 0; margin-right: 2px; }
+            .te2-bc-sym-icon svg { width: 14px; height: 14px; }
             .te2-bc-sep { opacity: 0.4; padding: 0 2px; }
             #fh-monaco { flex: 1; min-height: 0; min-width: 0; width: 100%; -webkit-touch-callout: none; user-select: none; }
             .fh-root, .monaco-editor { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
@@ -263,6 +261,7 @@ export default href;
                 Title("Code TE2"),
                 Meta(charset="utf-8"),
                 Meta(name="viewport", content="width=device-width, initial-scale=1"),
+                Link(rel="stylesheet", href="/static/vendor/codicons/codicon.css"),
                 css,
                 touch_css,
                 bootstrap_bundle_css,

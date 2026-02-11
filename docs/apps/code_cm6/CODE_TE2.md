@@ -52,7 +52,7 @@ We will validate at least 2 deterministic features (hover + symbols + diagnostic
 
 ```
 Browser host shell (file_editor_cm6/template.html + main.js)
-  ├─ Explorer drawer (separate Socket.IO transport; main process service)
+  ├─ Explorer drawer (Socket.IO transport; worker-side server, main-process proxy)
   ├─ Terminal drawer (PTY plumbing; separate)
   └─ Editor iframe <iframe src="/api/app/file_editor_cm6/ui/nc?...">
         ├─ FastHTML harness: m_editor_app.py
@@ -63,15 +63,16 @@ Browser host shell (file_editor_cm6/template.html + main.js)
 Main framework process (app/main.py)
   ├─ Proxies /app/file_editor_cm6 → worker port
   ├─ Loads app services declared in manifest.json
-  ├─ Explorer transport service (Socket.IO)  : /explorer_ws/socket.io
-  ├─ LSP transport service (Socket.IO)       : /lsp_ws/socket.io
-  └─ Editor transport service (WS proxy only): /editor_ws/socket.io  → worker
+  ├─ Explorer transport service (WS proxy): /explorer_ws/socket.io → worker
+  ├─ LSP transport service (Socket.IO)    : /lsp_ws/socket.io
+  └─ Editor transport service (WS proxy)  : /editor_ws/socket.io  → worker
 
 App worker process (app/apps/file_editor_cm6/main.py)
   ├─ HTTP routes: /api/app/file_editor_cm6/*
   ├─ NiceGUI still mounted for legacy editor API endpoints (/editor/*)
   ├─ Monaco iframe routes under /ui/*
-  ├─ Worker‑owned Socket.IO server mounted at /editor_ws/socket.io (ASGI subapp)
+  ├─ Worker Socket.IO: /editor_ws/socket.io (EDITOR_ASGI_APP)
+  ├─ Worker Socket.IO: /explorer_ws/socket.io (EXPLORER_ASGI_APP)
   └─ SSOT stores: _history_store (project sidecar), _preferences_store
 
 Framework shells (service processes owned by the framework_shells orchestrator)
@@ -165,27 +166,68 @@ Spinner ownership (host UI):
   - Namespace logic (`EditorSocketIONamespace("/editor")`)
   - SSOT snapshot on connect
   - Open, mirror, git baselines, draft diff, save
+  - `on_editor_mirror`: persists draft, emits `editor:cache_state`, triggers `notify_draft_state_changed`
+  - `on_editor_workbench_did_change`: fire-and-forget `vscode.didChange` to adapter via stdio
+  - `on_editor_save_request`: writes to disk, clears draft, emits clean `editor:cache_state`
 
-### Editor transport proxy (main process)
+### Explorer Socket.IO (worker)
+- `app/apps/file_editor_cm6/explorer_socketio.py`
+  - `EXPLORER_SIO` (worker server) and `EXPLORER_ASGI_APP` (mounted at `/explorer_ws/socket.io`)
+- `app/apps/file_editor_cm6/explorer_ws.py`
+  - `ExplorerSocketIONamespace("/explorer")`: routes events to `ExplorerDispatcher` per client
+  - `ExplorerDispatcher`: file tree, git status, review panel, search, draft decorations
+  - `notify_draft_state_changed()`: debounced broadcast of `explorer:updateDecorations` + `review:setEntries`
+  - `_broadcast_draft_decorations()`: reads `DraftIndexSidecar`, broadcasts decorations and review list
+  - `broadcast_review_state()`: broadcasts review entries + draft decorations to all clients
+  - `_notify_editor_draft_cleared()`: cross-transport emit to editor SIO (`editor:cache_state`) for toolbar badge
+  - `handle_review_save` / `handle_review_discard`: save/discard drafts, notify editor + explorer
+
+### Transport proxies (main process, all proxy-only)
 - `app/apps/file_editor_cm6/services/editor_transport.py`
-  - **Main‑process shim only**: proxies websocket frames to the app worker port
-  - Must not touch SSOT
+  - Proxies `/editor_ws/socket.io` websocket frames to worker port
+- `app/apps/file_editor_cm6/services/explorer_transport.py`
+  - Proxies `/explorer_ws/socket.io` websocket frames to worker port
+  - Previously ran explorer business logic in-process (architectural violation, fixed)
+- `app/apps/file_editor_cm6/services/vscode_rpc_transport.py`
+  - Proxies `/vscode_rpc_ws` websocket frames to vscode_rpc framework shell
+- All transports: bidirectional WS frame forwarding, no SSOT access, no payload parsing
 
-### Host shell (browser, worker‑served)
+### Host shell (browser, worker-served)
 - `app/apps/file_editor_cm6/template.html`
   - Layout + iframe placement
 - `app/apps/file_editor_cm6/main.js`
   - Toolbar/menu logic, explorer integration, session state UI
   - Calls backend editor API endpoints (preferences, check_cache, etc.)
   - Emits `editor_open_request` and `editor_save_request` over editor Socket.IO
+  - `_applyEditorCacheState()`: receives `editor:cache_state`, updates draft badge + path display
+  - `_applyCacheIndicatorImpl()`: sets `#fe-file-draft-badge` color/text (orange=draft, red=crash, grey=clean)
+- `app/apps/file_editor_cm6/static/js/explorer.js`
+  - File tree rendering, search, review panel
+  - `fetchReviewResults()`: sends `review:list` via explorer bus
+  - `review:setEntries` handler: stores entries, re-renders if review overlay visible
+  - `renderReviewResults()`: review toolbar, Select All, Save/Discard buttons
+  - Draft decorations: `applyDraftFlag(rel, hasDraft)` sets `data-hasDraft` attribute on tree nodes
 
 ### SSOT and persistence
 - `app/apps/file_editor_cm6/stores.py`
   - Singleton store instances: `_history_store`, `_preferences_store`
 - `app/apps/file_editor_cm6/project_sidecar.py`
-  - Disk‑backed “session_cache” (draft cache entries)
+  - Disk-backed "session_cache" (draft cache entries) at `~/.cache/cm6_editor/projects/{hash}.json`
+  - `_instances`: per-process ClassVar cache (not shared across processes)
+  - `reload()`: re-reads from disk to pick up cross-process writes
+- `app/apps/file_editor_cm6/draft_index_sidecar.py`
+  - Lightweight per-project draft index at `{hash}.draft_index.json`
+  - `snapshot()` returns `(draft_files, draft_dirs)` sets for O(1) hasDraft checks
+  - `_rebuild_from_project_sidecar()`: reads ProjectSidecar file directly from disk
+- `app/apps/file_editor_cm6/history_store.py`
+  - `upsert_cached_document()`: writes to ProjectSidecar + updates DraftIndexSidecar
+  - `list_project_drafts()`: calls `sidecar.reload()` before reading (cross-process safe)
+  - `get_cached_document()`: calls `sidecar.reload()` before reading
+- `app/apps/file_editor_cm6/explorer/review.py`
+  - `list_reviews(project, lightweight)`: queries drafts, optionally computes diff hunks
+  - `discard_reviews(project, files)`: clears drafts, reverts active editor if file is open
 - `app/apps/file_editor_cm6/preferences_store.py`
-  - Disk‑backed preferences (editor settings)
+  - Disk-backed preferences (editor settings)
 
 ---
 
@@ -249,16 +291,35 @@ SSOT maintains a single current document concept (the editor is “one file at a
 - `_history_store.update_session_state({"currentPath": abs_path})`
 
 ### Drafts (project sidecar / session_cache)
-Drafts are stored in project sidecar “session_cache” entries:
+Drafts are stored in project sidecar "session_cache" entries:
 - key = absolute file path
 - content = entire draft text (current buffer)
 - metadata includes:
   - `base_sha256` (disk baseline hash when draft started)
   - `content_sha256` (draft content hash)
-  - `unsaved` (True/False)
+  - `unsaved` (True/False, computed as `content_sha256 != base_sha256`)
   - runtime identifiers (run_id, etc.)
 
-The editor Socket.IO server (`editor_ws.py`) is the worker‑side entry point for persisting drafts from the iframe.
+The editor Socket.IO server (`editor_ws.py`) is the worker-side entry point for persisting drafts from the iframe.
+
+Draft mutations trigger the following pipeline:
+1. `on_editor_mirror` persists to `ProjectSidecar.session_cache` via `upsert_cached_document`
+2. `DraftIndexSidecar` is updated with the file's unsaved status (fast O(1) hasDraft)
+3. `editor:cache_state` is emitted to all editor clients (updates toolbar badge)
+4. `notify_draft_state_changed()` broadcasts `explorer:updateDecorations` + `review:setEntries` to explorer clients
+
+### DraftIndexSidecar (fast hasDraft lookups)
+- Lightweight per-project index separate from ProjectSidecar
+- Stores only relative paths of unsaved files (no content)
+- `snapshot()` returns `(files, dirs)` sets for hasDraft icons on files and folders
+- Reads directly from the ProjectSidecar **disk file** (not `_instances` cache), so it works cross-process
+
+### Cross-process sync (important architectural note)
+- `ProjectSidecar._instances` is a per-process in-memory cache
+- Worker process writes drafts; explorer (also in worker after refactor) reads them
+- `sidecar.reload()` re-reads from disk before any read operation that might see stale data
+- `DraftIndexSidecar._rebuild_from_project_sidecar()` reads disk directly, bypassing `_instances`
+
 
 ### Preferences (PreferencesStore)
 Editor preferences are stored per active project and used to initialize the iframe editor options.
@@ -305,25 +366,8 @@ Notes:
 Clients:
 - Host shell connects with query: `{app_id:'file_editor_cm6', role:'host'}`
 
----
-
-## 11) Monaco language bundles + workers (recent learnings)
-
-### Invariants (must hold)
-- **Syntax highlighting must work** (non-plaintext languages set correctly).
-- **Syntax checking + autocomplete must work** (Monaco language services).
-- These are considered **hard invariants** for the Monaco iframe.
-
-### What broke (symptoms)
-- Language registry returned only `['plaintext']`.
-- Model language stayed `plaintext` even for `.py`/`.js`.
-- Console showed:
-  - `Failed to load language bundles`
-  - `Import Map ... monaco-editor-core ... blocked by a null value`
-  - `Failed to load .../basic-languages/monaco.contribution.js (404)`
-
-### Root cause
-  - see `connectEditorSocket()` in `app/apps/file_editor_cm6/main.js`
+### Connection
+- see `connectEditorSocket()` in `app/apps/file_editor_cm6/main.js`
 - Monaco iframe connects with query: `{app_id:'file_editor_cm6'}`
   - see `connectEditorSocket()` in `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
 
@@ -484,6 +528,127 @@ Worker:
 { ok: false, error: "BASE_MISMATCH", current_meta: {...} }
 ```
 
+### Cache state flow (draft indicator + toolbar badge)
+Emitted by the server after draft mutations or save operations:
+```js
+editor:cache_state {
+  path: "<abs>",
+  state: "clean" | "mid_session" | "crashed",
+  unsaved: boolean,
+  reason: "mirror" | "save" | "clear" | "discard",
+  content_sha256?: "<sha>",
+  base_sha256?: "<sha>",
+  source_client?: "<sid>"
+}
+```
+
+Consumers:
+- **Host shell** (`main.js`): `_applyEditorCacheState()` updates `#fe-file-draft-badge` (asterisk indicator)
+- **Monaco iframe** (`m_editor_app.js`): clears draft decorations on `unsaved:false`, requests fresh draft diff on `unsaved:true`
+
+Cross-transport note: when drafts are cleared via the explorer review panel (save/discard), `_notify_editor_draft_cleared()` in `explorer_ws.py` emits `editor:cache_state` via `EDITOR_SIO` (the editor Socket.IO server), not the explorer bus.
+
+### Diagnostics flow (server-side bridge)
+Emitted by the diagnostics bridge when the adapter reports `$changeMany`:
+```js
+editor:diagnostics {
+  type: "diagnostics/update",
+  path: "<abs>",
+  owner: "<marker owner>",
+  markers: [...],
+  ts_ms: <timestamp>
+}
+```
+
+The Monaco iframe converts markers to `monaco.editor.setModelMarkers()` calls.
+On file switch, `_clearDiagnosticsForSwitch()` resets all markers and counts to zero.
+
+### didChange flow (live typing diagnostics)
+Iframe emits (debounced 120ms):
+```js
+emit('editor_workbench_did_change', {
+  path: "<abs>",
+  text: "<full buffer>",
+  languageId: "<language>"
+})
+```
+
+Server forwards to adapter via stdio pipe. The adapter calls `$acceptModelChanged` (rpcId 85, `isFlush: true`) on the extension host. Diagnostics flow back through the bridge.
+
+### Relay events (UI commands)
+```js
+// Marker navigation (next/prev issue)
+emit('editor_issues_cmd', { action: "next" | "prev" }) → editor:issues_cmd
+// Find/replace
+emit('editor_find_cmd', { action: "find" | "replace" | ... }) → editor:find_cmd
+```
+
+---
+
+## 6.5) Explorer Socket.IO transport (events + payloads)
+
+### Transport
+- path: `/explorer_ws/socket.io`
+- namespace: `/explorer`
+- Worker-side server: `ExplorerSocketIONamespace` in `explorer_ws.py`
+- Main-process proxy: `services/explorer_transport.py` (WS frame forwarding only)
+
+### Connection
+Client connects with query: `{app_id: 'file_editor_cm6'}`
+
+On connect, the server creates an `ExplorerDispatcher` per client SID and sends:
+- Initial file tree for active project
+- Git status decorations
+- Draft decorations (hasDraft flags on files/folders)
+
+### Client → Server events
+All sent via `explorer_send` with JSON `{type, payload}`:
+
+| Type | Purpose |
+|------|---------|
+| `tree:list` | Request directory listing |
+| `tree:expand` | Expand a directory node |
+| `search:query` | Full-text search |
+| `review:list` | Request review entries (drafts with optional diff hunks) |
+| `review:save` | Save selected drafts to disk |
+| `review:discard` | Discard selected drafts |
+
+### Server → Client broadcasts
+
+| Type | Purpose |
+|------|---------|
+| `explorer:updateDecorations` | Draft flags `{drafts: {rel: {hasDraft: true}}}` |
+| `review:setEntries` | Review list `{entries: [{path, rel, has_draft, hunks?, timestamp}]}` |
+| `explorer:tree` | File tree data |
+| `explorer:gitStatus` | Git status decorations |
+
+### Draft decoration pipeline
+When a file is edited:
+1. `on_editor_mirror` → `upsert_cached_document` → `DraftIndexSidecar.update_from_abs_file`
+2. `notify_draft_state_changed()` fires (debounced)
+3. `_broadcast_draft_decorations()` reads `DraftIndexSidecar.snapshot()` and broadcasts:
+   - `explorer:updateDecorations` with `{drafts: {rel: {hasDraft: true}, ...}}`
+   - `review:setEntries` with full review list (including diff hunks)
+4. Explorer UI applies `data-hasDraft="1"` attribute to file/folder nodes (CSS handles visual indicator)
+
+### Review panel flow
+1. User opens Review Edits tab → frontend sends `review:list`
+2. Server calls `review.list_reviews(project, lightweight=False)` → computes diff hunks per draft
+3. Server broadcasts `review:setEntries` with entries
+4. **Live updates**: `_broadcast_draft_decorations()` also broadcasts `review:setEntries`, so the review list auto-refreshes when drafts change
+5. User selects files and clicks Save/Discard:
+   - `review:save` → `handle_review_save` → writes to disk, clears caches, emits `editor:cache_state` to editor transport
+   - `review:discard` → `handle_review_discard` → clears caches, reverts editor if file open, emits `editor:cache_state`
+
+### Cross-transport communication (explorer → editor)
+Both Socket.IO servers (`EXPLORER_SIO` and `EDITOR_SIO`) run in the same worker process.
+Explorer can emit to editor clients via:
+```python
+from .monaco_editor.editor_socketio import EDITOR_SIO
+await EDITOR_SIO.emit('editor:cache_state', payload, namespace='/editor')
+```
+Used by `_notify_editor_draft_cleared()` to update the toolbar draft badge when drafts are saved/discarded from the review panel.
+
 ---
 
 ## 7) Monaco asset pipeline (pinned VS Code build)
@@ -568,11 +733,17 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 ## 9) Debugging checklist (what to verify first)
 
 ### 1) Transport is correct (no reconnect loops)
-- Confirm the main process proxy is active: `app/apps/file_editor_cm6/services/editor_transport.py`
-- Confirm the worker subapp mount exists: `SUBAPPS = [("/editor_ws/socket.io", EDITOR_ASGI_APP)]`
-- Socket.IO client must connect to:
-  - namespace `/editor`
-  - path `/editor_ws/socket.io`
+- Confirm editor proxy: `app/apps/file_editor_cm6/services/editor_transport.py`
+- Confirm explorer proxy: `app/apps/file_editor_cm6/services/explorer_transport.py`
+- Confirm worker SUBAPPS mount:
+  ```python
+  SUBAPPS = [
+      ("/editor_ws/socket.io", EDITOR_ASGI_APP),
+      ("/explorer_ws/socket.io", EXPLORER_ASGI_APP),
+  ]
+  ```
+- Editor Socket.IO: namespace `/editor`, path `/editor_ws/socket.io`
+- Explorer Socket.IO: namespace `/explorer`, path `/explorer_ws/socket.io`
 
 ### 2) Iframe loads (no `/ui/nc` 404)
 - The Monaco iframe entrypoint is `/api/app/file_editor_cm6/ui/nc?app_id=file_editor_cm6`.
@@ -588,10 +759,18 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 ### 3) Open path convergence
 - `editor_open_request` should lead to `editor:open` for all connected clients.
 
-### 4) Draft persistence
+### 4) Draft persistence and live indicators
 - `editor_mirror` should produce a cached draft entry (project sidecar).
 - `editor_save_request` should clear the draft and write disk.
 - On save, the server broadcasts `editor:cache_state` with `unsaved:false`; the iframe must then refresh git baselines so the inline git diff view updates.
+- On edit, `on_editor_mirror` emits `editor:cache_state` with `unsaved:true` (updates toolbar badge live).
+- On edit, `notify_draft_state_changed()` broadcasts `explorer:updateDecorations` + `review:setEntries` (updates explorer hasDraft icons and review list live).
+- On review save/discard, `_notify_editor_draft_cleared()` emits `editor:cache_state` via editor SIO (clears toolbar badge).
+
+### 5) Cross-process consistency
+- If drafts appear empty in the review panel, verify `sidecar.reload()` is called before reads.
+- If explorer shows stale hasDraft icons, verify `DraftIndexSidecar` is being updated by `upsert_cached_document`.
+- Both editor and explorer Socket.IO must run in the same worker process (not main process). Check `SUBAPPS` mount.
 
 ---
 
@@ -728,105 +907,87 @@ If your browser keeps pausing on this, DevTools likely has “Pause on exception
 
 ---
 
-## 14) Planned: `vscode_rpc` service contract (TE2 “services” + Framework Shell)
+## 14) Planned removal: `vscode_rpc` and `vscode_api` standalone harnesses
 
-This section documents the **target contract** for integrating a VS Code-style server protocol into TE2, without mixing SSOT logic into the host process.
+### Background
+Early in development, two standalone Node.js JSON-RPC harnesses were created as separate framework shells:
+- **`vscode_rpc`**: a minimal WS JSON-RPC server intended to provide semantic tokens, themes, and grammars.
+- **`vscode_api`**: a larger harness intended to manage VSIX install/registry, TextMate grammars, themes, and eventually language features.
 
-### Goal
-- Run a VS Code-derived JSON-RPC server **server-side** (a “framework shell” process).
-- Expose exactly **one** WebSocket endpoint to the browser (same-origin via TE2 proxy).
-- Keep TE2 main process as **proxy-only**: it should not mutate `file_editor_cm6` SSOT (`_history_store` / `_preference_store`) or interpret RPC payloads.
-- Model this like existing TE2 “services” (see `app/apps/file_editor_cm6/services/README.md`): the service exists to bridge transports, not own app state.
+These were designed before the **workbench adapter** (stdio pipe transport) was fully operational. Now that the adapter provides direct access to the real VS Code extension host (diagnostics, hover, symbols, didChange — all working), the standalone harnesses are redundant for language features.
 
-### Pieces
-- **Framework shell runtime**: `framework_shells` (see `/data/data/com.termux/files/home/downloads/agent_log_server/fws_README.md`)
-  - Responsible for starting/stopping the RPC server process and capturing logs.
-- **Service shim (TE2 host)**: a **single** WS proxy route that forwards frames to the shell’s WS.
-- **Discovery endpoint (worker or host)**: returns the browser-facing WS URL + metadata (and token if needed).
+### What the adapter already covers
+The workbench adapter (`workbench_client.mjs` + `server.mjs`) talks to the real code-server extension host and provides:
+- All language intelligence (diagnostics, hover, symbols, didChange) via stdio pipe
+- All built-in extension activation (~30 language extensions)
+- Provider registration and handle tracking
+- Document model synchronization
 
-### Discovery endpoint (browser-facing)
-Proposed shape (exact mount TBD; keep under `file_editor_cm6`):
+### What `vscode_api` still provides (to be migrated)
+The `vscode_api` harness currently handles a few things the adapter does not:
+- **VSIX install/registry**: `vscode.vsix.*` methods (install, list, enable/disable per-project)
+- **TextMate grammars**: `vscode.textmate.grammars.list` / `vscode.textmate.grammars.load`
+- **Theme loading**: `vscode.themes.list` / `vscode.themes.load`
+- **Language configuration**: `vscode.languages.list` (returns `configuration_raw` for bracket matching, comments, etc.)
+- **Bootstrap snapshot**: `vscode.bootstrap.snapshot` (cached grammar/theme/language index)
 
-`GET /api/app/file_editor_cm6/vscode_rpc/discover`
+These are all **static asset queries** (reading installed extension files) — they don't need a running extension host. They should be migrated to either:
+1. The workbench adapter (if they benefit from extension host context), or
+2. A simple Python-side utility that reads the VSIX install pool directly (preferred for static assets)
 
-Response:
-```json
-{
-  "ok": true,
-  "data": {
-    "project_root": "/abs/path/to/project",
-    "ws_url": "/ws/app/file_editor_cm6/vscode_rpc?token=...",
-    "token": "...",
-    "expires_at": 1760000000
-  }
-}
-```
+### Files to remove (`vscode_rpc`)
+| File | Purpose |
+|------|---------|
+| `services/vscode_rpc_transport.py` | Main-process WS proxy |
+| `vscode_rpc_shell_manager.py` | Shell lifecycle manager |
+| `shellspec/vscode_rpc.yaml` | Framework shell definition |
+| `main.py` (references) | Discovery/start endpoints |
+| `manifest.json` (references) | Service registration |
 
-Notes:
-- `ws_url` should be a **same-origin** URL the browser can connect to (TE2 host will proxy it).
-- `token` is optional in dev mode; when present, it is **opaque** to the browser and validated only by the proxy/shim.
-- `project_root` is the SSOT “current project” root as seen by the worker.
+### Files to remove (`vscode_api`, after migration)
+| File | Purpose |
+|------|---------|
+| `services/vscode_api_transport.py` | Main-process WS proxy |
+| `vscode_api_shell_manager.py` | Shell lifecycle manager |
+| `shellspec/vscode_api.yaml` | Framework shell definition |
+| `main.py` (references) | Discovery/resolve endpoints |
+| `main.js` (references) | Frontend bootstrap/snapshot calls |
+| `m_editor_app.js` (references) | Grammar/theme loading calls |
+| `m_editor_app.py` (references) | Bootstrap snapshot route |
 
-### WebSocket proxy endpoint (TE2 host, proxy-only)
-Proposed:
+### Migration strategy (workbench adapter first)
+The workbench adapter already scans all extensions at startup (`_buildExtensionsSnapshot()`), so it has the full `contributes.grammars`, `contributes.themes`, and `contributes.languages` metadata in memory. The preferred migration path is to add new JSON-RPC methods to the adapter rather than building separate Python utilities.
 
-`WS /ws/app/file_editor_cm6/vscode_rpc?token=...`
+**Phase 1: Grammar/theme/language queries via adapter** (preferred path)
+Add these methods to `server.mjs` `handleJsonRpc()`:
 
-Contract:
-- Accepts a browser WS connection.
-- Opens a WS connection to the framework shell’s RPC server (local-only).
-- Forwards **all frames verbatim** both directions.
-- Does not parse/transform payloads.
+| Method | What it does | Data source |
+|--------|-------------|-------------|
+| `vscode.grammars.list` | List all contributed grammars (scopeName, language, path) | Scanned extensions `contributes.grammars` |
+| `vscode.grammars.load` | Load raw `.tmLanguage.json` content by scopeName or path | `fs.readFile` on extension content path |
+| `vscode.themes.list` | List all contributed themes (label, uiTheme, path) | Scanned extensions `contributes.themes` |
+| `vscode.themes.load` | Load raw theme JSON by path or label | `fs.readFile` on extension content path |
+| `vscode.languages.list` | List language contributions + configuration | Scanned extensions `contributes.languages` |
+| `vscode.languages.config` | Load raw language configuration JSONC | `fs.readFile` on extension content path |
 
-Error handling:
-- If the worker/shell isn’t running: return `503 Service Unavailable`.
-- If token is invalid/expired: return `401/403` (consistent with TE2 auth conventions).
-- If the upstream WS closes unexpectedly: close the downstream WS with a reason and let the browser reconnect.
+These reuse the existing stdio pipe transport (browser → Socket.IO → `editor_ws.py` → adapter stdin → response). No new transport or framework shell needed.
 
-### RPC payload framing
-Baseline: JSON-RPC 2.0 messages over WS, treated as opaque payloads by TE2.
+Python-side: add corresponding `editor_ws.py` handlers (same pattern as `on_editor_workbench_hover`).
+Frontend: update `m_editor_app.js` to call these via editor Socket.IO instead of the `vscode_api` WS harness.
 
-Non-negotiable invariant:
-- The RPC connection must support **bidirectional** messaging and must not depend on HTTP POST “command” endpoints.
+**Phase 2: VSIX management via Python**
+VSIX install/registry is pure file management (download, extract, update `extensions.json`). This doesn't need the adapter or an extension host. A Python utility reading `~/.local/share/termux-extensions-2/code-te2-extensions/` directly is sufficient.
 
-### Process lifecycle (shellspec-first)
-The RPC server process should be started via a shellspec (recommended) and managed by `framework_shells`:
-- A `shellspec/*.yaml` defines how to start the process (cwd, env, args, port).
-- The system can adopt/reuse the shell if already running under the same repo fingerprint/runtime secret.
+**Phase 3: Bootstrap snapshot consolidation**
+Replace the `vscode.bootstrap.snapshot` call (currently via `vscode_api` harness) with a single adapter call that returns grammars + themes + languages in one response, or combine the Phase 1 calls at the Python layer.
 
-### Security notes
-- Prefer short-lived tokens for WS discovery (rotated per UI session).
-- The token should not grant access outside the current repo fingerprint / runtime namespace.
-
-### Why we need this (ties back to Monaco vs “VS Code semantics”)
-Monaco’s built-in tokenization is often too coarse to replicate VS Code’s “GitHub Dark Default” semantic coloring (function names/imports/args, etc.) without the broader VS Code service layer (semantic tokens, richer language pipelines).
-
-`vscode_rpc` is the planned bridge to bring those semantics back while staying compatible with TE2’s proxy/service architecture.
-
-### Current status (scaffolding)
-The following pieces exist now (v0, minimal):
-- Worker discovery: `GET /api/app/file_editor_cm6/vscode_rpc/discover`
-  - ensures the framework shell is running
-  - returns `ws_url` like `/vscode_rpc_ws?shell_id=<shell_id>`
-- Host WS shim (service): `WS /vscode_rpc_ws?shell_id=<shell_id>`
-  - proxy-only, forwards frames verbatim to the shell’s WS
-- Shellspec: `app/apps/file_editor_cm6/shellspec/vscode_rpc.yaml#vscode-rpc`
-- Server entrypoint: `worktrees/vscode-te2-diff/te2/vscode_rpc_server.mjs`
-  - currently supports `rpc.ping` + a minimal `initialize`
-
-### Shell grouping / FWS kill semantics
-The `vscode_rpc` shellspec mirrors the Android LSP shellspec subgroup pattern so that:
-- The shell appears under the `file_editor_cm6` group in the FWS dashboard.
-- TE2 process-manager “kill app” operations include the rpc shell.
-
-Specifically, `app/apps/file_editor_cm6/shellspec/vscode_rpc.yaml` includes:
-- `${ctx:APP_ID}` (e.g. `file_editor_cm6`)
-- `vscode_rpc`
-- `project:${ctx:PROJECT_HASH}`
+### Priority
+- `vscode_rpc`: can be removed immediately (nothing depends on it in production).
+- `vscode_api`: remove after Phase 1 migrates grammar/theme/language queries to the workbench adapter. The frontend currently calls these on boot for TextMate tokenization and theme loading.
 
 ---
 
-## 15) In-progress: `vscode_api` harness (extension host + VSIX pipeline)
+## 15) Legacy: `vscode_api` harness (extension host + VSIX pipeline, pending removal)
 
 `vscode_api` is the next step after `vscode_rpc`.
 
@@ -905,7 +1066,7 @@ Language providers (working):
   - Monaco iframe handler converts bridge payload to `_applyDiagnosticsUpdate()` format
 - **All built-in language extensions** are loaded (filtered to language-only subset, ~30 of 95 scanned).
 - Diagnostics work for Python, TypeScript, JavaScript, CSS, HTML, JSON, and all other languages with built-in VS Code support.
-- RPC features (hover, symbols, openFile) still flow through `vscode_api_ws` → `vscode_api_server` → adapter
+- RPC features (hover, symbols, openFile, didChange) flow through editor Socket.IO → `editor_ws.py` → adapter stdio pipe
 
 Socket.IO relay handlers (`editor_ws.py`):
 - `on_editor_issues_cmd` → `editor:issues_cmd` — relays marker navigation commands (next/prev) to iframe
@@ -1058,7 +1219,7 @@ TE2 should apply the same principle anywhere we persist client-side state:
 
 ---
 
-## 12) Workbench protocol proxy plan (code-server “black box”)
+## 17) Workbench protocol proxy plan (code-server “black box”)
 
 Goal: **avoid rebuilding** VS Code / code-server workbench JS while still extracting language “gold” (diagnostics, hover, completion, symbols) into TE2.
 
@@ -1324,3 +1485,151 @@ The old `vscode_api_ws` WS path is **bypassed** for all language feature RPC. It
 The UI (Monaco iframe) remains a thin renderer:
 - It subscribes to TE2 events, updates Monaco markers/hover providers, and never runs an extension host itself.
 - Hover and symbol providers are registered immediately for the current file's language (no async dependency on VSIX language list).
+---
+
+## 18) Planned: Breadcrumb navigation widget (extracted from VS Code)
+
+### Goal
+Add a VS Code-style breadcrumb bar above the Monaco iframe showing:
+- File path segments (project root → current file)
+- Document symbols (outline: classes → methods → current scope based on cursor position)
+
+Clicking path segments navigates the explorer; clicking symbol segments scrolls to that symbol.
+
+### Source reference
+The VS Code breadcrumb implementation lives in the code-server submodule:
+- **Worktree**: `../mrselect6-2/code-server/lib/vscode/src/vs/`
+- **Core widget** (standalone, extractable):
+  - `base/browser/ui/breadcrumbs/breadcrumbsWidget.ts` (~366 lines)
+  - `base/browser/ui/breadcrumbs/breadcrumbsWidget.css` (37 lines)
+- **Workbench integration** (NOT extractable, too entangled):
+  - `workbench/browser/parts/editor/breadcrumbsControl.ts` (~878 lines)
+  - `workbench/browser/parts/editor/breadcrumbsModel.ts` (~147 lines)
+  - `workbench/browser/parts/editor/breadcrumbsPicker.ts` (~438 lines)
+  - `workbench/browser/parts/editor/breadcrumbs.ts` (~308 lines)
+  - `workbench/browser/parts/editor/media/breadcrumbscontrol.css`
+
+### Feasibility analysis
+
+**The core `BreadcrumbsWidget` is highly extractable.** It's a pure DOM widget with minimal dependencies:
+- `vs/base/browser/dom.js` — DOM helpers (createElement, classList, events)
+- `vs/base/browser/ui/scrollbar/scrollableElement.js` — Horizontal scrollbar
+- `vs/base/common/event.js` — Event emitters (Emitter, Event)
+- `vs/base/common/lifecycle.js` — Disposable pattern
+- `vs/base/common/themables.js` — ThemeIcon (for separator chevron)
+
+It renders with plain DOM manipulation (no React, no VS Code UI framework). The `BreadcrumbsItem` is abstract — you subclass it and implement `render(container: HTMLElement)` to put whatever you want in each crumb.
+
+**The workbench integration layer is NOT extractable.** `BreadcrumbsControl` depends on 12+ VS Code services (IOutlineService, IEditorService, IWorkspaceContextService, IConfigurationService, etc.). Don't even try.
+
+### Recommended approach: extract widget, build our own data model
+
+**Step 1: Transpile the core widget (~400 lines)**
+- Extract `breadcrumbsWidget.ts` + its `vs/base/` dependencies
+- Transpile to ES module (esbuild single-file bundle, externalize nothing)
+- Dependencies are all from `vs/base/` (utility code, no workbench)
+- The `DomScrollableElement` is the biggest transitive dep (~600 lines) but also standalone
+- Estimated total bundle: ~2-3KB minified
+
+**Step 2: Build a TE2 `BreadcrumbsItem` subclass**
+- `FilePathItem`: renders seti icon + directory/file name per path segment
+- `SymbolItem`: renders codicon + symbol name from document outline
+- Both use the existing seti icons (`app/static/vendor/seti-icons/`) for file type icons
+
+**Step 3: Wire data from the workbench adapter**
+- **File path**: already known from SSOT (`currentPath` + `project_root`). Split into segments. No adapter call needed.
+- **Document symbols**: already available via `vscode.documentSymbols` adapter RPC. Returns a symbol tree.
+- **Cursor → symbol mapping**: when cursor position changes, walk the symbol tree to find the deepest symbol whose range contains the cursor. This is ~20 lines of JS.
+
+**Step 4: Mount in the editor UI**
+- Place between `fe-toolbar` and the Monaco iframe
+- Update on: file open (`editor:open`), cursor move (Monaco `onDidChangeCursorPosition`), symbol response
+- Click handler: path segments emit `editor_open_request` (for folder nav) or scroll to symbol range
+
+### Icon infrastructure (already available)
+- **Seti icons**: `app/static/vendor/seti-icons/` — `getIcon(fileName)` returns SVG + color for 500+ file types
+- **Codicons**: available from the Monaco bundle (`vs/base/common/codicons`) for symbol kind icons
+- No additional icon assets needed
+
+### What this does NOT need
+- No `IOutlineService` — we have `vscode.documentSymbols` via the adapter
+- No `IEditorService` — we have SSOT `currentPath`
+- No `IWorkspaceContextService` — we have SSOT `project_root`
+- No `BreadcrumbsControl` or `BreadcrumbsModel` — we build our own (much simpler)
+- No `BreadcrumbsPicker` — optional future addition (dropdown on click)
+
+### Build plan (esbuild from code-server worktree)
+
+**Why esbuild, not manual vendoring:**
+The core widget imports ~54 transitive files from `vs/base/` (dom.ts alone is 2633 lines, event.ts is 1812, lifecycle.ts is 888). Manually copying and maintaining those is impractical. Instead, we use esbuild to bundle the widget + all deps into a single tree-shaken ESM file.
+
+**Directory structure:**
+```
+app/apps/file_editor_cm6/monaco_editor/vscode_build_src/
+  ├─ README.md                  # What this is, how to rebuild
+  ├─ build.mjs                  # esbuild script
+  ├─ breadcrumbs_entry.ts       # Thin entrypoint (re-exports BreadcrumbsWidget)
+  └─ out/
+      └─ breadcrumbsWidget.js   # Bundled ESM artifact (served to browser)
+```
+
+**Build script (`build.mjs`):**
+- Uses esbuild with `bundle: true, format: 'esm', platform: 'browser'`
+- Resolves imports from `../mrselect6-2/code-server/lib/vscode/src/` (the worktree)
+- Tree-shakes unused exports (breadcrumbsWidget.ts only uses ~10 functions from dom.ts's 2633 lines)
+- Outputs single file to `out/breadcrumbsWidget.js`
+- CSS is embedded (breadcrumbsWidget.css is 37 lines)
+- Expected output: ~10-20KB minified (the widget + scrollbar + event/lifecycle/dom utilities)
+
+**Entrypoint (`breadcrumbs_entry.ts`):**
+```typescript
+export { BreadcrumbsWidget, BreadcrumbsItem, IBreadcrumbsWidgetStyles, IBreadcrumbsItemEvent }
+  from 'vs/base/browser/ui/breadcrumbs/breadcrumbsWidget';
+export { ScrollbarVisibility } from 'vs/base/common/scrollable';
+export { ThemeIcon } from 'vs/base/common/themables';
+export { Codicon } from 'vs/base/common/codicons';
+```
+
+**Dependency resolution chain:**
+```
+breadcrumbsWidget.ts (366 lines)
+  ├─ dom.ts (2633 lines, but tree-shaken to ~10 used functions)
+  ├─ domStylesheets.ts (~50 lines)
+  ├─ mouseEvent.ts (~100 lines)
+  ├─ ui/scrollbar/scrollableElement.ts + 6 scrollbar files
+  ├─ common/event.ts (1812 lines)
+  ├─ common/lifecycle.ts (888 lines)
+  ├─ common/arrays.ts (949 lines, tree-shaken to commonPrefixLength)
+  ├─ common/themables.ts (117 lines)
+  └─ common/scrollable.ts (522 lines)
+Total transitive: ~54 unique .ts files from vs/base/ (all MIT licensed)
+```
+
+### Integration plan (after build)
+
+**Step 1: Build the widget bundle**
+- Create `vscode_build_src/` with build script + entrypoint
+- Run esbuild → `out/breadcrumbsWidget.js`
+- Serve via existing Monaco static route
+
+**Step 2: Create TE2 breadcrumb component (`te2_breadcrumbs.js`)**
+- Import `BreadcrumbsWidget`, `BreadcrumbsItem` from the bundle
+- Implement `FilePathItem extends BreadcrumbsItem`:
+  - `render()`: seti icon + segment name
+  - Click → navigate explorer to that directory
+- Implement `SymbolItem extends BreadcrumbsItem`:
+  - `render()`: codicon + symbol name (class/function/variable)
+  - Click → scroll Monaco to symbol range
+- Mount widget in a container div between `fe-toolbar` and the iframe
+
+**Step 3: Wire data sources**
+- **File path**: listen to `editor:open` → split `currentPath` relative to `project_root` → update crumbs
+- **Document symbols**: call `editor_workbench_symbols` on file open (already implemented)
+- **Cursor tracking**: listen to Monaco `onDidChangeCursorPosition` → walk symbol tree → update active symbol crumbs
+- **Symbol tree walk**: find deepest symbol whose `range.startLineNumber <= cursor.lineNumber <= range.endLineNumber`
+
+**Step 4: Style to match TE2 theme**
+- Map `IBreadcrumbsWidgetStyles` colors to TE2 CSS variables
+- Separator icon: `Codicon.chevronRight` (already in the bundle)
+- Height: ~22px (matches VS Code's breadcrumb bar)
+

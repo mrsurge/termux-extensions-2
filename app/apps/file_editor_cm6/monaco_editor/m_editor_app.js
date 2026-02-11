@@ -994,6 +994,53 @@
   var _wbPending = new Map(); // request_id -> {resolve, reject, timer}
   var _wbNextId = 1;
 
+  // Gate: open_file calls are deferred until the readiness baton arrives.
+  // On page reload (adapter already running), the baton arrives quickly.
+  // On cold start, it arrives after code-server + adapter boot.
+  function _isAdapterReady() {
+    return !!window.__te2AdapterReady;
+  }
+
+  // Replay: called when baton arrives, triggers open_file for the currently loaded file.
+  function _replayOpenFileAfterBaton() {
+    if (!currentPath || !editor) return;
+    var model = editor.getModel ? editor.getModel() : null;
+    if (!model) return;
+    var lang = (model.getLanguageId ? model.getLanguageId() : '') || '';
+    var replayReqId = 'baton_' + Date.now();
+    console.log('[readiness] baton arrived, replaying open_file for', currentPath);
+    try {
+      editorSocket.emit('editor_diagnostics_consumer_ready', { path: currentPath, request_id: replayReqId });
+    } catch (_) {}
+    editorWorkbenchCall(
+      'open_file',
+      {
+        path: currentPath,
+        languageId: lang,
+        uri: (model && model.uri) ? String(model.uri.toString()) : '',
+        requestId: replayReqId,
+        forceRefresh: true,
+      },
+      { timeoutMs: 8000 }
+    ).then(function () {
+      // Push draft content if available.
+      try {
+        var content = model.getValue();
+        if (content && editorSocket && editorSocket.connected) {
+          editorSocket.emit('editor_workbench_did_change', {
+            path: currentPath,
+            text: content,
+            languageId: lang,
+          });
+        }
+      } catch (_) {}
+    }).catch(function (e) {
+      console.warn('[readiness] baton replay open_file failed', e);
+    });
+    // Also trigger breadcrumb symbols now that adapter is ready.
+    try { _bcRequestSymbols(currentPath); } catch (_) {}
+  }
+
   function editorWorkbenchCall(method, params, opts) {
     var timeoutMs = (opts && Number.isFinite(Number(opts.timeoutMs))) ? Number(opts.timeoutMs) : 12000;
     var requestId = 'wb_' + (_wbNextId++) + '_' + Date.now();
@@ -3106,7 +3153,7 @@
       }
     }
     currentPath = absPath;
-    try { bcUpdatePath(currentPath); } catch (_) {}
+    try { bcUpdatePath(currentPath, true); } catch (_) {}
     baseSha256 = sha256;
 
     // Emit SSOT-derived telemetry to host (draft badge + autosave toggle sync).
@@ -3127,30 +3174,6 @@
     updateDebug('open=ok');
   }
 
-  async function restoreFromSSOT() {
-    try {
-      var state = await fetchSSOTState();
-      cachedPrefs = state;
-      if (!state) return;
-      var target = state.currentPath || state.lastFile || null;
-      if (!target) return;
-      await openPathFromBackend(target, languageFromPath(target));
-    } catch (e) {
-      console.warn('[Monaco] restoreFromSSOT failed', e);
-    }
-  }
-
-  function applyOpenPayload(payload) {
-    try {
-      if (!payload) return;
-      cachedPrefs = { preferences: payload.preferences || (cachedPrefs && cachedPrefs.preferences) || {} };
-      baseSha256 = payload.base_sha256 || payload.baseSha256 || baseSha256;
-      openPathFromBackend(payload.path, payload.language || languageFromPath(payload.path));
-    } catch (e) {
-      console.warn('[Monaco] applyOpenPayload failed', e);
-    }
-  }
-
   function connectEditorSocket() {
     try {
       if (!window.io) return false;
@@ -3163,6 +3186,23 @@
       editorSocket.on('connect', function() {
         editorSocketId = editorSocket.id || null;
         emitToHost('editor_ready', {});
+        // Kick off sequential readiness chain: code-server -> adapter -> baton.
+        emitToHost('editor:iframe_ready', {});
+        editorSocket.emit('editor_readiness_check', {});
+      });
+
+      // Readiness step events from the server-side chain.
+      editorSocket.on('editor:readiness_step', function(data) {
+        var step = data && data.step || '';
+        var ok = data && data.ok;
+        console.log('[readiness] step=' + step + ' ok=' + ok + (data.error ? ' error=' + data.error : ''));
+        emitToHost('editor:readiness_step', data);
+        if (step === 'baton' && ok) {
+          window.__te2AdapterReady = true;
+          // Replay initial open_file now that the adapter is confirmed ready.
+          // This gates diagnostics/symbols to AFTER the full readiness chain.
+          _replayOpenFileAfterBaton();
+        }
       });
 
       editorSocket.on('editor:ssot', function(snapshot) {
@@ -3179,7 +3219,7 @@
             // Apply directly from SSOT payload (draft wins).
             baseSha256 = f.base_sha256 || baseSha256;
             currentPath = f.path || currentPath;
-            try { bcUpdatePath(currentPath); } catch (_) {}
+            try { bcUpdatePath(currentPath, true); } catch (_) {}
             ensureEditorWithPrefs().then(function() {
               var lang = languageFromPath(currentPath);
               if (!model) {
@@ -3259,6 +3299,9 @@
                     editorSocket.emit('editor_diagnostics_consumer_ready', { path: currentPath, request_id: ssotReqId });
                   }
                 } catch (_) {}
+                // Gate: only call open_file if adapter is ready (baton received).
+                // On cold start, baton arrives later and _replayOpenFileAfterBaton handles it.
+                if (_isAdapterReady()) {
                 editorWorkbenchCall(
                   'open_file',
                   {
@@ -3282,7 +3325,12 @@
                       }
                     }
                   } catch (_) {}
+                  // Request symbols AFTER open_file completes.
+                  try { _bcRequestSymbols(currentPath); } catch (_) {}
                 }).catch(function () {});
+                } else {
+                  console.log('[readiness] open_file deferred (ssot) — waiting for baton');
+                }
               } catch (_) {}
 
               // If diagnostics arrived early (before model/currentPath), apply from cache now.
@@ -3308,7 +3356,7 @@
           // Always follow SSOT open across clients.
           baseSha256 = payload.base_sha256 || baseSha256;
           currentPath = payload.path;
-          try { bcUpdatePath(currentPath); } catch (_) {}
+          try { bcUpdatePath(currentPath, true); } catch (_) {}
           ensureEditorWithPrefs().then(function() {
             var lang = languageFromPath(currentPath);
             if (!model) {
@@ -3360,6 +3408,8 @@
                   editorSocket.emit('editor_diagnostics_consumer_ready', { path: currentPath, request_id: openReqId });
                 }
               } catch (_) {}
+              // Gate: only call open_file if adapter is ready.
+              if (_isAdapterReady()) {
               editorWorkbenchCall(
                 'open_file',
                 {
@@ -3385,8 +3435,13 @@
                       }
                     }
                   } catch (_) {}
+                  // Request symbols AFTER open_file completes (adapter now knows about this file).
+                  try { _bcRequestSymbols(currentPath); } catch (_) {}
                 })
                 .catch(function () {});
+              } else {
+                console.log('[readiness] open_file deferred (editor:open) — waiting for baton');
+              }
             } catch (_) {}
             // Apply cached diagnostics for this file immediately after open/model swap.
             try { _applyCachedDiagnosticsForActive(); } catch (_) {}
@@ -3835,22 +3890,29 @@
     }).catch(function(e) { console.warn('[BC] seti-icons load failed:', e); });
   }
 
-  function bcUpdatePath(absPath) {
+  function bcUpdatePath(absPath, deferSymbols) {
     if (!_bcEl || !absPath) return;
-    if (absPath === _bcLastPath) return;
+    if (absPath === _bcLastPath && !deferSymbols) return;
     _bcLastPath = absPath;
     _bcSymbols = [];
     _bcRender();
-    _bcRequestSymbols(absPath);
+    if (!deferSymbols) {
+      _bcRequestSymbols(absPath);
+    }
   }
 
   function _bcRequestSymbols(absPath) {
     if (!editorSocket || !editorSocket.connected) return;
+    if (!_isAdapterReady()) return; // Wait for readiness baton before requesting symbols.
     var seq = ++_bcSymbolsSeq;
+    var langId = (model && model.getLanguageId) ? model.getLanguageId() : '';
+    if (!langId) langId = languageFromPath(absPath) || '';
+    // TS/JS extensions can be slow to activate on mobile — give them extra time
+    var tms = (langId === 'javascript' || langId === 'typescript' || langId === 'javascriptreact' || langId === 'typescriptreact') ? 15000 : 8000;
     editorWorkbenchCall('symbols', {
       path: absPath,
-      languageId: model ? (model.getLanguageId ? model.getLanguageId() : '') : '',
-    }, { timeoutMs: 8000 }).then(function(result) {
+      languageId: langId,
+    }, { timeoutMs: tms }).then(function(result) {
       if (seq !== _bcSymbolsSeq) return; // stale
       // Unwrap adapter response: {ok, result: [...]} or raw array
       var symbols = result;
@@ -3904,33 +3966,39 @@
     return chain;
   }
 
-  // Symbol kind → icon (LSP SymbolKind values)
-  var _BC_SYM_ICONS = {
-    1: '\u{1F4C4}', // File
-    2: '{M}',       // Module
-    3: '{N}',       // Namespace
-    4: '\u{1F4E6}', // Package 📦
-    5: '\u25C7',    // Class ◇
-    6: '\u0192',    // Method ƒ
-    7: '\u25AB',    // Property ▫
-    8: '\u25AB',    // Field ▫
-    9: '\u0192',    // Constructor ƒ
-    10: '\u2630',   // Enum ☰
-    11: '\u25C7',   // Interface ◇
-    12: '\u0192',   // Function ƒ
-    13: 'x',        // Variable
-    14: '\u03C0',   // Constant π
-    15: '"',        // String
-    16: '#',        // Number
-    17: '\u25CF',   // Boolean ●
-    18: '[]',       // Array
-    19: '{}',       // Object
-    22: '\u2630',   // EnumMember ☰
-    23: '\u25C7',   // Struct ◇
-    25: '\u00B1',   // Operator ±
-    26: 'T',        // TypeParameter
+  // Symbol kind -> codicon class + color (LSP SymbolKind values, VS Code-style colors)
+  var _SYM_CODICON = {
+    1:  ['codicon-symbol-file',           '#8b949e'], // File
+    2:  ['codicon-symbol-module',         '#bc8cff'], // Module
+    3:  ['codicon-symbol-namespace',      '#bc8cff'], // Namespace
+    4:  ['codicon-symbol-package',        '#f0883e'], // Package
+    5:  ['codicon-symbol-class',          '#f0883e'], // Class
+    6:  ['codicon-symbol-method',         '#bc8cff'], // Method
+    7:  ['codicon-symbol-property',       '#4da6ff'], // Property
+    8:  ['codicon-symbol-field',          '#4da6ff'], // Field
+    9:  ['codicon-symbol-constructor',    '#bc8cff'], // Constructor
+    10: ['codicon-symbol-enum',           '#f0883e'], // Enum
+    11: ['codicon-symbol-interface',      '#4da6ff'], // Interface
+    12: ['codicon-symbol-function',       '#bc8cff'], // Function
+    13: ['codicon-symbol-variable',       '#4da6ff'], // Variable
+    14: ['codicon-symbol-constant',       '#4da6ff'], // Constant
+    15: ['codicon-symbol-string',         '#f0883e'], // String
+    16: ['codicon-symbol-number',         '#a6e22e'], // Number
+    17: ['codicon-symbol-boolean',        '#4da6ff'], // Boolean
+    18: ['codicon-symbol-array',          '#f0883e'], // Array
+    19: ['codicon-symbol-object',         '#8b949e'], // Object
+    22: ['codicon-symbol-enum-member',    '#f0883e'], // EnumMember
+    23: ['codicon-symbol-struct',         '#f0883e'], // Struct
+    25: ['codicon-symbol-operator',       '#8b949e'], // Operator
+    26: ['codicon-symbol-type-parameter', '#a6e22e'], // TypeParameter
   };
-  function _bcSymbolIcon(kind) { return _BC_SYM_ICONS[kind] || '\u25B8'; } // ▸ default
+
+  function _bcSymbolSvg(kind) {
+    var entry = _SYM_CODICON[kind];
+    var cls = entry ? entry[0] : 'codicon-symbol-misc';
+    var col = entry ? entry[1] : '#8b949e';
+    return '<span class="codicon ' + cls + '" style="color:' + col + ';font-size:14px;line-height:1"></span>';
+  }
 
   function _bcRender(cursorLine) {
     if (!_bcEl) return;
@@ -3989,14 +4057,11 @@
 
         var sitem = document.createElement('span');
         sitem.className = 'te2-bc-item';
-        // Symbol kind icon
-        var symIcon = _bcSymbolIcon(chain[j].kind);
-        if (symIcon) {
-          var si = document.createElement('span');
-          si.className = 'te2-bc-sym-icon';
-          si.textContent = symIcon;
-          sitem.appendChild(si);
-        }
+        // Symbol kind SVG icon
+        var si = document.createElement('span');
+        si.className = 'te2-bc-sym-icon';
+        si.innerHTML = _bcSymbolSvg(chain[j].kind);
+        sitem.appendChild(si);
         var slabel = document.createElement('span');
         slabel.textContent = chain[j].name || '';
         sitem.appendChild(slabel);
@@ -4195,10 +4260,8 @@
         }
       } catch (_) {}
 
-      // Prefer dedicated editor Socket.IO transport; fall back to SSOT HTTP.
-      if (!connectEditorSocket()) {
-        restoreFromSSOT();
-      }
+      // Connect editor Socket.IO transport (required for readiness chain + SSOT).
+      connectEditorSocket();
 
       // Phase 0: connect vscode_rpc (semantic tokens via TS LSP).
       // Best-effort: this is optional, but should be available when the shell is running.
