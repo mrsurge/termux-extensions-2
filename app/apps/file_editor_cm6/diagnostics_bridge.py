@@ -264,6 +264,61 @@ async def _adapter_ws_loop(sio):
                             print(f"[diag_bridge] adapter/ready emit FAIL: {exc}", flush=True)
                         continue
 
+                    # Forward file watcher events to editor and explorer SIO.
+                    if ev_type == "watcher/fileChanges":
+                        try:
+                            changes = ev.get("changes", [])
+                            # Get project root for abs→rel conversion
+                            try:
+                                from .explorer_helper import get_project_root
+                                proj = str(get_project_root())
+                            except Exception:
+                                proj = ""
+                            created, changed, deleted = [], [], []
+                            for c in changes:
+                                p = c.get("path", "") if isinstance(c, dict) else ""
+                                t = c.get("type", 0) if isinstance(c, dict) else 0
+                                if not p:
+                                    continue
+                                # Convert absolute path to relative
+                                rel = p
+                                if proj and p.startswith(proj):
+                                    rel = p[len(proj):].lstrip("/") or "."
+                                # type: 0=UPDATED, 1=ADDED, 2=DELETED (VS Code FileChangeType)
+                                if t == 1:
+                                    created.append(rel)
+                                elif t == 2:
+                                    deleted.append(rel)
+                                else:
+                                    changed.append(rel)
+                            payload = {
+                                "created": created,
+                                "changed": changed,
+                                "deleted": deleted,
+                            }
+                            total = len(created) + len(changed) + len(deleted)
+                            if total > 0:
+                                await sio.emit(
+                                    "editor:filesChanged",
+                                    payload,
+                                    room="file_editor_cm6",
+                                    namespace="/editor",
+                                )
+                                # Notify explorer with watcher:files type
+                                try:
+                                    from .explorer_socketio import EXPLORER_SIO
+                                    await EXPLORER_SIO.emit(
+                                        "explorer:event",
+                                        {"type": "watcher:files", "payload": payload},
+                                        namespace="/explorer",
+                                    )
+                                except Exception:
+                                    pass
+                                print(f"[diag_bridge] watcher/fileChanges forwarded ({total} paths)", flush=True)
+                        except Exception as exc:
+                            print(f"[diag_bridge] watcher/fileChanges emit FAIL: {exc}", flush=True)
+                        continue
+
                     if ev_type != "diagnostics/update":
                         continue
 

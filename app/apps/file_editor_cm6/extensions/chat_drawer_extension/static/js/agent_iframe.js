@@ -29,6 +29,7 @@ export function initAgentIframe(options = {}) {
   const drawerOpenEndpoint = options.drawerOpenEndpoint || (hostOrigin ? `${hostOrigin}${DEFAULT_DRAWER_OPEN_ENDPOINT}` : DEFAULT_DRAWER_OPEN_ENDPOINT);
   const drawerCloseEndpoint = options.drawerCloseEndpoint || (hostOrigin ? `${hostOrigin}${DEFAULT_DRAWER_CLOSE_ENDPOINT}` : DEFAULT_DRAWER_CLOSE_ENDPOINT);
   const allowAnyOrigin = options.allowAnyOrigin === true;
+  const hideDrawerHeader = options.hideDrawerHeader !== false;
   let isOpen = false;
   let iframeOrigin = null;
 
@@ -63,6 +64,7 @@ export function initAgentIframe(options = {}) {
   }
 
   async function updateHostHints() {
+    if (!hideDrawerHeader) return false;
     try {
       const resp = await fetch('/api/app/file_editor_cm6/agent/drawer/ui_hints', {
         method: 'POST',
@@ -91,11 +93,13 @@ export function initAgentIframe(options = {}) {
     updateAria();
     ensureIframeLoaded();
     updateHostUi(true);
-    updateHostHints().then((ok) => {
-      if (ok && header) {
-        header.remove();
-      }
-    });
+    if (hideDrawerHeader) {
+      updateHostHints().then((ok) => {
+        if (ok && header) {
+          header.remove();
+        }
+      });
+    }
   }
 
   function closeDrawer() {

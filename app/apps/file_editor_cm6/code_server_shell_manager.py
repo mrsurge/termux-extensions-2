@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import re
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -30,6 +31,86 @@ def _label() -> str:
 
 def _expected_port() -> str:
     return str(CODE_SERVER_FIXED_PORT)
+
+
+# ── Bridge extension install ──────────────────────────────────────────
+
+_BRIDGE_EXT_ID = "te2-extension-api-bridge"
+_BRIDGE_EXT_SRC = Path(__file__).parent / "vendor" / _BRIDGE_EXT_ID
+_EXTENSIONS_DIR = Path.home() / ".config" / "code-server" / "extensions"
+
+
+def ensure_bridge_extension_installed() -> bool:
+    """Copy the vendored bridge extension to code-server's extensions dir if needed.
+
+    Compares package.json version to decide whether to update.
+    Also ensures the extension is registered in extensions.json so code-server loads it.
+    Returns True if installed/updated, False if already current.
+    """
+    import json
+
+    dest = _EXTENSIONS_DIR / _BRIDGE_EXT_ID
+    src_pkg = _BRIDGE_EXT_SRC / "package.json"
+
+    if not src_pkg.exists():
+        print(f"[code_server] bridge extension source missing: {src_pkg}", flush=True)
+        return False
+
+    src_manifest = json.loads(src_pkg.read_text())
+    src_version = src_manifest.get("version", "0")
+
+    dest_pkg = dest / "package.json"
+    needs_copy = True
+    if dest_pkg.exists():
+        try:
+            dest_version = json.loads(dest_pkg.read_text()).get("version", "")
+            if dest_version == src_version:
+                needs_copy = False
+        except Exception:
+            pass  # corrupt — reinstall
+
+    if needs_copy:
+        if dest.exists():
+            shutil.rmtree(dest)
+        _EXTENSIONS_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(str(_BRIDGE_EXT_SRC), str(dest))
+        print(f"[code_server] bridge extension installed: {_BRIDGE_EXT_ID} v{src_version}", flush=True)
+
+    # Ensure extension is registered in extensions.json
+    ext_json_path = _EXTENSIONS_DIR / "extensions.json"
+    try:
+        entries = json.loads(ext_json_path.read_text()) if ext_json_path.exists() else []
+    except Exception:
+        entries = []
+
+    publisher = src_manifest.get("publisher", "te2")
+    ext_id = f"{publisher}.{src_manifest.get('name', _BRIDGE_EXT_ID)}"
+    already_registered = any(
+        e.get("identifier", {}).get("id", "") == ext_id for e in entries
+    )
+
+    if not already_registered:
+        entries.append({
+            "identifier": {"id": ext_id},
+            "version": src_version,
+            "location": {
+                "$mid": 1,
+                "path": str(dest),
+                "scheme": "file",
+            },
+            "relativeLocation": _BRIDGE_EXT_ID,
+            "metadata": {
+                "installedTimestamp": int(__import__("time").time() * 1000),
+                "source": "vsix",
+                "isPreReleaseVersion": False,
+                "hasPreReleaseVersion": False,
+            },
+        })
+        ext_json_path.write_text(json.dumps(entries))
+        print(f"[code_server] bridge extension registered in extensions.json: {ext_id}", flush=True)
+        return True
+
+    return needs_copy
 
 
 def _matches_expected_port(record: ShellRecord) -> bool:
@@ -106,6 +187,12 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
 
         repo_root = Path(project_root).resolve(strict=False)
         data_dir = Path.home() / ".config" / "code-server"
+
+        # Ensure bridge extension is installed before code-server starts
+        try:
+            ensure_bridge_extension_installed()
+        except Exception as exc:
+            print(f"[code_server] bridge extension install failed (non-fatal): {exc}", flush=True)
 
         shell = await orch.start_from_ref(
             SHELLSPEC_REF,

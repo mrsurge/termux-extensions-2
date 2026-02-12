@@ -614,6 +614,7 @@ export class WorkbenchClient {
     this.mgmt = null; // { protocol }
     this.ext = null; // { protocol }
     this._mgmtIpc = null;
+    this._fsWatcherSub = null; // IPC event subscription for remoteFilesystem fileChange
     this._connecting = false;
     this._pendingExt = new Map(); // req -> {resolve,reject}
     this._signService = createNoopSignService();
@@ -1258,6 +1259,44 @@ export class WorkbenchClient {
       const extArgs = { language: "en", break: false, port: null, env: { VSCODE_PROXY_URI: proxyUri } };
 
       const workspaceRoot = params.workspaceFolder ?? params.folder ?? folder ?? null;
+
+      // Subscribe to file watcher events via the remoteFilesystem IPC channel.
+      try {
+        this._fsWatcherSub?.dispose?.();
+        const sessionId = crypto.randomUUID();
+        console.log(`[watcher] setting up IPC listen on remoteFilesystem/fileChange sessionId=${sessionId}`);
+        const sub = this._mgmtIpc.listen("remoteFilesystem", "fileChange", [sessionId]);
+        console.log(`[watcher] listen() called, subscription created`);
+        sub.event((changes) => {
+          console.log(`[watcher] EVENT FIRED: ${JSON.stringify(changes)?.slice(0, 500)}`);
+          if (Array.isArray(changes) && changes.length > 0) {
+            const mapped = changes.map(c => ({
+              type: c.type, // 1=UPDATED, 2=ADDED, 3=DELETED
+              path: c.resource?.path ?? c.resource?.fsPath ?? String(c.resource ?? ""),
+            }));
+            console.log(`[watcher] forwarding ${mapped.length} changes via onEvent`);
+            this.onEvent({ type: "watcher/fileChanges", ts_ms: Date.now(), changes: mapped });
+          } else {
+            console.log(`[watcher] EVENT received but not array or empty: type=${typeof changes} isArr=${Array.isArray(changes)}`);
+          }
+        });
+        this._fsWatcherSub = sub;
+        // Register a recursive watch on the workspace root
+        if (workspaceRoot) {
+          const watchId = 1;
+          const rootUri = this._uriForPath(String(workspaceRoot), useRemote ? authority : null);
+          console.log(`[watcher] calling watch() sessionId=${sessionId} watchId=${watchId} uri=${JSON.stringify(rootUri)}`);
+          await this._mgmtIpc.call("remoteFilesystem", "watch", [sessionId, watchId, rootUri, { recursive: true, excludes: [] }]);
+          this.onEvent({ type: "watcher/subscribed", ts_ms: Date.now(), root: String(workspaceRoot) });
+          console.log(`[watcher] watch() call returned OK — subscribed to ${workspaceRoot}`);
+        } else {
+          console.log(`[watcher] no workspaceRoot, skipping watch() call`);
+        }
+      } catch (e) {
+        this.onEvent({ type: "watcher/subscribe_error", ts_ms: Date.now(), error: String(e?.message ?? e) });
+        console.log(`[watcher] subscribe error: ${e?.stack ?? e?.message ?? e}`);
+      }
+
       const productVersion = await spanTraceAsync("connect.loadProductVersion", () => this._loadProductVersionFromAppRoot(envData));
       const extInitData = spanTrace("connect.buildExtHostInitData", () => this._buildExtHostInitData({
         authority: useRemote ? authority : null,
@@ -1580,6 +1619,8 @@ export class WorkbenchClient {
             replyPayload = encodeExtReplyOkJson(msg.req, null);
           } else if (msg.method === "$getPassword") {
             replyPayload = encodeExtReplyOkJson(msg.req, null);
+          } else if (msg.method === "$executeCommand") {
+            replyPayload = encodeExtReplyOkEmpty(msg.req);
           } else {
             replyPayload = encodeExtReplyOkEmpty(msg.req);
           }
@@ -2076,6 +2117,11 @@ export class WorkbenchClient {
     try {
       this._pendingExt?.clear?.();
     } catch {}
+
+    try {
+      this._fsWatcherSub?.dispose?.();
+    } catch {}
+    this._fsWatcherSub = null;
 
     try {
       this._mgmtIpc?.dispose?.();

@@ -293,64 +293,15 @@ def _do_handle_fs_event(raw_event):
 def init_watcher(project_root: Path = None):
     """Initializes and starts the file system watcher.
     
+    DISABLED: recursive watchdog hits inotify limits on large repos.
+    Will be replaced by extension host watcher relay via $onFileEvent pipeline.
+    Code preserved for reference.
+    
     If project_root is None, reads from the history store SSOT.
     This ensures the watcher always watches whatever the active project is.
     """
-    global _watcher_thread, _project_root
-
-    # Read from SSOT if no path provided
-    if project_root is None:
-        from .stores import get_history_store
-        history = get_history_store()
-        active = history.get_active_project()
-        if not active:
-            return  # No active project
-        project_root = Path(active)
-    
-    desired_root = project_root.resolve()
-    
-    # Check if watcher needs to be restarted due to project change
-    with _lock:
-        existing_root = _project_root.resolve() if _project_root else None
-        
-        # If project changed, stop the old watcher
-        if _watcher_thread and existing_root and existing_root != desired_root:
-            # Release lock before stopping to avoid deadlock
-            pass  # Will stop below
-        elif _watcher_thread:
-            # Same project, watcher already running
-            return
-        else:
-            # No watcher running, set the root
-            _project_root = desired_root
-    
-    # Stop old watcher if project changed (outside lock to avoid deadlock)
-    if existing_root and existing_root != desired_root:
-        stop_watcher()
-        with _lock:
-            _project_root = desired_root
-
-    # Start new watcher (NO polling fallback).
-    # This editor already has git-based reconciliation paths; polling is too noisy and expensive.
-    if not _is_watchdog_available:
-        raise RuntimeError(
-            "[WATCHER] watchdog is not available (import failed). "
-            "Install watchdog or disable watcher-dependent features."
-        )
-    try:
-        handler = WatchdogHandler(_handle_fs_event)
-        observer = Observer()
-        observer.schedule(handler, str(desired_root), recursive=True)
-        observer.start()
-        with _lock:
-            _watcher_thread = observer
-    except OSError as e:
-        if e.errno == errno.ENOSPC:
-            raise RuntimeError(
-                "[WATCHER] Inotify watch limit reached (ENOSPC). "
-                "Increase inotify limits; polling fallback is disabled by design."
-            ) from e
-        raise
+    logger.info("[WATCHER] init_watcher disabled — pending watcher overhaul (inotify limits)")
+    return
 
 def subscribe(path: str, client_id: str, on_event: Callable[[dict], None]) -> str:
     """Subscribes a client to file events, sends an initial snapshot, and returns a token."""

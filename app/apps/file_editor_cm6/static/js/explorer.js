@@ -1541,6 +1541,32 @@ function refreshOpenDirectoriesAfterGit() {
   applyAggregatedGitStatusFlags();
 }
 
+function _normalizeWatcherRel(rel) {
+  if (typeof rel !== 'string') return '';
+  const normalized = rel.replace(/\\/g, '/').replace(/^\.\/+/, '').trim();
+  return normalized;
+}
+
+function _collectWatcherRels(payload) {
+  const out = new Set();
+  const src = payload && typeof payload === 'object' ? payload : {};
+  ['created', 'changed', 'deleted'].forEach((key) => {
+    const items = Array.isArray(src[key]) ? src[key] : [];
+    items.forEach((rel) => {
+      const norm = _normalizeWatcherRel(rel);
+      if (!norm) return;
+      out.add(norm);
+    });
+  });
+  return out;
+}
+
+function _isWatcherRelInOpenDir(rel, openDir) {
+  if (!openDir) return false;
+  if (rel === openDir) return true;
+  return rel.startsWith(openDir + '/');
+}
+
 function handleExplorerEvent(type, payload) {
   if (type === 'watcher:error') {
     try {
@@ -1563,6 +1589,51 @@ function handleExplorerEvent(type, payload) {
       }
     } catch (err) {
       console.warn('[Explorer] watcher:raiseResult handler failed', err);
+    }
+    return;
+  }
+  if (type === 'watcher:files') {
+    try {
+      if (typeof window.__explorerBusSend !== 'function') return;
+
+      // Required: every watcher event triggers git status refresh.
+      window.__explorerBusSend('git:status', {});
+
+      const rels = _collectWatcherRels(payload);
+      if (!rels.size) return;
+
+      const dirsToRefresh = new Set();
+      let refreshRoot = false;
+      rels.forEach((rel) => {
+        if (rel === '.') {
+          refreshRoot = true;
+        } else if (rel.indexOf('/') === -1) {
+          refreshRoot = true;
+        }
+
+        openDirectories.forEach((openDir) => {
+          if (_isWatcherRelInOpenDir(rel, openDir)) {
+            dirsToRefresh.add(openDir);
+          }
+        });
+      });
+
+      if (refreshRoot) {
+        window.__explorerBusSend('explorer:list', { rel: '.' });
+      }
+      dirsToRefresh.forEach((rel) => {
+        if (!rel || rel === '.') return;
+        window.__explorerBusSend('explorer:list', { rel });
+      });
+
+      if (activeFileRel) {
+        const touchedActive = Array.from(rels).some((rel) => rel === activeFileRel);
+        if (touchedActive && typeof window.__cm6RequestGitBaselines === 'function') {
+          window.__cm6RequestGitBaselines();
+        }
+      }
+    } catch (err) {
+      console.warn('[Explorer] watcher:files handler failed', err);
     }
     return;
   }

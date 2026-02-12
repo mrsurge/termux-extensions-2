@@ -1313,6 +1313,8 @@
     draftDecoCollection = null;
     draftDecoIds = [];
     draftZoneIds = [];
+    // Allow scroll/cursor publisher to re-install on the next editor instance.
+    installScrollPublisher._done = false;
   }
 
   function disposePlainEditorOnly() {
@@ -1322,6 +1324,8 @@
     draftDecoCollection = null;
     draftDecoIds = [];
     draftZoneIds = [];
+    // Allow scroll/cursor publisher to re-install on the next editor instance.
+    installScrollPublisher._done = false;
   }
 
   function disposeGitBaselines() {
@@ -2516,6 +2520,7 @@
     if (model) {
       try { editor.setModel(model); } catch (_) {}
       installMirrorPublisher();
+      installScrollPublisher();
     }
     ensureTouchSelection('plain');
     ensureLayoutObserver();
@@ -2581,7 +2586,10 @@
     if (model) {
       try { editor.setModel(model); } catch (_) {}
       installMirrorPublisher();
+      installScrollPublisher();
     }
+    // Request breadcrumb symbols for the diff editor's active file.
+    try { if (currentPath) _bcRequestSymbols(currentPath); } catch (_) {}
     ensureTouchSelection('diff');
     ensureLayoutObserver();
     _layoutEditors();

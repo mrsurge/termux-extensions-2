@@ -3,6 +3,8 @@ import { Emitter } from "../../../common/event.mjs";
 
 const RequestType = Object.freeze({
   Promise: 100,
+  EventListen: 102,
+  EventDispose: 103,
 });
 
 const ResponseType = Object.freeze({
@@ -10,6 +12,7 @@ const ResponseType = Object.freeze({
   PromiseSuccess: 201,
   PromiseError: 202,
   PromiseErrorObj: 203,
+  EventFire: 204,
 });
 
 class BufferReader {
@@ -156,6 +159,7 @@ class ChannelClientLite {
     this._protocol = protocol;
     this._state = "uninitialized";
     this._handlers = new Map(); // id -> {resolve,reject}
+    this._eventListeners = new Map(); // id -> emitter
     this._lastRequestId = 0;
     this._onDidInitialize = new Emitter();
     this.onDidInitialize = this._onDidInitialize.event;
@@ -165,6 +169,8 @@ class ChannelClientLite {
   dispose() {
     this._disposable?.dispose?.();
     this._handlers.clear();
+    for (const emitter of this._eventListeners.values()) emitter.dispose();
+    this._eventListeners.clear();
   }
 
   whenInitialized(timeoutMs = 15000) {
@@ -198,6 +204,30 @@ class ChannelClientLite {
     });
   }
 
+  listen(channelName, eventName, arg) {
+    const id = this._lastRequestId++;
+    const header = [RequestType.EventListen, id, channelName, eventName];
+    const writer = new BufferWriter();
+    serialize(writer, header);
+    serialize(writer, arg);
+    this._protocol.send(writer.buffer);
+
+    const emitter = new Emitter();
+    this._eventListeners.set(id, emitter);
+
+    const dispose = () => {
+      emitter.dispose();
+      this._eventListeners.delete(id);
+      // Send EventDispose to server
+      const dWriter = new BufferWriter();
+      serialize(dWriter, [RequestType.EventDispose, id]);
+      serialize(dWriter, undefined);
+      try { this._protocol.send(dWriter.buffer); } catch {}
+    };
+
+    return { event: emitter.event, dispose };
+  }
+
   _onBuffer(message) {
     const reader = new BufferReader(message);
     const header = deserialize(reader);
@@ -207,6 +237,14 @@ class ChannelClientLite {
     if (type === ResponseType.Initialize) {
       this._state = "idle";
       this._onDidInitialize.fire();
+      return;
+    }
+
+    if (type === ResponseType.EventFire) {
+      const id = header[1];
+      const emitter = this._eventListeners.get(id);
+      console.log(`[ipc] EventFire received: id=${id} hasListener=${!!emitter} body=${JSON.stringify(body)?.slice(0, 300)}`);
+      if (emitter) emitter.fire(body);
       return;
     }
 
@@ -222,6 +260,11 @@ class ChannelClientLite {
       err.name = body?.name || "Error";
       err.stack = Array.isArray(body?.stack) ? body.stack.join("\n") : body?.stack;
       return handler.reject(err);
+    }
+
+    // Log unknown message types
+    if (type !== undefined) {
+      console.log(`[ipc] unhandled message type=${type} header=${JSON.stringify(header)?.slice(0, 200)}`);
     }
   }
 }
@@ -253,5 +296,9 @@ export class IpcPromiseClient {
 
   call(channelName, command, arg) {
     return this.channelClient.call(channelName, command, arg);
+  }
+
+  listen(channelName, eventName, arg) {
+    return this.channelClient.listen(channelName, eventName, arg);
   }
 }

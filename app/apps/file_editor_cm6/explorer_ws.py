@@ -459,6 +459,69 @@ async def reset_project_session(new_project_path: str) -> bool:
 _explorer_refresh_timers: Dict[str, Timer] = {}
 _explorer_refresh_lock = __import__('threading').Lock()
 EXPLORER_REFRESH_DEBOUNCE = 0.25  # 250ms
+WATCHER_FILES_DEBOUNCE = 0.3  # 300ms
+_watcher_file_batches: Dict[str, Dict[str, set]] = {}
+
+
+def _watcher_bucket_for_event(event_type: str) -> str:
+    if event_type == "created":
+        return "created"
+    if event_type == "deleted":
+        return "deleted"
+    return "changed"
+
+
+def _schedule_watcher_files_broadcast(project_path: str, rel_path: str, event_type: str) -> None:
+    bucket = _watcher_bucket_for_event(event_type)
+    debounce_key = f"watcher:files:{project_path}"
+    with _explorer_refresh_lock:
+        batch = _watcher_file_batches.get(project_path)
+        if batch is None:
+            batch = {"created": set(), "changed": set(), "deleted": set()}
+            _watcher_file_batches[project_path] = batch
+        batch[bucket].add(rel_path)
+
+        existing_timer = _explorer_refresh_timers.get(debounce_key)
+        if existing_timer:
+            existing_timer.cancel()
+
+        def do_broadcast():
+            with _explorer_refresh_lock:
+                _explorer_refresh_timers.pop(debounce_key, None)
+                payload = _watcher_file_batches.pop(project_path, None)
+            loop = _explorer_event_loop
+            if not loop or not payload:
+                return
+            asyncio.run_coroutine_threadsafe(
+                _broadcast_watcher_files(project_path, payload),
+                loop,
+            )
+
+        timer = Timer(WATCHER_FILES_DEBOUNCE, do_broadcast)
+        _explorer_refresh_timers[debounce_key] = timer
+        timer.start()
+
+
+async def _broadcast_watcher_files(project_path: str, payload: Dict[str, set]) -> None:
+    try:
+        created = sorted(str(p) for p in payload.get("created", set()) if p is not None)
+        changed = sorted(str(p) for p in payload.get("changed", set()) if p is not None)
+        deleted = sorted(str(p) for p in payload.get("deleted", set()) if p is not None)
+        if not created and not changed and not deleted:
+            return
+        await manager.broadcast(
+            project_path,
+            {
+                "type": "watcher:files",
+                "payload": {
+                    "created": created,
+                    "changed": changed,
+                    "deleted": deleted,
+                },
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to broadcast watcher files for {project_path}: {exc}")
 
 def set_explorer_event_loop(loop: asyncio.AbstractEventLoop):
     """Called during app startup to set the event loop for watcher callbacks."""
@@ -468,8 +531,7 @@ def set_explorer_event_loop(loop: asyncio.AbstractEventLoop):
 def notify_explorer_of_change(abs_path: str, event_type: str):
     """
     Called by the file watcher when a file/directory is created, deleted, or modified.
-    Schedules an explorer refresh for the affected directory (debounced).
-    Also triggers git status update for the whole project.
+    Fans out batched watcher events to explorer clients and triggers git status refresh.
     """
     if not _explorer_event_loop or not manager.active_connections:
         return
@@ -478,34 +540,9 @@ def notify_explorer_of_change(abs_path: str, event_type: str):
     for project_path in manager.active_connections.keys():
         if abs_path.startswith(project_path):
             try:
-                # Get the parent directory relative to project
                 rel_path = _get_rel_from_abs(abs_path, project_path)
-                parent_rel = _get_parent_rel(rel_path)
-                
-                # Debounce directory refresh
-                debounce_key = f"{project_path}:{parent_rel}"
-                with _explorer_refresh_lock:
-                    existing_timer = _explorer_refresh_timers.get(debounce_key)
-                    if existing_timer:
-                        existing_timer.cancel()
-                    
-                    def do_refresh():
-                        with _explorer_refresh_lock:
-                            _explorer_refresh_timers.pop(debounce_key, None)
-                        loop = _explorer_event_loop
-                        if not loop:
-                            return
-                        asyncio.run_coroutine_threadsafe(
-                            _refresh_explorer_directory(project_path, parent_rel),
-                            loop
-                        )
-                    
-                    timer = Timer(EXPLORER_REFRESH_DEBOUNCE, do_refresh)
-                    _explorer_refresh_timers[debounce_key] = timer
-                    timer.start()
-                
-                # Also trigger git status update (debounced separately)
-                # This ensures parent directories get updated even when collapsed
+                _schedule_watcher_files_broadcast(project_path, rel_path, event_type)
+                # Trigger git status update for every file-change event.
                 _schedule_git_status_broadcast(project_path)
                     
             except Exception as e:
@@ -1339,7 +1376,9 @@ class ExplorerDispatcher:
     # --- Git Operations (Broadcasts Status) ---
 
     async def handle_git_status(self, payload: dict, msg_id: str):
+        mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
+        await self.broadcast_git_decorations()
 
     async def handle_git_stage(self, payload: dict, msg_id: str):
         stage_paths(self.project_root, payload.get("paths", []))

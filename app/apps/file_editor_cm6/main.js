@@ -257,7 +257,15 @@ async function resolveAgentIframeUrl(settings) {
 async function resolveAgentIframeSettings(settings) {
   const enabled = parseBoolean(settings.agent_drawer_iframe);
   const url = await resolveAgentIframeUrl(settings);
-  return { enabled, url };
+  let normalized = '';
+  try {
+    normalized = String(url || '').trim();
+  } catch (_) {
+    normalized = '';
+  }
+  const noProto = normalized.replace(/^[a-z]+:\/\//i, '').replace(/\/+$/, '');
+  const isDefaultCodexTarget = noProto === '127.0.0.1:12359/codex-agent';
+  return { enabled, url, hideDrawerHeader: isDefaultCodexTarget };
 }
 
 // =============================================================================
@@ -3009,6 +3017,17 @@ window.__cm6ReloadCurrentFile = async function() {
   }
 };
 
+window.__cm6RequestGitBaselines = function() {
+  try {
+    if (!editorSocket || !editorSocket.connected) return false;
+    if (!currentPath) return false;
+    editorSocket.emit('editor_git_baselines_request', { path: currentPath });
+    return true;
+  } catch (_) {
+    return false;
+  }
+};
+
 window.__cm6EnsureInlineDiffs = async function ensureInlineDiffsEnabled(forceOn = true) {
   if (!forceOn) {
     return true;
@@ -4701,7 +4720,12 @@ async function main() {
   } catch (_) {}
   window.__agentHostBase = agentHostBase;
   agentDrawerHandle = agentIframeConfig.enabled
-    ? initAgentIframe({ url: agentIframeConfig.url, title: 'Agent', allowAnyOrigin: true })
+    ? initAgentIframe({
+        url: agentIframeConfig.url,
+        title: 'Agent',
+        allowAnyOrigin: true,
+        hideDrawerHeader: agentIframeConfig.hideDrawerHeader !== false,
+      })
     : initAgentDrawer();
 
   const serverState = await syncEditorState(true);
