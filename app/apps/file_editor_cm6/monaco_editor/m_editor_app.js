@@ -2508,18 +2508,33 @@
 
       ensureDiffEditorWithPrefs();
 
+      // If the diffEditor already has models bound for this file, skip setModel()
+      // to preserve scroll position (the model content updates above are sufficient
+      // to trigger diff recomputation).
+      var needsSetModel = true;
       try {
-        diffEditor.setModel({
-          original: gitHeadModel,
-          modified: model,
-          modifiedBaseline: gitDiskModel,
-          te2FreezeProjection: true,
-        });
-      } catch (e) {
-        console.warn('[Monaco] diffEditor.setModel failed', e);
-        disposeGitBaselines();
-        ensurePlainEditorWithPrefs();
-        return;
+        if (diffEditor && diffEditor.getModel) {
+          var dm = diffEditor.getModel();
+          if (dm && dm.original === gitHeadModel && dm.modified === model) {
+            needsSetModel = false;
+          }
+        }
+      } catch (_) {}
+
+      if (needsSetModel) {
+        try {
+          diffEditor.setModel({
+            original: gitHeadModel,
+            modified: model,
+            modifiedBaseline: gitDiskModel,
+            te2FreezeProjection: true,
+          });
+        } catch (e) {
+          console.warn('[Monaco] diffEditor.setModel failed', e);
+          disposeGitBaselines();
+          ensurePlainEditorWithPrefs();
+          return;
+        }
       }
       applyLineNumberSizing();
       _layoutEditors();
@@ -3531,12 +3546,27 @@
                   installVscodeRpcChangePublisher();
                 } else {
                   isApplyingRemote = true;
-                  try { model.setValue(payload.content || ''); } finally { isApplyingRemote = false; }
+                  try {
+                    if (payload.reason === 'external_change') {
+                      // Atomic edit preserves scroll position, cursor, and decorations
+                      var fullRange = model.getFullModelRange();
+                      model.applyEdits([{ range: fullRange, text: payload.content || '' }]);
+                    } else {
+                      model.setValue(payload.content || '');
+                    }
+                  } finally { isApplyingRemote = false; }
                   applyLanguageToModel(model, lang, currentPath);
                 }
               } catch (_) {
                 isApplyingRemote = true;
-                try { model.setValue(payload.content || ''); } finally { isApplyingRemote = false; }
+                try {
+                  if (payload.reason === 'external_change') {
+                    var fullRange2 = model.getFullModelRange();
+                    model.applyEdits([{ range: fullRange2, text: payload.content || '' }]);
+                  } else {
+                    model.setValue(payload.content || '');
+                  }
+                } finally { isApplyingRemote = false; }
                 applyLanguageToModel(model, lang, currentPath);
               }
             }

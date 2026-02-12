@@ -332,6 +332,17 @@ async def _adapter_ws_loop(sio):
                                 except Exception:
                                     pass
                                 print(f"[diag_bridge] watcher/fileChanges forwarded ({total} paths)", flush=True)
+
+                                # External edit detection: check if active file was changed
+                                for c in changes:
+                                    abs_p = c.get("path", "") if isinstance(c, dict) else ""
+                                    c_type = c.get("type", 0) if isinstance(c, dict) else 0
+                                    if abs_p and c_type in (0, 1):  # UPDATED or ADDED
+                                        try:
+                                            from .monaco_editor.editor_ws import handle_external_file_change
+                                            await handle_external_file_change(abs_p)
+                                        except Exception as exc:
+                                            print(f"[diag_bridge] external edit check failed: {exc}", flush=True)
                         except Exception as exc:
                             print(f"[diag_bridge] watcher/fileChanges emit FAIL: {exc}", flush=True)
                         continue

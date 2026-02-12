@@ -26,6 +26,10 @@ _ISSUES_DUMP_TTL_S = 20.0
 _WORKBENCH_PATH_LOCKS: dict[str, asyncio.Lock] = {}
 _WORKBENCH_OPEN_BASELINE: dict[str, dict[str, Any]] = {}
 
+# Tracks SHA256 of the most recent editor-initiated save per abs path.
+# Used to suppress watcher reload for our own saves.
+_LAST_SAVE_SHA: dict[str, str] = {}
+
 
 def _workbench_get_lock(abs_path: str) -> asyncio.Lock:
     lock = _WORKBENCH_PATH_LOCKS.get(abs_path)
@@ -184,6 +188,97 @@ def _read_disk_text(abs_path: str) -> str:
         return content_bytes.decode("utf-8", errors="replace")
     except Exception:
         return ""
+
+
+async def handle_external_file_change(changed_abs_path: str) -> bool:
+    """Called when a watcher event indicates the active file changed on disk.
+
+    Compares disk SHA against the last known base_sha256.  If different:
+      - clears any draft for the file
+      - broadcasts editor:open with reason="external_change"
+    Returns True if a reload was broadcast, False otherwise.
+    """
+    project = _active_project()
+    if not project:
+        return False
+
+    active_path = _history_store.get_last_file(project)
+    if not active_path:
+        return False
+
+    # Normalize for comparison
+    try:
+        active_norm = str(Path(active_path).resolve(strict=False))
+        changed_norm = str(Path(changed_abs_path).resolve(strict=False))
+    except Exception:
+        return False
+
+    if active_norm != changed_norm:
+        return False
+
+    # Read fresh disk content
+    try:
+        disk_bytes = Path(active_norm).read_bytes()
+        disk_text = disk_bytes.decode("utf-8", errors="replace")
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+    disk_sha = hashlib.sha256(disk_text.encode("utf-8")).hexdigest()
+
+    # Suppress watcher event triggered by our own save
+    suppressed_sha = _LAST_SAVE_SHA.get(active_norm)
+    if suppressed_sha and suppressed_sha == disk_sha:
+        _LAST_SAVE_SHA.pop(active_norm, None)
+        return False
+
+    # Check against cached draft / last known SHA
+    cached = _history_store.get_cached_document(project, active_norm)
+    last_sha = None
+    if cached:
+        last_sha = cached.get("base_sha256") or cached.get("content_sha256")
+
+    # For clean files (no draft), the watcher event itself is evidence of a
+    # change — reload unconditionally so the editor stays current.
+    # For draft files, verify the SHA actually differs from what we know.
+    if last_sha and disk_sha == last_sha:
+        return False  # No actual change
+
+    # External edit confirmed — clear draft if present
+    if cached and cached.get("unsaved"):
+        try:
+            _history_store.clear_cached_document(project, active_norm)
+            print(f"[editor_ws] external change: cleared draft for {active_norm}", flush=True)
+        except Exception as e:
+            print(f"[editor_ws] external change: draft clear failed: {e}", flush=True)
+
+        try:
+            from ..explorer_helper import mark_draft_cache_dirty
+            mark_draft_cache_dirty()
+        except Exception:
+            pass
+
+    # Broadcast fresh payload to all editor clients
+    try:
+        from .editor_socketio import EDITOR_SIO
+        payload = _read_file_payload(project, active_norm)
+        payload["reason"] = "external_change"
+        payload["request_id"] = f"ext_{int(time.time() * 1000)}"
+        await EDITOR_SIO.emit("editor:open", payload, room="file_editor_cm6", namespace="/editor")
+        print(f"[editor_ws] external change: broadcast editor:open for {active_norm}", flush=True)
+    except Exception as e:
+        print(f"[editor_ws] external change: broadcast failed: {e}", flush=True)
+        return False
+
+    # Mark git cache dirty for explorer decorations
+    try:
+        from ..explorer_helper import mark_git_cache_dirty
+        mark_git_cache_dirty()
+    except Exception:
+        pass
+
+    return True
 
 
 def _git_head_text(project_root: str, abs_path: str) -> Optional[str]:
@@ -894,6 +989,11 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             return {"ok": False, "error": str(exc)}
 
         file_meta = _get_file_meta(Path(abs_path))
+
+        # Stamp save SHA to suppress watcher reload for our own write
+        save_sha = file_meta.get("sha256")
+        if save_sha:
+            _LAST_SAVE_SHA[abs_path] = save_sha
 
         _history_store.clear_cached_document(project, abs_path)
         _history_store.prune_clean_drafts(project)

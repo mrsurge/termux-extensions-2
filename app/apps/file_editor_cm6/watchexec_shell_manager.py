@@ -126,6 +126,14 @@ def _forward_watchexec_event(evt: dict, project_root: str) -> None:
                     namespace="/explorer",
                 )
             )
+            # External edit detection for active editor file
+            if changed or created:
+                for abs_p in ([path_abs] if (fs_op != "remove") else []):
+                    try:
+                        from .monaco_editor.editor_ws import handle_external_file_change
+                        loop.create_task(handle_external_file_change(abs_p))
+                    except Exception:
+                        pass
     except Exception as exc:
         log.debug("[watchexec] forward error: %s", exc)
 
