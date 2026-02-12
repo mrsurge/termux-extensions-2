@@ -266,6 +266,19 @@ async def _adapter_ws_loop(sio):
 
                     # Forward file watcher events to editor and explorer SIO.
                     if ev_type == "watcher/enospc":
+                        # Suppress ENOSPC when user is on polling/watchexec fallback —
+                        # they already know inotify is limited, that's why they switched.
+                        try:
+                            from .explorer_helper import get_project_root
+                            from .project_sidecar import ProjectSidecar
+                            proj = str(get_project_root())
+                            sc = ProjectSidecar.load_or_create(proj)
+                            watcher_mode = sc.data.get("watcher", {}).get("mode", "ipc")
+                            if watcher_mode != "ipc":
+                                print(f"[diag_bridge] watcher/enospc suppressed (mode={watcher_mode})", flush=True)
+                                continue
+                        except Exception:
+                            pass
                         try:
                             from .explorer_socketio import EXPLORER_SIO
                             payload = {

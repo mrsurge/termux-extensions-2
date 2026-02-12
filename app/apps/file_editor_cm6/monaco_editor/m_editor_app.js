@@ -2471,6 +2471,19 @@
 
       lastGitBaselines = payload;
 
+      // Capture scroll/cursor from whichever editor is active before any transitions.
+      var savedScrollTop = null;
+      var savedPosition = null;
+      try {
+        var activeEd = (diffEditor && diffEditor.getModifiedEditor)
+          ? diffEditor.getModifiedEditor()
+          : editor;
+        if (activeEd) {
+          savedScrollTop = activeEd.getScrollTop();
+          savedPosition = activeEd.getPosition();
+        }
+      } catch (_) {}
+
       if (!getShowInlineDiffs()) {
         disposeGitBaselines();
         if (diffEditor) ensurePlainEditorWithPrefs();
@@ -2603,6 +2616,24 @@
 
       ensureTouchSelection('gitdiff');
       setTimeout(function(){ ensureTouchSelection('gitdiff-tick'); }, 0);
+
+      // Restore scroll/cursor after editor transition + setModel + async diff computation.
+      // Must be deferred because diff view zones alter scroll synchronously after computation.
+      if (savedScrollTop != null) {
+        var _restoreScroll = function() {
+          try {
+            var restoreEd = (diffEditor && diffEditor.getModifiedEditor)
+              ? diffEditor.getModifiedEditor()
+              : editor;
+            if (restoreEd && savedScrollTop != null) restoreEd.setScrollTop(savedScrollTop);
+            if (restoreEd && savedPosition) restoreEd.setPosition(savedPosition);
+          } catch (_) {}
+        };
+        // Immediate attempt + deferred attempts after diff engine settles
+        _restoreScroll();
+        setTimeout(_restoreScroll, 50);
+        setTimeout(_restoreScroll, 300);
+      }
     } catch (e) {
       console.warn('[Monaco] applyGitBaselines failed', e);
     }
@@ -2650,7 +2681,17 @@
   }
 
   function ensurePlainEditorWithPrefs() {
+    // Capture scroll position from diff editor's modified pane before disposing.
+    var savedScrollTop = null;
+    var savedPosition = null;
     if (diffEditor) {
+      try {
+        var me = diffEditor.getModifiedEditor();
+        if (me) {
+          savedScrollTop = me.getScrollTop();
+          savedPosition = me.getPosition();
+        }
+      } catch (_) {}
       disposeDiffEditorOnly();
       editor = null;
     }
@@ -2682,11 +2723,32 @@
     ensureTouchSelection('plain');
     ensureLayoutObserver();
     _layoutEditors();
+
+    // Restore scroll position from the diff editor that was disposed.
+    try {
+      if (savedScrollTop != null && editor) {
+        editor.setScrollTop(savedScrollTop);
+      }
+      if (savedPosition && editor) {
+        editor.setPosition(savedPosition);
+      }
+    } catch (_) {}
+
     return editor;
   }
 
   function ensureDiffEditorWithPrefs() {
     if (diffEditor) return diffEditor;
+
+    // Capture scroll position from plain editor before disposing it.
+    var savedScrollTop = null;
+    var savedPosition = null;
+    try {
+      if (editor) {
+        savedScrollTop = editor.getScrollTop();
+        savedPosition = editor.getPosition();
+      }
+    } catch (_) {}
 
     // Dispose the plain editor instance before creating the DiffEditor in the same container.
     if (editor) {
@@ -2750,6 +2812,17 @@
     ensureTouchSelection('diff');
     ensureLayoutObserver();
     _layoutEditors();
+
+    // Restore scroll position from the plain editor that was disposed.
+    try {
+      if (savedScrollTop != null && editor) {
+        editor.setScrollTop(savedScrollTop);
+      }
+      if (savedPosition && editor) {
+        editor.setPosition(savedPosition);
+      }
+    } catch (_) {}
+
     return diffEditor;
   }
 

@@ -1013,7 +1013,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         push_save_ack(str(rel_path), op_id, client_id, file_meta)
         emit_diff_changed(str(rel_path), file_meta.get("sha256"))
         invalidate_diff_cache(root_path, str(rel_path))
-
+        # comment
         await self.emit(
             "editor:cache_state",
             {
