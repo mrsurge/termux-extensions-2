@@ -34,18 +34,43 @@ const AGENT_HOST_RESOLVE_ENDPOINT = '/api/host/resolve_iframe';
 const AGENT_IFRAME_STORAGE_KEY = 'te2_agent_iframe_url';
 const AGENT_EXTENSION_MANIFEST = '/apps/file_editor_cm6/extensions/chat_drawer_extension/manifest.json';
 const AGENT_HOST_CWD_ENDPOINT = '/api/host/project/cwd';
+const UI_PREF_KEY_AGENT_IFRAME = 'agentDrawerIframe';
+const UI_PREF_KEY_AGENT_IFRAME_URL = 'agentDrawerIframeUrl';
+const UI_PREF_KEY_AGENT_TOGGLE_DISPLAY = 'agentToggleDisplay';
+const UI_PREF_KEY_AGENT_TOGGLE_TEXT = 'agentToggleText';
+const UI_PREF_KEY_AGENT_TOGGLE_ICON = 'agentToggleIcon';
+const UI_PREF_KEY_AGENT_SHORTCUTS = 'agentShortcuts';
 
-async function fetchFrameworkSettings() {
-  try {
-    const resp = await fetch('/api/settings', { cache: 'no-store' });
-    const body = await resp.json();
-    if (body && body.ok && body.data && typeof body.data === 'object') {
-      return body.data;
-    }
-  } catch (e) {
-    console.warn('[Settings] Failed to load framework settings:', e);
+let _latestUiPrefs = {};
+let _hasUiPrefsSnapshot = false;
+const _uiPrefsWaiters = [];
+let _agentRuntimeConfig = null;
+let _agentRuntimeMode = null;
+let _agentConfigApplySeq = 0;
+
+function _resolveUiPrefsWaiters(ui) {
+  if (!_uiPrefsWaiters.length) return;
+  while (_uiPrefsWaiters.length) {
+    const resolve = _uiPrefsWaiters.shift();
+    try {
+      resolve(ui);
+    } catch (_) {}
   }
-  return {};
+}
+
+function waitForInitialUiPrefs(timeoutMs = 2200) {
+  if (_hasUiPrefsSnapshot) {
+    return Promise.resolve(_latestUiPrefs || {});
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      resolve(_latestUiPrefs || {});
+    }, Math.max(300, timeoutMs || 0));
+    _uiPrefsWaiters.push((ui) => {
+      clearTimeout(timer);
+      resolve(ui || {});
+    });
+  });
 }
 
 function _isMobileLayout() {
@@ -223,9 +248,9 @@ function getAgentHostBase() {
   return getAgentHostBaseFromStorage() || buildAgentHostBase();
 }
 
-async function resolveAgentIframeUrl(settings) {
-  const explicit = typeof settings.agent_drawer_iframe_url === 'string'
-    ? settings.agent_drawer_iframe_url.trim()
+async function resolveAgentIframeUrl(uiPrefs) {
+  const explicit = typeof uiPrefs?.[UI_PREF_KEY_AGENT_IFRAME_URL] === 'string'
+    ? uiPrefs[UI_PREF_KEY_AGENT_IFRAME_URL].trim()
     : '';
   if (explicit) {
     return explicit;
@@ -254,9 +279,9 @@ async function resolveAgentIframeUrl(settings) {
   return resolved;
 }
 
-async function resolveAgentIframeSettings(settings) {
-  const enabled = parseBoolean(settings.agent_drawer_iframe);
-  const url = await resolveAgentIframeUrl(settings);
+async function resolveAgentIframeSettings(uiPrefs) {
+  const enabled = parseBoolean(uiPrefs?.[UI_PREF_KEY_AGENT_IFRAME]);
+  const url = await resolveAgentIframeUrl(uiPrefs || {});
   let normalized = '';
   try {
     normalized = String(url || '').trim();
@@ -326,6 +351,8 @@ initDebugConsole();
 let explorerSocket = null;
 const explorerPending = [];
 let explorerNeedsResync = false;
+let _explorerReqNextId = 1;
+const _explorerReqPending = new Map(); // id -> {resolve,reject,timer}
 
 // Dedicated Editor Socket.IO transport (separate from explorer and NiceGUI).
 let editorSocket = null;
@@ -449,8 +476,15 @@ function connectExplorerSocket() {
         } catch {
           return;
         }
+        const msgId = msg.id || msg?.data?.id || null;
         const type = msg.type || msg?.data?.type;
         const payload = msg.payload || msg?.data?.payload || {};
+        if (msgId && _explorerReqPending.has(msgId)) {
+          const pending = _explorerReqPending.get(msgId);
+          _explorerReqPending.delete(msgId);
+          try { clearTimeout(pending.timer); } catch (_) {}
+          try { pending.resolve({ type, payload, id: msgId }); } catch (_) {}
+        }
         if (type === 'agent:open') {
           handleAgentOpen(payload);
           return;
@@ -467,6 +501,11 @@ function connectExplorerSocket() {
         }
         if (type === 'watcher:raiseResult' && window.__cm6HandleWatcherRaiseResult) {
           window.__cm6HandleWatcherRaiseResult(payload);
+        }
+        if (type === 'prefs:setUi' && window.__cm6HandleUiPrefs) {
+          window.__cm6HandleUiPrefs(payload);
+        } else if (type === 'prefs:setUi') {
+          try { window.__cm6PendingUiPrefs = payload; } catch (_) {}
         }
         // The explorer websocket is THE authority for which file is active.
         // Update host toolbar whenever the active file changes.
@@ -522,13 +561,28 @@ function connectExplorerSocket() {
         } catch (_) {}
       });
 
-      window.__explorerBusSend = (type, payload) => {
+      window.__explorerBusSend = (type, payload, id) => {
         const msg = { type, payload: payload || {} };
+        if (id) msg.id = id;
         if (explorerSocket && explorerSocket.connected) {
           explorerSocket.emit('explorer_send', msg);
         } else {
           explorerPending.push(msg);
         }
+      };
+
+      window.__explorerBusRequest = (type, payload, timeoutMs) => {
+        const id = `req_${Date.now()}_${_explorerReqNextId++}`;
+        const t = Math.max(500, Number(timeoutMs) || 8000);
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            if (!_explorerReqPending.has(id)) return;
+            _explorerReqPending.delete(id);
+            reject(new Error(`Explorer request timeout: ${type}`));
+          }, t);
+          _explorerReqPending.set(id, { resolve, reject, timer });
+          window.__explorerBusSend(type, payload || {}, id);
+        });
       };
 
       // Android/Gecko often drops websockets while backgrounded; force a reconnect
@@ -1411,6 +1465,27 @@ const editorSettingsVsixBrowse = requireEl('#editor-settings-vsix-browse');
 const editorSettingsVsixInstall = requireEl('#editor-settings-vsix-install');
 const editorSettingsThemeList = requireEl('#editor-settings-theme-list');
 const editorSettingsExtList = requireEl('#editor-settings-ext-list');
+const editorSettingsAgentIframeToggle = requireEl('#editor-settings-agent-iframe');
+const editorSettingsAgentIframeUrlInput = requireEl('#editor-settings-agent-iframe-url');
+const editorSettingsAgentToggleText = requireEl('#editor-settings-agent-toggle-text');
+const editorSettingsAgentToggleEmoji = requireEl('#editor-settings-agent-toggle-emoji');
+const editorSettingsAgentToggleIconBrowse = requireEl('#editor-settings-agent-toggle-icon-browse');
+const editorSettingsAgentToggleIconClear = requireEl('#editor-settings-agent-toggle-icon-clear');
+const editorSettingsAgentShortcutsBtn = requireEl('#editor-settings-agent-shortcuts');
+
+const agentShortcutsModal = requireEl('#agent-shortcuts-modal');
+const agentShortcutsClose = requireEl('#agent-shortcuts-close');
+const agentShortcutsAdd = requireEl('#agent-shortcuts-add');
+const agentShortcutsList = requireEl('#agent-shortcuts-list');
+const agentShortcutsEditor = requireEl('#agent-shortcuts-editor');
+const agentShortcutLabel = requireEl('#agent-shortcut-label');
+const agentShortcutUrl = requireEl('#agent-shortcut-url');
+const agentShortcutEmoji = requireEl('#agent-shortcut-emoji');
+const agentShortcutIconBrowse = requireEl('#agent-shortcut-icon-browse');
+const agentShortcutIconClear = requireEl('#agent-shortcut-icon-clear');
+const agentShortcutIconPreview = requireEl('#agent-shortcut-icon-preview');
+const agentShortcutCancel = requireEl('#agent-shortcut-cancel');
+const agentShortcutSave = requireEl('#agent-shortcut-save');
 
 const editorExtManagerModal = requireEl('#editor-ext-manager-modal');
 const editorExtManagerClose = requireEl('#editor-ext-manager-close');
@@ -2400,6 +2475,7 @@ let cachedProjectRoot = null;
 let editorState = null;
 let branchMenuHandle = null;
 let agentDrawerHandle = null;
+let _agentSettingsUiMutating = false;
 let sessionState = {
   activeProject: null,
   currentPath: null,
@@ -2412,6 +2488,686 @@ let sessionStateTimer = null;
 let persistedSessionSnapshot = null;
 let externalRefreshInProgress = false;
 let lastPickerPath = HOME_DIR;
+let _agentShortcutsCache = [];
+let _agentShortcutEditingId = null;
+let _agentShortcutEditingAssetName = null;
+let _agentToggleEditingAssetName = null;
+
+function _setAgentIframeUrlInputEnabled(enabled) {
+  if (!editorSettingsAgentIframeUrlInput) return;
+  editorSettingsAgentIframeUrlInput.disabled = !enabled;
+  editorSettingsAgentIframeUrlInput.style.opacity = enabled ? '1' : '0.72';
+}
+
+function _agentIconUrlFromName(name) {
+  const safe = String(name || '').trim();
+  if (!safe) return '';
+  return `/api/app/file_editor_cm6/agent_icons/${encodeURIComponent(safe)}`;
+}
+
+function _renderAgentIconInto(el, icon) {
+  if (!el) return;
+  el.textContent = '';
+  const i = icon && typeof icon === 'object' ? icon : null;
+  const kind = i && typeof i.kind === 'string' ? i.kind : '';
+  if (kind === 'emoji') {
+    const emoji = typeof i.emoji === 'string' ? i.emoji.trim() : '';
+    el.textContent = emoji || (el.dataset?.defaultIcon || '💬');
+    return;
+  }
+  if (kind === 'asset') {
+    const name = typeof i.name === 'string' ? i.name.trim() : '';
+    if (!name) {
+      el.textContent = el.dataset?.defaultIcon || '💬';
+      return;
+    }
+    const img = document.createElement('img');
+    img.src = _agentIconUrlFromName(name);
+    img.alt = '';
+    img.setAttribute('aria-hidden', 'true');
+    el.appendChild(img);
+    return;
+  }
+  // Fallback: keep whatever is already there (manifest icon) if possible.
+  el.textContent = el.dataset?.defaultIcon || '💬';
+}
+
+function _applyAgentToggleToolbar(uiPrefs) {
+  const btn = document.getElementById('fe-agent-toggle');
+  if (!btn) return;
+  const iconEl = btn.querySelector('.fe-agent-icon');
+  const labelEl = btn.querySelector('.fe-agent-label');
+
+  const display = typeof uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_DISPLAY] === 'string'
+    ? uiPrefs[UI_PREF_KEY_AGENT_TOGGLE_DISPLAY].trim()
+    : 'icon';
+  btn.classList.remove('fe-agent-toggle--icon', 'fe-agent-toggle--text', 'fe-agent-toggle--both');
+  if (display === 'text') btn.classList.add('fe-agent-toggle--text');
+  else if (display === 'both') btn.classList.add('fe-agent-toggle--both');
+  else btn.classList.add('fe-agent-toggle--icon');
+
+  const text = typeof uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_TEXT] === 'string'
+    ? uiPrefs[UI_PREF_KEY_AGENT_TOGGLE_TEXT].trim()
+    : 'Agent';
+  if (labelEl) labelEl.textContent = text || 'Agent';
+
+  const icon = uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_ICON];
+  if (iconEl && icon && typeof icon === 'object' && icon.kind && icon.kind !== 'default') {
+    _renderAgentIconInto(iconEl, icon);
+  }
+}
+
+function _applyAgentSettingsControls(uiPrefs) {
+  const enabled = parseBoolean(uiPrefs?.[UI_PREF_KEY_AGENT_IFRAME]);
+  const explicitUrl =
+    typeof uiPrefs?.[UI_PREF_KEY_AGENT_IFRAME_URL] === 'string'
+      ? uiPrefs[UI_PREF_KEY_AGENT_IFRAME_URL].trim()
+      : '';
+  const display = typeof uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_DISPLAY] === 'string'
+    ? uiPrefs[UI_PREF_KEY_AGENT_TOGGLE_DISPLAY].trim()
+    : 'icon';
+  const toggleText = typeof uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_TEXT] === 'string'
+    ? uiPrefs[UI_PREF_KEY_AGENT_TOGGLE_TEXT].trim()
+    : 'Agent';
+  const toggleIcon = uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_ICON];
+  const shortcuts = Array.isArray(uiPrefs?.[UI_PREF_KEY_AGENT_SHORTCUTS])
+    ? uiPrefs[UI_PREF_KEY_AGENT_SHORTCUTS]
+    : [];
+
+  _agentSettingsUiMutating = true;
+  try {
+    editorSettingsAgentIframeToggle.checked = enabled;
+    editorSettingsAgentIframeUrlInput.value = explicitUrl;
+    _setAgentIframeUrlInputEnabled(enabled);
+
+    // Toggle display radios
+    try {
+      const radios = document.querySelectorAll('input[name="agent-toggle-display"]');
+      radios.forEach((r) => { r.checked = (r.value === display); });
+    } catch (_) {}
+
+    editorSettingsAgentToggleText.value = toggleText || 'Agent';
+    if (toggleIcon && typeof toggleIcon === 'object' && toggleIcon.kind === 'emoji') {
+      editorSettingsAgentToggleEmoji.value = String(toggleIcon.emoji || '').trim();
+      _agentToggleEditingAssetName = null;
+    } else if (toggleIcon && typeof toggleIcon === 'object' && toggleIcon.kind === 'asset') {
+      editorSettingsAgentToggleEmoji.value = '';
+      _agentToggleEditingAssetName = String(toggleIcon.name || '').trim() || null;
+    } else {
+      editorSettingsAgentToggleEmoji.value = '';
+      _agentToggleEditingAssetName = null;
+    }
+
+    _agentShortcutsCache = shortcuts.slice();
+  } finally {
+    _agentSettingsUiMutating = false;
+  }
+
+  _applyAgentToggleToolbar(uiPrefs);
+}
+
+function _sendAgentUiPrefUpdate(key, value) {
+  if (typeof window.__explorerBusSend !== 'function') {
+    host.toast('Explorer WebSocket is not connected yet.');
+    return;
+  }
+  window.__explorerBusSend('prefs:updateUi', { key, value });
+}
+
+function _applyAgentIframeUrlToDom(url) {
+  const iframe = document.getElementById('agent-iframe');
+  if (!iframe) return;
+  const next = String(url || '').trim();
+  if (!next) return;
+  const current = String(iframe.getAttribute('src') || '').trim();
+  if (current !== next) {
+    iframe.setAttribute('src', next);
+  }
+}
+
+function _renderShortcutIconNode(icon, sizePx = 16) {
+  const wrap = document.createElement('span');
+  wrap.style.display = 'inline-flex';
+  wrap.style.alignItems = 'center';
+  wrap.style.justifyContent = 'center';
+  wrap.style.width = `${sizePx}px`;
+  wrap.style.height = `${sizePx}px`;
+  const i = icon && typeof icon === 'object' ? icon : null;
+  if (!i) return wrap;
+  if (i.kind === 'emoji') {
+    wrap.textContent = String(i.emoji || '').trim();
+    return wrap;
+  }
+  if (i.kind === 'asset') {
+    const name = String(i.name || '').trim();
+    if (!name) return wrap;
+    const img = document.createElement('img');
+    img.src = _agentIconUrlFromName(name);
+    img.alt = '';
+    img.style.width = `${sizePx}px`;
+    img.style.height = `${sizePx}px`;
+    img.style.objectFit = 'contain';
+    wrap.appendChild(img);
+  }
+  return wrap;
+}
+
+function _renderAgentDropdown() {
+  const dd = document.getElementById('fe-agent-dd');
+  if (!dd) return;
+  dd.innerHTML = '';
+
+  const shortcuts = Array.isArray(_agentShortcutsCache) ? _agentShortcutsCache : [];
+  if (!shortcuts.length) {
+    const empty = document.createElement('div');
+    empty.className = 'fe-dd-item';
+    empty.style.opacity = '0.7';
+    empty.textContent = 'No shortcuts';
+    dd.appendChild(empty);
+  } else {
+    shortcuts.forEach((sc) => {
+      const label = typeof sc?.label === 'string' ? sc.label : '';
+      const url = typeof sc?.url === 'string' ? sc.url : '';
+      if (!label || !url) return;
+      const item = document.createElement('div');
+      item.className = 'fe-dd-item';
+      item.style.display = 'flex';
+      item.style.gap = '8px';
+      item.style.alignItems = 'center';
+      item.appendChild(_renderShortcutIconNode(sc.icon, 16));
+      const text = document.createElement('span');
+      text.textContent = label;
+      item.appendChild(text);
+      item.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        _closeAgentDropdown();
+        _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_IFRAME, true);
+        _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_IFRAME_URL, url);
+        // Give the controller rebind a beat if mode changes.
+        setTimeout(() => { try { agentDrawerHandle?.open?.(); } catch (_) {} }, 120);
+      });
+      dd.appendChild(item);
+    });
+  }
+
+  const sep = document.createElement('div');
+  sep.className = 'fe-dd-separator';
+  sep.style.margin = '6px 0';
+  dd.appendChild(sep);
+
+  const manage = document.createElement('div');
+  manage.className = 'fe-dd-item';
+  manage.textContent = 'Manage shortcuts…';
+  manage.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    _closeAgentDropdown();
+    _openAgentShortcutsModal();
+  });
+  dd.appendChild(manage);
+}
+
+function _closeAgentDropdown() {
+  const dd = document.getElementById('fe-agent-dd');
+  if (!dd) return;
+  dd.classList.remove('show');
+}
+
+function _openAgentDropdown() {
+  const dd = document.getElementById('fe-agent-dd');
+  if (!dd) return;
+  try { closeAllMenus(); } catch (_) {}
+  _renderAgentDropdown();
+  dd.classList.add('show');
+}
+
+function _openAgentShortcutsModal() {
+  agentShortcutsModal.classList.add('show');
+  agentShortcutsModal.setAttribute('aria-hidden', 'false');
+  _renderAgentShortcutsList();
+}
+
+function _closeAgentShortcutsModal() {
+  agentShortcutsModal.classList.remove('show');
+  agentShortcutsModal.setAttribute('aria-hidden', 'true');
+  _hideAgentShortcutEditor();
+}
+
+function _hideAgentShortcutEditor() {
+  agentShortcutsEditor.style.display = 'none';
+  _agentShortcutEditingId = null;
+  _agentShortcutEditingAssetName = null;
+  agentShortcutLabel.value = '';
+  agentShortcutUrl.value = '';
+  agentShortcutEmoji.value = '';
+  agentShortcutIconPreview.textContent = '';
+}
+
+function _showAgentShortcutEditor(entry) {
+  agentShortcutsEditor.style.display = '';
+  const e = entry && typeof entry === 'object' ? entry : {};
+  _agentShortcutEditingId = typeof e.id === 'string' && e.id.trim() ? e.id.trim() : null;
+  agentShortcutLabel.value = typeof e.label === 'string' ? e.label : '';
+  agentShortcutUrl.value = typeof e.url === 'string' ? e.url : '';
+
+  const icon = e.icon && typeof e.icon === 'object' ? e.icon : null;
+  _agentShortcutEditingAssetName = null;
+  agentShortcutEmoji.value = '';
+  if (icon && icon.kind === 'emoji') {
+    agentShortcutEmoji.value = String(icon.emoji || '').trim();
+  } else if (icon && icon.kind === 'asset') {
+    _agentShortcutEditingAssetName = String(icon.name || '').trim() || null;
+  }
+  _renderAgentShortcutPreview();
+}
+
+function _renderAgentShortcutPreview() {
+  agentShortcutIconPreview.textContent = '';
+  if (_agentShortcutEditingAssetName) {
+    const img = document.createElement('img');
+    img.src = _agentIconUrlFromName(_agentShortcutEditingAssetName);
+    img.alt = '';
+    img.style.width = '18px';
+    img.style.height = '18px';
+    img.style.objectFit = 'contain';
+    agentShortcutIconPreview.appendChild(img);
+    return;
+  }
+  const em = String(agentShortcutEmoji.value || '').trim();
+  if (em) {
+    agentShortcutIconPreview.textContent = em;
+  }
+}
+
+function _persistAgentShortcuts(nextList) {
+  _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_SHORTCUTS, nextList);
+}
+
+function _renderAgentShortcutsList() {
+  agentShortcutsList.innerHTML = '';
+  const shortcuts = Array.isArray(_agentShortcutsCache) ? _agentShortcutsCache.slice() : [];
+  if (!shortcuts.length) {
+    const empty = document.createElement('div');
+    empty.style.opacity = '0.7';
+    empty.textContent = 'No shortcuts yet.';
+    agentShortcutsList.appendChild(empty);
+    return;
+  }
+  shortcuts.forEach((sc, idx) => {
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '10px';
+    row.style.alignItems = 'center';
+    row.style.padding = '6px 0';
+    row.style.borderBottom = '1px solid rgba(255,255,255,0.06)';
+
+    const icon = _renderShortcutIconNode(sc.icon, 18);
+    row.appendChild(icon);
+
+    const meta = document.createElement('div');
+    meta.style.flex = '1';
+    const title = document.createElement('div');
+    title.textContent = sc.label || '(no label)';
+    const url = document.createElement('div');
+    url.style.fontSize = '0.78rem';
+    url.style.opacity = '0.7';
+    url.textContent = sc.url || '';
+    meta.appendChild(title);
+    meta.appendChild(url);
+    row.appendChild(meta);
+
+    const btn = (text) => {
+      const b = document.createElement('button');
+      b.className = 'fe-btn';
+      b.textContent = text;
+      return b;
+    };
+
+    const up = btn('↑');
+    up.title = 'Move up';
+    up.disabled = idx === 0;
+    up.addEventListener('click', () => {
+      if (idx <= 0) return;
+      const next = shortcuts.slice();
+      const t = next[idx - 1];
+      next[idx - 1] = next[idx];
+      next[idx] = t;
+      _persistAgentShortcuts(next);
+    });
+    row.appendChild(up);
+
+    const down = btn('↓');
+    down.title = 'Move down';
+    down.disabled = idx >= shortcuts.length - 1;
+    down.addEventListener('click', () => {
+      if (idx >= shortcuts.length - 1) return;
+      const next = shortcuts.slice();
+      const t = next[idx + 1];
+      next[idx + 1] = next[idx];
+      next[idx] = t;
+      _persistAgentShortcuts(next);
+    });
+    row.appendChild(down);
+
+    const edit = btn('Edit');
+    edit.addEventListener('click', () => _showAgentShortcutEditor(sc));
+    row.appendChild(edit);
+
+    const del = btn('Delete');
+    del.addEventListener('click', () => {
+      const next = shortcuts.slice();
+      next.splice(idx, 1);
+      _persistAgentShortcuts(next);
+      _hideAgentShortcutEditor();
+    });
+    row.appendChild(del);
+
+    agentShortcutsList.appendChild(row);
+  });
+}
+
+function _createAgentController(config) {
+  const enabled = !!config?.enabled;
+  _agentRuntimeMode = enabled ? 'iframe' : 'drawer';
+  if (enabled) {
+    return initAgentIframe({
+      url: config.url,
+      title: 'Agent',
+      allowAnyOrigin: true,
+      hideDrawerHeader: config.hideDrawerHeader !== false,
+    });
+  }
+  return initAgentDrawer();
+}
+
+function _destroyAgentController() {
+  if (!agentDrawerHandle) return;
+  try {
+    agentDrawerHandle.close?.();
+  } catch (_) {}
+  try {
+    agentDrawerHandle.destroy?.();
+  } catch (_) {}
+  agentDrawerHandle = null;
+}
+
+function _rebindAgentController(config) {
+  const drawerEl = document.getElementById('agent-drawer');
+  const wasOpen = !!(drawerEl && drawerEl.classList.contains('open'));
+  _destroyAgentController();
+  agentDrawerHandle = _createAgentController(config);
+  if (wasOpen) {
+    try {
+      agentDrawerHandle?.open?.();
+    } catch (_) {}
+  }
+}
+
+async function _applyAgentRuntimeConfigFromUi(uiPrefs) {
+  const seq = ++_agentConfigApplySeq;
+  const config = await resolveAgentIframeSettings(uiPrefs || {});
+  if (seq !== _agentConfigApplySeq) return config;
+
+  const previous = _agentRuntimeConfig;
+  _agentRuntimeConfig = config;
+
+  try {
+    window.__agentHostBase = new URL(config.url, window.location.href).origin;
+  } catch (_) {
+    window.__agentHostBase = getAgentHostBase();
+  }
+
+  try {
+    if (config.url) {
+      localStorage.setItem(AGENT_IFRAME_STORAGE_KEY, config.url);
+    }
+  } catch (_) {}
+
+  if (!agentDrawerHandle) {
+    return config;
+  }
+
+  const nextMode = config.enabled ? 'iframe' : 'drawer';
+  const currentMode = _agentRuntimeMode || nextMode;
+  const modeChanged = currentMode !== nextMode;
+  const headerChanged =
+    nextMode === 'iframe'
+    && !!previous
+    && previous.hideDrawerHeader !== config.hideDrawerHeader;
+
+  if (modeChanged || headerChanged) {
+    _rebindAgentController(config);
+    return config;
+  }
+
+  if (nextMode === 'iframe') {
+    if (typeof agentDrawerHandle?.setUrl === 'function') {
+      agentDrawerHandle.setUrl(config.url);
+    } else {
+      _applyAgentIframeUrlToDom(config.url);
+    }
+  }
+
+  return config;
+}
+
+function _initAgentSettingsUI() {
+  editorSettingsAgentIframeToggle.addEventListener('change', () => {
+    if (_agentSettingsUiMutating) return;
+    _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_IFRAME, !!editorSettingsAgentIframeToggle.checked);
+  });
+
+  const sendUrlUpdate = () => {
+    if (_agentSettingsUiMutating) return;
+    _sendAgentUiPrefUpdate(
+      UI_PREF_KEY_AGENT_IFRAME_URL,
+      (editorSettingsAgentIframeUrlInput.value || '').trim(),
+    );
+  };
+
+  editorSettingsAgentIframeUrlInput.addEventListener('change', sendUrlUpdate);
+  editorSettingsAgentIframeUrlInput.addEventListener('blur', sendUrlUpdate);
+  editorSettingsAgentIframeUrlInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      sendUrlUpdate();
+      editorSettingsAgentIframeUrlInput.blur();
+    }
+  });
+
+  // Toggle display radios
+  try {
+    const radios = document.querySelectorAll('input[name="agent-toggle-display"]');
+    radios.forEach((r) => {
+      r.addEventListener('change', () => {
+        if (_agentSettingsUiMutating) return;
+        if (!r.checked) return;
+        _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_TOGGLE_DISPLAY, r.value);
+      });
+    });
+  } catch (_) {}
+
+  const sendToggleText = () => {
+    if (_agentSettingsUiMutating) return;
+    _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_TOGGLE_TEXT, (editorSettingsAgentToggleText.value || '').trim());
+  };
+  editorSettingsAgentToggleText.addEventListener('change', sendToggleText);
+  editorSettingsAgentToggleText.addEventListener('blur', sendToggleText);
+
+  editorSettingsAgentToggleEmoji.addEventListener('change', () => {
+    if (_agentSettingsUiMutating) return;
+    const em = (editorSettingsAgentToggleEmoji.value || '').trim();
+    if (!em) return;
+    _agentToggleEditingAssetName = null;
+    _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_TOGGLE_ICON, { kind: 'emoji', emoji: em });
+  });
+
+  editorSettingsAgentToggleIconBrowse.addEventListener('click', async () => {
+    if (typeof window.__explorerBusRequest !== 'function') {
+      host.toast('Explorer connection unavailable');
+      return;
+    }
+    const picked = await pickFile(lastPickerPath || HOME_DIR);
+    if (!picked) return;
+    try {
+      const res = await window.__explorerBusRequest('prefs:vendorAgentIcon', { abs_path: picked }, 12000);
+      if (res?.payload?.ok && res.payload.name) {
+        _agentToggleEditingAssetName = res.payload.name;
+        _agentSettingsUiMutating = true;
+        try { editorSettingsAgentToggleEmoji.value = ''; } finally { _agentSettingsUiMutating = false; }
+        _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_TOGGLE_ICON, { kind: 'asset', name: res.payload.name });
+      }
+    } catch (e) {
+      host.toast(e?.message || 'Failed to vendor icon');
+    }
+  });
+
+  editorSettingsAgentToggleIconClear.addEventListener('click', () => {
+    if (_agentSettingsUiMutating) return;
+    _agentToggleEditingAssetName = null;
+    _agentSettingsUiMutating = true;
+    try { editorSettingsAgentToggleEmoji.value = ''; } finally { _agentSettingsUiMutating = false; }
+    _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_TOGGLE_ICON, { kind: 'default' });
+  });
+
+  editorSettingsAgentShortcutsBtn.addEventListener('click', () => {
+    _openAgentShortcutsModal();
+  });
+
+  agentShortcutsClose.addEventListener('click', _closeAgentShortcutsModal);
+  agentShortcutsModal.addEventListener('click', (ev) => {
+    if (ev.target === agentShortcutsModal) _closeAgentShortcutsModal();
+  });
+  agentShortcutsAdd.addEventListener('click', () => _showAgentShortcutEditor({}));
+  agentShortcutCancel.addEventListener('click', _hideAgentShortcutEditor);
+  agentShortcutEmoji.addEventListener('input', _renderAgentShortcutPreview);
+
+  agentShortcutIconBrowse.addEventListener('click', async () => {
+    if (typeof window.__explorerBusRequest !== 'function') {
+      host.toast('Explorer connection unavailable');
+      return;
+    }
+    const picked = await pickFile(lastPickerPath || HOME_DIR);
+    if (!picked) return;
+    try {
+      const res = await window.__explorerBusRequest('prefs:vendorAgentIcon', { abs_path: picked }, 12000);
+      if (res?.payload?.ok && res.payload.name) {
+        _agentShortcutEditingAssetName = res.payload.name;
+        agentShortcutEmoji.value = '';
+        _renderAgentShortcutPreview();
+      }
+    } catch (e) {
+      host.toast(e?.message || 'Failed to vendor icon');
+    }
+  });
+
+  agentShortcutIconClear.addEventListener('click', () => {
+    _agentShortcutEditingAssetName = null;
+    agentShortcutEmoji.value = '';
+    _renderAgentShortcutPreview();
+  });
+
+  agentShortcutSave.addEventListener('click', () => {
+    const label = (agentShortcutLabel.value || '').trim();
+    const url = (agentShortcutUrl.value || '').trim();
+    if (!label || !url) {
+      host.toast('Label and URL are required');
+      return;
+    }
+    const id = _agentShortcutEditingId || `sc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    let icon = null;
+    if (_agentShortcutEditingAssetName) {
+      icon = { kind: 'asset', name: _agentShortcutEditingAssetName };
+    } else {
+      const em = (agentShortcutEmoji.value || '').trim();
+      if (em) icon = { kind: 'emoji', emoji: em };
+    }
+    const next = Array.isArray(_agentShortcutsCache) ? _agentShortcutsCache.slice() : [];
+    const idx = next.findIndex((x) => x && x.id === id);
+    const entry = { id, label, url, icon };
+    if (idx >= 0) next[idx] = entry;
+    else next.push(entry);
+    _persistAgentShortcuts(next);
+    _hideAgentShortcutEditor();
+  });
+
+  _applyAgentSettingsControls(_latestUiPrefs || {});
+
+  // Agent dropdown: right-click + long-press.
+  try {
+    const agentBtn = document.getElementById('fe-agent-toggle');
+    if (agentBtn) {
+      let longPressTimer = null;
+      let suppressUntil = 0;
+      agentBtn.addEventListener('click', (ev) => {
+        if (Date.now() < suppressUntil) {
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          suppressUntil = 0;
+        }
+      }, true);
+      agentBtn.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        _openAgentDropdown();
+      });
+      agentBtn.addEventListener('touchstart', (ev) => {
+        if (longPressTimer) clearTimeout(longPressTimer);
+        longPressTimer = setTimeout(() => {
+          suppressUntil = Date.now() + 900;
+          _openAgentDropdown();
+        }, 520);
+      }, { passive: true });
+      const clearLp = () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } };
+      agentBtn.addEventListener('touchend', clearLp, { passive: true });
+      agentBtn.addEventListener('touchcancel', clearLp, { passive: true });
+      document.addEventListener('click', (ev) => {
+        const dd = document.getElementById('fe-agent-dd');
+        if (!dd || !dd.classList.contains('show')) return;
+        if (ev.target.closest('#fe-agent-toggle')) return;
+        if (ev.target.closest('#fe-agent-dd')) return;
+        _closeAgentDropdown();
+      }, false);
+    }
+  } catch (_) {}
+}
+
+window.__cm6HandleUiPrefs = function(payload) {
+  try {
+    const ui =
+      payload && typeof payload.ui === 'object' && payload.ui
+        ? payload.ui
+        : {};
+    _latestUiPrefs = { ...ui };
+    _hasUiPrefsSnapshot = true;
+    _resolveUiPrefsWaiters(_latestUiPrefs);
+    _applyAgentSettingsControls(_latestUiPrefs);
+    if (agentDrawerHandle) {
+      void _applyAgentRuntimeConfigFromUi(_latestUiPrefs);
+    }
+    // Keep agent dropdown in sync if open.
+    try {
+      const dd = document.getElementById('fe-agent-dd');
+      if (dd && dd.classList.contains('show')) {
+        _renderAgentDropdown();
+      }
+    } catch (_) {}
+    // Keep shortcuts modal list in sync while open.
+    try {
+      if (agentShortcutsModal && agentShortcutsModal.classList.contains('show')) {
+        _renderAgentShortcutsList();
+      }
+    } catch (_) {}
+  } catch (err) {
+    console.warn('[AgentPrefs] Failed to apply prefs:setUi payload:', err);
+  }
+};
+
+try {
+  if (window.__cm6PendingUiPrefs) {
+    window.__cm6HandleUiPrefs(window.__cm6PendingUiPrefs);
+    window.__cm6PendingUiPrefs = null;
+  }
+} catch (_) {}
 
 // WebSocket and autosave state
 let ws = null;
@@ -4039,6 +4795,7 @@ window.__cm6HandleWatcherModeStatus = (status) => {
 
 // Init watcher UI on load
 try { _initWatcherSettingsUI(); } catch (_) {}
+try { _initAgentSettingsUI(); } catch (_) {}
 
 try {
   if (window.__cm6PendingWatcherError) {
@@ -4838,23 +5595,9 @@ async function main() {
   branchMenuHandle = initBranchMenu();
   const agentExtensionManifest = await fetchAgentExtensionManifest();
   applyAgentIcon(agentExtensionManifest);
-  const frameworkSettings = await fetchFrameworkSettings();
-  const agentIframeConfig = await resolveAgentIframeSettings(frameworkSettings);
-  let agentHostBase = getAgentHostBase();
-  try {
-    if (agentIframeConfig && agentIframeConfig.url) {
-      agentHostBase = new URL(agentIframeConfig.url, window.location.href).origin;
-    }
-  } catch (_) {}
-  window.__agentHostBase = agentHostBase;
-  agentDrawerHandle = agentIframeConfig.enabled
-    ? initAgentIframe({
-        url: agentIframeConfig.url,
-        title: 'Agent',
-        allowAnyOrigin: true,
-        hideDrawerHeader: agentIframeConfig.hideDrawerHeader !== false,
-      })
-    : initAgentDrawer();
+  const initialUiPrefs = await waitForInitialUiPrefs(2200);
+  const agentIframeConfig = await _applyAgentRuntimeConfigFromUi(initialUiPrefs);
+  agentDrawerHandle = _createAgentController(agentIframeConfig);
 
   const serverState = await syncEditorState(true);
   

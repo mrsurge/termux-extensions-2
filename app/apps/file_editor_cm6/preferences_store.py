@@ -41,6 +41,16 @@ DEFAULT_UI_PREFS: Dict[str, Any] = {
     "gitIndicators": True,
     # Explorer drawer (Monaco-ish sticky scope headers)
     "explorerStickyHeaders": True,
+    # Agent drawer mode + iframe endpoint (owned by file_editor_cm6 main page).
+    "agentDrawerIframe": False,
+    "agentDrawerIframeUrl": "",
+    # Agent toggle chrome + shortcuts (global).
+    "agentToggleDisplay": "icon",  # "icon" | "text" | "both"
+    "agentToggleText": "Agent",
+    # icon descriptor: {"kind":"default"} | {"kind":"emoji","emoji":"💬"} | {"kind":"asset","name":"..."}
+    "agentToggleIcon": {"kind": "default"},
+    # Shortcuts list: [{"id": "...", "label": "...", "url": "...", "icon": {...}}]
+    "agentShortcuts": [],
 }
 
 

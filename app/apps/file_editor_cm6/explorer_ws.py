@@ -4,6 +4,8 @@ import logging
 import os
 import subprocess
 import urllib.request
+import hashlib
+import shutil
 from contextlib import suppress
 from typing import Dict, Any, List, Optional
 from fastapi import WebSocket, WebSocketDisconnect
@@ -53,9 +55,12 @@ from .git_helper import (
 from .stores import _history_store, _preferences_store
 from .project_sidecar import ProjectSidecar
 from .explorer import search, review
+from .preferences_store import DEFAULT_UI_PREFS
 
 # Logger setup
 logger = logging.getLogger(__name__)
+
+AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "agent_icons"
 
 
 def abs_to_rel(abs_path: str, project_root: str) -> Optional[str]:
@@ -1316,27 +1321,131 @@ class ExplorerDispatcher:
 
         if not isinstance(key, str) or not key.strip():
             return await self.send_error("prefs:updateUi requires 'key' (string)", msg_id)
+        key = key.strip()
+        if key not in DEFAULT_UI_PREFS:
+            return await self.send_error(f"Unknown UI preference key: {key}", msg_id)
 
-        if not isinstance(value, bool):
-            # Accept a few common serializations to be resilient.
-            if isinstance(value, (int, float)) and value in (0, 1):
-                value = bool(value)
-            elif isinstance(value, str):
-                lowered = value.strip().lower()
-                if lowered in ("true", "1", "yes", "on"):
-                    value = True
-                elif lowered in ("false", "0", "no", "off"):
-                    value = False
+        expected = DEFAULT_UI_PREFS[key]
+        if isinstance(expected, bool):
+            if not isinstance(value, bool):
+                # Accept a few common serializations to be resilient.
+                if isinstance(value, (int, float)) and value in (0, 1):
+                    value = bool(value)
+                elif isinstance(value, str):
+                    lowered = value.strip().lower()
+                    if lowered in ("true", "1", "yes", "on"):
+                        value = True
+                    elif lowered in ("false", "0", "no", "off"):
+                        value = False
+                    else:
+                        return await self.send_error(
+                            "prefs:updateUi requires 'value' (boolean)",
+                            msg_id,
+                        )
                 else:
                     return await self.send_error(
                         "prefs:updateUi requires 'value' (boolean)",
                         msg_id,
                     )
-            else:
+        elif isinstance(expected, str):
+            if value is None:
+                value = ""
+            elif not isinstance(value, str):
                 return await self.send_error(
-                    "prefs:updateUi requires 'value' (boolean)",
+                    "prefs:updateUi requires 'value' (string)",
                     msg_id,
                 )
+            value = value.strip()
+            if key == "agentToggleDisplay":
+                if value not in ("icon", "text", "both"):
+                    return await self.send_error(
+                        "agentToggleDisplay must be one of: icon, text, both",
+                        msg_id,
+                    )
+        elif isinstance(expected, dict):
+            if not isinstance(value, dict):
+                return await self.send_error(
+                    "prefs:updateUi requires 'value' (object)",
+                    msg_id,
+                )
+            if key == "agentToggleIcon":
+                kind = value.get("kind")
+                if kind == "emoji":
+                    emoji = value.get("emoji")
+                    if not isinstance(emoji, str) or not emoji.strip():
+                        return await self.send_error("agentToggleIcon.emoji is required", msg_id)
+                    value = {"kind": "emoji", "emoji": emoji.strip()}
+                elif kind == "asset":
+                    name = value.get("name")
+                    if not isinstance(name, str) or not name.strip():
+                        return await self.send_error("agentToggleIcon.name is required", msg_id)
+                    value = {"kind": "asset", "name": name.strip()}
+                elif kind == "default":
+                    value = {"kind": "default"}
+                else:
+                    return await self.send_error(
+                        "agentToggleIcon.kind must be 'default', 'emoji', or 'asset'",
+                        msg_id,
+                    )
+        elif isinstance(expected, list):
+            if not isinstance(value, list):
+                return await self.send_error(
+                    "prefs:updateUi requires 'value' (array)",
+                    msg_id,
+                )
+            if key == "agentShortcuts":
+                cleaned = []
+                if len(value) > 64:
+                    return await self.send_error("agentShortcuts max length is 64", msg_id)
+                for idx, raw in enumerate(value):
+                    if not isinstance(raw, dict):
+                        return await self.send_error(f"agentShortcuts[{idx}] must be an object", msg_id)
+                    label = raw.get("label")
+                    url = raw.get("url")
+                    if not isinstance(label, str) or not label.strip():
+                        return await self.send_error(f"agentShortcuts[{idx}].label is required", msg_id)
+                    if not isinstance(url, str) or not url.strip():
+                        return await self.send_error(f"agentShortcuts[{idx}].url is required", msg_id)
+                    sid = raw.get("id")
+                    if isinstance(sid, str) and sid.strip():
+                        sid = sid.strip()
+                    else:
+                        sid = f"sc_{idx}"
+                    icon = raw.get("icon")
+                    icon_clean = None
+                    if icon is not None:
+                        if not isinstance(icon, dict):
+                            return await self.send_error(f"agentShortcuts[{idx}].icon must be an object", msg_id)
+                        kind = icon.get("kind")
+                        if kind == "emoji":
+                            emoji = icon.get("emoji")
+                            if not isinstance(emoji, str) or not emoji.strip():
+                                return await self.send_error(f"agentShortcuts[{idx}].icon.emoji is required", msg_id)
+                            icon_clean = {"kind": "emoji", "emoji": emoji.strip()}
+                        elif kind == "asset":
+                            name = icon.get("name")
+                            if not isinstance(name, str) or not name.strip():
+                                return await self.send_error(f"agentShortcuts[{idx}].icon.name is required", msg_id)
+                            icon_clean = {"kind": "asset", "name": name.strip()}
+                        else:
+                            return await self.send_error(
+                                f"agentShortcuts[{idx}].icon.kind must be 'emoji' or 'asset'",
+                                msg_id,
+                            )
+                    cleaned.append(
+                        {
+                            "id": sid,
+                            "label": label.strip(),
+                            "url": url.strip(),
+                            "icon": icon_clean,
+                        }
+                    )
+                value = cleaned
+        else:
+            return await self.send_error(
+                "prefs:updateUi unsupported preference type",
+                msg_id,
+            )
 
         try:
             updated = _preferences_store.update_preferences(ui={key: value})
@@ -1346,6 +1455,51 @@ class ExplorerDispatcher:
 
         ui_prefs = updated.get("ui") or {}
         await self.broadcast("prefs:setUi", {"ui": ui_prefs})
+
+    async def handle_prefs_vendorAgentIcon(self, payload: dict, msg_id: str):
+        """Copy an icon asset into the global agent icon cache directory and return its name."""
+        abs_path = payload.get("abs_path") or payload.get("path")
+        if not isinstance(abs_path, str) or not abs_path.strip():
+            return await self.send_error("prefs:vendorAgentIcon requires abs_path", msg_id)
+
+        src = Path(abs_path).expanduser()
+        try:
+            src = src.resolve(strict=True)
+        except Exception:
+            return await self.send_error(f"Icon file not found: {abs_path}", msg_id)
+
+        if not src.is_file():
+            return await self.send_error("Icon path is not a file", msg_id)
+
+        ext = src.suffix.lower()
+        if ext not in (".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp"):
+            return await self.send_error("Unsupported icon type (svg/png/jpg/gif/webp)", msg_id)
+
+        try:
+            data = src.read_bytes()
+        except Exception as e:
+            return await self.send_error(f"Failed to read icon: {e}", msg_id)
+
+        digest = hashlib.sha256(data).hexdigest()[:16]
+        stem = src.stem
+        safe_stem = "".join(ch for ch in stem if ch.isalnum() or ch in ("-", "_"))[:40] or "icon"
+        name = f"{safe_stem}_{digest}{ext}"
+
+        try:
+            AGENT_ICON_DIR.mkdir(parents=True, exist_ok=True)
+            dst = (AGENT_ICON_DIR / name).resolve()
+            # Ensure dst stays within the icon dir.
+            if AGENT_ICON_DIR.resolve() not in dst.parents:
+                return await self.send_error("Invalid destination path", msg_id)
+            if not dst.exists():
+                tmp = dst.with_suffix(dst.suffix + ".tmp")
+                tmp.write_bytes(data)
+                tmp.replace(dst)
+        except Exception as e:
+            return await self.send_error(f"Failed to vendor icon: {e}", msg_id)
+
+        url = f"/api/app/file_editor_cm6/agent_icons/{name}"
+        await self.emit_personal("prefs:vendorAgentIconResult", {"ok": True, "name": name, "url": url}, msg_id)
 
     # --- File Operations (Broadcasts updates) ---
 

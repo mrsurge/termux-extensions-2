@@ -62,8 +62,6 @@ export default function init(root, _api, host) {
   const ipcLogOutput = root.querySelector('[data-role="ipc-log-output"]');
 
   const persistentNetworkToggle = root.querySelector('#setting-persistent-network');
-  const agentDrawerIframeToggle = root.querySelector('#setting-agent-drawer-iframe');
-  const agentDrawerIframeUrlInput = root.querySelector('#setting-agent-drawer-iframe-url');
 
   let ipcEventSource = null;
 
@@ -444,24 +442,10 @@ export default function init(root, _api, host) {
     }
   });
 
-  function setAgentIframeUrlEnabled(enabled) {
-    if (!agentDrawerIframeUrlInput) return;
-    agentDrawerIframeUrlInput.disabled = !enabled;
-    agentDrawerIframeUrlInput.style.opacity = enabled ? '1' : '0.7';
-  }
-
-  agentDrawerIframeToggle?.addEventListener('change', () => {
-    setAgentIframeUrlEnabled(!!agentDrawerIframeToggle.checked);
-  });
-
   saveIntegrationBtn?.addEventListener('click', async () => {
     const patch = {
       persistent_network_notification: !!persistentNetworkToggle?.checked,
-      agent_drawer_iframe: !!agentDrawerIframeToggle?.checked,
     };
-    if (agentDrawerIframeUrlInput) {
-      patch.agent_drawer_iframe_url = agentDrawerIframeUrlInput.value.trim();
-    }
 
     try {
       await persistSettingsPatch(patch);
@@ -492,16 +476,6 @@ export default function init(root, _api, host) {
     if (persistentNetworkToggle) {
       persistentNetworkToggle.checked = !!settings.persistent_network_notification;
     }
-
-    if (agentDrawerIframeToggle) {
-      agentDrawerIframeToggle.checked = !!settings.agent_drawer_iframe;
-    }
-
-    if (agentDrawerIframeUrlInput) {
-      agentDrawerIframeUrlInput.value = settings.agent_drawer_iframe_url || '';
-    }
-
-    setAgentIframeUrlEnabled(!!agentDrawerIframeToggle?.checked);
   }
 
   loadAndRenderAll();

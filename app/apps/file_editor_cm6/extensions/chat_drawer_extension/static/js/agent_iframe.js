@@ -2,7 +2,6 @@
 // Lightweight iframe-based agent drawer.
 
 const DEFAULT_IFRAME_URL = '/codex-agent';
-const DEFAULT_HOST_UI_ENDPOINT = '/api/host/ui';
 const DEFAULT_DRAWER_OPEN_ENDPOINT = '/api/host/drawer/open';
 const DEFAULT_DRAWER_CLOSE_ENDPOINT = '/api/host/drawer/close';
 
@@ -15,26 +14,33 @@ export function initAgentIframe(options = {}) {
   const header = drawer?.querySelector('.agent-drawer__header');
 
   if (!drawer || !toggle) {
-    return { open: () => {}, close: () => {} };
+    return { open: () => {}, close: () => {}, destroy: () => {}, setUrl: () => {} };
   }
 
-  const url = options.url || DEFAULT_IFRAME_URL;
+  let url = options.url || DEFAULT_IFRAME_URL;
   let hostOrigin = '';
-  try {
-    hostOrigin = new URL(url, window.location.href).origin;
-  } catch {
-    hostOrigin = '';
-  }
-  const hostUiEndpoint = options.hostUiEndpoint || (hostOrigin ? `${hostOrigin}${DEFAULT_HOST_UI_ENDPOINT}` : DEFAULT_HOST_UI_ENDPOINT);
-  const drawerOpenEndpoint = options.drawerOpenEndpoint || (hostOrigin ? `${hostOrigin}${DEFAULT_DRAWER_OPEN_ENDPOINT}` : DEFAULT_DRAWER_OPEN_ENDPOINT);
-  const drawerCloseEndpoint = options.drawerCloseEndpoint || (hostOrigin ? `${hostOrigin}${DEFAULT_DRAWER_CLOSE_ENDPOINT}` : DEFAULT_DRAWER_CLOSE_ENDPOINT);
+  let drawerOpenEndpoint = DEFAULT_DRAWER_OPEN_ENDPOINT;
+  let drawerCloseEndpoint = DEFAULT_DRAWER_CLOSE_ENDPOINT;
   const allowAnyOrigin = options.allowAnyOrigin === true;
   const hideDrawerHeader = options.hideDrawerHeader !== false;
+  const originalHeaderDisplay = header ? header.style.display : '';
   let isOpen = false;
+  let destroyed = false;
   let iframeOrigin = null;
 
   function updateAria() {
     drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  }
+
+  function refreshOriginsAndEndpoints() {
+    try {
+      hostOrigin = new URL(url, window.location.href).origin;
+    } catch {
+      hostOrigin = '';
+    }
+    drawerOpenEndpoint = options.drawerOpenEndpoint || (hostOrigin ? `${hostOrigin}${DEFAULT_DRAWER_OPEN_ENDPOINT}` : DEFAULT_DRAWER_OPEN_ENDPOINT);
+    drawerCloseEndpoint = options.drawerCloseEndpoint || (hostOrigin ? `${hostOrigin}${DEFAULT_DRAWER_CLOSE_ENDPOINT}` : DEFAULT_DRAWER_CLOSE_ENDPOINT);
+    resolveIframeOrigin();
   }
 
   function resolveIframeOrigin() {
@@ -81,12 +87,18 @@ export function initAgentIframe(options = {}) {
 
   function ensureIframeLoaded() {
     if (!iframe) return;
-    if (!iframe.src) {
+    if (!iframe.src || iframe.src !== url) {
       iframe.src = url;
     }
   }
 
+  function applyHeaderMode() {
+    if (!header) return;
+    header.style.display = hideDrawerHeader ? 'none' : originalHeaderDisplay;
+  }
+
   function openDrawer() {
+    if (destroyed) return;
     if (isOpen) return;
     drawer.classList.add('open');
     isOpen = true;
@@ -95,14 +107,13 @@ export function initAgentIframe(options = {}) {
     updateHostUi(true);
     if (hideDrawerHeader) {
       updateHostHints().then((ok) => {
-        if (ok && header) {
-          header.remove();
-        }
+        if (ok) applyHeaderMode();
       });
     }
   }
 
   function closeDrawer() {
+    if (destroyed) return;
     if (!isOpen) return;
     drawer.classList.remove('open');
     isOpen = false;
@@ -111,29 +122,71 @@ export function initAgentIframe(options = {}) {
   }
 
   drawer.classList.add('agent-drawer--iframe');
+  applyHeaderMode();
   if (title) {
     title.textContent = options.title || 'Agent';
   }
 
-  resolveIframeOrigin();
+  refreshOriginsAndEndpoints();
 
-  window.addEventListener('message', (event) => {
+  const onMessage = (event) => {
+    if (destroyed) return;
     if (!allowAnyOrigin && iframeOrigin && event.origin !== iframeOrigin) return;
     const data = event?.data;
     if (!data || typeof data !== 'object') return;
     if (data.type === 'codex_agent_close') {
       closeDrawer();
     }
-  });
+  };
 
-  toggle.addEventListener('click', () => {
+  const onToggleClick = () => {
+    if (destroyed) return;
     if (isOpen) closeDrawer();
     else openDrawer();
-  });
+  };
+
+  window.addEventListener('message', onMessage);
+  toggle.addEventListener('click', onToggleClick);
 
   if (closeBtn) {
     closeBtn.addEventListener('click', closeDrawer);
   }
 
-  return { open: openDrawer, close: closeDrawer };
+  function setUrl(nextUrl) {
+    const normalized = String(nextUrl || '').trim();
+    if (!normalized || normalized === url) return;
+    url = normalized;
+    refreshOriginsAndEndpoints();
+    if (iframe) {
+      iframe.src = url;
+    }
+  }
+
+  function destroy() {
+    if (destroyed) return;
+    if (isOpen) {
+      updateHostUi(false);
+    }
+    destroyed = true;
+    try {
+      window.removeEventListener('message', onMessage);
+    } catch (_) {}
+    try {
+      toggle.removeEventListener('click', onToggleClick);
+    } catch (_) {}
+    try {
+      if (closeBtn) closeBtn.removeEventListener('click', closeDrawer);
+    } catch (_) {}
+    try {
+      drawer.classList.remove('agent-drawer--iframe');
+      drawer.classList.remove('open');
+      drawer.setAttribute('aria-hidden', 'true');
+    } catch (_) {}
+    if (header) {
+      header.style.display = originalHeaderDisplay;
+    }
+    isOpen = false;
+  }
+
+  return { open: openDrawer, close: closeDrawer, destroy, setUrl };
 }

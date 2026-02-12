@@ -41,9 +41,28 @@ export function initAgentDrawer() {
   const sessionFullCheck = document.getElementById('agent-session-full');
   const sessionCancelBtn = document.getElementById('agent-session-cancel');
   const sessionCreateBtn = document.getElementById('agent-session-create');
+  const sessionBackdrop = sessionsModal?.querySelector('.agent-modal__backdrop') || null;
+  const drawerHeader = drawer?.querySelector('.agent-drawer__header') || null;
 
   if (!drawer || !toggle) {
-    return { open: () => {}, close: () => {} };
+    return { open: () => {}, close: () => {}, destroy: () => {} };
+  }
+
+  // If we are switching from iframe mode, restore native drawer chrome.
+  drawer.classList.remove('agent-drawer--iframe');
+  if (drawerHeader) {
+    drawerHeader.style.display = '';
+  }
+
+  const listenerCleanup = [];
+  function on(target, eventName, handler, options) {
+    if (!target || typeof target.addEventListener !== 'function') return;
+    target.addEventListener(eventName, handler, options);
+    listenerCleanup.push(() => {
+      try {
+        target.removeEventListener(eventName, handler, options);
+      } catch (_) {}
+    });
   }
 
   let isOpen = false;
@@ -1233,40 +1252,40 @@ export function initAgentDrawer() {
   // DELETED: saveShellState() - backend tracks shell_id
   
   // Event listeners
-  toggle.addEventListener('click', toggleDrawer);
-  closeBtn?.addEventListener('click', closeDrawer);
-  
-  collapseBtn?.addEventListener('click', () => {
+  on(toggle, 'click', toggleDrawer);
+  on(closeBtn, 'click', closeDrawer);
+
+  on(collapseBtn, 'click', () => {
     closeDrawer();
   });
-  
-  fullscreenBtn?.addEventListener('click', () => {
+
+  on(fullscreenBtn, 'click', () => {
     if (!isOpen) openDrawer();
     isFullscreen = !isFullscreen;
     drawer.classList.toggle('agent-drawer--fullscreen', isFullscreen);
   });
 
-  newSessionBtn?.addEventListener('click', () => {
+  on(newSessionBtn, 'click', () => {
     showSessionModal();
   });
-  
+
   // Current session card - click to show sessions modal
-  currentSessionCard?.addEventListener('click', () => {
+  on(currentSessionCard, 'click', () => {
     showSessionsModal();
   });
-  
+
   // Sessions modal handlers
-  sessionsModalClose?.addEventListener('click', hideSessionsModal);
-  sessionsModal?.querySelector('.agent-modal__backdrop')?.addEventListener('click', hideSessionsModal);
+  on(sessionsModalClose, 'click', hideSessionsModal);
+  on(sessionBackdrop, 'click', hideSessionsModal);
 
   // Files toggle handler
-  filesToggleBtn?.addEventListener('click', () => {
+  on(filesToggleBtn, 'click', () => {
     const drawerOpenBtn = document.getElementById('fe-drawer-open');
     drawerOpenBtn?.click();
   });
 
   // Refresh button now triggers manual reconnection
-  refreshBtn?.addEventListener('click', async () => {
+  on(refreshBtn, 'click', async () => {
     if (sharedShell.status === 'Connected') {
       notify('Already connected');
     } else {
@@ -1274,7 +1293,7 @@ export function initAgentDrawer() {
     }
   });
 
-  sendBtn?.addEventListener('click', () => {
+  on(sendBtn, 'click', () => {
     const text = composer?.value?.trim();
     if (!text) {
       notify('Enter a prompt to send to the agent.');
@@ -1283,19 +1302,19 @@ export function initAgentDrawer() {
     sendMessage(text);
   });
 
-  composer?.addEventListener('keydown', (e) => {
+  on(composer, 'keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       sendBtn?.click();
     }
   });
-  
+
   // Session config modal handlers
-  sessionModalClose?.addEventListener('click', hideSessionModal);
-  sessionCancelBtn?.addEventListener('click', hideSessionModal);
-  sessionCreateBtn?.addEventListener('click', createSessionFromModal);
-  
-  sessionAutoCheck?.addEventListener('change', () => {
+  on(sessionModalClose, 'click', hideSessionModal);
+  on(sessionCancelBtn, 'click', hideSessionModal);
+  on(sessionCreateBtn, 'click', createSessionFromModal);
+
+  on(sessionAutoCheck, 'change', () => {
     if (sessionFullCheck) {
       sessionFullCheck.disabled = !sessionAutoCheck.checked;
       if (!sessionAutoCheck.checked) {
@@ -1306,8 +1325,32 @@ export function initAgentDrawer() {
 
   // Initialize - sessions loaded on-demand when drawer opens
 
+  function destroy() {
+    try {
+      closeDrawer();
+    } catch (_) {}
+    hideSessionModal();
+    hideSessionsModal();
+    try {
+      drawer.classList.remove('agent-drawer--fullscreen');
+    } catch (_) {}
+    if (sharedShell.socket) {
+      try {
+        sharedShell.socket.disconnect();
+      } catch (_) {}
+      sharedShell.socket = null;
+    }
+    while (listenerCleanup.length) {
+      const off = listenerCleanup.pop();
+      try {
+        off && off();
+      } catch (_) {}
+    }
+  }
+
   return {
     open: openDrawer,
     close: closeDrawer,
+    destroy,
   };
 }

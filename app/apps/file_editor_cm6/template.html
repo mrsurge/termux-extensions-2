@@ -689,7 +689,7 @@
     #terminal-container .xterm-viewport::-webkit-scrollbar { width: 0px; }
     #terminal-container .xterm-viewport::-webkit-scrollbar-thumb { background: transparent; }
   }
-  .fe-agent-toggle { font-size: 1.1rem; line-height: 0; }
+  .fe-agent-toggle { font-size: 1.1rem; line-height: 0; display: inline-flex; gap: 6px; align-items: center; }
   .fe-agent-toggle .fe-agent-icon {
     display: inline-flex;
     align-items: center;
@@ -698,11 +698,19 @@
     height: 1.35rem;
     line-height: 0;
   }
+  .fe-agent-toggle .fe-agent-label {
+    font-size: 0.85rem;
+    line-height: 1;
+    opacity: 0.9;
+    padding-right: 2px;
+  }
   .fe-agent-toggle .fe-agent-icon img {
     width: 2.2rem;
     height: 2.2rem;
     display: block;
   }
+  .fe-agent-toggle.fe-agent-toggle--icon .fe-agent-label { display: none; }
+  .fe-agent-toggle.fe-agent-toggle--text .fe-agent-icon { display: none; }
   .fe-git-actions .fe-btn {
     flex: 0 0 auto;
     font-size: 0.8rem;
@@ -2029,9 +2037,11 @@
       <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
       <span id="fe-lsp-spinner" class="fe-lsp-spinner" title="Language server starting…" aria-hidden="true" style="display: none;"></span>
-      <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Agent drawer">
+      <button class="fe-menu-btn fe-agent-toggle fe-agent-toggle--icon" id="fe-agent-toggle" title="Agent drawer">
         <span class="fe-agent-icon" data-default-icon="💬">💬</span>
+        <span class="fe-agent-label">Agent</span>
       </button>
+      <div id="fe-agent-dd" class="fe-dropdown"></div>
     </div>
     <span id="fe-status" class="fe-status" style="display: none;"></span>
     <span id="edit-tracker-status" class="fe-status" style="display: none; margin-left: 0.5rem;"></span>
@@ -2728,6 +2738,124 @@
 
         <div style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
           <span id="watcher-status-indicator" style="font-size: 0.8rem; opacity: 0.7;">Active: ipc</span>
+        </div>
+      </div>
+
+      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
+
+      <div style="font-weight: 600; margin-bottom: 6px;">Agent Drawer (global)</div>
+      <div id="editor-settings-agent" style="font-size: 0.88rem; line-height: 1.6;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom: 8px;">
+          <input id="editor-settings-agent-iframe" type="checkbox" />
+          <span>Use iframe agent drawer</span>
+        </label>
+        <label for="editor-settings-agent-iframe-url" style="display:block; margin-bottom: 6px;">Agent iframe URL</label>
+        <input
+          id="editor-settings-agent-iframe-url"
+          class="lsp-rootrel-input"
+          type="text"
+          placeholder="http://127.0.0.1:12359/codex-agent"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+        />
+
+        <div class="fe-dd-separator" style="margin: 12px 0;"></div>
+
+        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Agent toggle</div>
+        <div style="display:flex; flex-direction: column; gap: 8px;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="radio" name="agent-toggle-display" value="icon" checked />
+            <span>Icon only</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="radio" name="agent-toggle-display" value="text" />
+            <span>Text only</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="radio" name="agent-toggle-display" value="both" />
+            <span>Icon + text</span>
+          </label>
+        </div>
+
+        <label for="editor-settings-agent-toggle-text" style="display:block; margin-top: 10px; margin-bottom: 6px;">Toggle text</label>
+        <input
+          id="editor-settings-agent-toggle-text"
+          class="lsp-rootrel-input"
+          type="text"
+          placeholder="Agent"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+        />
+
+        <div style="display:flex; gap:8px; align-items:flex-end; margin-top: 10px;">
+          <div style="flex:1;">
+            <label for="editor-settings-agent-toggle-emoji" style="display:block; margin-bottom: 6px;">Toggle emoji (optional)</label>
+            <input
+              id="editor-settings-agent-toggle-emoji"
+              class="lsp-rootrel-input"
+              type="text"
+              placeholder="💬"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+          </div>
+          <button class="fe-btn" id="editor-settings-agent-toggle-icon-browse">Browse icon…</button>
+          <button class="fe-btn" id="editor-settings-agent-toggle-icon-clear">Clear</button>
+        </div>
+
+        <div style="display:flex; gap:8px; align-items:center; margin-top: 12px;">
+          <button class="fe-btn" id="editor-settings-agent-shortcuts">Shortcuts…</button>
+          <span style="font-size: 0.8rem; opacity: 0.7;">Long-press / right-click the toggle to choose.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Agent Shortcuts Modal -->
+<div id="agent-shortcuts-modal" class="fe-modal" aria-hidden="true" style="z-index: 360;">
+  <div class="fe-modal-card" style="max-width: 760px;">
+    <div class="fe-modal-header">
+      <strong>Agent Shortcuts</strong>
+      <span style="flex:1"></span>
+      <button class="fe-btn" id="agent-shortcuts-close" aria-label="Close">✕</button>
+    </div>
+    <div class="fe-modal-body">
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom: 10px;">
+        <button class="fe-btn fe-btn-primary" id="agent-shortcuts-add">Add</button>
+      </div>
+      <div id="agent-shortcuts-list"></div>
+
+      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
+
+      <div id="agent-shortcuts-editor" style="display:none;">
+        <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 10px;">
+          <div style="flex:1; min-width: 220px;">
+            <label for="agent-shortcut-label" style="display:block; margin-bottom: 6px;">Label</label>
+            <input id="agent-shortcut-label" class="lsp-rootrel-input" type="text" placeholder="Codex Agent" autocomplete="off" spellcheck="false" />
+          </div>
+          <div style="flex:2; min-width: 260px;">
+            <label for="agent-shortcut-url" style="display:block; margin-bottom: 6px;">URL</label>
+            <input id="agent-shortcut-url" class="lsp-rootrel-input" type="text" placeholder="http://127.0.0.1:12359/codex-agent" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom: 10px;">
+          <div style="flex:1;">
+            <label for="agent-shortcut-emoji" style="display:block; margin-bottom: 6px;">Emoji (optional)</label>
+            <input id="agent-shortcut-emoji" class="lsp-rootrel-input" type="text" placeholder="🤖" autocomplete="off" spellcheck="false" />
+          </div>
+          <button class="fe-btn" id="agent-shortcut-icon-browse">Browse icon…</button>
+          <button class="fe-btn" id="agent-shortcut-icon-clear">Clear</button>
+          <div id="agent-shortcut-icon-preview" style="width:32px; height:32px; border-radius:8px; border:1px solid var(--border,#333); background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center;"></div>
+        </div>
+
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button class="fe-btn" id="agent-shortcut-cancel">Cancel</button>
+          <button class="fe-btn fe-btn-primary" id="agent-shortcut-save">Save</button>
         </div>
       </div>
     </div>

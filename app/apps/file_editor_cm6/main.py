@@ -70,6 +70,8 @@ IGNORE_PATTERNS = [
     '*.egg-info', '.DS_Store'
 ]
 
+AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "agent_icons"
+
 # Workbench adapter boot record (per worker process).
 # Purpose: make `/workbench_adapter/start` idempotent for page refresh / new clients
 # by reusing the adapter shell that was started at worker boot, when still alive.
@@ -1110,6 +1112,16 @@ async def serve_static(file_path: str):
     """Serve static files from the app's static directory"""
     static_dir = Path(__file__).parent / "static"
     file = static_dir / file_path
+    if not file.exists() or not file.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file)
+
+@file_editor_cm6_bp.get("/agent_icons/{name}")
+async def serve_agent_icon(name: str):
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="Invalid icon name")
+    file = (AGENT_ICON_DIR / safe)
     if not file.exists() or not file.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(file)
