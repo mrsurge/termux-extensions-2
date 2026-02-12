@@ -165,6 +165,15 @@ class ProjectSidecar:
                 # Format: "publisher.name"
                 "enabled_extensions": [],
             },
+            # File watcher configuration (project-scoped SSOT).
+            "watcher": {
+                # "ipc" (VS Code IPC, default) | "watchexec" (poll fallback) | "none" (lazy/manual)
+                "mode": "ipc",
+                # Storage type determines poll interval: "ssd" → 1500ms, "hdd" → 4500ms
+                "storage_type": "ssd",
+                # Explicit poll interval in ms (derived from storage_type by default)
+                "poll_interval_ms": 1500,
+            },
         }
 
     # --------------------------------------------------------------------- #

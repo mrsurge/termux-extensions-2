@@ -24,6 +24,7 @@ _pipe_state: Optional[PipeState] = None
 _rpc_counter: int = 0
 _rpc_pending: dict[int, asyncio.Future] = {}
 _stdout_reader_task: Optional[asyncio.Task] = None
+_rpc_write_lock: Optional[asyncio.Lock] = None
 
 
 def _project_hash(project_root: str) -> str:
@@ -98,18 +99,27 @@ async def adapter_rpc(method: str, params: Optional[dict] = None, timeout: float
     if _pipe_state is None or _pipe_state.process.stdin is None:
         raise RuntimeError("Adapter pipe not available — shell not started or stdin closed")
 
-    _rpc_counter += 1
-    rid = _rpc_counter
-    msg = {"jsonrpc": "2.0", "id": rid, "method": method}
-    if params is not None:
-        msg["params"] = params
+    global _rpc_write_lock
+    if _rpc_write_lock is None:
+        _rpc_write_lock = asyncio.Lock()
 
-    fut: asyncio.Future = asyncio.get_event_loop().create_future()
-    _rpc_pending[rid] = fut
+    async with _rpc_write_lock:
+        _rpc_counter += 1
+        rid = _rpc_counter
+        msg = {"jsonrpc": "2.0", "id": rid, "method": method}
+        if params is not None:
+            msg["params"] = params
 
-    line = json.dumps(msg) + "\n"
-    _pipe_state.process.stdin.write(line.encode("utf-8"))
-    await _pipe_state.process.stdin.drain()
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        _rpc_pending[rid] = fut
+
+        line = json.dumps(msg) + "\n"
+        try:
+            _pipe_state.process.stdin.write(line.encode("utf-8"))
+            await _pipe_state.process.stdin.drain()
+        except Exception:
+            _rpc_pending.pop(rid, None)
+            raise
 
     try:
         result = await asyncio.wait_for(fut, timeout=timeout)

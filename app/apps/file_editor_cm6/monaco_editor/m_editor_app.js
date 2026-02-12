@@ -993,6 +993,14 @@
   // Replaces the old vscode_api_ws raw WebSocket path.
   var _wbPending = new Map(); // request_id -> {resolve, reject, timer}
   var _wbNextId = 1;
+  var _wbFlow = {
+    generation: 0,
+    activePath: '',
+    openAckGeneration: -1,
+    openAckPath: '',
+    pendingDidChange: null, // { path, text, languageId, generation }
+    pendingSymbols: null, // { path, generation }
+  };
 
   // Gate: open_file calls are deferred until the readiness baton arrives.
   // On page reload (adapter already running), the baton arrives quickly.
@@ -1001,44 +1009,178 @@
     return !!window.__te2AdapterReady;
   }
 
+  function _wbCurrentGeneration() {
+    return Number(_wbFlow.generation || 0);
+  }
+
+  function _wbBumpGeneration(path, reason) {
+    _wbFlow.generation = _wbCurrentGeneration() + 1;
+    _wbFlow.activePath = String(path || '');
+    _wbFlow.openAckGeneration = -1;
+    _wbFlow.openAckPath = '';
+    _wbFlow.pendingDidChange = null;
+    _wbFlow.pendingSymbols = null;
+    try {
+      console.log('[workbench-flow] generation=' + _wbFlow.generation + ' reason=' + String(reason || 'unknown') + ' path=' + _wbFlow.activePath);
+    } catch (_) {}
+    return _wbFlow.generation;
+  }
+
+  function _wbIsFrameworkReady() {
+    return !!(editor && model && currentPath);
+  }
+
+  function _wbIsBarrierOpen(path, generation) {
+    if (!_isAdapterReady()) return false;
+    if (!_wbIsFrameworkReady()) return false;
+    var wantPath = String(path || currentPath || '');
+    var wantGen = Number.isFinite(Number(generation)) ? Number(generation) : _wbCurrentGeneration();
+    return Number(_wbFlow.openAckGeneration) === wantGen && String(_wbFlow.openAckPath || '') === wantPath;
+  }
+
+  function _wbSetOpenAck(path, generation) {
+    _wbFlow.openAckPath = String(path || '');
+    _wbFlow.openAckGeneration = Number.isFinite(Number(generation)) ? Number(generation) : _wbCurrentGeneration();
+  }
+
+  function _wbQueueDidChange(path, text, languageId, generation) {
+    _wbFlow.pendingDidChange = {
+      path: String(path || ''),
+      text: String(text || ''),
+      languageId: String(languageId || ''),
+      generation: Number.isFinite(Number(generation)) ? Number(generation) : _wbCurrentGeneration(),
+    };
+  }
+
+  function _wbQueueSymbols(path, generation) {
+    _wbFlow.pendingSymbols = {
+      path: String(path || ''),
+      generation: Number.isFinite(Number(generation)) ? Number(generation) : _wbCurrentGeneration(),
+    };
+  }
+
+  function _wbEmitDidChange(payload) {
+    try {
+      if (!editorSocket || !editorSocket.connected) return false;
+      if (!payload || !payload.path) return false;
+      editorSocket.emit('editor_workbench_did_change', {
+        path: payload.path,
+        text: String(payload.text || ''),
+        languageId: String(payload.languageId || ''),
+        generation: Number.isFinite(Number(payload.generation)) ? Number(payload.generation) : _wbCurrentGeneration(),
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function _wbFlushDidChangeIfReady() {
+    var pending = _wbFlow.pendingDidChange;
+    if (!pending) return;
+    if (!_wbIsBarrierOpen(pending.path, pending.generation)) return;
+    _wbFlow.pendingDidChange = null;
+    _wbEmitDidChange(pending);
+  }
+
+  function _wbFlushSymbolsIfReady() {
+    var pending = _wbFlow.pendingSymbols;
+    if (!pending) return;
+    if (!_wbIsBarrierOpen(pending.path, pending.generation)) return;
+    _wbFlow.pendingSymbols = null;
+    _bcRequestSymbols(pending.path, { generation: pending.generation, fromQueue: true });
+  }
+
+  function _wbFlushPendingAfterOpen() {
+    _wbFlushDidChangeIfReady();
+    _wbFlushSymbolsIfReady();
+  }
+
+  function _wbPublishDidChange(path, text, languageId, generation) {
+    var payload = {
+      path: String(path || ''),
+      text: String(text || ''),
+      languageId: String(languageId || ''),
+      generation: Number.isFinite(Number(generation)) ? Number(generation) : _wbCurrentGeneration(),
+    };
+    if (_wbIsBarrierOpen(payload.path, payload.generation)) {
+      return _wbEmitDidChange(payload);
+    }
+    _wbQueueDidChange(payload.path, payload.text, payload.languageId, payload.generation);
+    return false;
+  }
+
+  function _wbOpenFileFlow(opts) {
+    var o = opts || {};
+    var path = String(o.path || '');
+    var generation = Number.isFinite(Number(o.generation)) ? Number(o.generation) : _wbCurrentGeneration();
+    var lang = String(o.languageId || '');
+    var requestId = String(o.requestId || ('diag_' + Date.now() + '_open'));
+    var source = String(o.source || 'open');
+    if (!path || !editorSocket || !editorSocket.connected) return Promise.resolve({ ok: false, deferred: true });
+
+    try {
+      editorSocket.emit('editor_diagnostics_consumer_pending', { path: path, request_id: requestId });
+    } catch (_) {}
+
+    if (!_isAdapterReady()) {
+      console.log('[readiness] open_file deferred (' + source + ') — waiting for baton');
+      return Promise.resolve({ ok: false, deferred: true });
+    }
+
+    return editorWorkbenchCall(
+      'open_file',
+      {
+        path: path,
+        languageId: lang,
+        uri: String(o.uri || ''),
+        requestId: requestId,
+        forceRefresh: !!o.forceRefresh,
+        generation: generation,
+      },
+      { timeoutMs: Number.isFinite(Number(o.timeoutMs)) ? Number(o.timeoutMs) : 8000 }
+    ).then(function (res) {
+      if (generation !== _wbCurrentGeneration() || String(path) !== String(currentPath || '')) {
+        return { ok: false, stale: true };
+      }
+      _wbSetOpenAck(path, generation);
+      try {
+        editorSocket.emit('editor_diagnostics_consumer_ready', { path: path, request_id: requestId });
+      } catch (_) {}
+      _wbFlushPendingAfterOpen();
+      return res;
+    });
+  }
+
   // Replay: called when baton arrives, triggers open_file for the currently loaded file.
   function _replayOpenFileAfterBaton() {
     if (!currentPath || !editor) return;
     var model = editor.getModel ? editor.getModel() : null;
     if (!model) return;
     var lang = (model.getLanguageId ? model.getLanguageId() : '') || '';
+    var generation = _wbCurrentGeneration();
+    if (!generation || String(_wbFlow.activePath || '') !== String(currentPath || '')) {
+      generation = _wbBumpGeneration(currentPath, 'baton_replay');
+    }
     var replayReqId = 'baton_' + Date.now();
     console.log('[readiness] baton arrived, replaying open_file for', currentPath);
     try {
-      editorSocket.emit('editor_diagnostics_consumer_ready', { path: currentPath, request_id: replayReqId });
+      var content = model.getValue();
+      _wbQueueDidChange(currentPath, content, lang, generation);
     } catch (_) {}
-    editorWorkbenchCall(
-      'open_file',
-      {
-        path: currentPath,
-        languageId: lang,
-        uri: (model && model.uri) ? String(model.uri.toString()) : '',
-        requestId: replayReqId,
-        forceRefresh: true,
-      },
-      { timeoutMs: 8000 }
-    ).then(function () {
-      // Push draft content if available.
-      try {
-        var content = model.getValue();
-        if (content && editorSocket && editorSocket.connected) {
-          editorSocket.emit('editor_workbench_did_change', {
-            path: currentPath,
-            text: content,
-            languageId: lang,
-          });
-        }
-      } catch (_) {}
+    _wbQueueSymbols(currentPath, generation);
+    _wbOpenFileFlow({
+      path: currentPath,
+      languageId: lang,
+      uri: (model && model.uri) ? String(model.uri.toString()) : '',
+      requestId: replayReqId,
+      forceRefresh: true,
+      generation: generation,
+      source: 'baton',
+      timeoutMs: 8000,
     }).catch(function (e) {
       console.warn('[readiness] baton replay open_file failed', e);
     });
-    // Also trigger breadcrumb symbols now that adapter is ready.
-    try { _bcRequestSymbols(currentPath); } catch (_) {}
   }
 
   function editorWorkbenchCall(method, params, opts) {
@@ -2612,11 +2754,12 @@
               content: content,
               base_sha256: baseSha256,
             });
-            editorSocket.emit('editor_workbench_did_change', {
-              path: currentPath,
-              text: content,
-              languageId: model.getLanguageId ? model.getLanguageId() : '',
-            });
+            _wbPublishDidChange(
+              currentPath,
+              content,
+              model.getLanguageId ? model.getLanguageId() : '',
+              _wbCurrentGeneration()
+            );
           } catch (_) {}
           requestDraftDiff('local');
         }, 120);
@@ -3161,6 +3304,7 @@
       }
     }
     currentPath = absPath;
+    var backendGeneration = _wbBumpGeneration(currentPath, 'openPathFromBackend');
     try { bcUpdatePath(currentPath, true); } catch (_) {}
     baseSha256 = sha256;
 
@@ -3176,6 +3320,28 @@
     if (hasDraft) {
       emitToHost('editor_draft_state', { has_draft: true, path: absPath });
     }
+
+    try {
+      var backendReqId = 'diag_' + Date.now() + '_backend';
+      var backendText = model && model.getValue ? model.getValue() : '';
+      _wbQueueDidChange(
+        currentPath,
+        backendText,
+        model && model.getLanguageId ? model.getLanguageId() : lang,
+        backendGeneration
+      );
+      _wbQueueSymbols(currentPath, backendGeneration);
+      _wbOpenFileFlow({
+        path: currentPath,
+        languageId: lang,
+        uri: (model && model.uri) ? String(model.uri.toString()) : '',
+        requestId: backendReqId,
+        forceRefresh: true,
+        generation: backendGeneration,
+        source: 'openPathFromBackend',
+        timeoutMs: 8000,
+      }).catch(function () {});
+    } catch (_) {}
 
     ensureTouchSelection('open-post');
     setTimeout(function(){ ensureTouchSelection('open-tick'); }, 0);
@@ -3227,6 +3393,7 @@
             // Apply directly from SSOT payload (draft wins).
             baseSha256 = f.base_sha256 || baseSha256;
             currentPath = f.path || currentPath;
+            var ssotGeneration = _wbBumpGeneration(currentPath, 'ssot');
             try { bcUpdatePath(currentPath, true); } catch (_) {}
             ensureEditorWithPrefs().then(function() {
               var lang = languageFromPath(currentPath);
@@ -3294,51 +3461,25 @@
               // activate extensions and register providers for the active file.
               try {
                 var ssotReqId = (f && f.request_id) ? String(f.request_id) : ('diag_' + Date.now() + '_ssot');
-                // Diagnostics consumer gating: tell the server we are about to request diagnostics,
-                // but only consider emitting diagnostics/update once we declare ready for this request.
-                try {
-                  if (editorSocket && editorSocket.connected && currentPath) {
-                    editorSocket.emit('editor_diagnostics_consumer_pending', { path: currentPath, request_id: ssotReqId });
-                  }
-                } catch (_) {}
-                try {
-                  if (editorSocket && editorSocket.connected && currentPath) {
-                    // At this point, model/currentPath exist and marker wiring is installed.
-                    editorSocket.emit('editor_diagnostics_consumer_ready', { path: currentPath, request_id: ssotReqId });
-                  }
-                } catch (_) {}
-                // Gate: only call open_file if adapter is ready (baton received).
-                // On cold start, baton arrives later and _replayOpenFileAfterBaton handles it.
-                if (_isAdapterReady()) {
-                editorWorkbenchCall(
-                  'open_file',
-                  {
-                    path: currentPath,
-                    languageId: lang,
-                    uri: (model && model.uri) ? String(model.uri.toString()) : '',
-                    requestId: ssotReqId,
-                    forceRefresh: true,
-                  },
-                  { timeoutMs: 8000 }
-                ).then(function () {
-                  try {
-                    if (model && editorSocket && editorSocket.connected && currentPath) {
-                      var content = model.getValue();
-                      if (content) {
-                        editorSocket.emit('editor_workbench_did_change', {
-                          path: currentPath,
-                          text: content,
-                          languageId: model.getLanguageId ? model.getLanguageId() : '',
-                        });
-                      }
-                    }
-                  } catch (_) {}
-                  // Request symbols AFTER open_file completes.
-                  try { _bcRequestSymbols(currentPath); } catch (_) {}
+                var ssotText = '';
+                try { ssotText = model && model.getValue ? model.getValue() : ''; } catch (_) {}
+                _wbQueueDidChange(
+                  currentPath,
+                  ssotText,
+                  model && model.getLanguageId ? model.getLanguageId() : lang,
+                  ssotGeneration
+                );
+                _wbQueueSymbols(currentPath, ssotGeneration);
+                _wbOpenFileFlow({
+                  path: currentPath,
+                  languageId: lang,
+                  uri: (model && model.uri) ? String(model.uri.toString()) : '',
+                  requestId: ssotReqId,
+                  forceRefresh: true,
+                  generation: ssotGeneration,
+                  source: 'ssot',
+                  timeoutMs: 8000,
                 }).catch(function () {});
-                } else {
-                  console.log('[readiness] open_file deferred (ssot) — waiting for baton');
-                }
               } catch (_) {}
 
               // If diagnostics arrived early (before model/currentPath), apply from cache now.
@@ -3364,6 +3505,7 @@
           // Always follow SSOT open across clients.
           baseSha256 = payload.base_sha256 || baseSha256;
           currentPath = payload.path;
+          var openGeneration = _wbBumpGeneration(currentPath, 'editor:open');
           try { bcUpdatePath(currentPath, true); } catch (_) {}
           ensureEditorWithPrefs().then(function() {
             var lang = languageFromPath(currentPath);
@@ -3404,52 +3546,25 @@
             // This is intentionally best-effort and must not block the editor UI.
             try {
               var openReqId = (payload && payload.request_id) ? String(payload.request_id) : ('diag_' + Date.now() + '_open');
-              // Diagnostics consumer gating for open: ensure the bridge won't forward diagnostics
-              // until the editor model/marker plumbing is ready for this request.
-              try {
-                if (editorSocket && editorSocket.connected && currentPath) {
-                  editorSocket.emit('editor_diagnostics_consumer_pending', { path: currentPath, request_id: openReqId });
-                }
-              } catch (_) {}
-              try {
-                if (editorSocket && editorSocket.connected && currentPath) {
-                  editorSocket.emit('editor_diagnostics_consumer_ready', { path: currentPath, request_id: openReqId });
-                }
-              } catch (_) {}
-              // Gate: only call open_file if adapter is ready.
-              if (_isAdapterReady()) {
-              editorWorkbenchCall(
-                'open_file',
-                {
-                  path: currentPath,
-                  languageId: lang,
-                  uri: (model && model.uri) ? String(model.uri.toString()) : '',
-                  requestId: openReqId,
-                  forceRefresh: true,
-                },
-                { timeoutMs: 8000 }
-              )
-                .then(function () {
-                  // If model has a draft applied, push it to extension host for live diagnostics
-                  try {
-                    if (model && editorSocket && editorSocket.connected && currentPath) {
-                      var content = model.getValue();
-                      if (content) {
-                        editorSocket.emit('editor_workbench_did_change', {
-                          path: currentPath,
-                          text: content,
-                          languageId: model.getLanguageId ? model.getLanguageId() : '',
-                        });
-                      }
-                    }
-                  } catch (_) {}
-                  // Request symbols AFTER open_file completes (adapter now knows about this file).
-                  try { _bcRequestSymbols(currentPath); } catch (_) {}
-                })
-                .catch(function () {});
-              } else {
-                console.log('[readiness] open_file deferred (editor:open) — waiting for baton');
-              }
+              var openText = '';
+              try { openText = model && model.getValue ? model.getValue() : ''; } catch (_) {}
+              _wbQueueDidChange(
+                currentPath,
+                openText,
+                model && model.getLanguageId ? model.getLanguageId() : lang,
+                openGeneration
+              );
+              _wbQueueSymbols(currentPath, openGeneration);
+              _wbOpenFileFlow({
+                path: currentPath,
+                languageId: lang,
+                uri: (model && model.uri) ? String(model.uri.toString()) : '',
+                requestId: openReqId,
+                forceRefresh: true,
+                generation: openGeneration,
+                source: 'editor:open',
+                timeoutMs: 8000,
+              }).catch(function () {});
             } catch (_) {}
             // Apply cached diagnostics for this file immediately after open/model swap.
             try { _applyCachedDiagnosticsForActive(); } catch (_) {}
@@ -3909,9 +4024,13 @@
     }
   }
 
-  function _bcRequestSymbols(absPath) {
+  function _bcRequestSymbols(absPath, opts) {
+    var generation = (opts && Number.isFinite(Number(opts.generation))) ? Number(opts.generation) : _wbCurrentGeneration();
     if (!editorSocket || !editorSocket.connected) return;
-    if (!_isAdapterReady()) return; // Wait for readiness baton before requesting symbols.
+    if (!_wbIsBarrierOpen(absPath, generation)) {
+      _wbQueueSymbols(absPath, generation);
+      return;
+    }
     var seq = ++_bcSymbolsSeq;
     var langId = (model && model.getLanguageId) ? model.getLanguageId() : '';
     if (!langId) langId = languageFromPath(absPath) || '';
@@ -3920,8 +4039,11 @@
     editorWorkbenchCall('symbols', {
       path: absPath,
       languageId: langId,
+      generation: generation,
     }, { timeoutMs: tms }).then(function(result) {
       if (seq !== _bcSymbolsSeq) return; // stale
+      if (generation !== _wbCurrentGeneration()) return; // stale generation
+      if (String(absPath || '') !== String(currentPath || '')) return; // stale path
       // Unwrap adapter response: {ok, result: [...]} or raw array
       var symbols = result;
       if (symbols && typeof symbols === 'object' && !Array.isArray(symbols)) {

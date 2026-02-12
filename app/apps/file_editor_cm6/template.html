@@ -1980,6 +1980,10 @@
       <button id="fe-drawer-close" class="fe-btn">✕</button>
     </header>
     <div class="fe-drawer-body">
+      <div id="fe-watcher-refresh-bar" style="display:none;padding:4px 8px;text-align:center;background:var(--bg2,#1a1a1a);border-bottom:1px solid var(--border,#333);">
+        <button id="fe-watcher-refresh-btn" class="fe-btn" style="font-size:12px;padding:2px 10px;" title="Refresh file tree (no active watcher)">↻ Refresh</button>
+        <span style="font-size:11px;opacity:0.6;margin-left:6px;">No active watcher</span>
+      </div>
       <ul id="fe-file-tree" class="fe-tree" data-project=""></ul>
       <div id="fe-search-overlay" class="fe-search-overlay"></div>
       <footer class="fe-git-footer">
@@ -2677,6 +2681,55 @@
 
       <div style="font-weight: 600; margin-bottom: 6px;">Extensions (per-project)</div>
       <div id="editor-settings-ext-list"></div>
+
+      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
+
+      <div style="font-weight: 600; margin-bottom: 6px;">File Watcher (per-project)</div>
+      <div id="editor-settings-watcher" style="font-size: 0.88rem; line-height: 1.6;">
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="radio" name="watcher-mode" value="ipc" checked />
+            <span>VS Code IPC <span style="opacity:0.6">(default — uses code-server's native watcher)</span></span>
+          </label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="radio" name="watcher-mode" value="watchexec" />
+            <span id="watcher-mode-watchexec-label">watchexec poll <span style="opacity:0.6">(stat-polling, no inotify)</span></span>
+          </label>
+          <div id="watcher-watchexec-opts" style="margin-left: 26px; display: none;">
+            <div style="display:flex; gap:12px; align-items:center; margin-bottom: 6px;">
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="radio" name="watcher-storage" value="ssd" checked />
+                <span>SSD <span style="opacity:0.6">(1500ms)</span></span>
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="radio" name="watcher-storage" value="hdd" />
+                <span>HDD <span style="opacity:0.6">(4500ms)</span></span>
+              </label>
+            </div>
+          </div>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="radio" name="watcher-mode" value="none" />
+            <span>None <span style="opacity:0.6">(manual refresh only)</span></span>
+          </label>
+        </div>
+
+        <div class="fe-dd-separator" style="margin: 10px 0;"></div>
+
+        <div style="font-size: 0.82rem; opacity: 0.7; margin-bottom: 6px;">
+          Raise inotify limit (requires sudo)
+        </div>
+        <div style="display:flex; gap:8px; align-items:flex-end;">
+          <div style="flex:1;">
+            <input id="watcher-raise-password" type="password" placeholder="sudo password (optional)" style="width:100%; padding:6px 8px; border-radius:6px; border:1px solid var(--fe-border, #2c333b); background: var(--fe-panel, #0f141a); color: inherit; font-size: 0.85rem;" />
+          </div>
+          <button class="fe-btn fe-btn-primary" id="watcher-raise-btn" style="white-space:nowrap;">Raise Limit</button>
+        </div>
+        <div id="watcher-raise-status" style="font-size: 0.8rem; margin-top: 4px; min-height: 1.2em;"></div>
+
+        <div style="display:flex; align-items:center; gap:8px; margin-top: 8px;">
+          <span id="watcher-status-indicator" style="font-size: 0.8rem; opacity: 0.7;">Active: ipc</span>
+        </div>
+      </div>
     </div>
   </div>
 </div>

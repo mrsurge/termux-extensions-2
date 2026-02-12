@@ -676,6 +676,35 @@ async function handleJsonRpc(reqObj) {
     return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs() } };
   }
 
+  if (method === "adapter.resubscribeWatcher") {
+    try {
+      await wb.resubscribeWatcher();
+      return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs() } };
+    } catch (e) {
+      return { jsonrpc: "2.0", id, error: { code: -32000, message: String(e?.message ?? e) } };
+    }
+  }
+
+  if (method === "adapter.reconnect") {
+    const p = (params && typeof params === "object") ? params : {};
+    try {
+      wb.disconnect();
+      const connectParams = {
+        folder: p.workspaceFolder ?? null,
+        authority: p.authority ?? DEFAULT_REMOTE_AUTHORITY,
+        proxyHttp: p.proxyHttp ?? DEFAULT_CODE_SERVER_HTTP,
+        token: p.token ?? "00000000000000000000",
+      };
+      const result = await wb.connect(connectParams);
+      state.session = { ...state.session, ...wb.state };
+      logStatus("adapter_reconnected");
+      return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs(), ...result } };
+    } catch (e) {
+      logStatus("adapter_reconnect_error");
+      return { jsonrpc: "2.0", id, error: { code: -32000, message: String(e?.message ?? e) } };
+    }
+  }
+
   if (method === "adapter.heapSnapshot") {
     const p = (params && typeof params === "object") ? params : {};
     const label = typeof p.label === "string" ? p.label : "manual";
@@ -756,6 +785,7 @@ async function handleJsonRpc(reqObj) {
       languageId: p.languageId,
       authority,
       forceRefresh: forceRefreshEff,
+      generation: p.generation,
     });
     batonLog(`wb.openFile returned for ${resolvedPath}`);
     logStatus("open_file", { path: resolvedPath });
@@ -797,6 +827,7 @@ async function handleJsonRpc(reqObj) {
       providerHandle: p.providerHandle,
       languageId: p.languageId,
       timeoutMs: p.timeoutMs,
+      generation: p.generation,
     });
     return { jsonrpc: "2.0", id, result };
   }
@@ -830,6 +861,7 @@ async function handleJsonRpc(reqObj) {
       path: resolvedPath,
       text: String(p.text ?? ""),
       languageId: p.languageId,
+      generation: p.generation,
     });
     return { jsonrpc: "2.0", id, result };
   }

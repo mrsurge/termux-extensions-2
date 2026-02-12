@@ -1,0 +1,71 @@
+version: "1"
+
+shells:
+  watchexec-poll:
+    backend: pipe
+    cwd: ${ctx:PROJECT_ROOT}
+    command:
+      - sh
+      - -lc
+      - >-
+        echo "watchexec-ready" &&
+        watchexec
+        --poll "${ctx:POLL_INTERVAL_MS}ms"
+        --emit-events-to json-stdio
+        --no-process-group
+        --shell=none
+        --ignore ".git"
+        --ignore ".git/**"
+        --ignore "node_modules/**"
+        --ignore "__pycache__/**"
+        --ignore "*.pyc"
+        --ignore ".mypy_cache/**"
+        --ignore ".pytest_cache/**"
+        --ignore ".tox/**"
+        --ignore ".venv/**"
+        --ignore "venv/**"
+        --ignore ".DS_Store"
+        --ignore "*.swp"
+        --ignore "*.swo"
+        --ignore "*~"
+        --ignore ".cache/**"
+        --ignore "dist/**"
+        --ignore "build/**"
+        --ignore "out/**"
+        --ignore "*.egg-info/**"
+        --ignore ".eggs/**"
+        --ignore "coverage/**"
+        --ignore ".nyc_output/**"
+        --ignore ".next/**"
+        --ignore ".nuxt/**"
+        --ignore ".output/**"
+        --ignore "*.min.js"
+        --ignore "*.min.css"
+        --ignore "*.map"
+        --ignore ".hg/**"
+        --ignore ".svn/**"
+        --ignore "CVS/**"
+        --ignore "Thumbs.db"
+        --ignore ".history/**"
+        --ignore ".ionide/**"
+        -- cat
+        | while IFS= read -r line; do printf '%s\n' "$line"; printf '%s\n' "$line" >&2; done
+    env:
+      TE_APP_ID: ${ctx:APP_ID}
+      PROJECT_ROOT: ${ctx:PROJECT_ROOT}
+    subgroups:
+      - ${ctx:APP_ID}
+      - watchexec
+      - "project:${ctx:PROJECT_HASH}"
+    ui:
+      subgroup_styles:
+        watchexec:
+          bg: rgba(18, 30, 20, 0.92)
+          border: rgba(80, 200, 120, 0.70)
+        project:*:
+          bg: rgba(0, 0, 0, 0.88)
+          border: rgba(29, 70, 126, 0.88)
+    readiness:
+      type: output_match
+      pattern: "watchexec-ready"
+      timeout: 10

@@ -1,4 +1,5 @@
 import hashlib
+import asyncio
 import os
 import subprocess
 import time
@@ -22,6 +23,41 @@ _wb_log = _logging.getLogger("editor_ws.workbench")
 
 _ISSUES_DUMP_WAITING: dict[str, str] = {}
 _ISSUES_DUMP_TTL_S = 20.0
+_WORKBENCH_PATH_LOCKS: dict[str, asyncio.Lock] = {}
+_WORKBENCH_OPEN_BASELINE: dict[str, dict[str, Any]] = {}
+
+
+def _workbench_get_lock(abs_path: str) -> asyncio.Lock:
+    lock = _WORKBENCH_PATH_LOCKS.get(abs_path)
+    if lock is None:
+        lock = asyncio.Lock()
+        _WORKBENCH_PATH_LOCKS[abs_path] = lock
+    return lock
+
+
+def _coerce_generation(raw: Any) -> Optional[int]:
+    try:
+        if raw is None or raw == "":
+            return None
+        return int(raw)
+    except Exception:
+        return None
+
+
+def _mark_open_baseline(abs_path: str, generation: Optional[int]) -> None:
+    _WORKBENCH_OPEN_BASELINE[abs_path] = {
+        "generation": generation,
+        "ts_ms": int(time.time() * 1000),
+    }
+
+
+def _has_open_baseline(abs_path: str, generation: Optional[int]) -> bool:
+    baseline = _WORKBENCH_OPEN_BASELINE.get(abs_path)
+    if not baseline:
+        return False
+    if generation is None:
+        return True
+    return baseline.get("generation") == generation
 
 
 def _runtime_meta() -> dict:
@@ -898,6 +934,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload = data if isinstance(data, dict) else {}
         abs_path = payload.get("path", "")
         request_id = payload.get("request_id", f"wb_{int(time.time() * 1000)}")
+        generation = _coerce_generation(payload.get("generation"))
 
         project = _active_project()
         if not project or not abs_path:
@@ -916,31 +953,35 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             )
             return
 
-        try:
-            from ..workbench_adapter_shell_manager import adapter_rpc
+        lock = _workbench_get_lock(abs_path)
+        async with lock:
+            try:
+                from ..workbench_adapter_shell_manager import adapter_rpc
 
-            resp = await adapter_rpc(
-                "vscode.openFile",
-                {
-                    "path": abs_path,
-                    "languageId": payload.get("languageId", ""),
-                    "requestId": request_id,
-                    "forceRefresh": payload.get("forceRefresh", False),
-                },
-            )
-            result = resp.get("result", resp)
-            await self.emit(
-                "editor:workbench_open_file_response",
-                {"request_id": request_id, "result": result},
-                room=sid,
-            )
-        except Exception as exc:
-            _wb_log.error("[workbench] open_file failed: %s", exc)
-            await self.emit(
-                "editor:workbench_open_file_response",
-                {"request_id": request_id, "error": str(exc)},
-                room=sid,
-            )
+                resp = await adapter_rpc(
+                    "vscode.openFile",
+                    {
+                        "path": abs_path,
+                        "languageId": payload.get("languageId", ""),
+                        "requestId": request_id,
+                        "forceRefresh": payload.get("forceRefresh", False),
+                        "generation": generation,
+                    },
+                )
+                _mark_open_baseline(abs_path, generation)
+                result = resp.get("result", resp)
+                await self.emit(
+                    "editor:workbench_open_file_response",
+                    {"request_id": request_id, "result": result},
+                    room=sid,
+                )
+            except Exception as exc:
+                _wb_log.error("[workbench] open_file failed: %s", exc)
+                await self.emit(
+                    "editor:workbench_open_file_response",
+                    {"request_id": request_id, "error": str(exc)},
+                    room=sid,
+                )
 
     async def on_editor_workbench_hover(self, sid, data):
         """Hover request via workbench adapter (stdio pipe)."""
@@ -989,6 +1030,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload = data if isinstance(data, dict) else {}
         request_id = payload.get("request_id", f"sym_{int(time.time() * 1000)}")
         abs_path = payload.get("path", "")
+        generation = _coerce_generation(payload.get("generation"))
 
         project = _active_project()
         if not project or not abs_path:
@@ -1002,33 +1044,44 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         lang_id = payload.get("languageId", "")
         _wb_log.info("[symbols] request path=%s lang=%s", abs_path, lang_id)
 
-        try:
-            from ..workbench_adapter_shell_manager import adapter_rpc
+        lock = _workbench_get_lock(abs_path)
+        async with lock:
+            if not _has_open_baseline(abs_path, generation):
+                await self.emit(
+                    "editor:workbench_symbols_response",
+                    {"request_id": request_id, "error": "document_not_ready"},
+                    room=sid,
+                )
+                return
 
-            resp = await adapter_rpc(
-                "vscode.documentSymbols",
-                {
-                    "path": abs_path,
-                    "languageId": lang_id,
-                },
-            )
-            result = resp.get("result", resp)
-            sym_count = len(result) if isinstance(result, list) else "non-list"
-            _wb_log.info("[symbols] response path=%s lang=%s count=%s ok=%s", abs_path, lang_id, sym_count, resp.get("ok"))
-            if not isinstance(result, list) or not result:
-                _wb_log.warning("[symbols] raw adapter resp keys=%s", list(resp.keys()) if isinstance(resp, dict) else type(resp))
-            await self.emit(
-                "editor:workbench_symbols_response",
-                {"request_id": request_id, "result": result},
-                room=sid,
-            )
-        except Exception as exc:
-            _wb_log.error("[symbols] FAILED path=%s lang=%s err=%s", abs_path, lang_id, exc)
-            await self.emit(
-                "editor:workbench_symbols_response",
-                {"request_id": request_id, "error": str(exc)},
-                room=sid,
-            )
+            try:
+                from ..workbench_adapter_shell_manager import adapter_rpc
+
+                resp = await adapter_rpc(
+                    "vscode.documentSymbols",
+                    {
+                        "path": abs_path,
+                        "languageId": lang_id,
+                        "generation": generation,
+                    },
+                )
+                result = resp.get("result", resp)
+                sym_count = len(result) if isinstance(result, list) else "non-list"
+                _wb_log.info("[symbols] response path=%s lang=%s count=%s ok=%s", abs_path, lang_id, sym_count, resp.get("ok"))
+                if not isinstance(result, list) or not result:
+                    _wb_log.warning("[symbols] raw adapter resp keys=%s", list(resp.keys()) if isinstance(resp, dict) else type(resp))
+                await self.emit(
+                    "editor:workbench_symbols_response",
+                    {"request_id": request_id, "result": result},
+                    room=sid,
+                )
+            except Exception as exc:
+                _wb_log.error("[symbols] FAILED path=%s lang=%s err=%s", abs_path, lang_id, exc)
+                await self.emit(
+                    "editor:workbench_symbols_response",
+                    {"request_id": request_id, "error": str(exc)},
+                    room=sid,
+                )
 
     async def on_editor_breadcrumb_navigate(self, sid, data):
         """Breadcrumb directory click → relay to explorer socket + open drawer."""
@@ -1068,24 +1121,31 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         abs_path = payload.get("path", "")
         text = payload.get("text", "")
         language_id = payload.get("languageId", "")
+        generation = _coerce_generation(payload.get("generation"))
 
         project = _active_project()
         if not project or not abs_path:
             return
 
-        try:
-            from ..workbench_adapter_shell_manager import adapter_rpc
+        lock = _workbench_get_lock(abs_path)
+        async with lock:
+            if not _has_open_baseline(abs_path, generation):
+                _wb_log.warning("[workbench] didChange dropped (no open baseline) path=%s gen=%s", abs_path, generation)
+                return
+            try:
+                from ..workbench_adapter_shell_manager import adapter_rpc
 
-            await adapter_rpc(
-                "vscode.didChange",
-                {
-                    "path": abs_path,
-                    "text": text,
-                    "languageId": language_id,
-                },
-            )
-        except Exception as exc:
-            _wb_log.error("[workbench] didChange failed: %s", exc)
+                await adapter_rpc(
+                    "vscode.didChange",
+                    {
+                        "path": abs_path,
+                        "text": text,
+                        "languageId": language_id,
+                        "generation": generation,
+                    },
+                )
+            except Exception as exc:
+                _wb_log.error("[workbench] didChange failed: %s", exc)
 
     async def on_editor_readiness_check(self, sid, data):
         """Sequential readiness chain triggered by the editor iframe.

@@ -33,6 +33,7 @@ Status: implemented and working for **all built-in languages** (Python, TypeScri
 - **Diagnostics counter** (toolbar badge) resets to zero on file switch, then updates when new diagnostics arrive for the new file.
 - The workbench adapter and code-server are started eagerly at worker boot. Code-server readiness (pipe stdout regex) **gates** adapter startup, eliminating race conditions.
 - Working end-to-end (over stdio pipe): `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`, `vscode.didChange`.
+- **File watcher pipeline** (working): TE2 subscribes to code-server's native `remoteFilesystem` IPC channel to receive file change events — zero overhead, no extension needed. Triple fallback: VS Code IPC (default) → raise inotify limit (recovery) → watchexec poll (last resort) → none/lazy (manual). Watcher mode is persisted per-project in ProjectSidecar. Explorer git decorations propagate to parent directories on every change.
 - **Builtin extensions** are loaded by default (95 scanned from code-server, filtered to ~30 language-related).
 - **LanguageId detection**: the adapter infers language from file extension when not provided (supports 40+ extensions including `.mjs`, `.cjs`, `.mts`, `.cts`, `.jsx`, `.tsx`).
 
@@ -95,6 +96,16 @@ Live diagnostics pipeline (didChange, stdio pipe):
     → editor_ws.py → adapter stdin → $acceptModelChanged (rpcId 85, isFlush:true)
     → ext host mirror model update → Pyright/TS re-analysis
     → $changeMany → diagnostics_bridge.py → editor Socket.IO → browser markers
+
+File watcher pipeline (IPC — triple fallback):
+  code-server parcel watcher detects disk change
+    → remoteFilesystem IPC channel fires EventFire (ResponseType 204)
+    → workbench_client.mjs onEvent({type: "watcher/fileChanges", changes: [...]})
+    → diagnostics_bridge.py WS → abs→rel path conversion
+    → explorer:event {type: "watcher:files", payload: {created, changed, deleted}}
+    → main.js dispatch → explorer.js handleExplorerEvent
+    → git:status refresh + directory re-listing + parent dir decoration propagation
+  Fallbacks: raise inotify limit → watchexec --poll -- cat → none (manual refresh)
 ```
 
 ---
@@ -569,11 +580,13 @@ Iframe emits (debounced 120ms):
 emit('editor_workbench_did_change', {
   path: "<abs>",
   text: "<full buffer>",
-  languageId: "<language>"
+  languageId: "<language>",
+  generation: <int>
 })
 ```
 
 Server forwards to adapter via stdio pipe. The adapter calls `$acceptModelChanged` (rpcId 85, `isFlush: true`) on the extension host. Diagnostics flow back through the bridge.
+Safety invariant: `didChange` and symbols are accepted only after `openFile` baseline exists for the same `(path, generation)`.
 
 ### Relay events (UI commands)
 ```js
@@ -1470,15 +1483,22 @@ Diagnostics use a **server-side bridge** over the existing editor Socket.IO chan
 - Nudge-on-connect: `adapter_rpc("vscode.openFile", ...)` over stdio pipe to force fresh diagnostics
 
 RPC features use **editor Socket.IO → stdio pipe** (no separate WS):
-- `editor_workbench_open_file` → `adapter_rpc("vscode.openFile", { path, languageId })` → `{ ok }`
+- `editor_workbench_open_file` → `adapter_rpc("vscode.openFile", { path, languageId, generation })` → `{ ok }`
 - `editor_workbench_hover` → `adapter_rpc("vscode.hover", { path, lineNumber, column, languageId })` → `{ hover }`
-- `editor_workbench_symbols` → `adapter_rpc("vscode.documentSymbols", { path, languageId })` → `{ symbols[] }`
-- `editor_workbench_did_change` → `adapter_rpc("vscode.didChange", { path, text, languageId })` → fire-and-forget (diagnostics arrive via bridge)
+- `editor_workbench_symbols` → `adapter_rpc("vscode.documentSymbols", { path, languageId, generation })` → `{ symbols[] }`
+- `editor_workbench_did_change` → `adapter_rpc("vscode.didChange", { path, text, languageId, generation })` → fire-and-forget (diagnostics arrive via bridge)
 
 Live diagnostics data flow:
 - User types in Monaco → 120ms debounce → `editor_workbench_did_change` → `editor_ws.py` → adapter stdin → `$acceptModelChanged` (rpcId 85, full text replace via `isFlush: true`) → extension host re-analyzes → `$changeMany` → diagnostics bridge → browser
 - The adapter tracks per-document `versionId` (monotonically increasing, reset to 1 on `openFile`) and previous line/char counts for correct range replacement
-- File watchers handle post-save diagnostics automatically (Pyright/TS detect disk changes without `didChange`)
+- File watchers (Section 19) handle post-save diagnostics automatically — code-server's parcel watcher detects disk changes and feeds `$onFileEvent` to the extension host; TE2 subscribes to the same IPC channel for explorer updates
+
+Document-symbol ordering hardening (validated):
+- Monaco now gates workbench flow by `(path, generation)` and requires `open_file` ack before queued `didChange` and symbols flush.
+- `editor:ssot`, `editor:open`, baton replay, and `openPathFromBackend` all use the same ordered open flow.
+- `editor_ws.py` serializes `open_file`/`didChange`/symbols per path and tracks open baselines.
+- Adapter invariants return `document_not_open` / `stale_generation` for out-of-order requests.
+- Adapter stdio writes are serialized in `workbench_adapter_shell_manager.py` to avoid request interleaving.
 
 The old `vscode_api_ws` WS path is **bypassed** for all language feature RPC. It remains only for VSIX/grammar/theme management.
 
@@ -1633,3 +1653,94 @@ Total transitive: ~54 unique .ts files from vs/base/ (all MIT licensed)
 - Separator icon: `Codicon.chevronRight` (already in the bundle)
 - Height: ~22px (matches VS Code's breadcrumb bar)
 
+## 19) File watcher pipeline — triple fallback
+
+**Status**: working end-to-end. IPC watcher tested on small repos; ENOSPC recovery and watchexec fallback wired.
+
+### Architecture
+
+Code-server runs VS Code's native parcel watcher (`@parcel/watcher`) internally — it manages inotify watches in a separate child process. The extension host does NOT run its own watcher; code-server feeds it `$onFileEvent` automatically. TE2 does NOT need to send file events to the extension host.
+
+Instead, TE2 subscribes to code-server's `remoteFilesystem` IPC channel (management connection) to **receive** file change events as the workbench client. This is zero-overhead — we piggyback on the watcher code-server already runs.
+
+### IPC protocol
+
+- **Channel**: `"remoteFilesystem"`
+- **Subscribe**: `listen("remoteFilesystem", "fileChange", [sessionUUID])` → sends `[102, requestId, "remoteFilesystem", "fileChange"]` (EventListen)
+- **Watch**: `call("remoteFilesystem", "watch", [sessionUUID, watchId, uri, {recursive, excludes}])`
+- **Events**: arrive as EventFire (ResponseType 204): `header=[204, requestId]`, `body=[{resource: {path, scheme, authority}, type: 0|1|2}]`
+- **FileChangeType**: 0=UPDATED, 1=ADDED, 2=DELETED (VS Code enum)
+- **ENOSPC errors**: arrive as string body (not array), e.g. `"[File Watcher ('parcel')] Inotify limit reached (ENOSPC) (path: ...)"`
+- **URI format**: `{$mid:1, path:"/abs/path", scheme:"vscode-remote", authority:"localhost:18180"}`
+
+### Pipeline
+
+```
+code-server parcel watcher detects disk change
+  → remoteFilesystem IPC EventFire (ResponseType 204)
+  → workbench_client.mjs _setupFileWatcher() onEvent callback
+    → event body is array? → emit {type: "watcher/fileChanges", changes: [...]}
+    → event body is ENOSPC string? → emit {type: "watcher/enospc", message: "..."}
+  → diagnostics_bridge.py WS handler
+    → watcher/fileChanges: parse changes, convert abs→rel paths
+      → EXPLORER_SIO.emit("explorer:event", {type: "watcher:files", payload: {created, changed, deleted}})
+    → watcher/enospc: forward as watcher:error
+      → EXPLORER_SIO.emit("explorer:event", {type: "watcher:error", payload: {message}})
+  → main.js explorer:event listener → dispatch to explorer.js
+    → watcher:files: git:status refresh + directory re-listing for open dirs
+      → handle_git_status() calls broadcast_git_status() + broadcast_git_decorations()
+      → applyAggregatedGitStatusFlags() propagates decorations to parent directory DOM nodes
+    → watcher:error: showWatcherLimitModal() (standalone raise modal)
+```
+
+### Triple fallback (4 modes)
+
+Watcher mode is persisted per-project in `ProjectSidecar._data.watcher`:
+
+| Mode | Description | Overhead |
+|------|-------------|----------|
+| `ipc` (default) | Subscribe to code-server's native parcel watcher via IPC | Zero — piggybacks on existing watcher |
+| raise inotify limit | On ENOSPC: modal prompts user to raise `fs.inotify.max_user_watches` via `sysctl`, then resubscribe IPC | One-time sysctl call |
+| `watchexec` | `watchexec --poll --emit-events-to json-stdio --shell=none -- cat` in a framework shell | Stat-polling: SSD=1500ms, HDD=4500ms |
+| `none` | No background watching; manual refresh button in explorer | Zero |
+
+Mode selection is in the Editor Settings modal (`Editor > Settings… > File Watcher`). The ENOSPC standalone modal appears automatically when the IPC watcher hits the limit. The user can raise the limit or switch to watchexec/none from either modal.
+
+### watchexec framework shell
+
+When watchexec mode is active, a framework shell runs `watchexec --poll <interval> --emit-events-to json-stdio --shell=none -- cat`:
+
+- `--emit-events-to json-stdio` pipes JSON events to the child command's stdin
+- `cat` reads stdin → stdout (thinnest possible passthrough)
+- Stdout is fanned to both the pipe (for Python reader) and stderr (for observability), same pattern as code-server's shell wrapper
+- `--ignore ".git" --ignore ".git/**"` (need both — glob only matches contents, not the dir itself)
+- `--shell=none` (not `--no-shell` — removed in watchexec v2.3.3)
+- Events are parsed by `watchexec_shell_manager._stdout_reader_loop()` and forwarded into the same `watcher:files` pipeline
+
+### Adapter RPCs for watcher lifecycle
+
+- `adapter.resubscribeWatcher` — dispose old IPC subscription, call `_setupFileWatcher()` again (used after raising inotify limit)
+- `adapter.reconnect({workspaceFolder})` — `disconnect()` + `connect()` with new workspace (used on project switch; adapter process stays alive)
+
+### Key files
+
+- `workbench_client.mjs`: `_setupFileWatcher()` (~line 2075), `resubscribeWatcher()` (~line 2126), `_fsWatcherSub` field
+- `server.mjs`: `adapter.resubscribeWatcher` and `adapter.reconnect` RPC handlers
+- `vscode_oss_runtime/.../ipc.mjs`: `EventListen` (102), `EventFire` (204), `EventDispose` (103), `listen()` method
+- `diagnostics_bridge.py`: `watcher/enospc` and `watcher/fileChanges` handlers
+- `explorer_ws.py`: `handle_watcher_setMode`, `handle_watcher_getConfig`, `handle_watcher_raiseLimit`, eager start on connect
+- `watchexec_shell_manager.py`: `ensure_watchexec_shell()`, `stop_watchexec_shell()`, `is_watchexec_available()`, `_forward_watchexec_event()`
+- `shellspec/watchexec.yaml`: framework shell spec with VS Code parity ignore patterns
+- `project_sidecar.py`: `watcher` field in `_default_data()`: `{mode, storage_type, poll_interval_ms}`
+- `main.js`: watcher settings UI wiring, ENOSPC modal, `watcher:config`/`watcher:modeStatus` handlers
+- `explorer.js`: `watcher:files` handler, `watcher:modeChanged` handler, manual refresh button
+- `template.html`: File Watcher section in editor-settings-modal, refresh bar in explorer drawer
+
+### Previous approach (deprecated)
+
+The original plan was to use Python watchdog → adapter stdio → `$onFileEvent` (rpcId 92). This was abandoned because:
+1. We ARE the workbench client — code-server already sends `$onFileEvent` to the extension host
+2. Python watchdog `recursive=True` consumed inotify watches independently of code-server, doubling resource usage
+3. The IPC approach has zero overhead — we subscribe to events code-server already generates
+
+The `te2-extension-api-bridge` VS Code extension approach was also abandoned — subscribing directly to the IPC channel is simpler and doesn't require loading an extension.

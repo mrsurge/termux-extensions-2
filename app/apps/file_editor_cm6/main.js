@@ -455,6 +455,19 @@ function connectExplorerSocket() {
           handleAgentOpen(payload);
           return;
         }
+        // Watcher config/status events → handled in main.js, not explorer
+        if (type === 'watcher:config' && window.__cm6HandleWatcherConfig) {
+          window.__cm6HandleWatcherConfig(payload);
+        }
+        if (type === 'watcher:modeStatus' && window.__cm6HandleWatcherModeStatus) {
+          window.__cm6HandleWatcherModeStatus(payload);
+        }
+        if (type === 'watcher:error' && window.__cm6HandleWatcherError) {
+          window.__cm6HandleWatcherError(payload);
+        }
+        if (type === 'watcher:raiseResult' && window.__cm6HandleWatcherRaiseResult) {
+          window.__cm6HandleWatcherRaiseResult(payload);
+        }
         // The explorer websocket is THE authority for which file is active.
         // Update host toolbar whenever the active file changes.
         if (type === 'explorer:activeFile' && payload.rel) {
@@ -1858,6 +1871,13 @@ async function refreshEditorSettingsModal() {
 
     editorSettingsExtList.appendChild(list);
   }
+
+  // Watcher config: request fresh state from server
+  try {
+    if (typeof window.__explorerBusSend === 'function') {
+      window.__explorerBusSend('watcher:getConfig', {});
+    }
+  } catch (_) {}
 }
 
 async function refreshEditorExtManagerModal() {
@@ -3898,19 +3918,127 @@ function showWatcherLimitModal(message, limit) {
 window.__cm6HandleWatcherError = (payload) => {
   const msg = payload && payload.message ? payload.message : null;
   const limit = payload && typeof payload.limit === 'number' ? payload.limit : 524288;
-  const warning = msg ? `${msg}\n\nAttempt to raise the limit now?` : 'File watcher limit reached. Attempt to raise now?';
+  // On ENOSPC, show the standalone raise modal
+  const warning = msg
+    ? `${msg}\n\nAttempt to raise the limit now?`
+    : 'File watcher limit reached. Attempt to raise now?';
   showWatcherLimitModal(warning, limit);
 };
 
 window.__cm6HandleWatcherRaiseResult = (payload) => {
   if (!payload) return;
+  const statusEl = document.getElementById('watcher-raise-status');
   if (payload.ok) {
-    host.toast(payload.stdout || 'Watcher limit updated');
+    host.toast(payload.stdout || 'Watcher limit updated — IPC watcher resubscribed');
+    if (statusEl) statusEl.textContent = '✓ Limit raised successfully';
+    _updateWatcherStatusIndicator('ipc');
   } else {
     const err = payload.stderr || payload.stdout || 'Failed to raise watcher limit';
     host.toast(err);
+    if (statusEl) statusEl.textContent = `✗ ${err}`;
   }
 };
+
+// ── Watcher settings UI (integrated into editor-settings-modal) ──
+let _watcherConfig = { mode: 'ipc', storage_type: 'ssd', poll_interval_ms: 1500, watchexec_available: false };
+
+function _initWatcherSettingsUI() {
+  const modeRadios = document.querySelectorAll('input[name="watcher-mode"]');
+  const storageRadios = document.querySelectorAll('input[name="watcher-storage"]');
+  const watchexecOpts = document.getElementById('watcher-watchexec-opts');
+  const watchexecLabel = document.getElementById('watcher-mode-watchexec-label');
+  const raiseBtn = document.getElementById('watcher-raise-btn');
+  const raisePwd = document.getElementById('watcher-raise-password');
+  const raiseStatus = document.getElementById('watcher-raise-status');
+
+  // Show/hide watchexec sub-options based on mode selection
+  modeRadios.forEach(r => {
+    r.addEventListener('change', () => {
+      if (watchexecOpts) {
+        watchexecOpts.style.display = r.value === 'watchexec' && r.checked ? 'block' : '';
+        if (r.value !== 'watchexec') watchexecOpts.style.display = 'none';
+      }
+      if (r.checked) _sendWatcherMode(r.value);
+    });
+  });
+
+  storageRadios.forEach(r => {
+    r.addEventListener('change', () => {
+      if (r.checked) {
+        const modeEl = document.querySelector('input[name="watcher-mode"]:checked');
+        if (modeEl) _sendWatcherMode(modeEl.value);
+      }
+    });
+  });
+
+  // Raise limit button
+  if (raiseBtn) {
+    raiseBtn.addEventListener('click', () => {
+      showWatcherLimitModal('Raise the inotify watch limit?', 524288);
+    });
+  }
+}
+
+function _sendWatcherMode(mode) {
+  const storageEl = document.querySelector('input[name="watcher-storage"]:checked');
+  const storageType = storageEl ? storageEl.value : 'ssd';
+  if (typeof window.__explorerBusSend === 'function') {
+    window.__explorerBusSend('watcher:setMode', { mode, storage_type: storageType });
+  }
+}
+
+function _applyWatcherConfig(cfg) {
+  _watcherConfig = { ..._watcherConfig, ...cfg };
+
+  // Apply mode radio
+  const modeRadios = document.querySelectorAll('input[name="watcher-mode"]');
+  modeRadios.forEach(r => { r.checked = r.value === cfg.mode; });
+
+  // Apply storage radio
+  const storageRadios = document.querySelectorAll('input[name="watcher-storage"]');
+  storageRadios.forEach(r => { r.checked = r.value === cfg.storage_type; });
+
+  // Show/hide watchexec options
+  const watchexecOpts = document.getElementById('watcher-watchexec-opts');
+  if (watchexecOpts) watchexecOpts.style.display = cfg.mode === 'watchexec' ? 'block' : 'none';
+
+  // Grey out watchexec if not available
+  const watchexecRadio = document.querySelector('input[name="watcher-mode"][value="watchexec"]');
+  const watchexecLabel = document.getElementById('watcher-mode-watchexec-label');
+  if (watchexecRadio && !cfg.watchexec_available) {
+    watchexecRadio.disabled = true;
+    if (watchexecLabel) watchexecLabel.style.opacity = '0.4';
+  } else if (watchexecRadio) {
+    watchexecRadio.disabled = false;
+    if (watchexecLabel) watchexecLabel.style.opacity = '';
+  }
+
+  _updateWatcherStatusIndicator(cfg.mode);
+}
+
+function _updateWatcherStatusIndicator(mode) {
+  const indicator = document.getElementById('watcher-status-indicator');
+  if (indicator) {
+    const labels = { ipc: 'VS Code IPC', watchexec: 'watchexec poll', none: 'None (manual)' };
+    indicator.textContent = `Active: ${labels[mode] || mode}`;
+  }
+}
+
+// Handle watcher:config from server (on connect)
+window.__cm6HandleWatcherConfig = (cfg) => { _applyWatcherConfig(cfg); };
+
+// Handle watcher:modeStatus from server (after setMode)
+window.__cm6HandleWatcherModeStatus = (status) => {
+  if (status && status.mode) {
+    _applyWatcherConfig(status);
+    if (status.active === false) {
+      host.toast('Failed to activate watcher mode');
+    }
+  }
+};
+
+// Init watcher UI on load
+try { _initWatcherSettingsUI(); } catch (_) {}
 
 try {
   if (window.__cm6PendingWatcherError) {

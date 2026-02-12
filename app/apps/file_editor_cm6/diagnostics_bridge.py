@@ -265,6 +265,23 @@ async def _adapter_ws_loop(sio):
                         continue
 
                     # Forward file watcher events to editor and explorer SIO.
+                    if ev_type == "watcher/enospc":
+                        try:
+                            from .explorer_socketio import EXPLORER_SIO
+                            payload = {
+                                "message": ev.get("message", "Inotify limit reached (ENOSPC)"),
+                                "limit": 524288,
+                            }
+                            await EXPLORER_SIO.emit(
+                                "explorer:event",
+                                {"type": "watcher:error", "payload": payload},
+                                namespace="/explorer",
+                            )
+                            print(f"[diag_bridge] watcher/enospc forwarded", flush=True)
+                        except Exception as exc:
+                            print(f"[diag_bridge] watcher/enospc emit FAIL: {exc}", flush=True)
+                        continue
+
                     if ev_type == "watcher/fileChanges":
                         try:
                             changes = ev.get("changes", [])

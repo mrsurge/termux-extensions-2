@@ -631,6 +631,7 @@ export class WorkbenchClient {
     this._docVersions = new Map(); // path -> versionId for didChange tracking
     this._docLineCount = new Map(); // path -> line count for didChange range
     this._docCharCount = new Map(); // path -> char count for didChange rangeLength
+    this._docOpenGeneration = new Map(); // path -> generation token from open_file flow
     this._useRemote = true;
     this._authority = DEFAULT_REMOTE_AUTHORITY;
     this._productVersion = null;
@@ -1261,41 +1262,7 @@ export class WorkbenchClient {
       const workspaceRoot = params.workspaceFolder ?? params.folder ?? folder ?? null;
 
       // Subscribe to file watcher events via the remoteFilesystem IPC channel.
-      try {
-        this._fsWatcherSub?.dispose?.();
-        const sessionId = crypto.randomUUID();
-        console.log(`[watcher] setting up IPC listen on remoteFilesystem/fileChange sessionId=${sessionId}`);
-        const sub = this._mgmtIpc.listen("remoteFilesystem", "fileChange", [sessionId]);
-        console.log(`[watcher] listen() called, subscription created`);
-        sub.event((changes) => {
-          console.log(`[watcher] EVENT FIRED: ${JSON.stringify(changes)?.slice(0, 500)}`);
-          if (Array.isArray(changes) && changes.length > 0) {
-            const mapped = changes.map(c => ({
-              type: c.type, // 1=UPDATED, 2=ADDED, 3=DELETED
-              path: c.resource?.path ?? c.resource?.fsPath ?? String(c.resource ?? ""),
-            }));
-            console.log(`[watcher] forwarding ${mapped.length} changes via onEvent`);
-            this.onEvent({ type: "watcher/fileChanges", ts_ms: Date.now(), changes: mapped });
-          } else {
-            console.log(`[watcher] EVENT received but not array or empty: type=${typeof changes} isArr=${Array.isArray(changes)}`);
-          }
-        });
-        this._fsWatcherSub = sub;
-        // Register a recursive watch on the workspace root
-        if (workspaceRoot) {
-          const watchId = 1;
-          const rootUri = this._uriForPath(String(workspaceRoot), useRemote ? authority : null);
-          console.log(`[watcher] calling watch() sessionId=${sessionId} watchId=${watchId} uri=${JSON.stringify(rootUri)}`);
-          await this._mgmtIpc.call("remoteFilesystem", "watch", [sessionId, watchId, rootUri, { recursive: true, excludes: [] }]);
-          this.onEvent({ type: "watcher/subscribed", ts_ms: Date.now(), root: String(workspaceRoot) });
-          console.log(`[watcher] watch() call returned OK — subscribed to ${workspaceRoot}`);
-        } else {
-          console.log(`[watcher] no workspaceRoot, skipping watch() call`);
-        }
-      } catch (e) {
-        this.onEvent({ type: "watcher/subscribe_error", ts_ms: Date.now(), error: String(e?.message ?? e) });
-        console.log(`[watcher] subscribe error: ${e?.stack ?? e?.message ?? e}`);
-      }
+      await this._setupFileWatcher(workspaceRoot);
 
       const productVersion = await spanTraceAsync("connect.loadProductVersion", () => this._loadProductVersionFromAppRoot(envData));
       const extInitData = spanTrace("connect.buildExtHostInitData", () => this._buildExtHostInitData({
@@ -1763,6 +1730,7 @@ export class WorkbenchClient {
     const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
     const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
     const forceRefresh = params.forceRefresh === true;
+    const generation = Number.isFinite(Number(params.generation)) ? Number(params.generation) : null;
     const prevEditorId = this._activeEditorId;
     const prevUriObj = this._activeUriObj;
     const prevTab = this._activeTab;
@@ -1882,6 +1850,7 @@ export class WorkbenchClient {
     this._docVersions.set(path, 1); // reset version tracking for didChange
     this._docLineCount.set(path, lines.length);
     this._docCharCount.set(path, text.length);
+    this._docOpenGeneration.set(path, generation);
     // Allow GC to collect the large `lines` array after JSON encoding.
     try {
       if (docDelta?.addedDocuments?.[0]) docDelta.addedDocuments[0].lines = null;
@@ -1967,6 +1936,18 @@ export class WorkbenchClient {
     const text = String(params.text ?? "");
     const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
     const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
+    const generation = Number.isFinite(Number(params.generation)) ? Number(params.generation) : null;
+
+    if (!this._docVersions.has(path) || !this._docLineCount.has(path) || !this._docCharCount.has(path)) {
+      console.warn(`[didChange] drop path=${path} reason=document_not_open`);
+      return { ok: false, error: "document_not_open" };
+    }
+
+    const openGeneration = this._docOpenGeneration.get(path);
+    if (generation !== null && openGeneration !== undefined && openGeneration !== null && openGeneration !== generation) {
+      console.warn(`[didChange] drop path=${path} reason=stale_generation openGen=${openGeneration} gotGen=${generation}`);
+      return { ok: false, error: "stale_generation", openGeneration };
+    }
 
     // Monotonically increasing versionId per document
     const prevVersion = this._docVersions.get(path) ?? 1;
@@ -2010,6 +1991,15 @@ export class WorkbenchClient {
     const path = String(params.path ?? "");
     const timeoutMs = Number(params.timeoutMs ?? 8000);
     const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
+    const generation = Number.isFinite(Number(params.generation)) ? Number(params.generation) : null;
+
+    if (!this._docVersions.has(path)) {
+      return { ok: false, error: "document_not_open" };
+    }
+    const openGeneration = this._docOpenGeneration.get(path);
+    if (generation !== null && openGeneration !== undefined && openGeneration !== null && openGeneration !== generation) {
+      return { ok: false, error: "stale_generation", openGeneration };
+    }
 
     console.log(`[symbols] request path=${path} lang=${languageId} registeredProviders=${[...this._providers.documentSymbols.values()].map(e => JSON.stringify(e.selector.map(s => s.language))).join(", ")}`);
 
@@ -2104,6 +2094,59 @@ export class WorkbenchClient {
     if (rep.type === 9) return { ok: true, result: rep.result };
     if (rep.type === 11) return { ok: false, error: rep.error };
     return { ok: false, error: rep };
+  }
+
+  // ─── File Watcher IPC ────────────────────────────────────────────────
+  async _setupFileWatcher(workspaceRoot) {
+    if (!this._mgmtIpc) {
+      console.log(`[watcher] no _mgmtIpc, skipping watcher setup`);
+      return;
+    }
+    try {
+      this._fsWatcherSub?.dispose?.();
+      this._fsWatcherSub = null;
+      const sessionId = crypto.randomUUID();
+      console.log(`[watcher] setting up IPC listen on remoteFilesystem/fileChange sessionId=${sessionId}`);
+      const sub = this._mgmtIpc.listen("remoteFilesystem", "fileChange", [sessionId]);
+      console.log(`[watcher] listen() called, subscription created`);
+      sub.event((changes) => {
+        console.log(`[watcher] EVENT FIRED: ${JSON.stringify(changes)?.slice(0, 500)}`);
+        if (Array.isArray(changes) && changes.length > 0) {
+          const mapped = changes.map(c => ({
+            type: c.type,
+            path: c.resource?.path ?? c.resource?.fsPath ?? String(c.resource ?? ""),
+          }));
+          console.log(`[watcher] forwarding ${mapped.length} changes via onEvent`);
+          this.onEvent({ type: "watcher/fileChanges", ts_ms: Date.now(), changes: mapped });
+        } else if (typeof changes === "string" && changes.includes("ENOSPC")) {
+          console.log(`[watcher] ENOSPC detected, forwarding watcher/enospc`);
+          this.onEvent({ type: "watcher/enospc", ts_ms: Date.now(), message: changes });
+        } else {
+          console.log(`[watcher] EVENT received but not array or empty: type=${typeof changes} isArr=${Array.isArray(changes)}`);
+        }
+      });
+      this._fsWatcherSub = sub;
+      if (workspaceRoot) {
+        const watchId = 1;
+        const authority = this._useRemote ? this._authority : null;
+        const rootUri = this._uriForPath(String(workspaceRoot), authority);
+        console.log(`[watcher] calling watch() sessionId=${sessionId} watchId=${watchId} uri=${JSON.stringify(rootUri)}`);
+        await this._mgmtIpc.call("remoteFilesystem", "watch", [sessionId, watchId, rootUri, { recursive: true, excludes: [] }]);
+        this.onEvent({ type: "watcher/subscribed", ts_ms: Date.now(), root: String(workspaceRoot) });
+        console.log(`[watcher] watch() call returned OK — subscribed to ${workspaceRoot}`);
+      } else {
+        console.log(`[watcher] no workspaceRoot, skipping watch() call`);
+      }
+    } catch (e) {
+      this.onEvent({ type: "watcher/subscribe_error", ts_ms: Date.now(), error: String(e?.message ?? e) });
+      console.log(`[watcher] subscribe error: ${e?.stack ?? e?.message ?? e}`);
+    }
+  }
+
+  async resubscribeWatcher() {
+    const root = this.state.workspaceFolder;
+    console.log(`[watcher] resubscribeWatcher called, root=${root}`);
+    await this._setupFileWatcher(root);
   }
 
   disconnect() {

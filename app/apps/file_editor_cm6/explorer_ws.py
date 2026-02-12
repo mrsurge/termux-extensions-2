@@ -856,6 +856,25 @@ class ExplorerDispatcher:
         # 6. Active file — NOT set here. The worker process (editor_ws.py) is the
         #    authority for which file is open. It broadcasts explorer:activeFile
         #    via the explorer forward-broadcast endpoint on editor connect.
+
+        # 7. Watcher config (current mode + watchexec availability)
+        try:
+            from .watchexec_shell_manager import is_watchexec_available, ensure_watchexec_shell
+            sidecar_w = ProjectSidecar.load_or_create(str(self.project_root))
+            watcher_cfg = sidecar_w._data.get("watcher", {})
+            watcher_mode = watcher_cfg.get("mode", "ipc")
+            await self.emit_personal("watcher:config", {
+                "mode": watcher_mode,
+                "storage_type": watcher_cfg.get("storage_type", "ssd"),
+                "poll_interval_ms": watcher_cfg.get("poll_interval_ms", 1500),
+                "watchexec_available": is_watchexec_available(),
+            })
+            # Eagerly start watchexec if sidecar says so
+            if watcher_mode == "watchexec" and is_watchexec_available():
+                poll_ms = watcher_cfg.get("poll_interval_ms", 1500)
+                await ensure_watchexec_shell(str(self.project_root), poll_ms)
+        except Exception as e:
+            logger.warning(f"Failed to send watcher config: {e}")
     
     async def _pump_job_events(self):
         """Background task to forward job updates to this client."""
@@ -1210,6 +1229,86 @@ class ExplorerDispatcher:
 
         await self.emit_personal("watcher:raiseResult", out_payload, msg_id)
 
+        # On successful raise, resubscribe the IPC watcher and stop watchexec if running
+        if out_payload.get("ok"):
+            try:
+                from .workbench_adapter_shell_manager import adapter_rpc
+                await adapter_rpc("adapter.resubscribeWatcher")
+                logger.info("[watcher] resubscribed IPC watcher after inotify raise")
+            except Exception as e:
+                logger.warning(f"[watcher] resubscribe after raise failed: {e}")
+            try:
+                from .watchexec_shell_manager import stop_watchexec_shell
+                await stop_watchexec_shell()
+            except Exception:
+                pass
+
+    async def handle_watcher_setMode(self, payload: dict, msg_id: str):
+        """Persist watcher mode and start/stop watchexec as needed."""
+        mode = payload.get("mode", "ipc")
+        storage_type = payload.get("storage_type", "ssd")
+        if mode not in ("ipc", "watchexec", "none"):
+            return await self.send_error(f"Invalid watcher mode: {mode}", msg_id)
+        if storage_type not in ("ssd", "hdd"):
+            storage_type = "ssd"
+
+        poll_ms = 1500 if storage_type == "ssd" else 4500
+
+        # Persist to sidecar
+        try:
+            sidecar = ProjectSidecar.load_or_create(str(self.project_root))
+            watcher_cfg = sidecar._data.get("watcher", {})
+            watcher_cfg["mode"] = mode
+            watcher_cfg["storage_type"] = storage_type
+            watcher_cfg["poll_interval_ms"] = poll_ms
+            sidecar._data["watcher"] = watcher_cfg
+            sidecar.save()
+        except Exception as e:
+            logger.warning(f"[watcher] failed to persist mode: {e}")
+
+        # Apply the mode
+        from .watchexec_shell_manager import stop_watchexec_shell, ensure_watchexec_shell
+
+        if mode == "watchexec":
+            try:
+                shell = await ensure_watchexec_shell(str(self.project_root), poll_ms)
+                ok = shell is not None
+            except Exception as e:
+                logger.warning(f"[watcher] failed to start watchexec: {e}")
+                ok = False
+            await self.emit_personal("watcher:modeStatus", {
+                "mode": mode, "storage_type": storage_type,
+                "poll_interval_ms": poll_ms, "active": ok,
+            }, msg_id)
+        else:
+            # Stop watchexec for both "ipc" and "none" modes
+            try:
+                await stop_watchexec_shell()
+            except Exception:
+                pass
+            await self.emit_personal("watcher:modeStatus", {
+                "mode": mode, "storage_type": storage_type,
+                "poll_interval_ms": poll_ms, "active": True,
+            }, msg_id)
+
+        # Broadcast mode change to all clients so explorer can show/hide refresh button
+        await self.broadcast("watcher:modeChanged", {"mode": mode})
+
+    async def handle_watcher_getConfig(self, payload: dict, msg_id: str):
+        """Return current watcher config + watchexec availability."""
+        from .watchexec_shell_manager import is_watchexec_available
+        try:
+            sidecar = ProjectSidecar.load_or_create(str(self.project_root))
+            watcher_cfg = sidecar._data.get("watcher", {})
+        except Exception:
+            watcher_cfg = {}
+        await self.emit_personal("watcher:config", {
+            "mode": watcher_cfg.get("mode", "ipc"),
+            "storage_type": watcher_cfg.get("storage_type", "ssd"),
+            "poll_interval_ms": watcher_cfg.get("poll_interval_ms", 1500),
+            "watchexec_available": is_watchexec_available(),
+        }, msg_id)
+
     async def handle_prefs_updateUi(self, payload: dict, msg_id: str):
         """Update a single UI preference key via PreferenceStore (backend owns defaults)."""
         key = payload.get("key")
@@ -1514,6 +1613,13 @@ class ExplorerDispatcher:
         old_project = str(self.project_root)
         manager.disconnect(self.websocket)  # Disconnect from old
 
+        # Stop watchexec fallback if running (old project)
+        try:
+            from .watchexec_shell_manager import stop_watchexec_shell
+            await stop_watchexec_shell()
+        except Exception:
+            pass
+
         new_root = set_project_root(path)
         # Persist active project + reset per-project session state
         was_new_sidecar = await reset_project_session(str(new_root))
@@ -1521,6 +1627,25 @@ class ExplorerDispatcher:
         
         # Register to new
         manager.register_existing(self.websocket, str(new_root))
+
+        # Reconnect adapter to new workspace (RPC — adapter stays alive)
+        try:
+            from .workbench_adapter_shell_manager import adapter_rpc
+            await adapter_rpc("adapter.reconnect", {"workspaceFolder": str(new_root)})
+            logger.info(f"[project_open] adapter reconnected to {new_root}")
+        except Exception as e:
+            logger.warning(f"[project_open] adapter reconnect failed: {e}")
+
+        # Start watchexec if this project's sidecar says so
+        try:
+            sidecar = ProjectSidecar.load_or_create(str(new_root))
+            watcher_cfg = sidecar._data.get("watcher", {})
+            if watcher_cfg.get("mode") == "watchexec":
+                from .watchexec_shell_manager import ensure_watchexec_shell
+                poll_ms = watcher_cfg.get("poll_interval_ms", 1500)
+                await ensure_watchexec_shell(str(new_root), poll_ms)
+        except Exception as e:
+            logger.warning(f"[project_open] watchexec start failed: {e}")
         
         await self.emit_personal("project:opened", {"path": str(new_root), "new_sidecar": was_new_sidecar}, msg_id)
         # Trigger full refresh for this client

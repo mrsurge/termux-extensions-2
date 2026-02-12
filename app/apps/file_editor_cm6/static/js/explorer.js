@@ -1637,13 +1637,32 @@ function handleExplorerEvent(type, payload) {
     }
     return;
   }
+  if (type === 'watcher:modeChanged') {
+    // Show/hide manual refresh bar when watcher mode changes
+    try {
+      const bar = document.getElementById('fe-watcher-refresh-bar');
+      if (bar) {
+        bar.style.display = (payload && payload.mode === 'none') ? '' : 'none';
+      }
+    } catch (_) {}
+    return;
+  }
+  if (type === 'watcher:config') {
+    // On initial connect, show refresh bar if mode is "none"
+    try {
+      const bar = document.getElementById('fe-watcher-refresh-bar');
+      if (bar) {
+        bar.style.display = (payload && payload.mode === 'none') ? '' : 'none';
+      }
+    } catch (_) {}
+    // Don't return — let main.js also handle via __cm6HandleWatcherConfig
+  }
   if (type === 'lsp:status') {
     try {
       const next = payload || {};
       if (typeof window.__cm6HandleLspStatus === 'function') {
         window.__cm6HandleLspStatus(next);
       } else {
-        // Host (main.js) may not have installed its handler yet; keep last snapshot for replay.
         window.__cm6PendingLspStatus = next;
       }
     } catch (err) {
@@ -3479,6 +3498,20 @@ export async function initExplorerUI() {
       window.__explorerBusSend('explorer:refresh', {});
     }
   };
+
+  // Manual refresh button for "none" watcher mode
+  const refreshBtn = document.getElementById('fe-watcher-refresh-btn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      if (typeof window.__explorerBusSend === 'function') {
+        window.__explorerBusSend('explorer:list', { rel: '.' });
+        window.__explorerBusSend('git:status', {});
+        openDirectories.forEach((rel) => {
+          window.__explorerBusSend('explorer:list', { rel });
+        });
+      }
+    });
+  }
 
   // Proactively fetch diagnostics after the dispatch hook is installed.
   // This prevents a race where the periodic broadcast arrives before initExplorerUI runs.
