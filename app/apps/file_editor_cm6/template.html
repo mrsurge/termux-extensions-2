@@ -689,7 +689,7 @@
     #terminal-container .xterm-viewport::-webkit-scrollbar { width: 0px; }
     #terminal-container .xterm-viewport::-webkit-scrollbar-thumb { background: transparent; }
   }
-  .fe-agent-toggle { font-size: 1.1rem; line-height: 0; display: inline-flex; gap: 6px; align-items: center; }
+  .fe-agent-toggle { font-size: 1.1rem; line-height: 0; display: inline-flex; align-items: center; }
   .fe-agent-toggle .fe-agent-icon {
     display: inline-flex;
     align-items: center;
@@ -698,19 +698,11 @@
     height: 1.35rem;
     line-height: 0;
   }
-  .fe-agent-toggle .fe-agent-label {
-    font-size: 0.85rem;
-    line-height: 1;
-    opacity: 0.9;
-    padding-right: 2px;
-  }
   .fe-agent-toggle .fe-agent-icon img {
     width: 2.2rem;
     height: 2.2rem;
     display: block;
   }
-  .fe-agent-toggle.fe-agent-toggle--icon .fe-agent-label { display: none; }
-  .fe-agent-toggle.fe-agent-toggle--text .fe-agent-icon { display: none; }
   .fe-git-actions .fe-btn {
     flex: 0 0 auto;
     font-size: 0.8rem;
@@ -2037,9 +2029,8 @@
       <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
       <span id="fe-lsp-spinner" class="fe-lsp-spinner" title="Language server starting…" aria-hidden="true" style="display: none;"></span>
-      <button class="fe-menu-btn fe-agent-toggle fe-agent-toggle--icon" id="fe-agent-toggle" title="Agent drawer">
+      <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Agent drawer">
         <span class="fe-agent-icon" data-default-icon="💬">💬</span>
-        <span class="fe-agent-label">Agent</span>
       </button>
       <div id="fe-agent-dd" class="fe-dropdown"></div>
     </div>

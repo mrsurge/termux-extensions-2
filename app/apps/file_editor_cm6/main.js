@@ -2536,23 +2536,26 @@ function _applyAgentToggleToolbar(uiPrefs) {
   const btn = document.getElementById('fe-agent-toggle');
   if (!btn) return;
   const iconEl = btn.querySelector('.fe-agent-icon');
-  const labelEl = btn.querySelector('.fe-agent-label');
+  if (!iconEl) return;
 
-  const display = typeof uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_DISPLAY] === 'string'
-    ? uiPrefs[UI_PREF_KEY_AGENT_TOGGLE_DISPLAY].trim()
-    : 'icon';
-  btn.classList.remove('fe-agent-toggle--icon', 'fe-agent-toggle--text', 'fe-agent-toggle--both');
-  if (display === 'text') btn.classList.add('fe-agent-toggle--text');
-  else if (display === 'both') btn.classList.add('fe-agent-toggle--both');
-  else btn.classList.add('fe-agent-toggle--icon');
+  const currentUrl = typeof uiPrefs?.[UI_PREF_KEY_AGENT_IFRAME_URL] === 'string'
+    ? uiPrefs[UI_PREF_KEY_AGENT_IFRAME_URL].trim()
+    : '';
 
-  const text = typeof uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_TEXT] === 'string'
-    ? uiPrefs[UI_PREF_KEY_AGENT_TOGGLE_TEXT].trim()
-    : 'Agent';
-  if (labelEl) labelEl.textContent = text || 'Agent';
+  // If the active URL matches a shortcut with an icon, that icon wins.
+  const shortcuts = Array.isArray(uiPrefs?.[UI_PREF_KEY_AGENT_SHORTCUTS])
+    ? uiPrefs[UI_PREF_KEY_AGENT_SHORTCUTS]
+    : [];
+  let shortcutIcon = null;
+  if (currentUrl) {
+    const match = shortcuts.find((sc) => sc && typeof sc === 'object' && sc.url === currentUrl);
+    if (match && match.icon && typeof match.icon === 'object') {
+      shortcutIcon = match.icon;
+    }
+  }
 
-  const icon = uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_ICON];
-  if (iconEl && icon && typeof icon === 'object' && icon.kind && icon.kind !== 'default') {
+  const icon = shortcutIcon || uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_ICON] || null;
+  if (icon && typeof icon === 'object' && icon.kind && icon.kind !== 'default') {
     _renderAgentIconInto(iconEl, icon);
   }
 }
@@ -2657,6 +2660,10 @@ function _renderAgentDropdown() {
   if (!dd) return;
   dd.innerHTML = '';
 
+  const display = typeof _latestUiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_DISPLAY] === 'string'
+    ? _latestUiPrefs[UI_PREF_KEY_AGENT_TOGGLE_DISPLAY].trim()
+    : 'icon';
+
   const shortcuts = Array.isArray(_agentShortcutsCache) ? _agentShortcutsCache : [];
   if (!shortcuts.length) {
     const empty = document.createElement('div');
@@ -2674,10 +2681,16 @@ function _renderAgentDropdown() {
       item.style.display = 'flex';
       item.style.gap = '8px';
       item.style.alignItems = 'center';
-      item.appendChild(_renderShortcutIconNode(sc.icon, 16));
-      const text = document.createElement('span');
-      text.textContent = label;
-      item.appendChild(text);
+      if (display === 'icon' || display === 'both') {
+        item.appendChild(_renderShortcutIconNode(sc.icon, 16));
+      }
+      if (display === 'text' || display === 'both') {
+        const text = document.createElement('span');
+        text.textContent = label;
+        item.appendChild(text);
+      } else {
+        item.title = label;
+      }
       item.addEventListener('click', async (ev) => {
         ev.stopPropagation();
         _closeAgentDropdown();

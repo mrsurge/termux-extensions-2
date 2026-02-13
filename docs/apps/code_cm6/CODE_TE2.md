@@ -625,6 +625,33 @@ All sent via `explorer_send` with JSON `{type, payload}`:
 | `review:list` | Request review entries (drafts with optional diff hunks) |
 | `review:save` | Save selected drafts to disk |
 | `review:discard` | Discard selected drafts |
+| `prefs:updateUi` | Update a single global UI preference key (backend validates type) |
+| `prefs:vendorAgentIcon` | Vendor an icon asset into the SSOT cache dir (returns a stable asset name) |
+
+### UI Preferences (global)
+- Store: `_preferences_store` (disk-backed) in `~/.local/share/termux-extensions-2/code_oss_prefs.json` under the `ui` object
+- Update flow:
+  - client → server: `prefs:updateUi` payload `{key, value}`
+  - server → all clients: `prefs:setUi` payload `{ui: { ...full snapshot... }}`
+- Icon vending flow (used by agent shortcuts/toggle):
+  - client → server: `prefs:vendorAgentIcon` payload `{abs_path: "/abs/to/icon.svg"}`
+  - server → requesting client: `prefs:vendorAgentIconResult` payload `{ok: true, name, url}`
+  - asset URL is served by the worker: `GET /api/app/file_editor_cm6/agent_icons/{name}`
+
+### Agent Toggle + Shortcuts (host shell)
+The agent toggle is owned by the **host shell** (`template.html` + `main.js`) and is configured entirely via the **Explorer Socket.IO** UI preference channel (`prefs:setUi`).
+
+Behavior:
+- The toolbar button (`#fe-agent-toggle`) is always **icon-only**.
+- The `icon/text/both` setting applies **only** to how entries render inside the agent shortcuts dropdown (`#fe-agent-dd`).
+- Toolbar icon precedence:
+  1) If the active `agentDrawerIframeUrl` matches a shortcut that has an icon, that shortcut icon wins.
+  2) Otherwise use the global `agentToggleIcon` (emoji/asset).
+  3) If `agentToggleIcon.kind == "default"`, keep the default/manifest icon.
+- Dropdown open gesture:
+  - right-click (desktop) or long-press (touch) opens the shortcuts dropdown.
+- Selecting a shortcut updates `agentDrawerIframe=true` and sets `agentDrawerIframeUrl` via `prefs:updateUi`.
+- No full page reload: mode/header changes hot-swap the agent controller in-place to preserve SSOT session/editor state.
 
 ### Server → Client broadcasts
 
@@ -1684,7 +1711,9 @@ code-server parcel watcher detects disk change
   → diagnostics_bridge.py WS handler
     → watcher/fileChanges: parse changes, convert abs→rel paths
       → EXPLORER_SIO.emit("explorer:event", {type: "watcher:files", payload: {created, changed, deleted}})
-    → watcher/enospc: forward as watcher:error
+      → external edit detection: if active file in changed/created → handle_external_file_change()
+        → re-read disk, compare SHA, clear draft if stale, broadcast editor:open reason="external_change"
+    → watcher/enospc: forward as watcher:error (suppressed when mode ≠ ipc)
       → EXPLORER_SIO.emit("explorer:event", {type: "watcher:error", payload: {message}})
   → main.js explorer:event listener → dispatch to explorer.js
     → watcher:files: git:status refresh + directory re-listing for open dirs
@@ -1736,11 +1765,23 @@ When watchexec mode is active, a framework shell runs `watchexec --poll <interva
 - `explorer.js`: `watcher:files` handler, `watcher:modeChanged` handler, manual refresh button
 - `template.html`: File Watcher section in editor-settings-modal, refresh bar in explorer drawer
 
-### Previous approach (deprecated)
+### External edit detection (watcher → editor pipeline)
 
-The original plan was to use Python watchdog → adapter stdio → `$onFileEvent` (rpcId 92). This was abandoned because:
-1. We ARE the workbench client — code-server already sends `$onFileEvent` to the extension host
-2. Python watchdog `recursive=True` consumed inotify watches independently of code-server, doubling resource usage
-3. The IPC approach has zero overhead — we subscribe to events code-server already generates
+When a watcher event (IPC or watchexec) reports a change to the **currently active file**, the server automatically:
+1. Re-reads the file from disk and computes a fresh SHA256
+2. Suppresses the event if the SHA matches our own last save (`_LAST_SAVE_SHA` — prevents reload loops)
+3. Clears any active draft for the file (stale draft eviction via `clear_cached_document`)
+4. Broadcasts `editor:open` with `reason: "external_change"` to all editor clients
+5. The inline diff editor also updates — `requestGitBaselines()` fetches fresh HEAD + disk content
 
-The `te2-extension-api-bridge` VS Code extension approach was also abandoned — subscribing directly to the IPC channel is simpler and doesn't require loading an extension.
+**Scroll preservation**: External edits use `model.applyEdits()` (not `model.setValue()`) to update content atomically without resetting scroll position, cursor, or decorations. The diff editor skips `diffEditor.setModel()` when models are already bound — content updates on existing models trigger recomputation without scroll reset.
+
+**Editor mode transitions** (plain ↔ diff): Scroll position is captured from the active editor before disposal and restored on the new editor after creation. `applyGitBaselines()` uses deferred restore (immediate + 50ms + 300ms) to survive the async diff computation and view zone scroll sync that follows `setModel()`.
+
+**ENOSPC suppression**: When the watcher mode is not `ipc` (i.e., user has switched to watchexec, polling, or none), `watcher/enospc` events from the IPC watcher are silently suppressed — the user already knows inotify is limited.
+
+**Key files**:
+- `editor_ws.py`: `handle_external_file_change()`, `_LAST_SAVE_SHA` save-suppress dict
+- `diagnostics_bridge.py`: IPC watcher path hook (calls `handle_external_file_change` for changed/created), ENOSPC suppression
+- `watchexec_shell_manager.py`: watchexec path hook (schedules `handle_external_file_change` via `loop.create_task`)
+- `m_editor_app.js`: `model.applyEdits()` for external changes, scroll save/restore in `ensureDiffEditorWithPrefs`/`ensurePlainEditorWithPrefs`/`applyGitBaselines`
