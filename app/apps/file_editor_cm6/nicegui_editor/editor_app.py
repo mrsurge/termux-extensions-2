@@ -2134,8 +2134,13 @@ async def refresh_diffs(data: dict = Body(...)):
 @editor_router.post('/toggle_edit_tracking')
 async def toggle_edit_tracking(data: dict = Body(...)):
     enabled = data.get('enabled', False)
-    if enabled: enable_edit_tracking()
-    else: disable_edit_tracking()
+    from app.apps.file_editor_cm6 import change_ledger
+    if enabled:
+        change_ledger.clear()  # Fresh start
+        print("[editor_app] trackAgentEdits enabled via API — change_ledger ready", file=sys.stderr)
+    else:
+        change_ledger.clear()
+        print("[editor_app] trackAgentEdits disabled via API — change_ledger cleared", file=sys.stderr)
     _preferences_store.update_preferences(editor={'trackAgentEdits': enabled})
     return {"ok": True, "enabled": enabled}
 
@@ -2447,10 +2452,13 @@ async def update_preference(data: dict = Body(...)):
             # Refresh handled below after persistence
 
         elif key == 'trackAgentEdits':
+            from app.apps.file_editor_cm6 import change_ledger
             if value:
-                enable_edit_tracking()
+                change_ledger.clear()  # Fresh start
+                print("[editor_app] trackAgentEdits enabled — change_ledger ready", file=sys.stderr)
             else:
-                disable_edit_tracking()
+                change_ledger.clear()  # Stop tracking
+                print("[editor_app] trackAgentEdits disabled — change_ledger cleared", file=sys.stderr)
         elif key in ['showLineNumbers', 'showSyntax', 'autoCloseBrackets', 'autocompletion', 'autoSave']:
             # These require frontend to rebuild view (legacy behavior)
             # Persistence happens after this block once runtime updates succeed

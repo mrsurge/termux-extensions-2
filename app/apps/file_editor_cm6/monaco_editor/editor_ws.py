@@ -281,6 +281,72 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
     return True
 
 
+async def handle_tracked_edit(edit_result: dict) -> None:
+    """Dispatch a jump/open when trackAgentEdits is enabled and a new edit is detected.
+
+    If the edited file is already active, emits ``editor:jump_to_line``.
+    If a different file was edited, emits ``editor:open`` with a target line.
+    Toolbar filename update flows through explorer:activeFile, not editor:cache_state.
+    """
+    project = _active_project()
+    if not project:
+        return
+
+    # Check preference
+    prefs = _preferences_store.get_preferences()
+    if not prefs.get("editor", {}).get("trackAgentEdits", False):
+        return
+
+    abs_path = edit_result.get("path", "")
+    rel_path = edit_result.get("rel_path", "")
+    line = edit_result.get("line", 1)
+
+    active_path = _history_store.get_last_file(project)
+    try:
+        active_norm = str(Path(active_path).resolve(strict=False)) if active_path else ""
+        changed_norm = str(Path(abs_path).resolve(strict=False))
+    except Exception:
+        return
+
+    from .editor_socketio import EDITOR_SIO
+
+    if active_norm == changed_norm:
+        # Same file — just jump
+        await EDITOR_SIO.emit(
+            "editor:jump_to_line",
+            {"line": line, "column": 1, "scroll_to_top": False, "source_client": "change_ledger"},
+            room="file_editor_cm6",
+            namespace="/editor",
+        )
+        print(f"[change_ledger] jump to {rel_path}:{line}", file=sys.stderr)
+    else:
+        # Different file — update SSOT, then open with line target
+        _history_store.update_session_state({"currentPath": abs_path})
+        _history_store.set_last_file(project, abs_path)
+
+        payload = _read_file_payload(project, abs_path)
+        payload["line"] = line
+        payload["reason"] = "tracked_edit"
+        payload["request_id"] = f"track_{int(time.time() * 1000)}"
+        await EDITOR_SIO.emit("editor:open", payload, room="file_editor_cm6", namespace="/editor")
+
+        # Notify explorer so breadcrumb/toolbar filename updates
+        try:
+            from ..explorer_socketio import EXPLORER_SIO
+            from ..explorer_ws import abs_to_rel
+            rel = abs_to_rel(abs_path, project)
+            if rel and rel != ".":
+                await EXPLORER_SIO.emit(
+                    "explorer:event",
+                    {"type": "explorer:activeFile", "payload": {"rel": rel, "abs": abs_path}},
+                    namespace="/explorer",
+                )
+        except Exception:
+            pass
+
+        print(f"[change_ledger] open+jump {rel_path}:{line}", file=sys.stderr)
+
+
 def _git_head_text(project_root: str, abs_path: str) -> Optional[str]:
     """Return the file content at HEAD (or None if untracked / no commits)."""
 
@@ -637,7 +703,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             if rel and rel != ".":
                 await EXPLORER_SIO.emit(
                     "explorer:event",
-                    {"type": "explorer:activeFile", "payload": {"rel": rel}},
+                    {"type": "explorer:activeFile", "payload": {"rel": rel, "abs": path}},
                     namespace="/explorer",
                 )
         except Exception:

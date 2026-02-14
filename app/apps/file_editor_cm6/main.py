@@ -1745,6 +1745,32 @@ async def project_open(data: dict = Body(...)):
             await close_active_terminal_sockets()
         except Exception:
             pass
+
+        # Dispose stale ext host state for the old project.
+        try:
+            from .diagnostics_bridge import stop_bridge
+            stop_bridge()
+        except Exception:
+            pass
+        try:
+            import app.apps.file_editor_cm6.workbench_adapter_shell_manager as _wa_mod
+            if _wa_mod._active_shell_id:
+                from framework_shells import get_manager
+                mgr = await get_manager()
+                await mgr.terminate_shell(_wa_mod._active_shell_id, force=True)
+                _wa_mod._active_shell_id = None
+                _wa_mod._pipe_state = None
+                if _wa_mod._stdout_reader_task and not _wa_mod._stdout_reader_task.done():
+                    _wa_mod._stdout_reader_task.cancel()
+                _wa_mod._stdout_reader_task = None
+        except Exception:
+            pass
+        try:
+            from .change_ledger import clear as clear_ledger
+            clear_ledger()
+        except Exception:
+            pass
+
         state = _build_state_payload()
         return {"ok": True, "data": {"path": str(abs_path), "state": state}}
     except Exception as e:

@@ -458,6 +458,61 @@ async def reset_project_session(new_project_path: str) -> bool:
     except Exception:
         pass
 
+    # ── Project-switch teardown: dispose stale ext host / watcher state ──
+    # Without this teardown, stale watcher subscriptions cause ENOSPC on project switch.
+    # The bridge and adapter auto-restart on next editor readiness chain with the new root.
+    # Watcher subscriptions, LSP workspace, and PROJECT_ROOT env all live in the adapter shell.
+    # Killing the shell is the only reliable way to reset all of these at once.
+
+    # 1. Stop diagnostics bridge (WS listener to adapter).
+    #    Will auto-restart on next editor readiness chain with new project root.
+    try:
+        from .diagnostics_bridge import stop_bridge
+        stop_bridge()
+        print(f"[reset_project_session] diagnostics bridge stopped", flush=True)
+    except Exception:
+        pass
+
+    # 2. Kill the workbench adapter shell so it respawns with the new PROJECT_ROOT.
+    #    The ext host behind it holds the old project's watcher subs + LSP workspace.
+    try:
+        from .workbench_adapter_shell_manager import _active_shell_id, _pipe_state
+        from .workbench_adapter_shell_manager import _stdout_reader_task
+        import app.apps.file_editor_cm6.workbench_adapter_shell_manager as _wa_mod
+        if _active_shell_id:
+            from framework_shells import get_manager
+            mgr = await get_manager()
+            await mgr.terminate_shell(_active_shell_id, force=True)
+            _wa_mod._active_shell_id = None
+            _wa_mod._pipe_state = None
+            if _wa_mod._stdout_reader_task and not _wa_mod._stdout_reader_task.done():
+                _wa_mod._stdout_reader_task.cancel()
+            _wa_mod._stdout_reader_task = None
+            print(f"[reset_project_session] workbench adapter shell terminated", flush=True)
+    except Exception as exc:
+        print(f"[reset_project_session] adapter teardown error: {exc}", flush=True)
+
+    # 3. Invalidate diff cache (old project's diffs are stale).
+    try:
+        from .diff_helper import invalidate_diff_cache
+        invalidate_diff_cache()
+    except Exception:
+        pass
+
+    # 4. Clear change ledger (track-edits state is per-project).
+    try:
+        from .change_ledger import clear as clear_ledger
+        clear_ledger()
+    except Exception:
+        pass
+
+    # 5. Update edit_tracker project root.
+    try:
+        from . import edit_tracker
+        edit_tracker.set_project_root(Path(normalized_path))
+    except Exception:
+        pass
+
     return was_new_sidecar
 
 # Debounce explorer refreshes to avoid flooding

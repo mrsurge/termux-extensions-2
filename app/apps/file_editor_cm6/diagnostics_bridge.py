@@ -38,6 +38,12 @@ _SIO_REF = None
 _bridge_task: Optional[asyncio.Task] = None
 _bridge_running = False
 
+# ENOSPC dedup: only forward to frontend once per bridge session.
+# Resets in stop_bridge() so each project switch gets a fresh allowance.
+# The sidecar mode check alone isn't enough because mode defaults to "ipc" on first event.
+# Once forwarded, the flag stays true until stop_bridge() resets it on project switch.
+_enospc_forwarded = False
+
 
 def _abs_path_from_vscode_uri(raw: Any) -> str:
     """Extract absolute filesystem path from a vscode-remote:// or file:// URI."""
@@ -266,6 +272,10 @@ async def _adapter_ws_loop(sio):
 
                     # Forward file watcher events to editor and explorer SIO.
                     if ev_type == "watcher/enospc":
+                        global _enospc_forwarded
+                        # Suppress repeated ENOSPC — only forward once per bridge session
+                        if _enospc_forwarded:
+                            continue
                         # Suppress ENOSPC when user is on polling/watchexec fallback —
                         # they already know inotify is limited, that's why they switched.
                         try:
@@ -276,9 +286,11 @@ async def _adapter_ws_loop(sio):
                             watcher_mode = sc.data.get("watcher", {}).get("mode", "ipc")
                             if watcher_mode != "ipc":
                                 print(f"[diag_bridge] watcher/enospc suppressed (mode={watcher_mode})", flush=True)
+                                _enospc_forwarded = True
                                 continue
                         except Exception:
                             pass
+                        _enospc_forwarded = True
                         try:
                             from .explorer_socketio import EXPLORER_SIO
                             payload = {
@@ -290,7 +302,7 @@ async def _adapter_ws_loop(sio):
                                 {"type": "watcher:error", "payload": payload},
                                 namespace="/explorer",
                             )
-                            print(f"[diag_bridge] watcher/enospc forwarded", flush=True)
+                            print(f"[diag_bridge] watcher/enospc forwarded (once)", flush=True)
                         except Exception as exc:
                             print(f"[diag_bridge] watcher/enospc emit FAIL: {exc}", flush=True)
                         continue
@@ -356,6 +368,16 @@ async def _adapter_ws_loop(sio):
                                             await handle_external_file_change(abs_p)
                                         except Exception as exc:
                                             print(f"[diag_bridge] external edit check failed: {exc}", flush=True)
+                                    # Change ledger: record for track-edits (all types incl. DELETE)
+                                    if abs_p:
+                                        try:
+                                            from .change_ledger import record_change
+                                            from .monaco_editor.editor_ws import handle_tracked_edit
+                                            result = record_change(abs_p, proj)
+                                            if result:
+                                                await handle_tracked_edit(result)
+                                        except Exception as exc:
+                                            print(f"[diag_bridge] change_ledger failed: {exc}", flush=True)
                         except Exception as exc:
                             print(f"[diag_bridge] watcher/fileChanges emit FAIL: {exc}", flush=True)
                         continue
@@ -422,9 +444,10 @@ def start_bridge(sio):
 
 def stop_bridge():
     """Stop the background bridge task."""
-    global _bridge_running, _bridge_task
+    global _bridge_running, _bridge_task, _enospc_forwarded
 
     _bridge_running = False
+    _enospc_forwarded = False
     if _bridge_task and not _bridge_task.done():
         _bridge_task.cancel()
     _bridge_task = None

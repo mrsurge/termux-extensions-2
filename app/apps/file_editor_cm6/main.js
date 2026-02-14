@@ -508,19 +508,28 @@ function connectExplorerSocket() {
           try { window.__cm6PendingUiPrefs = payload; } catch (_) {}
         }
         // The explorer websocket is THE authority for which file is active.
-        // Update host toolbar whenever the active file changes.
-        if (type === 'explorer:activeFile' && payload.rel) {
+        // Always update toolbar — no same-path guard so tracked edits
+        // and rapid switches never get silently dropped.
+        if (type === 'explorer:activeFile' && (payload.rel || payload.abs)) {
           try {
-            const projRoot = cachedProjectRoot || null;
-            if (projRoot) {
-              const abs = toAbsolute(payload.rel, projRoot, HOME_DIR);
-              if (abs && abs !== currentPath) {
-                currentPath = abs;
-                currentPathExists = true;
-                lastPickerPath = parentDir(abs);
-                currentModeLanguage = detectLanguageFromFilename(abs);
-                updatePathDisplay();
-              }
+            let abs = payload.abs || null;
+            if (!abs && payload.rel) {
+              let projRoot = null;
+              try { projRoot = activeProjectPath(); } catch (_) {}
+              if (!projRoot) try { projRoot = sessionState?.activeProject; } catch (_) {}
+              abs = projRoot ? toAbsolute(payload.rel, projRoot, HOME_DIR) : null;
+            }
+            if (abs) {
+              try { currentPath = abs; } catch (_) {}
+              try { currentPathExists = true; } catch (_) {}
+              try { lastPickerPath = abs.slice(0, abs.lastIndexOf('/')); } catch (_) {}
+              try { currentModeLanguage = detectLanguageFromFilename(abs); } catch (_) {}
+              // Inline toolbar update — functions declared later are out of scope
+              try {
+                const name = abs.slice(abs.lastIndexOf('/') + 1);
+                const el = document.getElementById('fe-file-name');
+                if (el) { el.textContent = name; el.title = name; }
+              } catch (_) {}
             }
           } catch (_) {}
         }
@@ -628,7 +637,7 @@ function _applyEditorCacheState(data) {
       lastPickerPath = idx > 0 ? trimmed.slice(0, idx) : '/';
     } catch (_) {}
     const nameEl = window.fileNameEl || fileNameEl || null;
-    if (nameEl && (pathChanged || !nameEl.textContent || nameEl.textContent === 'Untitled')) {
+    if (pathChanged || (nameEl && (!nameEl.textContent || nameEl.textContent === 'Untitled'))) {
       try {
         if (typeof updatePathDisplay === 'function') updatePathDisplay();
         else if (typeof window.updatePathDisplay === 'function') window.updatePathDisplay();
@@ -5390,9 +5399,32 @@ bindMenuToggle(miToggleStickyScroll, async () => {
   if (!success) host.toast('Failed to update sticky scroll preference');
 });
 
+// Saved preferences before track-edits mode forces overrides
+let _preTrackingPrefs = null;
+
 bindMenuToggle(miTrackEdits, async () => {
-  const success = await updatePreference('trackAgentEdits', !(editorViewState?.trackAgentEdits));
-  if (!success) host.toast('Failed to update preference');
+  const enabling = !(editorViewState?.trackAgentEdits);
+  if (enabling) {
+    // Save current values before forcing overrides
+    _preTrackingPrefs = {
+      showInlineDiffs: editorViewState?.showInlineDiffs ?? true,
+      readOnly: editorViewState?.readOnly ?? false,
+    };
+    // Force showInlineDiffs + readOnly ON, then enable tracking
+    await updatePreference('showInlineDiffs', true);
+    await updatePreference('readOnly', true);
+    const success = await updatePreference('trackAgentEdits', true);
+    if (!success) host.toast('Failed to enable edit tracking');
+  } else {
+    const success = await updatePreference('trackAgentEdits', false);
+    if (!success) { host.toast('Failed to disable edit tracking'); return; }
+    // Restore pre-tracking values
+    if (_preTrackingPrefs) {
+      await updatePreference('showInlineDiffs', _preTrackingPrefs.showInlineDiffs);
+      await updatePreference('readOnly', _preTrackingPrefs.readOnly);
+      _preTrackingPrefs = null;
+    }
+  }
 });
 
 // Initialize terminal drawer

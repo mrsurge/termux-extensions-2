@@ -134,6 +134,16 @@ def _forward_watchexec_event(evt: dict, project_root: str) -> None:
                         loop.create_task(handle_external_file_change(abs_p))
                     except Exception:
                         pass
+            # Change ledger: record for track-edits (all ops incl. remove)
+            if path_abs:
+                try:
+                    from .change_ledger import record_change
+                    from .monaco_editor.editor_ws import handle_tracked_edit
+                    result = record_change(path_abs, project_root)
+                    if result:
+                        loop.create_task(handle_tracked_edit(result))
+                except Exception:
+                    pass
     except Exception as exc:
         log.debug("[watchexec] forward error: %s", exc)
 
