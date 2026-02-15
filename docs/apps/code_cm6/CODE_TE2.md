@@ -1785,3 +1785,85 @@ When a watcher event (IPC or watchexec) reports a change to the **currently acti
 - `diagnostics_bridge.py`: IPC watcher path hook (calls `handle_external_file_change` for changed/created), ENOSPC suppression
 - `watchexec_shell_manager.py`: watchexec path hook (schedules `handle_external_file_change` via `loop.create_task`)
 - `m_editor_app.js`: `model.applyEdits()` for external changes, scroll save/restore in `ensureDiffEditorWithPrefs`/`ensurePlainEditorWithPrefs`/`applyGitBaselines`
+
+## 18) Cursor Stability Hardening (Autosave + Git Diff)
+
+This section documents the stabilization work that removed full-page thrash and significantly reduced cursor jumps under rapid typing.
+
+### Root causes observed
+
+1. **Diff mode flag drift in iframe context**  
+   In `applyGitBaselines()`, `diffEditor.setModel(...)` was skipped when model refs matched, even if `te2AutosaveMode` / `te2FreezeProjection` / `modifiedBaseline` flags were stale.
+
+2. **Mirror echo/jitter under autosave**  
+   `editor:mirror` applied full-buffer updates (`model.setValue(...)`) during active typing windows.
+
+3. **Git baseline recompute racing typing**  
+   In autosave + inline diff mode, baseline updates could apply while the user was still entering text.
+
+### Runtime fixes (iframe-only)
+
+#### A) Diff flag parity enforcement
+
+Inside `applyGitBaselines()`:
+- Compute desired flags from current prefs (`autoSave`, inline diff state).
+- If refs match but flags differ, force `diffEditor.setModel(desiredModel)` (no stale mode drift).
+- Debug badge now surfaces this via:
+  - `flags=ok as=<0|1> fr=<0|1> mb=<0|1>`
+  - `flags=rebind ...`
+  - `flags=set ...`
+
+#### B) Mirror echo guards + autosave debounce
+
+Mirror publisher/consumer now includes:
+- Local mirror publish debounce:
+  - autosave ON: `1000ms`
+  - autosave OFF: `180ms`
+- Hot-typing guard for inbound `editor:mirror`:
+  - autosave ON: `850ms`
+  - autosave OFF: `250ms`
+- Drop conditions in mirror handler:
+  - self echo (`source_client` matches socket id)
+  - stale/no-op SHA (`payload.content_sha256 == lastContentSha256`)
+  - hot typing window
+
+Overlay counters:
+- `mir=rx<...>/ap<...>/self<...>/sha<...>/hot<...>`
+
+#### C) Debounced git baseline requests
+
+Client-side request debounce:
+- autosave ON: `320ms`
+- autosave OFF: `180ms`
+- Save-complete path still uses immediate request (`requestGitBaselines({ immediate: true })`).
+
+#### D) Idle apply for autosave + diff
+
+For **autosave ON + inline diff ON**, incoming `editor:git_baselines` payloads are deferred until typing is idle:
+- apply idle window: `1000ms`
+- latest payload wins (`pendingGitBaselinePayload`)
+- debug badge shows `git=defer <ms>` while deferring.
+
+### Build/linking caveat (critical)
+
+If you copy build artifacts with:
+`cp -r out-monaco-editor-core/esm/ app/static/vendor/monaco-editor-core/esm/`
+you can accidentally create `esm/esm/...` and serve stale code from root `esm/...`.
+
+Correct copy pattern:
+`cp -r out-monaco-editor-core/esm/* app/static/vendor/monaco-editor-core/esm/`
+
+Verification checks:
+- `app/static/vendor/monaco-editor-core/esm/vs/.../diffEditorViewModel.js` contains `te2AutosaveMode` logic.
+- `app/static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js` contains matching logic.
+
+### Key files
+
+- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
+  - flag parity check in `applyGitBaselines()`
+  - mirror debounce/guards and mirror debug counters
+  - debounced/idle git baseline scheduling
+- `worktrees/vscode-te2-diff/src/vs/editor/browser/widget/diffEditor/diffEditorViewModel.ts`
+  - autosave-gated TE2 diff control flow (`te2AutosaveMode`)
+- `worktrees/vscode-te2-diff/src/vs/editor/common/editorCommon.ts`
+  - `IDiffEditorModel.te2AutosaveMode?: boolean`
