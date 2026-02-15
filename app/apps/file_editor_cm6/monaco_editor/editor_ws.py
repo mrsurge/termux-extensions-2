@@ -282,6 +282,58 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
     return True
 
 
+async def broadcast_git_baselines_for_active_file() -> bool:
+    """Push fresh editor:git_baselines to all editor clients for the active file.
+
+    Called when git state changes (commits, checkouts, etc.) so the diff
+    editor's original model updates even in draft mode where autosave
+    doesn't trigger the refresh.
+    """
+    print("[git_baselines_push] broadcast_git_baselines_for_active_file called", flush=True)
+    project = _active_project()
+    if not project:
+        print("[git_baselines_push] no active project, skipping", flush=True)
+        return False
+
+    active_path = _history_store.get_last_file(project)
+    if not active_path:
+        print("[git_baselines_push] no active file, skipping", flush=True)
+        return False
+
+    active_norm = _normalize_abs_path(active_path)
+    if not active_norm or not _is_under_project(project, active_norm):
+        print(f"[git_baselines_push] path not under project: {active_path}", flush=True)
+        return False
+
+    try:
+        disk = _read_disk_text(active_norm)
+        disk_sha = hashlib.sha256(disk.encode("utf-8")).hexdigest()
+
+        head = _git_head_text(project, active_norm)
+        head_sha = None
+        if isinstance(head, str):
+            head_sha = hashlib.sha256(head.encode("utf-8")).hexdigest()
+
+        print(f"[git_baselines_push] path={active_norm} tracked={head is not None} head_sha={head_sha} disk_sha={disk_sha}", flush=True)
+
+        payload: Dict[str, Any] = {
+            "path": active_norm,
+            "tracked": bool(head is not None),
+            "base_ref": "HEAD",
+            "disk_content": disk,
+            "disk_sha256": disk_sha,
+            "head_content": head,
+            "head_sha256": head_sha,
+        }
+        from .editor_socketio import EDITOR_SIO
+        await EDITOR_SIO.emit("editor:git_baselines", payload, room="file_editor_cm6", namespace="/editor")
+        print(f"[git_baselines_push] emitted editor:git_baselines for {active_norm}", flush=True)
+        return True
+    except Exception as e:
+        print(f"[git_baselines_push] FAILED: {e}", flush=True)
+        return False
+
+
 async def handle_tracked_edit(edit_result: dict) -> None:
     """Dispatch a jump/open when trackAgentEdits is enabled and a new edit is detected.
 

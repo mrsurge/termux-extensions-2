@@ -662,6 +662,17 @@ async def _broadcast_git_status_update(project_path: str):
             }
         }
         await manager.broadcast(project_path, summary_msg)
+
+        # 3. Push fresh git baselines to editor so diff editor's HEAD model
+        #    updates after commits/checkouts (especially needed in draft mode
+        #    where autosave doesn't trigger baseline refresh).
+        try:
+            logger.info("[git_baselines_push] about to call broadcast_git_baselines_for_active_file")
+            from .monaco_editor.editor_ws import broadcast_git_baselines_for_active_file
+            result = await broadcast_git_baselines_for_active_file()
+            logger.info(f"[git_baselines_push] result={result}")
+        except Exception as e:
+            logger.warning(f"Failed to push git baselines after status update: {e}")
     except Exception as e:
         logger.warning(f"Failed to broadcast git status update: {e}")
 
@@ -1044,8 +1055,15 @@ class ExplorerDispatcher:
             }
             await self.broadcast("git:status", data)
         except Exception:
-            # Not a git repo or error, maybe broadcast null or empty status?
             pass
+
+        # Push fresh git baselines to editor so diff editor's original model
+        # updates after commits/checkouts (needed in draft mode).
+        try:
+            from .monaco_editor.editor_ws import broadcast_git_baselines_for_active_file
+            await broadcast_git_baselines_for_active_file()
+        except Exception as e:
+            logger.warning(f"[broadcast_git_status] git baselines push failed: {e}")
 
     async def broadcast_git_decorations(self):
         """Broadcast git status decorations for all files and directories.

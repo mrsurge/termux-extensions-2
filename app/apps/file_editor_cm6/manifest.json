@@ -20,7 +20,8 @@
       "lsp_transport",
       "editor_transport",
       "vscode_rpc_transport",
-      "vscode_api_transport"
+      "vscode_api_transport",
+      "ui_ipc_transport"
     ]
   },
   "fullscreen": true,

@@ -989,6 +989,38 @@ function connectEditorSocket() {
     });
 }
 
+// ─── UI IPC (frontend ↔ editor iframe relay) ──────────────────────
+let uiIpcSocket = null;
+
+function connectUIIPC() {
+  ensureSocketIoLoaded().then((io) => {
+    if (!io) return;
+    uiIpcSocket = io('/ui_ipc', {
+      path: '/ui_ipc_ws/socket.io',
+      transports: ['websocket'],
+      query: { app_id: 'file_editor_cm6', source: 'main_page' },
+    });
+    uiIpcSocket.on('connect', () => {
+      console.log('[UI_IPC] main page connected');
+    });
+    uiIpcSocket.on('ui_event', (data) => {
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'save') {
+        // Dispatch synthetic Ctrl+S to trigger the existing keydown handler.
+        document.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 's', code: 'KeyS', ctrlKey: true, bubbles: true,
+        }));
+      } else if (data.type === 'focus') {
+        // Dispatch synthetic click to trigger the existing document click handler.
+        document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      }
+    });
+  }).catch((err) => {
+    console.warn('[UI_IPC] connect failed', err);
+  });
+}
+// ─── End UI IPC ───────────────────────────────────────────────────
+
 // === CM6 Code Disabled - Using NiceGUI iframe ===
 // All CM6 initialization, themes, languages, and editor setup moved to NiceGUI
 /*
@@ -5665,6 +5697,13 @@ async function main() {
     connectEditorSocket();
   } catch (e) {
     console.warn('Failed to connect editor Socket.IO channel:', e);
+  }
+
+  // Connect UI IPC Socket.IO (frontend-to-frontend relay with editor iframe).
+  try {
+    connectUIIPC();
+  } catch (e) {
+    console.warn('Failed to connect UI IPC channel:', e);
   }
 
   // Deterministic workbench adapter startup (prevents early 502/500).

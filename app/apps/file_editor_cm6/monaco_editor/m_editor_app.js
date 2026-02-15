@@ -2587,14 +2587,15 @@
 
   function applyGitBaselines(payload) {
     try {
-      if (!payload || !payload.path || !currentPath) return;
-      if (String(payload.path) !== String(currentPath)) return;
-      if (!window.monaco) return;
+      if (!payload || !payload.path || !currentPath) { console.log('[GitBaselines] skip: no path/currentPath'); return; }
+      if (String(payload.path) !== String(currentPath)) { console.log('[GitBaselines] skip: path mismatch', payload.path, currentPath); return; }
+      if (!window.monaco) { console.log('[GitBaselines] skip: no monaco'); return; }
 
       var baselineIdleMs = _gitBaselineApplyIdleMs();
       if (baselineIdleMs > 0 && diffEditor && lastLocalEditAt > 0) {
         var ageMs = Date.now() - lastLocalEditAt;
         if (ageMs < baselineIdleMs) {
+          console.log('[GitBaselines] deferred by idle guard, ageMs=' + ageMs + ' threshold=' + baselineIdleMs);
           pendingGitBaselinePayload = payload;
           _schedulePendingGitBaselineApply();
           setDebugGit('git=defer ' + String(baselineIdleMs - ageMs) + 'ms');
@@ -2639,11 +2640,15 @@
       var lang = languageFromPath(currentPath);
 
       if (!gitHeadModel) {
+        console.log('[GitBaselines] creating new gitHeadModel');
         gitHeadModel = monaco.editor.createModel(head || '', lang);
       } else {
         var nextHead = head || '';
         try {
-          if (!gitHeadModel.getValue || String(gitHeadModel.getValue()) !== String(nextHead)) {
+          var curHead = gitHeadModel.getValue ? String(gitHeadModel.getValue()) : '';
+          var headChanged = curHead !== String(nextHead);
+          console.log('[GitBaselines] gitHeadModel update: changed=' + headChanged + ' curLen=' + curHead.length + ' nextLen=' + nextHead.length);
+          if (headChanged) {
             gitHeadModel.setValue(nextHead);
           }
         } catch (_) {
@@ -2672,9 +2677,6 @@
       var desiredFreeze = !desiredAutoSave;
       var desiredHasBaseline = !desiredAutoSave;
 
-      // If the diffEditor already has models bound for this file, skip setModel()
-      // to preserve scroll position (the model content updates above are sufficient
-      // to trigger diff recomputation).
       var needsSetModel = true;
       var needsFlagRebind = false;
       try {
@@ -2690,11 +2692,9 @@
               curFreeze !== desiredFreeze ||
               curHasBaseline !== desiredHasBaseline
             );
-            setDebugFlags(
-              needsFlagRebind
-                ? ('flags=rebind as=' + (desiredAutoSave ? '1' : '0') + ' fr=' + (desiredFreeze ? '1' : '0') + ' mb=' + (desiredHasBaseline ? '1' : '0'))
-                : ('flags=ok as=' + (curAutoSave ? '1' : '0') + ' fr=' + (curFreeze ? '1' : '0') + ' mb=' + (curHasBaseline ? '1' : '0'))
-            );
+            console.log('[GitBaselines] models match: needsSetModel=false needsFlagRebind=' + needsFlagRebind + ' hasGitDiff=' + hasGitDiff);
+          } else {
+            console.log('[GitBaselines] models differ: needsSetModel=true');
           }
         }
       } catch (_) {}
@@ -2924,6 +2924,7 @@
       }
     } catch (_) {}
 
+    bindUIIPCEditorHooks();
     return editor;
   }
 
@@ -3013,6 +3014,7 @@
       }
     } catch (_) {}
 
+    bindUIIPCEditorHooks();
     return diffEditor;
   }
 
@@ -4132,11 +4134,6 @@
           if (String(payload.path) !== String(currentPath)) return;
           if (payload.unsaved === false) {
             clearDraftDiffDecorations();
-            // After a save, refresh Git baselines so inline git diffs update.
-            // In autosave mode, skip the refresh if the diff editor is already
-            // correctly configured — the diff is HEAD vs live editor, disk state
-            // is irrelevant, and refreshing on every save causes cursor jumps
-            // from gitDiskModel.setValue() + potential setModel() calls.
             try {
               if (getAutoSave()) {
                 // Only refresh if diff editor isn't set up yet or flags are stale.
@@ -4147,12 +4144,45 @@
                     _skipRefresh = true;
                   }
                 } else {
-                  // No diff editor — plain editor autosave; skip baseline refresh
-                  // to avoid cursor jumps from unnecessary editor recreation.
                   _skipRefresh = true;
                 }
                 if (!_skipRefresh) requestGitBaselines({ reason: 'cache_state_clean_autosave' });
               } else {
+                // Draft mode save: re-snapshot the modifiedBaseline so the diff
+                // recomputes against the newly saved content (clean state).
+                if (diffEditor && diffEditor.getModel && diffEditor.setModel) {
+                  try {
+                    var _dm2 = diffEditor.getModel();
+                    if (_dm2 && _dm2.te2FreezeProjection && _dm2.modifiedBaseline) {
+                      var _mvs2 = null;
+                      try {
+                        var _me3 = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
+                        if (_me3) _mvs2 = _me3.saveViewState();
+                      } catch (_) {}
+
+                      var freshContent = model.getValue ? model.getValue() : '';
+                      var freshLang = model.getLanguageId ? model.getLanguageId() : 'plaintext';
+                      var freshBaseline = monaco.editor.createModel(freshContent, freshLang);
+                      diffEditor.setModel({
+                        original: _dm2.original,
+                        modified: _dm2.modified,
+                        modifiedBaseline: freshBaseline,
+                        te2AutosaveMode: false,
+                        te2FreezeProjection: true,
+                      });
+
+                      try {
+                        if (_mvs2) {
+                          var _me4 = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
+                          if (_me4) _me4.restoreViewState(_mvs2);
+                        }
+                      } catch (_) {}
+                      console.log('[GitBaselines] draft save: re-snapshotted modifiedBaseline');
+                    }
+                  } catch (e) {
+                    console.warn('[GitBaselines] draft save baseline re-snapshot failed', e);
+                  }
+                }
                 requestGitBaselines({ immediate: true, reason: 'cache_state_clean' });
               }
             } catch (_) {}
@@ -4703,6 +4733,70 @@
   }
   // ─── End Breadcrumb ──────────────────────────────────────
 
+  // ─── UI IPC (frontend-to-frontend relay) ────────────────
+  var uiIpcSocket = null;
+
+  function connectUIIPC() {
+    try {
+      if (!window.io) return;
+      uiIpcSocket = window.io('/ui_ipc', {
+        path: '/ui_ipc_ws/socket.io',
+        transports: ['websocket'],
+        query: { app_id: 'file_editor_cm6', source: 'editor_iframe' },
+      });
+      uiIpcSocket.on('connect', function() {
+        console.log('[UI_IPC] editor iframe connected');
+      });
+      uiIpcSocket.on('ui_event', function(data) {
+        // Handle events from the main page if needed in the future
+      });
+    } catch (e) {
+      console.warn('[UI_IPC] connect failed', e);
+    }
+  }
+
+  /** Call after editor/diffEditor is created to bind Ctrl+S and focus relay. */
+  function bindUIIPCEditorHooks() {
+    _bindEditorSaveKey();
+    _bindEditorFocusRelay();
+  }
+
+  function _bindEditorSaveKey() {
+    try {
+      var ed = (diffEditor && diffEditor.getModifiedEditor)
+        ? diffEditor.getModifiedEditor()
+        : editor;
+      if (!ed || !window.monaco) return;
+      // Ctrl+S / Cmd+S
+      ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function() {
+        if (uiIpcSocket) {
+          uiIpcSocket.emit('ui_event', { type: 'save' });
+        }
+      });
+    } catch (_) {}
+  }
+
+  var _uiIpcFocusDisposable = null;
+
+  function _bindEditorFocusRelay() {
+    try {
+      if (_uiIpcFocusDisposable) {
+        try { _uiIpcFocusDisposable.dispose(); } catch (_) {}
+        _uiIpcFocusDisposable = null;
+      }
+      var ed = (diffEditor && diffEditor.getModifiedEditor)
+        ? diffEditor.getModifiedEditor()
+        : editor;
+      if (!ed) return;
+      _uiIpcFocusDisposable = ed.onDidFocusEditorWidget(function() {
+        if (uiIpcSocket) {
+          uiIpcSocket.emit('ui_event', { type: 'focus' });
+        }
+      });
+    } catch (_) {}
+  }
+  // ─── End UI IPC ─────────────────────────────────────────
+
   async function bootMonaco() {
     try {
       // Load the pinned VS Code monaco-editor-core ESM build (served by the worker).
@@ -4828,6 +4922,9 @@
 
       // Connect editor Socket.IO transport (required for readiness chain + SSOT).
       connectEditorSocket();
+
+      // Connect UI IPC Socket.IO (frontend-to-frontend relay for iframe ↔ main page).
+      connectUIIPC();
 
       // Phase 0: connect vscode_rpc (semantic tokens via TS LSP).
       // Best-effort: this is optional, but should be available when the shell is running.

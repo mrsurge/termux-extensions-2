@@ -1222,9 +1222,14 @@ from app.apps.file_editor_cm6.monaco_editor.editor_socketio import EDITOR_ASGI_A
 # The main framework process proxies /explorer_ws/socket.io to this worker endpoint.
 from app.apps.file_editor_cm6.explorer_socketio import EXPLORER_ASGI_APP
 
+# --- UI IPC Socket.IO (worker-owned) ---
+# Frontend-to-frontend relay for iframe ↔ main page communication.
+from app.apps.file_editor_cm6.ui_ipc.ui_ipc_socketio import UI_IPC_ASGI_APP
+
 SUBAPPS = [
     ("/editor_ws/socket.io", EDITOR_ASGI_APP),
     ("/explorer_ws/socket.io", EXPLORER_ASGI_APP),
+    ("/ui_ipc_ws/socket.io", UI_IPC_ASGI_APP),
 ]
 
 # Import singleton store instances
