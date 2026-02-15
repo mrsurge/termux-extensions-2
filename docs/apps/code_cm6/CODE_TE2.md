@@ -908,42 +908,77 @@ Primary implementation lives in:
 
 ---
 
-## 13) Known issue (next investigation): Git diff + drafts “thrash” / assertion
+## 13) Resolved: Git diff + drafts assertion / thrash
 
-When Git diff mode is enabled and drafts are updating, we can hit a diff-projection assertion:
+When Git diff mode is enabled and the user types at EOF, the diff-projection engine previously
+hit an assertion in `lineRangeMappingFromRangeMappings` (trailing-line invariant). This caused
+visual thrash (green insertion flash, editor re-render on every keystroke) unless the last line
+happened to have a deletion widget.
 
+### Root cause
+
+Stock Monaco had `applyModifiedEdits` and `applyOriginalEdits` **stubbed out** (`return undefined; // TODO@hediet`).
+The TE2 pinned-baseline branch un-stubbed them for draft-diff projection but did not re-stub them
+for autosave mode. The un-stubbed projection produced bad mappings at EOF boundaries where the
+trailing-line invariant (`originalTrailing === modifiedTrailing`) fails.
+
+`assertFn` in Monaco calls `onUnexpectedError` which is **non-throwing** (fires via `setTimeout`),
+so try/catch at the call site cannot intercept it.
+
+### Fix: Projection gating (`diffEditorViewModel.ts`)
+
+All 3 projection zones are now gated with `!model.te2AutosaveMode`:
+
+| Zone | Location | Gate |
+|------|----------|------|
+| 1 | `modified.onDidChangeContent` (~line 239) | `if (diff && !model.te2AutosaveMode)` |
+| 2 | `original.onDidChangeContent` (~line 271) | `if (diff && !model.te2AutosaveMode)` |
+| 3 | post-`computeDiff` autorun (~line 367) | `else if (!model.te2AutosaveMode)` |
+
+When `te2AutosaveMode = true`: projection skipped entirely (stock behavior), debouncer does clean
+full `computeDiff` — no thrash, no assertion.
+
+When `te2AutosaveMode = false`: projection runs for pinned-baseline draft-diff tracking.
+
+### Fix: EOF trailing-line invariant (`rangeMapping.ts`)
+
+Instead of `assertFn` (non-throwing, crashes error handler), the last mapping is **extended to
+absorb the EOF boundary** — simulating what a deletion widget naturally provides:
+
+```typescript
+const origTrailing = originalLines.length.lineCount - lastChange.original.endLineNumberExclusive;
+const modTrailing = modifiedLines.length.lineCount - lastChange.modified.endLineNumberExclusive;
+if (origTrailing !== modTrailing) {
+    const maxTrailing = Math.max(origTrailing, modTrailing);
+    changes[changes.length - 1] = new DetailedLineRangeMapping(
+        new LineRange(lastChange.original.startLineNumber,
+                      lastChange.original.endLineNumberExclusive + maxTrailing),
+        new LineRange(lastChange.modified.startLineNumber,
+                      lastChange.modified.endLineNumberExclusive + maxTrailing),
+        lastChange.innerChanges,
+    );
+}
 ```
-errors.ts:26 Uncaught Error: Assertion Failed
 
-Error: Assertion Failed
-    at assertFn (assert.ts:72:21)
-    at lineRangeMappingFromRangeMappings (rangeMapping.ts:301:2)
-    at applyModifiedEditsToLineRangeMappings (diffEditorViewModel.ts:781:10)
-    at applyModifiedEdits (diffEditorViewModel.ts:737:12)
-    at diffEditorViewModel.ts:228:20
-    at UniqueContainer.value (textModel.ts:206:79)
-    at Emitter._deliver (event.ts:1187:13)
-    at Emitter._deliverQueue (event.ts:1198:9)
-    at Emitter.fire (event.ts:1222:9)
-    at DidChangeContentEmitter.endDeferredEmit (textModel.ts:2598:23)
+### Fix: Mode switch baseline snapshot (`m_editor_app.js`)
+
+When toggling autosave OFF → draft mode, the baseline is now a **snapshot of the current editor
+content** (not `gitDiskModel`, which after autosave equals the editor = empty diff):
+
+```javascript
+var baselineContent = model.getValue();
+diffModel.modifiedBaseline = monaco.editor.createModel(baselineContent, lang);
 ```
 
-This is currently the primary “thrash” issue to tackle.
+Applied in both `applyGitBaselines` (~line 2716) and `prefs_changed` handler (~line 4071).
 
-### Mitigation (TE2 pinned baseline)
-When using the pinned-baseline diff mode (`modifiedBaseline`), TE2 can freeze projection updates so
-typing/draft edits do not cause the diff engine to re-project on every keystroke.
+### Fix: Mirror client autosave suppression (`main.js`)
 
-This is enabled by passing:
-- `te2FreezeProjection: true`
-
-in the `diffEditor.setModel({ ... })` payload from `m_editor_app.js`.
-
-Note: this flag is implemented in the VS Code fork (`worktrees/vscode-te2-diff`) and requires a rebuild
-to take effect in the served Monaco bundle.
+Mirror clients no longer trigger autosave for mirrored content. `markUnsaved(flag, opts)` accepts
+`{ skipAutosave: true }`, passed when `reason === 'mirror'` in `_applyCacheIndicatorImpl`.
 
 ### Debugger note
-If your browser keeps pausing on this, DevTools likely has “Pause on exceptions” enabled; disable it while iterating so the UI remains usable.
+If your browser keeps pausing on this, DevTools likely has "Pause on exceptions" enabled; disable it while iterating so the UI remains usable.
 
 ---
 
@@ -1786,7 +1821,7 @@ When a watcher event (IPC or watchexec) reports a change to the **currently acti
 - `watchexec_shell_manager.py`: watchexec path hook (schedules `handle_external_file_change` via `loop.create_task`)
 - `m_editor_app.js`: `model.applyEdits()` for external changes, scroll save/restore in `ensureDiffEditorWithPrefs`/`ensurePlainEditorWithPrefs`/`applyGitBaselines`
 
-## 18) Cursor Stability Hardening (Autosave + Git Diff)
+## 20) Cursor Stability Hardening (Autosave + Git Diff)
 
 This section documents the stabilization work that removed full-page thrash and significantly reduced cursor jumps under rapid typing.
 
