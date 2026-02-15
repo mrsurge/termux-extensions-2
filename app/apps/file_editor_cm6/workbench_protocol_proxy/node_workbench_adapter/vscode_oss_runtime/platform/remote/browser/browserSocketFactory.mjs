@@ -1,4 +1,4 @@
-import WebSocket from "ws";
+import WebSocket from "../../../../../../../../static/vendor/ws/index.js";
 import { Emitter } from "../../../base/common/event.mjs";
 import { VSBuffer } from "../../../base/common/buffer.mjs";
 
