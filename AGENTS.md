@@ -157,7 +157,7 @@ rg -l --hidden --no-ignore -g'*.js' -g'!*.map' "someCode" /path/to/installed/cod
   done
 ```
 
-**2.3. If you need “pretty-search even when raw string isn’t present”**
+**2.3. If I need “pretty-search even when raw string isn’t present”**
 Sometimes minified code obscures whitespace/newlines such that your *intended* snippet only appears after formatting. In that case, discovery becomes two-stage:
 
 * Stage A: narrow candidates with a cheaper anchor (a function name, string literal, import-ish token).
@@ -182,6 +182,13 @@ rg -l --hidden --no-ignore -g'*.js' -g'!*.map' "someCode" /path/to/installed/cod
 see `CTAG-ANNOTATIONS.md` for tagging prettified functions
 
 I will NEVER EVER IN 100 MILLION YEARS EVER WRITE A FALLBACK WITHOUT EXPLICIT APPROVAL... THIS MEANS ***YOU***
+
+---
+Memory MCP usage
+As an agent, I will memory MCP to to prevent contacts loss for important important function usage and architecture points That I will need in case I forget to summarize ... And when I am instructed to create a context summary, I will include the titles for all of important memory MCP entries. THIS IS A HARD REQUIREMENT, FOR CONTEXT SUMMARIES OF A CONVERSATION HAND OFF I MUST REFERENCE THESE MEMORY ENTRIES.
+
+The entries are designed to be concise, each covering a single point and not being longer than 100 lines descriptively. (code snippets do not count against this 100 line limit) several memory entries can be referenced together with one summary entry referencing the others. this will be put together as a "knowledge tree" with general basic concepts at the bottom and specifics at the ends of the chains.
+
 
 ---
 
@@ -221,3 +228,5 @@ This monologue must occur before the next tool is invoked and address:
 3. **Strategic Alignment**: How does this step move the needle on the primary objective?
 
 For high-complexity tasks or unexpected errors, I will expand this monologue to evaluate alternative paths before proceeding.
+
+Dont title the monologs. they should flow as actual speech to ones self
