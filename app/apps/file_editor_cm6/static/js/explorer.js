@@ -2271,7 +2271,8 @@ export async function initExplorerUI() {
       } else if (gitDiffBase.mode === 'none') {
         setGitControlsEnabled(true, true);
       } else {
-        setGitControlsEnabled(false, false);
+        // Git repo exists — enable controls immediately; git:status will refine.
+        setGitControlsEnabled(true, false);
       }
     }
   } catch {

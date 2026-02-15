@@ -5358,15 +5358,38 @@ bindMenuToggle(miToggleAutosave, async () => {
 
   editorViewState.autoSave = true;
   markUnsaved(false);
+
+  // Guard: autosave forces draft diffs off (there are no drafts in autosave mode)
+  if (editorViewState?.showDraftDiffs) {
+    await updatePreference('showDraftDiffs', false);
+  }
+
+  // Guard: autosave + trackEdits + editable is dangerous — the tracker chases its own saves.
+  if (editorViewState?.trackAgentEdits && !editorViewState?.readOnly) {
+    await updatePreference('trackAgentEdits', false);
+    host.toast('Auto-track edits disabled (incompatible with autosave)', 'warn');
+  }
 });
 
 bindMenuToggle(miToggleDiffs, async () => {
-  const success = await updatePreference('showInlineDiffs', !(editorViewState?.showInlineDiffs));
-  if (!success) host.toast('Failed to update preference');
+  const turningOff = !!(editorViewState?.showInlineDiffs);
+  const success = await updatePreference('showInlineDiffs', !turningOff);
+  if (!success) { host.toast('Failed to update preference'); return; }
+  // Guard: turning git diffs OFF while auto-track is on → disable auto-track
+  if (turningOff && editorViewState?.trackAgentEdits) {
+    await updatePreference('trackAgentEdits', false);
+    host.toast('Auto-track edits disabled (requires git diffs)', 'warn');
+  }
 });
 
 bindMenuToggle(miToggleDraftDiffs, async () => {
-  const success = await updatePreference('showDraftDiffs', !(editorViewState?.showDraftDiffs));
+  const turningOn = !(editorViewState?.showDraftDiffs);
+  if (turningOn && editorViewState?.autoSave) {
+    // Draft diffs require draft mode — disable autosave first
+    await updatePreference('autoSave', false);
+    host.toast('Autosave disabled (draft diffs require draft mode)', 'warn');
+  }
+  const success = await updatePreference('showDraftDiffs', turningOn);
   if (!success) host.toast('Failed to update preference');
 });
 
@@ -5376,9 +5399,16 @@ bindMenuToggle(miToggleColorPicker, async () => {
 });
 
 bindMenuToggle(miToggleReadonly, async () => {
-  const success = await updatePreference('readOnly', !(editorViewState?.readOnly));
+  const goingEditable = !!(editorViewState?.readOnly);
+  const success = await updatePreference('readOnly', !goingEditable);
   if (success) {
     host.toast(editorViewState?.readOnly ? 'Editor is now read-only' : 'Editor is now editable', 'info');
+    // Guard: if we just made it editable while autosave + trackEdits are both ON,
+    // the tracker would chase its own saves in an infinite loop. Disable tracking.
+    if (goingEditable && editorViewState?.autoSave && editorViewState?.trackAgentEdits) {
+      await updatePreference('trackAgentEdits', false);
+      host.toast('Auto-track edits disabled (incompatible with autosave)', 'warn');
+    }
   } else {
     host.toast('Failed to toggle read-only mode');
   }
@@ -5411,6 +5441,7 @@ bindMenuToggle(miTrackEdits, async () => {
       readOnly: editorViewState?.readOnly ?? false,
     };
     // Force showInlineDiffs + readOnly ON, then enable tracking
+    // readOnly keeps autosave harmless — no edits means no save loop
     await updatePreference('showInlineDiffs', true);
     await updatePreference('readOnly', true);
     const success = await updatePreference('trackAgentEdits', true);

@@ -181,7 +181,7 @@ rg -l --hidden --no-ignore -g'*.js' -g'!*.map' "someCode" /path/to/installed/cod
 
 see `CTAG-ANNOTATIONS.md` for tagging prettified functions
 
-NEVER EVER IN 100 MILLION YEARS EVER WRITE A FALLBACK WITHOUT EXPLICIT APPROVAL... THIS MEANS ***YOU***
+I will NEVER EVER IN 100 MILLION YEARS EVER WRITE A FALLBACK WITHOUT EXPLICIT APPROVAL... THIS MEANS ***YOU***
 
 ---
 
@@ -196,3 +196,28 @@ NEVER EVER IN 100 MILLION YEARS EVER WRITE A FALLBACK WITHOUT EXPLICIT APPROVAL.
 3. **If the user is unsure whether relevant methods exist** — I will ask: "Would you like me to search the codebase for existing methods that handle this?" and only proceed after approval.
 
 4. **I will never invent my own version of something that already exists in the codebase.** If a drawer has a toggle, I use that toggle. If an explorer has a scroll-to method, I use that method. I do not write `classList.add('open')` when the codebase uses `classList.add('drawer-open')` on a different element.
+
+---
+
+There are two WebSockets... The editor Web socket, that covers the editor iFrame, and the explorer WebSocket that covers the main page... The Python framework is the connection between the two front ends. this is how communication is handled. We only use post/http when absolutely necessary, or when it doesn't make sense to use a web socket.
+
+---
+
+# Codex Reasoning Protocol 
+
+If i am CODEX or CHATGPT... I will allways reason outloud with a brief 2-5 sentence paragraph 'internal monolog' message event between tool calls, with
+1. The reasoning behind the tool call
+2. What I have learned from the last tool call/outputs
+3. How it pertains to the task I'm working on
+
+More complex tasks may require more reasonin paragraph loops
+
+concretely:
+
+This monologue must occur before the next tool is invoked and address:
+
+1. **Retrospective**: What did the previous tool output actually prove or disprove? (Do not just summarize; analyze).
+2. **Intent & Prediction**: Why am I making the *next* call, and what specific value do I expect to find?
+3. **Strategic Alignment**: How does this step move the needle on the primary objective?
+
+For high-complexity tasks or unexpected errors, I will expand this monologue to evaluate alternative paths before proceeding.

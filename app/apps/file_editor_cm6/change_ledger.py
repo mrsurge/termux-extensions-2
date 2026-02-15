@@ -68,6 +68,9 @@ def record_change(abs_path: str, project_root: str) -> Optional[dict]:
         old_hunks = _file_hunks.get(abs_path, [])
         delta = _compute_hunk_delta(old_hunks, new_hunks)
 
+        # Debug: log every call to track missed edits
+        print(f"[change_ledger] record_change: {rel_path} old_hunks={old_hunks} new_hunks={new_hunks} delta={delta}", file=sys.stderr)
+
         # Store new snapshot regardless
         _file_hunks[abs_path] = new_hunks
 
@@ -221,34 +224,41 @@ def _compute_hunk_delta(
     old_hunks: List[Tuple[int, int]],
     new_hunks: List[Tuple[int, int]],
 ) -> List[Tuple[int, int]]:
-    """Find new or expanded hunks between two hunk snapshots.
+    """Find changed hunks between two hunk snapshots.
 
-    A hunk in new_hunks is considered a "delta" if:
-      - It doesn't exist at all in old_hunks (brand new region), or
-      - It exists at the same start line but with a larger count (expanded).
+    A hunk is considered a "delta" if:
+      - It's brand new (not in old_hunks),
+      - It changed size (expanded or shrunk), or
+      - An old hunk disappeared (reverted region — use old start line).
 
     Returns the delta hunks in file order.
     """
-    if not new_hunks:
+    if not new_hunks and not old_hunks:
         return []
 
     if not old_hunks:
-        # All hunks are new — everything is a delta
         return list(new_hunks)
 
     old_map: Dict[int, int] = {start: count for start, count in old_hunks}
+    new_map: Dict[int, int] = {start: count for start, count in new_hunks}
     delta: List[Tuple[int, int]] = []
 
+    # Detect new or changed hunks
     for start, count in new_hunks:
         old_count = old_map.get(start)
         if old_count is None:
-            # Brand new hunk at this start line
             delta.append((start, count))
-        elif count > old_count:
-            # Existing hunk expanded
+        elif count != old_count:
             delta.append((start, count))
-        # else: unchanged or shrunk — skip
 
+    # Detect disappeared hunks (old hunk start no longer in new)
+    for start, count in old_hunks:
+        if start not in new_map:
+            # Hunk was reverted — point to where it used to be
+            delta.append((start, 0))
+
+    # Sort by line number
+    delta.sort(key=lambda h: h[0])
     return delta
 
 

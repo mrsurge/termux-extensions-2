@@ -23,8 +23,12 @@
   var editorSocketId = null;
   var baseSha256 = null;
   var lastContentSha256 = null;
+  var lastLocalEditAt = 0;
   var isApplyingRemote = false;
   var mirrorDebounceT = null;
+  var gitBaselineDebounceT = null;
+  var gitBaselineApplyT = null;
+  var pendingGitBaselinePayload = null;
   var draftDecoCollection = null;
   var draftDecoIds = [];
   var draftDiffDebounceT = null;
@@ -35,7 +39,16 @@
   var _ignoreNextModifiedViewZonesEvent = false;
   var _reapplyDraftZonesScheduled = false;
   var layoutObserver = null;
-  var debugParts = { git: null, draft: null, diag: null, extra: null };
+  var debugParts = { git: null, draft: null, diag: null, flags: null, mirror: null, extra: null };
+  var mirrorState = {
+    rx: 0,
+    ap: 0,
+    drop_self: 0,
+    drop_path: 0,
+    drop_no_model: 0,
+    drop_sha: 0,
+    drop_hot: 0,
+  };
   var apiBase = (function() {
     try {
       var p = String(window.location && window.location.pathname ? window.location.pathname : '');
@@ -532,6 +545,8 @@
   }
 
   function getShowDraftDiffs() {
+    // Draft diffs are meaningless when autosave is ON (there are no drafts).
+    if (getAutoSave()) return false;
     try {
       var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
       if (prefs && prefs.editor && typeof prefs.editor.showDraftDiffs === 'boolean') return prefs.editor.showDraftDiffs;
@@ -547,6 +562,64 @@
       if (prefs && typeof prefs.useTrueInlineView === 'boolean') return prefs.useTrueInlineView;
     } catch (_) {}
     return false;
+  }
+
+  function getAutoSave() {
+    try {
+      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
+      if (prefs && prefs.editor && typeof prefs.editor.autoSave === 'boolean') return prefs.editor.autoSave;
+      if (prefs && typeof prefs.autoSave === 'boolean') return prefs.autoSave;
+    } catch (_) {}
+    return false;
+  }
+
+  function _localMirrorDebounceMs() {
+    // In autosave mode, use a longer debounce to reduce echo churn while typing.
+    return getAutoSave() ? 1000 : 180;
+  }
+
+  function _mirrorHotWindowMs() {
+    // Ignore incoming mirrors briefly after local keystrokes to avoid cursor jitter.
+    return getAutoSave() ? 850 : 250;
+  }
+
+  function _gitBaselineDebounceMs() {
+    return getAutoSave() ? 320 : 180;
+  }
+
+  function _gitBaselineApplyIdleMs() {
+    // For autosave + diff view, apply baseline updates only after typing settles.
+    return (getAutoSave() && getShowInlineDiffs()) ? 1000 : 0;
+  }
+
+  function _schedulePendingGitBaselineApply() {
+    if (!pendingGitBaselinePayload) return;
+    var idleMs = _gitBaselineApplyIdleMs();
+    if (idleMs <= 0) return;
+    var sinceEdit = lastLocalEditAt > 0 ? (Date.now() - lastLocalEditAt) : idleMs;
+    var waitMs = sinceEdit >= idleMs ? 0 : (idleMs - sinceEdit);
+    if (gitBaselineApplyT) clearTimeout(gitBaselineApplyT);
+    gitBaselineApplyT = setTimeout(function() {
+      gitBaselineApplyT = null;
+      var p = pendingGitBaselinePayload;
+      pendingGitBaselinePayload = null;
+      try { if (p) applyGitBaselines(p); } catch (_) {}
+    }, waitMs);
+  }
+
+  function _emitGitBaselineRequestNow() {
+    if (!editorSocket || !editorSocket.connected) return false;
+    if (!currentPath) return false;
+
+    if (!getShowInlineDiffs()) {
+      // Drop Git UI immediately if diffs are disabled.
+      disposeGitBaselines();
+      if (diffEditor) ensurePlainEditorWithPrefs();
+      return false;
+    }
+
+    editorSocket.emit('editor_git_baselines_request', { path: currentPath });
+    return true;
   }
 
   function normalizeLanguage(lang) {
@@ -2444,19 +2517,19 @@
     }
   }
 
-  function requestGitBaselines() {
+  function requestGitBaselines(opts) {
     try {
-      if (!editorSocket || !editorSocket.connected) return false;
-      if (!currentPath) return false;
-
-      if (!getShowInlineDiffs()) {
-        // Drop Git UI immediately if diffs are disabled.
-        disposeGitBaselines();
-        if (diffEditor) ensurePlainEditorWithPrefs();
-        return false;
+      var immediate = !!(opts && opts.immediate);
+      if (immediate) {
+        if (gitBaselineDebounceT) clearTimeout(gitBaselineDebounceT);
+        gitBaselineDebounceT = null;
+        return _emitGitBaselineRequestNow();
       }
-
-      editorSocket.emit('editor_git_baselines_request', { path: currentPath });
+      if (gitBaselineDebounceT) clearTimeout(gitBaselineDebounceT);
+      gitBaselineDebounceT = setTimeout(function() {
+        gitBaselineDebounceT = null;
+        try { _emitGitBaselineRequestNow(); } catch (_) {}
+      }, _gitBaselineDebounceMs());
       return true;
     } catch (_) {
       return false;
@@ -2468,6 +2541,17 @@
       if (!payload || !payload.path || !currentPath) return;
       if (String(payload.path) !== String(currentPath)) return;
       if (!window.monaco) return;
+
+      var baselineIdleMs = _gitBaselineApplyIdleMs();
+      if (baselineIdleMs > 0 && diffEditor && lastLocalEditAt > 0) {
+        var ageMs = Date.now() - lastLocalEditAt;
+        if (ageMs < baselineIdleMs) {
+          pendingGitBaselinePayload = payload;
+          _schedulePendingGitBaselineApply();
+          setDebugGit('git=defer ' + String(baselineIdleMs - ageMs) + 'ms');
+          return;
+        }
+      }
 
       lastGitBaselines = payload;
 
@@ -2521,27 +2605,50 @@
 
       ensureDiffEditorWithPrefs();
 
+      var desiredAutoSave = !!getAutoSave();
+      var desiredFreeze = !desiredAutoSave;
+      var desiredHasBaseline = !desiredAutoSave;
+
       // If the diffEditor already has models bound for this file, skip setModel()
       // to preserve scroll position (the model content updates above are sufficient
       // to trigger diff recomputation).
       var needsSetModel = true;
+      var needsFlagRebind = false;
       try {
         if (diffEditor && diffEditor.getModel) {
           var dm = diffEditor.getModel();
           if (dm && dm.original === gitHeadModel && dm.modified === model) {
             needsSetModel = false;
+            var curAutoSave = !!dm.te2AutosaveMode;
+            var curFreeze = !!dm.te2FreezeProjection;
+            var curHasBaseline = !!dm.modifiedBaseline;
+            needsFlagRebind = (
+              curAutoSave !== desiredAutoSave ||
+              curFreeze !== desiredFreeze ||
+              curHasBaseline !== desiredHasBaseline
+            );
+            setDebugFlags(
+              needsFlagRebind
+                ? ('flags=rebind as=' + (desiredAutoSave ? '1' : '0') + ' fr=' + (desiredFreeze ? '1' : '0') + ' mb=' + (desiredHasBaseline ? '1' : '0'))
+                : ('flags=ok as=' + (curAutoSave ? '1' : '0') + ' fr=' + (curFreeze ? '1' : '0') + ' mb=' + (curHasBaseline ? '1' : '0'))
+            );
           }
         }
       } catch (_) {}
 
-      if (needsSetModel) {
+      if (needsSetModel || needsFlagRebind) {
         try {
-          diffEditor.setModel({
+          var diffModel = {
             original: gitHeadModel,
             modified: model,
-            modifiedBaseline: gitDiskModel,
-            te2FreezeProjection: true,
-          });
+            te2AutosaveMode: desiredAutoSave,
+          };
+          if (!desiredAutoSave) {
+            diffModel.modifiedBaseline = gitDiskModel;
+            diffModel.te2FreezeProjection = true;
+          }
+          diffEditor.setModel(diffModel);
+          setDebugFlags('flags=set as=' + (desiredAutoSave ? '1' : '0') + ' fr=' + (desiredFreeze ? '1' : '0') + ' mb=' + (desiredHasBaseline ? '1' : '0'));
         } catch (e) {
           console.warn('[Monaco] diffEditor.setModel failed', e);
           disposeGitBaselines();
@@ -2833,6 +2940,7 @@
         if (isApplyingRemote) return;
         if (!editorSocket || !editorSocket.connected) return;
         if (!currentPath || !model) return;
+        lastLocalEditAt = Date.now();
         if (mirrorDebounceT) clearTimeout(mirrorDebounceT);
         mirrorDebounceT = setTimeout(function() {
           try {
@@ -2850,7 +2958,7 @@
             );
           } catch (_) {}
           requestDraftDiff('local');
-        }, 120);
+        }, _localMirrorDebounceMs());
       });
     } catch (e) {
       console.warn('[Monaco] Failed to install mirror publisher', e);
@@ -2917,6 +3025,8 @@
       if (debugParts.git) msg += ' ' + debugParts.git;
       if (debugParts.draft) msg += ' ' + debugParts.draft;
       if (debugParts.diag) msg += ' ' + debugParts.diag;
+      if (debugParts.flags) msg += ' ' + debugParts.flags;
+      if (debugParts.mirror) msg += ' ' + debugParts.mirror;
       if (debugParts.extra) msg += ' ' + debugParts.extra;
       dbg.textContent = msg;
     } catch (_) {}
@@ -2935,6 +3045,26 @@
   function setDebugDiag(s) {
     debugParts.diag = s || null;
     updateDebug();
+  }
+
+  function setDebugFlags(s) {
+    debugParts.flags = s || null;
+    updateDebug();
+  }
+
+  function setDebugMirror(s) {
+    debugParts.mirror = s || null;
+    updateDebug();
+  }
+
+  function _syncMirrorDebug() {
+    setDebugMirror(
+      'mir=rx' + mirrorState.rx +
+      '/ap' + mirrorState.ap +
+      '/self' + mirrorState.drop_self +
+      '/sha' + mirrorState.drop_sha +
+      '/hot' + mirrorState.drop_hot
+    );
   }
 
   function clearDraftDiffDecorations() {
@@ -3374,6 +3504,7 @@
       try {
         var want = _fileUri(absPath);
         if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
+          if (diffEditor) { try { diffEditor.setModel(null); } catch (_) {} }
           try { model.dispose(); } catch (_) {}
           model = createFileModel(content || '', lang, absPath);
           editor.setModel(model);
@@ -3499,6 +3630,7 @@
                 try {
                   var want = _fileUri(currentPath);
                   if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
+                    if (diffEditor) { try { diffEditor.setModel(null); } catch (_) {} }
                     try { model.dispose(); } catch (_) {}
                     model = createFileModel(f.content || '', lang, currentPath);
                     editor.setModel(model);
@@ -3609,6 +3741,10 @@
               try {
                 var want = _fileUri(currentPath);
                 if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
+                  // Detach diff editor model before disposing — Monaco throws
+                  // BugIndicatingError if a TextModel is disposed while DiffEditorWidget
+                  // still references it.
+                  if (diffEditor) { try { diffEditor.setModel(null); } catch (_) {} }
                   try { model.dispose(); } catch (_) {}
                   model = createFileModel(payload.content || '', lang, currentPath);
                   editor.setModel(model);
@@ -3714,13 +3850,39 @@
 
       editorSocket.on('editor:mirror', function(payload) {
         try {
-          if (!payload || !payload.path || !payload.content) return;
-          if (payload.source_client && editorSocketId && String(payload.source_client) === String(editorSocketId)) return;
-          if (currentPath && String(payload.path) !== String(currentPath)) return;
-          if (!model) return;
+          mirrorState.rx += 1;
+          if (!payload || !payload.path || typeof payload.content !== 'string') return;
+          if (payload.source_client && editorSocketId && String(payload.source_client) === String(editorSocketId)) {
+            mirrorState.drop_self += 1;
+            _syncMirrorDebug();
+            return;
+          }
+          if (currentPath && String(payload.path) !== String(currentPath)) {
+            mirrorState.drop_path += 1;
+            _syncMirrorDebug();
+            return;
+          }
+          if (!model) {
+            mirrorState.drop_no_model += 1;
+            _syncMirrorDebug();
+            return;
+          }
+          if (payload.content_sha256 && lastContentSha256 && String(payload.content_sha256) === String(lastContentSha256)) {
+            mirrorState.drop_sha += 1;
+            _syncMirrorDebug();
+            return;
+          }
+          var hotMs = _mirrorHotWindowMs();
+          if (hotMs > 0 && lastLocalEditAt > 0 && (Date.now() - lastLocalEditAt) < hotMs) {
+            mirrorState.drop_hot += 1;
+            _syncMirrorDebug();
+            return;
+          }
           isApplyingRemote = true;
           try { model.setValue(payload.content); } finally { isApplyingRemote = false; }
           try { lastContentSha256 = payload.content_sha256 || lastContentSha256; } catch (_) {}
+          mirrorState.ap += 1;
+          _syncMirrorDebug();
           applyLineNumberSizing();
           emitToHost('editor_cache_state', {
             path: payload.path,
@@ -3741,9 +3903,11 @@
         try {
           var nextPrefs = payload && payload.preferences ? payload.preferences : null;
           if (!nextPrefs) return;
+          var prevAutoSave = !!getAutoSave();
 
           if (!cachedPrefs) cachedPrefs = {};
           cachedPrefs.preferences = nextPrefs;
+          var nextAutoSave = !!getAutoSave();
 
           if (!editor) return;
           var opts = buildMonacoOptionsFromPrefs({ preferences: nextPrefs });
@@ -3775,6 +3939,25 @@
           ensureTouchSelection('prefs');
           _layoutEditors();
           updateDebug('prefs=ok');
+          if (prevAutoSave !== nextAutoSave && diffEditor && diffEditor.getModel) {
+            try {
+              var dm = diffEditor.getModel ? diffEditor.getModel() : null;
+              if (dm && dm.original && dm.modified) {
+                var nextDiffModel = {
+                  original: dm.original,
+                  modified: dm.modified,
+                  te2AutosaveMode: !!nextAutoSave,
+                };
+                if (!nextAutoSave && gitDiskModel && dm.original === gitHeadModel && dm.modified === model) {
+                  nextDiffModel.modifiedBaseline = gitDiskModel;
+                  nextDiffModel.te2FreezeProjection = true;
+                }
+                diffEditor.setModel(nextDiffModel);
+              }
+            } catch (e2) {
+              console.warn('[Monaco] autosave diff mode switch failed', e2);
+            }
+          }
           requestGitBaselines();
           if (getShowDraftDiffs()) requestDraftDiff('prefs');
           else clearDraftDiffDecorations();
@@ -3808,7 +3991,7 @@
             clearDraftDiffDecorations();
             // After a save (drafts cleared), refresh Git baselines so inline git diffs update
             // and the editor can switch back into diff mode when applicable.
-            try { requestGitBaselines(); } catch (_) {}
+            try { requestGitBaselines({ immediate: true }); } catch (_) {}
             return;
           }
           if (payload.unsaved === true) {
@@ -4424,9 +4607,13 @@
       };
 
       var monacoNs = null;
-      var bundled = await import(langBase + '/bootstrap/monaco.bootstrap.bundle.js');
+      // Fetch SSOT prefs before bundle import.
+      try { cachedPrefs = await fetchSSOTState(); } catch (_) {}
+      var bundleName = 'monaco.bootstrap.bundle.js';
+      var bundled = await import(langBase + '/bootstrap/' + bundleName);
       monacoNs = await bundled.loadMonaco();
-      console.log('[Monaco] loaded bundled bootstrap');
+      window._loadedMonacoBundle = bundleName;
+      console.log('[Monaco] loaded ' + bundleName);
 
       window.monaco = monacoNs;
       ensureTe2DiffTheme();

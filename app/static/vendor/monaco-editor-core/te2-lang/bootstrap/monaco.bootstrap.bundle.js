@@ -31,7 +31,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/nls.messages.js
+// app/static/vendor/monaco-editor-core/esm/vs/nls.messages.js
 function getNLSMessages() {
   return globalThis._VSCODE_NLS_MESSAGES;
 }
@@ -39,11 +39,11 @@ function getNLSLanguage() {
   return globalThis._VSCODE_NLS_LANGUAGE;
 }
 var init_nls_messages = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/nls.messages.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/nls.messages.js"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/nls.js
+// app/static/vendor/monaco-editor-core/esm/vs/nls.js
 function _format(message, args) {
   let result;
   if (args.length === 0) {
@@ -97,14 +97,14 @@ function localize2(data, originalMessage, ...args) {
 }
 var isPseudo;
 var init_nls = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/nls.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/nls.js"() {
     init_nls_messages();
     init_nls_messages();
     isPseudo = getNLSLanguage() === "pseudo" || typeof document !== "undefined" && document.location && typeof document.location.hash === "string" && document.location.hash.indexOf("pseudo=true") >= 0;
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/window.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/window.js
 function ensureCodeWindow(targetWindow, fallbackWindowId) {
   const codeWindow = targetWindow;
   if (typeof codeWindow.vscodeWindowId !== "number") {
@@ -115,12 +115,12 @@ function ensureCodeWindow(targetWindow, fallbackWindowId) {
 }
 var mainWindow;
 var init_window = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/window.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/window.js"() {
     mainWindow = window;
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/browser.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/browser.js
 function addMatchMediaChangeListener(targetWindow, query, callback) {
   if (typeof query === "string") {
     query = targetWindow.matchMedia(query);
@@ -138,7 +138,7 @@ function getMonacoEnvironment() {
 }
 var WindowManager, userAgent, isFirefox, isWebKit, isChrome, isSafari, isWebkitWebView, isElectron, isAndroid, standalone;
 var init_browser = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/browser.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/browser.js"() {
     init_window();
     WindowManager = class _WindowManager {
       constructor() {
@@ -177,7 +177,7 @@ var init_browser = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/errors.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/errors.js
 function onBugIndicatingError(e) {
   errorHandler.onUnexpectedError(e);
   return void 0;
@@ -237,7 +237,7 @@ function illegalState(name) {
 }
 var ErrorHandler, errorHandler, canceledName, CancellationError, NotSupportedError, ErrorNoTelemetry, BugIndicatingError;
 var init_errors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/errors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/errors.js"() {
     ErrorHandler = class {
       constructor() {
         this.listeners = [];
@@ -310,7 +310,7 @@ var init_errors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/assert.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/assert.js
 function ok(value, message) {
   if (!value) {
     throw new Error(message ? `Assertion failed (${message})` : "Assertion Failed");
@@ -350,12 +350,12 @@ function checkAdjacentItems(items, predicate) {
   return true;
 }
 var init_assert = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/assert.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/assert.js"() {
     init_errors();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/types.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/types.js
 function isString(str) {
   return typeof str === "string";
 }
@@ -430,12 +430,12 @@ function upcast(x) {
   return x;
 }
 var init_types = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/types.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/types.js"() {
     init_assert();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/platform.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/platform.js
 function isLittleEndian() {
   if (!_isLittleEndianComputed) {
     _isLittleEndianComputed = true;
@@ -449,7 +449,7 @@ function isLittleEndian() {
 }
 var LANGUAGE_DEFAULT, _isWindows, _isMacintosh, _isLinux, _isLinuxSnap, _isNative, _isWeb, _isElectron, _isIOS, _isCI, _isMobile, _locale, _language, _platformLocale, _translationsConfigFile, _userAgent, $globalThis, nodeProcess, isElectronProcess, isElectronRenderer, _platform, isWindows, isMacintosh, isLinux, isNative, isWeb, isWebWorker, webWorkerOrigin, isIOS, isMobile, platform, userAgent2, language, setTimeout0IsFaster, setTimeout0, OS, _isLittleEndian, _isLittleEndianComputed, isChrome2, isFirefox2, isSafari2, isEdge, isAndroid2;
 var init_platform = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/platform.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/platform.js"() {
     init_nls();
     LANGUAGE_DEFAULT = "en";
     _isWindows = false;
@@ -570,10 +570,10 @@ var init_platform = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/canIUse.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/canIUse.js
 var BrowserFeatures;
 var init_canIUse = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/canIUse.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/canIUse.js"() {
     init_browser();
     init_window();
     init_platform();
@@ -599,14 +599,14 @@ var init_canIUse = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/keyCodes.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/keyCodes.js
 function KeyChord(firstPart, secondPart) {
   const chordPart = (secondPart & 65535) << 16 >>> 0;
   return (firstPart | chordPart) >>> 0;
 }
 var KeyCodeStrMap, uiMap, userSettingsUSMap, userSettingsGeneralMap, EVENT_KEY_CODE_MAP, NATIVE_WINDOWS_KEY_CODE_TO_KEY_CODE, scanCodeIntToStr, scanCodeStrToInt, scanCodeLowerCaseStrToInt, IMMUTABLE_CODE_TO_KEY_CODE, IMMUTABLE_KEY_CODE_TO_CODE, KeyCodeUtils;
 var init_keyCodes = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/keyCodes.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/keyCodes.js"() {
     KeyCodeStrMap = class {
       constructor() {
         this._keyCodeToStr = [];
@@ -955,7 +955,7 @@ var init_keyCodes = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/keybindings.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/keybindings.js
 function decodeKeybinding(keybinding, OS2) {
   if (typeof keybinding === "number") {
     if (keybinding === 0) {
@@ -990,7 +990,7 @@ function createSimpleKeybinding(keybinding, OS2) {
 }
 var KeyCodeChord, Keybinding, ResolvedChord, ResolvedKeybinding;
 var init_keybindings = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/keybindings.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/keybindings.js"() {
     init_errors();
     KeyCodeChord = class _KeyCodeChord {
       constructor(ctrlKey, shiftKey, altKey, metaKey, keyCode) {
@@ -1036,7 +1036,7 @@ var init_keybindings = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/keyboardEvent.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/keyboardEvent.js
 function extractKeyCode(e) {
   if (e.charCode) {
     const char = String.fromCharCode(e.charCode).toUpperCase();
@@ -1080,7 +1080,7 @@ function extractKeyCode(e) {
 }
 var ctrlKeyMod, altKeyMod, shiftKeyMod, metaKeyMod, StandardKeyboardEvent;
 var init_keyboardEvent = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/keyboardEvent.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/keyboardEvent.js"() {
     init_browser();
     init_keyCodes();
     init_keybindings();
@@ -1157,7 +1157,7 @@ var init_keyboardEvent = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/iframe.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/iframe.js
 function getParentWindowIfSameOrigin(w) {
   if (!w.parent || w.parent === w) {
     return null;
@@ -1175,7 +1175,7 @@ function getParentWindowIfSameOrigin(w) {
 }
 var sameOriginWindowChainCache, IframeUtils;
 var init_iframe = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/iframe.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/iframe.js"() {
     sameOriginWindowChainCache = /* @__PURE__ */ new WeakMap();
     IframeUtils = class {
       /**
@@ -1242,10 +1242,10 @@ var init_iframe = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/mouseEvent.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/mouseEvent.js
 var StandardMouseEvent, StandardWheelEvent;
 var init_mouseEvent = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/mouseEvent.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/mouseEvent.js"() {
     init_browser();
     init_iframe();
     init_platform();
@@ -1362,7 +1362,7 @@ var init_mouseEvent = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/functional.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/functional.js
 function createSingleCallFunction(fn, fnDidRunCallback) {
   const _this = this;
   let didCall = false;
@@ -1385,14 +1385,14 @@ function createSingleCallFunction(fn, fnDidRunCallback) {
   };
 }
 var init_functional = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/functional.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/functional.js"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/iterator.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/iterator.js
 var Iterable;
 var init_iterator = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/iterator.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/iterator.js"() {
     init_types();
     (function(Iterable2) {
       function is(thing) {
@@ -1566,7 +1566,7 @@ var init_iterator = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/lifecycle.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/lifecycle.js
 function setDisposableTracker(tracker) {
   disposableTracker = tracker;
 }
@@ -1628,7 +1628,7 @@ function toDisposable(fn) {
 }
 var TRACK_DISPOSABLES, disposableTracker, FunctionDisposable, DisposableStore, Disposable, MutableDisposable, RefCountedDisposable, ImmortalReference, DisposableMap;
 var init_lifecycle = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/lifecycle.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/lifecycle.js"() {
     init_iterator();
     TRACK_DISPOSABLES = false;
     disposableTracker = null;
@@ -1909,10 +1909,10 @@ var init_lifecycle = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/linkedList.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/linkedList.js
 var Node2, LinkedList;
 var init_linkedList = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/linkedList.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/linkedList.js"() {
     Node2 = class _Node {
       static {
         this.Undefined = new _Node(void 0);
@@ -2024,10 +2024,10 @@ var init_linkedList = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/stopwatch.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/stopwatch.js
 var performanceNow, StopWatch;
 var init_stopwatch = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/stopwatch.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/stopwatch.js"() {
     performanceNow = globalThis.performance.now.bind(globalThis.performance);
     StopWatch = class _StopWatch {
       static create(highResolution) {
@@ -2055,10 +2055,10 @@ var init_stopwatch = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/event.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/event.js
 var _enableDisposeWithListenerWarning, _enableSnapshotPotentialLeakWarning, Event, EventProfiling, _globalLeakWarningThreshold, LeakageMonitor, Stacktrace, ListenerLeakError, ListenerRefusalError, UniqueContainer, compactionThreshold, forEachListener, Emitter, createEventDeliveryQueue, EventDeliveryQueuePrivate, PauseableEmitter, DebounceEmitter, MicrotaskEmitter, EventMultiplexer, EventBufferer, Relay;
 var init_event = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/event.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/event.js"() {
     init_errors();
     init_functional();
     init_lifecycle();
@@ -2995,7 +2995,7 @@ var init_event = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/cancellation.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/cancellation.js
 function cancelOnDispose(store) {
   const source = new CancellationTokenSource();
   store.add({ dispose() {
@@ -3005,7 +3005,7 @@ function cancelOnDispose(store) {
 }
 var shortcutEvent, CancellationToken, MutableToken, CancellationTokenSource;
 var init_cancellation = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/cancellation.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/cancellation.js"() {
     init_event();
     shortcutEvent = Object.freeze(function(callback, context) {
       const handle = setTimeout(callback.bind(context), 0);
@@ -3103,15 +3103,15 @@ var init_cancellation = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/symbols.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/symbols.js
 var MicrotaskDelay;
 var init_symbols = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/symbols.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/symbols.js"() {
     MicrotaskDelay = Symbol("MicrotaskDelay");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/async.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/async.js
 function isThenable(obj) {
   return !!obj && typeof obj.then === "function";
 }
@@ -3248,7 +3248,7 @@ function createCancelableAsyncIterableProducer(callback) {
 }
 var Throttler, timeoutDeferred, microtaskDeferred, Delayer, ThrottledDelayer, TaskQueue, TimeoutTimer, IntervalTimer, RunOnceScheduler, runWhenGlobalIdle, _runWhenIdle, AbstractIdleValue, GlobalIdleValue, DeferredPromise, Promises, ProducerConsumer, AsyncIterableProducer, CancelableAsyncIterableProducer, AsyncReaderEndOfStream;
 var init_async = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/async.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/async.js"() {
     init_cancellation();
     init_errors();
     init_lifecycle();
@@ -3886,13 +3886,13 @@ var init_async = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/cache.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/cache.js
 function identity(t) {
   return t;
 }
 var LRUCachedFunction, CachedFunction;
 var init_cache = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/cache.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/cache.js"() {
     LRUCachedFunction = class {
       constructor(arg1, arg2) {
         this.lastCache = void 0;
@@ -3943,10 +3943,10 @@ var init_cache = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/lazy.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/lazy.js
 var LazyValueState, Lazy;
 var init_lazy = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/lazy.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/lazy.js"() {
     (function(LazyValueState2) {
       LazyValueState2[LazyValueState2["Uninitialized"] = 0] = "Uninitialized";
       LazyValueState2[LazyValueState2["Running"] = 1] = "Running";
@@ -3991,7 +3991,7 @@ var init_lazy = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/strings.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/strings.js
 function isFalsyOrWhitespace(str) {
   if (!str || typeof str !== "string") {
     return true;
@@ -4429,7 +4429,7 @@ function isEmojiModifier(codePoint) {
 }
 var _formatRegexp, CodePointIterator, GraphemeIterator, CONTAINS_RTL, IS_BASIC_ASCII, UNUSUAL_LINE_TERMINATORS, CSI_SEQUENCE, OSC_SEQUENCE, ESC_SEQUENCE, CONTROL_SEQUENCES, UTF8_BOM_CHARACTER, GraphemeBreakTree, noBreakWhitespace, AmbiguousCharacters, InvisibleCharacters;
 var init_strings = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/strings.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/strings.js"() {
     init_cache();
     init_lazy();
     _formatRegexp = /{(\d+)}/g;
@@ -4657,10 +4657,10 @@ var init_strings = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/process.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/process.js
 var safeProcess, vscodeGlobal, cwd, env, platform2;
 var init_process = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/process.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/process.js"() {
     init_platform();
     vscodeGlobal = globalThis.vscode;
     if (typeof vscodeGlobal !== "undefined" && typeof vscodeGlobal.process !== "undefined") {
@@ -4718,7 +4718,7 @@ var init_process = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/path.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/path.js
 function validateObject(pathObject, name) {
   if (pathObject === null || typeof pathObject !== "object") {
     throw new ErrorInvalidArgType(name, "Object", pathObject);
@@ -4812,7 +4812,7 @@ function _format2(sep2, pathObject) {
 }
 var CHAR_UPPERCASE_A, CHAR_LOWERCASE_A, CHAR_UPPERCASE_Z, CHAR_LOWERCASE_Z, CHAR_DOT, CHAR_FORWARD_SLASH, CHAR_BACKWARD_SLASH, CHAR_COLON, CHAR_QUESTION_MARK, ErrorInvalidArgType, platformIsWin32, win32, posixCwd, posix, normalize, resolve, relative, dirname, basename, extname, sep;
 var init_path = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/path.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/path.js"() {
     init_process();
     CHAR_UPPERCASE_A = 65;
     CHAR_LOWERCASE_A = 97;
@@ -5818,7 +5818,7 @@ var init_path = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/uri.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/uri.js
 function _validateUri(ret, _strict) {
   if (!ret.scheme && _strict) {
     throw new Error(`[UriError]: Scheme is missing: {scheme: "", authority: "${ret.authority}", path: "${ret.path}", query: "${ret.query}", fragment: "${ret.fragment}"}`);
@@ -6006,7 +6006,7 @@ function percentDecode(str) {
 }
 var _schemePattern, _singleSlashStart, _doubleSlashStart, _empty, _slash, _regexp, URI, _pathSepMarker, Uri, encodeTable, _rEncodedAsHex;
 var init_uri = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/uri.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/uri.js"() {
     init_path();
     init_platform();
     _schemePattern = /^\w[\w\d+.-]*$/;
@@ -6358,7 +6358,7 @@ var init_uri = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/network.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/network.js
 function matchesScheme(target, scheme) {
   if (URI.isUri(target)) {
     return equalsIgnoreCase(target.scheme, scheme);
@@ -6371,7 +6371,7 @@ function matchesSomeScheme(target, ...schemes) {
 }
 var Schemas, connectionTokenQueryName, RemoteAuthoritiesImpl, RemoteAuthorities, VSCODE_AUTHORITY, FileAccessImpl, FileAccess, CacheControlheaders, DocumentPolicyheaders, COI;
 var init_network = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/network.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/network.js"() {
     init_errors();
     init_platform();
     init_strings();
@@ -6552,7 +6552,7 @@ var init_network = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/buffer.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/buffer.js
 function readUInt16LE(source, offset) {
   return source[offset + 0] << 0 >>> 0 | source[offset + 1] << 8 >>> 0;
 }
@@ -6590,7 +6590,7 @@ function encodeHex({ buffer }) {
 }
 var hasBuffer, indexOfTable, textDecoder, VSBuffer, hexChars;
 var init_buffer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/buffer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/buffer.js"() {
     init_lazy();
     hasBuffer = typeof Buffer !== "undefined";
     indexOfTable = new Lazy(() => new Uint8Array(256));
@@ -6625,7 +6625,7 @@ var init_buffer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/hash.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/hash.js
 function hash(obj) {
   return doHash(obj, 0);
 }
@@ -6687,7 +6687,7 @@ function toHexString(bufferOrValue, bitsize = 32) {
 }
 var StringSHA1;
 var init_hash = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/hash.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/hash.js"() {
     init_buffer();
     init_strings();
     StringSHA1 = class _StringSHA1 {
@@ -6860,7 +6860,7 @@ var init_hash = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/debugName.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/debugName.js
 function getDebugName(target, data) {
   const cached = cachedDebugName.get(target);
   if (cached) {
@@ -6950,7 +6950,7 @@ function getFunctionName(fn) {
 }
 var DebugNameData, countPerName, cachedDebugName, countPerClassName, ownerId;
 var init_debugName = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/debugName.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/debugName.js"() {
     DebugNameData = class {
       constructor(owner, debugNameSource, referenceFn) {
         this.owner = owner;
@@ -6968,7 +6968,7 @@ var init_debugName = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/arrays.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/arrays.js
 function tail(arr) {
   if (arr.length === 0) {
     throw new Error("Invalid tail call");
@@ -7228,7 +7228,7 @@ function sum(array2) {
 }
 var CompareResult, numberComparator, booleanComparator, ArrayQueue, CallbackIterable, Permutation;
 var init_arrays = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/arrays.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/arrays.js"() {
     (function(CompareResult2) {
       function isLessThan(result) {
         return result < 0;
@@ -7384,7 +7384,7 @@ var init_arrays = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/equals.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/equals.js
 function itemsEquals(itemEquals2 = strictEquals) {
   return (a, b) => equals(a, b, itemEquals2);
 }
@@ -7448,15 +7448,15 @@ function structuralEquals(a, b) {
 }
 var strictEquals;
 var init_equals = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/equals.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/equals.js"() {
     init_arrays();
     strictEquals = (a, b) => a === b;
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/commonFacade/deps.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/commonFacade/deps.js
 var init_deps = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/commonFacade/deps.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/commonFacade/deps.js"() {
     init_assert();
     init_equals();
     init_errors();
@@ -7465,19 +7465,19 @@ var init_deps = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/base.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/base.js
 function handleBugIndicatingErrorRecovery(message) {
   const err = new Error("BugIndicatingErrorRecovery: " + message);
   onUnexpectedError(err);
   console.error("recovered from an error that indicates a bug", err);
 }
 var init_base = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/base.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/base.js"() {
     init_deps();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/logging.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/logging.js
 function addLogger(logger) {
   if (!globalObservableLogger) {
     globalObservableLogger = logger;
@@ -7495,7 +7495,7 @@ function setLogObservableFn(fn) {
 }
 var globalObservableLogger, globalObservableLoggerFn, ComposedLogger;
 var init_logging = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/logging.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/logging.js"() {
     globalObservableLoggerFn = void 0;
     ComposedLogger = class {
       constructor(loggers) {
@@ -7565,7 +7565,7 @@ var init_logging = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/transaction.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/transaction.js
 function transaction(fn, getDebugName2) {
   const tx = new TransactionImpl(fn, getDebugName2);
   try {
@@ -7605,7 +7605,7 @@ function subtransaction(tx, fn, getDebugName2) {
 }
 var _globalTransaction, TransactionImpl;
 var init_transaction = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/transaction.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/transaction.js"() {
     init_base();
     init_debugName();
     init_logging();
@@ -7654,7 +7654,7 @@ var init_transaction = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/debugLocation.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/debugLocation.js
 function parseLine(stackLine) {
   const match2 = stackLine.match(/\((.*):(\d+):(\d+)\)/);
   if (match2) {
@@ -7678,7 +7678,7 @@ function parseLine(stackLine) {
 }
 var DebugLocation, DebugLocationImpl;
 var init_debugLocation = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/debugLocation.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/debugLocation.js"() {
     (function(DebugLocation2) {
       let enabled = false;
       function enable() {
@@ -7718,7 +7718,7 @@ var init_debugLocation = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/baseObservable.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/baseObservable.js
 function _setDerivedOpts(derived2) {
   _derived = derived2;
 }
@@ -7733,7 +7733,7 @@ function _setDebugGetDependencyGraph(debugGetDependencyGraph2) {
 }
 var _derived, _recomputeInitiallyAndOnChange, _keepObserved, _debugGetDependencyGraph, ConvenientObservable, BaseObservable;
 var init_baseObservable = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/baseObservable.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/baseObservable.js"() {
     init_debugLocation();
     init_debugName();
     init_logging();
@@ -7826,7 +7826,7 @@ var init_baseObservable = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableValue.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableValue.js
 function observableValue(nameOrOwner, initialValue, debugLocation = DebugLocation.ofCaller()) {
   let debugNameData;
   if (typeof nameOrOwner === "string") {
@@ -7847,7 +7847,7 @@ function disposableObservableValue(nameOrOwner, initialValue, debugLocation = De
 }
 var ObservableValue, DisposableObservableValue;
 var init_observableValue = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableValue.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableValue.js"() {
     init_transaction();
     init_baseObservable();
     init_deps();
@@ -7923,10 +7923,10 @@ var init_observableValue = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/lazyObservableValue.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/lazyObservableValue.js
 var LazyObservableValue;
 var init_lazyObservableValue = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/lazyObservableValue.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/lazyObservableValue.js"() {
     init_transaction();
     init_logging();
     init_baseObservable();
@@ -8043,7 +8043,7 @@ var init_lazyObservableValue = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableValueOpts.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableValueOpts.js
 function observableValueOpts(options2, initialValue, debugLocation = DebugLocation.ofCaller()) {
   if (options2.lazy) {
     return new LazyObservableValue(new DebugNameData(options2.owner, options2.debugName, void 0), initialValue, options2.equalsFn ?? strictEquals, debugLocation);
@@ -8051,7 +8051,7 @@ function observableValueOpts(options2, initialValue, debugLocation = DebugLocati
   return new ObservableValue(new DebugNameData(options2.owner, options2.debugName, void 0), initialValue, options2.equalsFn ?? strictEquals, debugLocation);
 }
 var init_observableValueOpts = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableValueOpts.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableValueOpts.js"() {
     init_debugName();
     init_deps();
     init_observableValue();
@@ -8060,7 +8060,7 @@ var init_observableValueOpts = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/reactions/autorunImpl.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/reactions/autorunImpl.js
 function autorunStateToString(state) {
   switch (state) {
     case 1:
@@ -8075,7 +8075,7 @@ function autorunStateToString(state) {
 }
 var AutorunObserver;
 var init_autorunImpl = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/reactions/autorunImpl.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/reactions/autorunImpl.js"() {
     init_deps();
     init_logging();
     AutorunObserver = class {
@@ -8266,7 +8266,7 @@ var init_autorunImpl = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/reactions/autorun.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/reactions/autorun.js
 function autorun(fn, debugLocation = DebugLocation.ofCaller()) {
   return new AutorunObserver(new DebugNameData(void 0, void 0, fn), fn, void 0, debugLocation);
 }
@@ -8317,7 +8317,7 @@ function autorunDelta(observable, handler) {
   });
 }
 var init_autorun = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/reactions/autorun.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/reactions/autorun.js"() {
     init_deps();
     init_debugName();
     init_autorunImpl();
@@ -8325,7 +8325,7 @@ var init_autorun = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/derivedImpl.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/derivedImpl.js
 function derivedStateToString(state) {
   switch (state) {
     case 0:
@@ -8342,7 +8342,7 @@ function derivedStateToString(state) {
 }
 var Derived, DerivedWithSetter;
 var init_derivedImpl = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/derivedImpl.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/derivedImpl.js"() {
     init_baseObservable();
     init_deps();
     init_logging();
@@ -8648,7 +8648,7 @@ var init_derivedImpl = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/derived.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/derived.js
 function derived(computeFnOrOwner, computeFn, debugLocation = DebugLocation.ofCaller()) {
   if (computeFn !== void 0) {
     return new Derived(new DebugNameData(computeFnOrOwner, void 0, computeFn), computeFn, void 0, void 0, strictEquals, debugLocation);
@@ -8703,7 +8703,7 @@ function derivedDisposable(computeFnOrOwner, computeFnOrUndefined, debugLocation
   }, strictEquals, debugLocation);
 }
 var init_derived = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/derived.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/derived.js"() {
     init_deps();
     init_debugLocation();
     init_debugName();
@@ -8713,10 +8713,10 @@ var init_derived = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/utils/promise.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/utils/promise.js
 var ObservablePromise, PromiseResult;
 var init_promise = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/utils/promise.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/utils/promise.js"() {
     init_transaction();
     init_observableValue();
     ObservablePromise = class {
@@ -8754,15 +8754,15 @@ var init_promise = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/commonFacade/cancellation.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/commonFacade/cancellation.js
 var init_cancellation2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/commonFacade/cancellation.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/commonFacade/cancellation.js"() {
     init_errors();
     init_cancellation();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/utils/utilsCancellation.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/utils/utilsCancellation.js
 function waitForState(observable, predicate, isError, cancellationToken) {
   if (!predicate) {
     predicate = (state) => state !== null && state !== void 0;
@@ -8812,13 +8812,13 @@ function waitForState(observable, predicate, isError, cancellationToken) {
   });
 }
 var init_utilsCancellation = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/utils/utilsCancellation.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/utils/utilsCancellation.js"() {
     init_cancellation2();
     init_autorun();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableFromEvent.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableFromEvent.js
 function observableFromEvent(...args) {
   let owner;
   let event;
@@ -8836,7 +8836,7 @@ function observableFromEventOpts(options2, event, getValue, debugLocation = Debu
 }
 var FromEventObservable;
 var init_observableFromEvent = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableFromEvent.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableFromEvent.js"() {
     init_transaction();
     init_deps();
     init_debugName();
@@ -8934,7 +8934,7 @@ var init_observableFromEvent = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableSignal.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableSignal.js
 function observableSignal(debugNameOrOwner, debugLocation = DebugLocation.ofCaller()) {
   if (typeof debugNameOrOwner === "string") {
     return new ObservableSignal(debugNameOrOwner, void 0, debugLocation);
@@ -8944,7 +8944,7 @@ function observableSignal(debugNameOrOwner, debugLocation = DebugLocation.ofCall
 }
 var ObservableSignal;
 var init_observableSignal = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableSignal.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableSignal.js"() {
     init_transaction();
     init_debugName();
     init_baseObservable();
@@ -8979,7 +8979,7 @@ var init_observableSignal = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/utils/utils.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/utils/utils.js
 function debouncedObservable(observable, debounceMs) {
   let hasValue = false;
   let lastValue;
@@ -9059,7 +9059,7 @@ function mapObservableArrayCached(owner, items, map, keySelector) {
 }
 var KeepAliveObserver, ArrayMap;
 var init_utils = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/utils/utils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/utils/utils.js"() {
     init_autorun();
     init_deps();
     init_derived();
@@ -9133,7 +9133,7 @@ var init_utils = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/changeTracker.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/changeTracker.js
 function recordChanges(obs) {
   return {
     createChangeSummary: (_previousChangeSummary) => {
@@ -9192,18 +9192,18 @@ function recordChangesLazy(getObs) {
   };
 }
 var init_changeTracker = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/changeTracker.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/changeTracker.js"() {
     init_deps();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/constObservable.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/constObservable.js
 function constObservable(value) {
   return new ConstObservable(value);
 }
 var ConstObservable;
 var init_constObservable = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/constObservable.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/constObservable.js"() {
     init_baseObservable();
     ConstObservable = class extends ConvenientObservable {
       constructor(value) {
@@ -9227,13 +9227,13 @@ var init_constObservable = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableSignalFromEvent.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableSignalFromEvent.js
 function observableSignalFromEvent(owner, event, debugLocation = DebugLocation.ofCaller()) {
   return new FromEventObservableSignal(typeof owner === "string" ? owner : new DebugNameData(owner, void 0, void 0), event, debugLocation);
 }
 var FromEventObservableSignal;
 var init_observableSignalFromEvent = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableSignalFromEvent.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/observables/observableSignalFromEvent.js"() {
     init_transaction();
     init_debugName();
     init_baseObservable();
@@ -9265,15 +9265,15 @@ var init_observableSignalFromEvent = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/utils/valueWithChangeEvent.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/utils/valueWithChangeEvent.js
 var init_valueWithChangeEvent = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/utils/valueWithChangeEvent.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/utils/valueWithChangeEvent.js"() {
     init_deps();
     init_observableFromEvent();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/utils/runOnChange.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/utils/runOnChange.js
 function runOnChange(observable, cb) {
   let _previousValue;
   let _firstRun = true;
@@ -9323,24 +9323,24 @@ function runOnChangeWithCancellationToken(observable, cb) {
   });
 }
 var init_runOnChange = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/utils/runOnChange.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/utils/runOnChange.js"() {
     init_cancellation2();
     init_deps();
     init_autorun();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/experimental/utils.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/experimental/utils.js
 function derivedConstOnceDefined(owner, fn) {
   return derivedObservableWithCache(owner, (reader, lastValue) => lastValue ?? fn(reader));
 }
 var init_utils2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/experimental/utils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/experimental/utils.js"() {
     init_utils();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/consoleObservableLogger.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/consoleObservableLogger.js
 function logObservableToConsole(obs) {
   if (!consoleObservableLogger) {
     consoleObservableLogger = new ConsoleObservableLogger();
@@ -9488,7 +9488,7 @@ function padStr(str, length) {
 }
 var consoleObservableLogger, ConsoleObservableLogger;
 var init_consoleObservableLogger = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/consoleObservableLogger.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/consoleObservableLogger.js"() {
     init_logging();
     init_debugName();
     init_derivedImpl();
@@ -9667,10 +9667,10 @@ var init_consoleObservableLogger = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/rpc.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/rpc.js
 var SimpleTypedRpcConnection;
 var init_rpc = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/rpc.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/rpc.js"() {
     SimpleTypedRpcConnection = class _SimpleTypedRpcConnection {
       static createClient(channelFactory, getHandler) {
         return new _SimpleTypedRpcConnection(channelFactory, getHandler);
@@ -9722,7 +9722,7 @@ var init_rpc = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/debuggerRpc.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/debuggerRpc.js
 function registerDebugChannel(channelId, createClient) {
   const g = globalThis;
   let queuedNotifications = [];
@@ -9780,12 +9780,12 @@ function createChannelFactoryFromDebugChannel(host) {
   };
 }
 var init_debuggerRpc = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/debuggerRpc.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/debuggerRpc.js"() {
     init_rpc();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/utils.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/utils.js
 function deepAssign(target, source) {
   for (const key in source) {
     if (!!target[key] && typeof target[key] === "object" && !!source[key] && typeof source[key] === "object") {
@@ -9808,7 +9808,7 @@ function deepAssignDeleteNulls(target, source) {
 }
 var Throttler2;
 var init_utils3 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/utils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/utils.js"() {
     Throttler2 = class {
       constructor() {
         this._timeout = void 0;
@@ -9830,10 +9830,10 @@ var init_utils3 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/devToolsLogger.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/devToolsLogger.js
 var DevToolsLogger;
 var init_devToolsLogger = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/devToolsLogger.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugger/devToolsLogger.js"() {
     init_autorunImpl();
     init_consoleObservableLogger();
     init_debuggerRpc();
@@ -10264,7 +10264,7 @@ var init_devToolsLogger = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugGetDependencyGraph.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugGetDependencyGraph.js
 function debugGetDependencyGraph(obs, options2) {
   const debugNamePostProcessor = options2?.debugNamePostProcessor ?? ((str) => str);
   const info = Info.from(obs, debugNamePostProcessor);
@@ -10296,7 +10296,7 @@ function formatObservableInfo(info, indentLevel, alreadyListed) {
 }
 var Info;
 var init_debugGetDependencyGraph = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugGetDependencyGraph.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/logging/debugGetDependencyGraph.js"() {
     init_derivedImpl();
     init_observableFromEvent();
     init_observableValue();
@@ -10334,10 +10334,10 @@ var init_debugGetDependencyGraph = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/index.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/index.js
 var enableLogging;
 var init_observableInternal = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/index.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/index.js"() {
     init_observableValueOpts();
     init_autorun();
     init_observableValue();
@@ -10375,14 +10375,14 @@ var init_observableInternal = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observable.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observable.js
 var init_observable = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observable.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/observable.js"() {
     init_observableInternal();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/dom.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/dom.js
 function clearNode(node) {
   while (node.firstChild) {
     node.firstChild.remove();
@@ -10852,7 +10852,7 @@ function isObservable(obj) {
 }
 var registerWindow, getWindow, getDocument, getWindows, getWindowsCount, getWindowId, getWindowById, hasWindow, onDidRegisterWindow, onWillUnregisterWindow, onDidUnregisterWindow, DomListener, addStandardDisposableListener, addStandardDisposableGenericMouseDownListener, WindowIdleValue, runAtThisOrScheduleAtNextAnimationFrame, scheduleAtNextAnimationFrame, WindowIntervalTimer, AnimationFrameQueueItem, SizeUtils, Dimension, sharedMutationObserver, EventType, EventHelper, FocusTracker, SELECTOR_REGEX, Namespace, ModifierKeyEmitter, DragAndDropObserver, H_REGEX, n, ObserverNode, LiveElement, ObserverNodeWithElement;
 var init_dom = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/dom.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/dom.js"() {
     init_browser();
     init_canIUse();
     init_keyboardEvent();
@@ -11673,13 +11673,13 @@ var init_dom = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/aria/aria.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/aria/aria.css
 var init_aria = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/aria/aria.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/aria/aria.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/aria/aria.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/aria/aria.js
 function setARIAContainer(parent) {
   ariaContainer = document.createElement("div");
   ariaContainer.className = "monaco-aria-container";
@@ -11740,14 +11740,14 @@ function insertMessage(target, msg) {
 }
 var MAX_MESSAGE_LENGTH, ariaContainer, alertContainer, alertContainer2, statusContainer, statusContainer2;
 var init_aria2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/aria/aria.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/aria/aria.js"() {
     init_dom();
     init_aria();
     MAX_MESSAGE_LENGTH = 2e4;
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/instantiation.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/instantiation.js
 function storeServiceDependency(id, target, index) {
   if (target[_util.DI_TARGET] === target) {
     target[_util.DI_DEPENDENCIES].push({ id, index });
@@ -11772,7 +11772,7 @@ function createDecorator(serviceId) {
 }
 var _util, IInstantiationService;
 var init_instantiation = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/instantiation.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/instantiation.js"() {
     (function(_util2) {
       _util2.serviceIds = /* @__PURE__ */ new Map();
       _util2.DI_TARGET = "$di$target";
@@ -11786,19 +11786,19 @@ var init_instantiation = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/codeEditorService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/codeEditorService.js
 var ICodeEditorService;
 var init_codeEditorService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/codeEditorService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/codeEditorService.js"() {
     init_instantiation();
     ICodeEditorService = createDecorator("codeEditorService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/position.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/position.js
 var Position;
 var init_position = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/position.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/position.js"() {
     Position = class _Position {
       constructor(lineNumber, column) {
         this.lineNumber = lineNumber;
@@ -11929,25 +11929,25 @@ var init_position = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/model.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/model.js
 var IModelService;
 var init_model = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/model.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/model.js"() {
     init_instantiation();
     IModelService = createDecorator("modelService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/resolverService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/resolverService.js
 var ITextModelService;
 var init_resolverService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/resolverService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/resolverService.js"() {
     init_instantiation();
     ITextModelService = createDecorator("textModelService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/actions.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/actions.js
 function toAction(props) {
   return {
     id: props.id,
@@ -11961,7 +11961,7 @@ function toAction(props) {
 }
 var Action, ActionRunner, Separator, SubmenuAction, EmptySubmenuAction;
 var init_actions = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/actions.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/actions.js"() {
     init_event();
     init_lifecycle();
     init_nls();
@@ -12134,7 +12134,7 @@ var init_actions = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/codiconsUtil.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/codiconsUtil.js
 function register(id, fontCharacter) {
   if (isString(fontCharacter)) {
     const val = _codiconFontCharacters[fontCharacter];
@@ -12151,16 +12151,16 @@ function getCodiconFontCharacters() {
 }
 var _codiconFontCharacters;
 var init_codiconsUtil = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/codiconsUtil.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/codiconsUtil.js"() {
     init_types();
     _codiconFontCharacters = /* @__PURE__ */ Object.create(null);
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/codiconsLibrary.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/codiconsLibrary.js
 var codiconsLibrary;
 var init_codiconsLibrary = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/codiconsLibrary.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/codiconsLibrary.js"() {
     init_codiconsUtil();
     codiconsLibrary = {
       add: register("add", 6e4),
@@ -12796,10 +12796,10 @@ var init_codiconsLibrary = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/codicons.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/codicons.js
 var codiconsDerived, Codicon;
 var init_codicons = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/codicons.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/codicons.js"() {
     init_codiconsUtil();
     init_codiconsLibrary();
     codiconsDerived = {
@@ -12840,10 +12840,10 @@ var init_codicons = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/themables.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/themables.js
 var ThemeColor, ThemeIcon;
 var init_themables = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/themables.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/themables.js"() {
     init_codicons();
     (function(ThemeColor2) {
       function isThemeColor(obj) {
@@ -12932,10 +12932,10 @@ var init_themables = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/commands/common/commands.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/commands/common/commands.js
 var ICommandService, CommandsRegistry;
 var init_commands = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/commands/common/commands.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/commands/common/commands.js"() {
     init_event();
     init_iterator();
     init_lifecycle();
@@ -13013,7 +13013,7 @@ var init_commands = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextkey/common/scanner.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/contextkey/common/scanner.js
 function hintDidYouMean(...meant) {
   switch (meant.length) {
     case 1:
@@ -13028,7 +13028,7 @@ function hintDidYouMean(...meant) {
 }
 var hintDidYouForgetToOpenOrCloseQuote, hintDidYouForgetToEscapeSlash, Scanner;
 var init_scanner = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextkey/common/scanner.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/contextkey/common/scanner.js"() {
     init_errors();
     init_nls();
     hintDidYouForgetToOpenOrCloseQuote = localize(1696, "Did you forget to open or close the quote?");
@@ -13346,7 +13346,7 @@ var init_scanner = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextkey/common/contextkey.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/contextkey/common/contextkey.js
 function expressionsAreEqualWithConstantSubstitution(a, b) {
   const aExpr = a ? a.substituteConstants() : void 0;
   const bExpr = b ? b.substituteConstants() : void 0;
@@ -13473,7 +13473,7 @@ function getTerminals(node) {
 }
 var CONSTANT_VALUES, hasOwnProperty, defaultConfig, errorEmptyString, hintEmptyString, errorNoInAfterNot, errorClosingParenthesis, errorUnexpectedToken, hintUnexpectedToken, errorUnexpectedEOF, hintUnexpectedEOF, Parser, ContextKeyExpr, ContextKeyFalseExpr, ContextKeyTrueExpr, ContextKeyDefinedExpr, ContextKeyEqualsExpr, ContextKeyInExpr, ContextKeyNotInExpr, ContextKeyNotEqualsExpr, ContextKeyNotExpr, ContextKeyGreaterExpr, ContextKeyGreaterEqualsExpr, ContextKeySmallerExpr, ContextKeySmallerEqualsExpr, ContextKeyRegexExpr, ContextKeyNotRegexExpr, ContextKeyAndExpr, ContextKeyOrExpr, RawContextKey, IContextKeyService;
 var init_contextkey = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextkey/common/contextkey.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/contextkey/common/contextkey.js"() {
     init_platform();
     init_strings();
     init_scanner();
@@ -14838,10 +14838,10 @@ var init_contextkey = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/registry/common/platform.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/registry/common/platform.js
 var RegistryImpl, Registry;
 var init_platform2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/registry/common/platform.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/registry/common/platform.js"() {
     init_assert();
     init_types();
     RegistryImpl = class {
@@ -14870,7 +14870,7 @@ var init_platform2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/keybindingsRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/keybindingsRegistry.js
 function sorter(a, b) {
   if (a.weight1 !== b.weight1) {
     return a.weight1 - b.weight1;
@@ -14887,7 +14887,7 @@ function sorter(a, b) {
 }
 var KeybindingsRegistryImpl, KeybindingsRegistry, Extensions;
 var init_keybindingsRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/keybindingsRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/keybindingsRegistry.js"() {
     init_keybindings();
     init_platform();
     init_commands();
@@ -14975,7 +14975,7 @@ var init_keybindingsRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/common/actions.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/actions/common/actions.js
 function isIMenuItem(item) {
   return item.command !== void 0;
 }
@@ -15028,7 +15028,7 @@ function registerAction2(ctor) {
 }
 var __decorate, __param, MenuItemAction_1, MenuId, IMenuService, MenuRegistryChangeEvent, MenuRegistry, SubmenuItemAction, MenuItemAction, Action2;
 var init_actions2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/common/actions.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/actions/common/actions.js"() {
     init_actions();
     init_event();
     init_lifecycle();
@@ -15884,22 +15884,22 @@ var init_actions2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/telemetry/common/telemetry.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/telemetry/common/telemetry.js
 var ITelemetryService;
 var init_telemetry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/telemetry/common/telemetry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/telemetry/common/telemetry.js"() {
     init_instantiation();
     ITelemetryService = createDecorator("telemetryService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/map.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/map.js
 function isEntries(arg) {
   return Array.isArray(arg);
 }
 var _a, _b, _c, ResourceMapEntry, ResourceMap, ResourceSet, LinkedMap, Cache, LRUCache, BidirectionalMap, SetMap, NKeyMap;
 var init_map = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/map.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/map.js"() {
     ResourceMapEntry = class {
       constructor(uri, value) {
         this.uri = uri;
@@ -16531,7 +16531,7 @@ var init_map = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/extpath.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/extpath.js
 function isPathSeparator2(code) {
   return code === 47 || code === 92;
 }
@@ -16633,20 +16633,20 @@ function hasDriveLetter(path, isWindowsOS = isWindows) {
   return false;
 }
 var init_extpath = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/extpath.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/extpath.js"() {
     init_path();
     init_platform();
     init_strings();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/resources.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/resources.js
 function originalFSPath(uri) {
   return uriToFsPath(uri, true);
 }
 var ExtUri, extUri, extUriBiasedIgnorePathCase, extUriIgnorePathCase, isEqual, isEqualOrParent2, getComparisonKey, basenameOrAuthority, basename2, extname2, dirname2, joinPath, normalizePath, relativePath, resolvePath, isAbsolutePath, isEqualAuthority, hasTrailingPathSeparator, removeTrailingPathSeparator, addTrailingPathSeparator, DataUri;
 var init_resources = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/resources.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/resources.js"() {
     init_extpath();
     init_network();
     init_path();
@@ -16854,7 +16854,7 @@ var init_resources = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/log/common/log.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/log/common/log.js
 function canLog(loggerLevel, messageLevel) {
   return loggerLevel !== LogLevel.Off && loggerLevel <= messageLevel;
 }
@@ -16876,7 +16876,7 @@ function LogLevelToString(logLevel) {
 }
 var ILogService, ILoggerService, LogLevel, DEFAULT_LOG_LEVEL, AbstractLogger, ConsoleLogger, MultiplexLogger, AbstractLoggerService, NullLogger, NullLoggerService, CONTEXT_LOG_LEVEL;
 var init_log = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/log/common/log.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/log/common/log.js"() {
     init_event();
     init_hash();
     init_lifecycle();
@@ -17137,10 +17137,10 @@ var init_log = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/triggerInlineEditCommandsRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/triggerInlineEditCommandsRegistry.js
 var TriggerInlineEditCommandsRegistry;
 var init_triggerInlineEditCommandsRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/triggerInlineEditCommandsRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/triggerInlineEditCommandsRegistry.js"() {
     TriggerInlineEditCommandsRegistry = class _TriggerInlineEditCommandsRegistry {
       static {
         this.REGISTERED_COMMANDS = /* @__PURE__ */ new Set();
@@ -17155,7 +17155,7 @@ var init_triggerInlineEditCommandsRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/editorExtensions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/editorExtensions.js
 function registerModelAndPositionCommand(id, handler) {
   CommandsRegistry.registerCommand(id, function(accessor, ...args) {
     const instaService = accessor.get(IInstantiationService);
@@ -17206,7 +17206,7 @@ function registerCommand(command) {
 }
 var Command, MultiCommand, ProxyCommand, EditorCommand, EditorAction, MultiEditorAction, EditorAction2, EditorExtensionsRegistry, Extensions2, EditorContributionRegistry, UndoCommand, RedoCommand, SelectAllCommand;
 var init_editorExtensions = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/editorExtensions.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/editorExtensions.js"() {
     init_nls();
     init_uri();
     init_codeEditorService();
@@ -17625,10 +17625,10 @@ var init_editorExtensions = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/range.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/range.js
 var Range;
 var init_range = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/range.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/range.js"() {
     init_position();
     Range = class _Range {
       constructor(startLineNumber, startColumn, endLineNumber, endColumn) {
@@ -18017,10 +18017,10 @@ var init_range = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/selection.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/selection.js
 var Selection;
 var init_selection = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/selection.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/selection.js"() {
     init_position();
     init_range();
     Selection = class _Selection extends Range {
@@ -18150,7 +18150,7 @@ var init_selection = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports.js
 function createScopedLineTokens(context, offset) {
   const tokenCount = context.getCount();
   const tokenIndex = context.findTokenIndexAtOffset(offset);
@@ -18170,7 +18170,7 @@ function ignoreBracketsInToken(standardTokenType) {
 }
 var ScopedLineTokens;
 var init_supports = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports.js"() {
     ScopedLineTokens = class {
       constructor(actual, languageId, firstTokenIndex, lastTokenIndex, firstCharOffset, lastCharOffset) {
         this._scopedLineTokensBrand = void 0;
@@ -18209,10 +18209,10 @@ var init_supports = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/cursorColumns.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/cursorColumns.js
 var CursorColumns;
 var init_cursorColumns = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/cursorColumns.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/cursorColumns.js"() {
     init_strings();
     CursorColumns = class _CursorColumns {
       static _nextVisibleColumn(codePoint, visibleColumn, tabSize) {
@@ -18303,7 +18303,7 @@ var init_cursorColumns = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/misc/indentation.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/misc/indentation.js
 function _normalizeIndentationFromWhitespace(str, indentSize, insertSpaces) {
   let spacesCnt = 0;
   for (let i2 = 0; i2 < str.length; i2++) {
@@ -18334,16 +18334,16 @@ function normalizeIndentation(str, indentSize, insertSpaces) {
   return _normalizeIndentationFromWhitespace(str.substring(0, firstNonWhitespaceIndex2), indentSize, insertSpaces) + str.substring(firstNonWhitespaceIndex2);
 }
 var init_indentation = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/misc/indentation.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/misc/indentation.js"() {
     init_strings();
     init_cursorColumns();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/inputMode.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/inputMode.js
 var InputModeImpl, InputMode;
 var init_inputMode = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/inputMode.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/inputMode.js"() {
     init_event();
     InputModeImpl = class {
       constructor() {
@@ -18359,13 +18359,13 @@ var init_inputMode = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursorCommon.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursorCommon.js
 function isQuote(ch) {
   return ch === "'" || ch === '"' || ch === "`";
 }
 var autoCloseAlways, autoCloseNever, autoCloseBeforeWhitespace, CursorConfiguration, CursorState, PartialModelCursorState, PartialViewCursorState, SingleCursorState, EditOperationResult;
 var init_cursorCommon = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursorCommon.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursorCommon.js"() {
     init_position();
     init_range();
     init_selection();
@@ -18698,10 +18698,10 @@ var init_cursorCommon = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorColumnSelection.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorColumnSelection.js
 var ColumnSelection;
 var init_cursorColumnSelection = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorColumnSelection.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorColumnSelection.js"() {
     init_cursorCommon();
     init_position();
     init_range();
@@ -18788,7 +18788,7 @@ var init_cursorColumnSelection = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/commands/replaceCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/commands/replaceCommand.js
 function addPositiveOffsetToModelPosition(model, position, offset) {
   if (offset < 0) {
     throw new Error("Unexpected negative delta");
@@ -18816,7 +18816,7 @@ function addPositiveOffsetToModelPosition(model, position, offset) {
 }
 var ReplaceCommand, ReplaceOvertypeCommand, ReplaceCommandThatSelectsText, ReplaceCommandWithoutChangingPosition, ReplaceCommandWithOffsetCursorState, ReplaceOvertypeCommandOnCompositionEnd, ReplaceCommandThatPreservesSelection;
 var init_replaceCommand = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/commands/replaceCommand.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/commands/replaceCommand.js"() {
     init_position();
     init_range();
     init_selection();
@@ -18949,10 +18949,10 @@ var init_replaceCommand = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorAtomicMoveOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorAtomicMoveOperations.js
 var AtomicTabMoveOperations;
 var init_cursorAtomicMoveOperations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorAtomicMoveOperations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorAtomicMoveOperations.js"() {
     init_cursorColumns();
     AtomicTabMoveOperations = class _AtomicTabMoveOperations {
       /**
@@ -19074,10 +19074,10 @@ var init_cursorAtomicMoveOperations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorMoveOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorMoveOperations.js
 var CursorPosition, MoveOperations;
 var init_cursorMoveOperations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorMoveOperations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorMoveOperations.js"() {
     init_strings();
     init_cursorColumns();
     init_position();
@@ -19377,10 +19377,10 @@ var init_cursorMoveOperations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorDeleteOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorDeleteOperations.js
 var DeleteOperations;
 var init_cursorDeleteOperations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorDeleteOperations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorDeleteOperations.js"() {
     init_strings();
     init_replaceCommand();
     init_cursorCommon();
@@ -19587,10 +19587,10 @@ var init_cursorDeleteOperations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/date.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/date.js
 var safeIntl;
 var init_date = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/date.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/date.js"() {
     init_lazy();
     init_platform();
     safeIntl = {
@@ -19643,7 +19643,7 @@ var init_date = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/uint.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/uint.js
 function toUint8(v) {
   if (v < 0) {
     return 0;
@@ -19663,14 +19663,14 @@ function toUint32(v) {
   return v | 0;
 }
 var init_uint = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/uint.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/uint.js"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/characterClassifier.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/characterClassifier.js
 var CharacterClassifier, CharacterSet;
 var init_characterClassifier = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/characterClassifier.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/characterClassifier.js"() {
     init_uint();
     CharacterClassifier = class _CharacterClassifier {
       constructor(_defaultValue) {
@@ -19728,7 +19728,7 @@ var init_characterClassifier = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/wordCharacterClassifier.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/wordCharacterClassifier.js
 function getMapForWordSeparators(wordSeparators2, intlSegmenterLocales) {
   const key = `${wordSeparators2}/${intlSegmenterLocales.join(",")}`;
   let result = wordClassifierCache.get(key);
@@ -19740,7 +19740,7 @@ function getMapForWordSeparators(wordSeparators2, intlSegmenterLocales) {
 }
 var WordCharacterClassifier, wordClassifierCache;
 var init_wordCharacterClassifier = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/wordCharacterClassifier.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/wordCharacterClassifier.js"() {
     init_date();
     init_map();
     init_characterClassifier();
@@ -19827,13 +19827,13 @@ var init_wordCharacterClassifier = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorWordOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorWordOperations.js
 function enforceDefined(arr) {
   return arr.filter((el) => Boolean(el));
 }
 var WordOperations, WordPartOperations;
 var init_cursorWordOperations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorWordOperations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorWordOperations.js"() {
     init_strings();
     init_cursorCommon();
     init_cursorDeleteOperations();
@@ -20499,7 +20499,7 @@ var init_cursorWordOperations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/objects.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/objects.js
 function deepClone(obj) {
   if (!obj || typeof obj !== "object") {
     return obj;
@@ -20638,13 +20638,13 @@ function equals2(one, other) {
 }
 var _hasOwnProperty;
 var init_objects = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/objects.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/objects.js"() {
     init_types();
     _hasOwnProperty = Object.prototype.hasOwnProperty;
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model.js
 function isITextSnapshot(obj) {
   return !!obj && typeof obj.read === "function";
 }
@@ -20653,7 +20653,7 @@ function shouldSynchronizeModel(model) {
 }
 var OverviewRulerLane, GlyphMarginLane, TextDirection, InjectedTextCursorStops, TextModelResolvedOptions, FindMatch, ValidAnnotatedEditOperation, SearchData, ApplyEditsResult;
 var init_model2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model.js"() {
     init_objects();
     (function(OverviewRulerLane3) {
       OverviewRulerLane3[OverviewRulerLane3["Left"] = 1] = "Left";
@@ -20753,10 +20753,10 @@ var init_model2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorMoveCommands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorMoveCommands.js
 var CursorMoveCommands, CursorMove;
 var init_cursorMoveCommands = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorMoveCommands.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorMoveCommands.js"() {
     init_types();
     init_cursorCommon();
     init_cursorMoveOperations();
@@ -21374,7 +21374,7 @@ var init_cursorMoveCommands = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/languageConfiguration.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/languageConfiguration.js
 function appendEntry(target, key, value) {
   if (target.has(key)) {
     target.get(key).push(value);
@@ -21384,7 +21384,7 @@ function appendEntry(target, key, value) {
 }
 var IndentAction, StandardAutoClosingPairConditional, AutoClosingPairs;
 var init_languageConfiguration = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/languageConfiguration.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/languageConfiguration.js"() {
     (function(IndentAction3) {
       IndentAction3[IndentAction3["None"] = 0] = "None";
       IndentAction3[IndentAction3["Indent"] = 1] = "Indent";
@@ -21498,7 +21498,7 @@ var init_languageConfiguration = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/wordHelper.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/wordHelper.js
 function createWordRegExp(allowInWords = "") {
   let source = "(-?\\d*\\.\\d\\w*)|([^";
   for (const sep2 of USUAL_WORD_SEPARATORS) {
@@ -21592,7 +21592,7 @@ function _findRegexMatchEnclosingPosition(wordDefinition, text2, pos, stopPos) {
 }
 var USUAL_WORD_SEPARATORS, DEFAULT_WORD_REGEXP, _defaultConfig;
 var init_wordHelper = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/wordHelper.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/wordHelper.js"() {
     init_iterator();
     init_linkedList();
     USUAL_WORD_SEPARATORS = "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?";
@@ -21606,10 +21606,10 @@ var init_wordHelper = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/characterPair.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/characterPair.js
 var CharacterPairSupport;
 var init_characterPair = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/characterPair.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/characterPair.js"() {
     init_languageConfiguration();
     CharacterPairSupport = class _CharacterPairSupport {
       static {
@@ -21647,7 +21647,7 @@ var init_characterPair = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/stringBuilder.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/stringBuilder.js
 function getUTF16LE_TextDecoder() {
   if (!_utf16LE_TextDecoder) {
     _utf16LE_TextDecoder = new TextDecoder("UTF-16LE");
@@ -21685,7 +21685,7 @@ function compatDecodeUTF16LE(source, offset, len) {
 }
 var _utf16LE_TextDecoder, _utf16BE_TextDecoder, _platformTextDecoder, StringBuilder;
 var init_stringBuilder = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/stringBuilder.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/stringBuilder.js"() {
     init_strings();
     init_platform();
     init_buffer();
@@ -21759,7 +21759,7 @@ var init_stringBuilder = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/richEditBrackets.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/richEditBrackets.js
 function groupFuzzyBrackets(brackets) {
   const N = brackets.length;
   brackets = brackets.map((b) => [b[0].toLowerCase(), b[1].toLowerCase()]);
@@ -21907,7 +21907,7 @@ function createBracketOrRegExp(pieces, options2) {
 }
 var RichEditBracket, RichEditBrackets, toReversedString, BracketsUtils;
 var init_richEditBrackets = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/richEditBrackets.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/richEditBrackets.js"() {
     init_strings();
     init_stringBuilder();
     init_range();
@@ -22025,10 +22025,10 @@ var init_richEditBrackets = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/electricCharacter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/electricCharacter.js
 var BracketElectricCharacterSupport;
 var init_electricCharacter = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/electricCharacter.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/electricCharacter.js"() {
     init_arrays();
     init_supports();
     init_richEditBrackets();
@@ -22079,7 +22079,7 @@ var init_electricCharacter = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/indentRules.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/indentRules.js
 function resetGlobalRegex(reg) {
   if (reg.global) {
     reg.lastIndex = 0;
@@ -22088,7 +22088,7 @@ function resetGlobalRegex(reg) {
 }
 var IndentRulesSupport;
 var init_indentRules = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/indentRules.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/indentRules.js"() {
     IndentRulesSupport = class {
       constructor(indentationRules) {
         this._indentationRules = indentationRules;
@@ -22139,10 +22139,10 @@ var init_indentRules = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/onEnter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/onEnter.js
 var OnEnterSupport;
 var init_onEnter = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/onEnter.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/onEnter.js"() {
     init_errors();
     init_strings();
     init_languageConfiguration();
@@ -22244,7 +22244,7 @@ var init_onEnter = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/configuration/common/configuration.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/configuration/common/configuration.js
 function toValuesTree(properties, conflictReporter) {
   const root = /* @__PURE__ */ Object.create(null);
   for (const key in properties) {
@@ -22328,25 +22328,25 @@ function getLanguageTagSettingPlainKey(settingKey) {
 }
 var IConfigurationService;
 var init_configuration = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/configuration/common/configuration.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/configuration/common/configuration.js"() {
     init_instantiation();
     IConfigurationService = createDecorator("configurationService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/language.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/language.js
 var ILanguageService;
 var init_language = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/language.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/language.js"() {
     init_instantiation();
     ILanguageService = createDecorator("languageService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/descriptors.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/descriptors.js
 var SyncDescriptor;
 var init_descriptors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/descriptors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/descriptors.js"() {
     SyncDescriptor = class {
       constructor(ctor, staticArguments = [], supportsDelayedInstantiation = false) {
         this.ctor = ctor;
@@ -22357,7 +22357,7 @@ var init_descriptors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/extensions.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/extensions.js
 function registerSingleton(id, ctorOrDescriptor, supportsDelayedInstantiation) {
   if (!(ctorOrDescriptor instanceof SyncDescriptor)) {
     ctorOrDescriptor = new SyncDescriptor(ctorOrDescriptor, [], Boolean(supportsDelayedInstantiation));
@@ -22369,16 +22369,16 @@ function getSingletonServiceDescriptors() {
 }
 var _registry;
 var init_extensions = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/extensions.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/extensions.js"() {
     init_descriptors();
     _registry = [];
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/mime.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/mime.js
 var Mimes;
 var init_mime = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/mime.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/mime.js"() {
     Mimes = Object.freeze({
       text: "text/plain",
       binary: "application/octet-stream",
@@ -22391,7 +22391,7 @@ var init_mime = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/jsonschemas/common/jsonContributionRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/jsonschemas/common/jsonContributionRegistry.js
 function normalizeId(id) {
   if (id.length > 0 && id.charAt(id.length - 1) === "#") {
     return id.substring(0, id.length - 1);
@@ -22400,7 +22400,7 @@ function normalizeId(id) {
 }
 var Extensions3, JSONContributionRegistry, jsonContributionRegistry;
 var init_jsonContributionRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/jsonschemas/common/jsonContributionRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/jsonschemas/common/jsonContributionRegistry.js"() {
     init_event();
     init_lifecycle();
     init_platform2();
@@ -22433,10 +22433,10 @@ var init_jsonContributionRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/product/common/product.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/product/common/product.js
 var product, vscodeGlobal2, product_default;
 var init_product = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/product/common/product.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/product/common/product.js"() {
     init_process();
     vscodeGlobal2 = globalThis.vscode;
     if (typeof vscodeGlobal2 !== "undefined" && typeof vscodeGlobal2.context !== "undefined") {
@@ -22485,7 +22485,7 @@ var init_product = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/configuration/common/configurationRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/configuration/common/configurationRegistry.js
 function overrideIdentifiersFromKey(key) {
   const identifiers = [];
   if (OVERRIDE_PROPERTY_REGEX.test(key)) {
@@ -22535,7 +22535,7 @@ function validateProperty(property, schema, extensionId) {
 }
 var Extensions4, allSettings, applicationSettings, applicationMachineSettings, machineSettings, machineOverridableSettings, windowSettings, resourceSettings, resourceLanguageSettingsSchemaId, contributionRegistry, ConfigurationRegistry, OVERRIDE_IDENTIFIER_PATTERN, OVERRIDE_IDENTIFIER_REGEX, OVERRIDE_PROPERTY_PATTERN, OVERRIDE_PROPERTY_REGEX, configurationRegistry, EXTENSION_UNIFICATION_EXTENSION_IDS;
 var init_configurationRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/configuration/common/configurationRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/configuration/common/configurationRegistry.js"() {
     init_arrays();
     init_event();
     init_types();
@@ -22893,10 +22893,10 @@ var init_configurationRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/modesRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/modesRegistry.js
 var Extensions5, EditorModesRegistry, ModesRegistry, PLAINTEXT_LANGUAGE_ID, PLAINTEXT_EXTENSION;
 var init_modesRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/modesRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/modesRegistry.js"() {
     init_nls();
     init_event();
     init_platform2();
@@ -22966,13 +22966,13 @@ var init_modesRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/languageBracketsConfiguration.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/languageBracketsConfiguration.js
 function filterValidBrackets(bracketPairs) {
   return bracketPairs.filter(([open, close]) => open !== "" && close !== "");
 }
 var LanguageBracketsConfiguration, BracketKindBase, OpeningBracketKind, ClosingBracketKind;
 var init_languageBracketsConfiguration = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/languageBracketsConfiguration.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/languageBracketsConfiguration.js"() {
     init_cache();
     init_richEditBrackets();
     LanguageBracketsConfiguration = class {
@@ -23084,7 +23084,7 @@ var init_languageBracketsConfiguration = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/languageConfigurationRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/languageConfigurationRegistry.js
 function computeConfig(languageId, registry, configurationService, languageService) {
   let languageConfig = registry.getLanguageConfiguration(languageId);
   if (!languageConfig) {
@@ -23162,7 +23162,7 @@ function combineLanguageConfigurations(configs) {
 }
 var __decorate2, __param2, LanguageConfigurationServiceChangeEvent, ILanguageConfigurationService, LanguageConfigurationService, customizedLanguageConfigKeys, ComposedLanguageConfiguration, LanguageConfigurationContribution, LanguageConfigurationChangeEvent, LanguageConfigurationRegistry, ResolvedLanguageConfiguration;
 var init_languageConfigurationRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/languageConfigurationRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/languageConfigurationRegistry.js"() {
     init_event();
     init_lifecycle();
     init_strings();
@@ -23434,10 +23434,10 @@ var init_languageConfigurationRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/encodedTokenAttributes.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/encodedTokenAttributes.js
 var TokenMetadata;
 var init_encodedTokenAttributes = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/encodedTokenAttributes.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/encodedTokenAttributes.js"() {
     TokenMetadata = class {
       static getLanguageId(metadata) {
         return (metadata & 255) >>> 0;
@@ -23524,10 +23524,10 @@ var init_encodedTokenAttributes = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/ranges/offsetRange.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/ranges/offsetRange.js
 var OffsetRange, OffsetRangeSet;
 var init_offsetRange = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/ranges/offsetRange.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/ranges/offsetRange.js"() {
     init_errors();
     OffsetRange = class _OffsetRange {
       static fromTo(start, endExclusive) {
@@ -23742,7 +23742,7 @@ var init_offsetRange = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/lineTokens.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/lineTokens.js
 function getStandardTokenTypeAtPosition(model, position) {
   const lineNumber = position.lineNumber;
   if (!model.tokenization.isCheapToTokenize(lineNumber)) {
@@ -23756,7 +23756,7 @@ function getStandardTokenTypeAtPosition(model, position) {
 }
 var LineTokens, SliceLineTokens, TokenArray, TokenInfo, TokenArrayBuilder;
 var init_lineTokens = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/lineTokens.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/lineTokens.js"() {
     init_encodedTokenAttributes();
     init_offsetRange();
     init_errors();
@@ -24127,7 +24127,7 @@ var init_lineTokens = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/indentationLineProcessor.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/indentationLineProcessor.js
 function isLanguageDifferentFromLineStart(model, position) {
   model.tokenization.forceTokenization(position.lineNumber);
   const lineTokens = model.tokenization.getLineTokens(position.lineNumber);
@@ -24139,7 +24139,7 @@ function isLanguageDifferentFromLineStart(model, position) {
 }
 var ProcessedIndentRulesSupport, IndentationContextProcessor, IndentationLineProcessor;
 var init_indentationLineProcessor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/indentationLineProcessor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/indentationLineProcessor.js"() {
     init_strings();
     init_supports();
     init_lineTokens();
@@ -24301,7 +24301,7 @@ var init_indentationLineProcessor = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/enterAction.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/enterAction.js
 function getEnterAction(autoIndent, model, range2, languageConfigurationService) {
   model.tokenization.forceTokenization(range2.startLineNumber);
   const languageId = model.getLanguageIdAtPosition(range2.startLineNumber, range2.startColumn);
@@ -24342,14 +24342,14 @@ function getEnterAction(autoIndent, model, range2, languageConfigurationService)
   };
 }
 var init_enterAction = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/enterAction.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/enterAction.js"() {
     init_languageConfiguration();
     init_languageConfigurationRegistry();
     init_indentationLineProcessor();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/commands/shiftCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/commands/shiftCommand.js
 function cachedStringRepeat(str, count) {
   if (count <= 0) {
     return "";
@@ -24365,7 +24365,7 @@ function cachedStringRepeat(str, count) {
 }
 var __decorate3, __param3, ShiftCommand_1, repeatCache, ShiftCommand;
 var init_shiftCommand = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/commands/shiftCommand.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/commands/shiftCommand.js"() {
     init_strings();
     init_cursorColumns();
     init_range();
@@ -24565,10 +24565,10 @@ var init_shiftCommand = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/commands/surroundSelectionCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/commands/surroundSelectionCommand.js
 var SurroundSelectionCommand, CompositionSurroundSelectionCommand;
 var init_surroundSelectionCommand = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/commands/surroundSelectionCommand.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/commands/surroundSelectionCommand.js"() {
     init_range();
     init_selection();
     SurroundSelectionCommand = class {
@@ -24606,7 +24606,7 @@ var init_surroundSelectionCommand = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/autoIndent.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/autoIndent.js
 function getPrecedingValidLine(model, lineNumber, processedIndentRulesSupport) {
   const languageId = model.tokenization.getLanguageIdAtPosition(lineNumber, 0);
   if (lineNumber > 1) {
@@ -24937,14 +24937,14 @@ function createVirtualModelWithModifiedTokensAtLine(model, modifiedLineNumber, m
   return virtualModel;
 }
 var init_autoIndent = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/autoIndent.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/autoIndent.js"() {
     init_strings();
     init_languageConfiguration();
     init_indentationLineProcessor();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorTypeEditOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorTypeEditOperations.js
 function getTypingOperation(typedText, previousTypingOperation) {
   if (typedText === " ") {
     return previousTypingOperation === 5 || previousTypingOperation === 6 ? 6 : 5;
@@ -25029,7 +25029,7 @@ function shouldSurroundChar(config, ch) {
 }
 var AutoIndentOperation, AutoClosingOvertypeOperation, AutoClosingOvertypeWithInterceptorsOperation, AutoClosingOpenCharTypeOperation, CompositionEndOvertypeOperation, SurroundSelectionOperation, InterceptorElectricCharOperation, SimpleCharacterTypeOperation, EnterOperation, PasteOperation, CompositionOperation, TypeWithoutInterceptorsOperation, TabOperation, BaseTypeWithAutoClosingCommand, TypeWithAutoClosingCommand, TypeWithIndentationAndAutoClosingCommand;
 var init_cursorTypeEditOperations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorTypeEditOperations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorTypeEditOperations.js"() {
     init_errors();
     init_strings();
     init_replaceCommand();
@@ -25841,10 +25841,10 @@ var init_cursorTypeEditOperations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorTypeOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorTypeOperations.js
 var TypeOperations, CompositionOutcome;
 var init_cursorTypeOperations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorTypeOperations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorTypeOperations.js"() {
     init_shiftCommand();
     init_surroundSelectionCommand();
     init_cursorCommon();
@@ -26006,10 +26006,10 @@ var init_cursorTypeOperations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/editorContextKeys.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/editorContextKeys.js
 var EditorContextKeys;
 var init_editorContextKeys = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/editorContextKeys.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/editorContextKeys.js"() {
     init_nls();
     init_contextkey();
     (function(EditorContextKeys2) {
@@ -26073,7 +26073,7 @@ var init_editorContextKeys = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/coreCommands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/coreCommands.js
 function registerColumnSelection(id, keybinding) {
   KeybindingsRegistry.registerKeybindingRule({
     id,
@@ -26092,7 +26092,7 @@ function registerOverwritableCommand(handlerId, metadata) {
 }
 var CORE_WEIGHT, CoreEditorCommand, EditorScroll_, RevealLine_, EditorOrNativeTextInputCommand, CoreNavigationCommands, columnSelectionCondition, CoreEditingCommands, EditorHandlerCommand;
 var init_coreCommands = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/coreCommands.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/coreCommands.js"() {
     init_nls();
     init_browser();
     init_types();
@@ -27959,19 +27959,19 @@ var init_coreCommands = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/markerDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/markerDecorations.js
 var IMarkerDecorationsService;
 var init_markerDecorations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/markerDecorations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/markerDecorations.js"() {
     init_instantiation();
     IMarkerDecorationsService = createDecorator("markerDecorationsService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/markerDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/markerDecorations.js
 var __decorate4, __param4, MarkerDecorationsContribution;
 var init_markerDecorations2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/markerDecorations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/markerDecorations.js"() {
     init_markerDecorations();
     init_editorExtensions();
     __decorate4 = function(decorators, target, key, desc) {
@@ -28006,13 +28006,13 @@ var init_markerDecorations2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/editor.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/editor.css
 var init_editor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/editor.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/editor.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/fastDomNode.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/fastDomNode.js
 function numberAsPixels(value) {
   return typeof value === "number" ? `${value}px` : value;
 }
@@ -28021,7 +28021,7 @@ function createFastDomNode(domNode) {
 }
 var FastDomNode;
 var init_fastDomNode = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/fastDomNode.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/fastDomNode.js"() {
     FastDomNode = class {
       constructor(domNode) {
         this.domNode = domNode;
@@ -28268,7 +28268,7 @@ var init_fastDomNode = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/domFontInfo.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/domFontInfo.js
 function applyFontInfo(domNode, fontInfo) {
   if (domNode instanceof FastDomNode) {
     domNode.setFontFamily(fontInfo.getMassagedFontFamily());
@@ -28289,15 +28289,15 @@ function applyFontInfo(domNode, fontInfo) {
   }
 }
 var init_domFontInfo = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/domFontInfo.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/domFontInfo.js"() {
     init_fastDomNode();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/elementSizeObserver.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/elementSizeObserver.js
 var ElementSizeObserver;
 var init_elementSizeObserver = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/elementSizeObserver.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/elementSizeObserver.js"() {
     init_lifecycle();
     init_event();
     init_dom();
@@ -28393,10 +28393,10 @@ var init_elementSizeObserver = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/pixelRatio.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/pixelRatio.js
 var DevicePixelRatioMonitor, PixelRatioMonitorImpl, PixelRatioMonitorFacade, PixelRatio;
 var init_pixelRatio = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/pixelRatio.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/pixelRatio.js"() {
     init_dom();
     init_event();
     init_lifecycle();
@@ -28467,14 +28467,14 @@ var init_pixelRatio = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/charWidthReader.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/charWidthReader.js
 function readCharWidths(targetWindow, bareFontInfo, requests) {
   const reader = new DomCharWidthReader(bareFontInfo, requests);
   reader.read(targetWindow);
 }
 var CharWidthRequest, DomCharWidthReader;
 var init_charWidthReader = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/charWidthReader.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/charWidthReader.js"() {
     init_domFontInfo();
     CharWidthRequest = class {
       constructor(chr, type) {
@@ -28564,10 +28564,10 @@ var init_charWidthReader = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/editorZoom.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/editorZoom.js
 var EditorZoom;
 var init_editorZoom = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/editorZoom.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/editorZoom.js"() {
     init_event();
     EditorZoom = new class {
       constructor() {
@@ -28590,10 +28590,10 @@ var init_editorZoom = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/fontInfo.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/fontInfo.js
 var GOLDEN_LINE_HEIGHT_RATIO, MINIMUM_LINE_HEIGHT, BareFontInfo, SERIALIZED_FONT_INFO_VERSION, FontInfo, FONT_VARIATION_OFF, FONT_VARIATION_TRANSLATE, DEFAULT_WINDOWS_FONT_FAMILY, DEFAULT_MAC_FONT_FAMILY, DEFAULT_LINUX_FONT_FAMILY, EDITOR_FONT_DEFAULTS;
 var init_fontInfo = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/fontInfo.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/fontInfo.js"() {
     init_platform();
     init_editorZoom();
     GOLDEN_LINE_HEIGHT_RATIO = isMacintosh ? 1.5 : 1.35;
@@ -28717,10 +28717,10 @@ var init_fontInfo = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/misc/textModelDefaults.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/misc/textModelDefaults.js
 var EDITOR_MODEL_DEFAULTS;
 var init_textModelDefaults = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/misc/textModelDefaults.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/misc/textModelDefaults.js"() {
     EDITOR_MODEL_DEFAULTS = {
       tabSize: 4,
       indentSize: 4,
@@ -28736,7 +28736,7 @@ var init_textModelDefaults = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/editorOptions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/editorOptions.js
 function applyUpdate(value, update) {
   if (typeof value !== "object" || typeof update !== "object" || !value || !update) {
     return new ApplyUpdateResult(update, value !== update);
@@ -28892,7 +28892,7 @@ function register2(option2) {
 }
 var MINIMAP_GUTTER_WIDTH, ConfigurationChangedEvent, ComputeOptionsMemory, BaseEditorOption, ApplyUpdateResult, ComputedEditorOption, SimpleEditorOption, EditorBooleanOption, EditorIntOption, EditorFloatOption, EditorStringOption, EditorStringEnumOption, EditorEnumOption, EditorAccessibilitySupport, EditorComments, TextEditorCursorStyle, EditorClassName, EditorEmptySelectionClipboard, EditorFind, EditorFontLigatures, EditorFontVariations, EditorFontInfo, EffectiveCursorStyle, EffectiveEditContextEnabled, EffectiveAllowVariableFonts, EditorFontSize, EditorFontWeight, EditorGoToLocation, EditorHover, EditorLayoutInfoComputer, WrappingStrategy, ShowLightbulbIconMode, EditorLightbulb, EditorStickyScroll, EditorInlayHints, EditorLineDecorationsWidth, EditorLineHeight, EditorMinimap, EditorPadding, EditorParameterHints, EditorPixelRatio, PlaceholderOption, EditorQuickSuggestions, EditorRenderLineNumbersOption, EditorRulers, ReadonlyMessage, EditorScrollbar, inUntrustedWorkspace, unicodeHighlightConfigKeys, UnicodeHighlight, InlineEditorSuggest, BracketPairColorization, GuideOptions, EditorSuggest, SmartSelect, WordSegmenterLocales, WrappingIndentOption, EditorWrappingInfoComputer, EditorDropIntoEditor, EditorPasteAs, editorOptionsRegistry, EditorOptions;
 var init_editorOptions = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/editorOptions.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/editorOptions.js"() {
     init_arrays();
     init_objects();
     init_platform();
@@ -32067,10 +32067,10 @@ var init_editorOptions = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/fontMeasurements.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/fontMeasurements.js
 var FontMeasurementsImpl, FontMeasurementsCache, FontMeasurements;
 var init_fontMeasurements = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/fontMeasurements.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/fontMeasurements.js"() {
     init_dom();
     init_pixelRatio();
     init_event();
@@ -32265,7 +32265,7 @@ var init_fontMeasurements = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/migrateOptions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/migrateOptions.js
 function registerEditorSettingMigration(key, migrate) {
   EditorSettingMigration.items.push(new EditorSettingMigration(key, migrate));
 }
@@ -32286,7 +32286,7 @@ function migrateOptions(options2) {
 }
 var EditorSettingMigration, suggestFilteredTypesMapping;
 var init_migrateOptions = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/migrateOptions.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/migrateOptions.js"() {
     EditorSettingMigration = class _EditorSettingMigration {
       static {
         this.items = [];
@@ -32478,10 +32478,10 @@ var init_migrateOptions = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/tabFocus.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/tabFocus.js
 var TabFocusImpl, TabFocus;
 var init_tabFocus = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/tabFocus.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/tabFocus.js"() {
     init_event();
     TabFocusImpl = class {
       constructor() {
@@ -32501,7 +32501,7 @@ var init_tabFocus = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/fontInfoFromSettings.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/fontInfoFromSettings.js
 function createBareFontInfoFromValidatedSettings(options2, pixelRatio, ignoreEditorZoom) {
   const fontFamily = options2.get(
     58
@@ -32544,16 +32544,16 @@ function createBareFontInfoFromRawSettings(opts, pixelRatio, ignoreEditorZoom = 
   return BareFontInfo._create(fontFamily, fontWeight, fontSize, fontFeatureSettings, fontVariationSettings, lineHeight, letterSpacing, pixelRatio, ignoreEditorZoom);
 }
 var init_fontInfoFromSettings = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/fontInfoFromSettings.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/fontInfoFromSettings.js"() {
     init_editorOptions();
     init_fontInfo();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/accessibility/common/accessibility.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/accessibility/common/accessibility.js
 var IAccessibilityService, CONTEXT_ACCESSIBILITY_MODE_ENABLED;
 var init_accessibility = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/accessibility/common/accessibility.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/accessibility/common/accessibility.js"() {
     init_contextkey();
     init_instantiation();
     IAccessibilityService = createDecorator("accessibilityService");
@@ -32561,7 +32561,7 @@ var init_accessibility = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/editorConfiguration.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/editorConfiguration.js
 function digitCount(n2) {
   let r = 0;
   while (n2) {
@@ -32590,7 +32590,7 @@ function deepCloneAndMigrateOptions(_options) {
 }
 var __decorate5, __param5, EditorConfiguration, ValidatedEditorOptions, ComputedEditorOptions, EditorOptionsUtil;
 var init_editorConfiguration = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/config/editorConfiguration.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/config/editorConfiguration.js"() {
     init_browser();
     init_arrays();
     init_event();
@@ -32855,10 +32855,10 @@ var init_editorConfiguration = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/performance.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/performance.js
 var inputLatency;
 var init_performance = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/performance.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/performance.js"() {
     (function(inputLatency2) {
       const totalKeydownTime = { total: 0, min: Number.MAX_VALUE, max: 0 };
       const totalInputTime = { ...totalKeydownTime };
@@ -33002,7 +33002,7 @@ var init_performance = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/domStylesheets.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/domStylesheets.js
 function createStyleSheet2() {
   return new WrappedStyleElement();
 }
@@ -33102,7 +33102,7 @@ function createStyleSheetFromObservable(css) {
 }
 var globalStylesheets, WrappedStyleElement, _sharedStyleSheet;
 var init_domStylesheets = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/domStylesheets.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/domStylesheets.js"() {
     init_lifecycle();
     init_observable();
     init_browser();
@@ -33136,10 +33136,10 @@ var init_domStylesheets = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/globalPointerMoveMonitor.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/globalPointerMoveMonitor.js
 var GlobalPointerMoveMonitor;
 var init_globalPointerMoveMonitor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/globalPointerMoveMonitor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/globalPointerMoveMonitor.js"() {
     init_dom();
     init_lifecycle();
     GlobalPointerMoveMonitor = class {
@@ -33199,14 +33199,14 @@ var init_globalPointerMoveMonitor = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/color.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/color.js
 function roundFloat(number, decimalPoints) {
   const decimal = Math.pow(10, decimalPoints);
   return Math.round(number * decimal) / decimal;
 }
 var RGBA, HSLA, HSVA, Color;
 var init_color = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/color.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/color.js"() {
     RGBA = class {
       constructor(r, g, b, a = 1) {
         this._rgbaBrand = void 0;
@@ -34019,7 +34019,7 @@ var init_color = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colorUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colorUtils.js
 function asCssVariableName(colorIdent) {
   return `--vscode-${colorIdent.replace(/\./g, "-")}`;
 }
@@ -34115,7 +34115,7 @@ function resolveColorValue(colorValue, theme) {
 }
 var Extensions6, DEFAULT_COLOR_CONFIG_VALUE, ColorRegistry, colorRegistry, workbenchColorsSchemaId, schemaRegistry, delayer;
 var init_colorUtils = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colorUtils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colorUtils.js"() {
     init_assert();
     init_async();
     init_color();
@@ -34200,10 +34200,10 @@ var init_colorUtils = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/baseColors.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/baseColors.js
 var foreground, disabledForeground, errorForeground, descriptionForeground, iconForeground, focusBorder, contrastBorder, activeContrastBorder, selectionBackground, textLinkForeground, textLinkActiveForeground, textSeparatorForeground, textPreformatForeground, textPreformatBackground, textBlockQuoteBackground, textBlockQuoteBorder, textCodeBlockBackground;
 var init_baseColors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/baseColors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/baseColors.js"() {
     init_nls();
     init_color();
     init_colorUtils();
@@ -34227,10 +34227,10 @@ var init_baseColors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/miscColors.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/miscColors.js
 var sashHoverBorder, badgeBackground, badgeForeground, activityWarningBadgeForeground, activityWarningBadgeBackground, activityErrorBadgeForeground, activityErrorBadgeBackground, scrollbarShadow, scrollbarSliderBackground, scrollbarSliderHoverBackground, scrollbarSliderActiveBackground, scrollbarBackground, progressBarBackground, chartLine, chartAxis, chartGuide;
 var init_miscColors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/miscColors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/miscColors.js"() {
     init_nls();
     init_color();
     init_colorUtils();
@@ -34254,10 +34254,10 @@ var init_miscColors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/editorColors.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/editorColors.js
 var editorBackground, editorForeground, editorStickyScrollBackground, editorStickyScrollGutterBackground, editorStickyScrollHoverBackground, editorStickyScrollBorder, editorStickyScrollShadow, editorWidgetBackground, editorWidgetForeground, editorWidgetBorder, editorWidgetResizeBorder, editorErrorBackground, editorErrorForeground, editorErrorBorder, editorWarningBackground, editorWarningForeground, editorWarningBorder, editorInfoBackground, editorInfoForeground, editorInfoBorder, editorHintForeground, editorHintBorder, editorActiveLinkForeground, editorSelectionBackground, editorSelectionForeground, editorInactiveSelection, editorSelectionHighlight, editorSelectionHighlightBorder, editorCompositionBorder, editorFindMatch, editorFindMatchForeground, editorFindMatchHighlight, editorFindMatchHighlightForeground, editorFindRangeHighlight, editorFindMatchBorder, editorFindMatchHighlightBorder, editorFindRangeHighlightBorder, editorHoverHighlight, editorHoverBackground, editorHoverForeground, editorHoverBorder, editorHoverStatusBarBackground, editorInlayHintForeground, editorInlayHintBackground, editorInlayHintTypeForeground, editorInlayHintTypeBackground, editorInlayHintParameterForeground, editorInlayHintParameterBackground, editorLightBulbForeground, editorLightBulbAutoFixForeground, editorLightBulbAiForeground, snippetTabstopHighlightBackground, snippetTabstopHighlightBorder, snippetFinalTabstopHighlightBackground, snippetFinalTabstopHighlightBorder, defaultInsertColor, defaultRemoveColor, diffInserted, diffRemoved, diffInsertedLine, diffRemovedLine, diffInsertedLineGutter, diffRemovedLineGutter, diffOverviewRulerInserted, diffOverviewRulerRemoved, diffInsertedOutline, diffRemovedOutline, diffBorder, diffDiagonalFill, diffUnchangedRegionBackground, diffUnchangedRegionForeground, diffUnchangedTextBackground, widgetShadow, widgetBorder, toolbarHoverBackground, toolbarHoverOutline, toolbarActiveBackground, breadcrumbsForeground, breadcrumbsBackground, breadcrumbsFocusForeground, breadcrumbsActiveSelectionForeground, breadcrumbsPickerBackground, headerTransparency, currentBaseColor, incomingBaseColor, commonBaseColor, contentTransparency, rulerTransparency, mergeCurrentHeaderBackground, mergeCurrentContentBackground, mergeIncomingHeaderBackground, mergeIncomingContentBackground, mergeCommonHeaderBackground, mergeCommonContentBackground, mergeBorder, overviewRulerCurrentContentForeground, overviewRulerIncomingContentForeground, overviewRulerCommonContentForeground, overviewRulerFindMatchForeground, overviewRulerSelectionHighlightForeground, problemsErrorIconForeground, problemsWarningIconForeground, problemsInfoIconForeground;
 var init_editorColors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/editorColors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/editorColors.js"() {
     init_nls();
     init_color();
     init_colorUtils();
@@ -34369,10 +34369,10 @@ var init_editorColors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/minimapColors.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/minimapColors.js
 var minimapFindMatch, minimapSelectionOccurrenceHighlight, minimapSelection, minimapInfo, minimapWarning, minimapError, minimapBackground, minimapForegroundOpacity, minimapSliderBackground, minimapSliderHoverBackground, minimapSliderActiveBackground;
 var init_minimapColors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/minimapColors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/minimapColors.js"() {
     init_nls();
     init_color();
     init_colorUtils();
@@ -34392,10 +34392,10 @@ var init_minimapColors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/chartsColors.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/chartsColors.js
 var chartsForeground, chartsLines, chartsRed, chartsBlue, chartsYellow, chartsOrange, chartsGreen, chartsPurple;
 var init_chartsColors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/chartsColors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/chartsColors.js"() {
     init_nls();
     init_colorUtils();
     init_baseColors();
@@ -34412,10 +34412,10 @@ var init_chartsColors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/inputColors.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/inputColors.js
 var inputBackground, inputForeground, inputBorder, inputActiveOptionBorder, inputActiveOptionHoverBackground, inputActiveOptionBackground, inputActiveOptionForeground, inputPlaceholderForeground, inputValidationInfoBackground, inputValidationInfoForeground, inputValidationInfoBorder, inputValidationWarningBackground, inputValidationWarningForeground, inputValidationWarningBorder, inputValidationErrorBackground, inputValidationErrorForeground, inputValidationErrorBorder, selectBackground, selectListBackground, selectForeground, selectBorder, buttonForeground, buttonSeparator, buttonBackground, buttonHoverBackground, buttonBorder, buttonSecondaryForeground, buttonSecondaryBackground, buttonSecondaryHoverBackground, radioActiveForeground, radioActiveBackground, radioActiveBorder, radioInactiveForeground, radioInactiveBackground, radioInactiveBorder, radioInactiveHoverBackground, checkboxBackground, checkboxSelectBackground, checkboxForeground, checkboxBorder, checkboxSelectBorder, checkboxDisabledBackground, checkboxDisabledForeground, keybindingLabelBackground, keybindingLabelForeground, keybindingLabelBorder, keybindingLabelBottomBorder;
 var init_inputColors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/inputColors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/inputColors.js"() {
     init_nls();
     init_color();
     init_colorUtils();
@@ -34471,10 +34471,10 @@ var init_inputColors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/listColors.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/listColors.js
 var listFocusBackground, listFocusForeground, listFocusOutline, listFocusAndSelectionOutline, listActiveSelectionBackground, listActiveSelectionForeground, listActiveSelectionIconForeground, listInactiveSelectionBackground, listInactiveSelectionForeground, listInactiveSelectionIconForeground, listInactiveFocusBackground, listInactiveFocusOutline, listHoverBackground, listHoverForeground, listDropOverBackground, listDropBetweenBackground, listHighlightForeground, listFocusHighlightForeground, listInvalidItemForeground, listErrorForeground, listWarningForeground, listFilterWidgetBackground, listFilterWidgetOutline, listFilterWidgetNoMatchesOutline, listFilterWidgetShadow, listFilterMatchHighlight, listFilterMatchHighlightBorder, listDeemphasizedForeground, treeIndentGuidesStroke, treeInactiveIndentGuidesStroke, tableColumnsBorder, tableOddRowsBackgroundColor, editorActionListBackground, editorActionListForeground, editorActionListFocusForeground, editorActionListFocusBackground;
 var init_listColors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/listColors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/listColors.js"() {
     init_nls();
     init_color();
     init_colorUtils();
@@ -34519,10 +34519,10 @@ var init_listColors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/menuColors.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/menuColors.js
 var menuBorder, menuForeground, menuBackground, menuSelectionForeground, menuSelectionBackground, menuSelectionBorder, menuSeparatorBackground;
 var init_menuColors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/menuColors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/menuColors.js"() {
     init_nls();
     init_colorUtils();
     init_baseColors();
@@ -34538,10 +34538,10 @@ var init_menuColors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/quickpickColors.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/quickpickColors.js
 var quickInputBackground, quickInputForeground, quickInputTitleBackground, pickerGroupForeground, pickerGroupBorder, _deprecatedQuickInputListFocusBackground, quickInputListFocusForeground, quickInputListFocusIconForeground, quickInputListFocusBackground;
 var init_quickpickColors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/quickpickColors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/quickpickColors.js"() {
     init_nls();
     init_color();
     init_colorUtils();
@@ -34559,10 +34559,10 @@ var init_quickpickColors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/searchColors.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/searchColors.js
 var searchResultsInfoForeground, searchEditorFindMatch, searchEditorFindMatchBorder;
 var init_searchColors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colors/searchColors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colors/searchColors.js"() {
     init_nls();
     init_colorUtils();
     init_baseColors();
@@ -34573,9 +34573,9 @@ var init_searchColors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colorRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colorRegistry.js
 var init_colorRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/colorRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colorRegistry.js"() {
     init_colorUtils();
     init_baseColors();
     init_chartsColors();
@@ -34590,7 +34590,7 @@ var init_colorRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/editorDom.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/editorDom.js
 function createEditorPagePosition(editorViewDomNode) {
   const editorPos = getDomNodePagePosition(editorViewDomNode);
   return new EditorPagePosition(editorPos.left, editorPos.top, editorPos.width, editorPos.height);
@@ -34607,7 +34607,7 @@ function camelToDashes(str) {
 }
 var PageCoordinates, ClientCoordinates, EditorPagePosition, CoordinatesRelativeToEditor, EditorMouseEvent, EditorMouseEventFactory, EditorPointerEventFactory, GlobalEditorPointerMoveMonitor, DynamicCssRules, RefCountedCssRule;
 var init_editorDom = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/editorDom.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/editorDom.js"() {
     init_dom();
     init_domStylesheets();
     init_globalPointerMoveMonitor();
@@ -34841,10 +34841,10 @@ var init_editorDom = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewEventHandler.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewEventHandler.js
 var ViewEventHandler;
 var init_viewEventHandler = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewEventHandler.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewEventHandler.js"() {
     init_lifecycle();
     ViewEventHandler = class extends Disposable {
       constructor() {
@@ -35027,10 +35027,10 @@ var init_viewEventHandler = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/viewPart.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/viewPart.js
 var ViewPart, PartFingerprints;
 var init_viewPart = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/viewPart.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/viewPart.js"() {
     init_viewEventHandler();
     ViewPart = class extends ViewEventHandler {
       constructor(context) {
@@ -35076,10 +35076,10 @@ var init_viewPart = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/renderingContext.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/renderingContext.js
 var RestrictedRenderingContext, RenderingContext, LineVisibleRanges, HorizontalRange, FloatHorizontalRange, HorizontalPosition, VisibleRanges;
 var init_renderingContext = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/renderingContext.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/renderingContext.js"() {
     RestrictedRenderingContext = class {
       constructor(viewLayout, viewportData) {
         this._restrictedRenderingContextBrand = void 0;
@@ -35191,10 +35191,10 @@ var init_renderingContext = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/rangeUtil.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/rangeUtil.js
 var RangeUtil;
 var init_rangeUtil = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/rangeUtil.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/rangeUtil.js"() {
     init_renderingContext();
     RangeUtil = class {
       static _createRange() {
@@ -35293,10 +35293,10 @@ var init_rangeUtil = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/lineDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/lineDecorations.js
 var LineDecoration, DecorationSegment, Stack, LineDecorationsNormalizer;
 var init_lineDecorations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/lineDecorations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/lineDecorations.js"() {
     init_strings();
     LineDecoration = class _LineDecoration {
       constructor(startColumn, endColumn, className2, type) {
@@ -35485,10 +35485,10 @@ var init_lineDecorations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/linePart.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/linePart.js
 var LinePart;
 var init_linePart = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/linePart.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/linePart.js"() {
     LinePart = class {
       constructor(endIndex, type, metadata, containsRTL2) {
         this.endIndex = endIndex;
@@ -35507,7 +35507,7 @@ var init_linePart = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/viewLineRenderer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/viewLineRenderer.js
 function renderViewLine(input, sb) {
   if (input.lineContent.length === 0) {
     if (input.lineDecorations.length > 0) {
@@ -36117,7 +36117,7 @@ function renderOverflowingCharCount(n2) {
 }
 var RenderLineInput, DomPosition, CharacterMapping, RenderLineOutput, RenderLineOutput2, ResolvedRenderLineInput;
 var init_viewLineRenderer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/viewLineRenderer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/viewLineRenderer.js"() {
     init_nls();
     init_strings();
     init_stringBuilder();
@@ -36313,7 +36313,7 @@ var init_viewLineRenderer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/theme.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/theme.js
 function isHighContrast(scheme) {
   return scheme === ColorScheme.HIGH_CONTRAST_DARK || scheme === ColorScheme.HIGH_CONTRAST_LIGHT;
 }
@@ -36322,7 +36322,7 @@ function isDark(scheme) {
 }
 var ColorScheme, ThemeTypeSelector;
 var init_theme = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/theme.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/theme.js"() {
     (function(ColorScheme2) {
       ColorScheme2["DARK"] = "dark";
       ColorScheme2["LIGHT"] = "light";
@@ -36338,7 +36338,7 @@ var init_theme = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLine.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLine.js
 function createWebKitRenderedLine(domNode, renderLineInput, characterMapping, containsForeignElements) {
   return new WebKitRenderedViewLine(domNode, renderLineInput, characterMapping, containsForeignElements);
 }
@@ -36356,7 +36356,7 @@ function getColumnOfNodeOffset(characterMapping, spanNode, offset) {
 }
 var canUseFastRenderedViewLine, monospaceAssumptionsAreValid, ViewLine, FastRenderedViewLine, RenderedViewLine, WebKitRenderedViewLine, createRenderedLine;
 var init_viewLine = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLine.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLine.js"() {
     init_browser();
     init_fastDomNode();
     init_platform();
@@ -36850,7 +36850,7 @@ var init_viewLine = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/mouseTarget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/mouseTarget.js
 function createEmptyContentDataInLines(horizontalDistanceToText) {
   return {
     isAfterLines: false,
@@ -36898,7 +36898,7 @@ function shadowCaretRangeFromPoint(shadowRoot, x, y) {
 }
 var UnknownHitTestResult, ContentHitTestResult, HitTestResult, PointerHandlerLastRenderData, MouseTarget, ElementPath, HitTestContext, BareHitTestRequest, HitTestRequest, EMPTY_CONTENT_AFTER_LINES, MouseTargetFactory, CharWidthReader;
 var init_mouseTarget = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/mouseTarget.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/mouseTarget.js"() {
     init_editorDom();
     init_viewPart();
     init_viewLine();
@@ -37742,7 +37742,7 @@ var init_mouseTarget = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/decorators.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/decorators.js
 function memoize(_target, key, descriptor) {
   let fnKey = null;
   let fn = null;
@@ -37773,14 +37773,14 @@ function memoize(_target, key, descriptor) {
   };
 }
 var init_decorators = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/decorators.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/decorators.js"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/touch.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/touch.js
 var __decorate6, EventType2, Gesture;
 var init_touch = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/touch.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/touch.js"() {
     init_dom();
     init_window();
     init_decorators();
@@ -38047,10 +38047,10 @@ var init_touch = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/widget.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/widget.js
 var Widget;
 var init_widget = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/widget.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/widget.js"() {
     init_dom();
     init_keyboardEvent();
     init_mouseEvent();
@@ -38091,10 +38091,10 @@ var init_widget = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarArrow.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarArrow.js
 var ARROW_IMG_SIZE, ScrollbarArrow;
 var init_scrollbarArrow = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarArrow.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarArrow.js"() {
     init_globalPointerMoveMonitor();
     init_widget();
     init_async();
@@ -38167,10 +38167,10 @@ var init_scrollbarArrow = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarVisibilityController.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarVisibilityController.js
 var ScrollbarVisibilityController;
 var init_scrollbarVisibilityController = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarVisibilityController.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarVisibilityController.js"() {
     init_async();
     init_lifecycle();
     ScrollbarVisibilityController = class extends Disposable {
@@ -38256,10 +38256,10 @@ var init_scrollbarVisibilityController = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/abstractScrollbar.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/abstractScrollbar.js
 var POINTER_DRAG_RESET_DISTANCE, AbstractScrollbar;
 var init_abstractScrollbar = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/abstractScrollbar.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/abstractScrollbar.js"() {
     init_dom();
     init_fastDomNode();
     init_globalPointerMoveMonitor();
@@ -38459,10 +38459,10 @@ var init_abstractScrollbar = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarState.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarState.js
 var MINIMUM_SLIDER_SIZE, ScrollbarState;
 var init_scrollbarState = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarState.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollbarState.js"() {
     MINIMUM_SLIDER_SIZE = 20;
     ScrollbarState = class _ScrollbarState {
       constructor(arrowSize, scrollbarSize, oppositeScrollbarSize, visibleSize, scrollSize, scrollPosition) {
@@ -38612,10 +38612,10 @@ var init_scrollbarState = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/horizontalScrollbar.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/horizontalScrollbar.js
 var HorizontalScrollbar;
 var init_horizontalScrollbar = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/horizontalScrollbar.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/horizontalScrollbar.js"() {
     init_mouseEvent();
     init_abstractScrollbar();
     init_scrollbarArrow();
@@ -38703,10 +38703,10 @@ var init_horizontalScrollbar = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/verticalScrollbar.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/verticalScrollbar.js
 var VerticalScrollbar;
 var init_verticalScrollbar = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/verticalScrollbar.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/verticalScrollbar.js"() {
     init_mouseEvent();
     init_abstractScrollbar();
     init_scrollbarArrow();
@@ -38802,7 +38802,7 @@ var init_verticalScrollbar = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/scrollable.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/scrollable.js
 function createEaseOutCubic(from, to) {
   const delta = to - from;
   return function(completion) {
@@ -38825,7 +38825,7 @@ function easeOutCubic(t) {
 }
 var ScrollState, Scrollable, SmoothScrollingUpdate, SmoothScrollingOperation;
 var init_scrollable = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/scrollable.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/scrollable.js"() {
     init_event();
     init_lifecycle();
     ScrollState = class _ScrollState {
@@ -39100,13 +39100,13 @@ var init_scrollable = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/media/scrollbars.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/media/scrollbars.css
 var init_scrollbars = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/media/scrollbars.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/media/scrollbars.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollableElement.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollableElement.js
 function resolveOptions(opts) {
   const result = {
     lazyRender: typeof opts.lazyRender !== "undefined" ? opts.lazyRender : false,
@@ -39143,7 +39143,7 @@ function resolveOptions(opts) {
 }
 var HIDE_TIMEOUT, SCROLL_WHEEL_SENSITIVITY, SCROLL_WHEEL_SMOOTH_SCROLL_ENABLED, MouseWheelClassifierItem, MouseWheelClassifier, AbstractScrollableElement, ScrollableElement, SmoothScrollableElement, DomScrollableElement;
 var init_scrollableElement = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollableElement.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/scrollbar/scrollableElement.js"() {
     init_browser();
     init_dom();
     init_fastDomNode();
@@ -39677,10 +39677,10 @@ var init_scrollableElement = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/dragScrolling.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/dragScrolling.js
 var DragScrolling, DragScrollingOperation, TopBottomDragScrolling, TopBottomDragScrollingOperation, LeftRightDragScrolling, LeftRightDragScrollingOperation;
 var init_dragScrolling = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/dragScrolling.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/dragScrolling.js"() {
     init_dom();
     init_lifecycle();
     init_position();
@@ -39880,10 +39880,10 @@ var init_dragScrolling = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/mouseHandler.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/mouseHandler.js
 var MouseHandler, MouseDownOperation, MouseDownState;
 var init_mouseHandler = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/mouseHandler.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/mouseHandler.js"() {
     init_dom();
     init_mouseEvent();
     init_lifecycle();
@@ -40419,10 +40419,10 @@ var init_mouseHandler = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/event.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/event.js
 var DomEmitter;
 var init_event2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/event.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/event.js"() {
     init_event();
     DomEmitter = class {
       get event() {
@@ -40442,7 +40442,7 @@ var init_event2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/clipboardUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/clipboardUtils.js
 function getDataToCopy(viewModel, modelSelections, emptySelectionClipboard, copyWithSyntaxHighlighting) {
   const rawTextToCopy = viewModel.getPlainTextToCopy(modelSelections, emptySelectionClipboard, isWindows);
   const newLineCharacter = viewModel.model.getEOL();
@@ -40469,7 +40469,7 @@ function getDataToCopy(viewModel, modelSelections, emptySelectionClipboard, copy
 }
 var InMemoryClipboardMetadataManager, CopyOptions, ClipboardEventUtils;
 var init_clipboardUtils = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/clipboardUtils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/clipboardUtils.js"() {
     init_platform();
     init_mime();
     InMemoryClipboardMetadataManager = class _InMemoryClipboardMetadataManager {
@@ -40524,10 +40524,10 @@ var init_clipboardUtils = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.js
 var _debugComposition, TextAreaState;
 var init_textAreaEditContextState = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.js"() {
     init_strings();
     _debugComposition = false;
     TextAreaState = class _TextAreaState {
@@ -40699,13 +40699,13 @@ var init_textAreaEditContextState = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/uuid.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/uuid.js
 function prefixedUuid(namespace) {
   return `${namespace}-${generateUuid()}`;
 }
 var generateUuid;
 var init_uuid = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/uuid.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/uuid.js"() {
     generateUuid = (function() {
       if (typeof crypto.randomUUID === "function") {
         return crypto.randomUUID.bind(crypto);
@@ -40747,10 +40747,10 @@ var init_uuid = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.js
 var __decorate7, __param6, TextAreaSyntethicEvents, CompositionContext, TextAreaInput, TextAreaWrapper;
 var init_textAreaEditContextInput = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.js"() {
     init_browser();
     init_dom();
     init_event2();
@@ -41256,10 +41256,10 @@ var init_textAreaEditContextInput = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/pointerHandler.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/pointerHandler.js
 var PointerEventHandler, TouchHandler, PointerHandler;
 var init_pointerHandler = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/pointerHandler.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/pointerHandler.js"() {
     init_canIUse();
     init_dom();
     init_touch();
@@ -41391,10 +41391,10 @@ var init_pointerHandler = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/viewController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/viewController.js
 var ViewController;
 var init_viewController = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/viewController.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/viewController.js"() {
     init_coreCommands();
     init_position();
     init_platform();
@@ -41659,7 +41659,7 @@ var init_viewController = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/trustedTypes.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/trustedTypes.js
 function createTrustedTypesPolicy(policyName, policyOptions) {
   const monacoEnvironment2 = getMonacoEnvironment();
   if (monacoEnvironment2?.createTrustedTypesPolicy) {
@@ -41678,16 +41678,16 @@ function createTrustedTypesPolicy(policyName, policyOptions) {
   }
 }
 var init_trustedTypes = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/trustedTypes.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/trustedTypes.js"() {
     init_errors();
     init_browser();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/viewLayer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/viewLayer.js
 var RenderedLinesCollection, VisibleLinesCollection, ViewLayerRenderer;
 var init_viewLayer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/viewLayer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/viewLayer.js"() {
     init_fastDomNode();
     init_trustedTypes();
     init_errors();
@@ -42128,10 +42128,10 @@ var init_viewLayer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/viewOverlays.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/viewOverlays.js
 var ViewOverlays, ViewOverlayLine, ContentViewOverlays, MarginViewOverlays;
 var init_viewOverlays = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/viewOverlays.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/viewOverlays.js"() {
     init_fastDomNode();
     init_domFontInfo();
     init_viewLayer();
@@ -42352,10 +42352,10 @@ var init_viewOverlays = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/viewUserInputEvents.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/viewUserInputEvents.js
 var ViewUserInputEvents;
 var init_viewUserInputEvents = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/viewUserInputEvents.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/viewUserInputEvents.js"() {
     init_position();
     ViewUserInputEvents = class _ViewUserInputEvents {
       constructor(coordinatesConverter) {
@@ -42443,16 +42443,16 @@ var init_viewUserInputEvents = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/blockDecorations/blockDecorations.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/blockDecorations/blockDecorations.css
 var init_blockDecorations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/blockDecorations/blockDecorations.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/blockDecorations/blockDecorations.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/blockDecorations/blockDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/blockDecorations/blockDecorations.js
 var BlockDecorations;
 var init_blockDecorations2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/blockDecorations/blockDecorations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/blockDecorations/blockDecorations.js"() {
     init_fastDomNode();
     init_blockDecorations();
     init_viewPart();
@@ -42544,7 +42544,7 @@ var init_blockDecorations2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/contentWidgets/contentWidgets.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/contentWidgets/contentWidgets.js
 function safeInvoke(fn, thisArg, ...args) {
   try {
     return fn.call(thisArg, ...args);
@@ -42554,7 +42554,7 @@ function safeInvoke(fn, thisArg, ...args) {
 }
 var ViewContentWidgets, Widget2, PositionPair, Coordinate, AnchorCoordinate;
 var init_contentWidgets = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/contentWidgets/contentWidgets.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/contentWidgets/contentWidgets.js"() {
     init_dom();
     init_fastDomNode();
     init_viewPart();
@@ -43025,23 +43025,23 @@ var init_contentWidgets = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/currentLineHighlight/currentLineHighlight.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/currentLineHighlight/currentLineHighlight.css
 var init_currentLineHighlight = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/currentLineHighlight/currentLineHighlight.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/currentLineHighlight/currentLineHighlight.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/dynamicViewOverlay.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/dynamicViewOverlay.js
 var DynamicViewOverlay;
 var init_dynamicViewOverlay = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/dynamicViewOverlay.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/dynamicViewOverlay.js"() {
     init_viewEventHandler();
     DynamicViewOverlay = class extends ViewEventHandler {
     };
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/themeService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/themeService.js
 function themeColorFromId(id) {
   return { id };
 }
@@ -43062,7 +43062,7 @@ function registerThemingParticipant(participant) {
 }
 var IThemeService, Extensions7, ThemingRegistry, themingRegistry, Themable;
 var init_themeService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/themeService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/themeService.js"() {
     init_event();
     init_lifecycle();
     init_instantiation();
@@ -43110,10 +43110,10 @@ var init_themeService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/editorColorRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/editorColorRegistry.js
 var editorLineHighlight, editorLineHighlightBorder, editorRangeHighlight, editorRangeHighlightBorder, editorSymbolHighlight, editorSymbolHighlightBorder, editorCursorForeground, editorCursorBackground, editorMultiCursorPrimaryForeground, editorMultiCursorPrimaryBackground, editorMultiCursorSecondaryForeground, editorMultiCursorSecondaryBackground, editorWhitespaces, editorLineNumbers, deprecatedEditorIndentGuides, deprecatedEditorActiveIndentGuides, editorIndentGuide1, editorIndentGuide2, editorIndentGuide3, editorIndentGuide4, editorIndentGuide5, editorIndentGuide6, editorActiveIndentGuide1, editorActiveIndentGuide2, editorActiveIndentGuide3, editorActiveIndentGuide4, editorActiveIndentGuide5, editorActiveIndentGuide6, deprecatedEditorActiveLineNumber, editorActiveLineNumber, editorDimmedLineNumber, editorRuler, editorCodeLensForeground, editorBracketMatchBackground, editorBracketMatchBorder, editorOverviewRulerBorder, editorOverviewRulerBackground, editorGutter, editorUnnecessaryCodeBorder, editorUnnecessaryCodeOpacity, ghostTextBorder, ghostTextForeground, ghostTextBackground, rulerRangeDefault, overviewRulerRangeHighlight, overviewRulerError, overviewRulerWarning, overviewRulerInfo, editorBracketHighlightingForeground1, editorBracketHighlightingForeground2, editorBracketHighlightingForeground3, editorBracketHighlightingForeground4, editorBracketHighlightingForeground5, editorBracketHighlightingForeground6, editorBracketHighlightingUnexpectedBracketForeground, editorBracketPairGuideBackground1, editorBracketPairGuideBackground2, editorBracketPairGuideBackground3, editorBracketPairGuideBackground4, editorBracketPairGuideBackground5, editorBracketPairGuideBackground6, editorBracketPairGuideActiveBackground1, editorBracketPairGuideActiveBackground2, editorBracketPairGuideActiveBackground3, editorBracketPairGuideActiveBackground4, editorBracketPairGuideActiveBackground5, editorBracketPairGuideActiveBackground6, editorUnicodeHighlightBorder, editorUnicodeHighlightBackground;
 var init_editorColorRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/editorColorRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/editorColorRegistry.js"() {
     init_nls();
     init_color();
     init_colorRegistry();
@@ -43198,10 +43198,10 @@ var init_editorColorRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/currentLineHighlight/currentLineHighlight.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/currentLineHighlight/currentLineHighlight.js
 var AbstractLineHighlightOverlay, CurrentLineHighlightOverlay, CurrentLineMarginHighlightOverlay;
 var init_currentLineHighlight2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/currentLineHighlight/currentLineHighlight.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/currentLineHighlight/currentLineHighlight.js"() {
     init_currentLineHighlight();
     init_dynamicViewOverlay();
     init_editorColorRegistry();
@@ -43409,16 +43409,16 @@ var init_currentLineHighlight2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/decorations/decorations.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/decorations/decorations.css
 var init_decorations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/decorations/decorations.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/decorations/decorations.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/decorations/decorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/decorations/decorations.js
 var DecorationsOverlay;
 var init_decorations2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/decorations/decorations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/decorations/decorations.js"() {
     init_decorations();
     init_dynamicViewOverlay();
     init_renderingContext();
@@ -43604,10 +43604,10 @@ var init_decorations2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/editorScrollbar/editorScrollbar.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/editorScrollbar/editorScrollbar.js
 var EditorScrollbar2;
 var init_editorScrollbar = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/editorScrollbar/editorScrollbar.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/editorScrollbar/editorScrollbar.js"() {
     init_dom();
     init_fastDomNode();
     init_scrollableElement();
@@ -43796,16 +43796,16 @@ var init_editorScrollbar = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/glyphMargin/glyphMargin.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/glyphMargin/glyphMargin.css
 var init_glyphMargin = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/glyphMargin/glyphMargin.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/glyphMargin/glyphMargin.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/glyphMargin/glyphMargin.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/glyphMargin/glyphMargin.js
 var DecorationToRender, LineDecorationToRender, VisibleLineDecorationsToRender, DedupOverlay, GlyphMarginWidgets, DecorationBasedGlyphRenderRequest, WidgetBasedGlyphRenderRequest, DecorationBasedGlyph;
 var init_glyphMargin2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/glyphMargin/glyphMargin.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/glyphMargin/glyphMargin.js"() {
     init_fastDomNode();
     init_arrays();
     init_glyphMargin();
@@ -44185,13 +44185,13 @@ var init_glyphMargin2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/indentGuides/indentGuides.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/indentGuides/indentGuides.css
 var init_indentGuides = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/indentGuides/indentGuides.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/indentGuides/indentGuides.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/arraysFind.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/arraysFind.js
 function findLast(array2, predicate, fromIndex = array2.length - 1) {
   const idx = findLastIdx(array2, predicate, fromIndex);
   if (idx === -1) {
@@ -44295,7 +44295,7 @@ function mapFindFirst(items, mapFn) {
 }
 var MonotonousArray;
 var init_arraysFind = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/arraysFind.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/arraysFind.js"() {
     MonotonousArray = class _MonotonousArray {
       static {
         this.assertInvariants = false;
@@ -44327,10 +44327,10 @@ var init_arraysFind = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/textModelPart.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/textModelPart.js
 var TextModelPart;
 var init_textModelPart = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/textModelPart.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/textModelPart.js"() {
     init_lifecycle();
     TextModelPart = class extends Disposable {
       constructor() {
@@ -44350,7 +44350,7 @@ var init_textModelPart = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/utils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/utils.js
 function computeIndentLevel(line, tabSize) {
   let indent = 0;
   let i2 = 0;
@@ -44372,14 +44372,14 @@ function computeIndentLevel(line, tabSize) {
   return indent;
 }
 var init_utils4 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/utils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/utils.js"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/textModelGuides.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/textModelGuides.js
 var HorizontalGuidesState, IndentGuide, IndentGuideHorizontalLine;
 var init_textModelGuides = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/textModelGuides.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/textModelGuides.js"() {
     (function(HorizontalGuidesState2) {
       HorizontalGuidesState2[HorizontalGuidesState2["Disabled"] = 0] = "Disabled";
       HorizontalGuidesState2[HorizontalGuidesState2["EnabledForActive"] = 1] = "EnabledForActive";
@@ -44407,10 +44407,10 @@ var init_textModelGuides = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/guidesTextModelPart.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/guidesTextModelPart.js
 var GuidesTextModelPart, BracketPairGuidesClassNames;
 var init_guidesTextModelPart = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/guidesTextModelPart.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/guidesTextModelPart.js"() {
     init_arraysFind();
     init_strings();
     init_cursorColumns();
@@ -44734,7 +44734,7 @@ var init_guidesTextModelPart = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/indentGuides/indentGuides.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/indentGuides/indentGuides.js
 function transparentToUndefined(color) {
   if (color && color.isTransparent()) {
     return void 0;
@@ -44743,7 +44743,7 @@ function transparentToUndefined(color) {
 }
 var IndentGuidesOverlay;
 var init_indentGuides2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/indentGuides/indentGuides.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/indentGuides/indentGuides.js"() {
     init_indentGuides();
     init_dynamicViewOverlay();
     init_editorColorRegistry();
@@ -44983,16 +44983,16 @@ var init_indentGuides2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/lineNumbers/lineNumbers.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/lineNumbers/lineNumbers.css
 var init_lineNumbers = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/lineNumbers/lineNumbers.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/lineNumbers/lineNumbers.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/lineNumbers/lineNumbers.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/lineNumbers/lineNumbers.js
 var LineNumbersOverlay;
 var init_lineNumbers2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/lineNumbers/lineNumbers.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/lineNumbers/lineNumbers.js"() {
     init_lineNumbers();
     init_platform();
     init_dynamicViewOverlay();
@@ -45181,31 +45181,31 @@ var init_lineNumbers2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/mouseCursor/mouseCursor.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/mouseCursor/mouseCursor.css
 var init_mouseCursor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/mouseCursor/mouseCursor.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/mouseCursor/mouseCursor.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/mouseCursor/mouseCursor.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/mouseCursor/mouseCursor.js
 var MOUSE_CURSOR_TEXT_CSS_CLASS_NAME;
 var init_mouseCursor2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/mouseCursor/mouseCursor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/mouseCursor/mouseCursor.js"() {
     init_mouseCursor();
     MOUSE_CURSOR_TEXT_CSS_CLASS_NAME = `monaco-mouse-cursor-text`;
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLines.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLines.css
 var init_viewLines = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLines.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLines.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/domReadingContext.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/domReadingContext.js
 var DomReadingContext;
 var init_domReadingContext = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/domReadingContext.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/domReadingContext.js"() {
     DomReadingContext = class {
       get didDomLayout() {
         return this._didDomLayout;
@@ -45246,10 +45246,10 @@ var init_domReadingContext = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLineOptions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLineOptions.js
 var ViewLineOptions;
 var init_viewLineOptions = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLineOptions.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLineOptions.js"() {
     ViewLineOptions = class {
       constructor(config, themeType) {
         this.themeType = themeType;
@@ -45306,10 +45306,10 @@ var init_viewLineOptions = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLines.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLines.js
 var LastRenderedData, HorizontalRevealRangeRequest, HorizontalRevealSelectionsRequest, ViewLines;
 var init_viewLines2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLines.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLines/viewLines.js"() {
     init_mouseCursor2();
     init_async();
     init_platform();
@@ -46027,16 +46027,16 @@ var init_viewLines2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/linesDecorations/linesDecorations.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/linesDecorations/linesDecorations.css
 var init_linesDecorations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/linesDecorations/linesDecorations.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/linesDecorations/linesDecorations.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/linesDecorations/linesDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/linesDecorations/linesDecorations.js
 var LinesDecorationsOverlay;
 var init_linesDecorations2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/linesDecorations/linesDecorations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/linesDecorations/linesDecorations.js"() {
     init_linesDecorations();
     init_glyphMargin2();
     LinesDecorationsOverlay = class extends DedupOverlay {
@@ -46143,16 +46143,16 @@ var init_linesDecorations2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/margin/margin.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/margin/margin.css
 var init_margin = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/margin/margin.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/margin/margin.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/margin/margin.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/margin/margin.js
 var Margin;
 var init_margin2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/margin/margin.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/margin/margin.js"() {
     init_margin();
     init_fastDomNode();
     init_viewPart();
@@ -46230,16 +46230,16 @@ var init_margin2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/marginDecorations/marginDecorations.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/marginDecorations/marginDecorations.css
 var init_marginDecorations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/marginDecorations/marginDecorations.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/marginDecorations/marginDecorations.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/marginDecorations/marginDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/marginDecorations/marginDecorations.js
 var MarginViewLineDecorationsOverlay;
 var init_marginDecorations2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/marginDecorations/marginDecorations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/marginDecorations/marginDecorations.js"() {
     init_marginDecorations();
     init_glyphMargin2();
     MarginViewLineDecorationsOverlay = class extends DedupOverlay {
@@ -46320,16 +46320,16 @@ var init_marginDecorations2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimap.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimap.css
 var init_minimap = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimap.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimap.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/misc/rgba.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/misc/rgba.js
 var RGBA8;
 var init_rgba = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/misc/rgba.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/misc/rgba.js"() {
     RGBA8 = class _RGBA8 {
       static {
         this.Empty = new _RGBA8(0, 0, 0, 0);
@@ -46357,10 +46357,10 @@ var init_rgba = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokenizationRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokenizationRegistry.js
 var TokenizationRegistry, TokenizationSupportFactoryData;
 var init_tokenizationRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokenizationRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokenizationRegistry.js"() {
     init_event();
     init_lifecycle();
     TokenizationRegistry = class {
@@ -46481,7 +46481,7 @@ var init_tokenizationRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages.js
 function isLocationLink(thing) {
   return !!thing && URI.isUri(thing.uri) && Range.isIRange(thing.range) && (Range.isIRange(thing.originSelectionRange) || Range.isIRange(thing.targetSelectionRange));
 }
@@ -46490,7 +46490,7 @@ function getAriaLabelForSymbol(symbolName, kind) {
 }
 var Token, TokenizationResult, EncodedTokenizationResult, HoverVerbosityAction, CompletionItemKinds, InlineCompletionTriggerKind, SelectedSuggestionInfo, InlineCompletionHintStyle, ProviderId, InlineCompletionEndOfLifeReasonKind, DocumentPasteTriggerKind, SignatureHelpTriggerKind, DocumentHighlightKind, symbolKindNames, SymbolKinds, FoldingRangeKind, NewSymbolNameTag, NewSymbolNameTriggerKind, Command2, InlayHintKind, LazyTokenizationSupport, TokenizationRegistry2;
 var init_languages = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages.js"() {
     init_codicons();
     init_uri();
     init_range();
@@ -47234,10 +47234,10 @@ var init_languages = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/minimapTokensColorTracker.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/minimapTokensColorTracker.js
 var MinimapTokensColorTracker;
 var init_minimapTokensColorTracker = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/minimapTokensColorTracker.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/minimapTokensColorTracker.js"() {
     init_event();
     init_lifecycle();
     init_rgba();
@@ -47295,10 +47295,10 @@ var init_minimapTokensColorTracker = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharSheet.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharSheet.js
 var allCharCodes, getCharIndex;
 var init_minimapCharSheet = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharSheet.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharSheet.js"() {
     allCharCodes = (() => {
       const v = [];
       for (let i2 = 32; i2 <= 126; i2++) {
@@ -47323,10 +47323,10 @@ var init_minimapCharSheet = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharRenderer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharRenderer.js
 var MinimapCharRenderer;
 var init_minimapCharRenderer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharRenderer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharRenderer.js"() {
     init_minimapCharSheet();
     init_uint();
     MinimapCharRenderer = class _MinimapCharRenderer {
@@ -47413,10 +47413,10 @@ var init_minimapCharRenderer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapPreBaked.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapPreBaked.js
 var charTable, decodeData, prebakedMiniMaps;
 var init_minimapPreBaked = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapPreBaked.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapPreBaked.js"() {
     init_functional();
     charTable = {
       "0": 0,
@@ -47450,10 +47450,10 @@ var init_minimapPreBaked = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharRendererFactory.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharRendererFactory.js
 var MinimapCharRendererFactory;
 var init_minimapCharRendererFactory = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharRendererFactory.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimapCharRendererFactory.js"() {
     init_minimapCharRenderer();
     init_minimapCharSheet();
     init_minimapPreBaked();
@@ -47568,17 +47568,17 @@ var init_minimapCharRendererFactory = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/fonts.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/fonts.js
 var DEFAULT_FONT_FAMILY;
 var init_fonts = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/fonts.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/fonts.js"() {
     init_window();
     init_platform();
     DEFAULT_FONT_FAMILY = isWindows ? '"Segoe WPC", "Segoe UI", sans-serif' : isMacintosh ? "-apple-system, BlinkMacSystemFont, sans-serif" : 'system-ui, "Ubuntu", "Droid Sans", sans-serif';
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/viewModelDecoration.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/viewModelDecoration.js
 function isModelDecorationVisible(model, decoration3) {
   if (decoration3.options.hideInCommentTokens && isModelDecorationInComment(model, decoration3)) {
     return false;
@@ -47628,7 +47628,7 @@ function testTokensInRange(model, range2, callback) {
 }
 var ViewModelDecoration;
 var init_viewModelDecoration = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/viewModelDecoration.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/viewModelDecoration.js"() {
     ViewModelDecoration = class {
       constructor(range2, options2) {
         this._viewModelDecorationBrand = void 0;
@@ -47639,10 +47639,10 @@ var init_viewModelDecoration = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimap.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimap.js
 var POINTER_DRAG_RESET_DISTANCE2, GUTTER_DECORATION_WIDTH, MinimapOptions, MinimapLayout, MinimapLine, RenderData, MinimapBuffers, MinimapSamplingState, Minimap, InnerMinimap, ContiguousLineMap;
 var init_minimap2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimap.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/minimap/minimap.js"() {
     init_minimap();
     init_dom();
     init_fastDomNode();
@@ -49150,16 +49150,16 @@ var init_minimap2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/overlayWidgets/overlayWidgets.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/overlayWidgets/overlayWidgets.css
 var init_overlayWidgets = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/overlayWidgets/overlayWidgets.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/overlayWidgets/overlayWidgets.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/overlayWidgets/overlayWidgets.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/overlayWidgets/overlayWidgets.js
 var ViewOverlayWidgets;
 var init_overlayWidgets2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/overlayWidgets/overlayWidgets.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/overlayWidgets/overlayWidgets.js"() {
     init_overlayWidgets();
     init_fastDomNode();
     init_viewPart();
@@ -49349,10 +49349,10 @@ var init_overlayWidgets2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel.js
 var Viewport, MinimapLinesRenderingData, ViewLineData, ViewLineRenderingData, OverviewRulerDecorationsGroup;
 var init_viewModel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel.js"() {
     init_arrays();
     init_strings();
     Viewport = class {
@@ -49438,10 +49438,10 @@ var init_viewModel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/overviewRuler/decorationsOverviewRuler.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/overviewRuler/decorationsOverviewRuler.js
 var Settings, DecorationsOverviewRuler;
 var init_decorationsOverviewRuler = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/overviewRuler/decorationsOverviewRuler.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/overviewRuler/decorationsOverviewRuler.js"() {
     init_fastDomNode();
     init_color();
     init_viewPart();
@@ -49885,10 +49885,10 @@ var init_decorationsOverviewRuler = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/overviewZoneManager.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/overviewZoneManager.js
 var ColorZone, OverviewRulerZone, OverviewZoneManager;
 var init_overviewZoneManager = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/overviewZoneManager.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/overviewZoneManager.js"() {
     ColorZone = class {
       constructor(from, to, colorId) {
         this._colorZoneBrand = void 0;
@@ -50057,10 +50057,10 @@ var init_overviewZoneManager = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/overviewRuler/overviewRuler.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/overviewRuler/overviewRuler.js
 var OverviewRuler;
 var init_overviewRuler = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/overviewRuler/overviewRuler.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/overviewRuler/overviewRuler.js"() {
     init_fastDomNode();
     init_overviewZoneManager();
     init_viewEventHandler();
@@ -50203,16 +50203,16 @@ var init_overviewRuler = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/rulers/rulers.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/rulers/rulers.css
 var init_rulers = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/rulers/rulers.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/rulers/rulers.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/rulers/rulers.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/rulers/rulers.js
 var Rulers;
 var init_rulers2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/rulers/rulers.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/rulers/rulers.js"() {
     init_rulers();
     init_fastDomNode();
     init_viewPart();
@@ -50297,16 +50297,16 @@ var init_rulers2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/scrollDecoration/scrollDecoration.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/scrollDecoration/scrollDecoration.css
 var init_scrollDecoration = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/scrollDecoration/scrollDecoration.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/scrollDecoration/scrollDecoration.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/scrollDecoration/scrollDecoration.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/scrollDecoration/scrollDecoration.js
 var ScrollDecorationViewPart;
 var init_scrollDecoration2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/scrollDecoration/scrollDecoration.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/scrollDecoration/scrollDecoration.js"() {
     init_scrollDecoration();
     init_fastDomNode();
     init_viewPart();
@@ -50380,13 +50380,13 @@ var init_scrollDecoration2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/selections/selections.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/selections/selections.css
 var init_selections = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/selections/selections.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/selections/selections.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/selections/selections.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/selections/selections.js
 function toStyledRange(item) {
   return new HorizontalRangeWithStyle(item);
 }
@@ -50398,7 +50398,7 @@ function abs(n2) {
 }
 var HorizontalRangeWithStyle, LineVisibleRangesWithStyle, SelectionsOverlay;
 var init_selections2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/selections/selections.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/selections/selections.js"() {
     init_selections();
     init_dynamicViewOverlay();
     init_colorRegistry();
@@ -50709,16 +50709,16 @@ var init_selections2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursors.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursors.css
 var init_viewCursors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursors.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursors.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursor.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursor.js
 var ViewCursorRenderData, CursorPlurality, ViewCursor;
 var init_viewCursor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursor.js"() {
     init_dom();
     init_fastDomNode();
     init_strings();
@@ -50942,10 +50942,10 @@ var init_viewCursor = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursors.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursors.js
 var ViewCursors;
 var init_viewCursors2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewCursors/viewCursors.js"() {
     init_viewCursors();
     init_fastDomNode();
     init_async();
@@ -51296,7 +51296,7 @@ var init_viewCursors2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewZones/viewZones.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewZones/viewZones.js
 function safeInvoke1Arg(func, arg1) {
   try {
     return func(arg1);
@@ -51307,7 +51307,7 @@ function safeInvoke1Arg(func, arg1) {
 }
 var invalidFunc, ViewZones;
 var init_viewZones = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewZones/viewZones.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewZones/viewZones.js"() {
     init_fastDomNode();
     init_errors();
     init_viewPart();
@@ -51632,16 +51632,16 @@ var init_viewZones = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/whitespace/whitespace.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/whitespace/whitespace.css
 var init_whitespace = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/whitespace/whitespace.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/whitespace/whitespace.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/whitespace/whitespace.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/whitespace/whitespace.js
 var WhitespaceOverlay, WhitespaceOptions;
 var init_whitespace2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/whitespace/whitespace.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/whitespace/whitespace.js"() {
     init_whitespace();
     init_dynamicViewOverlay();
     init_strings();
@@ -51910,10 +51910,10 @@ var init_whitespace2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/viewLinesViewportData.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/viewLinesViewportData.js
 var ViewportData;
 var init_viewLinesViewportData = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/viewLinesViewportData.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/viewLinesViewportData.js"() {
     init_range();
     ViewportData = class {
       constructor(selections, partialData, whitespaceViewportData, model) {
@@ -51937,10 +51937,10 @@ var init_viewLinesViewportData = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/editorTheme.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/editorTheme.js
 var EditorTheme;
 var init_editorTheme = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/editorTheme.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/editorTheme.js"() {
     EditorTheme = class {
       get type() {
         return this._theme.type;
@@ -51961,10 +51961,10 @@ var init_editorTheme = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/viewContext.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/viewContext.js
 var ViewContext;
 var init_viewContext = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/viewContext.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/viewContext.js"() {
     init_editorTheme();
     ViewContext = class {
       constructor(configuration, theme, model) {
@@ -51983,7 +51983,7 @@ var init_viewContext = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/gpuUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/gpuUtils.js
 function ensureNonNullable(value) {
   if (!value) {
     throw new Error(`Value "${value}" cannot be null`);
@@ -52018,7 +52018,7 @@ function observeDevicePixelDimensions(element, parentWindow, callback) {
 }
 var quadVertices;
 var init_gpuUtils = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/gpuUtils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/gpuUtils.js"() {
     init_errors();
     init_lifecycle();
     quadVertices = new Float32Array([
@@ -52038,10 +52038,10 @@ var init_gpuUtils = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/raster/glyphRasterizer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/raster/glyphRasterizer.js
 var __decorate8, nextId, GlyphRasterizer;
 var init_glyphRasterizer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/raster/glyphRasterizer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/raster/glyphRasterizer.js"() {
     init_decorators();
     init_lifecycle();
     init_platform();
@@ -52258,10 +52258,10 @@ var init_glyphRasterizer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/taskQueue.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/taskQueue.js
 var __decorate9, __param7, TaskQueue2, PriorityTaskQueue, IdleTaskQueueInternal, IdleTaskQueue;
 var init_taskQueue = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/taskQueue.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/taskQueue.js"() {
     init_dom();
     init_lifecycle();
     init_log();
@@ -52356,10 +52356,10 @@ var init_taskQueue = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasShelfAllocator.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasShelfAllocator.js
 var TextureAtlasShelfAllocator;
 var init_textureAtlasShelfAllocator = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasShelfAllocator.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasShelfAllocator.js"() {
     init_errors();
     init_gpuUtils();
     TextureAtlasShelfAllocator = class {
@@ -52481,7 +52481,7 @@ var init_textureAtlasShelfAllocator = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasSlabAllocator.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasSlabAllocator.js
 function addEntryToMapArray(map, key, entry) {
   let list2 = map.get(key);
   if (!list2) {
@@ -52492,7 +52492,7 @@ function addEntryToMapArray(map, key, entry) {
 }
 var TextureAtlasSlabAllocator;
 var init_textureAtlasSlabAllocator = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasSlabAllocator.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasSlabAllocator.js"() {
     init_dom();
     init_errors();
     init_map();
@@ -52784,10 +52784,10 @@ var init_textureAtlasSlabAllocator = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasPage.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasPage.js
 var __decorate10, __param8, TextureAtlasPage_1, TextureAtlasPage;
 var init_textureAtlasPage = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasPage.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlasPage.js"() {
     init_lifecycle();
     init_map();
     init_log();
@@ -52891,10 +52891,10 @@ var init_textureAtlasPage = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlas.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlas.js
 var __decorate11, __param9, TextureAtlas_1, TextureAtlas;
 var init_textureAtlas = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlas.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/atlas/textureAtlas.js"() {
     init_dom();
     init_errors();
     init_event();
@@ -53039,10 +53039,10 @@ var init_textureAtlas = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/severity.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/severity.js
 var Severity, severity_default;
 var init_severity = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/severity.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/severity.js"() {
     init_strings();
     (function(Severity3) {
       Severity3[Severity3["Ignore"] = 0] = "Ignore";
@@ -53090,10 +53090,10 @@ var init_severity = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/notification/common/notification.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/notification/common/notification.js
 var Severity2, INotificationService, NoOpNotification;
 var init_notification = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/notification/common/notification.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/notification/common/notification.js"() {
     init_severity();
     init_instantiation();
     Severity2 = severity_default;
@@ -53103,7 +53103,7 @@ var init_notification = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/gpuDisposable.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/gpuDisposable.js
 function wrapDestroyableInDisposable(value) {
   return {
     object: value,
@@ -53112,7 +53112,7 @@ function wrapDestroyableInDisposable(value) {
 }
 var GPULifecycle;
 var init_gpuDisposable = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/gpuDisposable.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/gpuDisposable.js"() {
     init_types();
     (function(GPULifecycle2) {
       async function requestDevice(fallback2) {
@@ -53149,10 +53149,10 @@ var init_gpuDisposable = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/bufferDirtyTracker.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/bufferDirtyTracker.js
 var BufferDirtyTracker;
 var init_bufferDirtyTracker = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/bufferDirtyTracker.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/bufferDirtyTracker.js"() {
     BufferDirtyTracker = class {
       get dataOffset() {
         return this._startIndex;
@@ -53194,13 +53194,13 @@ var init_bufferDirtyTracker = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/objectCollectionBuffer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/objectCollectionBuffer.js
 function createObjectCollectionBuffer(propertySpecs, capacity) {
   return new ObjectCollectionBuffer(propertySpecs, capacity);
 }
 var ObjectCollectionBuffer, ObjectCollectionBufferEntry;
 var init_objectCollectionBuffer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/objectCollectionBuffer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/objectCollectionBuffer.js"() {
     init_event();
     init_lifecycle();
     init_linkedList();
@@ -53296,10 +53296,10 @@ var init_objectCollectionBuffer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/rectangleRenderer.wgsl.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/rectangleRenderer.wgsl.js
 var rectangleRendererWgsl;
 var init_rectangleRenderer_wgsl = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/rectangleRenderer.wgsl.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/rectangleRenderer.wgsl.js"() {
     rectangleRendererWgsl = /*wgsl*/
     `
 
@@ -53366,10 +53366,10 @@ struct VSOutput {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/rectangleRenderer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/rectangleRenderer.js
 var RectangleRenderer;
 var init_rectangleRenderer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/rectangleRenderer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/rectangleRenderer.js"() {
     init_dom();
     init_event();
     init_lifecycle();
@@ -53604,16 +53604,16 @@ var init_rectangleRenderer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/css/media/decorationCssRuleExtractor.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/css/media/decorationCssRuleExtractor.css
 var init_decorationCssRuleExtractor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/css/media/decorationCssRuleExtractor.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/css/media/decorationCssRuleExtractor.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/css/decorationCssRuleExtractor.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/css/decorationCssRuleExtractor.js
 var DecorationCssRuleExtractor;
 var init_decorationCssRuleExtractor2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/css/decorationCssRuleExtractor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/css/decorationCssRuleExtractor.js"() {
     init_dom();
     init_lifecycle();
     init_decorationCssRuleExtractor();
@@ -53667,10 +53667,10 @@ var init_decorationCssRuleExtractor2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/css/decorationStyleCache.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/css/decorationStyleCache.js
 var DecorationStyleCache;
 var init_decorationStyleCache = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/css/decorationStyleCache.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/css/decorationStyleCache.js"() {
     init_map();
     DecorationStyleCache = class {
       constructor() {
@@ -53707,7 +53707,7 @@ var init_decorationStyleCache = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/viewGpuContext.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/viewGpuContext.js
 function supportsCssRule(rule, style) {
   if (!gpuSupportedDecorationCssRules.includes(rule)) {
     return false;
@@ -53719,7 +53719,7 @@ function supportsCssRule(rule, style) {
 }
 var __decorate12, __param10, ViewGpuContext_1, ViewGpuContext, gpuSupportedDecorationCssRules;
 var init_viewGpuContext = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/viewGpuContext.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/viewGpuContext.js"() {
     init_nls();
     init_dom();
     init_fastDomNode();
@@ -53941,7 +53941,7 @@ var init_viewGpuContext = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/contentSegmenter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/contentSegmenter.js
 function createContentSegmenter(lineData, options2) {
   if (lineData.isBasicASCII && options2.useMonospaceOptimizations) {
     return new AsciiContentSegmenter(lineData);
@@ -53950,7 +53950,7 @@ function createContentSegmenter(lineData, options2) {
 }
 var AsciiContentSegmenter, GraphemeContentSegmenter;
 var init_contentSegmenter = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/contentSegmenter.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/contentSegmenter.js"() {
     init_date();
     AsciiContentSegmenter = class {
       constructor(lineData) {
@@ -53987,10 +53987,10 @@ var init_contentSegmenter = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/baseRenderStrategy.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/baseRenderStrategy.js
 var BaseRenderStrategy;
 var init_baseRenderStrategy = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/baseRenderStrategy.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/baseRenderStrategy.js"() {
     init_viewEventHandler();
     BaseRenderStrategy = class extends ViewEventHandler {
       get glyphRasterizer() {
@@ -54008,10 +54008,10 @@ var init_baseRenderStrategy = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/fullFileRenderStrategy.wgsl.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/fullFileRenderStrategy.wgsl.js
 var fullFileRenderStrategyWgsl;
 var init_fullFileRenderStrategy_wgsl = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/fullFileRenderStrategy.wgsl.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/fullFileRenderStrategy.wgsl.js"() {
     init_textureAtlas();
     init_textureAtlasPage();
     fullFileRenderStrategyWgsl = /*wgsl*/
@@ -54102,7 +54102,7 @@ struct VSOutput {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/viewportRenderStrategy.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/viewportRenderStrategy.js
 function parseCssFontWeight(value) {
   switch (value) {
     case "lighter":
@@ -54125,7 +54125,7 @@ function parseCssOpacity(value) {
 }
 var ViewportRenderStrategy;
 var init_viewportRenderStrategy = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/viewportRenderStrategy.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/viewportRenderStrategy.js"() {
     init_dom();
     init_color();
     init_errors();
@@ -54408,7 +54408,7 @@ var init_viewportRenderStrategy = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/fullFileRenderStrategy.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/fullFileRenderStrategy.js
 function parseCssFontWeight2(value) {
   switch (value) {
     case "lighter":
@@ -54431,7 +54431,7 @@ function parseCssOpacity2(value) {
 }
 var FullFileRenderStrategy;
 var init_fullFileRenderStrategy = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/fullFileRenderStrategy.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/gpu/renderStrategy/fullFileRenderStrategy.js"() {
     init_dom();
     init_color();
     init_errors();
@@ -54794,10 +54794,10 @@ var init_fullFileRenderStrategy = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLinesGpu/viewLinesGpu.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLinesGpu/viewLinesGpu.js
 var __decorate13, __param11, ViewLinesGpu;
 var init_viewLinesGpu = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/viewLinesGpu/viewLinesGpu.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/viewLinesGpu/viewLinesGpu.js"() {
     init_dom();
     init_errors();
     init_observable();
@@ -55413,16 +55413,16 @@ var init_viewLinesGpu = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.css
 var init_textAreaEditContext = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/ime.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/ime.js
 var IMEImpl, IME;
 var init_ime = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/ime.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/ime.js"() {
     init_event();
     IMEImpl = class {
       constructor() {
@@ -55452,26 +55452,26 @@ var init_ime = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/keybinding.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/keybinding.js
 var IKeybindingService;
 var init_keybinding = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/keybinding.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/keybinding.js"() {
     init_instantiation();
     IKeybindingService = createDecorator("keybindingService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/editContext.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/editContext.js
 var AbstractEditContext;
 var init_editContext = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/editContext.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/editContext.js"() {
     init_viewPart();
     AbstractEditContext = class extends ViewPart {
     };
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/screenReaderUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/screenReaderUtils.js
 function ariaLabelForScreenReaderContent(options2, keybindingService) {
   const accessibilitySupport = options2.get(
     2
@@ -55511,7 +55511,7 @@ function newlinecount(text2) {
 }
 var SimplePagedScreenReaderStrategy;
 var init_screenReaderUtils = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/screenReaderUtils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/screenReaderUtils.js"() {
     init_range();
     init_nls();
     SimplePagedScreenReaderStrategy = class {
@@ -55605,7 +55605,7 @@ var init_screenReaderUtils = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.js
 function measureText(targetDocument, text2, fontInfo, tabSize) {
   if (text2.length === 0) {
     return 0;
@@ -55627,7 +55627,7 @@ function measureText(targetDocument, text2, fontInfo, tabSize) {
 }
 var __decorate14, __param12, VisibleTextAreaData, canUseZeroSizeTextarea, TextAreaEditContext;
 var init_textAreaEditContext2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContext.js"() {
     init_textAreaEditContext();
     init_nls();
     init_browser();
@@ -56339,13 +56339,13 @@ var init_textAreaEditContext2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContext.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContext.css
 var init_nativeEditContext = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContext.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContext.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContextUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContextUtils.js
 function editContextAddDisposableListener(target, type, listener, options2) {
   target.addEventListener(type, listener, options2);
   return {
@@ -56356,7 +56356,7 @@ function editContextAddDisposableListener(target, type, listener, options2) {
 }
 var __decorate15, __param13, FocusTracker2;
 var init_nativeEditContextUtils = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContextUtils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContextUtils.js"() {
     init_dom();
     init_lifecycle();
     init_log();
@@ -56427,10 +56427,10 @@ var init_nativeEditContextUtils = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderContentRich.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderContentRich.js
 var __decorate16, __param14, ttPolicy, LINE_NUMBER_ATTRIBUTE, RichScreenReaderContent, RichRenderedScreenReaderLine, LineInterval, RichScreenReaderState, RichPagedScreenReaderStrategy;
 var init_screenReaderContentRich = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderContentRich.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderContentRich.js"() {
     init_dom();
     init_trustedTypes();
     init_accessibility();
@@ -56778,10 +56778,10 @@ var init_screenReaderContentRich = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/edits/edit.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/edits/edit.js
 var BaseEdit, BaseReplacement;
 var init_edit = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/edits/edit.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/edits/edit.js"() {
     init_errors();
     init_offsetRange();
     BaseEdit = class {
@@ -56957,7 +56957,7 @@ var init_edit = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/edits/stringEdit.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/edits/stringEdit.js
 function applyEditsToRanges(sortedRanges, edit2) {
   sortedRanges = sortedRanges.slice();
   const result = [];
@@ -57008,7 +57008,7 @@ function applyEditsToRanges(sortedRanges, edit2) {
 }
 var BaseStringEdit, BaseStringReplacement, StringEdit, StringReplacement;
 var init_stringEdit = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/edits/stringEdit.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/edits/stringEdit.js"() {
     init_strings();
     init_offsetRange();
     init_edit();
@@ -57115,10 +57115,10 @@ var init_stringEdit = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/ranges/lineRange.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/ranges/lineRange.js
 var LineRange, LineRangeSet;
 var init_lineRange = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/ranges/lineRange.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/ranges/lineRange.js"() {
     init_errors();
     init_offsetRange();
     init_range();
@@ -57402,10 +57402,10 @@ var init_lineRange = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/text/textLength.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/text/textLength.js
 var TextLength;
 var init_textLength = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/text/textLength.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/text/textLength.js"() {
     init_lineRange();
     init_position();
     init_range();
@@ -57483,13 +57483,13 @@ var init_textLength = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/text/positionToOffsetImpl.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/text/positionToOffsetImpl.js
 function _setPositionOffsetTransformerDependencies(deps) {
   Deps._deps = deps;
 }
 var PositionOffsetTransformerBase, Deps, PositionOffsetTransformer;
 var init_positionToOffsetImpl = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/text/positionToOffsetImpl.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/text/positionToOffsetImpl.js"() {
     init_arraysFind();
     init_offsetRange();
     init_position();
@@ -57581,10 +57581,10 @@ var init_positionToOffsetImpl = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/text/abstractText.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/text/abstractText.js
 var AbstractText, LineBasedText, ArrayText, StringText;
 var init_abstractText = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/text/abstractText.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/text/abstractText.js"() {
     init_assert();
     init_position();
     init_range();
@@ -57670,7 +57670,7 @@ var init_abstractText = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/edits/textEdit.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/edits/textEdit.js
 function rangeFromPositions(start, end) {
   if (start.lineNumber === end.lineNumber && start.column === Number.MAX_SAFE_INTEGER) {
     return Range.fromPositions(end, end);
@@ -57681,7 +57681,7 @@ function rangeFromPositions(start, end) {
 }
 var TextEdit, TextReplacement;
 var init_textEdit = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/edits/textEdit.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/edits/textEdit.js"() {
     init_arrays();
     init_assert();
     init_errors();
@@ -57926,9 +57926,9 @@ var init_textEdit = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/text/positionToOffset.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/text/positionToOffset.js
 var init_positionToOffset = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/text/positionToOffset.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/text/positionToOffset.js"() {
     init_stringEdit();
     init_textEdit();
     init_positionToOffsetImpl();
@@ -57944,10 +57944,10 @@ var init_positionToOffset = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderContentSimple.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderContentSimple.js
 var __decorate17, __param15, SimpleScreenReaderContent;
 var init_screenReaderContentSimple = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderContentSimple.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderContentSimple.js"() {
     init_dom();
     init_accessibility();
     init_selection();
@@ -58137,10 +58137,10 @@ var init_screenReaderContentSimple = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderSupport.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderSupport.js
 var __decorate18, __param16, ScreenReaderSupport;
 var init_screenReaderSupport = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderSupport.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/screenReaderSupport.js"() {
     init_lifecycle();
     init_nls();
     init_accessibility();
@@ -58334,10 +58334,10 @@ var init_screenReaderSupport = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/editContextFactory.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/editContextFactory.js
 var EditContext;
 var init_editContextFactory = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/editContextFactory.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/editContextFactory.js"() {
     (function(EditContext2) {
       function create3(window2, options2) {
         return new window2.EditContext(options2);
@@ -58347,10 +58347,10 @@ var init_editContextFactory = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContextRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContextRegistry.js
 var NativeEditContextRegistryImpl, NativeEditContextRegistry;
 var init_nativeEditContextRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContextRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContextRegistry.js"() {
     NativeEditContextRegistryImpl = class {
       constructor() {
         this._nativeEditContextMapping = /* @__PURE__ */ new Map();
@@ -58371,10 +58371,10 @@ var init_nativeEditContextRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContext.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContext.js
 var __decorate19, __param17, CompositionClassName, NativeEditContext;
 var init_nativeEditContext2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContext.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContext.js"() {
     init_nativeEditContext();
     init_browser();
     init_dom();
@@ -58898,10 +58898,10 @@ var init_nativeEditContext2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/rulersGpu/rulersGpu.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/rulersGpu/rulersGpu.js
 var RulersGpu;
 var init_rulersGpu = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/rulersGpu/rulersGpu.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/rulersGpu/rulersGpu.js"() {
     init_viewPart();
     init_color();
     init_editorColorRegistry();
@@ -58962,16 +58962,16 @@ var init_rulersGpu = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/gpuMark/gpuMark.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/gpuMark/gpuMark.css
 var init_gpuMark = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/gpuMark/gpuMark.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/gpuMark/gpuMark.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/gpuMark/gpuMark.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/gpuMark/gpuMark.js
 var GpuMarkOverlay;
 var init_gpuMark2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/viewParts/gpuMark/gpuMark.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/viewParts/gpuMark/gpuMark.js"() {
     init_dynamicViewOverlay();
     init_viewLineOptions();
     init_gpuMark();
@@ -59047,7 +59047,7 @@ var init_gpuMark2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view.js
 function safeInvokeNoArg(func) {
   try {
     return func();
@@ -59058,7 +59058,7 @@ function safeInvokeNoArg(func) {
 }
 var __decorate20, __param18, View, EditorRenderingCoordinator, CodeEditorWidgetFocusTracker;
 var init_view = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view.js"() {
     init_dom();
     init_fastDomNode();
     init_performance();
@@ -59771,7 +59771,7 @@ var init_view = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/modelLineProjectionData.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/modelLineProjectionData.js
 function hasRightCursorStop(cursorStop) {
   if (cursorStop === null || cursorStop === void 0) {
     return true;
@@ -59786,7 +59786,7 @@ function hasLeftCursorStop(cursorStop) {
 }
 var ModelLineProjectionData, OutputPosition;
 var init_modelLineProjectionData = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/modelLineProjectionData.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/modelLineProjectionData.js"() {
     init_assert();
     init_position();
     init_model2();
@@ -60010,10 +60010,10 @@ var init_modelLineProjectionData = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/textModelEvents.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/textModelEvents.js
 var ModelRawFlush, LineInjectedText, ModelRawLineChanged, ModelLineHeightChanged, ModelFontChanged, ModelRawLinesDeleted, ModelRawLinesInserted, ModelRawEOLChanged, ModelRawContentChangedEvent, ModelInjectedTextChangedEvent, ModelLineHeightChangedEvent, ModelFontChangedEvent, InternalModelContentChangeEvent;
 var init_textModelEvents = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/textModelEvents.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/textModelEvents.js"() {
     ModelRawFlush = class {
       constructor() {
         this.changeType = 1;
@@ -60180,7 +60180,7 @@ var init_textModelEvents = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/domLineBreaksComputer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/domLineBreaksComputer.js
 function createLineBreaks(targetWindow, requests, fontInfo, tabSize, firstLineBreakColumn, wrappingIndent, wordBreak, injectedTextsPerLine) {
   function createEmptyLineBreakWithPossiblyInjectedText(requestIdx) {
     const injectedTexts = injectedTextsPerLine[requestIdx];
@@ -60436,7 +60436,7 @@ function readClientRect(range2, spans, startOffset, endOffset) {
 }
 var ttPolicy2, DOMLineBreaksComputerFactory;
 var init_domLineBreaksComputer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/view/domLineBreaksComputer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/view/domLineBreaksComputer.js"() {
     init_trustedTypes();
     init_strings();
     init_types();
@@ -60469,10 +60469,10 @@ var init_domLineBreaksComputer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/codeEditorContributions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/codeEditorContributions.js
 var CodeEditorContributions;
 var init_codeEditorContributions = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/codeEditorContributions.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/codeEditorContributions.js"() {
     init_dom();
     init_errors();
     init_lifecycle();
@@ -60610,10 +60610,10 @@ var init_codeEditorContributions = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/editorAction.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/editorAction.js
 var InternalEditorAction;
 var init_editorAction = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/editorAction.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/editorAction.js"() {
     InternalEditorAction = class {
       constructor(id, label, alias, metadata, _precondition, _run, _contextKeyService) {
         this.id = id;
@@ -60637,10 +60637,10 @@ var init_editorAction = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/editorCommon.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/editorCommon.js
 var EditorType;
 var init_editorCommon = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/editorCommon.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/editorCommon.js"() {
     EditorType = {
       ICodeEditor: "vs.editor.ICodeEditor",
       IDiffEditor: "vs.editor.IDiffEditor"
@@ -60648,7 +60648,7 @@ var init_editorCommon = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/misc/eolCounter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/misc/eolCounter.js
 function countEOL(text2) {
   let eolCount = 0;
   let firstLineLength = 0;
@@ -60683,14 +60683,14 @@ function countEOL(text2) {
   return [eolCount, firstLineLength, text2.length - lastLineStart, eol];
 }
 var init_eolCounter = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/misc/eolCounter.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/misc/eolCounter.js"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/textModelBracketPairs.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/textModelBracketPairs.js
 var BracketInfo, BracketPairInfo, BracketPairWithMinIndentationInfo;
 var init_textModelBracketPairs = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/textModelBracketPairs.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/textModelBracketPairs.js"() {
     BracketInfo = class {
       constructor(range2, nestingLevel, nestingLevelOfEqualBracketType, isInvalid) {
         this.range = range2;
@@ -60721,7 +60721,7 @@ var init_textModelBracketPairs = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/length.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/length.js
 function lengthDiff(startLineCount, startColumnCount, endLineCount, endColumnCount) {
   return startLineCount !== endLineCount ? toLength(endLineCount - startLineCount, endColumnCount) : toLength(0, endColumnCount - startColumnCount);
 }
@@ -60813,7 +60813,7 @@ function lengthOfString(str) {
 }
 var lengthZero, factor;
 var init_length = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/length.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/length.js"() {
     init_strings();
     init_position();
     init_range();
@@ -60823,10 +60823,10 @@ var init_length = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/beforeEditPositionMapper.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/beforeEditPositionMapper.js
 var TextEditInfo, BeforeEditPositionMapper, TextEditInfoCache;
 var init_beforeEditPositionMapper = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/beforeEditPositionMapper.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/beforeEditPositionMapper.js"() {
     init_range();
     init_length();
     TextEditInfo = class _TextEditInfo {
@@ -60925,10 +60925,10 @@ var init_beforeEditPositionMapper = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/smallImmutableSet.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/smallImmutableSet.js
 var emptyArr, SmallImmutableSet, identityKeyProvider, DenseKeyProvider;
 var init_smallImmutableSet = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/smallImmutableSet.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/smallImmutableSet.js"() {
     emptyArr = [];
     SmallImmutableSet = class _SmallImmutableSet {
       static {
@@ -61025,10 +61025,10 @@ var init_smallImmutableSet = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/ast.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/ast.js
 var BaseAstNode, PairAstNode, ListAstNode, TwoThreeListAstNode, Immutable23ListAstNode, ArrayListAstNode, ImmutableArrayListAstNode, emptyArray, ImmutableLeafAstNode, TextAstNode, BracketAstNode, InvalidBracketAstNode;
 var init_ast = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/ast.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/ast.js"() {
     init_errors();
     init_cursorColumns();
     init_length();
@@ -61479,10 +61479,10 @@ var init_ast = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/tokenizer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/tokenizer.js
 var Token2, TextBufferTokenizer, NonPeekableTextBufferTokenizer, FastTokenizer;
 var init_tokenizer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/tokenizer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/tokenizer.js"() {
     init_errors();
     init_encodedTokenAttributes();
     init_ast();
@@ -61730,7 +61730,7 @@ var init_tokenizer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/brackets.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/brackets.js
 function prepareBracketForRegExp2(str) {
   let escaped = escapeRegExpCharacters(str);
   if (/^[\w ]+/.test(str)) {
@@ -61743,7 +61743,7 @@ function prepareBracketForRegExp2(str) {
 }
 var BracketTokens, LanguageAgnosticBracketTokens;
 var init_brackets = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/brackets.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/brackets.js"() {
     init_strings();
     init_ast();
     init_length();
@@ -61834,7 +61834,7 @@ var init_brackets = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/concat23Trees.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/concat23Trees.js
 function concat23Trees(items) {
   if (items.length === 0) {
     return null;
@@ -61972,12 +61972,12 @@ function prepend2(list2, nodeToAppend) {
   }
 }
 var init_concat23Trees = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/concat23Trees.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/concat23Trees.js"() {
     init_ast();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/nodeReader.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/nodeReader.js
 function getNextChildIdx(node, curIdx = -1) {
   while (true) {
     curIdx++;
@@ -61994,7 +61994,7 @@ function lastOrUndefined(arr) {
 }
 var NodeReader;
 var init_nodeReader = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/nodeReader.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/nodeReader.js"() {
     init_length();
     NodeReader = class {
       constructor(node) {
@@ -62078,14 +62078,14 @@ var init_nodeReader = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/parser.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/parser.js
 function parseDocument(tokenizer, edits, oldNode, createImmutableLists) {
   const parser2 = new Parser2(tokenizer, edits, oldNode, createImmutableLists);
   return parser2.parseDocument();
 }
 var Parser2;
 var init_parser = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/parser.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/parser.js"() {
     init_ast();
     init_beforeEditPositionMapper();
     init_smallImmutableSet();
@@ -62182,7 +62182,7 @@ var init_parser = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/combineTextEditInfos.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/combineTextEditInfos.js
 function combineTextEditInfos(textEditInfoFirst, textEditInfoSecond) {
   if (textEditInfoFirst.length === 0) {
     return textEditInfoSecond;
@@ -62259,7 +62259,7 @@ function toLengthMapping(textEditInfos) {
 }
 var LengthMapping;
 var init_combineTextEditInfos = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/combineTextEditInfos.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/combineTextEditInfos.js"() {
     init_arrays();
     init_beforeEditPositionMapper();
     init_length();
@@ -62292,7 +62292,7 @@ var init_combineTextEditInfos = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/bracketPairsTree.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/bracketPairsTree.js
 function getFirstBracketBefore(node, nodeOffsetStart, nodeOffsetEnd, position) {
   if (node.kind === 4 || node.kind === 2) {
     const lengths = [];
@@ -62484,7 +62484,7 @@ function collectBracketPairs(node, nodeOffsetStart, nodeOffsetEnd, startOffset, 
 }
 var BracketPairsTree, CollectBracketPairsContext;
 var init_bracketPairsTree = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/bracketPairsTree.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/bracketPairsTree.js"() {
     init_event();
     init_lifecycle();
     init_textModelBracketPairs();
@@ -62614,7 +62614,7 @@ var init_bracketPairsTree = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsImpl.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsImpl.js
 function createDisposableRef(object, disposable) {
   return {
     object,
@@ -62639,7 +62639,7 @@ function stripBracketSearchCanceled(result) {
 }
 var BracketPairsTextModelPart, BracketSearchCanceled;
 var init_bracketPairsImpl = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsImpl.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsImpl.js"() {
     init_arrays();
     init_event();
     init_lifecycle();
@@ -63274,10 +63274,10 @@ var init_bracketPairsImpl = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/colorizedBracketPairsDecorationProvider.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/colorizedBracketPairsDecorationProvider.js
 var ColorizedBracketPairsDecorationProvider, ColorProvider;
 var init_colorizedBracketPairsDecorationProvider = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/colorizedBracketPairsDecorationProvider.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/colorizedBracketPairsDecorationProvider.js"() {
     init_event();
     init_lifecycle();
     init_range();
@@ -63365,7 +63365,7 @@ var init_colorizedBracketPairsDecorationProvider = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/textChange.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/textChange.js
 function escapeNewLine(str) {
   return str.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
 }
@@ -63378,7 +63378,7 @@ function compressConsecutiveTextChanges(prevEdits, currEdits) {
 }
 var TextChange, TextChangeCompressor;
 var init_textChange = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/textChange.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/textChange.js"() {
     init_buffer();
     init_stringBuilder();
     TextChange = class _TextChange {
@@ -63603,7 +63603,7 @@ var init_textChange = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/textModelEditSource.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/textModelEditSource.js
 function createEditSource(metadata) {
   return new TextModelEditSource(metadata, privateSymbol);
 }
@@ -63628,7 +63628,7 @@ function toEditIdentity(id) {
 }
 var privateSymbol, TextModelEditSource, EditSources, EditDeltaInfo, EditSuggestionId;
 var init_textModelEditSource = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/textModelEditSource.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/textModelEditSource.js"() {
     init_uuid();
     init_textLength();
     privateSymbol = Symbol("TextModelEditSource");
@@ -63766,7 +63766,7 @@ var init_textModelEditSource = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/editStack.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/editStack.js
 function uriGetComparisonKey(resource) {
   return resource.toString();
 }
@@ -63786,7 +63786,7 @@ function isEditStackElement(element) {
 }
 var SingleModelEditStackData, SingleModelEditStackElement, MultiModelEditStackElement, EditStack;
 var init_editStack = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/editStack.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/editStack.js"() {
     init_nls();
     init_errors();
     init_selection();
@@ -64117,7 +64117,7 @@ var init_editStack = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/indentationGuesser.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/indentationGuesser.js
 function spacesDiff(a, aLength, b, bLength, result) {
   result.spacesDiff = 0;
   result.looksLikeAlignment = false;
@@ -64247,7 +64247,7 @@ function guessIndentation(source, defaultTabSize, defaultInsertSpaces) {
 }
 var SpacesDiffResult;
 var init_indentationGuesser = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/indentationGuesser.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/indentationGuesser.js"() {
     SpacesDiffResult = class {
       constructor() {
         this.spacesDiff = 0;
@@ -64257,7 +64257,7 @@ var init_indentationGuesser = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/intervalTree.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/intervalTree.js
 function getNodeColor(node) {
   return (node.metadata & 1) >>> 0;
 }
@@ -65107,7 +65107,7 @@ function intervalCompare(aStart, aEnd, bStart, bEnd) {
 }
 var IntervalNode, SENTINEL, IntervalTree;
 var init_intervalTree = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/intervalTree.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/intervalTree.js"() {
     IntervalNode = class {
       constructor(id, start, end) {
         this.metadata = 0;
@@ -65262,7 +65262,7 @@ var init_intervalTree = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/rbTreeBase.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/rbTreeBase.js
 function leftest2(node) {
   while (node.left !== SENTINEL2) {
     node = node.left;
@@ -65535,7 +65535,7 @@ function recomputeTreeMetadata(tree, x) {
 }
 var TreeNode, SENTINEL2;
 var init_rbTreeBase = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/rbTreeBase.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/rbTreeBase.js"() {
     TreeNode = class {
       constructor(piece, color) {
         this.piece = piece;
@@ -65598,7 +65598,7 @@ var init_rbTreeBase = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/textModelSearch.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/textModelSearch.js
 function isMultilineRegexSource(searchString) {
   if (!searchString || searchString.length === 0) {
     return false;
@@ -65674,7 +65674,7 @@ function isValidMatch(wordSeparators2, text2, textLength, matchStartIndex, match
 }
 var LIMIT_FIND_COUNT, SearchParams, LineFeedCounter, TextModelSearch, Searcher;
 var init_textModelSearch = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/textModelSearch.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/textModelSearch.js"() {
     init_strings();
     init_wordCharacterClassifier();
     init_position();
@@ -66018,7 +66018,7 @@ var init_textModelSearch = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeBase.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeBase.js
 function createUintArray(arr) {
   let r;
   if (arr[arr.length - 1] < 65536) {
@@ -66085,7 +66085,7 @@ function createLineStarts(r, str) {
 }
 var AverageBufferSize, LineStarts, Piece, StringBuffer, PieceTreeSnapshot, PieceTreeSearchCache, PieceTreeBase;
 var init_pieceTreeBase = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeBase.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeBase.js"() {
     init_position();
     init_range();
     init_model2();
@@ -67397,10 +67397,10 @@ var init_pieceTreeBase = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBuffer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBuffer.js
 var PieceTreeTextBuffer;
 var init_pieceTreeTextBuffer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBuffer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBuffer.js"() {
     init_event();
     init_strings();
     init_range();
@@ -67827,10 +67827,10 @@ var init_pieceTreeTextBuffer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBufferBuilder.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBufferBuilder.js
 var PieceTreeTextBufferFactory, PieceTreeTextBufferBuilder;
 var init_pieceTreeTextBufferBuilder = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBufferBuilder.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBufferBuilder.js"() {
     init_strings();
     init_pieceTreeBase();
     init_pieceTreeTextBuffer();
@@ -67955,10 +67955,10 @@ var init_pieceTreeTextBufferBuilder = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/abstractSyntaxTokenBackend.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/abstractSyntaxTokenBackend.js
 var AttachedViews, AttachedViewState, AttachedViewImpl, AttachedViewHandler, AbstractSyntaxTokenBackend;
 var init_abstractSyntaxTokenBackend = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/abstractSyntaxTokenBackend.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/abstractSyntaxTokenBackend.js"() {
     init_arrays();
     init_async();
     init_event();
@@ -68076,7 +68076,7 @@ var init_abstractSyntaxTokenBackend = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/cursorUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/cursorUtils.js
 function gotoNextSibling(newCursor, oldCursor) {
   const n2 = newCursor.gotoNextSibling();
   const o = oldCursor.gotoNextSibling();
@@ -68146,11 +68146,11 @@ function getClosestPreviousNodes(cursor, tree) {
   }
 }
 var init_cursorUtils = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/cursorUtils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/cursorUtils.js"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterTree.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterTree.js
 function newTimeOutProgressCallback() {
   let lastYieldTime = performance.now();
   return function parseProgressCallback(_state) {
@@ -68170,7 +68170,7 @@ function rangesIntersect(a, b) {
 }
 var __decorate21, __param19, TreeSitterTree;
 var init_treeSitterTree = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterTree.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterTree.js"() {
     init_async();
     init_lifecycle();
     init_observable();
@@ -68501,7 +68501,7 @@ var init_treeSitterTree = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/nullTokenize.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/nullTokenize.js
 function nullTokenize(languageId, state) {
   return new TokenizationResult([new Token(0, "", languageId)], state);
 }
@@ -68513,7 +68513,7 @@ function nullTokenizeEncoded(languageId, state) {
 }
 var NullState;
 var init_nullTokenize = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/nullTokenize.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/nullTokenize.js"() {
     init_languages();
     NullState = new class {
       clone() {
@@ -68526,7 +68526,7 @@ var init_nullTokenize = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/fixedArray.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/fixedArray.js
 function arrayFill(length, value) {
   const arr = [];
   for (let i2 = 0; i2 < length; i2++) {
@@ -68536,7 +68536,7 @@ function arrayFill(length, value) {
 }
 var FixedArray;
 var init_fixedArray = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/fixedArray.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/fixedArray.js"() {
     init_arrays();
     FixedArray = class {
       constructor(_default) {
@@ -68591,10 +68591,10 @@ var init_fixedArray = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/contiguousMultilineTokens.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/contiguousMultilineTokens.js
 var ContiguousMultilineTokens;
 var init_contiguousMultilineTokens = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/contiguousMultilineTokens.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/contiguousMultilineTokens.js"() {
     ContiguousMultilineTokens = class {
       /**
        * (Inclusive) start line number for these tokens.
@@ -68625,10 +68625,10 @@ var init_contiguousMultilineTokens = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/contiguousMultilineTokensBuilder.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/contiguousMultilineTokensBuilder.js
 var ContiguousMultilineTokensBuilder;
 var init_contiguousMultilineTokensBuilder = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/contiguousMultilineTokensBuilder.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/contiguousMultilineTokensBuilder.js"() {
     init_contiguousMultilineTokens();
     ContiguousMultilineTokensBuilder = class {
       constructor() {
@@ -68651,7 +68651,7 @@ var init_contiguousMultilineTokensBuilder = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/textModelTokens.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/textModelTokens.js
 function findLikelyRelevantLines(model, lineNumber, store) {
   let nonWhitespaceColumn = model.getLineFirstNonWhitespaceColumn(lineNumber);
   const likelyRelevantLines = [];
@@ -68690,7 +68690,7 @@ function safeTokenize(languageIdCodec, languageId, tokenizationSupport, text2, h
 }
 var TokenizerWithStateStore, TokenizerWithStateStoreAndTextModel, TrackingTokenizationStateStore, TokenizationStateStore, RangePriorityQueueImpl, DefaultBackgroundTokenizer;
 var init_textModelTokens = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/textModelTokens.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/textModelTokens.js"() {
     init_async();
     init_errors();
     init_platform();
@@ -69059,7 +69059,7 @@ var init_textModelTokens = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/tokenStore.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/tokenStore.js
 function isLeaf(node) {
   return node.token !== void 0;
 }
@@ -69138,7 +69138,7 @@ function concat2(node1, node2) {
 }
 var ListNode, TokenQuality, TokenStore;
 var init_tokenStore = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/tokenStore.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/tokenStore.js"() {
     ListNode = class _ListNode {
       get children() {
         return this._children;
@@ -69438,19 +69438,19 @@ var init_tokenStore = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/treeSitter/treeSitterThemeService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/treeSitter/treeSitterThemeService.js
 var ITreeSitterThemeService;
 var init_treeSitterThemeService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/treeSitter/treeSitterThemeService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/treeSitter/treeSitterThemeService.js"() {
     init_instantiation();
     ITreeSitterThemeService = createDecorator("treeSitterThemeService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterTokenizationImpl.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterTokenizationImpl.js
 var __decorate22, __param20, TreeSitterTokenizationImpl, TREESITTER_BASE_SCOPES, BRACKETS;
 var init_treeSitterTokenizationImpl = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterTokenizationImpl.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterTokenizationImpl.js"() {
     init_event();
     init_lifecycle();
     init_platform();
@@ -70102,19 +70102,19 @@ var init_treeSitterTokenizationImpl = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/treeSitter/treeSitterLibraryService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/treeSitter/treeSitterLibraryService.js
 var ITreeSitterLibraryService;
 var init_treeSitterLibraryService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/treeSitter/treeSitterLibraryService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/treeSitter/treeSitterLibraryService.js"() {
     init_instantiation();
     ITreeSitterLibraryService = createDecorator("treeSitterLibraryService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterSyntaxTokenBackend.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterSyntaxTokenBackend.js
 var __decorate23, __param21, TreeSitterSyntaxTokenBackend;
 var init_treeSitterSyntaxTokenBackend = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterSyntaxTokenBackend.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/treeSitter/treeSitterSyntaxTokenBackend.js"() {
     init_event();
     init_lifecycle();
     init_lineTokens();
@@ -70280,10 +70280,10 @@ var init_treeSitterSyntaxTokenBackend = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/sparseTokensStore.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/sparseTokensStore.js
 var SparseTokensStore;
 var init_sparseTokensStore = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/sparseTokensStore.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/sparseTokensStore.js"() {
     init_arrays();
     init_lineTokens();
     SparseTokensStore = class _SparseTokensStore {
@@ -70456,7 +70456,7 @@ var init_sparseTokensStore = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/contiguousTokensEditing.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/contiguousTokensEditing.js
 function toUint32Array(arr) {
   if (arr instanceof Uint32Array) {
     return arr;
@@ -70466,7 +70466,7 @@ function toUint32Array(arr) {
 }
 var EMPTY_LINE_TOKENS, ContiguousTokensEditing;
 var init_contiguousTokensEditing = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/contiguousTokensEditing.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/contiguousTokensEditing.js"() {
     init_lineTokens();
     EMPTY_LINE_TOKENS = new Uint32Array(0).buffer;
     ContiguousTokensEditing = class _ContiguousTokensEditing {
@@ -70577,13 +70577,13 @@ var init_contiguousTokensEditing = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/contiguousTokensStore.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/contiguousTokensStore.js
 function getDefaultMetadata(topLevelLanguageId) {
   return (topLevelLanguageId << 0 | 0 << 8 | 0 << 11 | 1 << 15 | 2 << 24 | 1024) >>> 0;
 }
 var ContiguousTokensStore;
 var init_contiguousTokensStore = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/contiguousTokensStore.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/contiguousTokensStore.js"() {
     init_arrays();
     init_position();
     init_contiguousTokensEditing();
@@ -70767,10 +70767,10 @@ var init_contiguousTokensStore = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/tokenizerSyntaxTokenBackend.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/tokenizerSyntaxTokenBackend.js
 var TokenizerSyntaxTokenBackend;
 var init_tokenizerSyntaxTokenBackend = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/tokenizerSyntaxTokenBackend.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/tokenizerSyntaxTokenBackend.js"() {
     init_errors();
     init_event();
     init_lifecycle();
@@ -71014,10 +71014,10 @@ var init_tokenizerSyntaxTokenBackend = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/tokenizationTextModelPart.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/tokenizationTextModelPart.js
 var __decorate24, __param22, TokenizationTextModelPart_1, TokenizationTextModelPart;
 var init_tokenizationTextModelPart = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/tokens/tokenizationTextModelPart.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/tokens/tokenizationTextModelPart.js"() {
     init_errors();
     init_event();
     init_eolCounter();
@@ -71279,10 +71279,10 @@ var init_tokenizationTextModelPart = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/undoRedo/common/undoRedo.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/undoRedo/common/undoRedo.js
 var IUndoRedoService, ResourceEditStackSnapshot, UndoRedoGroup, UndoRedoSource;
 var init_undoRedo = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/undoRedo/common/undoRedo.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/undoRedo/common/undoRedo.js"() {
     init_instantiation();
     IUndoRedoService = createDecorator("undoRedoService");
     ResourceEditStackSnapshot = class {
@@ -71330,7 +71330,7 @@ var init_undoRedo = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/collections.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/collections.js
 function groupByMap(data, groupFn) {
   const result = /* @__PURE__ */ new Map();
   for (const element of data) {
@@ -71370,7 +71370,7 @@ function intersection(setA, setB) {
 }
 var _a2, SetWithKey;
 var init_collections = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/collections.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/collections.js"() {
     SetWithKey = class {
       static {
         _a2 = Symbol.toStringTag;
@@ -71423,7 +71423,7 @@ var init_collections = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/textModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/textModel.js
 function createTextBufferFactory(text2) {
   const builder = new PieceTreeTextBufferBuilder();
   builder.acceptChunk(text2);
@@ -71479,7 +71479,7 @@ function _normalizeOptions(options2) {
 }
 var __decorate25, __param23, TextModel_1, MODEL_ID, LIMIT_FIND_COUNT2, LONG_LINE_BOUNDARY, LINE_HEIGHT_CEILING, TextModelSnapshot, invalidFunc2, TextModel, DecorationsTrees, DecorationOptions, ModelDecorationOverviewRulerOptions, ModelDecorationGlyphMarginOptions, ModelDecorationMinimapOptions, ModelDecorationInjectedTextOptions, ModelDecorationOptions, TRACKED_RANGE_OPTIONS, LineHeightChangingDecoration, LineFontChangingDecoration, DidChangeDecorationsEmitter, DidChangeContentEmitter;
 var init_textModel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/textModel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/textModel.js"() {
     init_arrays();
     init_color();
     init_errors();
@@ -73443,16 +73443,16 @@ var init_textModel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languageFeatures.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languageFeatures.js
 var ILanguageFeaturesService;
 var init_languageFeatures = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languageFeatures.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languageFeatures.js"() {
     init_instantiation();
     ILanguageFeaturesService = createDecorator("ILanguageFeaturesService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/monospaceLineBreaksComputer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/monospaceLineBreaksComputer.js
 function createLineBreaksFromPreviousLineBreaks(classifier, previousBreakingData, lineText, tabSize, firstLineBreakColumn, columnsForFullWidthChar, wrappingIndent, wordBreak) {
   if (firstLineBreakColumn === -1) {
     return null;
@@ -73791,7 +73791,7 @@ function computeWrappedTextIndentLength(lineText, tabSize, firstLineBreakColumn,
 }
 var MonospaceLineBreaksComputerFactory, WrappingCharacterClassifier, arrPool1, arrPool2;
 var init_monospaceLineBreaksComputer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/monospaceLineBreaksComputer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/monospaceLineBreaksComputer.js"() {
     init_strings();
     init_characterClassifier();
     init_textModelEvents();
@@ -73877,10 +73877,10 @@ var init_monospaceLineBreaksComputer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/oneCursor.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/oneCursor.js
 var Cursor;
 var init_oneCursor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/oneCursor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/oneCursor.js"() {
     init_cursorCommon();
     init_position();
     init_range();
@@ -74000,10 +74000,10 @@ var init_oneCursor = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorCollection.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorCollection.js
 var CursorCollection;
 var init_cursorCollection = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorCollection.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorCollection.js"() {
     init_arrays();
     init_arraysFind();
     init_cursorCommon();
@@ -74186,10 +74186,10 @@ var init_cursorCollection = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorContext.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorContext.js
 var CursorContext;
 var init_cursorContext = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursorContext.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursorContext.js"() {
     CursorContext = class {
       constructor(model, viewModel, coordinatesConverter, cursorConfig) {
         this._cursorContextBrand = void 0;
@@ -74202,10 +74202,10 @@ var init_cursorContext = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewEvents.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewEvents.js
 var ViewCompositionStartEvent, ViewCompositionEndEvent, ViewConfigurationChangedEvent, ViewCursorStateChangedEvent, ViewDecorationsChangedEvent, ViewFlushedEvent, ViewFocusChangedEvent, ViewLanguageConfigurationEvent, ViewLineMappingChangedEvent, ViewLinesChangedEvent, ViewLinesDeletedEvent, ViewLinesInsertedEvent, ViewRevealRangeRequestEvent, ViewScrollChangedEvent, ViewThemeChangedEvent, ViewTokensChangedEvent, ViewTokensColorsChangedEvent, ViewZonesChangedEvent;
 var init_viewEvents = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewEvents.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewEvents.js"() {
     ViewCompositionStartEvent = class {
       constructor() {
         this.type = 0;
@@ -74341,10 +74341,10 @@ var init_viewEvents = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModelEventDispatcher.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModelEventDispatcher.js
 var ViewModelEventDispatcher, ViewModelEventsCollector, ContentSizeChangedEvent, FocusChangedEvent, WidgetFocusChangedEvent, ScrollChangedEvent, ViewZonesChangedEvent2, HiddenAreasChangedEvent, CursorStateChangedEvent, ReadOnlyEditAttemptEvent, ModelDecorationsChangedEvent, ModelLanguageChangedEvent, ModelLanguageConfigurationChangedEvent, ModelContentChangedEvent, ModelOptionsChangedEvent, ModelTokensChangedEvent, ModelLineHeightChangedEvent2, ModelFontChangedEvent2;
 var init_viewModelEventDispatcher = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModelEventDispatcher.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModelEventDispatcher.js"() {
     init_event();
     init_lifecycle();
     ViewModelEventDispatcher = class extends Disposable {
@@ -74731,10 +74731,10 @@ var init_viewModelEventDispatcher = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursor.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursor.js
 var CursorsController, CursorModelState, AutoClosedAction, CommandExecutor, CompositionLineState, CompositionState;
 var init_cursor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/cursor/cursor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/cursor/cursor.js"() {
     init_errors();
     init_strings();
     init_cursorCollection();
@@ -75613,7 +75613,7 @@ var init_cursor = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/textToHtmlTokenizer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/textToHtmlTokenizer.js
 async function tokenizeToString(languageService, text2, languageId) {
   if (!languageId) {
     return _tokenizeToString(text2, languageService.languageIdCodec, fallback);
@@ -75737,7 +75737,7 @@ function _tokenizeToString(text2, languageIdCodec, tokenizationSupport) {
 }
 var fallback;
 var init_textToHtmlTokenizer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/textToHtmlTokenizer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/textToHtmlTokenizer.js"() {
     init_strings();
     init_lineTokens();
     init_languages();
@@ -75749,10 +75749,10 @@ var init_textToHtmlTokenizer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/lineHeights.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/lineHeights.js
 var CustomLine, LineHeightsManager, ArrayMap2;
 var init_lineHeights = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/lineHeights.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/lineHeights.js"() {
     init_arrays();
     init_collections();
     CustomLine = class {
@@ -76069,10 +76069,10 @@ var init_lineHeights = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/linesLayout.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/linesLayout.js
 var PendingChanges, EditorWhitespace, LinesLayout;
 var init_linesLayout = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/linesLayout.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/linesLayout.js"() {
     init_strings();
     init_lineHeights();
     PendingChanges = class {
@@ -76784,10 +76784,10 @@ var init_linesLayout = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/viewLayout.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/viewLayout.js
 var SMOOTH_SCROLLING_TIME, EditorScrollDimensions, EditorScrollable, ViewLayout;
 var init_viewLayout = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewLayout/viewLayout.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewLayout/viewLayout.js"() {
     init_event();
     init_lifecycle();
     init_scrollable();
@@ -77202,10 +77202,10 @@ var init_viewLayout = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/inlineDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/inlineDecorations.js
 var InlineDecoration, SingleLineInlineDecoration;
 var init_inlineDecorations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/inlineDecorations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/inlineDecorations.js"() {
     init_range();
     InlineDecoration = class {
       constructor(range2, inlineClassName, type) {
@@ -77233,10 +77233,10 @@ var init_inlineDecorations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/viewModelDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/viewModelDecorations.js
 var ViewModelDecorations;
 var init_viewModelDecorations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/viewModelDecorations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/viewModelDecorations.js"() {
     init_position();
     init_range();
     init_editorOptions();
@@ -77385,7 +77385,7 @@ var init_viewModelDecorations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/modelLineProjection.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/modelLineProjection.js
 function createModelLineProjection(lineBreakData, isVisible) {
   if (lineBreakData === null) {
     if (isVisible) {
@@ -77409,7 +77409,7 @@ function _makeSpaces(count) {
 }
 var ModelLineProjection, IdentityModelLineProjection, HiddenModelLineProjection, _spaces;
 var init_modelLineProjection = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/modelLineProjection.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/modelLineProjection.js"() {
     init_lineTokens();
     init_position();
     init_textModelEvents();
@@ -77721,10 +77721,10 @@ var init_modelLineProjection = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/prefixSumComputer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/prefixSumComputer.js
 var PrefixSumComputer, ConstantTimePrefixSumComputer, PrefixSumIndexOfResult;
 var init_prefixSumComputer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/prefixSumComputer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/prefixSumComputer.js"() {
     init_arrays();
     init_uint();
     PrefixSumComputer = class {
@@ -77936,10 +77936,10 @@ var init_prefixSumComputer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/coordinatesConverter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/coordinatesConverter.js
 var IdentityCoordinatesConverter;
 var init_coordinatesConverter = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/coordinatesConverter.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/coordinatesConverter.js"() {
     IdentityCoordinatesConverter = class {
       constructor(model) {
         this._model = model;
@@ -77987,7 +77987,7 @@ var init_coordinatesConverter = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/viewModelLines.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/viewModelLines.js
 function normalizeLineRanges(ranges) {
   if (ranges.length === 0) {
     return [];
@@ -78012,7 +78012,7 @@ function normalizeLineRanges(ranges) {
 }
 var ViewModelLinesFromProjectedModel, ViewLineInfo, ViewLineInfoGroupedByModelRange, CoordinatesConverter, ViewModelLinesFromModelAsIs;
 var init_viewModelLines = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/viewModelLines.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/viewModelLines.js"() {
     init_arrays();
     init_position();
     init_range();
@@ -78866,10 +78866,10 @@ var init_viewModelLines = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/glyphLanesModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/glyphLanesModel.js
 var MAX_LANE, GlyphMarginLanesModel;
 var init_glyphLanesModel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/glyphLanesModel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/glyphLanesModel.js"() {
     init_model2();
     MAX_LANE = GlyphMarginLane.Right;
     GlyphMarginLanesModel = class {
@@ -78926,7 +78926,7 @@ var init_glyphLanesModel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/viewModelImpl.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/viewModelImpl.js
 function mergeLineRangeArray(arr1, arr2) {
   const result = [];
   let i2 = 0;
@@ -78967,7 +78967,7 @@ function rangeArraysEqual(arr1, arr2) {
 }
 var USE_IDENTITY_LINES_COLLECTION, ViewModel, ViewportStart, OverviewRulerDecorations, HiddenAreasModel, StableViewport;
 var init_viewModelImpl = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/viewModel/viewModelImpl.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/viewModel/viewModelImpl.js"() {
     init_arrays();
     init_async();
     init_color();
@@ -80175,10 +80175,10 @@ var init_viewModelImpl = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/serviceCollection.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/serviceCollection.js
 var ServiceCollection;
 var init_serviceCollection = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/serviceCollection.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/serviceCollection.js"() {
     ServiceCollection = class {
       constructor(...entries2) {
         this._entries = /* @__PURE__ */ new Map();
@@ -80198,7 +80198,7 @@ var init_serviceCollection = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/codeEditorWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/codeEditorWidget.js
 function getSquigglySVGData(color) {
   return squigglyStart + encodeURIComponent(color.toString()) + squigglyEnd;
 }
@@ -80207,7 +80207,7 @@ function getDotDotDotSVGData(color) {
 }
 var __decorate26, __param24, CodeEditorWidget_1, CodeEditorWidget, EDITOR_ID, ModelData, BooleanEventEmitter, InteractionEmitter, EditorContextKeysManager, EditorModeContext, EditorDecorationsCollection, squigglyStart, squigglyEnd, dotdotdotStart, dotdotdotEnd;
 var init_codeEditorWidget = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/codeEditorWidget.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/codeEditorWidget.js"() {
     init_markerDecorations2();
     init_dom();
     init_errors();
@@ -82065,7 +82065,7 @@ var init_codeEditorWidget = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/hotReload.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/hotReload.js
 function isHotReloadEnabled() {
   return false;
 }
@@ -82116,7 +82116,7 @@ function registerGlobalHotReloadHandler() {
 }
 var hotReloadHandlers;
 var init_hotReload = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/hotReload.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/hotReload.js"() {
     hotReloadHandlers = void 0;
     if (isHotReloadEnabled()) {
       registerHotReloadHandler(({ oldExports, newSrc, config }) => {
@@ -82149,7 +82149,7 @@ var init_hotReload = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/hotReloadHelpers.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/hotReloadHelpers.js
 function readHotReloadableExport(value, reader) {
   observeHotReloadableExports([value], reader);
   return value;
@@ -82186,17 +82186,17 @@ function createHotClass(clazz) {
 }
 var classes;
 var init_hotReloadHelpers = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/hotReloadHelpers.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/hotReloadHelpers.js"() {
     init_hotReload();
     init_observable();
     classes = /* @__PURE__ */ new Map();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/accessibilitySignal/browser/accessibilitySignalService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/accessibilitySignal/browser/accessibilitySignalService.js
 var IAccessibilitySignalService, AcknowledgeDocCommentsToken, Sound, SoundSource, AccessibilitySignal;
 var init_accessibilitySignalService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/accessibilitySignal/browser/accessibilitySignalService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/accessibilitySignal/browser/accessibilitySignalService.js"() {
     init_nls();
     init_instantiation();
     IAccessibilitySignalService = createDecorator("accessibilitySignalService");
@@ -82660,7 +82660,7 @@ var init_accessibilitySignalService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/observable/common/platformObservableUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/observable/common/platformObservableUtils.js
 function observableConfigValue(key, defaultValue, configurationService, debugLocation = DebugLocation.ofCaller()) {
   return observableFromEventOpts({ debugName: () => `Configuration Key "${key}"` }, (handleChange) => configurationService.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration(key)) {
@@ -82679,16 +82679,16 @@ function bindContextKey(key, service, computeValue, debugLocation = DebugLocatio
   return store;
 }
 var init_platformObservableUtils = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/observable/common/platformObservableUtils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/observable/common/platformObservableUtils.js"() {
     init_lifecycle();
     init_observable();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/progress/common/progress.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/progress/common/progress.js
 var IProgressService, emptyProgressRunner, Progress, IEditorProgressService;
 var init_progress = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/progress/common/progress.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/progress/common/progress.js"() {
     init_instantiation();
     IProgressService = createDecorator("progressService");
     emptyProgressRunner = Object.freeze({
@@ -82716,10 +82716,10 @@ var init_progress = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/stableEditorScroll.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/stableEditorScroll.js
 var StableEditorScrollState;
 var init_stableEditorScroll = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/stableEditorScroll.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/stableEditorScroll.js"() {
     StableEditorScrollState = class _StableEditorScrollState {
       static capture(editor2) {
         if (editor2.getScrollTop() === 0 || editor2.hasPendingScrollAnimation()) {
@@ -82770,10 +82770,10 @@ var init_stableEditorScroll = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/dnd.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/dnd.js
 var DataTransfers;
 var init_dnd = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/dnd.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/dnd.js"() {
     init_mime();
     DataTransfers = {
       /**
@@ -82802,7 +82802,7 @@ var init_dnd = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/hover/hoverDelegateFactory.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/hover/hoverDelegateFactory.js
 function setHoverDelegateFactory(hoverDelegateProvider) {
   hoverDelegateFactory = hoverDelegateProvider;
 }
@@ -82817,7 +82817,7 @@ function createInstantHoverDelegate() {
 }
 var nullHoverDelegateFactory, hoverDelegateFactory, defaultHoverDelegateMouse, defaultHoverDelegateElement;
 var init_hoverDelegateFactory = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/hover/hoverDelegateFactory.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/hover/hoverDelegateFactory.js"() {
     init_lazy();
     nullHoverDelegateFactory = () => ({
       get delay() {
@@ -82835,13 +82835,13 @@ var init_hoverDelegateFactory = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBox.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBox.css
 var init_selectBox = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBox.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBox.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/cssValue.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/cssValue.js
 function asFragment(raw) {
   return raw;
 }
@@ -82890,7 +82890,7 @@ function inline(strings, ...values) {
 }
 var Builder;
 var init_cssValue = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/cssValue.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/cssValue.js"() {
     init_network();
     Builder = class {
       constructor() {
@@ -82906,7 +82906,7 @@ var init_cssValue = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/naturalLanguage/korean.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/naturalLanguage/korean.js
 function getKoreanAltChars(code) {
   const result = disassembleKorean(code);
   if (result && result.length > 0) {
@@ -83015,7 +83015,7 @@ function addCodesToBuffer(codes) {
 }
 var codeBufferLength, codeBuffer, modernConsonants, modernVowels, modernFinalConsonants, compatibilityJamo;
 var init_korean = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/naturalLanguage/korean.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/naturalLanguage/korean.js"() {
     codeBufferLength = 0;
     codeBuffer = new Uint32Array(10);
     modernConsonants = new Uint8Array([
@@ -83307,7 +83307,7 @@ var init_korean = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/filters.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/filters.js
 function or(...filter) {
   return function(word, wordToMatchAgainst) {
     for (let i2 = 0, len = filter.length; i2 < len; i2++) {
@@ -83914,7 +83914,7 @@ function nextTypoPermutation(pattern, patternPos) {
 }
 var matchesStrictPrefix, matchesPrefix, wordSeparators, alternateCharsCache, fuzzyContiguousFilter, fuzzySeparateFilter, fuzzyRegExpCache, _maxLen, _minWordMatchPos, _maxWordMatchPos, _diag, _table, _arrows, _debug, FuzzyScore, FuzzyScoreOptions;
 var init_filters = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/filters.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/filters.js"() {
     init_map();
     init_korean();
     init_strings();
@@ -83952,7 +83952,7 @@ var init_filters = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/iconLabels.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/iconLabels.js
 function escapeIcons(text2) {
   return text2.replace(escapeIconsRegex, (match2, escaped) => escaped ? match2 : `\\${match2}`);
 }
@@ -84012,7 +84012,7 @@ function matchesFuzzyIconAware(query, target, enableSeparateSubstringMatching = 
 }
 var iconStartMarker, iconsRegex, escapeIconsRegex, markdownEscapedIconsRegex, stripIconsRegex, _parseIconsRegex;
 var init_iconLabels = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/iconLabels.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/iconLabels.js"() {
     init_filters();
     init_strings();
     init_themables();
@@ -84025,7 +84025,7 @@ var init_iconLabels = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/htmlContent.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/htmlContent.js
 function isEmptyMarkdownString(oneOrMany) {
   if (isMarkdownString(oneOrMany)) {
     return !oneOrMany.value;
@@ -84103,7 +84103,7 @@ function createCommandUri(commandId, ...commandArgs) {
 }
 var MarkdownString;
 var init_htmlContent = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/htmlContent.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/htmlContent.js"() {
     init_errors();
     init_iconLabels();
     init_network();
@@ -84167,10 +84167,10 @@ ${appendEscapedMarkdownCodeBlockFence(code, langId)}
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/idGenerator.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/idGenerator.js
 var IdGenerator, defaultGenerator;
 var init_idGenerator = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/idGenerator.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/idGenerator.js"() {
     IdGenerator = class {
       constructor(prefix) {
         this._prefix = prefix;
@@ -84184,7 +84184,7 @@ var init_idGenerator = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/marked/marked.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/marked/marked.js
 function _getDefaults() {
   return {
     async: false,
@@ -84355,7 +84355,7 @@ function marked(src, opt) {
 }
 var _defaults, escapeTest, escapeReplace, escapeTestNoEncode, escapeReplaceNoEncode, escapeReplacements, getEscapeReplacement, caret, noopTest, _Tokenizer, newline, blockCode, fences, hr, heading, bullet, lheading, _paragraph, blockText, _blockLabel, def, list, _tag, _comment, html, paragraph, blockquote, blockNormal, gfmTable, blockGfm, blockPedantic, escape2, inlineCode, br, inlineText, _punctuation, punctuation, blockSkip, emStrongLDelim, emStrongRDelimAst, emStrongRDelimUnd, anyPunctuation, autolink, _inlineComment, tag, _inlineLabel, link, reflink, nolink, reflinkSearch, inlineNormal, inlinePedantic, inlineGfm, inlineBreaks, block, inline2, _Lexer, _Renderer, _TextRenderer, _Parser, _Hooks, Marked, markedInstance, options, setOptions, use, walkTokens, parseInline, parse, parser, lexer;
 var init_marked = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/marked/marked.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/marked/marked.js"() {
     _defaults = _getDefaults();
     escapeTest = /[&<>"']/;
     escapeReplace = new RegExp(escapeTest.source, "g");
@@ -86240,7 +86240,7 @@ ${text2}</tr>
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/marshalling.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/marshalling.js
 function stringify(obj) {
   return JSON.stringify(obj, replacer);
 }
@@ -86293,13 +86293,13 @@ function revive(obj, depth = 0) {
   return obj;
 }
 var init_marshalling = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/marshalling.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/marshalling.js"() {
     init_buffer();
     init_uri();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/dompurify/dompurify.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/dompurify/dompurify.js
 function unapply(func) {
   return function(thisArg) {
     if (thisArg instanceof RegExp) {
@@ -87136,7 +87136,7 @@ function createDOMPurify() {
 }
 var entries, setPrototypeOf, isFrozen, getPrototypeOf, getOwnPropertyDescriptor, freeze, seal, create, apply, construct, arrayForEach, arrayLastIndexOf, arrayPop, arrayPush, arraySplice, stringToLowerCase, stringToString, stringMatch, stringReplace, stringIndexOf, stringTrim, objectHasOwnProperty, regExpTest, typeErrorCreate, html$1, svg$1, svgFilters, svgDisallowed, mathMl$1, mathMlDisallowed, text, html2, svg, mathMl, xml, MUSTACHE_EXPR, ERB_EXPR, TMPLIT_EXPR, DATA_ATTR, ARIA_ATTR, IS_ALLOWED_URI, IS_SCRIPT_OR_DATA, ATTR_WHITESPACE, DOCTYPE_NAME, CUSTOM_ELEMENT, EXPRESSIONS, NODE_TYPE, getGlobal, _createTrustedTypesPolicy, _createHooksMap, purify;
 var init_dompurify = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/dompurify/dompurify.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/dompurify/dompurify.js"() {
     ({
       entries,
       setPrototypeOf,
@@ -87294,7 +87294,7 @@ var init_dompurify = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/domSanitize.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/domSanitize.js
 function validateLink(value, allowedProtocols) {
   if (allowedProtocols.override === "*") {
     return true;
@@ -87450,7 +87450,7 @@ function safeSetInnerHtml(node, untrusted, config) {
 }
 var basicMarkupHtmlTags, defaultAllowedAttrs, fakeRelativeUrlProtocol, defaultDomPurifyConfig, selfClosingTags, replaceWithPlainTextHook;
 var init_domSanitize = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/domSanitize.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/domSanitize.js"() {
     init_network();
     init_dom();
     init_dompurify();
@@ -87566,7 +87566,7 @@ var init_domSanitize = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconLabels.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconLabels.js
 function renderLabelWithIcons(text2) {
   const elements = new Array();
   let match2;
@@ -87592,14 +87592,14 @@ function renderIcon(icon) {
 }
 var labelWithIconsRegex;
 var init_iconLabels2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconLabels.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconLabels.js"() {
     init_dom();
     init_themables();
     labelWithIconsRegex = new RegExp(`(\\\\)?\\$\\((${ThemeIcon.iconNameExpression}(?:${ThemeIcon.iconModifierExpression})?)\\)`, "g");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/markdownRenderer.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/markdownRenderer.js
 function createAlertBlockquoteRenderer(fallbackRenderer) {
   return function(token) {
     const { tokens } = token;
@@ -88245,7 +88245,7 @@ function completeTable(tokens) {
 }
 var defaultMarkedRenderers, allowedMarkdownHtmlTags, allowedMarkdownHtmlAttributes, unescapeInfo, plainTextRenderer, plainTextWithCodeBlocksRenderer, maxIncompleteTokensFixRounds;
 var init_markdownRenderer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/markdownRenderer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/markdownRenderer.js"() {
     init_errors();
     init_htmlContent();
     init_iconLabels();
@@ -88383,7 +88383,7 @@ ${escape(text2)}
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/hover/hoverDelegate2.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/hover/hoverDelegate2.js
 function setBaseLayerHoverDelegate(hoverDelegate) {
   baseHoverDelegate = hoverDelegate;
 }
@@ -88392,7 +88392,7 @@ function getBaseLayerHoverDelegate() {
 }
 var baseHoverDelegate;
 var init_hoverDelegate2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/hover/hoverDelegate2.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/hover/hoverDelegate2.js"() {
     init_lifecycle();
     baseHoverDelegate = {
       showInstantHover: () => void 0,
@@ -88412,10 +88412,10 @@ var init_hoverDelegate2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/splice.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/splice.js
 var CombinedSpliceable;
 var init_splice = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/splice.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/splice.js"() {
     CombinedSpliceable = class {
       constructor(spliceables) {
         this.spliceables = spliceables;
@@ -88427,13 +88427,13 @@ var init_splice = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/numbers.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/numbers.js
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 var MovingAverage, SlidingWindowAverage;
 var init_numbers = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/numbers.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/numbers.js"() {
     MovingAverage = class {
       constructor() {
         this._n = 1;
@@ -88477,16 +88477,16 @@ var init_numbers = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/list.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/list.css
 var init_list = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/list.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/list.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/list.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/list.js
 var ListError;
 var init_list2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/list.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/list.js"() {
     ListError = class extends Error {
       constructor(user, message) {
         super(`ListError [${user}] ${message}`);
@@ -88495,10 +88495,10 @@ var init_list2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/range.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/range.js
 var Range2;
 var init_range2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/range.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/range.js"() {
     (function(Range5) {
       function intersect(one, other) {
         if (one.start >= other.end || other.start >= one.end) {
@@ -88537,7 +88537,7 @@ var init_range2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/rangeMap.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/rangeMap.js
 function groupIntersect(range2, groups) {
   const result = [];
   for (const r of groups) {
@@ -88582,7 +88582,7 @@ function concat3(...groups) {
 }
 var RangeMap;
 var init_rangeMap = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/rangeMap.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/rangeMap.js"() {
     init_range2();
     RangeMap = class {
       get paddingTop() {
@@ -88680,10 +88680,10 @@ var init_rangeMap = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/rowCache.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/rowCache.js
 var RowCache;
 var init_rowCache = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/rowCache.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/rowCache.js"() {
     init_dom();
     RowCache = class {
       constructor(renderers) {
@@ -88787,13 +88787,13 @@ var init_rowCache = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/dnd/dnd.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/dnd/dnd.css
 var init_dnd2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/dnd/dnd.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/dnd/dnd.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/dnd/dnd.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/dnd/dnd.js
 function applyDragImage(event, container, label, extraClasses = []) {
   if (!event.dataTransfer) {
     return;
@@ -88813,13 +88813,13 @@ function applyDragImage(event, container, label, extraClasses = []) {
   setTimeout(() => dragImage.remove(), 0);
 }
 var init_dnd3 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/dnd/dnd.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/dnd/dnd.js"() {
     init_dom();
     init_dnd2();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/listView.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/listView.js
 function equalsDragFeedback(f1, f2) {
   if (Array.isArray(f1) && Array.isArray(f2)) {
     return equals(f1, f2);
@@ -88828,7 +88828,7 @@ function equalsDragFeedback(f1, f2) {
 }
 var __decorate27, StaticDND, DefaultOptions, ElementsDragAndDropData, ExternalElementsDragAndDropData, NativeDragAndDropData, ListViewAccessibilityProvider, ListView;
 var init_listView = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/listView.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/listView.js"() {
     init_dnd();
     init_dom();
     init_event2();
@@ -89979,7 +89979,7 @@ var init_listView = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/listWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/listWidget.js
 function isListElementDescendantOfClass(e, className2) {
   if (e.classList.contains(className2)) {
     return true;
@@ -90088,7 +90088,7 @@ function relativeComplement(one, other) {
 }
 var __decorate28, TraitRenderer, Trait, SelectionTrait, TraitSpliceable, KeyboardController, TypeNavigationMode, TypeNavigationControllerState, DefaultKeyboardNavigationDelegate, TypeNavigationController, DOMFocusController, DefaultMultipleSelectionController, MouseController, DefaultStyleController, unthemedListStyles, DefaultOptions2, numericSort, PipelineRenderer, AccessibiltyRenderer, ListViewDragAndDrop, List;
 var init_listWidget = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/listWidget.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/listWidget.js"() {
     init_dom();
     init_domStylesheets();
     init_cssValue();
@@ -91460,16 +91460,16 @@ var init_listWidget = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxCustom.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxCustom.css
 var init_selectBoxCustom = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxCustom.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxCustom.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxCustom.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxCustom.js
 var $2, SELECT_OPTION_ENTRY_TEMPLATE_ID, SelectListRenderer, SelectBoxList;
 var init_selectBoxCustom2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxCustom.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxCustom.js"() {
     init_nls();
     init_arrays();
     init_event();
@@ -92245,10 +92245,10 @@ var init_selectBoxCustom2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxNative.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxNative.js
 var SelectBoxNative;
 var init_selectBoxNative = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxNative.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBoxNative.js"() {
     init_dom();
     init_touch();
     init_arrays();
@@ -92378,10 +92378,10 @@ var init_selectBoxNative = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBox.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBox.js
 var SelectBox;
 var init_selectBox2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBox.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/selectBox/selectBox.js"() {
     init_platform();
     init_widget();
     init_selectBox();
@@ -92423,16 +92423,16 @@ var init_selectBox2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionbar.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionbar.css
 var init_actionbar = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionbar.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionbar.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionViewItems.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionViewItems.js
 var BaseActionViewItem, ActionViewItem, SelectActionViewItem;
 var init_actionViewItems = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionViewItems.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionViewItems.js"() {
     init_browser();
     init_dnd();
     init_dom();
@@ -92784,10 +92784,10 @@ var init_actionViewItems = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionbar.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionbar.js
 var ActionBar;
 var init_actionbar2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionbar.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/actionbar/actionbar.js"() {
     init_dom();
     init_keyboardEvent();
     init_actionViewItems();
@@ -93263,7 +93263,7 @@ var init_actionbar2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/utils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/utils.js
 function joinCombine(arr1, arr2, keySelector, combine) {
   if (arr1.length === 0) {
     return arr2;
@@ -93505,7 +93505,7 @@ function filterWithPrevious(arr, filter) {
 }
 var ObservableElementSizeObserver, ViewZoneOverlayWidget, PlaceholderViewZone, ManagedOverlayWidget, DisposableCancellationTokenSource, RefCounted, BaseRefCounted, ClonedRefCounted;
 var init_utils5 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/utils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/utils.js"() {
     init_arraysFind();
     init_cancellation();
     init_lifecycle();
@@ -93683,7 +93683,7 @@ var init_utils5 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/rangeMapping.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/rangeMapping.js
 function normalizePosition(position, content) {
   if (position.lineNumber < 1) {
     return new Position(1, 1);
@@ -93736,7 +93736,7 @@ function getLineRangeMapping(rangeMapping, originalLines, modifiedLines) {
 }
 var LineRangeMapping, DetailedLineRangeMapping, RangeMapping;
 var init_rangeMapping = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/rangeMapping.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/rangeMapping.js"() {
     init_arrays();
     init_assert();
     init_errors();
@@ -93877,7 +93877,7 @@ var init_rangeMapping = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/iconRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/iconRegistry.js
 function registerIcon(id, defaults, description, deprecationMessage) {
   return iconRegistry.registerIcon(id, defaults, description, deprecationMessage);
 }
@@ -93893,7 +93893,7 @@ function initialize() {
 }
 var Extensions8, IconContribution, IconFontDefinition, fontIdRegex, fontIdErrorMessage, IconRegistry, iconRegistry, iconsSchemaId, schemaRegistry2, delayer2, widgetClose, gotoPreviousLocation, gotoNextLocation, syncing, spinningLoading;
 var init_iconRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/common/iconRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/common/iconRegistry.js"() {
     init_async();
     init_codicons();
     init_codiconsUtil();
@@ -94053,13 +94053,13 @@ var init_iconRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/accessibleDiffViewer.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/accessibleDiffViewer.css
 var init_accessibleDiffViewer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/accessibleDiffViewer.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/accessibleDiffViewer.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/accessibleDiffViewer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/accessibleDiffViewer.js
 function computeViewElementGroups(diffs, originalLineCount, modifiedLineCount) {
   const result = [];
   for (const g of groupAdjacentBy(diffs, (a, b) => b.modified.startLineNumber - a.modified.endLineNumberExclusive < 2 * viewElementGroupLineMargin)) {
@@ -94090,7 +94090,7 @@ function computeViewElementGroups(diffs, originalLineCount, modifiedLineCount) {
 }
 var __decorate29, __param25, accessibleDiffViewerInsertIcon, accessibleDiffViewerRemoveIcon, accessibleDiffViewerCloseIcon, AccessibleDiffViewer, ViewModel2, viewElementGroupLineMargin, LineType, ViewElementGroup, HeaderViewElement, DeletedLineViewElement, AddedLineViewElement, UnchangedLineViewElement, View3, AccessibleDiffViewerModelFromEditors;
 var init_accessibleDiffViewer2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/accessibleDiffViewer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/accessibleDiffViewer.js"() {
     init_dom();
     init_trustedTypes();
     init_actionbar2();
@@ -94689,10 +94689,10 @@ var init_accessibleDiffViewer2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/registrations.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/registrations.contribution.js
 var diffMoveBorder, diffMoveBorderActive, diffEditorUnchangedRegionShadow, diffInsertIcon, diffRemoveIcon, diffLineAddDecorationBackgroundWithIndicator, diffLineDeleteDecorationBackgroundWithIndicator, diffLineAddDecorationBackground, diffLineDeleteDecorationBackground, diffAddDecoration, diffWholeLineAddDecoration, diffAddDecorationEmpty, diffDeleteDecoration, diffWholeLineDeleteDecoration, diffDeleteDecorationEmpty;
 var init_registrations_contribution = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/registrations.contribution.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/registrations.contribution.js"() {
     init_codicons();
     init_themables();
     init_textModel();
@@ -94761,19 +94761,19 @@ var init_registrations_contribution = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/editorWorker.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorWorker.js
 var IEditorWorkerService;
 var init_editorWorker = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/editorWorker.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorWorker.js"() {
     init_instantiation();
     IEditorWorkerService = createDecorator("editorWorkerService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffProviderFactoryService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffProviderFactoryService.js
 var __decorate30, __param26, WorkerBasedDocumentDiffProvider_1, IDiffProviderFactoryService, WorkerBasedDiffProviderFactoryService, WorkerBasedDocumentDiffProvider;
 var init_diffProviderFactoryService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffProviderFactoryService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffProviderFactoryService.js"() {
     init_extensions();
     init_instantiation();
     init_event();
@@ -94918,10 +94918,10 @@ var init_diffProviderFactoryService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/linesDiffComputer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/linesDiffComputer.js
 var LinesDiff, MovedText;
 var init_linesDiffComputer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/linesDiffComputer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/linesDiffComputer.js"() {
     LinesDiff = class {
       constructor(changes, moves, hitTimeout) {
         this.changes = changes;
@@ -94941,10 +94941,10 @@ var init_linesDiffComputer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/diffAlgorithm.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/diffAlgorithm.js
 var DiffAlgorithmResult, SequenceDiff, OffsetPair, InfiniteTimeout, DateTimeout;
 var init_diffAlgorithm = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/diffAlgorithm.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/diffAlgorithm.js"() {
     init_arrays();
     init_errors();
     init_offsetRange();
@@ -95081,13 +95081,13 @@ var init_diffAlgorithm = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/utils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/utils.js
 function isSpace(charCode) {
   return charCode === 32 || charCode === 9;
 }
 var Array2D, LineRangeFragment;
 var init_utils6 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/utils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/utils.js"() {
     Array2D = class {
       constructor(width2, height) {
         this.width = width2;
@@ -95146,10 +95146,10 @@ var init_utils6 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/dynamicProgrammingDiffing.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/dynamicProgrammingDiffing.js
 var DynamicProgrammingDiffing;
 var init_dynamicProgrammingDiffing = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/dynamicProgrammingDiffing.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/dynamicProgrammingDiffing.js"() {
     init_offsetRange();
     init_diffAlgorithm();
     init_utils6();
@@ -95230,10 +95230,10 @@ var init_dynamicProgrammingDiffing = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/myersDiffAlgorithm.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/myersDiffAlgorithm.js
 var MyersDiffAlgorithm, SnakePath, FastInt32Array, FastArrayNegativeIndices;
 var init_myersDiffAlgorithm = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/myersDiffAlgorithm.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/algorithms/myersDiffAlgorithm.js"() {
     init_offsetRange();
     init_diffAlgorithm();
     MyersDiffAlgorithm = class {
@@ -95369,7 +95369,7 @@ var init_myersDiffAlgorithm = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/linesSliceCharSequence.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/linesSliceCharSequence.js
 function isWordChar(charCode) {
   return charCode >= 97 && charCode <= 122 || charCode >= 65 && charCode <= 90 || charCode >= 48 && charCode <= 57;
 }
@@ -95402,7 +95402,7 @@ function getCategory(charCode) {
 }
 var LinesSliceCharSequence, score;
 var init_linesSliceCharSequence = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/linesSliceCharSequence.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/linesSliceCharSequence.js"() {
     init_arraysFind();
     init_offsetRange();
     init_position();
@@ -95582,7 +95582,7 @@ var init_linesSliceCharSequence = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/computeMovedLines.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/computeMovedLines.js
 function computeMovedLines(changes, originalLines, modifiedLines, hashedOriginalLines, hashedModifiedLines, timeout2) {
   let { moves, excludedChanges } = computeMovesFromSimpleDeletionsToSimpleInsertions(changes, originalLines, modifiedLines, timeout2);
   if (!timeout2.isValid()) {
@@ -95808,7 +95808,7 @@ function removeMovesInSameDiff(changes, moves) {
   return moves;
 }
 var init_computeMovedLines = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/computeMovedLines.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/computeMovedLines.js"() {
     init_diffAlgorithm();
     init_rangeMapping();
     init_arrays();
@@ -95822,7 +95822,7 @@ var init_computeMovedLines = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/heuristicSequenceOptimizations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/heuristicSequenceOptimizations.js
 function optimizeSequenceDiffs(sequence1, sequence2, sequenceDiffs) {
   let result = sequenceDiffs;
   result = joinSequenceDiffsByShifting(sequence1, sequence2, result);
@@ -96130,14 +96130,14 @@ function removeVeryShortMatchingTextBetweenLongDiffs(sequence1, sequence2, seque
   return newDiffs;
 }
 var init_heuristicSequenceOptimizations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/heuristicSequenceOptimizations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/heuristicSequenceOptimizations.js"() {
     init_arrays();
     init_offsetRange();
     init_diffAlgorithm();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/lineSequence.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/lineSequence.js
 function getIndentation(str) {
   let i2 = 0;
   while (i2 < str.length && (str.charCodeAt(i2) === 32 || str.charCodeAt(i2) === 9)) {
@@ -96147,7 +96147,7 @@ function getIndentation(str) {
 }
 var LineSequence;
 var init_lineSequence = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/lineSequence.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/lineSequence.js"() {
     LineSequence = class {
       constructor(trimmedHash, lines) {
         this.trimmedHash = trimmedHash;
@@ -96174,13 +96174,13 @@ var init_lineSequence = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/defaultLinesDiffComputer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/defaultLinesDiffComputer.js
 function toLineRangeMapping(sequenceDiff) {
   return new LineRangeMapping(new LineRange(sequenceDiff.seq1Range.start + 1, sequenceDiff.seq1Range.endExclusive + 1), new LineRange(sequenceDiff.seq2Range.start + 1, sequenceDiff.seq2Range.endExclusive + 1));
 }
 var DefaultLinesDiffComputer;
 var init_defaultLinesDiffComputer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/defaultLinesDiffComputer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/defaultLinesDiffComputer/defaultLinesDiffComputer.js"() {
     init_arrays();
     init_assert();
     init_lineRange();
@@ -96373,7 +96373,7 @@ var init_defaultLinesDiffComputer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorViewModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorViewModel.js
 function normalizeDocumentDiff(diff, original, modified) {
   return {
     changes: diff.changes.map((c) => new DetailedLineRangeMapping(c.original, c.modified, c.innerChanges ? c.innerChanges.map((i2) => normalizeRangeMapping(i2, original, modified)) : void 0)),
@@ -96455,7 +96455,7 @@ function applyModifiedEditsToLineRangeMappings(changes, textEdits, originalTextM
 }
 var __decorate31, __param27, DiffEditorViewModel, DiffState, DiffMapping, UnchangedRegion;
 var init_diffEditorViewModel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorViewModel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorViewModel.js"() {
     init_async();
     init_cancellation();
     init_lifecycle();
@@ -96605,7 +96605,8 @@ var init_diffEditorViewModel = __esm({
           }, tx);
         };
         this._register(model.modified.onDidChangeContent((e) => {
-          if (model.te2FreezeProjection && model.modifiedBaseline && model.modifiedBaseline !== model.modified) {
+          const freezePinnedMode = !model.te2AutosaveMode && !!model.te2FreezeProjection && !!model.modifiedBaseline && model.modifiedBaseline !== model.modified;
+          if (freezePinnedMode) {
             return;
           }
           const diff = this._diff.get();
@@ -96626,6 +96627,12 @@ var init_diffEditorViewModel = __esm({
           debouncer.schedule();
         }));
         this._register(model.original.onDidChangeContent((e) => {
+          const freezePinnedMode = !model.te2AutosaveMode && !!model.te2FreezeProjection && !!model.modifiedBaseline && model.modifiedBaseline !== model.modified;
+          if (freezePinnedMode) {
+            this._isDiffUpToDate.set(false, void 0);
+            debouncer.schedule();
+            return;
+          }
           const diff = this._diff.get();
           if (diff) {
             const textEdits = TextEditInfo.fromModelContentChanges(e.changes);
@@ -96659,15 +96666,16 @@ var init_diffEditorViewModel = __esm({
             originalTextEditInfos = combineTextEditInfos(originalTextEditInfos, edits);
           }));
           let modifiedTextEditInfos = [];
-          if (!(model.te2FreezeProjection && model.modifiedBaseline && model.modifiedBaseline !== model.modified)) {
+          const freezePinnedMode = !model.te2AutosaveMode && !!model.te2FreezeProjection && !!model.modifiedBaseline && model.modifiedBaseline !== model.modified;
+          if (!freezePinnedMode) {
             store.add(model.modified.onDidChangeContent((e) => {
               const edits = TextEditInfo.fromModelContentChanges(e.changes);
               modifiedTextEditInfos = combineTextEditInfos(modifiedTextEditInfos, edits);
             }));
           }
-          const baselineOriginal = model.originalBaseline ?? model.original;
-          const baselineModified = model.modifiedBaseline ?? model.modified;
-          const usePinnedBaseline = baselineOriginal === model.original && baselineModified !== model.modified;
+          const baselineOriginal = model.te2AutosaveMode ? model.original : model.originalBaseline ?? model.original;
+          const baselineModified = model.te2AutosaveMode ? model.modified : model.modifiedBaseline ?? model.modified;
+          const usePinnedBaseline = !model.te2AutosaveMode && baselineOriginal === model.original && baselineModified !== model.modified;
           const originalForDiff = usePinnedBaseline ? baselineOriginal : model.original;
           const modifiedForDiff = usePinnedBaseline ? baselineModified : model.modified;
           let result = await documentDiffProvider.diffProvider.computeDiff(originalForDiff, modifiedForDiff, {
@@ -96684,7 +96692,7 @@ var init_diffEditorViewModel = __esm({
             return;
           }
           result = normalizeDocumentDiff(result, originalForDiff, modifiedForDiff);
-          const freezePinnedBaselineProjection = usePinnedBaseline && !!model.te2FreezeProjection;
+          const freezePinnedBaselineProjection = !model.te2AutosaveMode && usePinnedBaseline && !!model.te2FreezeProjection;
           if (usePinnedBaseline) {
             if (!freezePinnedBaselineProjection) {
               result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
@@ -96941,7 +96949,7 @@ var init_diffEditorViewModel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/copySelection.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/copySelection.js
 function enableCopySelection(options2) {
   const { domNode, renderLinesResult, diffEntry, originalModel, clipboardService } = options2;
   const viewZoneDisposable = new DisposableStore();
@@ -96974,17 +96982,17 @@ function enableCopySelection(options2) {
   return viewZoneDisposable;
 }
 var init_copySelection = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/copySelection.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/copySelection.js"() {
     init_dom();
     init_lifecycle();
     init_range();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/inlineDiffDeletedCodeMargin.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/inlineDiffDeletedCodeMargin.js
 var InlineDiffDeletedCodeMargin;
 var init_inlineDiffDeletedCodeMargin = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/inlineDiffDeletedCodeMargin.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/inlineDiffDeletedCodeMargin.js"() {
     init_dom();
     init_actions();
     init_codicons();
@@ -97116,7 +97124,7 @@ var init_inlineDiffDeletedCodeMargin = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/renderLines.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/renderLines.js
 function renderLines(source, options2, decorations, domNode, noExtra = false) {
   applyFontInfo(domNode, options2.fontInfo);
   const hasCharChanges = decorations.length > 0;
@@ -97201,7 +97209,7 @@ function renderOriginalLine(viewLineIdx, lineTokens, decorations, hasCharChanges
 }
 var ttPolicy3, LineSource, RenderOptions, RenderLinesResult, RenderLineOutputWithOffset;
 var init_renderLines = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/renderLines.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/renderLines.js"() {
     init_trustedTypes();
     init_domFontInfo();
     init_editorOptions();
@@ -97345,26 +97353,26 @@ var init_renderLines = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/clipboard/common/clipboardService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/clipboard/common/clipboardService.js
 var IClipboardService;
 var init_clipboardService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/clipboard/common/clipboardService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/clipboard/common/clipboardService.js"() {
     init_instantiation();
     IClipboardService = createDecorator("clipboardService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextview/browser/contextView.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/contextview/browser/contextView.js
 var IContextViewService, IContextMenuService;
 var init_contextView = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextview/browser/contextView.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/contextview/browser/contextView.js"() {
     init_instantiation();
     IContextViewService = createDecorator("contextViewService");
     IContextMenuService = createDecorator("contextMenuService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/diffEditorViewZones.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/diffEditorViewZones.js
 function computeRangeAlignment(originalEditor, modifiedEditor, diffs, originalEditorAlignmentViewZones, modifiedEditorAlignmentViewZones, innerHunkAlignment) {
   const originalLineHeightOverrides = new ArrayQueue(getAdditionalLineHeights(originalEditor, originalEditorAlignmentViewZones));
   const modifiedLineHeightOverrides = new ArrayQueue(getAdditionalLineHeights(modifiedEditor, modifiedEditorAlignmentViewZones));
@@ -97511,7 +97519,7 @@ function rangeIsSingleLine(range2) {
 }
 var __decorate32, __param28, DiffEditorViewZones;
 var init_diffEditorViewZones = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/diffEditorViewZones.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/diffEditorViewZones.js"() {
     init_dom();
     init_arrays();
     init_async();
@@ -97894,10 +97902,10 @@ var init_diffEditorViewZones = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/movedBlocksLinesFeature.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/movedBlocksLinesFeature.js
 var MovedBlocksLinesFeature, LinesLayout2, MovedBlockOverlayWidget;
 var init_movedBlocksLinesFeature = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/movedBlocksLinesFeature.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/movedBlocksLinesFeature.js"() {
     init_dom();
     init_actionbar2();
     init_actions();
@@ -98159,10 +98167,10 @@ var init_movedBlocksLinesFeature = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorDecorations.js
 var DiffEditorDecorations;
 var init_diffEditorDecorations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorDecorations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorDecorations.js"() {
     init_lifecycle();
     init_observable();
     init_diffEditorViewZones();
@@ -98273,10 +98281,10 @@ var init_diffEditorDecorations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/2d/point.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/2d/point.js
 var Point;
 var init_point = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/2d/point.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/2d/point.js"() {
     Point = class _Point {
       static equals(a, b) {
         return a.x === b.x && a.y === b.y;
@@ -98323,13 +98331,13 @@ var init_point = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/observableCodeEditor.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/observableCodeEditor.js
 function observableCodeEditor(editor2) {
   return ObservableCodeEditor.get(editor2);
 }
 var ObservableCodeEditor;
 var init_observableCodeEditor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/observableCodeEditor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/observableCodeEditor.js"() {
     init_equals();
     init_lifecycle();
     init_observable();
@@ -98689,10 +98697,10 @@ var init_observableCodeEditor = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/overviewRulerFeature.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/overviewRulerFeature.js
 var __decorate33, __param29, OverviewRulerFeature_1, OverviewRulerFeature;
 var init_overviewRulerFeature = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/overviewRulerFeature.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/overviewRulerFeature.js"() {
     init_dom();
     init_fastDomNode();
     init_scrollbarState();
@@ -98842,10 +98850,10 @@ var init_overviewRulerFeature = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorEditors.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorEditors.js
 var __decorate34, __param30, DiffEditorEditors;
 var init_diffEditorEditors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorEditors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorEditors.js"() {
     init_event();
     init_lifecycle();
     init_observable();
@@ -99030,16 +99038,16 @@ var init_diffEditorEditors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/sash/sash.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/sash/sash.css
 var init_sash = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/sash/sash.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/sash/sash.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/sash/sash.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/sash/sash.js
 var __decorate35, DEBUG, OrthogonalEdge, globalSize, onDidChangeGlobalSize, globalHoverDelay, onDidChangeHoverDelay, MouseEventFactory, GestureEventFactory, OrthogonalPointerEventFactory, PointerEventsDisabledCssClass, Sash;
 var init_sash2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/sash/sash.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/sash/sash.js"() {
     init_dom();
     init_domStylesheets();
     init_event2();
@@ -99472,10 +99480,10 @@ var init_sash2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorSash.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorSash.js
 var SashLayout, DiffEditorSash;
 var init_diffEditorSash = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorSash.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/components/diffEditorSash.js"() {
     init_sash2();
     init_lifecycle();
     init_observable();
@@ -99557,10 +99565,10 @@ var init_diffEditorSash = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/delegatingEditorImpl.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/delegatingEditorImpl.js
 var DelegatingEditor;
 var init_delegatingEditorImpl = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/delegatingEditorImpl.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/delegatingEditorImpl.js"() {
     init_event();
     init_lifecycle();
     DelegatingEditor = class _DelegatingEditor extends Disposable {
@@ -99671,10 +99679,10 @@ var init_delegatingEditorImpl = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/diffEditor.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/diffEditor.js
 var diffEditorDefaultOptions;
 var init_diffEditor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/diffEditor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/diffEditor.js"() {
     diffEditorDefaultOptions = {
       enableSplitViewResizing: true,
       splitViewDefaultRatio: 0.5,
@@ -99711,7 +99719,7 @@ var init_diffEditor = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorOptions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorOptions.js
 function isSimpleDiff(diff, supportsTrueDiffRendering) {
   return diff.mappings.every((m) => isInsertion(m.lineRangeMapping) || isDeletion(m.lineRangeMapping) || supportsTrueDiffRendering && allowsTrueInlineDiffRendering(m.lineRangeMapping));
 }
@@ -99795,7 +99803,7 @@ function validateDiffEditorOptions(options2, defaults) {
 }
 var __decorate36, __param31, DiffEditorOptions;
 var init_diffEditorOptions = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorOptions.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorOptions.js"() {
     init_observable();
     init_accessibility();
     init_diffEditor();
@@ -99895,16 +99903,16 @@ var init_diffEditorOptions = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdown.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdown.css
 var init_dropdown = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdown.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdown.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdown.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdown.js
 var BaseDropdown, DropdownMenu;
 var init_dropdown2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdown.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdown.js"() {
     init_dom();
     init_keyboardEvent();
     init_touch();
@@ -100045,10 +100053,10 @@ var init_dropdown2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdownActionViewItem.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdownActionViewItem.js
 var DropdownMenuActionViewItem;
 var init_dropdownActionViewItem = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdownActionViewItem.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/dropdown/dropdownActionViewItem.js"() {
     init_event();
     init_dom();
     init_actionViewItems();
@@ -100156,16 +100164,16 @@ var init_dropdownActionViewItem = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/toolbar/toolbar.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/toolbar/toolbar.css
 var init_toolbar = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/toolbar/toolbar.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/toolbar/toolbar.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/toolbar/toolbar.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/toolbar/toolbar.js
 var ACTION_MIN_WIDTH, ToolBar, ToggleMenuAction;
 var init_toolbar2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/toolbar/toolbar.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/toolbar/toolbar.js"() {
     init_actionbar2();
     init_dropdownActionViewItem();
     init_actions();
@@ -100388,7 +100396,7 @@ var init_toolbar2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/keybindingLabels.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/keybindingLabels.js
 function _simpleAsString(modifiers, key, labels) {
   if (key === null) {
     return "";
@@ -100413,7 +100421,7 @@ function _simpleAsString(modifiers, key, labels) {
 }
 var ModifierLabelProvider, UILabelProvider, AriaLabelProvider, ElectronAcceleratorLabelProvider, UserSettingsLabelProvider;
 var init_keybindingLabels = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/keybindingLabels.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/keybindingLabels.js"() {
     init_nls();
     ModifierLabelProvider = class {
       constructor(mac, windows, linux = windows) {
@@ -100520,7 +100528,7 @@ var init_keybindingLabels = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/action/common/action.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/action/common/action.js
 function isLocalizedString(thing) {
   return !!thing && typeof thing === "object" && typeof thing.original === "string" && typeof thing.value === "string";
 }
@@ -100528,14 +100536,14 @@ function isICommandActionToggleInfo(thing) {
   return thing ? thing.condition !== void 0 : false;
 }
 var init_action = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/action/common/action.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/action/common/action.js"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/parts/storage/common/storage.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/parts/storage/common/storage.js
 var StorageHint, StorageState, Storage, InMemoryStorageDatabase;
 var init_storage = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/parts/storage/common/storage.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/parts/storage/common/storage.js"() {
     init_async();
     init_event();
     init_lifecycle();
@@ -100704,7 +100712,7 @@ var init_storage = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/storage/common/storage.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/storage/common/storage.js
 function loadKeyTargets(storage) {
   const keysRaw = storage.get(TARGET_KEY);
   if (keysRaw) {
@@ -100717,7 +100725,7 @@ function loadKeyTargets(storage) {
 }
 var TARGET_KEY, IStorageService, WillSaveStateReason, AbstractStorageService, InMemoryStorageService;
 var init_storage2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/storage/common/storage.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/storage/common/storage.js"() {
     init_async();
     init_event();
     init_lifecycle();
@@ -100932,7 +100940,7 @@ var init_storage2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/browser/defaultStyles.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/browser/defaultStyles.js
 function overrideStyles(override, styles) {
   const result = { ...styles };
   for (const key in override) {
@@ -100946,7 +100954,7 @@ function getListStyles(override) {
 }
 var defaultKeybindingLabelStyles, defaultButtonStyles, defaultProgressBarStyles, defaultToggleStyles, defaultRadioStyles, defaultCheckboxStyles, defaultDialogStyles, defaultInputBoxStyles, defaultFindWidgetStyles, defaultCountBadgeStyles, defaultBreadcrumbsWidgetStyles, defaultListStyles, defaultSelectBoxStyles, defaultMenuStyles;
 var init_defaultStyles = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/browser/defaultStyles.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/browser/defaultStyles.js"() {
     init_colorRegistry();
     init_color();
     defaultKeybindingLabelStyles = {
@@ -101120,7 +101128,7 @@ var init_defaultStyles = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/window/common/window.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/window/common/window.js
 function hasNativeContextMenu(configurationService, titleBarStyle) {
   if (isWeb) {
     return false;
@@ -101177,18 +101185,18 @@ function getWindowControlsStyle(configurationService) {
   return "native";
 }
 var init_window2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/window/common/window.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/window/common/window.js"() {
     init_platform();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/browser/menuEntryActionViewItem.css
+// app/static/vendor/monaco-editor-core/esm/vs/platform/actions/browser/menuEntryActionViewItem.css
 var init_menuEntryActionViewItem = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/browser/menuEntryActionViewItem.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/actions/browser/menuEntryActionViewItem.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/browser/menuEntryActionViewItem.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/actions/browser/menuEntryActionViewItem.js
 function getFlatContextMenuActions(groups, primaryGroup) {
   const target = [];
   getContextMenuActionsImpl(groups, target, primaryGroup);
@@ -101275,7 +101283,7 @@ function createActionViewItem(instaService, action, options2) {
 }
 var __decorate37, __param32, MenuEntryActionViewItem, TextOnlyMenuEntryActionViewItem, SubmenuEntryActionViewItem, DropdownWithDefaultActionViewItem, SubmenuEntrySelectActionViewItem;
 var init_menuEntryActionViewItem2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/browser/menuEntryActionViewItem.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/actions/browser/menuEntryActionViewItem.js"() {
     init_cssValue();
     init_dom();
     init_keyboardEvent();
@@ -101677,7 +101685,7 @@ var init_menuEntryActionViewItem2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/common/menuService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/actions/common/menuService.js
 function createMenuHide(menu, command, states) {
   const id = isISubmenuItem(command) ? command.submenu.id : command.id;
   const title = typeof command.title === "string" ? command.title : command.title.value;
@@ -101720,7 +101728,7 @@ function createConfigureKeybindingAction(commandService, keybindingService, comm
 }
 var __decorate38, __param33, PersistedMenuHideState_1, MenuInfo_1, MenuService, PersistedMenuHideState, MenuInfoSnapshot, MenuInfo, MenuImpl;
 var init_menuService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/common/menuService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/actions/common/menuService.js"() {
     init_async();
     init_event();
     init_lifecycle();
@@ -102093,10 +102101,10 @@ var init_menuService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/browser/actionViewItemService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/actions/browser/actionViewItemService.js
 var IActionViewItemService, ActionViewItemService;
 var init_actionViewItemService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/browser/actionViewItemService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/actions/browser/actionViewItemService.js"() {
     init_event();
     init_extensions();
     init_instantiation();
@@ -102127,10 +102135,10 @@ var init_actionViewItemService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/browser/toolbar.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/actions/browser/toolbar.js
 var __decorate39, __param34, WorkbenchToolBar, MenuWorkbenchToolBar;
 var init_toolbar3 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actions/browser/toolbar.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/actions/browser/toolbar.js"() {
     init_dom();
     init_mouseEvent();
     init_toolbar2();
@@ -102381,10 +102389,10 @@ var init_toolbar3 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/hover/browser/hover.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/hover/browser/hover.js
 var __decorate40, __param35, IHoverService, WorkbenchHoverDelegate, nativeHoverDelegate;
 var init_hover = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/hover/browser/hover.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/hover/browser/hover.js"() {
     init_instantiation();
     init_lifecycle();
     init_configuration();
@@ -102483,10 +102491,10 @@ var init_hover = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/textModelText.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/textModelText.js
 var TextModelText;
 var init_textModelText = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/textModelText.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/textModelText.js"() {
     init_abstractText();
     init_textLength();
     TextModelText = class extends AbstractText {
@@ -102509,10 +102517,10 @@ var init_textModelText = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/utils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/utils.js
 var ActionRunnerWithContext;
 var init_utils7 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/utils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/utils.js"() {
     init_actions();
     ActionRunnerWithContext = class extends ActionRunner {
       constructor(_getContext) {
@@ -102527,10 +102535,10 @@ var init_utils7 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/utils/editorGutter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/utils/editorGutter.js
 var EditorGutter, ManagedGutterItemView;
 var init_editorGutter = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/utils/editorGutter.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/utils/editorGutter.js"() {
     init_dom();
     init_lifecycle();
     init_observable();
@@ -102657,10 +102665,10 @@ var init_editorGutter = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/gutterFeature.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/gutterFeature.js
 var __decorate41, __param36, emptyArr2, width, DiffEditorGutter, DiffGutterItem, DiffToolBar;
 var init_gutterFeature = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/gutterFeature.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/gutterFeature.js"() {
     init_dom();
     init_lifecycle();
     init_observable();
@@ -102899,10 +102907,10 @@ var init_gutterFeature = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/hideUnchangedRegionsFeature.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/hideUnchangedRegionsFeature.js
 var __decorate42, __param37, HideUnchangedRegionsFeature_1, HideUnchangedRegionsFeature, CompactCollapsedCodeOverlayWidget, CollapsedCodeOverlayWidget;
 var init_hideUnchangedRegionsFeature = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/hideUnchangedRegionsFeature.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/hideUnchangedRegionsFeature.js"() {
     init_dom();
     init_iconLabels2();
     init_codicons();
@@ -103333,10 +103341,10 @@ var init_hideUnchangedRegionsFeature = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/revertButtonsFeature.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/revertButtonsFeature.js
 var emptyArr3, RevertButtonsFeature, RevertButton;
 var init_revertButtonsFeature = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/revertButtonsFeature.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/features/revertButtonsFeature.js"() {
     init_dom();
     init_iconLabels2();
     init_codicons();
@@ -103477,13 +103485,13 @@ var init_revertButtonsFeature = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/style.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/style.css
 var init_style = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/style.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/style.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorWidget.js
 function toLineChanges(state) {
   return state.mappings.map((x) => {
     const m = x.lineRangeMapping;
@@ -103528,7 +103536,7 @@ function toLineChanges(state) {
 }
 var __decorate43, __param38, DiffEditorWidget;
 var init_diffEditorWidget = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorWidget.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditorWidget.js"() {
     init_dom();
     init_arraysFind();
     init_errors();
@@ -104073,10 +104081,10 @@ var init_diffEditorWidget = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/common/quickInput.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/common/quickInput.js
 var NO_KEY_MODS, QuickInputHideReason, ItemActivation, QuickPickFocus, QuickInputButtonLocation, QuickPickItemScorerAccessor, quickPickItemScorerAccessor, IQuickInputService;
 var init_quickInput = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/common/quickInput.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/common/quickInput.js"() {
     init_instantiation();
     NO_KEY_MODS = { ctrlCmd: false, alt: false };
     (function(QuickInputHideReason2) {
@@ -104116,10 +104124,10 @@ var init_quickInput = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/bulkEditService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/bulkEditService.js
 var IBulkEditService, ResourceEdit, ResourceTextEdit, ResourceFileEdit;
 var init_bulkEditService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/bulkEditService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/bulkEditService.js"() {
     init_instantiation();
     init_uri();
     init_types();
@@ -104186,10 +104194,10 @@ var init_bulkEditService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/editorState/browser/keybindingCancellation.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/editorState/browser/keybindingCancellation.js
 var IEditorCancellationTokens, ctxCancellableOperation, EditorKeybindingCancellationTokenSource;
 var init_keybindingCancellation = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/editorState/browser/keybindingCancellation.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/editorState/browser/keybindingCancellation.js"() {
     init_editorExtensions();
     init_contextkey();
     init_cancellation();
@@ -104271,10 +104279,10 @@ var init_keybindingCancellation = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/editorState/browser/editorState.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/editorState/browser/editorState.js
 var EditorState, EditorStateCancellationTokenSource, TextModelCancellationTokenSource;
 var init_editorState = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/editorState/browser/editorState.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/editorState/browser/editorState.js"() {
     init_strings();
     init_range();
     init_cancellation();
@@ -104374,7 +104382,7 @@ var init_editorState = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/opener/common/opener.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/opener/common/opener.js
 function withSelection(uri, selection) {
   return uri.with({ fragment: `${selection.startLineNumber},${selection.startColumn}${selection.endLineNumber ? `-${selection.endLineNumber}${selection.endColumn ? `,${selection.endColumn}` : ""}` : ""}` });
 }
@@ -104394,13 +104402,13 @@ function extractSelection(uri) {
 }
 var IOpenerService;
 var init_opener = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/opener/common/opener.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/opener/common/opener.js"() {
     init_instantiation();
     IOpenerService = createDecorator("openerService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/markdown/browser/markdownRenderer.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/markdown/browser/markdownRenderer.js
 async function openLinkFromMarkdown(openerService, link2, isTrusted, skipValidation) {
   try {
     return await openerService.open(link2, {
@@ -104425,7 +104433,7 @@ function toAllowCommandsOption(isTrusted) {
 }
 var __decorate46, __param41, IMarkdownRendererService, MarkdownRendererService;
 var init_markdownRenderer2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/markdown/browser/markdownRenderer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/markdown/browser/markdownRenderer.js"() {
     init_markdownRenderer();
     init_errors();
     init_extensions();
@@ -104479,10 +104487,10 @@ var init_markdownRenderer2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/ternarySearchTree.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/ternarySearchTree.js
 var StringIterator, ConfigKeysIterator, PathIterator, UriIterator, Undef, TernarySearchTreeNode, TernarySearchTree;
 var init_ternarySearchTree = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/ternarySearchTree.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/ternarySearchTree.js"() {
     init_assert();
     init_strings();
     StringIterator = class {
@@ -105080,7 +105088,7 @@ var init_ternarySearchTree = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/workspace/common/workspace.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/workspace/common/workspace.js
 function isSingleFolderWorkspaceIdentifier(obj) {
   const singleFolderIdentifier = obj;
   return typeof singleFolderIdentifier?.id === "string" && URI.isUri(singleFolderIdentifier.uri);
@@ -105127,7 +105135,7 @@ function isStandaloneEditorWorkspace(workspace) {
 }
 var IWorkspaceContextService, EXTENSION_DEVELOPMENT_EMPTY_WINDOW_WORKSPACE, UNKNOWN_EMPTY_WINDOW_WORKSPACE, WorkspaceFolder, WORKSPACE_EXTENSION, WORKSPACE_FILTER, STANDALONE_EDITOR_WORKSPACE_ID;
 var init_workspace = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/workspace/common/workspace.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/workspace/common/workspace.js"() {
     init_nls();
     init_path();
     init_ternarySearchTree();
@@ -105153,16 +105161,16 @@ var init_workspace = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/button/button.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/button/button.css
 var init_button = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/button/button.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/button/button.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/button/button.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/button/button.js
 var unthemedButtonStyles, buttonSanitizerConfig, Button;
 var init_button2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/button/button.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/button/button.js"() {
     init_dom();
     init_keyboardEvent();
     init_markdownRenderer();
@@ -105395,16 +105403,16 @@ var init_button2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/keybindingLabel/keybindingLabel.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/keybindingLabel/keybindingLabel.css
 var init_keybindingLabel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/keybindingLabel/keybindingLabel.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/keybindingLabel/keybindingLabel.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/keybindingLabel/keybindingLabel.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/keybindingLabel/keybindingLabel.js
 var $3, unthemedKeybindingLabelOptions, KeybindingLabel;
 var init_keybindingLabel2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/keybindingLabel/keybindingLabel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/keybindingLabel/keybindingLabel.js"() {
     init_dom();
     init_hoverDelegate2();
     init_hoverDelegateFactory();
@@ -105522,16 +105530,16 @@ var init_keybindingLabel2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/layout/browser/layoutService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/layout/browser/layoutService.js
 var ILayoutService;
 var init_layoutService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/layout/browser/layoutService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/layout/browser/layoutService.js"() {
     init_instantiation();
     ILayoutService = createDecorator("layoutService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/editorConfigurationSchema.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/editorConfigurationSchema.js
 function isConfigurationPropertySchema(x) {
   return typeof x.type !== "undefined" || typeof x.anyOf !== "undefined";
 }
@@ -105554,7 +105562,7 @@ function isDiffEditorConfigurationKey(key) {
 }
 var editorConfigurationBaseNode, editorConfiguration, cachedEditorConfigurationKeys, configurationRegistry2;
 var init_editorConfigurationSchema = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/config/editorConfigurationSchema.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/config/editorConfigurationSchema.js"() {
     init_diffEditor();
     init_editorOptions();
     init_textModelDefaults();
@@ -105872,10 +105880,10 @@ var init_editorConfigurationSchema = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/markers/common/markers.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/markers/common/markers.js
 var MarkerSeverity, IMarkerData, IMarkerService;
 var init_markers = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/markers/common/markers.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/markers/common/markers.js"() {
     init_severity();
     init_nls();
     init_instantiation();
@@ -105994,19 +106002,19 @@ var init_markers = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/environment/common/environment.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/environment/common/environment.js
 var IEnvironmentService;
 var init_environment = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/environment/common/environment.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/environment/common/environment.js"() {
     init_instantiation();
     IEnvironmentService = createDecorator("environmentService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languageFeatureDebounce.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languageFeatureDebounce.js
 var __decorate57, __param52, ILanguageFeatureDebounceService, IdentityHash, NullDebounceInformation, FeatureDebounceInformation, LanguageFeatureDebounceService;
 var init_languageFeatureDebounce = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languageFeatureDebounce.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languageFeatureDebounce.js"() {
     init_hash();
     init_map();
     init_numbers();
@@ -106149,7 +106157,7 @@ var init_languageFeatureDebounce = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/editorFeatures.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/editorFeatures.js
 function registerEditorFeature(ctor) {
   editorFeatures.push(ctor);
 }
@@ -106158,24 +106166,24 @@ function getEditorFeatures() {
 }
 var editorFeatures;
 var init_editorFeatures = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/editorFeatures.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/editorFeatures.js"() {
     editorFeatures = [];
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/hover/hoverWidget.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/hover/hoverWidget.css
 var init_hoverWidget = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/hover/hoverWidget.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/hover/hoverWidget.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/hover/hoverWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/hover/hoverWidget.js
 function getHoverAccessibleViewHint(shouldHaveHint, keybinding) {
   return shouldHaveHint && keybinding ? localize(7, "Inspect this in the accessible view with {0}.", keybinding) : shouldHaveHint ? localize(8, "Inspect this in the accessible view via the command Open Accessible View which is currently not triggerable via keybinding.") : "";
 }
 var $4, HoverWidget, HoverAction, ClickAction, KeyDownAction;
 var init_hoverWidget2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/hover/hoverWidget.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/hover/hoverWidget.js"() {
     init_dom();
     init_keyboardEvent();
     init_scrollableElement();
@@ -106265,16 +106273,16 @@ var init_hoverWidget2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/toggle/toggle.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/toggle/toggle.css
 var init_toggle = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/toggle/toggle.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/toggle/toggle.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/toggle/toggle.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/toggle/toggle.js
 var unthemedToggleStyles, Toggle, BaseCheckbox, Checkbox, TriStateCheckbox;
 var init_toggle2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/toggle/toggle.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/toggle/toggle.js"() {
     init_codicons();
     init_event();
     init_themables();
@@ -106520,10 +106528,10 @@ var init_toggle2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/findinput/findInputToggles.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/findinput/findInputToggles.js
 var NLS_CASE_SENSITIVE_TOGGLE_LABEL, NLS_WHOLE_WORD_TOGGLE_LABEL, NLS_REGEX_TOGGLE_LABEL, CaseSensitiveToggle, WholeWordsToggle, RegexToggle;
 var init_findInputToggles = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/findinput/findInputToggles.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/findinput/findInputToggles.js"() {
     init_toggle2();
     init_codicons();
     init_nls();
@@ -106572,7 +106580,7 @@ var init_findInputToggles = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/formattedTextRenderer.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/formattedTextRenderer.js
 function renderText(text2, _options, target) {
   const element = target ?? document.createElement("div");
   element.textContent = text2;
@@ -106700,7 +106708,7 @@ function formatTagType(char, supportCodeSegments) {
 }
 var StringStream;
 var init_formattedTextRenderer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/formattedTextRenderer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/formattedTextRenderer.js"() {
     init_dom();
     StringStream = class {
       constructor(source) {
@@ -106725,10 +106733,10 @@ var init_formattedTextRenderer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/navigator.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/navigator.js
 var ArrayNavigator;
 var init_navigator = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/navigator.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/navigator.js"() {
     ArrayNavigator = class {
       constructor(items, start = 0, end = items.length, index = start - 1) {
         this.items = items;
@@ -106762,10 +106770,10 @@ var init_navigator = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/history.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/history.js
 var HistoryNavigator;
 var init_history = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/history.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/history.js"() {
     init_navigator();
     HistoryNavigator = class {
       constructor(_history = /* @__PURE__ */ new Set(), limit = 10) {
@@ -106849,16 +106857,16 @@ var init_history = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/inputbox/inputBox.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/inputbox/inputBox.css
 var init_inputBox = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/inputbox/inputBox.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/inputbox/inputBox.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/inputbox/inputBox.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/inputbox/inputBox.js
 var $6, InputBox, HistoryInputBox;
 var init_inputBox2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/inputbox/inputBox.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/inputbox/inputBox.js"() {
     init_dom();
     init_cssValue();
     init_event2();
@@ -107352,16 +107360,16 @@ var init_inputBox2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/findinput/findInput.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/findinput/findInput.css
 var init_findInput = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/findinput/findInput.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/findinput/findInput.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/findinput/findInput.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/findinput/findInput.js
 var NLS_DEFAULT_LABEL, FindInput;
 var init_findInput2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/findinput/findInput.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/findinput/findInput.js"() {
     init_dom();
     init_findInputToggles();
     init_inputBox2();
@@ -107672,10 +107680,10 @@ var init_findInput2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/editOperation.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/editOperation.js
 var EditOperation;
 var init_editOperation = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/editOperation.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/editOperation.js"() {
     init_range();
     EditOperation = class {
       static insert(position, text2) {
@@ -107708,7 +107716,7 @@ var init_editOperation = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/editorBrowser.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/editorBrowser.js
 function isCodeEditor(thing) {
   if (thing && typeof thing.getEditorType === "function") {
     return thing.getEditorType() === EditorType.ICodeEditor;
@@ -107739,12 +107747,12 @@ function getCodeEditor(thing) {
   return null;
 }
 var init_editorBrowser = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/editorBrowser.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/editorBrowser.js"() {
     init_editorCommon();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/listPaging.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/listPaging.js
 function fromPagedListOptions(modelProvider, options2) {
   return {
     ...options2,
@@ -107753,7 +107761,7 @@ function fromPagedListOptions(modelProvider, options2) {
 }
 var PagedRenderer, PagedAccessibilityProvider, PagedList;
 var init_listPaging = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/list/listPaging.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/list/listPaging.js"() {
     init_arrays();
     init_cancellation();
     init_event();
@@ -107874,16 +107882,16 @@ var init_listPaging = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/splitview/splitview.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/splitview/splitview.css
 var init_splitview = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/splitview/splitview.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/splitview/splitview.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/splitview/splitview.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/splitview/splitview.js
 var defaultStyles, ViewItem, VerticalViewItem, HorizontalViewItem, State, Sizing, SplitView;
 var init_splitview2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/splitview/splitview.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/splitview/splitview.js"() {
     init_dom();
     init_event2();
     init_sash2();
@@ -108675,13 +108683,13 @@ var init_splitview2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/table/table.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/table/table.css
 var init_table = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/table/table.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/table/table.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/table/tableWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/table/tableWidget.js
 function asListVirtualDelegate(delegate) {
   return {
     getHeight(row) {
@@ -108694,7 +108702,7 @@ function asListVirtualDelegate(delegate) {
 }
 var TableListRenderer, ColumnHeader, Table;
 var init_tableWidget = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/table/tableWidget.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/table/tableWidget.js"() {
     init_dom();
     init_domStylesheets();
     init_hoverDelegate2();
@@ -108898,10 +108906,10 @@ var init_tableWidget = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/tree.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/tree.js
 var ObjectTreeElementCollapseState, TreeMouseEventTarget, TreeError, WeakMapper;
 var init_tree = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/tree.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/tree.js"() {
     (function(ObjectTreeElementCollapseState2) {
       ObjectTreeElementCollapseState2[ObjectTreeElementCollapseState2["Expanded"] = 0] = "Expanded";
       ObjectTreeElementCollapseState2[ObjectTreeElementCollapseState2["Collapsed"] = 1] = "Collapsed";
@@ -108936,10 +108944,10 @@ var init_tree = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/diff/diffChange.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/diff/diffChange.js
 var DiffChange;
 var init_diffChange = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/diff/diffChange.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/diff/diffChange.js"() {
     DiffChange = class {
       /**
        * Constructs a new DiffChange with the given sequence information
@@ -108967,13 +108975,13 @@ var init_diffChange = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/diff/diff.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/diff/diff.js
 function stringDiff(original, modified, pretty) {
   return new LcsDiff(new StringDiffSequence(original), new StringDiffSequence(modified)).ComputeDiff(pretty).changes;
 }
 var StringDiffSequence, Debug, MyArray, DiffChangeHelper, LcsDiff, precomputedEqualityArray;
 var init_diff = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/diff/diff.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/diff/diff.js"() {
     init_diffChange();
     init_hash();
     StringDiffSequence = class {
@@ -109712,7 +109720,7 @@ var init_diff = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/indexTreeModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/indexTreeModel.js
 function isFilterResult(obj) {
   return !!obj && obj.visibility !== void 0;
 }
@@ -109731,7 +109739,7 @@ function isCollapsibleStateUpdate(update) {
 }
 var IndexTreeModel;
 var init_indexTreeModel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/indexTreeModel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/indexTreeModel.js"() {
     init_tree();
     init_arrays();
     init_async();
@@ -110230,13 +110238,13 @@ var init_indexTreeModel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/media/tree.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/media/tree.css
 var init_tree2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/media/tree.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/media/tree.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/abstractTree.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/abstractTree.js
 function asTreeDragAndDropData(data) {
   if (data instanceof ElementsDragAndDropData) {
     return new TreeElementsDragAndDropData(data);
@@ -110347,7 +110355,7 @@ function dfs(node, fn) {
 }
 var TreeElementsDragAndDropData, TreeNodeListDragAndDrop, ComposedTreeDelegate, RenderIndentGuides, EventCollection, TreeRenderer, FindFilter, FindToggles, TreeFindMode, TreeFindMatchType, DefaultTreeToggles, AbstractFindController, FindController, StickyScrollState, DefaultStickyScrollDelegate, StickyScrollController, StickyScrollWidget, StickyScrollFocus, Trait2, TreeNodeListMouseController, TreeNodeList, AbstractTree;
 var init_abstractTree = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/abstractTree.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/abstractTree.js"() {
     init_dom();
     init_domStylesheets();
     init_cssValue();
@@ -112227,10 +112235,10 @@ var init_abstractTree = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/objectTreeModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/objectTreeModel.js
 var ObjectTreeModel;
 var init_objectTreeModel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/objectTreeModel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/objectTreeModel.js"() {
     init_indexTreeModel();
     init_tree();
     init_iterator();
@@ -112441,7 +112449,7 @@ var init_objectTreeModel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/compressedObjectTreeModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/compressedObjectTreeModel.js
 function noCompress(element) {
   const elements = [element.element];
   const incompressible = element.incompressible || false;
@@ -112534,7 +112542,7 @@ function mapOptions(compressedNodeUnwrapper, options2) {
 }
 var wrapIdentityProvider, CompressedObjectTreeModel, DefaultElementMapper, CompressedTreeNodeWrapper, CompressibleObjectTreeModel;
 var init_compressedObjectTreeModel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/compressedObjectTreeModel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/compressedObjectTreeModel.js"() {
     init_indexTreeModel();
     init_objectTreeModel();
     init_tree();
@@ -112839,7 +112847,7 @@ var init_compressedObjectTreeModel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/objectTree.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/objectTree.js
 function asObjectTreeOptions(compressedTreeNodeProvider, options2) {
   return options2 && {
     ...options2,
@@ -112862,7 +112870,7 @@ function asObjectTreeOptions(compressedTreeNodeProvider, options2) {
 }
 var __decorate70, ObjectTree, CompressibleRenderer, CompressibleStickyScrollDelegate, CompressibleObjectTree;
 var init_objectTree = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/objectTree.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/objectTree.js"() {
     init_abstractTree();
     init_compressedObjectTreeModel();
     init_objectTreeModel();
@@ -113038,7 +113046,7 @@ var init_objectTree = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/asyncDataTree.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/asyncDataTree.js
 function createAsyncDataTreeNode(props) {
   return {
     ...props,
@@ -113177,7 +113185,7 @@ function getVisibility(filterResult) {
 }
 var AsyncDataTreeNodeWrapper, AsyncDataTreeRenderer, AsyncDataTreeElementsDragAndDropData, AsyncDataTreeNodeListDragAndDrop, AsyncFindFilter, AsyncFindController, AsyncDataTree, CompressibleAsyncDataTreeNodeWrapper, CompressibleAsyncDataTreeRenderer, CompressibleAsyncDataTree;
 var init_asyncDataTree = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/asyncDataTree.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/asyncDataTree.js"() {
     init_listView();
     init_abstractTree();
     init_indexTreeModel();
@@ -114008,10 +114016,10 @@ var init_asyncDataTree = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/dataTree.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/dataTree.js
 var DataTree;
 var init_dataTree = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/tree/dataTree.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/tree/dataTree.js"() {
     init_abstractTree();
     init_objectTreeModel();
     DataTree = class extends AbstractTree {
@@ -114028,10 +114036,10 @@ var init_dataTree = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextkey/common/contextkeys.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/contextkey/common/contextkeys.js
 var IsMacContext, IsLinuxContext, IsWindowsContext, IsWebContext, IsMacNativeContext, IsIOSContext, IsMobileContext, IsDevelopmentContext, ProductQualityContext, InputFocusedContextKey, InputFocusedContext;
 var init_contextkeys = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextkey/common/contextkeys.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/contextkey/common/contextkeys.js"() {
     init_platform();
     init_nls();
     init_contextkey();
@@ -114049,7 +114057,7 @@ var init_contextkeys = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/list/browser/listService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/list/browser/listService.js
 function createScopedContextKeyService(contextKeyService, widget) {
   const result = contextKeyService.createScoped(widget.getHTMLElement());
   RawWorkbenchListFocusContextKey.bindTo(result);
@@ -114192,7 +114200,7 @@ function workbenchTreeDataPreamble(accessor, options2) {
 }
 var __decorate71, __param65, IListService, ListService, RawWorkbenchListScrollAtBoundaryContextKey, WorkbenchListScrollAtTopContextKey, WorkbenchListScrollAtBottomContextKey, RawWorkbenchListFocusContextKey, WorkbenchTreeStickyScrollFocused, WorkbenchListSupportsMultiSelectContextKey, WorkbenchListFocusContextKey, WorkbenchListHasSelectionOrFocus, WorkbenchListDoubleSelection, WorkbenchListMultiSelection, WorkbenchListSelectionNavigation, WorkbenchListSupportsFind, WorkbenchTreeElementCanCollapse, WorkbenchTreeElementHasParent, WorkbenchTreeElementCanExpand, WorkbenchTreeElementHasChild, WorkbenchTreeFindOpen, WorkbenchListTypeNavigationModeKey, WorkbenchListAutomaticKeyboardNavigationLegacyKey, multiSelectModifierSettingKey, openModeSettingKey, horizontalScrollingKey, defaultFindModeSettingKey, typeNavigationModeSettingKey, keyboardNavigationSettingKey, scrollByPageKey, defaultFindMatchTypeSettingKey, treeIndentKey, treeRenderIndentGuidesKey, listSmoothScrolling, mouseWheelScrollSensitivityKey, fastScrollSensitivityKey, treeExpandMode, treeStickyScroll, treeStickyScrollMaxElements, MultipleSelectionController, WorkbenchList, WorkbenchPagedList, WorkbenchTable, ResourceNavigator, ListResourceNavigator, TableResourceNavigator, TreeResourceNavigator, WorkbenchObjectTree, WorkbenchCompressibleObjectTree, WorkbenchDataTree, WorkbenchAsyncDataTree, WorkbenchCompressibleAsyncDataTree, WorkbenchTreeInternals, configurationRegistry3;
 var init_listService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/list/browser/listService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/list/browser/listService.js"() {
     init_dom();
     init_listPaging();
     init_listWidget();
@@ -115048,16 +115056,16 @@ var init_listService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/countBadge/countBadge.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/countBadge/countBadge.css
 var init_countBadge = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/countBadge/countBadge.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/countBadge/countBadge.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/countBadge/countBadge.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/countBadge/countBadge.js
 var CountBadge;
 var init_countBadge2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/countBadge/countBadge.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/countBadge/countBadge.js"() {
     init_dom();
     init_strings();
     init_countBadge();
@@ -115105,10 +115113,10 @@ var init_countBadge2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/highlightedlabel/highlightedLabel.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/highlightedlabel/highlightedLabel.js
 var HighlightedLabel;
 var init_highlightedLabel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/highlightedlabel/highlightedLabel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/highlightedlabel/highlightedLabel.js"() {
     init_dom();
     init_hoverDelegate2();
     init_hoverDelegateFactory();
@@ -115226,13 +115234,13 @@ var init_highlightedLabel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconlabel.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconlabel.css
 var init_iconlabel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconlabel.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconlabel.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconLabel.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconLabel.js
 function splitMatches(labels, separator2, matches) {
   if (!matches) {
     return void 0;
@@ -115247,7 +115255,7 @@ function splitMatches(labels, separator2, matches) {
 }
 var FastLabelNode, IconLabel, Label, LabelWithHighlights;
 var init_iconLabel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconLabel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/iconLabel/iconLabel.js"() {
     init_iconlabel();
     init_dom();
     init_cssValue();
@@ -115509,19 +115517,19 @@ var init_iconLabel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/label/common/label.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/label/common/label.js
 var ILabelService;
 var init_label = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/label/common/label.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/label/common/label.js"() {
     init_instantiation();
     ILabelService = createDecorator("labelService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/format/browser/formattingEdit.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/format/browser/formattingEdit.js
 var FormattingEdit;
 var init_formattingEdit = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/format/browser/formattingEdit.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/format/browser/formattingEdit.js"() {
     init_editOperation();
     init_range();
     init_stableEditorScroll();
@@ -115573,10 +115581,10 @@ var init_formattingEdit = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/extensions/common/extensions.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/extensions/common/extensions.js
 var ExtensionIdentifier, ExtensionIdentifierSet;
 var init_extensions2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/extensions/common/extensions.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/extensions/common/extensions.js"() {
     ExtensionIdentifier = class {
       constructor(value) {
         this.value = value;
@@ -115611,7 +115619,7 @@ var init_extensions2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/format/browser/format.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/format/browser/format.js
 function getRealAndSyntheticDocumentFormattersOrdered(documentFormattingEditProvider, documentRangeFormattingEditProvider, model) {
   const result = [];
   const seen = new ExtensionIdentifierSet();
@@ -115898,7 +115906,7 @@ function getOnTypeFormattingEdits(workerService, languageFeaturesService, model,
 }
 var FormattingConflicts;
 var init_format = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/format/browser/format.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/format/browser/format.js"() {
     init_arrays();
     init_cancellation();
     init_errors();
@@ -115984,10 +115992,10 @@ var init_format = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/documentSymbols/browser/outlineModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/documentSymbols/browser/outlineModel.js
 var __decorate95, __param89, TreeElement, OutlineElement, OutlineGroup, OutlineModel, IOutlineModelService, OutlineModelService;
 var init_outlineModel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/documentSymbols/browser/outlineModel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/documentSymbols/browser/outlineModel.js"() {
     init_arrays();
     init_cancellation();
     init_errors();
@@ -116241,10 +116249,10 @@ var init_outlineModel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/dataChannel/common/dataChannel.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/dataChannel/common/dataChannel.js
 var IDataChannelService, NullDataChannelService;
 var init_dataChannel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/dataChannel/common/dataChannel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/dataChannel/common/dataChannel.js"() {
     init_instantiation();
     IDataChannelService = createDecorator("dataChannelService");
     NullDataChannelService = class {
@@ -116258,7 +116266,7 @@ var init_dataChannel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/legacyLinesDiffComputer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/legacyLinesDiffComputer.js
 function computeDiff(originalSequence, modifiedSequence, continueProcessingPredicate, pretty) {
   const diffAlgo = new LcsDiff(originalSequence, modifiedSequence, continueProcessingPredicate);
   return diffAlgo.ComputeDiff(pretty);
@@ -116309,7 +116317,7 @@ function createContinueProcessingPredicate(maximumRuntime) {
 }
 var MINIMUM_MATCHING_CHARACTER_LENGTH, LegacyLinesDiffComputer, LineSequence2, CharSequence, CharChange, LineChange, DiffComputer;
 var init_legacyLinesDiffComputer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/legacyLinesDiffComputer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/legacyLinesDiffComputer.js"() {
     init_diff();
     init_linesDiffComputer();
     init_rangeMapping();
@@ -116689,10 +116697,10 @@ var init_legacyLinesDiffComputer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/linesDiffComputers.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/linesDiffComputers.js
 var linesDiffComputers;
 var init_linesDiffComputers = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/diff/linesDiffComputers.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/diff/linesDiffComputers.js"() {
     init_legacyLinesDiffComputer();
     init_defaultLinesDiffComputer();
     linesDiffComputers = {
@@ -116702,10 +116710,10 @@ var init_linesDiffComputers = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/inlineCompletionsService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/inlineCompletionsService.js
 var __decorate105, __param99, IInlineCompletionsService, InlineCompletionsSnoozing, InlineCompletionsService, snoozeInlineSuggestId, cancelSnoozeInlineSuggestId, LAST_SNOOZE_DURATION_KEY, SnoozeInlineCompletion, CancelSnoozeInlineCompletion;
 var init_inlineCompletionsService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/inlineCompletionsService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/inlineCompletionsService.js"() {
     init_async();
     init_errors();
     init_event();
@@ -116888,10 +116896,10 @@ var init_inlineCompletionsService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplaceCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplaceCommand.js
 var InPlaceReplaceCommand;
 var init_inPlaceReplaceCommand = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplaceCommand.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplaceCommand.js"() {
     init_selection();
     InPlaceReplaceCommand = class {
       constructor(editRange, originalSelection, text2) {
@@ -116914,15 +116922,15 @@ var init_inPlaceReplaceCommand = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplace.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplace.css
 var init_inPlaceReplace = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplace.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplace.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplace.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplace.js
 var require_inPlaceReplace = __commonJS({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplace.js"(exports) {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplace.js"(exports) {
     init_async();
     init_errors();
     init_editorState();
@@ -117082,20 +117090,20 @@ var require_inPlaceReplace = __commonJS({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/textResourceConfiguration.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/textResourceConfiguration.js
 var ITextResourceConfigurationService, ITextResourcePropertiesService;
 var init_textResourceConfiguration = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/textResourceConfiguration.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/textResourceConfiguration.js"() {
     init_instantiation();
     ITextResourceConfigurationService = createDecorator("textResourceConfigurationService");
     ITextResourcePropertiesService = createDecorator("textResourcePropertiesService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/common.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/common.js
 var RateLimiter;
 var init_common = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/common.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/common.js"() {
     RateLimiter = class {
       constructor(timesPerSecond = 5) {
         this.timesPerSecond = timesPerSecond;
@@ -117113,10 +117121,10 @@ var init_common = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/sparseMultilineTokens.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/sparseMultilineTokens.js
 var SparseMultilineTokens, SparseMultilineTokensStorage, SparseLineTokens;
 var init_sparseMultilineTokens = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/sparseMultilineTokens.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/sparseMultilineTokens.js"() {
     init_position();
     init_range();
     init_eolCounter();
@@ -117532,7 +117540,7 @@ var init_sparseMultilineTokens = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/semanticTokensProviderStyling.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/semanticTokensProviderStyling.js
 function toMultilineTokens2(tokens, styling, languageId) {
   const srcData = tokens.data;
   const tokenCount = tokens.data.length / 5 | 0;
@@ -117614,7 +117622,7 @@ function toMultilineTokens2(tokens, styling, languageId) {
 }
 var __decorate147, __param141, ENABLE_TRACE, SemanticTokensProviderStyling, HashTableEntry, HashTable;
 var init_semanticTokensProviderStyling = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/semanticTokensProviderStyling.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/semanticTokensProviderStyling.js"() {
     init_encodedTokenAttributes();
     init_themeService();
     init_log();
@@ -117807,16 +117815,16 @@ var init_semanticTokensProviderStyling = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/semanticTokensStyling.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/semanticTokensStyling.js
 var ISemanticTokensStylingService;
 var init_semanticTokensStyling = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/semanticTokensStyling.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/semanticTokensStyling.js"() {
     init_instantiation();
     ISemanticTokensStylingService = createDecorator("semanticTokensStylingService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/unicodeTextModelHighlighter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/unicodeTextModelHighlighter.js
 function buildRegExpCharClassExpr(codePoints, flags) {
   const src = `[${escapeRegExpCharacters(codePoints.map((i2) => String.fromCodePoint(i2)).join(""))}]`;
   return src;
@@ -117826,7 +117834,7 @@ function isAllowedInvisibleCharacter(character) {
 }
 var UnicodeTextModelHighlighter, CodePointHighlighter;
 var init_unicodeTextModelHighlighter = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/unicodeTextModelHighlighter.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/unicodeTextModelHighlighter.js"() {
     init_range();
     init_textModelSearch();
     init_strings();
@@ -118002,25 +118010,25 @@ var init_unicodeTextModelHighlighter = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/workspace/common/workspaceTrust.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/workspace/common/workspaceTrust.js
 var IWorkspaceTrustManagementService;
 var init_workspaceTrust = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/workspace/common/workspaceTrust.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/workspace/common/workspaceTrust.js"() {
     init_instantiation();
     IWorkspaceTrustManagementService = createDecorator("workspaceTrustManagementService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/dialogs/common/dialogs.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/dialogs/common/dialogs.js
 var IDialogService;
 var init_dialogs = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/dialogs/common/dialogs.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/dialogs/common/dialogs.js"() {
     init_instantiation();
     IDialogService = createDecorator("dialogService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/glob.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/glob.js
 function starsToRegExp(starCount, isLastPattern) {
   switch (starCount) {
     case 0:
@@ -118495,7 +118503,7 @@ function aggregateBasenameMatches(parsedPatterns, result) {
 }
 var GLOBSTAR, GLOB_SPLIT, PATH_REGEX, NO_PATH_REGEX, ALL_FORWARD_SLASHES, T1, T2, T3, T3_2, T4, T5, CACHE, FALSE, NULL;
 var init_glob = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/glob.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/glob.js"() {
     init_async();
     init_extpath();
     init_map();
@@ -118523,7 +118531,7 @@ var init_glob = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languageSelector.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languageSelector.js
 function score2(selector, candidateUri, candidateLanguage, candidateIsSynchronized, candidateNotebookUri, candidateNotebookType) {
   if (Array.isArray(selector)) {
     let ret = 0;
@@ -118603,15 +118611,15 @@ function score2(selector, candidateUri, candidateLanguage, candidateIsSynchroniz
   }
 }
 var init_languageSelector = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languageSelector.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languageSelector.js"() {
     init_glob();
     init_path();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/diffEditorBreadcrumbs/browser/contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/diffEditorBreadcrumbs/browser/contribution.js
 var require_contribution = __commonJS({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/diffEditorBreadcrumbs/browser/contribution.js"(exports) {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/diffEditorBreadcrumbs/browser/contribution.js"(exports) {
     init_arrays();
     init_observable();
     init_hideUnchangedRegionsFeature();
@@ -118671,10 +118679,10 @@ var require_contribution = __commonJS({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/standaloneStrings.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/standaloneStrings.js
 var InspectTokensNLS, GoToLineNLS, QuickHelpNLS, QuickCommandNLS, QuickOutlineNLS, StandaloneCodeEditorNLS, ToggleHighContrastNLS, StandaloneServicesNLS;
 var init_standaloneStrings = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/standaloneStrings.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/standaloneStrings.js"() {
     init_nls();
     (function(InspectTokensNLS2) {
       InspectTokensNLS2.inspectTokensAction = localize(786, "Developer: Inspect Tokens");
@@ -118705,24 +118713,24 @@ var init_standaloneStrings = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/inspectTokens/inspectTokens.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/inspectTokens/inspectTokens.css
 var init_inspectTokens = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/inspectTokens/inspectTokens.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/inspectTokens/inspectTokens.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/common/standaloneTheme.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/common/standaloneTheme.js
 var IStandaloneThemeService;
 var init_standaloneTheme = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/common/standaloneTheme.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/common/standaloneTheme.js"() {
     init_instantiation();
     IStandaloneThemeService = createDecorator("themeService");
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/inspectTokens/inspectTokens.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/inspectTokens/inspectTokens.js
 var require_inspectTokens = __commonJS({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/inspectTokens/inspectTokens.js"(exports) {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/inspectTokens/inspectTokens.js"(exports) {
     init_inspectTokens();
     init_dom();
     init_color();
@@ -118982,10 +118990,10 @@ var require_inspectTokens = __commonJS({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/common/quickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/common/quickAccess.js
 var DefaultQuickAccessFilterValue, Extensions10, QuickAccessRegistry;
 var init_quickAccess = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/common/quickAccess.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/common/quickAccess.js"() {
     init_arrays();
     init_lifecycle();
     init_platform2();
@@ -119027,7 +119035,7 @@ var init_quickAccess = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/tokenization.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/tokenization.js
 function parseTokenTheme(source) {
   if (!source || !Array.isArray(source)) {
     return [];
@@ -119148,7 +119156,7 @@ function generateTokensCSSForColorMap(colorMap) {
 }
 var ParsedTokenThemeRule, colorRegExp, ColorMap, TokenTheme, STANDARD_TOKEN_TYPE_REGEXP, ThemeTrieElementRule, ThemeTrieElement;
 var init_tokenization = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/tokenization.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/tokenization.js"() {
     init_color();
     ParsedTokenThemeRule = class {
       constructor(token, index, fontStyle, foreground2, background) {
@@ -119295,10 +119303,10 @@ var init_tokenization = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/common/themes.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/common/themes.js
 var vs, vs_dark, hc_black, hc_light;
 var init_themes = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/common/themes.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/common/themes.js"() {
     init_editorColorRegistry();
     init_colorRegistry();
     vs = {
@@ -119519,7 +119527,7 @@ var init_themes = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/browser/iconsStyleSheet.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/theme/browser/iconsStyleSheet.js
 function getIconsStyleSheet(themeService) {
   const disposable = new DisposableStore();
   const onDidChangeEmmiter = disposable.add(new Emitter());
@@ -119570,7 +119578,7 @@ function getIconsStyleSheet(themeService) {
 }
 var UnthemedProductIconTheme;
 var init_iconsStyleSheet = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/theme/browser/iconsStyleSheet.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/theme/browser/iconsStyleSheet.js"() {
     init_cssValue();
     init_event();
     init_lifecycle();
@@ -119593,7 +119601,7 @@ var init_iconsStyleSheet = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneThemeService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneThemeService.js
 function isBuiltinTheme(themeName) {
   return themeName === VS_LIGHT_THEME_NAME || themeName === VS_DARK_THEME_NAME || themeName === HC_BLACK_THEME_NAME || themeName === HC_LIGHT_THEME_NAME;
 }
@@ -119615,7 +119623,7 @@ function newBuiltInTheme(builtinTheme) {
 }
 var VS_LIGHT_THEME_NAME, VS_DARK_THEME_NAME, HC_BLACK_THEME_NAME, HC_LIGHT_THEME_NAME, colorRegistry2, themingRegistry2, StandaloneTheme, StandaloneThemeService;
 var init_standaloneThemeService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneThemeService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneThemeService.js"() {
     init_dom();
     init_domStylesheets();
     init_browser();
@@ -119952,10 +119960,10 @@ ${this._themeCSS}`;
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/standalone/standaloneEnums.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/standalone/standaloneEnums.js
 var AccessibilitySupport, CodeActionTriggerType, CompletionItemInsertTextRule, CompletionItemKind, CompletionItemTag, CompletionTriggerKind, ContentWidgetPositionPreference, CursorChangeReason, DefaultEndOfLine, DocumentHighlightKind2, EditorAutoIndentStrategy, EditorOption, EndOfLinePreference, EndOfLineSequence, GlyphMarginLane2, HoverVerbosityAction2, IndentAction2, InjectedTextCursorStops2, InlayHintKind2, InlineCompletionEndOfLifeReasonKind2, InlineCompletionHintStyle2, InlineCompletionTriggerKind2, KeyCode, MarkerSeverity2, MarkerTag, MinimapPosition, MinimapSectionHeaderStyle, MouseTargetType, NewSymbolNameTag2, NewSymbolNameTriggerKind2, OverlayWidgetPositionPreference, OverviewRulerLane2, PartialAcceptTriggerKind, PositionAffinity, RenderLineNumbersType, RenderMinimap, ScrollType, ScrollbarVisibility, SelectionDirection, ShowLightbulbIconMode2, SignatureHelpTriggerKind2, SymbolKind, SymbolTag, TextDirection2, TextEditorCursorBlinkingStyle, TextEditorCursorStyle2, TrackedRangeStickiness, WrappingIndent;
 var init_standaloneEnums = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/standalone/standaloneEnums.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/standalone/standaloneEnums.js"() {
     (function(AccessibilitySupport2) {
       AccessibilitySupport2[AccessibilitySupport2["Unknown"] = 0] = "Unknown";
       AccessibilitySupport2[AccessibilitySupport2["Disabled"] = 1] = "Disabled";
@@ -120562,7 +120570,7 @@ var init_standaloneEnums = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/editorBaseApi.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorBaseApi.js
 function createMonacoBaseAPI() {
   return {
     editor: void 0,
@@ -120585,7 +120593,7 @@ function createMonacoBaseAPI() {
 }
 var KeyMod;
 var init_editorBaseApi = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/editorBaseApi.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorBaseApi.js"() {
     init_cancellation();
     init_event();
     init_keyCodes();
@@ -120615,13 +120623,13 @@ var init_editorBaseApi = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standalone-tokens.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standalone-tokens.css
 var init_standalone_tokens = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standalone-tokens.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standalone-tokens.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/worker/webWorker.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/worker/webWorker.js
 function logOnceWebWorkerWarning(err) {
   if (!isWeb) {
     return;
@@ -120640,7 +120648,7 @@ function propertyIsDynamicEvent(name) {
 }
 var DEFAULT_CHANNEL, INITIALIZE, webWorkerWarningLogged, RequestMessage, ReplyMessage, SubscribeEventMessage, EventMessage, UnsubscribeEventMessage, WebWorkerProtocol, WebWorkerClient;
 var init_webWorker = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/worker/webWorker.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/worker/webWorker.js"() {
     init_errors();
     init_event();
     init_lifecycle();
@@ -120934,7 +120942,7 @@ var init_webWorker = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/webWorkerFactory.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/webWorkerFactory.js
 function getWorker(descriptor, id) {
   const label = descriptor.label || "anonymous" + id;
   const monacoEnvironment2 = getMonacoEnvironment();
@@ -121002,7 +121010,7 @@ function createWebWorker(arg0, arg1) {
 }
 var ttPolicy5, WebWorker, WebWorkerDescriptor;
 var init_webWorkerFactory = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/webWorkerFactory.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/webWorkerFactory.js"() {
     init_trustedTypes();
     init_errors();
     init_network();
@@ -121083,7 +121091,7 @@ var init_webWorkerFactory = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/linkComputer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/linkComputer.js
 function getStateMachine() {
   if (_stateMachine === null) {
     _stateMachine = new StateMachine([
@@ -121256,7 +121264,7 @@ function computeLinks(model) {
 }
 var Uint8Matrix, StateMachine, _stateMachine, _classifier, LinkComputer;
 var init_linkComputer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/linkComputer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/linkComputer.js"() {
     init_characterClassifier();
     Uint8Matrix = class {
       constructor(rows, cols, defaultValue) {
@@ -121451,10 +121459,10 @@ var init_linkComputer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/inplaceReplaceSupport.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/inplaceReplaceSupport.js
 var BasicInplaceReplace;
 var init_inplaceReplaceSupport = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/supports/inplaceReplaceSupport.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/supports/inplaceReplaceSupport.js"() {
     BasicInplaceReplace = class _BasicInplaceReplace {
       constructor() {
         this._defaultValueSet = [
@@ -121537,7 +121545,7 @@ var init_inplaceReplaceSupport = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/defaultDocumentColorsComputer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/defaultDocumentColorsComputer.js
 function _parseCaptureGroups(captureGroups) {
   const values = [];
   for (const captureGroup of captureGroups) {
@@ -121658,12 +121666,12 @@ function computeDefaultDocumentColors(model) {
   return computeColors(model);
 }
 var init_defaultDocumentColorsComputer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languages/defaultDocumentColorsComputer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languages/defaultDocumentColorsComputer.js"() {
     init_color();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/findSectionHeaders.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/findSectionHeaders.js
 function findSectionHeaders(model, options2) {
   let headers = [];
   if (options2.findRegionSectionHeaders && options2.foldingRules?.markers) {
@@ -121761,7 +121769,7 @@ function getHeaderText(text2) {
 }
 var trimDashesRegex, CHUNK_SIZE, MAX_SECTION_LINES;
 var init_findSectionHeaders = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/findSectionHeaders.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/findSectionHeaders.js"() {
     init_textModelSearch();
     init_strings();
     trimDashesRegex = /^-+|-+$/g;
@@ -121770,10 +121778,10 @@ var init_findSectionHeaders = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/mirrorTextModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/mirrorTextModel.js
 var MirrorTextModel;
 var init_mirrorTextModel = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/mirrorTextModel.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/mirrorTextModel.js"() {
     init_strings();
     init_position();
     init_prefixSumComputer();
@@ -121869,10 +121877,10 @@ var init_mirrorTextModel = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/textModelSync/textModelSync.impl.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/textModelSync/textModelSync.impl.js
 var STOP_SYNC_MODEL_DELTA_TIME_MS, WorkerTextModelSyncClient, WorkerTextModelSyncServer, MirrorModel;
 var init_textModelSync_impl = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/textModelSync/textModelSync.impl.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/textModelSync/textModelSync.impl.js"() {
     init_async();
     init_lifecycle();
     init_uri();
@@ -122162,10 +122170,10 @@ var init_textModelSync_impl = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/editorWebWorker.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorWebWorker.js
 var EditorWorker;
 var init_editorWebWorker = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/editorWebWorker.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorWebWorker.js"() {
     init_diff();
     init_range();
     init_linkComputer();
@@ -122450,10 +122458,10 @@ var init_editorWebWorker = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/editorWorkerHost.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorWorkerHost.js
 var EditorWorkerHost;
 var init_editorWorkerHost = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/editorWorkerHost.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorWorkerHost.js"() {
     EditorWorkerHost = class _EditorWorkerHost {
       static {
         this.CHANNEL_NAME = "editorWorkerHost";
@@ -122468,7 +122476,7 @@ var init_editorWorkerHost = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/editorWorkerService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/editorWorkerService.js
 function canSyncModel(modelService, resource) {
   const model = modelService.getModel(resource);
   if (!model) {
@@ -122481,7 +122489,7 @@ function canSyncModel(modelService, resource) {
 }
 var __decorate166, __param160, STOP_WORKER_DELTA_TIME_MS, EditorWorkerService, WordBasedCompletionItemProvider, WorkerManager, SynchronousWorkerClient, EditorWorkerClient;
 var init_editorWorkerService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/editorWorkerService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/editorWorkerService.js"() {
     init_async();
     init_lifecycle();
     init_webWorker();
@@ -122826,13 +122834,13 @@ var init_editorWorkerService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneWebWorker.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneWebWorker.js
 function createWebWorker2(modelService, opts) {
   return new MonacoWebWorkerImpl(modelService, opts);
 }
 var MonacoWebWorkerImpl;
 var init_standaloneWebWorker = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneWebWorker.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneWebWorker.js"() {
     init_editorWorkerService();
     MonacoWebWorkerImpl = class extends EditorWorkerClient {
       constructor(modelService, opts) {
@@ -122875,7 +122883,7 @@ var init_standaloneWebWorker = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchCommon.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchCommon.js
 function isFuzzyActionArr(what) {
   return Array.isArray(what);
 }
@@ -122976,12 +122984,12 @@ function stateExists(lexer2, inState) {
   return false;
 }
 var init_monarchCommon = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchCommon.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchCommon.js"() {
     init_strings();
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchLexer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchLexer.js
 function findBracket(lexer2, matched) {
   if (!matched) {
     return null;
@@ -123007,7 +123015,7 @@ function findBracket(lexer2, matched) {
 }
 var __decorate167, __param161, MonarchTokenizer_1, CACHE_STACK_DEPTH, MonarchStackElementFactory, MonarchStackElement, EmbeddedLanguageData, MonarchLineStateFactory, MonarchLineState, MonarchClassicTokensCollector, MonarchModernTokensCollector, MonarchTokenizer;
 var init_monarchLexer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchLexer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchLexer.js"() {
     init_lifecycle();
     init_languages();
     init_nullTokenize();
@@ -123682,7 +123690,7 @@ var init_monarchLexer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/colorizer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/colorizer.js
 function _colorize(lines, tabSize, tokenizationSupport, languageIdCodec) {
   return new Promise((c, e) => {
     const execute = () => {
@@ -123754,7 +123762,7 @@ function _actualColorize(lines, tabSize, tokenizationSupport, languageIdCodec) {
 }
 var ttPolicy6, Colorizer;
 var init_colorizer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/colorizer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/colorizer.js"() {
     init_trustedTypes();
     init_strings();
     init_languages();
@@ -123818,10 +123826,10 @@ var init_colorizer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/abstractCodeEditorService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/abstractCodeEditorService.js
 var __decorate168, __param162, AbstractCodeEditorService;
 var init_abstractCodeEditorService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/abstractCodeEditorService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/abstractCodeEditorService.js"() {
     init_event();
     init_lifecycle();
     init_linkedList();
@@ -123951,10 +123959,10 @@ var init_abstractCodeEditorService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneCodeEditorService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneCodeEditorService.js
 var __decorate169, __param163, StandaloneCodeEditorService;
 var init_standaloneCodeEditorService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneCodeEditorService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneCodeEditorService.js"() {
     init_dom();
     init_network();
     init_abstractCodeEditorService();
@@ -124060,10 +124068,10 @@ var init_standaloneCodeEditorService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneLayoutService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneLayoutService.js
 var __decorate170, __param164, StandaloneLayoutService, EditorScopedLayoutService;
 var init_standaloneLayoutService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneLayoutService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneLayoutService.js"() {
     init_dom();
     init_window();
     init_arrays();
@@ -124143,13 +124151,13 @@ var init_standaloneLayoutService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/undoRedo/common/undoRedoService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/undoRedo/common/undoRedoService.js
 function getResourceLabel(resource) {
   return resource.scheme === Schemas.file ? resource.fsPath : resource.path;
 }
 var __decorate171, __param165, DEBUG2, stackElementCounter, ResourceStackElement, ResourceReasonPair, RemovedResources, WorkspaceStackElement, ResourceEditStack, EditStackSnapshot, missingEditStack, UndoRedoService, WorkspaceVerificationError;
 var init_undoRedoService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/undoRedo/common/undoRedoService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/undoRedo/common/undoRedoService.js"() {
     init_errors();
     init_lifecycle();
     init_network();
@@ -125242,10 +125250,10 @@ var init_undoRedoService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/semanticTokensStylingService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/semanticTokensStylingService.js
 var __decorate172, __param166, SemanticTokensStylingService;
 var init_semanticTokensStylingService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/semanticTokensStylingService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/semanticTokensStylingService.js"() {
     init_lifecycle();
     init_language();
     init_themeService();
@@ -125296,7 +125304,7 @@ var init_semanticTokensStylingService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languageFeatureRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/languageFeatureRegistry.js
 function isExclusive(selector) {
   if (typeof selector === "string") {
     return false;
@@ -125317,7 +125325,7 @@ function isBuiltinSelector(selector) {
 }
 var MatchCandidate, LanguageFeatureRegistry;
 var init_languageFeatureRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/languageFeatureRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/languageFeatureRegistry.js"() {
     init_event();
     init_lifecycle();
     init_model2();
@@ -125456,10 +125464,10 @@ var init_languageFeatureRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languageFeaturesService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languageFeaturesService.js
 var LanguageFeaturesService;
 var init_languageFeaturesService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languageFeaturesService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languageFeaturesService.js"() {
     init_languageFeatureRegistry();
     init_languageFeatures();
     init_extensions();
@@ -125508,16 +125516,16 @@ var init_languageFeaturesService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/hover/browser/hover.css
+// app/static/vendor/monaco-editor-core/esm/vs/platform/hover/browser/hover.css
 var init_hover2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/hover/browser/hover.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/hover/browser/hover.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/hover/browser/hoverWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/hover/browser/hoverWidget.js
 var __decorate173, __param167, $17, HoverWidget2, CompositeMouseTracker, ElementHoverTarget;
 var init_hoverWidget3 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/hover/browser/hoverWidget.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/hover/browser/hoverWidget.js"() {
     init_hover2();
     init_lifecycle();
     init_event();
@@ -126078,13 +126086,13 @@ var init_hoverWidget3 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/contextview/contextview.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/contextview/contextview.css
 var init_contextview = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/contextview/contextview.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/contextview/contextview.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/contextview/contextview.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/contextview/contextview.js
 function isAnchor(obj) {
   const anchor = obj;
   return !!anchor && typeof anchor.x === "number" && typeof anchor.y === "number";
@@ -126112,7 +126120,7 @@ function layout(viewportSize, viewSize, anchor) {
 }
 var LayoutAnchorMode, ContextView, SHADOW_ROOT_CSS;
 var init_contextview2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/contextview/contextview.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/contextview/contextview.js"() {
     init_canIUse();
     init_dom();
     init_lifecycle();
@@ -126374,10 +126382,10 @@ var init_contextview2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextview/browser/contextViewService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/contextview/browser/contextViewService.js
 var __decorate174, __param168, ContextViewHandler, ContextViewService;
 var init_contextViewService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextview/browser/contextViewService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/contextview/browser/contextViewService.js"() {
     init_contextview2();
     init_lifecycle();
     init_layoutService();
@@ -126450,20 +126458,20 @@ var init_contextViewService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/hover/hover.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/hover/hover.js
 function isManagedHoverTooltipMarkdownString(obj) {
   const candidate = obj;
   return typeof candidate === "object" && "markdown" in candidate && "markdownNotSupportedFallback" in candidate;
 }
 var init_hover3 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/hover/hover.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/hover/hover.js"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/hover/browser/updatableHoverWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/hover/browser/updatableHoverWidget.js
 var ManagedHoverWidget;
 var init_updatableHoverWidget = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/hover/browser/updatableHoverWidget.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/hover/browser/updatableHoverWidget.js"() {
     init_dom();
     init_hover3();
     init_cancellation();
@@ -126558,7 +126566,7 @@ var init_updatableHoverWidget = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/hover/browser/hoverService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/hover/browser/hoverService.js
 function getHoverOptionsIdentity(options2) {
   if (options2 === void 0) {
     return void 0;
@@ -126614,7 +126622,7 @@ function getHoverTargetElement(element, stopElement) {
 }
 var __decorate175, __param169, HoverService, HoverContextViewDelegate;
 var init_hoverService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/hover/browser/hoverService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/hover/browser/hoverService.js"() {
     init_extensions();
     init_themeService();
     init_colorRegistry();
@@ -127092,13 +127100,13 @@ var init_hoverService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/configuration/common/configurationModels.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/configuration/common/configurationModels.js
 function freeze2(data) {
   return Object.isFrozen(data) ? data : deepFreeze(data);
 }
 var ConfigurationModel, ConfigurationModelParser, ConfigurationInspectValue, Configuration, ConfigurationChangeEvent;
 var init_configurationModels = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/configuration/common/configurationModels.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/configuration/common/configurationModels.js"() {
     init_arrays();
     init_map();
     init_objects();
@@ -127681,7 +127689,7 @@ var init_configurationModels = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/keybindingResolver.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/keybindingResolver.js
 function KbFound(commandId, commandArgs, isBubble) {
   return { kind: 2, commandId, commandArgs, isBubble };
 }
@@ -127696,7 +127704,7 @@ function printSourceExplanation(kb) {
 }
 var NoMatchingKb, MoreChordsNeeded, KeybindingResolver;
 var init_keybindingResolver = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/keybindingResolver.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/keybindingResolver.js"() {
     init_contextkey();
     NoMatchingKb = {
       kind: 0
@@ -127957,10 +127965,10 @@ var init_keybindingResolver = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/abstractKeybindingService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/abstractKeybindingService.js
 var HIGH_FREQ_COMMANDS, AbstractKeybindingService, KeybindingModifierSet;
 var init_abstractKeybindingService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/abstractKeybindingService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/abstractKeybindingService.js"() {
     init_async();
     init_errors();
     init_event();
@@ -128245,7 +128253,7 @@ var init_abstractKeybindingService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/resolvedKeybindingItem.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/resolvedKeybindingItem.js
 function toEmptyArrayIfContainsNull(arr) {
   const result = [];
   for (let i2 = 0, len = arr.length; i2 < len; i2++) {
@@ -128259,7 +128267,7 @@ function toEmptyArrayIfContainsNull(arr) {
 }
 var ResolvedKeybindingItem;
 var init_resolvedKeybindingItem = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/resolvedKeybindingItem.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/resolvedKeybindingItem.js"() {
     ResolvedKeybindingItem = class {
       constructor(resolvedKeybinding, command, commandArgs, when, isDefault, extensionId, isBuiltinExtension) {
         this._resolvedKeybindingItemBrand = void 0;
@@ -128280,10 +128288,10 @@ var init_resolvedKeybindingItem = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/baseResolvedKeybinding.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/baseResolvedKeybinding.js
 var BaseResolvedKeybinding;
 var init_baseResolvedKeybinding = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/baseResolvedKeybinding.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/baseResolvedKeybinding.js"() {
     init_errors();
     init_keybindingLabels();
     init_keybindings();
@@ -128333,10 +128341,10 @@ var init_baseResolvedKeybinding = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/usLayoutResolvedKeybinding.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/usLayoutResolvedKeybinding.js
 var USLayoutResolvedKeybinding;
 var init_usLayoutResolvedKeybinding = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/keybinding/common/usLayoutResolvedKeybinding.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/keybinding/common/usLayoutResolvedKeybinding.js"() {
     init_keyCodes();
     init_keybindings();
     init_baseResolvedKeybinding();
@@ -128555,7 +128563,7 @@ var init_usLayoutResolvedKeybinding = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languagesAssociations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languagesAssociations.js
 function registerPlatformLanguageAssociation(association, warnOnOverwrite = false) {
   _registerLanguageAssociation(association, false, warnOnOverwrite);
 }
@@ -128706,7 +128714,7 @@ function getAssociationByFirstline(firstLine) {
 }
 var registeredAssociations, nonUserRegisteredAssociations, userRegisteredAssociations;
 var init_languagesAssociations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languagesAssociations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languagesAssociations.js"() {
     init_glob();
     init_mime();
     init_network();
@@ -128720,10 +128728,10 @@ var init_languagesAssociations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languagesRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languagesRegistry.js
 var hasOwnProperty2, NULL_LANGUAGE_ID, LanguageIdCodec, LanguagesRegistry;
 var init_languagesRegistry = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languagesRegistry.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languagesRegistry.js"() {
     init_event();
     init_lifecycle();
     init_strings();
@@ -128959,10 +128967,10 @@ var init_languagesRegistry = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languageService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languageService.js
 var LanguageService, LanguageSelection;
 var init_languageService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/languageService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/languageService.js"() {
     init_event();
     init_lifecycle();
     init_languagesRegistry();
@@ -129052,7 +129060,7 @@ var init_languageService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/menu/menu.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/menu/menu.js
 function cleanMnemonic(label) {
   const regex = MENU_MNEMONIC_REGEX;
   const matches = regex.exec(label);
@@ -129464,7 +129472,7 @@ ${formatRule(Codicon.menuSubmenu)}
 }
 var MENU_MNEMONIC_REGEX, MENU_ESCAPED_MNEMONIC_REGEX, HorizontalDirection, VerticalDirection, Menu, BaseMenuActionViewItem, SubmenuMenuActionViewItem, MenuSeparatorActionViewItem;
 var init_menu = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/menu/menu.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/menu/menu.js"() {
     init_browser();
     init_touch();
     init_dom();
@@ -130175,10 +130183,10 @@ var init_menu = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextview/browser/contextMenuHandler.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/contextview/browser/contextMenuHandler.js
 var ContextMenuHandler;
 var init_contextMenuHandler = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextview/browser/contextMenuHandler.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/contextview/browser/contextMenuHandler.js"() {
     init_dom();
     init_mouseEvent();
     init_menu();
@@ -130299,10 +130307,10 @@ var init_contextMenuHandler = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextview/browser/contextMenuService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/contextview/browser/contextMenuService.js
 var __decorate176, __param170, ContextMenuService, ContextMenuMenuDelegate;
 var init_contextMenuService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextview/browser/contextMenuService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/contextview/browser/contextMenuService.js"() {
     init_dom();
     init_actions();
     init_event();
@@ -130402,10 +130410,10 @@ var init_contextMenuService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/editor/common/editor.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/editor/common/editor.js
 var EditorOpenSource;
 var init_editor2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/editor/common/editor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/editor/common/editor.js"() {
     (function(EditorOpenSource2) {
       EditorOpenSource2[EditorOpenSource2["API"] = 0] = "API";
       EditorOpenSource2[EditorOpenSource2["USER"] = 1] = "USER";
@@ -130413,10 +130421,10 @@ var init_editor2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/openerService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/openerService.js
 var __decorate177, __param171, CommandOpener, EditorOpener, OpenerService;
 var init_openerService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/services/openerService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/services/openerService.js"() {
     init_dom();
     init_window();
     init_cancellation();
@@ -130611,10 +130619,10 @@ var init_openerService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/markerDecorationsService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/markerDecorationsService.js
 var __decorate178, __param172, MarkerDecorationsService, MarkerDecorations;
 var init_markerDecorationsService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/markerDecorationsService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/markerDecorationsService.js"() {
     init_markers();
     init_lifecycle();
     init_model2();
@@ -130861,13 +130869,13 @@ var init_markerDecorationsService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/modelService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/modelService.js
 function MODEL_ID2(resource) {
   return resource.toString();
 }
 var __decorate179, __param173, ModelService_1, ModelData2, DEFAULT_EOL, DisposedModelInfo, ModelService, DefaultModelSHA1Computer;
 var init_modelService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/modelService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/modelService.js"() {
     init_event();
     init_hash();
     init_lifecycle();
@@ -131257,16 +131265,16 @@ var init_modelService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/quickInput/standaloneQuickInput.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/quickInput/standaloneQuickInput.css
 var init_standaloneQuickInput = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/quickInput/standaloneQuickInput.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/quickInput/standaloneQuickInput.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickAccess.js
 var __decorate180, __param174, QuickAccessController;
 var init_quickAccess2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickAccess.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickAccess.js"() {
     init_async();
     init_cancellation();
     init_event();
@@ -131438,13 +131446,13 @@ var init_quickAccess2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/media/quickInput.css
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/media/quickInput.css
 var init_quickInput2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/media/quickInput.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/media/quickInput.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/linkedText.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/linkedText.js
 function parseLinkedText(text2) {
   const result = [];
   let index = 0;
@@ -131468,7 +131476,7 @@ function parseLinkedText(text2) {
 }
 var __decorate181, LinkedText, LINK_REGEX;
 var init_linkedText = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/linkedText.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/linkedText.js"() {
     init_decorators();
     __decorate181 = function(decorators, target, key, desc) {
       var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -131491,7 +131499,7 @@ var init_linkedText = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputUtils.js
 function getIconClass(iconPath) {
   if (!iconPath) {
     return void 0;
@@ -131565,7 +131573,7 @@ function renderQuickInputDescription(description, container, actionHandler) {
 }
 var iconPathToClass, iconClassGenerator;
 var init_quickInputUtils = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputUtils.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputUtils.js"() {
     init_dom();
     init_domStylesheets();
     init_cssValue();
@@ -131583,10 +131591,10 @@ var init_quickInputUtils = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInput.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInput.js
 var __decorate182, __param175, inQuickInputContextKeyValue, InQuickInputContextKey, inQuickInputContext, quickInputAlignmentContextKeyValue, QuickInputAlignmentContextKey, quickInputTypeContextKeyValue, QuickInputTypeContextKey, endOfQuickInputBoxContextKeyValue, EndOfQuickInputBoxContextKey, endOfQuickInputBoxContext, backButton, QuickInput, QuickPick, InputBox2, QuickInputHoverDelegate;
 var init_quickInput3 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInput.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInput.js"() {
     init_dom();
     init_keyboardEvent();
     init_toggle2();
@@ -132565,16 +132573,16 @@ var init_quickInput3 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/progressbar/progressbar.css
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/progressbar/progressbar.css
 var init_progressbar = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/progressbar/progressbar.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/progressbar/progressbar.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/progressbar/progressbar.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/progressbar/progressbar.js
 var CSS_DONE, CSS_ACTIVE, CSS_INFINITE, CSS_INFINITE_LONG_RUNNING, CSS_DISCRETE, ProgressBar;
 var init_progressbar2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/progressbar/progressbar.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/progressbar/progressbar.js"() {
     init_dom();
     init_async();
     init_lifecycle();
@@ -132662,10 +132670,10 @@ var init_progressbar2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputBox.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputBox.js
 var $18, QuickInputBox;
 var init_quickInputBox = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputBox.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputBox.js"() {
     init_dom();
     init_findInput2();
     init_lifecycle();
@@ -132760,7 +132768,7 @@ var init_quickInputBox = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/comparers.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/comparers.js
 function compareFileNames(one, other, caseSensitive = false) {
   const a = one || "";
   const b = other || "";
@@ -132807,7 +132815,7 @@ function compareByPrefix(one, other, lookFor) {
 }
 var intlFileNameCollatorBaseNumeric, intlFileNameCollatorNumeric, intlFileNameCollatorNumericCaseInsensitive;
 var init_comparers = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/comparers.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/base/common/comparers.js"() {
     init_date();
     init_lazy();
     intlFileNameCollatorBaseNumeric = new Lazy(() => {
@@ -132832,7 +132840,7 @@ var init_comparers = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputList.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputList.js
 function matchesContiguousIconAware(query, target) {
   const { text: text2, iconOffsets } = target;
   if (!iconOffsets || iconOffsets.length === 0) {
@@ -132873,7 +132881,7 @@ function compareEntries(elementA, elementB, lookFor) {
 }
 var __decorate183, __param176, QuickPickItemElementRenderer_1, $19, BaseQuickPickItemElement, QuickPickItemElement, QuickPickSeparatorFocusReason, QuickPickSeparatorElement, QuickInputItemDelegate, QuickInputAccessibilityProvider, BaseQuickInputListRenderer, QuickPickItemElementRenderer, QuickPickSeparatorElementRenderer, QuickInputList;
 var init_quickInputList = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputList.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputList.js"() {
     init_cssValue();
     init_dom();
     init_keyboardEvent();
@@ -134073,7 +134081,7 @@ var init_quickInputList = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputActions.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputActions.js
 function registerQuickInputCommandAndKeybindingRule(rule, options2 = {}) {
   KeybindingsRegistry.registerCommandAndKeybindingRule({
     weight: 200,
@@ -134142,7 +134150,7 @@ function focusHandler(focus, focusOnQuickNatigate) {
 }
 var ctrlKeyMod3, nextSeparatorFallbackDesc, prevSeparatorFallbackDesc;
 var init_quickInputActions = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputActions.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputActions.js"() {
     init_platform();
     init_nls();
     init_contextkey();
@@ -134276,10 +134284,10 @@ var init_quickInputActions = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeRenderer.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeRenderer.js
 var __decorate184, __param177, QuickInputTreeRenderer_1, $20, QuickInputTreeRenderer;
 var init_quickInputTreeRenderer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeRenderer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeRenderer.js"() {
     init_cssValue();
     init_dom();
     init_actionbar2();
@@ -134412,10 +134420,10 @@ var init_quickInputTreeRenderer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputDelegate.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputDelegate.js
 var QuickInputTreeDelegate;
 var init_quickInputDelegate = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputDelegate.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputDelegate.js"() {
     init_quickInputTreeRenderer();
     QuickInputTreeDelegate = class {
       getHeight(_element) {
@@ -134428,7 +134436,7 @@ var init_quickInputDelegate = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTree.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTree.js
 function getParentNodeState(parentChildren) {
   let containsChecks = false;
   let containsUnchecks = false;
@@ -134453,14 +134461,14 @@ function getParentNodeState(parentChildren) {
   return newState;
 }
 var init_quickInputTree = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTree.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTree.js"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeAccessibilityProvider.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeAccessibilityProvider.js
 var QuickTreeAccessibilityProvider;
 var init_quickInputTreeAccessibilityProvider = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeAccessibilityProvider.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeAccessibilityProvider.js"() {
     init_event();
     init_iconLabels();
     init_nls();
@@ -134492,10 +134500,10 @@ var init_quickInputTreeAccessibilityProvider = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeFilter.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeFilter.js
 var QuickInputTreeFilter;
 var init_quickInputTreeFilter = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeFilter.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeFilter.js"() {
     init_iconLabels();
     QuickInputTreeFilter = class {
       constructor() {
@@ -134522,10 +134530,10 @@ var init_quickInputTreeFilter = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeSorter.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeSorter.js
 var QuickInputTreeSorter;
 var init_quickInputTreeSorter = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeSorter.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeSorter.js"() {
     init_lifecycle();
     QuickInputTreeSorter = class extends Disposable {
       constructor() {
@@ -134564,10 +134572,10 @@ var init_quickInputTreeSorter = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeController.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeController.js
 var __decorate185, __param178, $21, QuickInputTreeController;
 var init_quickInputTreeController = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeController.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/tree/quickInputTreeController.js"() {
     init_dom();
     init_abstractTree();
     init_event();
@@ -134733,10 +134741,10 @@ var init_quickInputTreeController = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputController.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputController.js
 var __decorate186, __param179, QuickInputController_1, $22, VIEWSTATE_STORAGE_KEY, QuickInputController, QuickInputDragAndDropController;
 var init_quickInputController = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputController.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputController.js"() {
     init_dom();
     init_domStylesheets();
     init_actionbar2();
@@ -135597,10 +135605,10 @@ var init_quickInputController = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputService.js
 var __decorate187, __param180, QuickInputService;
 var init_quickInputService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/quickInputService.js"() {
     init_cancellation();
     init_event();
     init_contextkey();
@@ -135786,10 +135794,10 @@ var init_quickInputService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/quickInput/standaloneQuickInputService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/quickInput/standaloneQuickInputService.js
 var __decorate188, __param181, EditorScopedQuickInputService, StandaloneQuickInputService, QuickInputEditorContribution, QuickInputEditorWidget;
 var init_standaloneQuickInputService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/quickInput/standaloneQuickInputService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/quickInput/standaloneQuickInputService.js"() {
     init_standaloneQuickInput();
     init_event();
     init_editorExtensions();
@@ -135975,10 +135983,10 @@ var init_standaloneQuickInputService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/accessibility/browser/accessibilityService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/accessibility/browser/accessibilityService.js
 var __decorate189, __param182, AccessibilityService;
 var init_accessibilityService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/accessibility/browser/accessibilityService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/accessibility/browser/accessibilityService.js"() {
     init_dom();
     init_window();
     init_event();
@@ -136088,10 +136096,10 @@ var init_accessibilityService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/clipboard/browser/clipboardService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/clipboard/browser/clipboardService.js
 var __decorate190, __param183, BrowserClipboardService_1, vscodeResourcesMime, BrowserClipboardService;
 var init_clipboardService2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/clipboard/browser/clipboardService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/clipboard/browser/clipboardService.js"() {
     init_browser();
     init_dom();
     init_window();
@@ -136270,7 +136278,7 @@ var init_clipboardService2 = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextkey/browser/contextKeyService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/contextkey/browser/contextKeyService.js
 function allEventKeysInContext(event, context) {
   return event.allKeysContainedIn(new Set(Object.keys(context)));
 }
@@ -136304,7 +136312,7 @@ function stringifyURIs(contextValue) {
 }
 var __decorate191, __param184, KEYBINDING_CONTEXT_ATTR, Context3, NullContext, ConfigAwareContextValuesContainer, ContextKey, SimpleContextKeyChangeEvent, ArrayContextKeyChangeEvent, CompositeContextKeyChangeEvent, AbstractContextKeyService, ContextKeyService, ScopedContextKeyService;
 var init_contextKeyService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/contextkey/browser/contextKeyService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/contextkey/browser/contextKeyService.js"() {
     init_event();
     init_iterator();
     init_lifecycle();
@@ -136718,10 +136726,10 @@ var init_contextKeyService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/graph.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/graph.js
 var Node3, Graph;
 var init_graph = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/graph.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/graph.js"() {
     Node3 = class {
       constructor(key, data) {
         this.key = key;
@@ -136812,10 +136820,10 @@ var init_graph = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/instantiationService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/instantiationService.js
 var _enableAllTracing, CyclicDependencyError, InstantiationService, Trace;
 var init_instantiationService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/instantiation/common/instantiationService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/instantiation/common/instantiationService.js"() {
     init_async();
     init_errors();
     init_lifecycle();
@@ -137187,10 +137195,10 @@ ${graph.toString()}`;
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/markers/common/markerService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/markers/common/markerService.js
 var unsupportedSchemas, DoubleResourceMap, MarkerStats, MarkerService;
 var init_markerService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/markers/common/markerService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/markers/common/markerService.js"() {
     init_arrays();
     init_event();
     init_iterator();
@@ -137494,10 +137502,10 @@ var init_markerService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/configuration/common/configurations.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/configuration/common/configurations.js
 var DefaultConfiguration;
 var init_configurations = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/configuration/common/configurations.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/configuration/common/configurations.js"() {
     init_lifecycle();
     init_objects();
     init_configurationModels();
@@ -137542,10 +137550,10 @@ var init_configurations = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/log/common/logService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/log/common/logService.js
 var LogService;
 var init_logService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/log/common/logService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/platform/log/common/logService.js"() {
     init_lifecycle();
     init_log();
     LogService = class extends Disposable {
@@ -137582,10 +137590,10 @@ var init_logService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneTreeSitterLibraryService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneTreeSitterLibraryService.js
 var StandaloneTreeSitterLibraryService;
 var init_standaloneTreeSitterLibraryService = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneTreeSitterLibraryService.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneTreeSitterLibraryService.js"() {
     StandaloneTreeSitterLibraryService = class {
       getParserClass() {
         throw new Error("not implemented in StandaloneTreeSitterLibraryService");
@@ -137606,7 +137614,7 @@ var init_standaloneTreeSitterLibraryService = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices.js
 function isConfigurationOverrides(thing) {
   return !!thing && typeof thing === "object" && (!thing.overrideIdentifier || typeof thing.overrideIdentifier === "string") && (!thing.resource || thing.resource instanceof URI);
 }
@@ -137632,7 +137640,7 @@ function updateConfigurationService(configurationService, source, isDiffEditor2)
 }
 var __decorate192, __param185, SimpleModel, StandaloneTextModelService, StandaloneEditorProgressService, StandaloneProgressService, StandaloneEnvironmentService, StandaloneDialogService, StandaloneNotificationService, StandaloneCommandService, StandaloneKeybindingService, DomNodeListeners, StandaloneConfigurationService, StandaloneResourceConfigurationService, StandaloneResourcePropertiesService, StandaloneTelemetryService, StandaloneWorkspaceContextService, StandaloneBulkEditService, StandaloneUriLabelService, StandaloneContextViewService, StandaloneWorkspaceTrustManagementService, StandaloneLanguageService, StandaloneLogService, StandaloneContextMenuService, standaloneEditorWorkerDescriptor, StandaloneEditorWorkerService, StandaloneAccessbilitySignalService, StandaloneServices;
 var init_standaloneServices = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices.js"() {
     init_standaloneCodeEditorService();
     init_standaloneLayoutService();
     init_undoRedoService();
@@ -138575,16 +138583,16 @@ var init_standaloneServices = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/markdownRenderer/browser/renderedMarkdown.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/markdownRenderer/browser/renderedMarkdown.css
 var init_renderedMarkdown = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/markdownRenderer/browser/renderedMarkdown.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/markdownRenderer/browser/renderedMarkdown.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/markdownRenderer/browser/editorMarkdownCodeBlockRenderer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/markdownRenderer/browser/editorMarkdownCodeBlockRenderer.js
 var __decorate193, __param186, EditorMarkdownCodeBlockRenderer_1, EditorMarkdownCodeBlockRenderer;
 var init_editorMarkdownCodeBlockRenderer = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/markdownRenderer/browser/editorMarkdownCodeBlockRenderer.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/markdownRenderer/browser/editorMarkdownCodeBlockRenderer.js"() {
     init_dom();
     init_trustedTypes();
     init_configuration();
@@ -138663,7 +138671,7 @@ var init_editorMarkdownCodeBlockRenderer = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneCodeEditor.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneCodeEditor.js
 function createAriaDomNode(parent) {
   if (!parent) {
     if (ariaDomNodeCreated) {
@@ -138690,7 +138698,7 @@ function doCreateModel(modelService, value, languageSelection, uri) {
 }
 var __decorate194, __param187, LAST_GENERATED_COMMAND_ID, ariaDomNodeCreated, StandaloneCodeEditor, StandaloneEditor, StandaloneDiffEditor2;
 var init_standaloneCodeEditor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneCodeEditor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneCodeEditor.js"() {
     init_aria2();
     init_lifecycle();
     init_codeEditorService();
@@ -138974,10 +138982,10 @@ var init_standaloneCodeEditor = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/colors.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/colors.js
 var multiDiffEditorHeaderBackground, multiDiffEditorBackground, multiDiffEditorBorder;
 var init_colors = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/colors.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/colors.js"() {
     init_nls();
     init_colorRegistry();
     multiDiffEditorHeaderBackground = registerColor("multiDiffEditor.headerBackground", { dark: "#262626", light: "tab.inactiveBackground", hcDark: "tab.inactiveBackground", hcLight: "tab.inactiveBackground" }, localize(142, "The background color of the diff editor's header"));
@@ -138986,10 +138994,10 @@ var init_colors = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/diffEditorItemTemplate.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/diffEditorItemTemplate.js
 var __decorate195, __param188, TemplateData, DiffEditorItemTemplate;
 var init_diffEditorItemTemplate = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/diffEditorItemTemplate.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/diffEditorItemTemplate.js"() {
     init_dom();
     init_button2();
     init_codicons();
@@ -139250,10 +139258,10 @@ var init_diffEditorItemTemplate = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/objectPool.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/objectPool.js
 var ObjectPool;
 var init_objectPool = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/objectPool.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/objectPool.js"() {
     ObjectPool = class {
       constructor(_create) {
         this._create = _create;
@@ -139300,13 +139308,13 @@ var init_objectPool = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/style.css
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/style.css
 var init_style2 = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/style.css"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/style.css"() {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/multiDiffEditorWidgetImpl.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/multiDiffEditorWidgetImpl.js
 function highlightRange(targetEditor, range2) {
   const modelNow = targetEditor.getModel();
   const decorations = targetEditor.createDecorationsCollection([{ range: range2, options: { description: "symbol-navigate-action-highlight", className: "symbolHighlight" } }]);
@@ -139318,7 +139326,7 @@ function highlightRange(targetEditor, range2) {
 }
 var __decorate196, __param189, MultiDiffEditorWidgetImpl, VirtualizedViewItem;
 var init_multiDiffEditorWidgetImpl = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/multiDiffEditorWidgetImpl.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/multiDiffEditorWidgetImpl.js"() {
     init_dom();
     init_scrollableElement();
     init_arrays();
@@ -139721,10 +139729,10 @@ var init_multiDiffEditorWidgetImpl = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/multiDiffEditorWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/multiDiffEditorWidget.js
 var __decorate197, __param190, MultiDiffEditorWidget;
 var init_multiDiffEditorWidget = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/multiDiffEditorWidget.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/multiDiffEditor/multiDiffEditorWidget.js"() {
     init_hotReloadHelpers();
     init_lifecycle();
     init_observable();
@@ -139764,7 +139772,7 @@ var init_multiDiffEditorWidget = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneEditor.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneEditor.js
 function create2(domElement, options2, override) {
   const instantiationService = StandaloneServices.initialize(override || {});
   return instantiationService.createInstance(StandaloneEditor, domElement, options2);
@@ -140116,7 +140124,7 @@ function createMonacoEditorAPI() {
   };
 }
 var init_standaloneEditor = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneEditor.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneEditor.js"() {
     init_window();
     init_lifecycle();
     init_strings();
@@ -140151,7 +140159,7 @@ var init_standaloneEditor = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchCompile.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchCompile.js
 function isArrayOf2(elemType, obj) {
   if (!obj) {
     return false;
@@ -140584,7 +140592,7 @@ function compile(languageId, json) {
 }
 var Rule;
 var init_monarchCompile = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchCompile.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/common/monarch/monarchCompile.js"() {
     init_types();
     init_monarchCommon();
     Rule = class {
@@ -140622,7 +140630,7 @@ var init_monarchCompile = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneLanguages.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneLanguages.js
 function register3(language82) {
   ModesRegistry.registerLanguage(language82);
 }
@@ -140961,7 +140969,7 @@ function createMonacoLanguagesAPI() {
 }
 var EncodedTokenizationSupportAdapter, TokenizationSupportAdapter;
 var init_standaloneLanguages = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/standaloneLanguages.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneLanguages.js"() {
     init_color();
     init_range();
     init_languages();
@@ -141083,10 +141091,10 @@ var init_standaloneLanguages = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/editor.api.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/editor.api.js
 var api, CancellationTokenSource2, Emitter2, KeyCode2, KeyMod2, Position2, Range3, Selection2, SelectionDirection2, MarkerSeverity3, MarkerTag2, Uri2, Token3, editor, languages, monacoEnvironment, globalWithAMD;
 var init_editor_api = __esm({
-  "worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/editor.api.js"() {
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/editor.api.js"() {
     init_editorOptions();
     init_editorBaseApi();
     init_standaloneEditor();
@@ -175423,7 +175431,7 @@ var init_htmlMode = __esm({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/editor.main.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/editor.main.js
 var editor_main_exports = {};
 __export(editor_main_exports, {
   CancellationTokenSource: () => CancellationTokenSource2,
@@ -175442,14 +175450,14 @@ __export(editor_main_exports, {
   languages: () => languages
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/editor.all.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/editor.all.js
 init_coreCommands();
 init_codeEditorWidget();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditor.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditor.contribution.js
 init_codicons();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/commands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/commands.js
 init_dom();
 init_codicons();
 init_editorExtensions();
@@ -175692,7 +175700,7 @@ function findFocusedDiffEditor(accessor) {
   return null;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditor.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/diffEditor/diffEditor.contribution.js
 init_editorContextKeys();
 init_nls();
 init_actions2();
@@ -175770,7 +175778,7 @@ registerAction2(AccessibleDiffViewerNext);
 CommandsRegistry.registerCommandAlias("editor.action.diffReview.prev", AccessibleDiffViewerPrev.id);
 registerAction2(AccessibleDiffViewerPrev);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/anchorSelect/browser/anchorSelect.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/anchorSelect/browser/anchorSelect.js
 init_aria2();
 init_htmlContent();
 init_keyCodes();
@@ -175946,7 +175954,7 @@ registerEditorAction(GoToSelectionAnchor);
 registerEditorAction(SelectFromAnchorToCursor);
 registerEditorAction(CancelSelectionAnchor);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/bracketMatching/browser/bracketMatching.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/bracketMatching/browser/bracketMatching.js
 init_async();
 init_lifecycle();
 init_editorExtensions();
@@ -176303,11 +176311,11 @@ MenuRegistry.appendMenuItem(MenuId.MenubarGoMenu, {
   order: 2
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/caretOperations/browser/caretOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/caretOperations/browser/caretOperations.js
 init_editorExtensions();
 init_editorContextKeys();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/caretOperations/browser/moveCaretCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/caretOperations/browser/moveCaretCommand.js
 init_range();
 init_selection();
 var MoveCaretCommand = class {
@@ -176349,7 +176357,7 @@ var MoveCaretCommand = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/caretOperations/browser/caretOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/caretOperations/browser/caretOperations.js
 init_nls();
 var MoveCaretAction = class extends EditorAction {
   constructor(left, opts) {
@@ -176391,7 +176399,7 @@ var MoveCaretRightAction = class extends MoveCaretAction {
 registerEditorAction(MoveCaretLeftAction);
 registerEditorAction(MoveCaretRightAction);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/caretOperations/browser/transpose.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/caretOperations/browser/transpose.js
 init_editorExtensions();
 init_replaceCommand();
 init_cursorMoveOperations();
@@ -176450,7 +176458,7 @@ var TransposeLettersAction = class extends EditorAction {
 };
 registerEditorAction(TransposeLettersAction);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/clipboard/browser/clipboard.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/clipboard/browser/clipboard.js
 init_browser();
 init_dom();
 init_platform();
@@ -176461,11 +176469,11 @@ init_clipboardService();
 init_contextkey();
 init_log();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/product/common/productService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/product/common/productService.js
 init_instantiation();
 var IProductService = createDecorator("productService");
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/clipboard/browser/clipboard.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/clipboard/browser/clipboard.js
 init_telemetry();
 init_clipboardUtils();
 init_nativeEditContextRegistry();
@@ -176473,13 +176481,13 @@ init_editorExtensions();
 init_codeEditorService();
 init_editorContextKeys();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteController.js
 init_dom();
 init_arrays();
 init_async();
 init_cancellation();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/dataTransfer.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/dataTransfer.js
 init_arrays();
 init_iterator();
 init_uuid();
@@ -176603,10 +176611,10 @@ var UriList = Object.freeze({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteController.js
 init_errors();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/hierarchicalKind.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/hierarchicalKind.js
 var HierarchicalKind = class _HierarchicalKind {
   static {
     this.sep = ".";
@@ -176634,7 +176642,7 @@ var HierarchicalKind = class _HierarchicalKind {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteController.js
 init_lifecycle();
 init_mime();
 init_platform();
@@ -176651,12 +176659,12 @@ init_progress();
 init_quickInput();
 init_clipboardUtils();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/dataTransfer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/dataTransfer.js
 init_dnd();
 init_mime();
 init_uri();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/dnd/browser/dnd.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/dnd/browser/dnd.js
 init_platform();
 init_platform2();
 var CodeDataTransfers = {
@@ -176699,7 +176707,7 @@ function getPathForFile(file) {
   return void 0;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/dataTransfer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/dataTransfer.js
 function toVSDataTransfer(dataTransfer) {
   const vsDataTransfer = new VSDataTransfer();
   for (const item of dataTransfer.items) {
@@ -176762,14 +176770,14 @@ function toExternalVSDataTransfer(sourceDataTransfer, overwriteUriList = false) 
   return vsDataTransfer;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteController.js
 init_bulkEditService();
 init_range();
 init_languages();
 init_languageFeatures();
 init_editorState();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineProgress/browser/inlineProgress.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineProgress/browser/inlineProgress.js
 init_dom();
 init_async();
 init_codicons();
@@ -176916,7 +176924,7 @@ InlineProgressManager = __decorate45([
   __param40(2, IInstantiationService)
 ], InlineProgressManager);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/message/browser/messageController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/message/browser/messageController.js
 init_markdownRenderer();
 init_aria2();
 init_event();
@@ -177110,7 +177118,7 @@ registerEditorContribution(
   /* EditorContributionInstantiation.Lazy */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/defaultProviders.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/defaultProviders.js
 init_arrays();
 init_lifecycle();
 init_mime();
@@ -177324,10 +177332,10 @@ DefaultPasteProvidersFeature = __decorate48([
   __param43(1, IWorkspaceContextService)
 ], DefaultPasteProvidersFeature);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/edit.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/edit.js
 init_bulkEditService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetParser.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetParser.js
 var Scanner2 = class _Scanner {
   constructor() {
     this.value = "";
@@ -178242,7 +178250,7 @@ var SnippetParser = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/edit.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/edit.js
 function createCombinedWorkspaceEdit(uri, ranges, edit2) {
   if (typeof edit2.insertText === "string" ? edit2.insertText === "" : edit2.insertText.snippet === "") {
     return {
@@ -178311,13 +178319,13 @@ function sortEditsByYieldTo(edits) {
   return visit2(Array.from(edits));
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/postEditWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/postEditWidget.js
 init_dom();
 init_button2();
 init_async();
 init_codicons();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/errorMessage.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/errorMessage.js
 init_arrays();
 init_types();
 init_nls();
@@ -178375,20 +178383,20 @@ function toErrorMessage(error = null, verbose = false) {
   return localize(34, "An unknown error occurred. Please consult the log for more details.");
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/postEditWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/postEditWidget.js
 init_errors();
 init_event();
 init_lifecycle();
 init_themables();
 init_nls();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actionWidget/browser/actionWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/actionWidget/browser/actionWidget.js
 init_dom();
 init_actionbar2();
 init_lifecycle();
 init_nls();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actionWidget/browser/actionList.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/actionWidget/browser/actionList.js
 init_dom();
 init_keybindingLabel2();
 init_listWidget();
@@ -178715,7 +178723,7 @@ function stripNewlines(str) {
   return str.replace(/\r\n|\r|\n/g, " ");
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/actionWidget/browser/actionWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/actionWidget/browser/actionWidget.js
 init_actions2();
 init_contextkey();
 init_contextView();
@@ -178956,7 +178964,7 @@ registerAction2(class extends Action2 {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/postEditWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/postEditWidget.js
 init_contextkey();
 init_instantiation();
 init_keybinding();
@@ -179166,7 +179174,7 @@ PostEditWidgetManager = __decorate51([
   __param46(7, INotificationService)
 ], PostEditWidgetManager);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteController.js
 var __decorate52 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -179684,7 +179692,7 @@ CopyPasteController = CopyPasteController_1 = __decorate52([
   __param47(9, IProgressService)
 ], CopyPasteController);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/clipboard/browser/clipboard.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/clipboard/browser/clipboard.js
 var CLIPBOARD_CONTEXT_MENU_GROUP = "9_cutcopypaste";
 var supportsCut = isNative || document.queryCommandSupported("cut");
 var supportsCopy = isNative || document.queryCommandSupported("copy");
@@ -179991,16 +179999,16 @@ if (supportsCopy) {
   registerEditorAction(ExecCommandCopyWithSyntaxHighlightingAction);
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionContributions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionContributions.js
 init_editorExtensions();
 init_editorConfigurationSchema();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionCommands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionCommands.js
 init_strings();
 init_editorExtensions();
 init_editorContextKeys();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeAction.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeAction.js
 init_arrays();
 init_cancellation();
 init_errors();
@@ -180021,7 +180029,7 @@ init_model();
 init_textModelEditSource();
 init_editorState();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/common/types.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/common/types.js
 init_errors();
 var CodeActionKind = new class {
   constructor() {
@@ -180153,7 +180161,7 @@ var CodeActionItem = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeAction.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeAction.js
 var codeActionCommandId = "editor.action.codeAction";
 var quickFixCommandId = "editor.action.quickFix";
 var autoFixCommandId = "editor.action.autoFix";
@@ -180406,11 +180414,11 @@ CommandsRegistry.registerCommand("_executeCodeActionProvider", async function(ac
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionCommands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionCommands.js
 init_nls();
 init_contextkey();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionController.js
 init_dom();
 init_aria2();
 init_errors();
@@ -180430,7 +180438,7 @@ init_position();
 init_textModel();
 init_languageFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionKeybindingResolver.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionKeybindingResolver.js
 init_lazy();
 init_keybinding();
 var __decorate53 = function(decorators, target, key, desc) {
@@ -180508,10 +180516,10 @@ CodeActionKeybindingResolver = CodeActionKeybindingResolver_1 = __decorate53([
   __param48(0, IKeybindingService)
 ], CodeActionKeybindingResolver);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionMenu.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionMenu.js
 init_codicons();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/symbolIcons/browser/symbolIcons.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/symbolIcons/browser/symbolIcons.js
 init_nls();
 init_colorRegistry();
 var SYMBOL_ICON_ARRAY_FOREGROUND = registerColor("symbolIcon.arrayForeground", foreground, localize(1495, "The foreground color for array symbols. These symbols appear in the outline, breadcrumb, and suggest widget."));
@@ -180598,7 +180606,7 @@ var SYMBOL_ICON_VARIABLE_FOREGROUND = registerColor("symbolIcon.variableForegrou
   hcLight: "#007ACC"
 }, localize(1527, "The foreground color for variable symbols. These symbols appear in the outline, breadcrumb, and suggest widget."));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionMenu.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionMenu.js
 init_nls();
 var uncategorizedCodeActionGroup = Object.freeze({ kind: HierarchicalKind.Empty, title: localize(866, "More Actions...") });
 var codeActionGroups = Object.freeze([
@@ -180654,7 +180662,7 @@ function toMenuItems(inputCodeActions, showHeaders, keybindingResolver) {
   return allMenuItems;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionModel.js
 init_async();
 init_errors();
 init_event();
@@ -180963,7 +180971,7 @@ var CodeActionModel = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/lightBulbWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/lightBulbWidget.js
 init_dom();
 init_touch();
 init_codicons();
@@ -181382,7 +181390,7 @@ LightBulbWidget = LightBulbWidget_1 = __decorate54([
   __param49(1, IKeybindingService)
 ], LightBulbWidget);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionController.js
 var __decorate55 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -181713,7 +181721,7 @@ registerThemingParticipant((theme, collector) => {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionCommands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionCommands.js
 function contextKeyForSupportedActions(kind) {
   return ContextKeyExpr.regex(SUPPORTED_CODE_ACTIONS.keys()[0], new RegExp("(\\s|^)" + escapeRegExpCharacters(kind.value) + "\\b"));
 }
@@ -181923,7 +181931,7 @@ var AutoFixAction = class extends EditorAction {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionContributions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codeAction/browser/codeActionContributions.js
 init_nls();
 init_configurationRegistry();
 init_platform2();
@@ -181980,7 +181988,7 @@ Registry.as(Extensions4.Configuration).registerConfiguration({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codelens/browser/codelensController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codelens/browser/codelensController.js
 init_async();
 init_errors();
 init_lifecycle();
@@ -181989,7 +181997,7 @@ init_editorExtensions();
 init_fontInfo();
 init_editorContextKeys();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codelens/browser/codelens.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codelens/browser/codelens.js
 init_cancellation();
 init_errors();
 init_lifecycle();
@@ -182089,7 +182097,7 @@ CommandsRegistry.registerCommand("_executeCodeLensProvider", function(accessor, 
   });
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codelens/browser/codeLensCache.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codelens/browser/codeLensCache.js
 init_event();
 init_map();
 init_range();
@@ -182205,7 +182213,7 @@ registerSingleton(
   /* InstantiationType.Delayed */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codelens/browser/codelensWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codelens/browser/codelensWidget.js
 init_dom();
 init_iconLabels2();
 init_range();
@@ -182450,7 +182458,7 @@ var CodeLensWidget = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/codelens/browser/codelensController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/codelens/browser/codelensController.js
 init_nls();
 init_commands();
 init_notification();
@@ -182911,7 +182919,7 @@ registerEditorAction(class ShowLensesInCurrentLine extends EditorAction {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerContribution.js
 init_cancellation();
 init_errors();
 init_uri();
@@ -182920,7 +182928,7 @@ init_commands();
 init_editorExtensions();
 init_editorFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverTypes.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverTypes.js
 var HoverRangeAnchor = class {
   constructor(priority, range2, initialMousePosX, initialMousePosY) {
     this.priority = priority;
@@ -182977,13 +182985,13 @@ var HoverParticipantRegistry = new class HoverParticipantRegistry2 {
   }
 }();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/color.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/color.js
 init_cancellation();
 init_errors();
 init_model();
 init_languageFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/defaultDocumentColorProvider.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/defaultDocumentColorProvider.js
 init_color();
 init_lifecycle();
 init_languageFeatures();
@@ -183035,7 +183043,7 @@ DefaultDocumentColorProviderFeature = __decorate59([
   __param54(1, IEditorWorkerService)
 ], DefaultDocumentColorProviderFeature);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/color.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/color.js
 init_configuration();
 async function getColors(colorProviderRegistry, model, token, defaultColorDecoratorsEnablement = "auto") {
   return _findColorData(new ColorDataCollector(), colorProviderRegistry, model, token, defaultColorDecoratorsEnablement);
@@ -183119,7 +183127,7 @@ function _setupColorCommand(accessor, resource) {
   return { model, colorProviderRegistry, defaultColorDecoratorsEnablement };
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorDetector.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorDetector.js
 init_async();
 init_color();
 init_errors();
@@ -183379,11 +183387,11 @@ var DecoratorLimitReporter = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPickerContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPickerContribution.js
 init_lifecycle();
 init_range();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverActionIds.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverActionIds.js
 init_nls();
 var SHOW_OR_FOCUS_HOVER_ACTION_ID = "editor.action.showHover";
 var SHOW_DEFINITION_PREVIEW_HOVER_ACTION_ID = "editor.action.showDefinitionPreviewHover";
@@ -183401,11 +183409,11 @@ var INCREASE_HOVER_VERBOSITY_ACTION_LABEL = localize(1102, "Increase Hover Verbo
 var DECREASE_HOVER_VERBOSITY_ACTION_ID = "editor.action.decreaseHoverVerbosityLevel";
 var DECREASE_HOVER_VERBOSITY_ACTION_LABEL = localize(1103, "Decrease Hover Verbosity Level");
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverController.js
 init_lifecycle();
 init_instantiation();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/hintsWidget/inlineCompletionsHintsWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/hintsWidget/inlineCompletionsHintsWidget.js
 init_dom();
 init_markdownRenderer();
 init_actionViewItems();
@@ -183433,7 +183441,7 @@ init_iconRegistry();
 init_position();
 init_languages();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/commandIds.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/commandIds.js
 var inlineSuggestCommitId = "editor.action.inlineSuggest.commit";
 var showPreviousInlineSuggestionActionId = "editor.action.inlineSuggest.showPrevious";
 var showNextInlineSuggestionActionId = "editor.action.inlineSuggest.showNext";
@@ -183441,7 +183449,7 @@ var jumpToNextInlineEditId = "editor.action.inlineSuggest.jump";
 var hideInlineCompletionId = "editor.action.inlineSuggest.hide";
 var toggleShowCollapsedId = "editor.action.inlineSuggest.toggleShowCollapsed";
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/hintsWidget/inlineCompletionsHintsWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/hintsWidget/inlineCompletionsHintsWidget.js
 var __decorate61 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -183772,11 +183780,11 @@ CustomizedMenuWorkbenchToolBar = __decorate61([
   __param56(8, ITelemetryService)
 ], CustomizedMenuWorkbenchToolBar);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverController.js
 init_keybinding();
 init_async();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverUtils.js
 init_dom();
 function isMousePositionWithinElement(element, posx, posy) {
   const elementRect = getDomNodePagePosition(element);
@@ -183786,12 +183794,12 @@ function isMousePositionWithinElement(element, posx, posy) {
   return true;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidgetWrapper.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidgetWrapper.js
 init_dom();
 init_lifecycle();
 init_languages();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverOperation.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverOperation.js
 init_async();
 init_errors();
 init_event();
@@ -183943,15 +183951,15 @@ var Debouncer = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidgetWrapper.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidgetWrapper.js
 init_instantiation();
 init_keybinding();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidget.js
 init_dom();
 init_keybinding();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/resizable/resizable.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/resizable/resizable.js
 init_dom();
 init_sash2();
 init_event();
@@ -184106,7 +184114,7 @@ var ResizableHTMLElement = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/resizableContentWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/resizableContentWidget.js
 init_lifecycle();
 init_position();
 init_dom();
@@ -184193,7 +184201,7 @@ var ResizableContentWidget = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidget.js
 init_contextkey();
 init_configuration();
 init_accessibility();
@@ -184587,7 +184595,7 @@ function computeDistanceFromPointToRectangle(pointX, pointY, left, top, width2, 
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverComputer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverComputer.js
 init_arrays();
 init_async();
 var ContentHoverComputer = class _ContentHoverComputer {
@@ -184650,7 +184658,7 @@ var ContentHoverComputer = class _ContentHoverComputer {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverTypes.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverTypes.js
 var ContentHoverResult = class {
   constructor(hoverParts, isComplete, options2) {
     this.hoverParts = hoverParts;
@@ -184675,13 +184683,13 @@ var FilteredContentHoverResult = class extends ContentHoverResult {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidgetWrapper.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidgetWrapper.js
 init_event();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverRendered.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverRendered.js
 init_lifecycle();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverStatusBar.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverStatusBar.js
 init_dom();
 init_hoverWidget2();
 init_lifecycle();
@@ -184734,14 +184742,14 @@ EditorHoverStatusBar = __decorate63([
   __param58(1, IHoverService)
 ], EditorHoverStatusBar);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverCopyButton.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverCopyButton.js
 init_lifecycle();
 init_clipboardService();
 init_hover();
 init_nls();
 init_codicons();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findWidget.js
 init_dom();
 init_aria2();
 init_toggle2();
@@ -184755,7 +184763,7 @@ init_platform();
 init_strings();
 init_range();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findModel.js
 init_arraysFind();
 init_async();
 init_lifecycle();
@@ -184765,7 +184773,7 @@ init_range();
 init_selection();
 init_textModelSearch();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findDecorations.js
 init_range();
 init_model2();
 init_textModel();
@@ -185065,7 +185073,7 @@ var FindDecorations = class _FindDecorations {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/replaceAllCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/replaceAllCommand.js
 init_range();
 var ReplaceAllCommand = class {
   constructor(editorSelection, ranges, replaceStrings) {
@@ -185109,7 +185117,7 @@ var ReplaceAllCommand = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/search.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/search.js
 init_strings();
 function buildReplaceStringWithCasePreserved(matches, pattern) {
   if (matches && matches[0] !== "") {
@@ -185149,7 +185157,7 @@ function buildReplaceStringForSpecificSpecialCharacter(matches, pattern, special
   return replaceString.slice(0, -1);
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/replacePattern.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/replacePattern.js
 var StaticValueReplacePattern = class {
   constructor(staticValue) {
     this.staticValue = staticValue;
@@ -185386,7 +185394,7 @@ function parseReplaceString(replaceString) {
   return result.finalize();
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findModel.js
 init_contextkey();
 var CONTEXT_FIND_WIDGET_VISIBLE = new RawContextKey("findWidgetVisible", false);
 var CONTEXT_FIND_WIDGET_NOT_VISIBLE = CONTEXT_FIND_WIDGET_VISIBLE.toNegated();
@@ -185880,13 +185888,13 @@ var FindModelBoundToEditorModel = class _FindModelBoundToEditorModel {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findWidget.js
 init_nls();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/history/browser/contextScopedHistoryWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/history/browser/contextScopedHistoryWidget.js
 init_findInput2();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/findinput/replaceInput.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/findinput/replaceInput.js
 init_dom();
 init_toggle2();
 init_inputBox2();
@@ -186075,7 +186083,7 @@ var ReplaceInput = class extends Widget {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/history/browser/contextScopedHistoryWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/history/browser/contextScopedHistoryWidget.js
 init_contextkey();
 init_keybindingsRegistry();
 init_nls();
@@ -186181,12 +186189,12 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/history/browser/historyWidgetKeybindingHint.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/history/browser/historyWidgetKeybindingHint.js
 function showHistoryKeybindingHint(keybindingService) {
   return keybindingService.lookupKeybinding("history.showPrevious")?.getElectronAccelerator() === "Up" && keybindingService.lookupKeybinding("history.showNext")?.getElectronAccelerator() === "Down";
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findWidget.js
 init_colorRegistry();
 init_iconRegistry();
 init_themeService();
@@ -187384,7 +187392,7 @@ registerThemingParticipant((theme, collector) => {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverCopyButton.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverCopyButton.js
 init_aria2();
 var __decorate65 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -187426,14 +187434,14 @@ HoverCopyButton = __decorate65([
   __param60(3, IHoverService)
 ], HoverCopyButton);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverRendered.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverRendered.js
 init_keybinding();
 init_textModel();
 init_position();
 init_range();
 init_dom();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/markdownHoverParticipant.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/markdownHoverParticipant.js
 init_dom();
 init_arrays();
 init_cancellation();
@@ -187454,7 +187462,7 @@ init_hoverWidget2();
 init_hover();
 init_async();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/getHover.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/getHover.js
 init_async();
 init_cancellation();
 init_errors();
@@ -187500,7 +187508,7 @@ function isValid(result) {
   return hasRange && hasHtmlContent;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/markdownHoverParticipant.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/markdownHoverParticipant.js
 init_commands();
 var __decorate66 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -187897,21 +187905,21 @@ function labelForHoverVerbosityAction(keybindingService, action) {
   }
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPickerParticipant.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPickerParticipant.js
 init_async();
 init_range();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerWidget.js
 init_pixelRatio();
 init_dom();
 init_widget();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerBody.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerBody.js
 init_dom();
 init_color();
 init_lifecycle();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerSaturationBox.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerSaturationBox.js
 init_dom();
 init_globalPointerMoveMonitor();
 init_color();
@@ -188009,7 +188017,7 @@ var SaturationBox = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerInsertButton.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerInsertButton.js
 init_dom();
 init_event();
 init_lifecycle();
@@ -188030,7 +188038,7 @@ var InsertButton = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerStrip.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerStrip.js
 init_dom();
 init_globalPointerMoveMonitor();
 init_color();
@@ -188121,7 +188129,7 @@ var HueStrip = class extends Strip {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerBody.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerBody.js
 var $10 = $;
 var ColorPickerBody = class extends Disposable {
   constructor(container, model, pixelRatio, type) {
@@ -188180,14 +188188,14 @@ var ColorPickerBody = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerHeader.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerHeader.js
 init_dom();
 init_color();
 init_lifecycle();
 init_nls();
 init_colorRegistry();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerCloseButton.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerCloseButton.js
 init_dom();
 init_lifecycle();
 init_nls();
@@ -188215,7 +188223,7 @@ var CloseButton = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerHeader.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParts/colorPickerHeader.js
 var $12 = $;
 var ColorPickerHeader = class extends Disposable {
   constructor(container, model, themeService, type) {
@@ -188271,7 +188279,7 @@ var ColorPickerHeader = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerWidget.js
 var $13 = $;
 var ColorPickerWidget = class extends Widget {
   constructor(container, model, pixelRatio, themeService, type) {
@@ -188292,15 +188300,15 @@ var ColorPickerWidget = class extends Widget {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPickerParticipant.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPickerParticipant.js
 init_themeService();
 init_nls();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParticipantUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParticipantUtils.js
 init_cancellation();
 init_color();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerModel.js
 init_event();
 var ColorPickerModel = class {
   get color() {
@@ -188370,7 +188378,7 @@ var ColorPickerModel = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParticipantUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerParticipantUtils.js
 init_range();
 async function createColorHover(editorModel, colorInfo, provider) {
   const originalText = editorModel.getValueInRange(colorInfo.range);
@@ -188418,7 +188426,7 @@ async function updateColorPresentations(editorModel, colorPickerModel, color, ra
   colorPickerModel.colorPresentations = colorPresentations || [];
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPickerParticipant.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPickerParticipant.js
 init_dom();
 init_lifecycle();
 var __decorate67 = function(decorators, target, key, desc) {
@@ -188569,14 +188577,14 @@ HoverColorPickerParticipant = __decorate67([
   __param62(1, IThemeService)
 ], HoverColorPickerParticipant);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsHover.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsHover.js
 init_async();
 init_htmlContent();
 init_position();
 init_textModel();
 init_resolverService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsController.js
 init_dom();
 init_arrays();
 init_async();
@@ -188598,7 +188606,7 @@ init_languageFeatureDebounce();
 init_languageFeatures();
 init_resolverService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/link/clickLinkGesture.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/link/clickLinkGesture.js
 init_event();
 init_lifecycle();
 init_platform();
@@ -188753,7 +188761,7 @@ var ClickLinkGesture = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHints.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHints.js
 init_errors();
 init_lifecycle();
 init_position();
@@ -188886,7 +188894,7 @@ function asCommandLink(command) {
   return createCommandUri(command.id, ...command.arguments ?? []).toString();
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsLocations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsLocations.js
 init_dom();
 init_actions();
 init_cancellation();
@@ -188894,7 +188902,7 @@ init_uuid();
 init_range();
 init_resolverService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/goToCommands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/goToCommands.js
 init_aria2();
 init_async();
 init_keyCodes();
@@ -188905,7 +188913,7 @@ init_editorBrowser();
 init_editorExtensions();
 init_codeEditorService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/embeddedCodeEditorWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/browser/widget/codeEditor/embeddedCodeEditorWidget.js
 init_objects();
 init_codeEditorService();
 init_codeEditorWidget();
@@ -188967,13 +188975,13 @@ function getOuterEditor(accessor) {
   return editor2;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/goToCommands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/goToCommands.js
 init_position();
 init_range();
 init_editorContextKeys();
 init_languages();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesController.js
 init_async();
 init_errors();
 init_keyCodes();
@@ -188982,7 +188990,7 @@ init_codeEditorService();
 init_position();
 init_range();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/peekView/browser/peekView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/peekView/browser/peekView.js
 init_dom();
 init_actionbar2();
 init_actions();
@@ -188993,7 +189001,7 @@ init_event();
 init_objects();
 init_editorExtensions();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/zoneWidget/browser/zoneWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/zoneWidget/browser/zoneWidget.js
 init_domStylesheets();
 init_sash2();
 init_color();
@@ -189413,7 +189421,7 @@ var ZoneWidget = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/peekView/browser/peekView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/peekView/browser/peekView.js
 init_nls();
 init_menuEntryActionViewItem2();
 init_contextkey();
@@ -189647,7 +189655,7 @@ var peekViewResultsMatchHighlight = registerColor("peekViewResult.matchHighlight
 var peekViewEditorMatchHighlight = registerColor("peekViewEditor.matchHighlightBackground", { dark: "#ff8f0099", light: "#f5d802de", hcDark: null, hcLight: null }, localize(1332, "Match highlight color in the peek view editor."));
 var peekViewEditorMatchHighlightBorder = registerColor("peekViewEditor.matchHighlightBorder", { dark: null, light: null, hcDark: activeContrastBorder, hcLight: activeContrastBorder }, localize(1333, "Match highlight border in the peek view editor."));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesController.js
 init_nls();
 init_commands();
 init_configuration();
@@ -189658,7 +189666,7 @@ init_listService();
 init_notification();
 init_storage2();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/referencesModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/referencesModel.js
 init_errors();
 init_event();
 init_idGenerator();
@@ -189884,7 +189892,7 @@ var ReferencesModel = class _ReferencesModel {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesWidget.js
 init_dom();
 init_splitview2();
 init_color();
@@ -189897,7 +189905,7 @@ init_textModel();
 init_modesRegistry();
 init_resolverService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesTree.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesTree.js
 init_dom();
 init_countBadge2();
 init_highlightedLabel();
@@ -190081,7 +190089,7 @@ var AccessibilityProvider = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesWidget.js
 init_nls();
 init_instantiation();
 init_keybinding();
@@ -190567,7 +190575,7 @@ ReferenceWidget = __decorate73([
   __param67(8, IKeybindingService)
 ], ReferenceWidget);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/peek/referencesController.js
 init_editorContextKeys();
 init_contextkeys();
 var __decorate74 = function(decorators, target, key, desc) {
@@ -190936,7 +190944,7 @@ CommandsRegistry.registerCommand("openReference", (accessor) => {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/symbolNavigation.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/symbolNavigation.js
 init_event();
 init_lifecycle();
 init_resources();
@@ -191111,7 +191119,7 @@ EditorState2 = __decorate75([
   __param69(0, ICodeEditorService)
 ], EditorState2);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/goToCommands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/goToCommands.js
 init_nls();
 init_actions2();
 init_commands();
@@ -191120,7 +191128,7 @@ init_instantiation();
 init_notification();
 init_progress();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/goToSymbol.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/goToSymbol.js
 init_arrays();
 init_cancellation();
 init_errors();
@@ -191238,7 +191246,7 @@ registerModelAndPositionCommand("_executeImplementationProvider_recursive", (acc
   return _sortedAndDeduped(() => promise);
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/goToCommands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/goToCommands.js
 init_languageFeatures();
 init_iterator();
 init_contextkeys();
@@ -191941,7 +191949,7 @@ CommandsRegistry.registerCommand({
 });
 CommandsRegistry.registerCommandAlias("editor.action.showReferences", "editor.action.peekLocations");
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsLocations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsLocations.js
 init_actions2();
 init_commands();
 init_contextkey();
@@ -192024,7 +192032,7 @@ async function goToDefinitionWithLocation(accessor, event, editor2, location) {
   ref.dispose();
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsController.js
 init_commands();
 init_extensions();
 init_instantiation();
@@ -192645,7 +192653,7 @@ CommandsRegistry.registerCommand("_executeInlayHintProvider", async (accessor, .
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsHover.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsHover.js
 init_configuration();
 init_languageFeatures();
 init_nls();
@@ -192781,12 +192789,12 @@ InlayHintsHover = __decorate77([
   __param71(7, ICommandService)
 ], InlayHintsHover);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverRendered.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverRendered.js
 init_errors();
 init_hover();
 init_clipboardService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/markerHoverParticipant.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/markerHoverParticipant.js
 init_dom();
 init_arrays();
 init_async();
@@ -192797,7 +192805,7 @@ init_range();
 init_languageFeatures();
 init_markerDecorations();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/gotoError.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/gotoError.js
 init_codicons();
 init_lifecycle();
 init_editorExtensions();
@@ -192806,7 +192814,7 @@ init_position();
 init_range();
 init_editorContextKeys();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/markerNavigationService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/markerNavigationService.js
 init_arrays();
 init_event();
 init_lifecycle();
@@ -193013,14 +193021,14 @@ registerSingleton(
   /* InstantiationType.Delayed */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/gotoError.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/gotoError.js
 init_nls();
 init_actions2();
 init_contextkey();
 init_instantiation();
 init_iconRegistry();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/gotoErrorWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/gotoErrorWidget.js
 init_dom();
 init_scrollableElement();
 init_arrays();
@@ -193039,7 +193047,7 @@ init_label();
 init_markers();
 init_opener();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/browser/ui/severityIcon/severityIcon.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/severityIcon/severityIcon.js
 init_codicons();
 init_themables();
 init_severity();
@@ -193062,7 +193070,7 @@ var SeverityIcon;
   SeverityIcon2.className = className2;
 })(SeverityIcon || (SeverityIcon = {}));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/gotoErrorWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/gotoErrorWidget.js
 init_colorRegistry();
 init_themeService();
 var __decorate79 = function(decorators, target, key, desc) {
@@ -193215,22 +193223,7 @@ var MessageWidget2 = class {
     this._scrollable.setScrollDimensions({ width: width2, height });
   }
   getHeightInLines() {
-    const layoutInfo = this._editor.getLayoutInfo();
-    const fontInfo = this._editor.getOption(59);
-    const charW = fontInfo.typicalCharacterWidth || 7.5;
-    const contentW = (layoutInfo ? layoutInfo.contentWidth : 600) - 32;
-    const charsPerLine = Math.max(20, Math.floor(contentW / charW));
-    let vLines = 0;
-    const el = this._messageBlock;
-    if (el) {
-      const nodes = el.childNodes;
-      for (let i = 0; i < nodes.length; i++) {
-        const t = nodes[i].textContent || '';
-        vLines += Math.max(1, Math.ceil(t.length / charsPerLine));
-      }
-    }
-    if (vLines < this._lines) vLines = this._lines;
-    return Math.min(17, vLines);
+    return Math.min(17, this._lines);
   }
   getAriaLabel(marker) {
     let severityLabel = "";
@@ -193399,7 +193392,7 @@ var editorMarkerNavigationInfo = registerColor("editorMarkerNavigationInfo.backg
 var editorMarkerNavigationInfoHeader = registerColor("editorMarkerNavigationInfo.headerBackground", { dark: transparent(editorMarkerNavigationInfo, 0.1), light: transparent(editorMarkerNavigationInfo, 0.1), hcDark: null, hcLight: null }, localize(1036, "Editor marker navigation widget info heading background."));
 var editorMarkerNavigationBackground = registerColor("editorMarkerNavigation.background", editorBackground, localize(1037, "Editor marker navigation widget background."));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/gotoError.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoError/browser/gotoError.js
 var __decorate80 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -193671,7 +193664,7 @@ registerEditorCommand(new MarkerCommand({
   }
 }));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/markerHoverParticipant.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/markerHoverParticipant.js
 init_nls();
 init_markers();
 init_opener();
@@ -193916,7 +193909,7 @@ MarkerHoverParticipant = __decorate81([
   __param75(3, ILanguageFeaturesService)
 ], MarkerHoverParticipant);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverRendered.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverRendered.js
 var __decorate82 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -194230,7 +194223,7 @@ RenderedContentHoverParts = RenderedContentHoverParts_1 = __decorate82([
   __param76(6, IClipboardService)
 ], RenderedContentHoverParts);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidgetWrapper.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverWidgetWrapper.js
 init_hover();
 init_clipboardService();
 var __decorate83 = function(decorators, target, key, desc) {
@@ -194570,16 +194563,16 @@ ContentHoverWidgetWrapper = __decorate83([
   __param77(4, IClipboardService)
 ], ContentHoverWidgetWrapper);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverController.js
 init_event();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPicker.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPicker.js
 function isOnColorDecorator(mouseEvent) {
   const target = mouseEvent.target;
   return !!target && target.type === 6 && target.detail.injectedText?.options.attachedData === ColorDecorationInjectedTextMarker;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/contentHoverController.js
 init_contextView();
 var __decorate84 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -194889,7 +194882,7 @@ ContentHoverController = ContentHoverController_1 = __decorate84([
   __param78(3, IKeybindingService)
 ], ContentHoverController);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPickerContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/hoverColorPicker/hoverColorPickerContribution.js
 var HoverColorPickerContribution = class extends Disposable {
   static {
     this.ID = "editor.contrib.colorContribution";
@@ -194930,18 +194923,18 @@ var HoverColorPickerContribution = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerActions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerActions.js
 init_editorExtensions();
 init_nls();
 init_editorContextKeys();
 init_actions2();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerController.js
 init_contextkey();
 init_instantiation();
 init_editorContextKeys();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerWidget.js
 init_lifecycle();
 init_instantiation();
 init_keybinding();
@@ -194949,7 +194942,7 @@ init_event();
 init_languageFeatures();
 init_editorWorker();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerParticipant.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerParticipant.js
 init_cancellation();
 init_lifecycle();
 init_themeService();
@@ -195075,7 +195068,7 @@ StandaloneColorPickerParticipant = __decorate85([
   __param79(1, IThemeService)
 ], StandaloneColorPickerParticipant);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerWidget.js
 init_dom();
 init_hover();
 var __decorate86 = function(decorators, target, key, desc) {
@@ -195290,7 +195283,7 @@ StandaloneColorPickerWidget = StandaloneColorPickerWidget_1 = __decorate86([
   __param80(7, IHoverService)
 ], StandaloneColorPickerWidget);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerController.js
 init_lifecycle();
 var __decorate87 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -195348,7 +195341,7 @@ StandaloneColorPickerController = StandaloneColorPickerController_1 = __decorate
   __param81(2, IInstantiationService)
 ], StandaloneColorPickerController);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerActions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/standaloneColorPicker/standaloneColorPickerActions.js
 var ShowOrFocusStandaloneColorPicker = class extends EditorAction2 {
   constructor() {
     super({
@@ -195411,7 +195404,7 @@ var InsertColorWithStandaloneColorPicker = class extends EditorAction {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/colorPicker/browser/colorPickerContribution.js
 init_range();
 registerEditorAction(HideStandaloneColorPicker);
 registerEditorAction(InsertColorWithStandaloneColorPicker);
@@ -195458,7 +195451,7 @@ CommandsRegistry.registerCommand("_executeColorPresentationProvider", function(a
   return _findColorData(new ColorPresentationsCollector({ range: range2, color: { red, green, blue, alpha } }), colorProviderRegistry, model, CancellationToken.None, defaultColorDecoratorsEnablement);
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/comment/browser/comment.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/comment/browser/comment.js
 init_keyCodes();
 init_nls();
 init_actions2();
@@ -195467,7 +195460,7 @@ init_range();
 init_editorContextKeys();
 init_languageConfigurationRegistry();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/comment/browser/blockCommentCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/comment/browser/blockCommentCommand.js
 init_editOperation();
 init_position();
 init_range();
@@ -195592,7 +195585,7 @@ var BlockCommentCommand = class _BlockCommentCommand {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/comment/browser/lineCommentCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/comment/browser/lineCommentCommand.js
 init_strings();
 init_editOperation();
 init_position();
@@ -195895,7 +195888,7 @@ var LineCommentCommand = class _LineCommentCommand {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/comment/browser/comment.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/comment/browser/comment.js
 var CommentLineAction = class extends EditorAction {
   constructor(type, opts) {
     super(opts);
@@ -196046,7 +196039,7 @@ registerEditorAction(AddLineCommentAction);
 registerEditorAction(RemoveLineCommentAction);
 registerEditorAction(BlockCommentAction);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/contextmenu/browser/contextmenu.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/contextmenu/browser/contextmenu.js
 init_dom();
 init_actionViewItems();
 init_actions();
@@ -196393,7 +196386,7 @@ registerEditorContribution(
 );
 registerEditorAction(ShowContextMenu);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/cursorUndo/browser/cursorUndo.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/cursorUndo/browser/cursorUndo.js
 init_lifecycle();
 init_editorExtensions();
 init_editorContextKeys();
@@ -196528,7 +196521,7 @@ registerEditorContribution(
 registerEditorAction(CursorUndo);
 registerEditorAction(CursorRedo);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dnd/browser/dnd.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dnd/browser/dnd.js
 init_lifecycle();
 init_platform();
 init_editorExtensions();
@@ -196537,7 +196530,7 @@ init_range();
 init_selection();
 init_textModel();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dnd/browser/dragAndDropCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dnd/browser/dragAndDropCommand.js
 init_range();
 init_selection();
 var DragAndDropCommand = class {
@@ -196580,7 +196573,7 @@ var DragAndDropCommand = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dnd/browser/dnd.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dnd/browser/dnd.js
 function hasTriggerModifier(e) {
   if (isMacintosh) {
     return e.altKey;
@@ -196781,7 +196774,7 @@ registerEditorContribution(
   /* EditorContributionInstantiation.BeforeFirstInteraction */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/copyPasteContribution.js
 init_nls();
 init_editorExtensions();
 init_editorContextKeys();
@@ -196893,11 +196886,11 @@ registerEditorAction(class extends EditorAction {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/dropIntoEditorContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/dropIntoEditorContribution.js
 init_editorExtensions();
 init_editorFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/dropIntoEditorController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/dropIntoEditorController.js
 init_arrays();
 init_async();
 init_errors();
@@ -196909,7 +196902,7 @@ init_instantiation();
 init_range();
 init_languageFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/treeViewsDnd.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/treeViewsDnd.js
 var TreeViewsDnDService = class {
   constructor() {
     this._dragOperations = /* @__PURE__ */ new Map();
@@ -196929,7 +196922,7 @@ var DraggedTreeItemsIdentifier = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/treeViewsDndService.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/treeViewsDndService.js
 init_extensions();
 init_instantiation();
 var ITreeViewsDnDService = createDecorator("treeViewsDndService");
@@ -196940,7 +196933,7 @@ registerSingleton(
   /* InstantiationType.Delayed */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/dropIntoEditorController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/dropIntoEditorController.js
 init_editorState();
 var __decorate89 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -197092,7 +197085,7 @@ DropIntoEditorController = DropIntoEditorController_1 = __decorate89([
   __param83(4, ITreeViewsDnDService)
 ], DropIntoEditorController);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/dropIntoEditorContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/dropOrPasteInto/browser/dropIntoEditorContribution.js
 registerEditorContribution(
   DropIntoEditorController.ID,
   DropIntoEditorController,
@@ -197131,7 +197124,7 @@ registerEditorCommand(new class extends EditorCommand {
   }
 }());
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findController.js
 init_async();
 init_lifecycle();
 init_strings();
@@ -197140,7 +197133,7 @@ init_editorColorRegistry();
 init_editorContextKeys();
 init_model2();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findOptionsWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findOptionsWidget.js
 init_dom();
 init_findInputToggles();
 init_widget();
@@ -197281,7 +197274,7 @@ var FindOptionsWidget = class _FindOptionsWidget extends Widget {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findState.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findState.js
 init_event();
 init_lifecycle();
 init_range();
@@ -197549,7 +197542,7 @@ var FindReplaceState = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findController.js
 init_nls();
 init_actions2();
 init_clipboardService();
@@ -197562,7 +197555,7 @@ init_storage2();
 init_themeService();
 init_hover();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findWidgetSearchHistory.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findWidgetSearchHistory.js
 init_event();
 init_storage2();
 var __decorate90 = function(decorators, target, key, desc) {
@@ -197657,7 +197650,7 @@ FindWidgetSearchHistory = FindWidgetSearchHistory_1 = __decorate90([
   __param84(0, IStorageService)
 ], FindWidgetSearchHistory);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/replaceWidgetHistory.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/replaceWidgetHistory.js
 init_event();
 init_storage2();
 var __decorate91 = function(decorators, target, key, desc) {
@@ -197752,7 +197745,7 @@ ReplaceWidgetHistory = ReplaceWidgetHistory_1 = __decorate91([
   __param85(0, IStorageService)
 ], ReplaceWidgetHistory);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/find/browser/findController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/find/browser/findController.js
 var __decorate92 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -198783,7 +198776,7 @@ registerEditorCommand(new FindCommand({
   }
 }));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/folding/browser/folding.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/folding/browser/folding.js
 init_async();
 init_cancellation();
 init_errors();
@@ -198797,10 +198790,10 @@ init_editorContextKeys();
 init_languages();
 init_languageConfigurationRegistry();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/folding/browser/foldingModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/folding/browser/foldingModel.js
 init_event();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/folding/browser/foldingRanges.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/folding/browser/foldingRanges.js
 var foldSourceAbbr = {
   [
     0
@@ -199141,7 +199134,7 @@ var FoldingRegion = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/folding/browser/foldingModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/folding/browser/foldingModel.js
 init_hash();
 var FoldingModel = class {
   get regions() {
@@ -199579,7 +199572,7 @@ function getNextFoldLine(lineNumber, foldingModel) {
   return null;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/folding/browser/hiddenRangeModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/folding/browser/hiddenRangeModel.js
 init_arraysFind();
 init_event();
 init_range();
@@ -199701,7 +199694,7 @@ function findRange(ranges, line) {
   return null;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/folding/browser/indentRangeProvider.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/folding/browser/indentRangeProvider.js
 init_utils4();
 var MAX_FOLDING_REGIONS_FOR_INDENT_DEFAULT = 5e3;
 var ID_INDENT_PROVIDER = "indent";
@@ -199849,11 +199842,11 @@ function computeRanges(model, offSide, markers, foldingRangesLimit = foldingRang
   return result.toIndentRanges(model);
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/folding/browser/folding.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/folding/browser/folding.js
 init_nls();
 init_contextkey();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/folding/browser/foldingDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/folding/browser/foldingDecorations.js
 init_codicons();
 init_textModel();
 init_nls();
@@ -200021,7 +200014,7 @@ var FoldingDecorationProvider = class _FoldingDecorationProvider {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/folding/browser/syntaxRangeProvider.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/folding/browser/syntaxRangeProvider.js
 init_errors();
 init_lifecycle();
 var foldingContext = {};
@@ -200188,7 +200181,7 @@ function sanitizeRanges(rangeData, foldingRangesLimit) {
   return collector.toIndentRanges();
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/folding/browser/folding.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/folding/browser/folding.js
 init_notification();
 init_languageFeatureDebounce();
 init_stopwatch();
@@ -201433,7 +201426,7 @@ CommandsRegistry.registerCommand("_executeFoldingRangeProvider", async function(
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/fontZoom/browser/fontZoom.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/fontZoom/browser/fontZoom.js
 init_editorExtensions();
 init_editorZoom();
 init_nls();
@@ -201477,7 +201470,7 @@ registerEditorAction(EditorFontZoomIn);
 registerEditorAction(EditorFontZoomOut);
 registerEditorAction(EditorFontZoomReset);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/format/browser/formatActions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/format/browser/formatActions.js
 init_arrays();
 init_cancellation();
 init_errors();
@@ -201749,7 +201742,7 @@ CommandsRegistry.registerCommand("editor.action.format", async (accessor) => {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/documentSymbols/browser/documentSymbols.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/documentSymbols/browser/documentSymbols.js
 init_cancellation();
 init_types();
 init_uri();
@@ -201769,7 +201762,7 @@ CommandsRegistry.registerCommand("_executeDocumentSymbolProvider", async functio
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/accessibility/browser/accessibleViewRegistry.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/accessibility/browser/accessibleViewRegistry.js
 var AccessibleViewRegistry = new class AccessibleViewRegistry2 {
   constructor() {
     this._implementations = [];
@@ -201790,10 +201783,10 @@ var AccessibleViewRegistry = new class AccessibleViewRegistry2 {
   }
 }();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/inlineCompletions.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/inlineCompletions.contribution.js
 init_actions2();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/observable/common/wrapInHotClass.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/observable/common/wrapInHotClass.js
 init_hotReload();
 init_observable();
 init_instantiation();
@@ -201851,14 +201844,14 @@ BaseClass1 = __decorate96([
   __param90(1, IInstantiationService)
 ], BaseClass1);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/inlineCompletions.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/inlineCompletions.contribution.js
 init_editorExtensions();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/commands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/commands.js
 init_observable();
 init_strings();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/validation.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/validation.js
 init_arrays();
 var ValidatorBase = class {
   validateOrThrow(content) {
@@ -202011,7 +202004,7 @@ function vWithJsonSchemaRef(ref, validator) {
   return new UseRefSchemaValidator(ref, validator);
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/commands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/commands.js
 init_nls();
 init_accessibility();
 init_actions2();
@@ -202024,7 +202017,7 @@ init_editorExtensions();
 init_editorContextKeys();
 init_languageFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggest.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggest.js
 init_cancellation();
 init_errors();
 init_filters();
@@ -202336,7 +202329,7 @@ var QuickSuggestionsOptions = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/inlineCompletionContextKeys.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/inlineCompletionContextKeys.js
 init_contextkey();
 init_nls();
 init_nls();
@@ -202379,7 +202372,7 @@ var InlineCompletionContextKeys = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/inlineCompletionsController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/inlineCompletionsController.js
 init_aria2();
 init_async();
 init_cancellation();
@@ -202403,7 +202396,7 @@ init_position();
 init_languageFeatureDebounce();
 init_languageFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/linesOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/linesOperations.js
 init_keyCodes();
 init_nls();
 init_actions2();
@@ -202412,7 +202405,7 @@ init_coreCommands();
 init_editorExtensions();
 init_replaceCommand();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/commands/trimTrailingWhitespaceCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/commands/trimTrailingWhitespaceCommand.js
 init_strings();
 init_editOperation();
 init_range();
@@ -202490,7 +202483,7 @@ function trimTrailingWhitespace(model, cursors, trimInRegexesAndStrings) {
   return r;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/linesOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/linesOperations.js
 init_editOperation();
 init_position();
 init_range();
@@ -202500,7 +202493,7 @@ init_cursorTypeOperations();
 init_editorContextKeys();
 init_languageConfigurationRegistry();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/copyLinesCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/copyLinesCommand.js
 init_range();
 init_selection();
 var CopyLinesCommand = class {
@@ -202565,7 +202558,7 @@ var CopyLinesCommand = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/moveLinesCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/moveLinesCommand.js
 init_strings();
 init_shiftCommand();
 init_range();
@@ -202573,7 +202566,7 @@ init_selection();
 init_languageConfiguration();
 init_languageConfigurationRegistry();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/indentation/common/indentUtils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/indentation/common/indentUtils.js
 function getSpaceCnt(str, tabSize) {
   let spacesCnt = 0;
   for (let i2 = 0; i2 < str.length; i2++) {
@@ -202601,7 +202594,7 @@ function generateIndent(spacesCnt, tabSize, insertSpaces) {
   return result;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/moveLinesCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/moveLinesCommand.js
 init_autoIndent();
 init_enterAction();
 var __decorate97 = function(decorators, target, key, desc) {
@@ -202939,7 +202932,7 @@ MoveLinesCommand = __decorate97([
   __param91(3, ILanguageConfigurationService)
 ], MoveLinesCommand);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/sortLinesCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/sortLinesCommand.js
 init_date();
 init_editOperation();
 init_range();
@@ -203011,7 +203004,7 @@ function sortLines(model, selection, descending) {
   return EditOperation.replace(new Range(data.startLineNumber, 1, data.endLineNumber, model.getLineMaxColumn(data.endLineNumber)), data.after.join("\n"));
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/linesOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/linesOperations/browser/linesOperations.js
 var AbstractCopyLinesAction = class extends EditorAction {
   constructor(down, opts) {
     super(opts);
@@ -204179,14 +204172,14 @@ if (KebabCaseAction.isSupported()) {
   registerEditorAction(KebabCaseAction);
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/changeRecorder.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/changeRecorder.js
 init_lifecycle();
 init_observable();
 init_instantiation();
 init_log();
 init_codeEditorWidget();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/structuredLogger.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/structuredLogger.js
 init_lifecycle();
 init_observable();
 init_contextkey();
@@ -204235,7 +204228,7 @@ function observableContextKey(key, contextKeyService) {
   return observableFromEvent(contextKeyService.onDidChangeContext, () => contextKeyService.getContextKeyValue(key));
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/changeRecorder.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/changeRecorder.js
 var __decorate99 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -204300,7 +204293,7 @@ TextModelChangeRecorder = __decorate99([
   __param93(2, ILoggerService)
 ], TextModelChangeRecorder);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsModel.js
 init_arraysFind();
 init_equals();
 init_errors();
@@ -204325,7 +204318,7 @@ init_languageConfigurationRegistry();
 init_textModelText();
 init_languageFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetController2.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetController2.js
 init_lifecycle();
 init_types();
 init_editorExtensions();
@@ -204337,7 +204330,7 @@ init_nls();
 init_contextkey();
 init_log();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetSession.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetSession.js
 init_arrays();
 init_lifecycle();
 init_strings();
@@ -204349,7 +204342,7 @@ init_textModel();
 init_label();
 init_workspace();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/labels.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/labels.js
 init_extpath();
 init_platform();
 function normalizeDriveLetter(path, isWindowsOS = isWindows) {
@@ -204359,7 +204352,7 @@ function normalizeDriveLetter(path, isWindowsOS = isWindows) {
   return path;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetVariables.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetVariables.js
 init_path();
 init_resources();
 init_strings();
@@ -204682,7 +204675,7 @@ var RandomBasedVariableResolver = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetSession.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetSession.js
 init_textModelEditSource();
 var __decorate101 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -205216,7 +205209,7 @@ SnippetSession = SnippetSession_1 = __decorate101([
   __param95(3, ILanguageConfigurationService)
 ], SnippetSession);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetController2.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/snippet/browser/snippetController2.js
 init_observable();
 var __decorate102 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -205499,14 +205492,14 @@ registerEditorCommand(new CommandCtor({
   // }
 }));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/utils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/utils.js
 init_arrays();
 init_observable();
 init_platformObservableUtils();
 init_range();
 init_textEdit();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/text/getPositionOffsetTransformerFromTextModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/text/getPositionOffsetTransformerFromTextModel.js
 init_positionToOffset();
 function getPositionOffsetTransformerFromTextModel(textModel) {
   return new PositionOffsetTransformerWithTextModel(textModel);
@@ -205524,7 +205517,7 @@ var PositionOffsetTransformerWithTextModel = class extends PositionOffsetTransfo
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/utils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/utils.js
 var array = [];
 function getReadonlyEmptyArray() {
   return array;
@@ -205595,7 +205588,7 @@ function wait(ms, cancellationToken) {
   });
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/animation.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/animation.js
 init_dom();
 init_observable();
 var AnimatedValue = class {
@@ -205662,13 +205655,13 @@ var AnimationFrameScheduler = class _AnimationFrameScheduler {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/computeGhostText.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/computeGhostText.js
 init_diff();
 init_strings();
 init_range();
 init_textEdit();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/ghostText.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/ghostText.js
 init_arrays();
 init_strings();
 init_position();
@@ -205761,7 +205754,7 @@ function ghostTextOrReplacementEquals(a, b) {
   return false;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/singleTextEditHelpers.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/singleTextEditHelpers.js
 init_strings();
 init_range();
 init_textLength();
@@ -205790,7 +205783,7 @@ function rangeExtends(extendingRange, rangeToExtend) {
   return rangeToExtend.getStartPosition().equals(extendingRange.getStartPosition()) && rangeToExtend.getEndPosition().isBeforeOrEqual(extendingRange.getEndPosition());
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/computeGhostText.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/computeGhostText.js
 function computeGhostText(edit2, model, mode, cursorPosition, previewSuffixLength = 0) {
   let e = singleTextRemoveCommonPrefix(edit2, model);
   if (e.range.endLineNumber !== e.range.startLineNumber) {
@@ -205924,7 +205917,7 @@ function smartDiff(originalValue, newValue, smartBracketMatching) {
   return new LcsDiff({ getElements: () => elements1 }, { getElements: () => elements2 }).ComputeDiff(false).changes;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsSource.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsSource.js
 init_arrays();
 init_arraysFind();
 init_async();
@@ -205933,7 +205926,7 @@ init_equals();
 init_lifecycle();
 init_observable();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/observableInternal/experimental/reducer.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/observableInternal/experimental/reducer.js
 init_deps();
 init_transaction();
 init_debugName();
@@ -205967,12 +205960,12 @@ function observableReducerSettable(owner, options2) {
   return d;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsSource.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsSource.js
 init_types();
 init_configuration();
 init_contextkey();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/dataChannel/browser/forwardingTelemetryService.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/dataChannel/browser/forwardingTelemetryService.js
 init_telemetry();
 init_dataChannel();
 var __decorate103 = function(decorators, target, key, desc) {
@@ -206028,7 +206021,7 @@ function isCopilotLikeExtension(extensionId) {
   return extIdLowerCase === "github.copilot" || extIdLowerCase === "github.copilot-chat";
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsSource.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsSource.js
 init_instantiation();
 init_log();
 init_platformObservableUtils();
@@ -206037,7 +206030,7 @@ init_stringEdit();
 init_languages();
 init_languageConfigurationRegistry();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/textModelStringEdit.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/textModelStringEdit.js
 init_stringEdit();
 init_offsetRange();
 function offsetEditFromContentChanges(contentChanges) {
@@ -206047,12 +206040,12 @@ function offsetEditFromContentChanges(contentChanges) {
   return edits;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/telemetry.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/telemetry.js
 function sendInlineCompletionsEndOfLifeTelemetry(dataChannel, endOfLifeSummary) {
   dataChannel.publicLog2("inlineCompletion.endOfLife", endOfLifeSummary);
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineSuggestionItem.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineSuggestionItem.js
 init_errors();
 init_filters();
 init_observable();
@@ -206550,7 +206543,7 @@ function reshapeMultiLineInsertion(edit2, textModel) {
   return edit2;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/provideInlineCompletions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/provideInlineCompletions.js
 init_assert();
 init_async();
 init_cancellation();
@@ -206563,7 +206556,7 @@ init_range();
 init_textEdit();
 init_languages();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/fixBrackets.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/fixBrackets.js
 init_brackets();
 init_length();
 init_parser();
@@ -206622,10 +206615,10 @@ var StaticTokenizerSource = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/provideInlineCompletions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/provideInlineCompletions.js
 init_collections();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/graph.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/graph.js
 var DirectedGraph = class _DirectedGraph {
   constructor() {
     this._nodes = /* @__PURE__ */ new Set();
@@ -206691,10 +206684,10 @@ var DirectedGraph = class _DirectedGraph {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/provideInlineCompletions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/provideInlineCompletions.js
 init_cache();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViewInterface.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViewInterface.js
 var InlineEditTabAction;
 (function(InlineEditTabAction2) {
   InlineEditTabAction2["Jump"] = "jump";
@@ -206714,7 +206707,7 @@ var InlineCompletionViewKind;
   InlineCompletionViewKind2["Collapsed"] = "collapsed";
 })(InlineCompletionViewKind || (InlineCompletionViewKind = {}));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/provideInlineCompletions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/provideInlineCompletions.js
 init_types();
 init_textModelEditSource();
 init_uri();
@@ -207046,7 +207039,7 @@ function closeBrackets(text2, position, model, languageConfigurationService) {
   return fixedText;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsSource.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsSource.js
 var __decorate104 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -207537,7 +207530,7 @@ function moveToFront(item, items) {
   return items;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineEdit.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineEdit.js
 var InlineEdit = class {
   constructor(edit2, commands, inlineCompletion) {
     this.edit = edit2;
@@ -207549,12 +207542,12 @@ var InlineEdit = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsModel.js
 init_textModelEditSource();
 init_codeEditorService();
 init_inlineCompletionsService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/typingSpeed.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/typingSpeed.js
 init_arrays();
 init_lifecycle();
 var TypingInterval = class _TypingInterval extends Disposable {
@@ -207703,7 +207696,7 @@ var TypingInterval = class _TypingInterval extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsModel.js
 init_stringEdit();
 init_offsetRange();
 init_uri();
@@ -208673,7 +208666,7 @@ function isSuggestionInViewport(editor2, suggestion) {
   return viewportRange.containsRange(targetRange);
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/suggestWidgetAdapter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/suggestWidgetAdapter.js
 init_arrays();
 init_arraysFind();
 init_event();
@@ -208683,7 +208676,7 @@ init_range();
 init_textEdit();
 init_languages();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestController.js
 init_aria2();
 init_arrays();
 init_cancellation();
@@ -208702,7 +208695,7 @@ init_range();
 init_editorContextKeys();
 init_languages();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestMemory.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestMemory.js
 init_async();
 init_lifecycle();
 init_map();
@@ -208955,7 +208948,7 @@ registerSingleton(
   /* InstantiationType.Delayed */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/wordContextKey.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/wordContextKey.js
 init_contextkey();
 init_nls();
 var __decorate108 = function(decorators, target, key, desc) {
@@ -209029,14 +209022,14 @@ WordContextKey = WordContextKey_1 = __decorate108([
   __param102(1, IContextKeyService)
 ], WordContextKey);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestController.js
 init_nls();
 init_commands();
 init_contextkey();
 init_instantiation();
 init_log();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestAlternatives.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestAlternatives.js
 init_contextkey();
 var __decorate109 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -209128,7 +209121,7 @@ SuggestAlternatives = SuggestAlternatives_1 = __decorate109([
   __param103(1, IContextKeyService)
 ], SuggestAlternatives);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestCommitCharacters.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestCommitCharacters.js
 init_arrays();
 init_lifecycle();
 init_characterClassifier();
@@ -209182,7 +209175,7 @@ var CommitCharacterController = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestModel.js
 init_async();
 init_cancellation();
 init_errors();
@@ -209192,11 +209185,11 @@ init_strings();
 init_selection();
 init_editorWorker();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/wordDistance.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/wordDistance.js
 init_arrays();
 init_range();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/smartSelect/browser/bracketSelections.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/smartSelect/browser/bracketSelections.js
 init_linkedList();
 init_position();
 init_range();
@@ -209331,7 +209324,7 @@ var BracketSelectionRangeProvider = class _BracketSelectionRangeProvider {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/wordDistance.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/wordDistance.js
 var WordDistance = class _WordDistance {
   static {
     this.None = new class extends _WordDistance {
@@ -209393,14 +209386,14 @@ var WordDistance = class _WordDistance {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestModel.js
 init_clipboardService();
 init_configuration();
 init_contextkey();
 init_log();
 init_telemetry();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/completionModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/completionModel.js
 init_arrays();
 init_filters();
 init_strings();
@@ -209573,7 +209566,7 @@ var CompletionModel = class _CompletionModel {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestModel.js
 init_languageFeatures();
 init_filters();
 init_types();
@@ -210284,7 +210277,7 @@ SuggestModel = SuggestModel_1 = __decorate110([
   __param104(8, IEnvironmentService)
 ], SuggestModel);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestOvertypingCapturer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestOvertypingCapturer.js
 init_lifecycle();
 var OvertypingCapturer = class _OvertypingCapturer {
   static {
@@ -210341,7 +210334,7 @@ var OvertypingCapturer = class _OvertypingCapturer {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidget.js
 init_dom();
 init_listWidget();
 init_async();
@@ -210351,7 +210344,7 @@ init_lifecycle();
 init_numbers();
 init_strings();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidgetStatus.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidgetStatus.js
 init_dom();
 init_actionbar2();
 init_lifecycle();
@@ -210421,7 +210414,7 @@ SuggestWidgetStatus = __decorate111([
   __param105(4, IContextKeyService)
 ], SuggestWidgetStatus);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidget.js
 init_nls();
 init_contextkey();
 init_instantiation();
@@ -210429,7 +210422,7 @@ init_storage2();
 init_colorRegistry();
 init_themeService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidgetDetails.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidgetDetails.js
 init_dom();
 init_scrollableElement();
 init_codicons();
@@ -210829,7 +210822,7 @@ var SuggestDetailsOverlay = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidgetRenderer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidgetRenderer.js
 init_dom();
 init_iconLabel();
 init_codicons();
@@ -210840,13 +210833,13 @@ init_lifecycle();
 init_uri();
 init_languages();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/getIconClasses.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/getIconClasses.js
 init_network();
 init_resources();
 init_uri();
 init_modesRegistry();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/files/common/files.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/files/common/files.js
 init_instantiation();
 var IFileService = createDecorator("fileService");
 var FileKind;
@@ -210856,7 +210849,7 @@ var FileKind;
   FileKind2[FileKind2["ROOT_FOLDER"] = 2] = "ROOT_FOLDER";
 })(FileKind || (FileKind = {}));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/getIconClasses.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/getIconClasses.js
 init_themables();
 var fileIconDirectoryRegex = /(?:\/|^)(?:([^\/]+)\/)?([^\/]+)$/;
 function getIconClasses(modelService, languageService, resource, fileKind, icon) {
@@ -210933,7 +210926,7 @@ function fileIconSelectorEscape(str) {
   return str.replace(/[\s]/g, "/");
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidgetRenderer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidgetRenderer.js
 init_model();
 init_language();
 init_nls();
@@ -211133,7 +211126,7 @@ function stripNewLines(str) {
   return str.replace(/\r\n|\r|\n/g, "");
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidget.js
 init_defaultStyles();
 init_aria2();
 init_languages();
@@ -212022,7 +212015,7 @@ var SuggestContentWidget = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestController.js
 init_telemetry();
 init_resources();
 init_hash();
@@ -212987,7 +212980,7 @@ registerEditorAction(class extends EditorAction {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/suggestWidgetAdapter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/model/suggestWidgetAdapter.js
 init_observable();
 var SuggestWidgetAdaptor = class extends Disposable {
   get selectedItem() {
@@ -213170,14 +213163,14 @@ var ObservableSuggestWidgetAdapter = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineCompletionsView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineCompletionsView.js
 init_domStylesheets();
 init_lifecycle();
 init_observable();
 init_instantiation();
 init_observableCodeEditor();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/ghostText/ghostTextView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/ghostText/ghostTextView.js
 init_trustedTypes();
 init_iconLabels2();
 init_codicons();
@@ -213199,7 +213192,7 @@ init_lineTokens();
 init_lineDecorations();
 init_viewLineRenderer();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/ranges/rangeSingleLine.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/ranges/rangeSingleLine.js
 var RangeSingleLine = class {
   constructor(lineNumber, columnRange) {
     this.lineNumber = lineNumber;
@@ -213207,7 +213200,7 @@ var RangeSingleLine = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/ranges/columnRange.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/ranges/columnRange.js
 init_errors();
 init_offsetRange();
 init_range();
@@ -213230,12 +213223,12 @@ var ColumnRange = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/ghostText/ghostTextView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/ghostText/ghostTextView.js
 init_dom();
 init_mouseEvent();
 init_codeEditorWidget();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/tokens/tokenWithTextArray.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/tokens/tokenWithTextArray.js
 init_offsetRange();
 init_lineTokens();
 var TokenWithTextArray = class _TokenWithTextArray {
@@ -213295,7 +213288,7 @@ var TokenWithTextInfo = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/ghostText/ghostTextView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/ghostText/ghostTextView.js
 init_arrays();
 var __decorate116 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -213802,7 +213795,7 @@ function renderLines2(domNode, tabSize, lines, opts, isClickable) {
 }
 var ttPolicy4 = createTrustedTypesPolicy("editorGhostText", { createHTML: (value) => value });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViewProducer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViewProducer.js
 init_hotReloadHelpers();
 init_lifecycle();
 init_observable();
@@ -213813,7 +213806,7 @@ init_range();
 init_textEdit();
 init_textModelText();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/edits/lineEdit.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/edits/lineEdit.js
 init_assert();
 init_strings();
 init_lineRange();
@@ -213874,7 +213867,7 @@ var LineReplacement = class _LineReplacement {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditWithChanges.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditWithChanges.js
 init_lineRange();
 var InlineEditWithChanges = class {
   get lineEdit() {
@@ -213902,7 +213895,7 @@ var InlineEditWithChanges = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsModel.js
 init_observable();
 init_nls();
 init_observableCodeEditor();
@@ -213953,7 +213946,7 @@ var GhostTextIndicator = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsView.js
 init_dom();
 init_equals();
 init_errors();
@@ -213970,7 +213963,7 @@ init_textLength();
 init_rangeMapping();
 init_textModel();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/components/gutterIndicatorView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/components/gutterIndicatorView.js
 init_dom();
 init_iconLabels2();
 init_codicons();
@@ -213984,7 +213977,7 @@ init_colorUtils();
 init_themeService();
 init_point();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/core/2d/rect.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/core/2d/rect.js
 init_errors();
 init_point();
 var Rect = class _Rect {
@@ -214133,14 +214126,14 @@ var Rect = class _Rect {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/components/gutterIndicatorView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/components/gutterIndicatorView.js
 init_offsetRange();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollController.js
 init_lifecycle();
 init_languageFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollWidget.js
 init_dom();
 init_trustedTypes();
 init_arrays();
@@ -214624,7 +214617,7 @@ var StickyFoldingIcon = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollProvider.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollProvider.js
 init_lifecycle();
 init_languageFeatures();
 init_cancellation();
@@ -214633,7 +214626,7 @@ init_arrays();
 init_event();
 init_languageConfigurationRegistry();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollModelProvider.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollModelProvider.js
 init_lifecycle();
 init_languageFeatures();
 init_outlineModel();
@@ -214641,7 +214634,7 @@ init_async();
 init_languageConfigurationRegistry();
 init_errors();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollElement.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollElement.js
 var StickyRange = class {
   constructor(startLineNumber, endLineNumber) {
     this.startLineNumber = startLineNumber;
@@ -214664,7 +214657,7 @@ var StickyModel = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollModelProvider.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollModelProvider.js
 init_iterator();
 init_instantiation();
 var __decorate117 = function(decorators, target, key, desc) {
@@ -214981,7 +214974,7 @@ StickyModelFromCandidateSyntaxFoldingProvider = __decorate117([
   __param111(2, ILanguageFeaturesService)
 ], StickyModelFromCandidateSyntaxFoldingProvider);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollProvider.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollProvider.js
 init_position();
 init_range();
 var __decorate118 = function(decorators, target, key, desc) {
@@ -215171,7 +215164,7 @@ StickyLineCandidateProvider = __decorate118([
   __param112(2, ILanguageConfigurationService)
 ], StickyLineCandidateProvider);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollController.js
 init_instantiation();
 init_contextView();
 init_actions2();
@@ -215733,7 +215726,7 @@ StickyScrollController2 = StickyScrollController_1 = __decorate119([
   __param113(6, IContextKeyService)
 ], StickyScrollController2);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/theme.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/theme.js
 init_errors();
 init_observable();
 init_nls();
@@ -215827,7 +215820,7 @@ function observeColor(colorIdentifier, themeService) {
   });
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/utils/utils.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/utils/utils.js
 init_arrays();
 init_arraysFind();
 init_observable();
@@ -216034,7 +216027,7 @@ function rectToProps(fn, debugLocation = DebugLocation.ofCaller()) {
   };
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/components/gutterIndicatorMenu.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/components/gutterIndicatorMenu.js
 init_dom();
 init_actionbar2();
 init_iconLabels2();
@@ -216267,7 +216260,7 @@ function separator() {
   }));
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/components/gutterIndicatorView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/components/gutterIndicatorView.js
 init_assert();
 var __decorate121 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -216689,7 +216682,7 @@ function getRotationFromDirection(direction) {
   }
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsNewUsers.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsNewUsers.js
 init_async();
 init_errors();
 init_lifecycle();
@@ -216863,7 +216856,7 @@ InlineEditsOnboardingExperience = __decorate122([
   __param116(5, IConfigurationService)
 ], InlineEditsOnboardingExperience);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsCollapsedView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsCollapsedView.js
 init_dom();
 init_event();
 init_lifecycle();
@@ -216983,7 +216976,7 @@ InlineEditsCollapsedView = __decorate123([
   __param117(2, IAccessibilityService)
 ], InlineEditsCollapsedView);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsCustomView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsCustomView.js
 init_dom();
 init_mouseEvent();
 init_event();
@@ -217218,7 +217211,7 @@ InlineEditsCustomView = __decorate124([
   __param118(4, ILanguageService)
 ], InlineEditsCustomView);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsDeletionView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsDeletionView.js
 init_dom();
 init_event();
 init_lifecycle();
@@ -217375,7 +217368,7 @@ var InlineEditsDeletionView = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsInsertionView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsInsertionView.js
 init_dom();
 init_event();
 init_lifecycle();
@@ -217622,7 +217615,7 @@ InlineEditsInsertionView = __decorate125([
   __param119(4, ILanguageService)
 ], InlineEditsInsertionView);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsLineReplacementView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsLineReplacementView.js
 init_dom();
 init_mouseEvent();
 init_event();
@@ -217955,7 +217948,7 @@ function rangesToBubbleRanges(ranges) {
   return result;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsSideBySideView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsSideBySideView.js
 init_dom();
 init_mouseEvent();
 init_color();
@@ -218466,7 +218459,7 @@ InlineEditsSideBySideView = __decorate127([
   __param121(6, IThemeService)
 ], InlineEditsSideBySideView);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsWordReplacementView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/inlineEditsWordReplacementView.js
 init_dom();
 init_mouseEvent();
 init_event();
@@ -218668,7 +218661,7 @@ InlineEditsWordReplacementView = __decorate128([
   __param122(3, ILanguageService)
 ], InlineEditsWordReplacementView);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/originalEditorInlineDiffView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/originalEditorInlineDiffView.js
 init_event();
 init_lifecycle();
 init_observable();
@@ -218872,7 +218865,7 @@ function modelTokenizationFinished(model) {
   return observableFromEvent(model.onDidChangeTokens, () => i++);
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsView.js
 var __decorate129 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -219381,7 +219374,7 @@ function countPrefixRepeats(str, prefix) {
   return count;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViewProducer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViewProducer.js
 var __decorate130 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -219484,7 +219477,7 @@ InlineEditsViewAndDiffProducer = __decorate130([
   __param124(4, IInstantiationService)
 ], InlineEditsViewAndDiffProducer);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineCompletionsView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/view/inlineCompletionsView.js
 var __decorate131 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -219560,7 +219553,7 @@ InlineCompletionsView = __decorate131([
   __param125(3, IInstantiationService)
 ], InlineCompletionsView);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/inlineCompletionsController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/inlineCompletionsController.js
 var __decorate132 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -219937,7 +219930,7 @@ InlineCompletionsController = InlineCompletionsController_1 = __decorate132([
   __param126(9, IAccessibilityService)
 ], InlineCompletionsController);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/commands.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/controller/commands.js
 var ShowNextInlineSuggestionAction = class _ShowNextInlineSuggestionAction extends EditorAction {
   static {
     this.ID = showNextInlineSuggestionActionId;
@@ -220259,7 +220252,7 @@ ${json}
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/hintsWidget/hoverParticipant.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/hintsWidget/hoverParticipant.js
 init_dom();
 init_htmlContent();
 init_lifecycle();
@@ -220412,11 +220405,11 @@ InlineCompletionsHoverParticipant = __decorate133([
   __param127(4, IMarkdownRendererService)
 ], InlineCompletionsHoverParticipant);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/inlineCompletionsAccessibleView.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/inlineCompletionsAccessibleView.js
 var InlineCompletionsAccessibleView = class {
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/inlineCompletions.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlineCompletions/browser/inlineCompletions.contribution.js
 init_inlineCompletionsService();
 registerEditorContribution(
   InlineCompletionsController.ID,
@@ -220440,7 +220433,7 @@ registerAction2(CancelSnoozeInlineCompletion);
 HoverParticipantRegistry.register(InlineCompletionsHoverParticipant);
 AccessibleViewRegistry.register(new InlineCompletionsAccessibleView());
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/link/goToDefinitionAtPosition.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gotoSymbol/browser/link/goToDefinitionAtPosition.js
 init_async();
 init_errors();
 init_htmlContent();
@@ -220688,7 +220681,7 @@ registerEditorContribution(
   /* EditorContributionInstantiation.BeforeFirstInteraction */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/gpu/browser/gpuActions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/gpu/browser/gpuActions.js
 init_dom();
 init_buffer();
 init_uri();
@@ -220810,7 +220803,7 @@ var DebugEditorGpuRendererAction = class extends EditorAction {
 };
 registerEditorAction(DebugEditorGpuRendererAction);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverActions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverActions.js
 init_keyCodes();
 init_editorExtensions();
 init_range();
@@ -221194,23 +221187,23 @@ var DecreaseHoverVerbosityLevel = class extends EditorAction {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverContribution.js
 init_editorExtensions();
 init_colorRegistry();
 init_themeService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/glyphHoverController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/glyphHoverController.js
 init_lifecycle();
 init_instantiation();
 init_async();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/glyphHoverWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/glyphHoverWidget.js
 init_dom();
 init_lifecycle();
 init_markdownRenderer2();
 init_hoverWidget2();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/glyphHoverComputer.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/glyphHoverComputer.js
 init_arrays();
 init_htmlContent();
 init_model2();
@@ -221245,7 +221238,7 @@ var GlyphHoverComputer = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/glyphHoverWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/glyphHoverWidget.js
 var __decorate135 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -221421,7 +221414,7 @@ GlyphHoverWidget = GlyphHoverWidget_1 = __decorate135([
   __param129(1, IMarkdownRendererService)
 ], GlyphHoverWidget);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/glyphHoverController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/glyphHoverController.js
 var __decorate136 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -221596,7 +221589,7 @@ GlyphHoverController = __decorate136([
   __param130(1, IInstantiationService)
 ], GlyphHoverController);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverAccessibleViews.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverAccessibleViews.js
 var HoverAccessibleView = class {
 };
 var HoverAccessibilityHelp = class {
@@ -221604,7 +221597,7 @@ var HoverAccessibilityHelp = class {
 var ExtHoverAccessibleView = class {
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/hover/browser/hoverContribution.js
 registerEditorContribution(
   ContentHoverController.ID,
   ContentHoverController,
@@ -221644,7 +221637,7 @@ AccessibleViewRegistry.register(new HoverAccessibleView());
 AccessibleViewRegistry.register(new HoverAccessibilityHelp());
 AccessibleViewRegistry.register(new ExtHoverAccessibleView());
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/indentation/browser/indentation.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/indentation/browser/indentation.js
 init_lifecycle();
 init_strings();
 init_nls();
@@ -221658,7 +221651,7 @@ init_languageConfigurationRegistry();
 init_model();
 init_lineTokens();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/indentation/common/indentation.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/indentation/common/indentation.js
 init_strings();
 init_shiftCommand();
 init_editOperation();
@@ -221739,7 +221732,7 @@ function doesLineStartWithString(model, lineNumber) {
   return lineTokens.getStandardTokenType(0) === 2;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/indentation/browser/indentation.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/indentation/browser/indentation.js
 var __decorate137 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -222296,7 +222289,7 @@ registerEditorAction(DetectIndentation);
 registerEditorAction(ReindentLinesAction);
 registerEditorAction(ReindentSelectedLinesAction);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/inlayHints/browser/inlayHintsContribution.js
 init_editorExtensions();
 registerEditorContribution(
   InlayHintsController.ID,
@@ -222306,13 +222299,13 @@ registerEditorContribution(
 );
 HoverParticipantRegistry.register(InlayHintsHover);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/editor.all.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/editor.all.js
 var import_inPlaceReplace = __toESM(require_inPlaceReplace());
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/insertFinalNewLine/browser/insertFinalNewLine.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/insertFinalNewLine/browser/insertFinalNewLine.js
 init_editorExtensions();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/insertFinalNewLine/browser/insertFinalNewLineCommand.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/insertFinalNewLine/browser/insertFinalNewLineCommand.js
 init_strings();
 init_editOperation();
 init_position();
@@ -222342,7 +222335,7 @@ function insertFinalNewLine(model) {
   return EditOperation.insert(new Position(lineCount, model.getLineMaxColumn(lineCount)), model.getEOL());
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/insertFinalNewLine/browser/insertFinalNewLine.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/insertFinalNewLine/browser/insertFinalNewLine.js
 init_editorContextKeys();
 init_nls();
 var InsertFinalNewLineAction = class _InsertFinalNewLineAction extends EditorAction {
@@ -222369,7 +222362,7 @@ var InsertFinalNewLineAction = class _InsertFinalNewLineAction extends EditorAct
 };
 registerEditorAction(InsertFinalNewLineAction);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/lineSelection/browser/lineSelection.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/lineSelection/browser/lineSelection.js
 init_editorExtensions();
 init_cursorMoveCommands();
 init_editorContextKeys();
@@ -222401,7 +222394,7 @@ var ExpandLineSelectionAction = class extends EditorAction {
 };
 registerEditorAction(ExpandLineSelectionAction);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/linkedEditing/browser/linkedEditing.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/linkedEditing/browser/linkedEditing.js
 init_arrays();
 init_async();
 init_cancellation();
@@ -222780,7 +222773,7 @@ registerEditorContribution(
 );
 registerEditorAction(LinkedEditingAction);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/links/browser/links.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/links/browser/links.js
 init_async();
 init_cancellation();
 init_errors();
@@ -222796,7 +222789,7 @@ init_textModel();
 init_languageFeatureDebounce();
 init_languageFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/links/browser/getLinks.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/links/browser/getLinks.js
 init_arrays();
 init_cancellation();
 init_errors();
@@ -222939,7 +222932,7 @@ CommandsRegistry.registerCommand("_executeLinkProvider", async (accessor, ...arg
   return result;
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/links/browser/links.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/links/browser/links.js
 init_nls();
 init_notification();
 init_opener();
@@ -223297,7 +223290,7 @@ registerEditorContribution(
 );
 registerEditorAction(OpenLinkAction);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/longLinesHelper/browser/longLinesHelper.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/longLinesHelper/browser/longLinesHelper.js
 init_lifecycle();
 init_editorExtensions();
 var LongLinesHelper = class extends Disposable {
@@ -223327,10 +223320,10 @@ registerEditorContribution(
   /* EditorContributionInstantiation.BeforeFirstInteraction */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/middleScroll/browser/middleScroll.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/middleScroll/browser/middleScroll.contribution.js
 init_editorExtensions();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/middleScroll/browser/middleScrollController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/middleScroll/browser/middleScrollController.js
 init_dom();
 init_lifecycle();
 init_observable();
@@ -223451,7 +223444,7 @@ function toScrollPosition(p) {
   };
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/middleScroll/browser/middleScroll.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/middleScroll/browser/middleScroll.contribution.js
 registerEditorContribution(
   MiddleScrollController.ID,
   MiddleScrollController,
@@ -223459,7 +223452,7 @@ registerEditorContribution(
   /* EditorContributionInstantiation.BeforeFirstInteraction */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/multicursor/browser/multicursor.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/multicursor/browser/multicursor.js
 init_aria2();
 init_async();
 init_keyCodes();
@@ -223474,7 +223467,7 @@ init_actions2();
 init_contextkey();
 init_languageFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/wordHighlighter/browser/highlightDecorations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/wordHighlighter/browser/highlightDecorations.js
 init_model2();
 init_textModel();
 init_languages();
@@ -223570,7 +223563,7 @@ registerThemingParticipant((theme, collector) => {
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/multicursor/browser/multicursor.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/multicursor/browser/multicursor.js
 init_instantiation();
 var __decorate140 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -224638,7 +224631,7 @@ registerEditorAction(InsertCursorAtTopOfLineSelected);
 registerEditorAction(FocusNextCursor);
 registerEditorAction(FocusPreviousCursor);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHints.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHints.js
 init_lazy();
 init_lifecycle();
 init_editorExtensions();
@@ -224646,7 +224639,7 @@ init_editorContextKeys();
 init_languages();
 init_languageFeatures();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHintsModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHintsModel.js
 init_async();
 init_errors();
 init_event();
@@ -224654,7 +224647,7 @@ init_lifecycle();
 init_characterClassifier();
 init_languages();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/provideSignatureHelp.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/provideSignatureHelp.js
 init_cancellation();
 init_errors();
 init_types();
@@ -224706,7 +224699,7 @@ CommandsRegistry.registerCommand("_executeSignatureHelpProvider", async (accesso
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHintsModel.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHintsModel.js
 var ParameterHintState;
 (function(ParameterHintState2) {
   ParameterHintState2.Default = {
@@ -224960,12 +224953,12 @@ function mergeTriggerContexts(previous, current) {
   }
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHints.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHints.js
 init_nls();
 init_contextkey();
 init_instantiation();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHintsWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHintsWidget.js
 init_dom();
 init_aria2();
 init_scrollableElement();
@@ -225268,7 +225261,7 @@ ParameterHintsWidget = ParameterHintsWidget_1 = __decorate141([
 ], ParameterHintsWidget);
 registerColor("editorHoverWidget.highlightForeground", listHighlightForeground, localize(1315, "Foreground color of the active item in the parameter hint."));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHints.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/parameterHints/browser/parameterHints.js
 var __decorate142 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -225405,13 +225398,13 @@ registerEditorCommand(new ParameterHintsCommand({
   }
 }));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/placeholderText/browser/placeholderText.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/placeholderText/browser/placeholderText.contribution.js
 init_editorExtensions();
 init_editorColorRegistry();
 init_nls();
 init_colorUtils();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/placeholderText/browser/placeholderTextContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/placeholderText/browser/placeholderTextContribution.js
 init_dom();
 init_equals();
 init_lifecycle();
@@ -225490,7 +225483,7 @@ function isOrWasTrue(owner, fn) {
   });
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/observable/common/wrapInReloadableClass.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/observable/common/wrapInReloadableClass.js
 init_hotReload();
 init_hotReloadHelpers();
 init_observable();
@@ -225543,7 +225536,7 @@ BaseClass13 = __decorate143([
   __param137(1, IInstantiationService)
 ], BaseClass13);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/placeholderText/browser/placeholderText.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/placeholderText/browser/placeholderText.contribution.js
 registerEditorContribution(
   PlaceholderTextContribution.ID,
   wrapInReloadableClass1(() => PlaceholderTextContribution),
@@ -225552,7 +225545,7 @@ registerEditorContribution(
 );
 registerColor("editor.placeholder.foreground", ghostTextForeground, localize(1334, "Foreground color of the placeholder text in the editor."));
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/rename/browser/rename.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/rename/browser/rename.js
 init_aria2();
 init_async();
 init_cancellation();
@@ -225582,7 +225575,7 @@ init_textResourceConfiguration();
 init_textModelEditSource();
 init_editorState();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/rename/browser/renameWidget.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/rename/browser/renameWidget.js
 init_dom();
 init_keyboardEvent();
 init_aria2();
@@ -226316,7 +226309,7 @@ var RenameCandidateView = class _RenameCandidateView {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/rename/browser/rename.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/rename/browser/rename.js
 var __decorate145 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -226740,7 +226733,7 @@ Registry.as(Extensions4.Configuration).registerConfiguration({
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/sectionHeaders/browser/sectionHeaders.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/sectionHeaders/browser/sectionHeaders.js
 init_async();
 init_lifecycle();
 init_editorExtensions();
@@ -226934,7 +226927,7 @@ registerEditorContribution(
   /* EditorContributionInstantiation.AfterFirstRender */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/semanticTokens/browser/documentSemanticTokens.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/semanticTokens/browser/documentSemanticTokens.js
 init_async();
 init_cancellation();
 init_errors();
@@ -226950,7 +226943,7 @@ init_model();
 init_semanticTokensProviderStyling();
 init_semanticTokensStyling();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/semanticTokens/common/getSemanticTokens.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/semanticTokens/common/getSemanticTokens.js
 init_cancellation();
 init_errors();
 init_uri();
@@ -226958,7 +226951,7 @@ init_model();
 init_commands();
 init_types();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/common/services/semanticTokensDto.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/semanticTokensDto.js
 init_buffer();
 init_platform();
 function reverseEndianness(arr) {
@@ -227023,7 +227016,7 @@ function encodeSemanticTokensDtoSize(semanticTokens) {
   return result;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/semanticTokens/common/getSemanticTokens.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/semanticTokens/common/getSemanticTokens.js
 init_range();
 init_languageFeatures();
 function isSemanticTokens(v) {
@@ -227205,7 +227198,7 @@ CommandsRegistry.registerCommand("_provideDocumentRangeSemanticTokens", async (a
   });
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/semanticTokens/common/semanticTokensConfig.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/semanticTokens/common/semanticTokensConfig.js
 var SEMANTIC_HIGHLIGHTING_SETTING_ID = "editor.semanticHighlighting";
 function isSemanticColoringEnabled(model, themeService, configurationService) {
   const setting = configurationService.getValue(SEMANTIC_HIGHLIGHTING_SETTING_ID, { overrideIdentifier: model.getLanguageId(), resource: model.uri })?.enabled;
@@ -227215,7 +227208,7 @@ function isSemanticColoringEnabled(model, themeService, configurationService) {
   return themeService.getColorTheme().semanticHighlighting;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/semanticTokens/browser/documentSemanticTokens.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/semanticTokens/browser/documentSemanticTokens.js
 var __decorate148 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -227540,7 +227533,7 @@ var SemanticTokensResponse = class {
 };
 registerEditorFeature(DocumentSemanticTokensFeature);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/semanticTokens/browser/viewportSemanticTokens.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/semanticTokens/browser/viewportSemanticTokens.js
 init_async();
 init_lifecycle();
 init_editorExtensions();
@@ -227707,7 +227700,7 @@ registerEditorContribution(
   /* EditorContributionInstantiation.AfterFirstRender */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/smartSelect/browser/smartSelect.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/smartSelect/browser/smartSelect.js
 init_arrays();
 init_cancellation();
 init_errors();
@@ -227717,7 +227710,7 @@ init_range();
 init_selection();
 init_editorContextKeys();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/smartSelect/browser/wordSelections.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/smartSelect/browser/wordSelections.js
 init_strings();
 init_range();
 var WordSelectionRangeProvider = class {
@@ -227784,7 +227777,7 @@ var WordSelectionRangeProvider = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/smartSelect/browser/smartSelect.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/smartSelect/browser/smartSelect.js
 init_nls();
 init_actions2();
 init_commands();
@@ -228049,14 +228042,14 @@ CommandsRegistry.registerCommand("_executeSelectionRangeProvider", async functio
   }
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollContribution.js
 init_editorExtensions();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollActions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollActions.js
 init_editorExtensions();
 init_nls();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/action/common/actionCommonCategories.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/action/common/actionCommonCategories.js
 init_nls();
 var Categories = Object.freeze({
   View: localize2(1638, "View"),
@@ -228067,7 +228060,7 @@ var Categories = Object.freeze({
   Developer: localize2(1643, "Developer")
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollActions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollActions.js
 init_actions2();
 init_configuration();
 init_contextkey();
@@ -228194,7 +228187,7 @@ var SelectEditor = class extends EditorAction2 {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollContribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollContribution.js
 init_actions2();
 registerEditorContribution(
   StickyScrollController2.ID,
@@ -228209,7 +228202,7 @@ registerAction2(SelectNextStickyScrollLine);
 registerAction2(GoToStickyScrollLine);
 registerAction2(SelectEditor);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestInlineCompletions.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestInlineCompletions.js
 init_cancellation();
 init_filters();
 init_iterator();
@@ -228386,7 +228379,7 @@ SuggestInlineCompletions = __decorate151([
 ], SuggestInlineCompletions);
 registerEditorFeature(SuggestInlineCompletions);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/tokenization/browser/tokenization.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/tokenization/browser/tokenization.js
 init_stopwatch();
 init_editorExtensions();
 init_nls();
@@ -228412,7 +228405,7 @@ var ForceRetokenizeAction = class extends EditorAction {
 };
 registerEditorAction(ForceRetokenizeAction);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/toggleTabFocusMode/browser/toggleTabFocusMode.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/toggleTabFocusMode/browser/toggleTabFocusMode.js
 init_aria2();
 init_tabFocus();
 init_nls();
@@ -228454,7 +228447,7 @@ var ToggleTabFocusModeAction = class _ToggleTabFocusModeAction extends Action2 {
 };
 registerAction2(ToggleTabFocusModeAction);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/unicodeHighlighter/browser/unicodeHighlighter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/unicodeHighlighter/browser/unicodeHighlighter.js
 init_async();
 init_codicons();
 init_htmlContent();
@@ -228467,7 +228460,7 @@ init_textModel();
 init_unicodeTextModelHighlighter();
 init_editorWorker();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/unicodeHighlighter/browser/bannerController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/unicodeHighlighter/browser/bannerController.js
 init_nls();
 init_dom();
 init_actionbar2();
@@ -228476,7 +228469,7 @@ init_lifecycle();
 init_markdownRenderer2();
 init_instantiation();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/opener/browser/link.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/opener/browser/link.js
 init_dom();
 init_event2();
 init_keyboardEvent();
@@ -228566,7 +228559,7 @@ Link2 = __decorate152([
   __param146(4, IOpenerService)
 ], Link2);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/unicodeHighlighter/browser/bannerController.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/unicodeHighlighter/browser/bannerController.js
 init_iconRegistry();
 init_themables();
 var __decorate153 = function(decorators, target, key, desc) {
@@ -228669,7 +228662,7 @@ Banner = __decorate153([
   __param147(1, IMarkdownRendererService)
 ], Banner);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/unicodeHighlighter/browser/unicodeHighlighter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/unicodeHighlighter/browser/unicodeHighlighter.js
 init_nls();
 init_configuration();
 init_instantiation();
@@ -229355,7 +229348,7 @@ registerEditorContribution(
 );
 HoverParticipantRegistry.register(UnicodeHighlighterHoverParticipant);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/unusualLineTerminators/browser/unusualLineTerminators.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/unusualLineTerminators/browser/unusualLineTerminators.js
 init_lifecycle();
 init_resources();
 init_editorExtensions();
@@ -229476,7 +229469,7 @@ registerEditorContribution(
   /* EditorContributionInstantiation.AfterFirstRender */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/wordHighlighter/browser/wordHighlighter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/wordHighlighter/browser/wordHighlighter.js
 init_nls();
 init_aria2();
 init_async();
@@ -229500,7 +229493,7 @@ init_model2();
 init_languageFeatures();
 init_resolverService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/wordHighlighter/browser/textualHighlightProvider.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/wordHighlighter/browser/textualHighlightProvider.js
 init_wordHelper();
 init_languageFeatures();
 init_languages();
@@ -229575,7 +229568,7 @@ TextualMultiDocumentHighlightFeature = __decorate156([
   __param150(0, ILanguageFeaturesService)
 ], TextualMultiDocumentHighlightFeature);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/wordHighlighter/browser/wordHighlighter.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/wordHighlighter/browser/wordHighlighter.js
 var __decorate157 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -230306,7 +230299,7 @@ registerEditorAction(PrevWordHighlightAction);
 registerEditorAction(TriggerWordHighlightAction);
 registerEditorFeature(TextualMultiDocumentHighlightFeature);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/wordOperations/browser/wordOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/wordOperations/browser/wordOperations.js
 init_nls();
 init_accessibility();
 init_contextkey();
@@ -230794,7 +230787,7 @@ registerEditorCommand(new DeleteWordEndRight());
 registerEditorCommand(new DeleteWordRight());
 registerEditorAction(DeleteInsideWord);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/wordPartOperations/browser/wordPartOperations.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/wordPartOperations/browser/wordPartOperations.js
 init_editorExtensions();
 init_cursorWordOperations();
 init_range();
@@ -230955,7 +230948,7 @@ registerEditorCommand(new CursorWordPartLeftSelect());
 registerEditorCommand(new CursorWordPartRight());
 registerEditorCommand(new CursorWordPartRightSelect());
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/readOnlyMessage/browser/contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/readOnlyMessage/browser/contribution.js
 init_htmlContent();
 init_lifecycle();
 init_editorExtensions();
@@ -230994,13 +230987,13 @@ registerEditorContribution(
   /* EditorContributionInstantiation.BeforeFirstInteraction */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/editor.all.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/editor.all.js
 var import_contribution2 = __toESM(require_contribution());
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/floatingMenu/browser/floatingMenu.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/floatingMenu/browser/floatingMenu.contribution.js
 init_editorExtensions();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/floatingMenu/browser/floatingMenu.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/floatingMenu/browser/floatingMenu.js
 init_dom();
 init_lifecycle();
 init_observable();
@@ -231087,7 +231080,7 @@ FloatingEditorToolbar = __decorate158([
   __param152(3, IMenuService)
 ], FloatingEditorToolbar);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/floatingMenu/browser/floatingMenu.contribution.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/floatingMenu/browser/floatingMenu.contribution.js
 registerEditorContribution(
   FloatingEditorToolbar.ID,
   FloatingEditorToolbar,
@@ -231095,10 +231088,10 @@ registerEditorContribution(
   /* EditorContributionInstantiation.AfterFirstRender */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/editor.all.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/editor.all.js
 init_standaloneStrings();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/iPadShowKeyboard/iPadShowKeyboard.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/iPadShowKeyboard/iPadShowKeyboard.js
 init_dom();
 init_lifecycle();
 init_editorExtensions();
@@ -231178,15 +231171,15 @@ registerEditorContribution(
   /* EditorContributionInstantiation.Eventually */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/editor.main.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/editor.main.js
 var import_inspectTokens = __toESM(require_inspectTokens());
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneHelpQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneHelpQuickAccess.js
 init_platform2();
 init_quickAccess();
 init_standaloneStrings();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/helpQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/helpQuickAccess.js
 init_nls();
 init_platform2();
 init_lifecycle();
@@ -231257,14 +231250,14 @@ HelpQuickAccessProvider = HelpQuickAccessProvider_1 = __decorate159([
   __param153(1, IKeybindingService)
 ], HelpQuickAccessProvider);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneHelpQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneHelpQuickAccess.js
 Registry.as(Extensions10.Quickaccess).registerQuickAccessProvider({
   ctor: HelpQuickAccessProvider,
   prefix: "",
   helpEntries: [{ description: QuickHelpNLS.helpQuickAccessActionLabel }]
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/gotoLineQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/gotoLineQuickAccess.js
 init_toggle2();
 init_codicons();
 init_lifecycle();
@@ -231273,7 +231266,7 @@ init_inputColors();
 init_colorUtils();
 init_editorBrowser();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/editorNavigationQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/editorNavigationQuickAccess.js
 init_functional();
 init_lifecycle();
 init_editorBrowser();
@@ -231400,7 +231393,7 @@ var AbstractEditorNavigationQuickAccessProvider = class {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/gotoLineQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/gotoLineQuickAccess.js
 var AbstractGotoLineQuickAccessProvider = class _AbstractGotoLineQuickAccessProvider extends AbstractEditorNavigationQuickAccessProvider {
   static {
     this.PREFIX = ":";
@@ -231564,7 +231557,7 @@ var AbstractGotoLineQuickAccessProvider = class _AbstractGotoLineQuickAccessProv
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneGotoLineQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneGotoLineQuickAccess.js
 init_platform2();
 init_quickAccess();
 init_codeEditorService();
@@ -231633,13 +231626,13 @@ Registry.as(Extensions10.Quickaccess).registerQuickAccessProvider({
   helpEntries: [{ description: GoToLineNLS.gotoLineActionLabel, commandId: GotoLineAction.ID }]
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/gotoSymbolQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/gotoSymbolQuickAccess.js
 init_async();
 init_cancellation();
 init_codicons();
 init_themables();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/fuzzyScorer.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/fuzzyScorer.js
 init_filters();
 init_path();
 init_platform();
@@ -231754,7 +231747,7 @@ function pieceToQuery(arg1) {
   return prepareQuery(arg1.original);
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/gotoSymbolQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/gotoSymbolQuickAccess.js
 init_lifecycle();
 init_strings();
 init_range();
@@ -232183,7 +232176,7 @@ var NLS_SYMBOL_KIND_CACHE = {
   ]: localize(1377, "constants ({0})")
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneGotoSymbolQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneGotoSymbolQuickAccess.js
 init_platform2();
 init_quickAccess();
 init_codeEditorService();
@@ -232256,24 +232249,24 @@ Registry.as(Extensions10.Quickaccess).registerQuickAccessProvider({
   ]
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneCommandsQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneCommandsQuickAccess.js
 init_platform2();
 init_quickAccess();
 init_standaloneStrings();
 init_codeEditorService();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/commandsQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/commandsQuickAccess.js
 init_iconLabels();
 init_action();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/commandsQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/commandsQuickAccess.js
 init_errors();
 init_filters();
 init_functional();
 init_lifecycle();
 init_map();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/tfIdf.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/tfIdf.js
 function countMapFrom(values) {
   const map = /* @__PURE__ */ new Map();
   for (const value of values) {
@@ -232414,7 +232407,7 @@ function normalizeTfIdfScores(scores) {
   return result;
 }
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/commandsQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/commandsQuickAccess.js
 init_nls();
 init_commands();
 init_configuration();
@@ -232423,7 +232416,7 @@ init_instantiation();
 init_keybinding();
 init_log();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/pickerQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/pickerQuickAccess.js
 init_async();
 init_cancellation();
 init_lifecycle();
@@ -232652,11 +232645,11 @@ var PickerQuickAccessProvider = class extends Disposable {
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/commandsQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/commandsQuickAccess.js
 init_storage2();
 init_telemetry();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/base/common/normalization.js
+// app/static/vendor/monaco-editor-core/esm/vs/base/common/normalization.js
 init_map();
 var nfcCache = new LRUCache(1e4);
 var nfdCache = new LRUCache(1e4);
@@ -232688,7 +232681,7 @@ var removeAccents = /* @__PURE__ */ (function() {
   };
 })();
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/platform/quickinput/browser/commandsQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/platform/quickinput/browser/commandsQuickAccess.js
 var __decorate163 = function(decorators, target, key, desc) {
   var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
   if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -233054,7 +233047,7 @@ CommandsHistory = CommandsHistory_1 = __decorate163([
   __param157(2, ILogService)
 ], CommandsHistory);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/commandsQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/commandsQuickAccess.js
 var AbstractEditorCommandsQuickAccessProvider = class extends AbstractCommandsQuickAccessProvider {
   constructor(options2, instantiationService, keybindingService, commandService, telemetryService, dialogService) {
     super(options2, instantiationService, keybindingService, commandService, telemetryService, dialogService);
@@ -233085,7 +233078,7 @@ var AbstractEditorCommandsQuickAccessProvider = class extends AbstractCommandsQu
   }
 };
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneCommandsQuickAccess.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/standaloneCommandsQuickAccess.js
 init_instantiation();
 init_keybinding();
 init_commands();
@@ -233164,7 +233157,7 @@ Registry.as(Extensions10.Quickaccess).registerQuickAccessProvider({
   helpEntries: [{ description: QuickCommandNLS.quickCommandHelp, commandId: GotoLineAction2.ID }]
 });
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/referenceSearch/standaloneReferenceSearch.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/referenceSearch/standaloneReferenceSearch.js
 init_editorExtensions();
 init_codeEditorService();
 init_configuration();
@@ -233203,7 +233196,7 @@ registerEditorContribution(
   /* EditorContributionInstantiation.Lazy */
 );
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/standalone/browser/toggleHighContrast/toggleHighContrast.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/toggleHighContrast/toggleHighContrast.js
 init_editorExtensions();
 init_standaloneTheme();
 init_standaloneStrings();
@@ -233233,7 +233226,7 @@ var ToggleHighContrast = class extends EditorAction {
 };
 registerEditorAction(ToggleHighContrast);
 
-// worktrees/vscode-te2-diff/out-monaco-editor-core/esm/vs/editor/editor.main.js
+// app/static/vendor/monaco-editor-core/esm/vs/editor/editor.main.js
 init_editor_api();
 
 // ../git-clone/monaco-editor-mobile-playground/src/basic-languages/_.contribution.ts
