@@ -1326,6 +1326,13 @@ class ExplorerDispatcher:
         except Exception as e:
             logger.warning(f"[watcher] failed to persist mode: {e}")
 
+        # Sync VS Code's built-in watcher exclusion to match
+        try:
+            from .code_server_shell_manager import sync_vscode_watcher_settings
+            sync_vscode_watcher_settings(mode)
+        except Exception as e:
+            logger.warning(f"[watcher] failed to sync vscode watcher settings: {e}")
+
         # Apply the mode
         from .watchexec_shell_manager import stop_watchexec_shell, ensure_watchexec_shell
 

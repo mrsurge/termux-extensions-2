@@ -3478,7 +3478,7 @@ function createView(docText='') {
 function getText() { return ''; } // Stub: content is in iframe (legacy code still calls this)
 function setText(t) { console.log('[CM6] setText() disabled'); }
 
-function markUnsaved(flag, opts) {
+function markUnsaved(flag) {
   const next = !!flag;
   cacheStateBadge.dataset.state = next ? (cacheStateBadge.dataset.state || '') : '';
   unsaved = next;
@@ -3488,7 +3488,7 @@ function markUnsaved(flag, opts) {
     clearTimeout(saveDebounceTimer);
     saveDebounceTimer = null;
   }
-  if (unsaved && editorViewState?.autoSave && !(opts && opts.skipAutosave)) {
+  if (unsaved && editorViewState?.autoSave) {
     scheduleAutosave();
   }
 }
@@ -4110,12 +4110,10 @@ function _applyCacheIndicatorImpl(info) {
   const isRestored = (state === 'mid_session' && (reason === 'restore' || restoredActive));
   const isActiveDraft = (state === 'mid_session' && unsaved);
 
-  const isMirror = (reason === 'mirror');
-
   if (isCrashed || isRestored || isActiveDraft) {
     setIndicatorActive(badge, isCrashed ? '!' : '*');
     badge.dataset.state = isCrashed ? 'crashed' : (isRestored ? 'restored' : 'cached');
-    markUnsaved(true, isMirror ? { skipAutosave: true } : undefined);
+    markUnsaved(true);
   } else {
     // Only turn inactive if we are NOT holding a restored session
     // This protects against race conditions where 'clean' arrives after 'restore'
@@ -4358,8 +4356,9 @@ function saveFileViaEditorSocket(payload, timeoutMs = 8000) {
   });
 }
  // getAgentHostBase
-async function saveFile() {
+async function saveFile(opts) {
   if (!currentPath || !currentPathExists) return saveAsDialog();
+  const isAutosave = !!(opts && opts.isAutosave);
   statusEl.textContent = 'Saving...';
 
   const opId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -4378,6 +4377,11 @@ async function saveFile() {
     }
     if (result.ok === false) {
       if (result.error === 'BASE_MISMATCH') {
+        // Autosave silently skips on mismatch (mirror clients hit this)
+        if (isAutosave) {
+          statusEl.textContent = '';
+          return false;
+        }
         if (window.confirm('File was modified externally. Retry save and overwrite?')) {
           const retryPayload = {
             path: currentPath,
@@ -4537,7 +4541,7 @@ function scheduleAutosave() {
   const delay = editorViewState?.autoSave ? AUTOSAVE_ACTIVE_DELAY : AUTOSAVE_IDLE_DELAY;
   saveDebounceTimer = setTimeout(() => {
     if (unsaved && currentPath && currentPathExists && !nativeSelectionActive) {
-      saveFile().then((ok) => {
+      saveFile({ isAutosave: true }).then((ok) => {
         if (ok === false) {
           console.warn('Autosave attempt failed; leaving changes unsaved');
         }

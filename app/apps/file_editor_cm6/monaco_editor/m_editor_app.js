@@ -2631,9 +2631,9 @@
 
       var hasGitDiff = !!(tracked && head != null && headSha && diskSha && headSha !== diskSha);
       if (!hasGitDiff) {
-        disposeGitBaselines();
-        ensurePlainEditorWithPrefs();
-        return;
+        // No diff — use current editor content as both original and modified
+        // so the diff editor stays active with an empty diff (no editor swap).
+        head = model && model.getValue ? model.getValue() : '';
       }
 
       var lang = languageFromPath(currentPath);
@@ -3752,12 +3752,18 @@
                     installVscodeRpcChangePublisher();
                   } else {
                     isApplyingRemote = true;
-                    try { model.setValue(f.content || ''); } finally { isApplyingRemote = false; }
+                    try {
+                      var _ssotRange = model.getFullModelRange();
+                      model.applyEdits([{ range: _ssotRange, text: f.content || '' }]);
+                    } finally { isApplyingRemote = false; }
                     applyLanguageToModel(model, lang, currentPath);
                   }
                 } catch (_) {
                   isApplyingRemote = true;
-                  try { model.setValue(f.content || ''); } finally { isApplyingRemote = false; }
+                  try {
+                    var _ssotRange2 = model.getFullModelRange();
+                    model.applyEdits([{ range: _ssotRange2, text: f.content || '' }]);
+                  } finally { isApplyingRemote = false; }
                   applyLanguageToModel(model, lang, currentPath);
                 }
               }
@@ -3867,25 +3873,16 @@
                 } else {
                   isApplyingRemote = true;
                   try {
-                    if (payload.reason === 'external_change') {
-                      // Atomic edit preserves scroll position, cursor, and decorations
-                      var fullRange = model.getFullModelRange();
-                      model.applyEdits([{ range: fullRange, text: payload.content || '' }]);
-                    } else {
-                      model.setValue(payload.content || '');
-                    }
+                    var fullRange = model.getFullModelRange();
+                    model.applyEdits([{ range: fullRange, text: payload.content || '' }]);
                   } finally { isApplyingRemote = false; }
                   applyLanguageToModel(model, lang, currentPath);
                 }
               } catch (_) {
                 isApplyingRemote = true;
                 try {
-                  if (payload.reason === 'external_change') {
-                    var fullRange2 = model.getFullModelRange();
-                    model.applyEdits([{ range: fullRange2, text: payload.content || '' }]);
-                  } else {
-                    model.setValue(payload.content || '');
-                  }
+                  var fullRange2 = model.getFullModelRange();
+                  model.applyEdits([{ range: fullRange2, text: payload.content || '' }]);
                 } finally { isApplyingRemote = false; }
                 applyLanguageToModel(model, lang, currentPath);
               }
@@ -3989,8 +3986,17 @@
             _syncMirrorDebug();
             return;
           }
+          // Skip if content is identical (self-echo from authoring client).
+          if (model.getValue && model.getValue() === payload.content) {
+            mirrorState.drop_sha += 1;
+            _syncMirrorDebug();
+            return;
+          }
           isApplyingRemote = true;
-          try { model.setValue(payload.content); } finally { isApplyingRemote = false; }
+          try {
+            var fullRange = model.getFullModelRange();
+            model.applyEdits([{ range: fullRange, text: payload.content }]);
+          } finally { isApplyingRemote = false; }
           try { lastContentSha256 = payload.content_sha256 || lastContentSha256; } catch (_) {}
           mirrorState.ap += 1;
           _syncMirrorDebug();
@@ -4140,6 +4146,10 @@
                   if (_dm && _dm.original === gitHeadModel && _dm.modified === model && !!_dm.te2AutosaveMode) {
                     _skipRefresh = true;
                   }
+                } else {
+                  // No diff editor — plain editor autosave; skip baseline refresh
+                  // to avoid cursor jumps from unnecessary editor recreation.
+                  _skipRefresh = true;
                 }
                 if (!_skipRefresh) requestGitBaselines({ reason: 'cache_state_clean_autosave' });
               } else {
@@ -4427,8 +4437,14 @@
 
     var content = (typeof data.content === 'string') ? data.content : '';
     try {
-      if (model && model.setValue) model.setValue(content);
-      else editor.setValue(content);
+      if (model && model.getFullModelRange) {
+        var _mirrorRange = model.getFullModelRange();
+        model.applyEdits([{ range: _mirrorRange, text: content }]);
+      } else if (model && model.setValue) {
+        model.setValue(content);
+      } else {
+        editor.setValue(content);
+      }
     } catch (_) {}
 
     ensureTouchSelection('mirror-post');
@@ -4476,6 +4492,13 @@
     var seq = ++_bcSymbolsSeq;
     var langId = (model && model.getLanguageId) ? model.getLanguageId() : '';
     if (!langId) langId = languageFromPath(absPath) || '';
+    // plaintext has no symbol provider and never will — skip to avoid
+    // 8s timeout loops that trigger workbench re-opens and cursor resets.
+    if (langId === 'plaintext') {
+      _bcSymbols = [];
+      _bcRender();
+      return;
+    }
     // TS/JS extensions can be slow to activate on mobile — give them extra time
     var tms = (langId === 'javascript' || langId === 'typescript' || langId === 'javascriptreact' || langId === 'typescriptreact') ? 15000 : 8000;
     editorWorkbenchCall('symbols', {

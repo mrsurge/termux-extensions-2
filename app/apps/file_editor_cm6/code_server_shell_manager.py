@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json as _json
 import re
 import shutil
 from pathlib import Path
@@ -37,7 +38,39 @@ def _expected_port() -> str:
 
 _BRIDGE_EXT_ID = "te2-extension-api-bridge"
 _BRIDGE_EXT_SRC = Path(__file__).parent / "vendor" / _BRIDGE_EXT_ID
-_EXTENSIONS_DIR = Path.home() / ".config" / "code-server" / "extensions"
+_CODE_SERVER_DATA_DIR = Path.home() / ".config" / "code-server"
+_EXTENSIONS_DIR = _CODE_SERVER_DATA_DIR / "extensions"
+_USER_SETTINGS_PATH = _CODE_SERVER_DATA_DIR / "User" / "settings.json"
+
+
+# ── VS Code watcher settings sync ────────────────────────────────────
+
+def sync_vscode_watcher_settings(watcher_mode: str) -> None:
+    """Sync files.watcherExclude in code-server User/settings.json.
+
+    When our custom watcher (watchexec) is active, disable VS Code's
+    built-in file watcher by setting ``"files.watcherExclude": {"**": true}``.
+    When using VS Code's IPC watcher, remove the key so it works normally.
+    Must be called BEFORE code-server launches so it reads the setting on boot.
+    """
+    settings: dict = {}
+    _USER_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    if _USER_SETTINGS_PATH.exists():
+        try:
+            settings = _json.loads(_USER_SETTINGS_PATH.read_text("utf-8"))
+        except Exception:
+            settings = {}
+
+    if watcher_mode in ("watchexec", "none"):
+        settings["files.watcherExclude"] = {"**": True}
+    else:
+        settings.pop("files.watcherExclude", None)
+
+    _USER_SETTINGS_PATH.write_text(
+        _json.dumps(settings, indent=4) + "\n", encoding="utf-8"
+    )
+    print(f"[code_server] watcher settings synced: mode={watcher_mode}", flush=True)
 
 
 def ensure_bridge_extension_installed() -> bool:
@@ -45,7 +78,7 @@ def ensure_bridge_extension_installed() -> bool:
 
     Compares package.json version to decide whether to update.
     Also ensures the extension is registered in extensions.json so code-server loads it.
-    Returns True if installed/updated, False if already current.
+    Returns True if installed/updated, False if already current. # and a comment for good measure
     """
     import json
 
@@ -186,13 +219,23 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
             await asyncio.sleep(1.5)
 
         repo_root = Path(project_root).resolve(strict=False)
-        data_dir = Path.home() / ".config" / "code-server"
+        data_dir = _CODE_SERVER_DATA_DIR
 
         # Ensure bridge extension is installed before code-server starts
         try:
             ensure_bridge_extension_installed()
         except Exception as exc:
             print(f"[code_server] bridge extension install failed (non-fatal): {exc}", flush=True)
+
+        # Sync watcher exclusion settings before launch so code-server
+        # reads the correct files.watcherExclude on boot.
+        try:
+            from .preferences_store import ProjectSidecar
+            sc = ProjectSidecar.load_or_create(str(repo_root))
+            wmode = sc._data.get("watcher", {}).get("mode", "ipc")
+            sync_vscode_watcher_settings(wmode)
+        except Exception as exc:
+            print(f"[code_server] watcher settings sync failed (non-fatal): {exc}", flush=True)
 
         shell = await orch.start_from_ref(
             SHELLSPEC_REF,

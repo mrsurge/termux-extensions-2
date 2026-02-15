@@ -1288,6 +1288,18 @@ except Exception:
     _active_project_sidecar = None
 
 
+def _ensure_workbench_json_sync(project_root_str: str) -> None:
+    """Sync code-server User/settings.json watcher exclusion at boot."""
+    try:
+        from .preferences_store import ProjectSidecar
+        from .code_server_shell_manager import sync_vscode_watcher_settings
+        sc = ProjectSidecar.load_or_create(project_root_str)
+        wmode = sc._data.get("watcher", {}).get("mode", "ipc")
+        sync_vscode_watcher_settings(wmode)
+    except Exception as exc:
+        print(f"[file_editor_cm6] workbench json sync failed (non-fatal): {exc}", flush=True)
+
+
 async def _eager_start_code_server():
     """Best-effort eager start of code-server at worker boot.
 
@@ -1299,6 +1311,8 @@ async def _eager_start_code_server():
         pr = _history_store.get_active_project() or str(get_project_root())
         if not pr:
             return
+        # Sync watcher settings BEFORE code-server launches
+        _ensure_workbench_json_sync(pr)
         cs = await ensure_code_server_shell(pr)
         cs_env = (cs.env_overrides or {})
         pr = str(cs_env.get("PROJECT_ROOT") or pr)
