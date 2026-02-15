@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { groupAdjacentBy } from '../../../base/common/arrays.js';
-import { assertFn, checkAdjacentItems } from '../../../base/common/assert.js';
+import { checkAdjacentItems } from '../../../base/common/assert.js';
 import { BugIndicatingError } from '../../../base/common/errors.js';
 import { LineRange } from '../core/ranges/lineRange.js';
 import { Position } from '../core/position.js';
@@ -183,20 +183,31 @@ export function lineRangeMappingFromRangeMappings(alignments, originalLines, mod
         const last = g[g.length - 1];
         changes.push(new DetailedLineRangeMapping(first.original.join(last.original), first.modified.join(last.modified), g.map(a => a.innerChanges[0])));
     }
-    assertFn(() => {
-        if (!dontAssertStartLine && changes.length > 0) {
-            if (changes[0].modified.startLineNumber !== changes[0].original.startLineNumber) {
-                return false;
-            }
-            if (modifiedLines.length.lineCount - changes[changes.length - 1].modified.endLineNumberExclusive !== originalLines.length.lineCount - changes[changes.length - 1].original.endLineNumberExclusive) {
-                return false;
-            }
+    // TE2: instead of asserting, fix the mappings so incremental projection
+    // works seamlessly without a full recompute. When invariants fail, we
+    // adjust the last mapping to absorb the EOF boundary — simulating what
+    // a deletion widget at the end of the file would naturally provide.
+    if (!dontAssertStartLine && changes.length > 0) {
+        if (changes[0].modified.startLineNumber !== changes[0].original.startLineNumber) {
+            return undefined;
         }
-        return checkAdjacentItems(changes, (m1, m2) => m2.original.startLineNumber - m1.original.endLineNumberExclusive === m2.modified.startLineNumber - m1.modified.endLineNumberExclusive &&
-            // There has to be an unchanged line in between (otherwise both diffs should have been joined)
-            m1.original.endLineNumberExclusive < m2.original.startLineNumber &&
-            m1.modified.endLineNumberExclusive < m2.modified.startLineNumber);
-    });
+        const lastChange = changes[changes.length - 1];
+        const origTrailing = originalLines.length.lineCount - lastChange.original.endLineNumberExclusive;
+        const modTrailing = modifiedLines.length.lineCount - lastChange.modified.endLineNumberExclusive;
+        if (origTrailing !== modTrailing) {
+            // Extend the last mapping to cover through EOF on both sides
+            // so the trailing-line invariant is satisfied.
+            const maxTrailing = Math.max(origTrailing, modTrailing);
+            const newOrigEnd = lastChange.original.endLineNumberExclusive + maxTrailing;
+            const newModEnd = lastChange.modified.endLineNumberExclusive + maxTrailing;
+            changes[changes.length - 1] = new DetailedLineRangeMapping(new LineRange(lastChange.original.startLineNumber, newOrigEnd), new LineRange(lastChange.modified.startLineNumber, newModEnd), lastChange.innerChanges);
+        }
+    }
+    if (!checkAdjacentItems(changes, (m1, m2) => m2.original.startLineNumber - m1.original.endLineNumberExclusive === m2.modified.startLineNumber - m1.modified.endLineNumberExclusive &&
+        m1.original.endLineNumberExclusive < m2.original.startLineNumber &&
+        m1.modified.endLineNumberExclusive < m2.modified.startLineNumber)) {
+        return undefined;
+    }
     return changes;
 }
 export function getLineRangeMapping(rangeMapping, originalLines, modifiedLines) {

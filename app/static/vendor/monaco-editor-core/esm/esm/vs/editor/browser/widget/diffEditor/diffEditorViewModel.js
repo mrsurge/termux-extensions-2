@@ -169,15 +169,21 @@ let DiffEditorViewModel = class DiffEditorViewModel extends Disposable {
             const diff = this._diff.get();
             if (diff) {
                 const textEdits = TextEditInfo.fromModelContentChanges(e.changes);
-                const result = applyModifiedEdits(this._lastDiff, textEdits, model.original, model.modified);
-                if (result) {
-                    this._lastDiff = result;
-                    transaction(tx => {
-                        this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
-                        updateUnchangedRegions(result, tx);
-                        const currentSyncedMovedText = this.movedTextToCompare.get();
-                        this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find(m => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : undefined, tx);
-                    });
+                try {
+                    const result = applyModifiedEdits(this._lastDiff, textEdits, model.original, model.modified);
+                    if (result) {
+                        this._lastDiff = result;
+                        transaction(tx => {
+                            this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
+                            updateUnchangedRegions(result, tx);
+                            const currentSyncedMovedText = this.movedTextToCompare.get();
+                            this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find(m => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : undefined, tx);
+                        });
+                    }
+                }
+                catch (_projectionErr) {
+                    // Incremental projection failed (e.g. trailing-line invariant at EOF).
+                    // Fall back to full debounced recompute — same recovery as original-side edits.
                 }
             }
             this._isDiffUpToDate.set(false, undefined);
@@ -194,15 +200,21 @@ let DiffEditorViewModel = class DiffEditorViewModel extends Disposable {
             const diff = this._diff.get();
             if (diff) {
                 const textEdits = TextEditInfo.fromModelContentChanges(e.changes);
-                const result = applyOriginalEdits(this._lastDiff, textEdits, model.original, model.modified);
-                if (result) {
-                    this._lastDiff = result;
-                    transaction(tx => {
-                        this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
-                        updateUnchangedRegions(result, tx);
-                        const currentSyncedMovedText = this.movedTextToCompare.get();
-                        this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find(m => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : undefined, tx);
-                    });
+                try {
+                    const result = applyOriginalEdits(this._lastDiff, textEdits, model.original, model.modified);
+                    if (result) {
+                        this._lastDiff = result;
+                        transaction(tx => {
+                            this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
+                            updateUnchangedRegions(result, tx);
+                            const currentSyncedMovedText = this.movedTextToCompare.get();
+                            this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find(m => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : undefined, tx);
+                        });
+                    }
+                }
+                catch (_projectionErr) {
+                    // Incremental projection failed (e.g. trailing-line invariant at EOF).
+                    // Fall back to full debounced recompute.
                 }
             }
             this._isDiffUpToDate.set(false, undefined);
@@ -264,12 +276,21 @@ let DiffEditorViewModel = class DiffEditorViewModel extends Disposable {
                 // Only project through edits of the live modified model. The original model
                 // is expected to remain unchanged in pinned-baseline mode.
                 if (!freezePinnedBaselineProjection) {
-                    result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+                    try {
+                        result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+                    }
+                    catch (_projectionErr) { /* trailing-line invariant — use un-projected result */ }
                 }
             }
             else {
-                result = applyOriginalEdits(result, originalTextEditInfos, model.original, model.modified) ?? result;
-                result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+                try {
+                    result = applyOriginalEdits(result, originalTextEditInfos, model.original, model.modified) ?? result;
+                }
+                catch (_projectionErr) { /* trailing-line invariant — use un-projected result */ }
+                try {
+                    result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+                }
+                catch (_projectionErr) { /* trailing-line invariant — use un-projected result */ }
             }
             transaction(tx => {
                 /** @description write diff result */

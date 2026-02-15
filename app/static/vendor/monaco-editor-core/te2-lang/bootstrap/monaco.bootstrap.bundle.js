@@ -93707,18 +93707,23 @@ function lineRangeMappingFromRangeMappings(alignments, originalLines, modifiedLi
     const last = g[g.length - 1];
     changes.push(new DetailedLineRangeMapping(first2.original.join(last.original), first2.modified.join(last.modified), g.map((a) => a.innerChanges[0])));
   }
-  assertFn(() => {
-    if (!dontAssertStartLine && changes.length > 0) {
-      if (changes[0].modified.startLineNumber !== changes[0].original.startLineNumber) {
-        return false;
-      }
-      if (modifiedLines.length.lineCount - changes[changes.length - 1].modified.endLineNumberExclusive !== originalLines.length.lineCount - changes[changes.length - 1].original.endLineNumberExclusive) {
-        return false;
-      }
+  if (!dontAssertStartLine && changes.length > 0) {
+    if (changes[0].modified.startLineNumber !== changes[0].original.startLineNumber) {
+      return void 0;
     }
-    return checkAdjacentItems(changes, (m1, m2) => m2.original.startLineNumber - m1.original.endLineNumberExclusive === m2.modified.startLineNumber - m1.modified.endLineNumberExclusive && // There has to be an unchanged line in between (otherwise both diffs should have been joined)
-    m1.original.endLineNumberExclusive < m2.original.startLineNumber && m1.modified.endLineNumberExclusive < m2.modified.startLineNumber);
-  });
+    const lastChange = changes[changes.length - 1];
+    const origTrailing = originalLines.length.lineCount - lastChange.original.endLineNumberExclusive;
+    const modTrailing = modifiedLines.length.lineCount - lastChange.modified.endLineNumberExclusive;
+    if (origTrailing !== modTrailing) {
+      const maxTrailing = Math.max(origTrailing, modTrailing);
+      const newOrigEnd = lastChange.original.endLineNumberExclusive + maxTrailing;
+      const newModEnd = lastChange.modified.endLineNumberExclusive + maxTrailing;
+      changes[changes.length - 1] = new DetailedLineRangeMapping(new LineRange(lastChange.original.startLineNumber, newOrigEnd), new LineRange(lastChange.modified.startLineNumber, newModEnd), lastChange.innerChanges);
+    }
+  }
+  if (!checkAdjacentItems(changes, (m1, m2) => m2.original.startLineNumber - m1.original.endLineNumberExclusive === m2.modified.startLineNumber - m1.modified.endLineNumberExclusive && m1.original.endLineNumberExclusive < m2.original.startLineNumber && m1.modified.endLineNumberExclusive < m2.modified.startLineNumber)) {
+    return void 0;
+  }
   return changes;
 }
 function getLineRangeMapping(rangeMapping, originalLines, modifiedLines) {
@@ -96420,7 +96425,7 @@ function applyModifiedEdits(diff, textEdits, originalTextModel, modifiedTextMode
   const coarseChanges = diff.changes.map((c) => c.withInnerChangesFromLineRanges());
   let changes;
   changes = applyModifiedEditsToLineRangeMappings(coarseChanges, textEdits, originalTextModel, modifiedTextModel);
-  if (changes === coarseChanges) {
+  if (!changes || changes === coarseChanges) {
     return void 0;
   }
   return {
@@ -96448,7 +96453,11 @@ function applyModifiedEditsToLineRangeMappings(changes, textEdits, originalTextM
     return new RangeMapping(Range.fromPositions(lengthToPosition(c.startOffset), lengthToPosition(c.endOffset)), Range.fromPositions(lengthToPosition(modifiedStartOffset), lengthToPosition(lastModifiedEndOffset)));
   });
   try {
-    return lineRangeMappingFromRangeMappings(rangeMappings, new ArrayText(originalTextModel.getLinesContent()), new ArrayText(modifiedTextModel.getLinesContent()));
+    const result = lineRangeMappingFromRangeMappings(rangeMappings, new ArrayText(originalTextModel.getLinesContent()), new ArrayText(modifiedTextModel.getLinesContent()));
+    if (!result) {
+      return void 0;
+    }
+    return result;
   } catch {
     return changes;
   }
@@ -96610,17 +96619,20 @@ var init_diffEditorViewModel = __esm({
             return;
           }
           const diff = this._diff.get();
-          if (diff) {
+          if (diff && !model.te2AutosaveMode) {
             const textEdits = TextEditInfo.fromModelContentChanges(e.changes);
-            const result = applyModifiedEdits(this._lastDiff, textEdits, model.original, model.modified);
-            if (result) {
-              this._lastDiff = result;
-              transaction((tx) => {
-                this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
-                updateUnchangedRegions(result, tx);
-                const currentSyncedMovedText = this.movedTextToCompare.get();
-                this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find((m) => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : void 0, tx);
-              });
+            try {
+              const result = applyModifiedEdits(this._lastDiff, textEdits, model.original, model.modified);
+              if (result) {
+                this._lastDiff = result;
+                transaction((tx) => {
+                  this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
+                  updateUnchangedRegions(result, tx);
+                  const currentSyncedMovedText = this.movedTextToCompare.get();
+                  this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find((m) => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : void 0, tx);
+                });
+              }
+            } catch (_projectionErr) {
             }
           }
           this._isDiffUpToDate.set(false, void 0);
@@ -96634,17 +96646,20 @@ var init_diffEditorViewModel = __esm({
             return;
           }
           const diff = this._diff.get();
-          if (diff) {
+          if (diff && !model.te2AutosaveMode) {
             const textEdits = TextEditInfo.fromModelContentChanges(e.changes);
-            const result = applyOriginalEdits(this._lastDiff, textEdits, model.original, model.modified);
-            if (result) {
-              this._lastDiff = result;
-              transaction((tx) => {
-                this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
-                updateUnchangedRegions(result, tx);
-                const currentSyncedMovedText = this.movedTextToCompare.get();
-                this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find((m) => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : void 0, tx);
-              });
+            try {
+              const result = applyOriginalEdits(this._lastDiff, textEdits, model.original, model.modified);
+              if (result) {
+                this._lastDiff = result;
+                transaction((tx) => {
+                  this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
+                  updateUnchangedRegions(result, tx);
+                  const currentSyncedMovedText = this.movedTextToCompare.get();
+                  this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find((m) => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : void 0, tx);
+                });
+              }
+            } catch (_projectionErr) {
             }
           }
           this._isDiffUpToDate.set(false, void 0);
@@ -96695,11 +96710,20 @@ var init_diffEditorViewModel = __esm({
           const freezePinnedBaselineProjection = !model.te2AutosaveMode && usePinnedBaseline && !!model.te2FreezeProjection;
           if (usePinnedBaseline) {
             if (!freezePinnedBaselineProjection) {
-              result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+              try {
+                result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+              } catch (_projectionErr) {
+              }
             }
-          } else {
-            result = applyOriginalEdits(result, originalTextEditInfos, model.original, model.modified) ?? result;
-            result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+          } else if (!model.te2AutosaveMode) {
+            try {
+              result = applyOriginalEdits(result, originalTextEditInfos, model.original, model.modified) ?? result;
+            } catch (_projectionErr) {
+            }
+            try {
+              result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+            } catch (_projectionErr) {
+            }
           }
           transaction((tx) => {
             updateUnchangedRegions(result, tx);

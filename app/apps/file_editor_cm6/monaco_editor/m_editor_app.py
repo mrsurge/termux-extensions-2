@@ -237,10 +237,6 @@ export default href;
             rel="stylesheet",
             href="/api/app/file_editor_cm6/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css?raw=1",
         )
-        stock_bundle_css = Link(
-            rel="stylesheet",
-            href="/api/app/file_editor_cm6/ui/monaco_vscode/lang/bootstrap/monaco.stock.bundle.css?raw=1",
-        )
         breadcrumbs_css = Link(
             rel="stylesheet",
             href="/apps/file_editor_cm6/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
@@ -268,7 +264,6 @@ export default href;
                 css,
                 touch_css,
                 bootstrap_bundle_css,
-                stock_bundle_css,
                 breadcrumbs_css,
                 import_map,
                 # Debug: prove CSS is loaded inside the iframe

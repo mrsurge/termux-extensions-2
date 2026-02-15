@@ -3478,7 +3478,7 @@ function createView(docText='') {
 function getText() { return ''; } // Stub: content is in iframe (legacy code still calls this)
 function setText(t) { console.log('[CM6] setText() disabled'); }
 
-function markUnsaved(flag) {
+function markUnsaved(flag, opts) {
   const next = !!flag;
   cacheStateBadge.dataset.state = next ? (cacheStateBadge.dataset.state || '') : '';
   unsaved = next;
@@ -3488,7 +3488,7 @@ function markUnsaved(flag) {
     clearTimeout(saveDebounceTimer);
     saveDebounceTimer = null;
   }
-  if (unsaved && editorViewState?.autoSave) {
+  if (unsaved && editorViewState?.autoSave && !(opts && opts.skipAutosave)) {
     scheduleAutosave();
   }
 }
@@ -4110,10 +4110,12 @@ function _applyCacheIndicatorImpl(info) {
   const isRestored = (state === 'mid_session' && (reason === 'restore' || restoredActive));
   const isActiveDraft = (state === 'mid_session' && unsaved);
 
+  const isMirror = (reason === 'mirror');
+
   if (isCrashed || isRestored || isActiveDraft) {
     setIndicatorActive(badge, isCrashed ? '!' : '*');
     badge.dataset.state = isCrashed ? 'crashed' : (isRestored ? 'restored' : 'cached');
-    markUnsaved(true);
+    markUnsaved(true, isMirror ? { skipAutosave: true } : undefined);
   } else {
     // Only turn inactive if we are NOT holding a restored session
     // This protects against race conditions where 'clean' arrives after 'restore'
@@ -5780,6 +5782,9 @@ host.onBeforeExit(() => {
 
 // Track changes: refresh unsaved flag
 // (We don't wire CM6 transactions directly since we're using bare ESM; use a lightweight observer)
-const observer = new MutationObserver(() => onAnyChange());
-observer.observe(editorFrame, { childList:true, subtree:true, characterData:true });
+const ENABLE_LEGACY_IFRAME_DOM_UNSAVED_OBSERVER = false;
+if (ENABLE_LEGACY_IFRAME_DOM_UNSAVED_OBSERVER) {
+  const observer = new MutationObserver(() => onAnyChange());
+  observer.observe(editorFrame, { childList:true, subtree:true, characterData:true });
+}
 }

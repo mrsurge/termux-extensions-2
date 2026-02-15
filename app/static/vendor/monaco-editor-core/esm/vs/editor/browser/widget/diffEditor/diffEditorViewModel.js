@@ -167,17 +167,26 @@ let DiffEditorViewModel = class DiffEditorViewModel extends Disposable {
                 return;
             }
             const diff = this._diff.get();
-            if (diff) {
+            // TE2: In autosave mode, skip incremental projection entirely (stock behavior).
+            // Stock Monaco had applyModifiedEdits stubbed to return undefined. The debouncer
+            // handles everything cleanly via full recompute.
+            if (diff && !model.te2AutosaveMode) {
                 const textEdits = TextEditInfo.fromModelContentChanges(e.changes);
-                const result = applyModifiedEdits(this._lastDiff, textEdits, model.original, model.modified);
-                if (result) {
-                    this._lastDiff = result;
-                    transaction(tx => {
-                        this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
-                        updateUnchangedRegions(result, tx);
-                        const currentSyncedMovedText = this.movedTextToCompare.get();
-                        this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find(m => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : undefined, tx);
-                    });
+                try {
+                    const result = applyModifiedEdits(this._lastDiff, textEdits, model.original, model.modified);
+                    if (result) {
+                        this._lastDiff = result;
+                        transaction(tx => {
+                            this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
+                            updateUnchangedRegions(result, tx);
+                            const currentSyncedMovedText = this.movedTextToCompare.get();
+                            this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find(m => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : undefined, tx);
+                        });
+                    }
+                }
+                catch (_projectionErr) {
+                    // Incremental projection failed (e.g. trailing-line invariant at EOF).
+                    // Fall back to full debounced recompute — same recovery as original-side edits.
                 }
             }
             this._isDiffUpToDate.set(false, undefined);
@@ -192,17 +201,24 @@ let DiffEditorViewModel = class DiffEditorViewModel extends Disposable {
                 return;
             }
             const diff = this._diff.get();
-            if (diff) {
+            // TE2: In autosave mode, skip incremental projection entirely (stock behavior).
+            if (diff && !model.te2AutosaveMode) {
                 const textEdits = TextEditInfo.fromModelContentChanges(e.changes);
-                const result = applyOriginalEdits(this._lastDiff, textEdits, model.original, model.modified);
-                if (result) {
-                    this._lastDiff = result;
-                    transaction(tx => {
-                        this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
-                        updateUnchangedRegions(result, tx);
-                        const currentSyncedMovedText = this.movedTextToCompare.get();
-                        this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find(m => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : undefined, tx);
-                    });
+                try {
+                    const result = applyOriginalEdits(this._lastDiff, textEdits, model.original, model.modified);
+                    if (result) {
+                        this._lastDiff = result;
+                        transaction(tx => {
+                            this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
+                            updateUnchangedRegions(result, tx);
+                            const currentSyncedMovedText = this.movedTextToCompare.get();
+                            this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find(m => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : undefined, tx);
+                        });
+                    }
+                }
+                catch (_projectionErr) {
+                    // Incremental projection failed (e.g. trailing-line invariant at EOF).
+                    // Fall back to full debounced recompute.
                 }
             }
             this._isDiffUpToDate.set(false, undefined);
@@ -264,12 +280,23 @@ let DiffEditorViewModel = class DiffEditorViewModel extends Disposable {
                 // Only project through edits of the live modified model. The original model
                 // is expected to remain unchanged in pinned-baseline mode.
                 if (!freezePinnedBaselineProjection) {
-                    result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+                    try {
+                        result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+                    }
+                    catch (_projectionErr) { /* trailing-line invariant — use un-projected result */ }
                 }
             }
-            else {
-                result = applyOriginalEdits(result, originalTextEditInfos, model.original, model.modified) ?? result;
-                result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+            else if (!model.te2AutosaveMode) {
+                // TE2: Only run projection in draft-diff mode. In autosave mode, stock Monaco
+                // had these functions stubbed to return undefined — skip entirely.
+                try {
+                    result = applyOriginalEdits(result, originalTextEditInfos, model.original, model.modified) ?? result;
+                }
+                catch (_projectionErr) { /* trailing-line invariant — use un-projected result */ }
+                try {
+                    result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
+                }
+                catch (_projectionErr) { /* trailing-line invariant — use un-projected result */ }
             }
             transaction(tx => {
                 /** @description write diff result */
@@ -594,8 +621,8 @@ function applyModifiedEdits(diff, textEdits, originalTextModel, modifiedTextMode
     const coarseChanges = diff.changes.map(c => c.withInnerChangesFromLineRanges());
     let changes;
     changes = applyModifiedEditsToLineRangeMappings(coarseChanges, textEdits, originalTextModel, modifiedTextModel);
-    // If projection fails, we return the previous mappings; force full recompute instead.
-    if (changes === coarseChanges) {
+    // If projection fails (undefined) or returns unchanged, force full recompute.
+    if (!changes || changes === coarseChanges) {
         return undefined;
     }
     return {
@@ -623,7 +650,13 @@ function applyModifiedEditsToLineRangeMappings(changes, textEdits, originalTextM
         return new RangeMapping(Range.fromPositions(lengthToPosition(c.startOffset), lengthToPosition(c.endOffset)), Range.fromPositions(lengthToPosition(modifiedStartOffset), lengthToPosition(lastModifiedEndOffset)));
     });
     try {
-        return lineRangeMappingFromRangeMappings(rangeMappings, new ArrayText(originalTextModel.getLinesContent()), new ArrayText(modifiedTextModel.getLinesContent()));
+        const result = lineRangeMappingFromRangeMappings(rangeMappings, new ArrayText(originalTextModel.getLinesContent()), new ArrayText(modifiedTextModel.getLinesContent()));
+        // TE2: lineRangeMappingFromRangeMappings returns undefined on
+        // invariant failure (soft-bail) — treat as "can't project"
+        if (!result) {
+            return undefined;
+        }
+        return result;
     }
     catch {
         // Projection failed (usually due to out-of-bounds offsets after edits).
