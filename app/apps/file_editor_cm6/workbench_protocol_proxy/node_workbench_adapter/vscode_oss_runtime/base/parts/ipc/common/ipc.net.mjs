@@ -163,6 +163,12 @@ class ProtocolReader extends Disposable {
   acceptChunk(data) {
     if (data && data.byteLength > 0) {
       this.lastReadTime = Date.now();
+      this._chunkSeq = (this._chunkSeq || 0) + 1;
+      // Log every chunk after seq 200 to detect silence/arrival
+      if (data.byteLength > 100000 || this._chunkSeq > 200 || (this._chunkSeq && this._chunkSeq % 200 === 0)) {
+        const mem = process.memoryUsage();
+        console.log(`[ipc_chunk] seq=${this._chunkSeq} chunkBytes=${data.byteLength} bufBytes=${this._incomingData.byteLength} heapMB=${(mem.heapUsed/1048576).toFixed(1)}`);
+      }
       this._incomingData.acceptChunk(data);
     }
     if (IPC_TRACE) {
@@ -200,8 +206,14 @@ class ProtocolReader extends Disposable {
     if (this._draining) return;
     this._draining = true;
     let loopIters = 0;
+    const drainStartHeap = process.memoryUsage().heapUsed;
     while (this._incomingData.byteLength >= this._state.readLen) {
       loopIters++;
+      // Instrumentation: log every 1000 iterations and whenever readLen is suspicious
+      if (loopIters % 1000 === 0 || this._state.readLen <= 0) {
+        const mem = process.memoryUsage();
+        console.log(`[ipc_drain] iter=${loopIters} readLen=${this._state.readLen} readHead=${this._state.readHead} bufBytes=${this._incomingData.byteLength} msgType=${this._state.messageType} heapMB=${(mem.heapUsed/1048576).toFixed(1)} deltaHeapMB=${((mem.heapUsed - drainStartHeap)/1048576).toFixed(1)}`);
+      }
       if (IPC_LOOP_GUARD > 0 && loopIters > IPC_LOOP_GUARD) {
         this._draining = false;
         throw new Error(
@@ -220,6 +232,21 @@ class ProtocolReader extends Disposable {
         this._state.messageType = buff.readUInt8(0);
         this._state.id = buff.readUInt32BE(1);
         this._state.ack = buff.readUInt32BE(5);
+        // Guard: zero-length payload → emit empty message immediately, skip the
+        // payload-read phase entirely.  Without this, read(0) returns an empty
+        // buffer without consuming bytes and the loop can spin on the same
+        // buffered data until OOM.
+        if (this._state.readLen <= 0) {
+          const messageType = this._state.messageType;
+          const id = this._state.id;
+          const ack = this._state.ack;
+          this._state.readHead = true;
+          this._state.readLen = ProtocolConstants.HeaderLength;
+          this._state.messageType = ProtocolMessageType.None;
+          this._state.id = 0;
+          this._state.ack = 0;
+          this._onMessage.fire(new ProtocolMessage(messageType, id, ack, VSBuffer.alloc(0)));
+        }
       } else {
         const messageType = this._state.messageType;
         const id = this._state.id;
@@ -311,6 +338,12 @@ class ProtocolWriter {
     header.writeUInt32BE(msg.id, 1);
     header.writeUInt32BE(msg.ack, 5);
     header.writeUInt32BE(msg.data.byteLength, 9);
+    // Log outgoing IPC frames for debugging ext host silence
+    if (msg.type === 1 && msg.data.byteLength > 0) {
+      const rpcType = msg.data.buffer?.[0] ?? -1;
+      const rpcReq = msg.data.byteLength >= 5 ? msg.data.buffer.readUInt32BE(1) : -1;
+      console.log(`[ipc_out] ipcId=${msg.id} ipcAck=${msg.ack} payloadLen=${msg.data.byteLength} rpcType=${rpcType} rpcReq=${rpcReq}`);
+    }
     this._writeSoon(header, msg.data);
   }
 
@@ -513,6 +546,7 @@ export class PersistentProtocol {
       case ProtocolMessageType.Regular: {
         if (msg.id > this._incomingMsgId) {
           if (msg.id !== this._incomingMsgId + 1) {
+            console.log(`[ipc_in] DROPPED ipcType=Regular id=${msg.id} expected=${this._incomingMsgId + 1} payloadLen=${msg.data?.byteLength ?? 0}`);
             const now = Date.now();
             if (now - this._lastReplayRequestTime > 10000) {
               this._lastReplayRequestTime = now;
@@ -524,6 +558,8 @@ export class PersistentProtocol {
             this._sendAckCheck();
             this._onMessage.fire(msg.data);
           }
+        } else {
+          console.log(`[ipc_in] STALE ipcType=Regular id=${msg.id} current=${this._incomingMsgId} payloadLen=${msg.data?.byteLength ?? 0}`);
         }
         break;
       }
@@ -531,9 +567,11 @@ export class PersistentProtocol {
         this._onControlMessage.fire(msg.data);
         break;
       case ProtocolMessageType.Disconnect:
+        console.log(`[ipc_in] DISCONNECT received`);
         this._onDidDispose.fire();
         break;
       case ProtocolMessageType.ReplayRequest:
+        console.log(`[ipc_in] REPLAY_REQUEST received, replaying ${this._outgoingUnackMsg.length} msgs`);
         for (const m of this._outgoingUnackMsg) this._socketWriter.write(m);
         this._recvAckCheck();
         break;

@@ -1497,15 +1497,12 @@ const miLanguageServers = requireEl('#mi-language-servers');  // Added: 2025-12-
 const miExportDiagnostics = requireEl('#mi-export-diagnostics');
 const miEditorSettings = requireEl('#mi-editor-settings');
 
-// ---------- Editor Settings modal (VS Code API harness) ----------
+// ---------- Editor Settings modal ----------
 const editorSettingsModal = requireEl('#editor-settings-modal');
 const editorSettingsClose = requireEl('#editor-settings-close');
-const editorSettingsMenuBtn = requireEl('#editor-settings-menu');
-const editorSettingsVsixPath = requireEl('#editor-settings-vsix-path');
-const editorSettingsVsixBrowse = requireEl('#editor-settings-vsix-browse');
-const editorSettingsVsixInstall = requireEl('#editor-settings-vsix-install');
+const editorSettingsExtStrip = requireEl('#editor-settings-ext-strip');
+const editorSettingsExtSummary = requireEl('#editor-settings-ext-summary');
 const editorSettingsThemeList = requireEl('#editor-settings-theme-list');
-const editorSettingsExtList = requireEl('#editor-settings-ext-list');
 const editorSettingsAgentIframeToggle = requireEl('#editor-settings-agent-iframe');
 const editorSettingsAgentIframeUrlInput = requireEl('#editor-settings-agent-iframe-url');
 const editorSettingsAgentToggleText = requireEl('#editor-settings-agent-toggle-text');
@@ -1530,7 +1527,15 @@ const agentShortcutSave = requireEl('#agent-shortcut-save');
 
 const editorExtManagerModal = requireEl('#editor-ext-manager-modal');
 const editorExtManagerClose = requireEl('#editor-ext-manager-close');
+const editorExtManagerInstallBtn = requireEl('#editor-ext-manager-install');
 const editorExtManagerList = requireEl('#editor-ext-manager-list');
+
+const extConfigModal = requireEl('#ext-config-modal');
+const extConfigTitle = requireEl('#ext-config-title');
+const extConfigClose = requireEl('#ext-config-close');
+const extConfigForm = requireEl('#ext-config-form');
+const extConfigCancel = requireEl('#ext-config-cancel');
+const extConfigSave = requireEl('#ext-config-save');
 
 let vscodeApiWs = null;
 let vscodeApiNextId = 1;
@@ -1783,38 +1788,192 @@ editorExtManagerClose.addEventListener('click', closeEditorExtManagerModal);
 editorExtManagerModal.addEventListener('click', (ev) => {
   if (ev.target === editorExtManagerModal) closeEditorExtManagerModal();
 });
-editorSettingsMenuBtn.addEventListener('click', () => {
+// Strip in settings modal opens the ext manager
+editorSettingsExtStrip.addEventListener('click', () => {
   openEditorExtManagerModal();
 });
 
-async function refreshEditorSettingsModal() {
-  // Themes: use existing supported Monaco ids (SSOT is preference_store: editor.theme)
-  // Extensions: list installed VSIXs (global pool) and allow per-project enablement (project sidecar).
-  editorSettingsThemeList.textContent = 'Loading…';
-  editorSettingsExtList.textContent = 'Loading…';
+// --- Extension Config Modal (3rd level) ---
+let _extConfigExtId = '';
+let _extConfigValues = {};
 
-  let installed = [];
-  let enabled = [];
+function openExtConfigModal(extId, displayName, schema, currentValues) {
+  _extConfigExtId = extId;
+  _extConfigValues = { ...(currentValues || {}) };
+  extConfigTitle.textContent = `Configure: ${displayName || extId}`;
+  extConfigForm.innerHTML = '';
+
+  const props = schema?.properties || schema || {};
+  const propKeys = Object.keys(props);
+  if (!propKeys.length) {
+    const msg = document.createElement('div');
+    msg.style.opacity = '0.7';
+    msg.textContent = 'This extension has no configurable settings.';
+    extConfigForm.appendChild(msg);
+  } else {
+    propKeys.forEach((key) => {
+      const prop = props[key] || {};
+      const fieldRow = document.createElement('div');
+      fieldRow.style.marginBottom = '12px';
+
+      const label = document.createElement('label');
+      label.style.display = 'block';
+      label.style.fontWeight = '600';
+      label.style.fontSize = '0.88rem';
+      label.style.marginBottom = '4px';
+      label.textContent = key;
+      fieldRow.appendChild(label);
+
+      if (prop.description) {
+        const desc = document.createElement('div');
+        desc.style.fontSize = '12px';
+        desc.style.opacity = '0.6';
+        desc.style.marginBottom = '4px';
+        desc.textContent = prop.description;
+        fieldRow.appendChild(desc);
+      }
+
+      const curVal = _extConfigValues[key] !== undefined ? _extConfigValues[key] : prop.default;
+
+      if (prop.type === 'boolean') {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!curVal;
+        cb.addEventListener('change', () => { _extConfigValues[key] = cb.checked; });
+        fieldRow.appendChild(cb);
+      } else if (prop.enum && Array.isArray(prop.enum)) {
+        const wrap = document.createElement('div');
+        wrap.style.display = 'flex';
+        wrap.style.flexDirection = 'column';
+        wrap.style.gap = '4px';
+        prop.enum.forEach((opt) => {
+          const optLabel = document.createElement('label');
+          optLabel.style.display = 'flex';
+          optLabel.style.alignItems = 'center';
+          optLabel.style.gap = '6px';
+          optLabel.style.cursor = 'pointer';
+          const radio = document.createElement('input');
+          radio.type = 'radio';
+          radio.name = `ext-cfg-${key}`;
+          radio.value = String(opt);
+          radio.checked = String(curVal) === String(opt);
+          radio.addEventListener('change', () => { _extConfigValues[key] = opt; });
+          optLabel.appendChild(radio);
+          optLabel.appendChild(document.createTextNode(String(opt)));
+          wrap.appendChild(optLabel);
+        });
+        fieldRow.appendChild(wrap);
+      } else if (prop.type === 'number' || prop.type === 'integer') {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'lsp-rootrel-input';
+        input.style.width = '100%';
+        input.value = curVal != null ? String(curVal) : '';
+        if (prop.minimum != null) input.min = String(prop.minimum);
+        if (prop.maximum != null) input.max = String(prop.maximum);
+        input.addEventListener('input', () => {
+          _extConfigValues[key] = input.value === '' ? null : Number(input.value);
+        });
+        fieldRow.appendChild(input);
+      } else {
+        // string / fallback
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'lsp-rootrel-input';
+        input.style.width = '100%';
+        input.value = curVal != null ? String(curVal) : '';
+        input.placeholder = prop.default != null ? String(prop.default) : '';
+        input.addEventListener('input', () => { _extConfigValues[key] = input.value; });
+        fieldRow.appendChild(input);
+      }
+
+      extConfigForm.appendChild(fieldRow);
+    });
+  }
+
+  extConfigModal.classList.add('show');
+  extConfigModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeExtConfigModal() {
+  extConfigModal.classList.remove('show');
+  extConfigModal.setAttribute('aria-hidden', 'true');
+  _extConfigExtId = '';
+  _extConfigValues = {};
+}
+
+extConfigClose.addEventListener('click', closeExtConfigModal);
+extConfigCancel.addEventListener('click', closeExtConfigModal);
+extConfigModal.addEventListener('click', (ev) => {
+  if (ev.target === extConfigModal) closeExtConfigModal();
+});
+
+extConfigSave.addEventListener('click', async () => {
+  if (!_extConfigExtId) return;
+  extConfigSave.disabled = true;
+  try {
+    const res = await window.__explorerBusRequest('ext:configure', {
+      ext_id: _extConfigExtId,
+      values: _extConfigValues,
+    }, 15000);
+    if (res?.payload?.ok) {
+      host.toast('Configuration saved');
+      closeExtConfigModal();
+      void refreshEditorExtManagerModal();
+    } else {
+      host.toast(res?.payload?.error || 'Save failed');
+    }
+  } catch (e) {
+    host.toast(e?.message || 'Save failed');
+  } finally {
+    extConfigSave.disabled = false;
+  }
+});
+
+// --- Install extension via file picker ---
+editorExtManagerInstallBtn.addEventListener('click', async () => {
+  if (!pickerAvailable()) { host.toast('File picker unavailable'); return; }
+  const start = lastPickerPath || HOME_DIR;
+  const picked = await pickFile(start);
+  if (!picked) return;
+  if (!picked.toLowerCase().endsWith('.vsix')) {
+    host.toast('Not a .vsix file');
+    return;
+  }
+  editorExtManagerInstallBtn.disabled = true;
+  editorExtManagerInstallBtn.textContent = 'Installing…';
+  try {
+    const res = await window.__explorerBusRequest('ext:install', { vsix_path: picked }, 60000);
+    const payload = res?.payload || {};
+    if (payload.ok) {
+      const ext = payload.extension || {};
+      const schema = payload.config_schema || {};
+      host.toast(`Installed: ${ext.display_name || ext.id || 'ok'}`);
+      void refreshEditorExtManagerModal();
+      // If extension has config, open config modal
+      if (schema && Object.keys(schema.properties || schema || {}).length) {
+        openExtConfigModal(ext.id, ext.display_name, schema, {});
+      }
+    } else {
+      host.toast(payload.error || 'Install failed');
+    }
+  } catch (e) {
+    host.toast(e?.message || 'Install failed');
+  } finally {
+    editorExtManagerInstallBtn.disabled = false;
+    editorExtManagerInstallBtn.textContent = '+ Install';
+  }
+});
+
+async function refreshEditorSettingsModal() {
+  // Themes
+  editorSettingsThemeList.textContent = 'Loading…';
+
   let vscodeThemes = [];
-  try {
-    const installedRes = await vscodeApiCall('vscode.vsix.listInstalled', {});
-    installed = installedRes?.installed || [];
-  } catch (e) {
-    editorSettingsExtList.textContent = `Failed to load extensions: ${e?.message || 'unknown error'}`;
-  }
-  try {
-    const enabledRes = await vscodeApiCall('vscode.vsix.listEnabled', {});
-    enabled = enabledRes?.enabled || [];
-  } catch (e) {
-    // ok to keep enabled empty
-  }
   try {
     const themesRes = await vscodeApiCall('vscode.themes.list', {});
     vscodeThemes = themesRes?.themes || [];
-  } catch (e) {
-    // ok: keep empty, still show built-ins
-  }
-  const enabledSet = new Set((enabled || []).map(String));
+  } catch (_) {}
 
   const currentTheme = editorViewState?.theme || 'vs-dark';
   const themeOptions = [
@@ -1834,8 +1993,6 @@ async function refreshEditorSettingsModal() {
     { id: 'vs', label: 'VS Code Light' },
   ];
 
-  // Append VSIX-provided themes (global). Use a stable SSOT key:
-  // `theme = "vscode:<extensionId>:<relPath>"`.
   try {
     (vscodeThemes || []).forEach((t) => {
       const tid = String(t?.id || '').trim();
@@ -1883,7 +2040,6 @@ async function refreshEditorSettingsModal() {
       if (!input.checked) return;
       const ok = await updatePreference('theme', t.id);
       if (!ok) host.toast('Failed to change theme');
-      // Keep local view_state in sync for subsequent opens.
       try { editorViewState = editorViewState || {}; editorViewState.theme = t.id; } catch {}
     });
 
@@ -1891,101 +2047,18 @@ async function refreshEditorSettingsModal() {
   });
   editorSettingsThemeList.appendChild(themeWrap);
 
-  // Extensions list (checkboxes)
-  editorSettingsExtList.innerHTML = '';
-  // Exclude *pure* theme packs from per-project enablement list.
-  // IMPORTANT: most real language extensions contribute grammars; they must remain enable-able.
-  const projectExtensions = (installed || []).filter((ext) => {
-    try {
-      const contributes = ext?.contributes || {};
-      const themes = contributes?.themes;
-      const iconThemes = contributes?.iconThemes;
-      const productIconThemes = contributes?.productIconThemes;
-      const grammars = contributes?.grammars;
-      const languages = contributes?.languages;
-      const commands = contributes?.commands;
-
-      const hasThemes = Array.isArray(themes) && themes.length > 0;
-      const hasIconThemes = Array.isArray(iconThemes) && iconThemes.length > 0;
-      const hasProductIconThemes = Array.isArray(productIconThemes) && productIconThemes.length > 0;
-      const hasGrammars = Array.isArray(grammars) && grammars.length > 0;
-      const hasLanguages = Array.isArray(languages) && languages.length > 0;
-      const hasCommands = Array.isArray(commands) && commands.length > 0;
-
-      const onlyVisualThemes = (hasThemes || hasIconThemes || hasProductIconThemes) && !hasLanguages && !hasCommands && !hasGrammars;
-      return !onlyVisualThemes;
-    } catch (_) {
-      return true;
+  // Extension summary for the strip
+  try {
+    if (typeof window.__explorerBusRequest === 'function') {
+      const res = await window.__explorerBusRequest('ext:list', {}, 8000);
+      const exts = res?.payload?.extensions || [];
+      const active = exts.filter((e) => e.active);
+      const user = exts.filter((e) => e.source === 'user');
+      editorSettingsExtSummary.textContent =
+        `${active.length} active, ${user.length} user-installed, ${exts.length} total`;
     }
-  });
-
-  if (!projectExtensions.length) {
-    const empty = document.createElement('div');
-    empty.style.opacity = '0.8';
-    empty.textContent = installed.length ? 'No project-scoped extensions installed.' : 'No VSIX installed yet.';
-    editorSettingsExtList.appendChild(empty);
-  } else {
-    const list = document.createElement('div');
-    list.style.display = 'flex';
-    list.style.flexDirection = 'column';
-    list.style.gap = '6px';
-
-    projectExtensions
-      .slice()
-      .sort((a, b) => String(a.display_name || a.id).localeCompare(String(b.display_name || b.id)))
-      .forEach((ext) => {
-        const extId = String(ext.id || '').trim();
-        if (!extId) return;
-        const label = String(ext.display_name || extId);
-        const desc = String(ext.description || '').trim();
-
-        const row = document.createElement('label');
-        row.style.display = 'flex';
-        row.style.alignItems = 'flex-start';
-        row.style.gap = '10px';
-        row.style.padding = '8px 10px';
-        row.style.border = '1px solid var(--border, #333)';
-        row.style.borderRadius = '8px';
-        row.style.cursor = 'pointer';
-
-        const input = document.createElement('input');
-        input.type = 'checkbox';
-        input.checked = enabledSet.has(extId);
-        input.style.marginTop = '3px';
-
-        const text = document.createElement('div');
-        const title = document.createElement('div');
-        title.textContent = `${label} (${extId})`;
-        title.style.fontWeight = '600';
-        const sub = document.createElement('div');
-        sub.textContent = desc || `v${ext.version || ''}`;
-        sub.style.opacity = '0.8';
-        sub.style.fontSize = '12px';
-        text.appendChild(title);
-        text.appendChild(sub);
-
-        row.appendChild(input);
-        row.appendChild(text);
-
-        input.addEventListener('change', async () => {
-          const want = !!input.checked;
-          input.disabled = true;
-          try {
-            await vscodeApiCall(want ? 'vscode.vsix.enable' : 'vscode.vsix.disable', { id: extId });
-            if (want) enabledSet.add(extId);
-            else enabledSet.delete(extId);
-          } catch (e) {
-            host.toast(e?.message || 'Failed to update extension');
-            input.checked = !want;
-          } finally {
-            input.disabled = false;
-          }
-        });
-
-        list.appendChild(row);
-      });
-
-    editorSettingsExtList.appendChild(list);
+  } catch (_) {
+    editorSettingsExtSummary.textContent = 'Click to manage';
   }
 
   // Watcher config: request fresh state from server
@@ -1998,20 +2071,22 @@ async function refreshEditorSettingsModal() {
 
 async function refreshEditorExtManagerModal() {
   editorExtManagerList.textContent = 'Loading…';
-  let installed = [];
+  let extensions = [];
+  let langSlots = {};
   try {
-    const installedRes = await vscodeApiCall('vscode.vsix.listInstalled', {});
-    installed = installedRes?.installed || [];
+    const res = await window.__explorerBusRequest('ext:list', {}, 10000);
+    extensions = res?.payload?.extensions || [];
+    langSlots = res?.payload?.language_slots || {};
   } catch (e) {
     editorExtManagerList.textContent = `Failed to load: ${e?.message || 'unknown error'}`;
     return;
   }
 
   editorExtManagerList.innerHTML = '';
-  if (!installed.length) {
+  if (!extensions.length) {
     const empty = document.createElement('div');
     empty.style.opacity = '0.8';
-    empty.textContent = 'No VSIX installed yet.';
+    empty.textContent = 'No extensions registered.';
     editorExtManagerList.appendChild(empty);
     return;
   }
@@ -2021,113 +2096,171 @@ async function refreshEditorExtManagerModal() {
   list.style.flexDirection = 'column';
   list.style.gap = '8px';
 
-  installed
+  extensions
     .slice()
-    .sort((a, b) => String(a.display_name || a.id).localeCompare(String(b.display_name || b.id)))
+    .sort((a, b) => {
+      // user extensions first, then builtins
+      if (a.source !== b.source) return a.source === 'user' ? -1 : 1;
+      return String(a.display_name || a.id).localeCompare(String(b.display_name || b.id));
+    })
     .forEach((ext) => {
       const extId = String(ext.id || '').trim();
       if (!extId) return;
       const label = String(ext.display_name || extId);
       const version = String(ext.version || '');
-      const desc = String(ext.description || '').trim();
-        const hasThemes = Array.isArray(ext?.contributes?.themes) && ext.contributes.themes.length > 0;
-        const hasGrammars = Array.isArray(ext?.contributes?.grammars) && ext.contributes.grammars.length > 0;
-        const hasLanguages = Array.isArray(ext?.contributes?.languages) && ext.contributes.languages.length > 0;
-        const hasCommands = Array.isArray(ext?.contributes?.commands) && ext.contributes.commands.length > 0;
-        const tags = [];
-        if (hasThemes) tags.push('themes');
-        if (hasGrammars) tags.push('grammars');
-        if (hasLanguages) tags.push('languages');
-        if (hasCommands) tags.push('commands');
+      const isBuiltin = ext.source === 'builtin';
+      const isActive = !!ext.active;
+      const langs = ext.languages || [];
+      const hasConfig = !!ext.has_config;
 
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.alignItems = 'flex-start';
-      row.style.gap = '10px';
-      row.style.padding = '10px 12px';
-      row.style.border = '1px solid var(--border, #333)';
-      row.style.borderRadius = '10px';
+      const card = document.createElement('div');
+      card.style.display = 'flex';
+      card.style.alignItems = 'flex-start';
+      card.style.gap = '10px';
+      card.style.padding = '10px 12px';
+      card.style.border = '1px solid var(--border, #333)';
+      card.style.borderRadius = '10px';
+      if (!isActive) card.style.opacity = '0.5';
 
-      const text = document.createElement('div');
-      text.style.flex = '1';
-      const title = document.createElement('div');
-      title.textContent = `${label} (${extId})${version ? ` v${version}` : ''}`;
-      title.style.fontWeight = '700';
-      const sub = document.createElement('div');
-      sub.textContent = desc || (tags.length ? tags.join(', ') : '');
-      sub.style.opacity = '0.8';
-      sub.style.fontSize = '12px';
-      text.appendChild(title);
-      text.appendChild(sub);
+      // Left: info
+      const info = document.createElement('div');
+      info.style.flex = '1';
+      info.style.minWidth = '0';
 
-      const trash = document.createElement('button');
-      trash.className = 'fe-btn fe-btn-secondary';
-      trash.textContent = '🗑';
-      trash.title = 'Uninstall';
+      const titleRow = document.createElement('div');
+      titleRow.style.display = 'flex';
+      titleRow.style.alignItems = 'center';
+      titleRow.style.gap = '6px';
+      titleRow.style.flexWrap = 'wrap';
 
-      trash.addEventListener('click', async () => {
-        if (!window.confirm(`Uninstall ${extId}?`)) return;
-        trash.disabled = true;
+      const nameEl = document.createElement('span');
+      nameEl.textContent = label;
+      nameEl.style.fontWeight = '700';
+      titleRow.appendChild(nameEl);
+
+      if (version) {
+        const verEl = document.createElement('span');
+        verEl.textContent = `v${version}`;
+        verEl.style.opacity = '0.5';
+        verEl.style.fontSize = '12px';
+        titleRow.appendChild(verEl);
+      }
+
+      const badge = document.createElement('span');
+      badge.textContent = isBuiltin ? 'built-in' : 'user';
+      badge.style.fontSize = '10px';
+      badge.style.padding = '1px 6px';
+      badge.style.borderRadius = '4px';
+      badge.style.border = '1px solid var(--border, #333)';
+      badge.style.opacity = '0.6';
+      titleRow.appendChild(badge);
+      info.appendChild(titleRow);
+
+      if (langs.length) {
+        const langEl = document.createElement('div');
+        langEl.style.fontSize = '12px';
+        langEl.style.opacity = '0.7';
+        langEl.style.marginTop = '2px';
+        langEl.textContent = langs.join(', ');
+        info.appendChild(langEl);
+      }
+
+      card.appendChild(info);
+
+      // Right: action buttons
+      const actions = document.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.gap = '6px';
+      actions.style.alignItems = 'center';
+      actions.style.flexShrink = '0';
+
+      // Active toggle
+      const toggle = document.createElement('button');
+      toggle.className = 'fe-btn';
+      toggle.textContent = isActive ? '●' : '○';
+      toggle.title = isActive ? 'Deactivate' : 'Activate';
+      toggle.style.fontSize = '14px';
+      toggle.style.color = isActive ? 'var(--primary, #3b82f6)' : '';
+      toggle.addEventListener('click', async () => {
+        toggle.disabled = true;
         try {
-          const res = await vscodeApiCall('vscode.vsix.uninstall', { id: extId });
-          if (!res?.ok) throw new Error(res?.error || 'uninstall failed');
-
-          // If the active theme belongs to the uninstalled extension, revert to te2-dark.
-          try {
-            const t = String(editorViewState?.theme || '');
-            if (t.startsWith('vscode:') && t.slice('vscode:'.length).startsWith(extId + ':')) {
-              await updatePreference('theme', 'te2-dark');
-            }
-          } catch (_) {}
-
-          host.toast(`Uninstalled: ${extId}`);
-          await refreshEditorExtManagerModal();
-          await refreshEditorSettingsModal();
+          await window.__explorerBusRequest('ext:toggle', {
+            ext_id: extId,
+            active: !isActive,
+          }, 10000);
+          void refreshEditorExtManagerModal();
         } catch (e) {
-          host.toast(e?.message || 'Uninstall failed');
+          host.toast(e?.message || 'Toggle failed');
         } finally {
-          trash.disabled = false;
+          toggle.disabled = false;
         }
       });
+      actions.appendChild(toggle);
 
-      row.appendChild(text);
-      row.appendChild(trash);
-      list.appendChild(row);
+      // Configure button (only if extension has config)
+      if (hasConfig) {
+        const cfgBtn = document.createElement('button');
+        cfgBtn.className = 'fe-btn';
+        cfgBtn.textContent = '⚙';
+        cfgBtn.title = 'Configure';
+        cfgBtn.addEventListener('click', async () => {
+          cfgBtn.disabled = true;
+          try {
+            const res = await window.__explorerBusRequest('ext:configSchema', {
+              ext_id: extId,
+            }, 10000);
+            const schema = res?.payload?.schema || {};
+            // Fetch current values too
+            const currentValues = {};
+            try {
+              const listRes = await window.__explorerBusRequest('ext:list', {}, 5000);
+              const fullExt = (listRes?.payload?.extensions || []).find((e) => e.id === extId);
+              if (fullExt?.configuration_values) Object.assign(currentValues, fullExt.configuration_values);
+            } catch (_) {}
+            openExtConfigModal(extId, label, schema, currentValues);
+          } catch (e) {
+            host.toast(e?.message || 'Failed to load config');
+          } finally {
+            cfgBtn.disabled = false;
+          }
+        });
+        actions.appendChild(cfgBtn);
+      }
+
+      // Uninstall button (only for user extensions)
+      if (!isBuiltin) {
+        const trash = document.createElement('button');
+        trash.className = 'fe-btn';
+        trash.textContent = '🗑';
+        trash.title = 'Uninstall';
+        trash.addEventListener('click', async () => {
+          if (!window.confirm(`Uninstall ${label}?`)) return;
+          trash.disabled = true;
+          try {
+            const res = await window.__explorerBusRequest('ext:uninstall', {
+              ext_id: extId,
+            }, 30000);
+            if (res?.payload?.ok) {
+              host.toast(`Uninstalled: ${label}`);
+              void refreshEditorExtManagerModal();
+            } else {
+              host.toast(res?.payload?.error || 'Uninstall failed');
+            }
+          } catch (e) {
+            host.toast(e?.message || 'Uninstall failed');
+          } finally {
+            trash.disabled = false;
+          }
+        });
+        actions.appendChild(trash);
+      }
+
+      card.appendChild(actions);
+      list.appendChild(card);
     });
 
   editorExtManagerList.appendChild(list);
 }
-
-editorSettingsVsixInstall.addEventListener('click', async () => {
-  const p = String(editorSettingsVsixPath.value || '').trim();
-  if (!p) {
-    host.toast('Enter an absolute .vsix path');
-    return;
-  }
-  editorSettingsVsixInstall.disabled = true;
-  try {
-    const res = await vscodeApiCall('vscode.vsix.installLocal', { path: p });
-    if (!res?.ok) throw new Error(res?.error || 'VSIX install failed');
-    host.toast(`Installed: ${res.installed?.id || 'ok'}`);
-    editorSettingsVsixPath.value = '';
-    await refreshEditorSettingsModal();
-  } catch (e) {
-    host.toast(e?.message || 'VSIX install failed');
-  } finally {
-    editorSettingsVsixInstall.disabled = false;
-  }
-});
-
-editorSettingsVsixBrowse.addEventListener('click', async () => {
-  const start = lastPickerPath || HOME_DIR;
-  const picked = await pickFile(start);
-  if (!picked) return;
-  if (!picked.toLowerCase().endsWith('.vsix')) {
-    host.toast('Not a .vsix file');
-    return;
-  }
-  editorSettingsVsixPath.value = picked;
-});
 
 initVirtualKeyboardAdjustments({
   root,

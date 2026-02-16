@@ -62,6 +62,10 @@ const PARSE_ARGS_ONLY_METHODS = new Set([
   "$onWillActivateExtension",
   "$onDidActivateExtension",
   "$onExtensionActivationError",
+  "$onUnexpectedError",
+  "$logExtensionHostMessage",
+  "$onExtensionRuntimeError",
+  "$register",
 
   // Keep diagnostics/hover requests parseable when we need them later.
   "$changeMany",
@@ -458,6 +462,9 @@ function decodeExtHostRpc(payload) {
   };
   const readLongString = () => {
     const ln = readU32();
+    if (ln > 10000000) {
+      console.log(`[ipc_decode] WARNING readLongString len=${ln} off=${off} payloadLen=${payload.length}`);
+    }
     return readBytes(ln).toString("utf8");
   };
   const skipLongString = () => {
@@ -466,7 +473,11 @@ function decodeExtHostRpc(payload) {
     return ln >>> 0;
   };
   const readMixedArray = () => {
-    const count = readU32();
+    const count = readU8(); // VS Code uses readUInt8 for mixed arg count
+    if (count > 250) {
+      console.log(`[ipc_decode] WARNING readMixedArray count=${count} off=${off} payloadLen=${payload.length}`);
+      return [{ __mixed_array_too_large__: true, count }];
+    }
     const out = [];
     for (let i = 0; i < count; i++) {
       const argType = readU8();
@@ -490,7 +501,11 @@ function decodeExtHostRpc(payload) {
     return out;
   };
   const skipMixedArray = () => {
-    const count = readU32();
+    const count = readU8(); // VS Code uses readUInt8 for mixed arg count
+    if (count > 250) {
+      console.log(`[ipc_decode] WARNING skipMixedArray count=${count} (bailing) off=${off} payloadLen=${payload.length}`);
+      return { count, totalJsonBytes: 0, totalStringBytes: 0, totalBuffers: 0, skipped: true };
+    }
     let totalJsonBytes = 0;
     let totalStringBytes = 0;
     let totalBuffers = 0;
@@ -631,6 +646,7 @@ export class WorkbenchClient {
     this._docVersions = new Map(); // path -> versionId for didChange tracking
     this._docLineCount = new Map(); // path -> line count for didChange range
     this._docCharCount = new Map(); // path -> char count for didChange rangeLength
+    this._docLastLineLength = new Map(); // path -> length of last line (for valid endColumn)
     this._docOpenGeneration = new Map(); // path -> generation token from open_file flow
     this._useRemote = true;
     this._authority = DEFAULT_REMOTE_AUTHORITY;
@@ -1014,13 +1030,58 @@ export class WorkbenchClient {
     return { contents: {}, overrides: [], keys: [] };
   }
 
+  /**
+   * Extract configuration defaults from raw scanned extensions BEFORE sanitization
+   * strips the contributes data. Returns { contents, keys }.
+   */
+  _extractExtensionConfigDefaults(scannedExtensions) {
+    const allContents = {};
+    const allKeys = [];
+    try {
+      const exts = Array.isArray(scannedExtensions) ? scannedExtensions : [];
+      for (const ext of exts) {
+        const manifest = ext?.packageJSON ?? ext;
+        let configs = manifest?.contributes?.configuration;
+        if (!configs) continue;
+        if (!Array.isArray(configs)) configs = [configs];
+        for (const cfg of configs) {
+          const props = cfg?.properties;
+          if (!props || typeof props !== "object") continue;
+          for (const [fullKey, schema] of Object.entries(props)) {
+            if (!fullKey || typeof fullKey !== "string") continue;
+            if (!Object.prototype.hasOwnProperty.call(schema, "default")) continue;
+            const dotIdx = fullKey.indexOf(".");
+            if (dotIdx <= 0) continue;
+            const section = fullKey.substring(0, dotIdx);
+            const prop = fullKey.substring(dotIdx + 1);
+            if (!allContents[section]) allContents[section] = {};
+            const parts = prop.split(".");
+            let target = allContents[section];
+            for (let i = 0; i < parts.length - 1; i++) {
+              if (!target[parts[i]] || typeof target[parts[i]] !== "object") target[parts[i]] = {};
+              target = target[parts[i]];
+            }
+            target[parts[parts.length - 1]] = schema.default;
+            allKeys.push(fullKey);
+          }
+        }
+      }
+    } catch (e) {
+      console.log(`[config] error scanning extension defaults: ${e?.message ?? e}`);
+    }
+    console.log(`[config] extracted ${allKeys.length} default keys from ${Array.isArray(scannedExtensions) ? scannedExtensions.length : 0} extensions`);
+    return { contents: allContents, keys: allKeys };
+  }
+
   _buildConfigurationInitData(folder, authority) {
     const empty = this._emptyConfigSection();
 
-    // Force a deterministic Python LS path for headless mode.
-    // `ms-python.python` can provide hover/symbols via Jedi without Pylance, but it requires:
-    // - a valid interpreter, and
-    // - a non-None language server selection (see atlas msg #674).
+    // Use pre-extracted extension config defaults (extracted before sanitization).
+    const extracted = this._rawExtensionConfigs || { contents: {}, keys: [] };
+    const allContents = { ...extracted.contents };
+    const allKeys = [...extracted.keys];
+
+    // Apply overrides: force specific values for TE2 headless mode.
     const pythonPathCandidates = [
       String(process.env.TE2_PYTHON_PATH || ""),
       "/data/data/com.termux/files/usr/bin/python",
@@ -1037,17 +1098,14 @@ export class WorkbenchClient {
         }
       } catch {}
     }
+    if (!allContents.python) allContents.python = {};
+    allContents.python.languageServer = "Jedi";
+    allContents.python.defaultInterpreterPath = defaultInterpreterPath;
+    if (!allKeys.includes("python.languageServer")) allKeys.push("python.languageServer");
+    if (!allKeys.includes("python.defaultInterpreterPath")) allKeys.push("python.defaultInterpreterPath");
 
-    const defaults = {
-      contents: {
-        python: {
-          languageServer: "Jedi",
-          defaultInterpreterPath,
-        },
-      },
-      overrides: [],
-      keys: ["python.languageServer", "python.defaultInterpreterPath"],
-    };
+    const defaults = { contents: allContents, overrides: [], keys: allKeys };
+    // userRemote only needs the forced overrides, not all defaults
     const userRemote = {
       contents: {
         python: {
@@ -1214,6 +1272,8 @@ export class WorkbenchClient {
       }
       // Always sanitize scanned extensions into a lean JSON-only shape to avoid retaining
       // huge non-enumerable/symbol/buffer fields from the mgmt scan RPC.
+      // BUT first, extract configuration defaults while contributes data is still available.
+      this._rawExtensionConfigs = this._extractExtensionConfigDefaults(scannedExtensions);
       try {
         if (String(process.env.TE2_DEBUG_SCAN_SHAPE || "") === "1" && Array.isArray(scannedExtensions)) {
           const sample = scannedExtensions.slice(0, 5).map((ext) => {
@@ -1375,7 +1435,8 @@ export class WorkbenchClient {
         }
         this._extMsgCount++;
         if (this._extMsgCount <= 500) {
-          console.log(`[ext_msg] #${this._extMsgCount} len=${b0?.length ?? 0}`);
+          const mem = process.memoryUsage();
+          console.log(`[ext_msg] #${this._extMsgCount} len=${b0?.length ?? 0} heapUsed=${(mem.heapUsed/1048576).toFixed(1)}MB`);
         }
 
         if (this._extMsgTrace.enabled && this._extMsgTrace.seen < EXT_MSG_TRACE_MAX) {
@@ -1399,9 +1460,18 @@ export class WorkbenchClient {
             } catch {}
           }
         }
+        // Pre-decode: log raw header bytes for messages near the crash zone
+        if (this._extMsgCount >= 100 && this._extMsgCount <= 120) {
+          const raw = payloadVsBuf.buffer;
+          const hex = Buffer.from(raw.slice(0, Math.min(32, raw.length))).toString('hex');
+          console.log(`[ext_msg_raw] #${this._extMsgCount} len=${raw.length} first32hex=${hex}`);
+        }
         const msg = decodeExtHostRpc(payloadVsBuf.buffer);
         if (this._extMsgCount <= 500) {
-          console.log(`[ext_msg] #${this._extMsgCount} kind=${msg.kind} type=${msg.type} rpcId=${msg.rpcId ?? '-'} method=${msg.method ?? '-'} req=${msg.req ?? '-'}`);
+          // Peek at raw message type before full decode log
+          const rawType = payloadVsBuf.buffer?.[0];
+          const rawReq = payloadVsBuf.buffer?.length >= 5 ? payloadVsBuf.buffer.readUInt32BE(1) : -1;
+          console.log(`[ext_msg] #${this._extMsgCount} kind=${msg.kind} type=${msg.type} rpcId=${msg.rpcId ?? '-'} method=${msg.method ?? '-'} req=${msg.req ?? '-'} rawType=${rawType}`);
         }
         if (msg.kind !== "ext") return;
         if (this._extMsgTrace.enabled && msg?.error && this._extMsgTrace.seen < EXT_MSG_TRACE_MAX) {
@@ -1433,6 +1503,10 @@ export class WorkbenchClient {
               "$initializeExtensionStorage",
               "$registerDocumentSymbolProvider",
               "$registerHoverProvider",
+              "$onUnexpectedError",
+              "$logExtensionHostMessage",
+              "$onExtensionRuntimeError",
+              "$register",
             ]);
             if (logArgsMethods.has(msg.method)) {
               ev.args = msg.args;
@@ -1451,29 +1525,30 @@ export class WorkbenchClient {
           if (msg.method === "$initializeExtensionStorage") {
             console.log(`[ext_activation] $initializeExtensionStorage args=${JSON.stringify(msg.args ?? []).slice(0, 200)}`);
           }
+          if (msg.method === "$onUnexpectedError") {
+            console.log(`[ext_error] $onUnexpectedError args=${JSON.stringify(msg.args ?? []).slice(0, 500)}`);
+          }
+          if (msg.method === "$logExtensionHostMessage") {
+            console.log(`[ext_log] $logExtensionHostMessage args=${JSON.stringify(msg.args ?? []).slice(0, 500)}`);
+          }
+          if (msg.method === "$register") {
+            console.log(`[ext_register] $register rpcId=${msg.rpcId} args=${JSON.stringify(msg.args ?? []).slice(0, 500)}`);
+          }
+          if (msg.method === "$onExtensionRuntimeError") {
+            console.log(`[ext_error] $onExtensionRuntimeError args=${JSON.stringify(msg.args ?? []).slice(0, 500)}`);
+          }
 
           // RPCProtocol expects an immediate ACK for every request.
           try {
             this.ext?.protocol.send(VSBuffer.wrap(encodeExtAck(msg.req)));
           } catch {}
-          // Reply with appropriate data for methods that expect specific return types.
-          // $initializeExtensionStorage → {} (empty Record<string,string>)
-          // $getInitialState → undefined (no previous state)
-          // $getTools → [] (empty tools array)
-          // Everything else → ReplyOkEmpty (resolves promise with undefined)
-          try {
-            let replyBuf;
-            if (msg.method === "$initializeExtensionStorage") {
-              replyBuf = encodeExtReplyOkJson(msg.req, {});
-            } else if (msg.method === "$getTools") {
-              replyBuf = encodeExtReplyOkJson(msg.req, []);
-            } else {
-              replyBuf = encodeExtReplyOkEmpty(msg.req);
-            }
-            this.ext?.protocol.send(VSBuffer.wrap(replyBuf));
-          } catch {}
+          // Replies are sent below (after provider-learning and diagnostics) in
+          // the comprehensive reply block starting with REPLY_DROP_METHODS.
 
           // Learn provider handles.
+          if (msg.method && msg.method.startsWith("$register") && msg.method.endsWith("Provider")) {
+            console.log(`[providers] ${msg.method} handle=${msg.args?.[0]} selector=${JSON.stringify(msg.args?.[1])?.slice(0,300)}`);
+          }
           if (msg.method === "$registerDocumentSymbolProvider" && Array.isArray(msg.args) && msg.args.length >= 2) {
             const handle = Number(msg.args[0]);
             const selector = msg.args[1];
@@ -1578,7 +1653,11 @@ export class WorkbenchClient {
             // The real workbench returns a large list (built-in + extension tools). Empty array is acceptable for our TE2 use-cases.
             replyPayload = encodeExtReplyOkJson(msg.req, []);
           } else if (msg.method === "$initializeExtensionStorage") {
-            // Real workbench returns a JSON string blob of persisted storage keys/values.
+            // Real workbench returns a JSON-encoded string. ExtHostStorage.safeParseValue()
+            // calls JSON.parse() on the deserialized result. We send the string "{}" so:
+            //   wire: JSON.stringify("{}") → "\"{}\""
+            //   ext host RPC deserialize: JSON.parse("\"{}\"") → "{}" (string)
+            //   safeParseValue: JSON.parse("{}") → {} (empty object) ✓
             replyPayload = encodeExtReplyOkJson(msg.req, "{}");
           } else if (msg.method === "$startFileSearch") {
             replyPayload = encodeExtReplyOkJson(msg.req, []);
@@ -1588,6 +1667,12 @@ export class WorkbenchClient {
             replyPayload = encodeExtReplyOkJson(msg.req, null);
           } else if (msg.method === "$executeCommand") {
             replyPayload = encodeExtReplyOkEmpty(msg.req);
+          } else if (msg.method === "$register" && msg.rpcId === 29) {
+            // MainThreadOutputService.$register returns Promise<string> (channel ID).
+            // Clangd blocks waiting for this. Return a synthetic channel ID.
+            const channelId = `te2-output-${msg.req}`;
+            console.log(`[ext_reply] $register (OutputService) req=${msg.req} → channelId=${channelId}`);
+            replyPayload = encodeExtReplyOkJson(msg.req, channelId);
           } else {
             replyPayload = encodeExtReplyOkEmpty(msg.req);
           }
@@ -1595,6 +1680,8 @@ export class WorkbenchClient {
             this.ext?.protocol.send(VSBuffer.wrap(replyPayload));
             if (this._debugMainThreadReplySeen < 80) {
               this._debugMainThreadReplySeen++;
+              const replyHex = Buffer.from(replyPayload.slice(0, Math.min(64, replyPayload.length))).toString('hex');
+              console.log(`[ext_reply_sent] req=${msg.req} method=${msg.method} type=${replyPayload?.[0]} len=${replyPayload?.length} hex=${replyHex}`);
               this.onEvent({
                 type: "ext/reply_to_ext",
                 ts_ms: Date.now(),
@@ -1603,7 +1690,9 @@ export class WorkbenchClient {
                 replyType: replyPayload?.[0] ?? null,
               });
             }
-          } catch {}
+          } catch (replyErr) {
+            console.log(`[ext_reply_ERROR] req=${msg.req} method=${msg.method} err=${replyErr?.message ?? replyErr}`);
+          }
           return;
         }
 
@@ -1642,7 +1731,7 @@ export class WorkbenchClient {
       try {
         // In a real workbench session, configuration is then synced via `$acceptConfigurationChanged`.
         // Some extensions (including ms-python.python) appear to rely on this to observe settings.
-        this._sendExt(80, "$acceptConfigurationChanged", [configInit, { keys: ["python.languageServer", "python.defaultInterpreterPath"], overrides: [] }], false);
+        this._sendExt(80, "$acceptConfigurationChanged", [configInit, { keys: configInit.defaults.keys, overrides: [] }], false);
       } catch {}
 
       // Mirror the browser workbench bootstrap sequence that appears to gate provider registration
@@ -1761,9 +1850,15 @@ export class WorkbenchClient {
 		    // NOTE: The trace does NOT send `removedEditors` here; sending it with the wrong editor id
 		    // can break subsequent diagnostics.
 		    const prevAbs = (prevUriObj?.fsPath ?? prevUriObj?.path) ? String(prevUriObj?.fsPath ?? prevUriObj?.path) : "";
+		    // Same-file reopen (e.g. page reload): skip remove+re-add to keep the ext host model
+		    // stable. Clangd clears diagnostics on document close, so removing then re-adding the
+		    // same file causes a markers=0 flash and ContentChangedError on symbols.
+		    // Instead, reuse the existing model and push a full-content $didChange.
+		    const isSameFileReopen = !!(prevUriObj && prevAbs && prevAbs === path);
 		    const shouldClosePrev = !!(
 		      prevUriObj &&
 		      prevAbs &&
+		      !isSameFileReopen &&
 		      (forceRefresh || prevAbs !== path)
 		    );
 
@@ -1841,6 +1936,44 @@ export class WorkbenchClient {
       } catch {}
     }
 
+    if (isSameFileReopen) {
+      // Same file reopen (page reload): push full content via $didChange to keep model stable.
+      // This avoids clangd clearing diagnostics on document close+reopen.
+      const prevVersion = this._docVersions.get(path) || 1;
+      const newVersion = prevVersion + 1;
+      const prevLineCount = this._docLineCount.get(path) || 1;
+      const prevCharCount = this._docCharCount.get(path) || 0;
+      const prevLastLineLen = this._docLastLineLength.get(path) ?? 10000;
+      console.log(`[openFile] ts=${Date.now()} same-file reopen, sending $didChange instead of remove+add (v${prevVersion}→v${newVersion})`);
+      this._sendExt(85, "$acceptModelChanged", [
+        uriObj,
+        {
+          changes: [{
+            range: { startLineNumber: 1, startColumn: 1, endLineNumber: prevLineCount, endColumn: prevLastLineLen + 1 },
+            rangeOffset: 0,
+            rangeLength: prevCharCount,
+            text,
+          }],
+          eol: "\n",
+          versionId: newVersion,
+          isUndoing: false,
+          isRedoing: false,
+          isFlush: true,
+        },
+        false,
+      ], false);
+      this._docVersions.set(path, newVersion);
+      this._docLineCount.set(path, lines.length);
+      this._docCharCount.set(path, text.length);
+      this._docLastLineLength.set(path, lines[lines.length - 1].length);
+      this._docOpenGeneration.set(path, generation);
+      // Keep the same editor and tab — just update state references.
+      this._activeEditorId = prevEditorId;
+      this._activeUriObj = uriObj;
+      this._activeTab = prevTab;
+      return { ok: true, req: null };
+    }
+
     // Added document (with full line payload).
     const docDelta = spanTrace("openFile.buildDelta.addedDocuments", () => ({
       addedDocuments: [{ uri: uriObj, versionId: 1, lines, EOL: "\n", languageId, isDirty: false, encoding: "utf8" }],
@@ -1850,6 +1983,7 @@ export class WorkbenchClient {
     this._docVersions.set(path, 1); // reset version tracking for didChange
     this._docLineCount.set(path, lines.length);
     this._docCharCount.set(path, text.length);
+    this._docLastLineLength.set(path, lines[lines.length - 1].length);
     this._docOpenGeneration.set(path, generation);
     // Allow GC to collect the large `lines` array after JSON encoding.
     try {
@@ -1960,12 +2094,16 @@ export class WorkbenchClient {
     // The mirror model does _acceptDeleteRange(range) then _acceptInsertText(start, text),
     // so the range MUST span the entire existing document to delete it first.
     const prevLines = this._docLineCount.get(path) ?? 1;
+    // Fall back to 10000 if never tracked (file opened before this tracking existed).
+    // The mirror model clamps internally; clangd rejects INT32_MAX but tolerates reasonable values.
+    const prevLastLineLen = this._docLastLineLength.get(path) ?? 10000;
     const newLines = text.split(/\r?\n/);
     this._docLineCount.set(path, newLines.length);
+    this._docLastLineLength.set(path, newLines[newLines.length - 1].length);
 
     const event = {
       changes: [{
-        range: { startLineNumber: 1, startColumn: 1, endLineNumber: prevLines, endColumn: 2147483647 },
+        range: { startLineNumber: 1, startColumn: 1, endLineNumber: prevLines, endColumn: prevLastLineLen + 1 },
         rangeOffset: 0,
         rangeLength: this._docCharCount.get(path) ?? 0,
         text,
@@ -1981,7 +2119,7 @@ export class WorkbenchClient {
     // rpcId 85 = ExtHostDocuments, $acceptModelChanged(uri, event, isDirty)
     this._sendExt(85, "$acceptModelChanged", [uriObj, event, true], false);
     this._docCharCount.set(path, text.length);
-    console.log(`[didChange] ts=${Date.now()} path=${path} ver=${nextVersion} bytes=${text.length} prevLines=${prevLines} newLines=${newLines.length}`);
+    console.log(`[didChange] ts=${Date.now()} path=${path} ver=${nextVersion} bytes=${text.length} prevLines=${prevLines} prevLastLineLen=${prevLastLineLen} newLines=${newLines.length}`);
     return { ok: true, versionId: nextVersion };
   }
 
@@ -2041,7 +2179,16 @@ export class WorkbenchClient {
     const symCount = (rep.type === 9 && Array.isArray(rep.result)) ? rep.result.length : 'n/a';
     console.log(`[symbols] response path=${path} lang=${languageId} type=${rep.type} count=${symCount}`);
     if (rep.type === 9) return { ok: true, result: rep.result };
-    if (rep.type === 11) { console.log(`[symbols] error reply:`, rep.error); return { ok: false, error: rep.error }; }
+    if (rep.type === 11) {
+      console.log(`[symbols] error reply:`, rep.error);
+      // ContentChangedError — document was re-opened; retry once after a short delay.
+      if (!params._retried) {
+        console.log(`[symbols] retrying after 800ms...`);
+        await new Promise(r => setTimeout(r, 800));
+        return this.symbols({ ...params, _retried: true });
+      }
+      return { ok: false, error: rep.error };
+    }
     return { ok: false, error: rep };
   }
 

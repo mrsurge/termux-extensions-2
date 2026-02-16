@@ -2661,28 +2661,21 @@
     <div class="fe-modal-header">
       <strong>Editor Settings</strong>
       <span style="flex:1"></span>
-      <button class="fe-btn" id="editor-settings-menu" aria-label="Manage extensions">☰</button>
       <button class="fe-btn" id="editor-settings-close" aria-label="Close">✕</button>
     </div>
     <div class="fe-modal-body">
-      <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 14px;">
-        <div style="flex:1; min-width: 240px;">
-          <label for="editor-settings-vsix-path" style="display:block; font-size: 12px; opacity: 0.8; margin-bottom: 6px;">Install VSIX (absolute path)</label>
-          <input id="editor-settings-vsix-path" class="lsp-rootrel-input" type="text" placeholder="/data/data/.../extension.vsix" autocomplete="off" autocapitalize="off" spellcheck="false" />
-        </div>
-        <button class="fe-btn" id="editor-settings-vsix-browse">Browse</button>
-        <button class="fe-btn fe-btn-primary" id="editor-settings-vsix-install">Install</button>
-      </div>
-
-      <div class="fe-dd-separator" style="margin: 10px 0;"></div>
-
       <div style="font-weight: 600; margin-bottom: 6px;">Theme (global)</div>
       <div id="editor-settings-theme-list"></div>
 
       <div class="fe-dd-separator" style="margin: 12px 0;"></div>
 
-      <div style="font-weight: 600; margin-bottom: 6px;">Extensions (per-project)</div>
-      <div id="editor-settings-ext-list"></div>
+      <div id="editor-settings-ext-strip" style="display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:10px; cursor:pointer;">
+        <div style="flex:1;">
+          <div style="font-weight:600;">Languages &amp; Extensions</div>
+          <div id="editor-settings-ext-summary" style="font-size:12px; opacity:0.7; margin-top:2px;">Loading…</div>
+        </div>
+        <span style="opacity:0.5; font-size:1.2rem;">›</span>
+      </div>
 
       <div class="fe-dd-separator" style="margin: 12px 0;"></div>
 
@@ -2854,16 +2847,35 @@
   </div>
 </div>
 
-<!-- Extensions Manager Modal (all installed VSIX) -->
+<!-- Extensions Manager Modal (registry-based) -->
 <div id="editor-ext-manager-modal" class="fe-modal" aria-hidden="true" style="z-index: 350;">
   <div class="fe-modal-card" style="max-width: 760px;">
     <div class="fe-modal-header">
-      <strong>Installed Extensions</strong>
+      <strong>Languages &amp; Extensions</strong>
       <span style="flex:1"></span>
+      <button class="fe-btn fe-btn-primary" id="editor-ext-manager-install" aria-label="Install extension">+ Install</button>
       <button class="fe-btn" id="editor-ext-manager-close" aria-label="Close">✕</button>
     </div>
     <div class="fe-modal-body">
       <div id="editor-ext-manager-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Extension Config Modal (3rd level — configure individual extension) -->
+<div id="ext-config-modal" class="fe-modal" aria-hidden="true" style="z-index: 360;">
+  <div class="fe-modal-card" style="max-width: 680px;">
+    <div class="fe-modal-header">
+      <strong id="ext-config-title">Configure Extension</strong>
+      <span style="flex:1"></span>
+      <button class="fe-btn" id="ext-config-close" aria-label="Close">✕</button>
+    </div>
+    <div class="fe-modal-body">
+      <div id="ext-config-form"></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+        <button class="fe-btn" id="ext-config-cancel">Cancel</button>
+        <button class="fe-btn fe-btn-primary" id="ext-config-save">Save</button>
+      </div>
     </div>
   </div>
 </div>

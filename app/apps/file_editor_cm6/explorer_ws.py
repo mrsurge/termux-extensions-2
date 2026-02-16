@@ -2040,6 +2040,102 @@ class ExplorerDispatcher:
         """Handle client heartbeat response (silently)."""
         pass
 
+    # ── Extension registry handlers ───────────────────────────────────
+
+    async def handle_ext_list(self, payload: dict, msg_id: str):
+        """Return installed extensions + language slots."""
+        from .extension_registry import get_extension_list, get_language_slots
+        await self.emit_personal("ext:list", {
+            "extensions": get_extension_list(),
+            "language_slots": get_language_slots(),
+        }, msg_id)
+
+    async def handle_ext_install(self, payload: dict, msg_id: str):
+        """Install a VSIX extension and return the result + config schema."""
+        from .extension_registry import install_extension, get_extension_config_schema
+        vsix_path = payload.get("vsix_path", "")
+        if not vsix_path:
+            return await self.send_error("vsix_path is required", msg_id)
+        try:
+            result = await asyncio.to_thread(install_extension, vsix_path)
+            ext = result.get("extension") or {}
+            ext_id = ext.get("id", "")
+            config_schema = get_extension_config_schema(ext_id) if ext_id else {}
+            await self.emit_personal("ext:installed", {
+                "ok": True,
+                "extension": ext,
+                "config_schema": config_schema,
+                "registry_summary": result.get("registry_summary", {}),
+            }, msg_id)
+        except Exception as e:
+            await self.send_error(str(e), msg_id)
+
+    async def handle_ext_uninstall(self, payload: dict, msg_id: str):
+        """Uninstall a user-installed extension."""
+        from .extension_registry import uninstall_extension
+        ext_id = payload.get("ext_id", "")
+        if not ext_id:
+            return await self.send_error("ext_id is required", msg_id)
+        try:
+            result = await asyncio.to_thread(uninstall_extension, ext_id)
+            await self.emit_personal("ext:uninstalled", {
+                "ok": True,
+                "uninstalled_id": ext_id,
+                "registry_summary": result.get("registry_summary", {}),
+            }, msg_id)
+        except Exception as e:
+            await self.send_error(str(e), msg_id)
+
+    async def handle_ext_configure(self, payload: dict, msg_id: str):
+        """Save configuration values for an extension and rebuild gate."""
+        from .extension_registry import set_extension_config
+        ext_id = payload.get("ext_id", "")
+        values = payload.get("values", {})
+        if not ext_id:
+            return await self.send_error("ext_id is required", msg_id)
+        try:
+            set_extension_config(ext_id, values)
+            await self.emit_personal("ext:configured", {
+                "ok": True,
+                "ext_id": ext_id,
+            }, msg_id)
+        except Exception as e:
+            await self.send_error(str(e), msg_id)
+
+    async def handle_ext_toggle(self, payload: dict, msg_id: str):
+        """Activate/deactivate an extension or language slot."""
+        from .extension_registry import toggle_extension, toggle_language_slot
+        ext_id = payload.get("ext_id")
+        lang_id = payload.get("lang_id")
+        active = payload.get("active", True)
+        try:
+            if ext_id:
+                toggle_extension(ext_id, active)
+                await self.emit_personal("ext:toggled", {
+                    "ok": True, "ext_id": ext_id, "active": active,
+                }, msg_id)
+            elif lang_id:
+                toggle_language_slot(lang_id, active)
+                await self.emit_personal("ext:toggled", {
+                    "ok": True, "lang_id": lang_id, "active": active,
+                }, msg_id)
+            else:
+                await self.send_error("ext_id or lang_id is required", msg_id)
+        except Exception as e:
+            await self.send_error(str(e), msg_id)
+
+    async def handle_ext_configSchema(self, payload: dict, msg_id: str):
+        """Return the configuration schema for an extension."""
+        from .extension_registry import get_extension_config_schema
+        ext_id = payload.get("ext_id", "")
+        if not ext_id:
+            return await self.send_error("ext_id is required", msg_id)
+        schema = get_extension_config_schema(ext_id)
+        await self.emit_personal("ext:configSchema", {
+            "ext_id": ext_id,
+            "schema": schema,
+        }, msg_id)
+
 
 # --- WebSocket Endpoint ---
 

@@ -227,6 +227,16 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         except Exception as exc:
             print(f"[code_server] bridge extension install failed (non-fatal): {exc}", flush=True)
 
+        # Scan extensions and rebuild the settings gate before code-server
+        # reads settings.json on boot.  Must run AFTER bridge install (so the
+        # bridge is in the manifest) and BEFORE watcher sync (which layers
+        # files.watcherExclude on top of the gate output).
+        try:
+            from .extension_registry import ensure_registry_and_gate
+            ensure_registry_and_gate()
+        except Exception as exc:
+            print(f"[code_server] extension registry scan failed (non-fatal): {exc}", flush=True)
+
         # Sync watcher exclusion settings before launch so code-server
         # reads the correct files.watcherExclude on boot.
         try:

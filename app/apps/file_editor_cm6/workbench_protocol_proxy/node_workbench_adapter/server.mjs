@@ -539,6 +539,9 @@ const wb = new WorkbenchClient({
         // Diagnostics baton: resolve the current in-flight job when any item URI matches its path.
         // We intentionally resolve on the first match, regardless of marker count, so clean files
         // do not spin forever and late-arriving diagnostics for previous files won't block.
+        // EXCEPTION: When markers=0 arrives very quickly (<1500ms), defer resolution briefly
+        // because some extensions (clangd) clear diagnostics on document re-open then re-send.
+        const DIAG_EMPTY_GRACE_MS = 1500;
         if (_diagBatonJob) {
           const wantPath = _diagBatonJob.absPath;
           for (const item of norm.items) {
@@ -550,8 +553,28 @@ const wb = new WorkbenchClient({
             if (itemPath && wantPath && itemPath === wantPath) {
               const markerCount = (item.markers || []).length;
               const elapsed = Date.now() - (_diagBatonJob.startMs || Date.now());
+              // If markers=0 and we're still within the grace window, defer — wait for real diagnostics.
+              if (markerCount === 0 && elapsed < DIAG_EMPTY_GRACE_MS) {
+                batonLog(`DEFER empty match path=${itemPath} elapsed=${elapsed}ms (grace ${DIAG_EMPTY_GRACE_MS}ms)`);
+                // Schedule a fallback: if no non-empty match arrives in the grace window, resolve with 0.
+                if (!_diagBatonJob._emptyGraceTimer) {
+                  const jobRef = _diagBatonJob;
+                  _diagBatonJob._emptyGraceTimer = setTimeout(() => {
+                    if (_diagBatonJob === jobRef) {
+                      batonLog(`GRACE expired, resolving with markers=0 for ${itemPath}`);
+                      try { clearTimeout(_diagBatonJob.timer); } catch {}
+                      _diagBatonJob = null;
+                      try {
+                        jobRef.resolve({ status: "matched", absPath: itemPath, requestId: jobRef.requestId, owner: norm.owner, markers: 0, elapsed_ms: Date.now() - jobRef.startMs });
+                      } catch {}
+                    }
+                  }, DIAG_EMPTY_GRACE_MS - elapsed);
+                }
+                break;
+              }
               batonLog(`MATCH path=${itemPath} owner=${norm.owner} markers=${markerCount} elapsed=${elapsed}ms`);
               try { clearTimeout(_diagBatonJob.timer); } catch {}
+              try { clearTimeout(_diagBatonJob._emptyGraceTimer); } catch {}
               const job = _diagBatonJob;
               _diagBatonJob = null;
               try {

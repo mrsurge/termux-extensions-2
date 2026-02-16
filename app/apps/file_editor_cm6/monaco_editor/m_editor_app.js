@@ -3891,6 +3891,32 @@
             }
             applyLineNumberSizing();
             ensureTouchSelection('open');
+
+            // After external edit, re-snapshot modifiedBaseline so the diff
+            // recomputes even when te2FreezeProjection is active (draft/auto-track).
+            try {
+              if (diffEditor && diffEditor.getModel) {
+                var dm = diffEditor.getModel();
+                if (dm && dm.te2FreezeProjection && dm.modifiedBaseline && model) {
+                  var freshContent = model.getValue();
+                  var freshLang = model.getLanguageId ? model.getLanguageId() : 'plaintext';
+                  dm.modifiedBaseline.setValue(freshContent);
+                  // Force diff recomputation by calling setModel with updated baseline.
+                  var modViewState = null;
+                  try {
+                    var me = diffEditor.getModifiedEditor();
+                    if (me) modViewState = me.saveViewState();
+                  } catch (_) {}
+                  diffEditor.setModel(dm);
+                  try {
+                    if (modViewState) {
+                      var me2 = diffEditor.getModifiedEditor();
+                      if (me2) me2.restoreViewState(modViewState);
+                    }
+                  } catch (_) {}
+                }
+              }
+            } catch (_) {}
             // Notify the language sidecar so extension activation + provider registration can happen.
             // This is intentionally best-effort and must not block the editor UI.
             try {
