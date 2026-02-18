@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0d0f13"/>
+  <rect x="64" y="64" width="384" height="384" rx="72" fill="#151821" stroke="#2a2f3a" stroke-width="8"/>
+  <text x="256" y="292" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="160" font-weight="700" fill="#6e56cf">CA</text>
+</svg>

@@ -56,6 +56,7 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
 async def _stdout_reader_loop(proc: asyncio.subprocess.Process) -> None:
     """Read adapter stdout, route RPC responses to pending futures, log the rest."""
     RPC_PREFIX = "<<<RPC>>> "
+    PUSH_PREFIX = "<<<PUSH>>> "
     # asyncio subprocess default limit is 64KB which is too small for hover responses.
     # Read raw chunks and split on newlines ourselves.
     buf = b""
@@ -80,12 +81,35 @@ async def _stdout_reader_loop(proc: asyncio.subprocess.Process) -> None:
                             log.debug("[adapter_stdio] unmatched RPC response id=%s", rid)
                     except json.JSONDecodeError:
                         log.warning("[adapter_stdio] bad RPC JSON: %s", payload[:200])
+                elif line.startswith(PUSH_PREFIX):
+                    payload = line[len(PUSH_PREFIX):]
+                    try:
+                        obj = json.loads(payload)
+                        asyncio.create_task(_handle_push_event(obj))
+                    except json.JSONDecodeError:
+                        log.warning("[adapter_stdio] bad PUSH JSON: %s", payload[:200])
                 else:
                     log.debug("[adapter_stdout] %s", line[:500])
     except asyncio.CancelledError:
         pass
     except Exception as exc:
         log.error("[adapter_stdio] reader crashed: %s", exc)
+
+
+async def _handle_push_event(obj: dict) -> None:
+    """Forward adapter push events to the editor frontend via Socket.IO."""
+    event_name = obj.get("event", "")
+    if event_name == "semantic_tokens_provider_registered":
+        try:
+            from .monaco_editor.editor_socketio import EDITOR_SIO
+            await EDITOR_SIO.emit(
+                f"editor:{event_name}",
+                obj,
+                namespace="/editor",
+            )
+            log.info("[push] forwarded %s lang=%s", event_name, obj.get("language"))
+        except Exception as exc:
+            log.warning("[push] failed to emit %s: %s", event_name, exc)
 
 
 async def adapter_rpc(method: str, params: Optional[dict] = None, timeout: float = 30.0) -> dict:

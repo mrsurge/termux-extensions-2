@@ -1244,6 +1244,160 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 room=sid,
             )
 
+    async def on_editor_workbench_completions(self, sid, data):
+        """Completions request via workbench adapter (stdio pipe)."""
+        payload = data if isinstance(data, dict) else {}
+        request_id = payload.get("request_id", f"cmp_{int(time.time() * 1000)}")
+        abs_path = payload.get("path", "")
+        print(f"[editor_ws] completions request_id={request_id} path={abs_path} line={payload.get('lineNumber')} col={payload.get('column')} lang={payload.get('languageId')}", flush=True)
+
+        project = _active_project()
+        if not project or not abs_path:
+            await self.emit(
+                "editor:workbench_completions_response",
+                {"request_id": request_id, "error": "missing_path_or_project"},
+                room=sid,
+            )
+            return
+
+        try:
+            from ..workbench_adapter_shell_manager import adapter_rpc
+
+            resp = await adapter_rpc(
+                "vscode.completions",
+                {
+                    "path": abs_path,
+                    "lineNumber": payload.get("lineNumber", payload.get("line", 1)),
+                    "column": payload.get("column", payload.get("character", 1)),
+                    "languageId": payload.get("languageId", ""),
+                    "triggerKind": payload.get("triggerKind", 0),
+                    "triggerCharacter": payload.get("triggerCharacter"),
+                },
+            )
+            result = resp.get("result", resp)
+            await self.emit(
+                "editor:workbench_completions_response",
+                {"request_id": request_id, "result": result},
+                room=sid,
+            )
+        except Exception as exc:
+            _wb_log.error("[workbench] completions failed: %s", exc)
+            await self.emit(
+                "editor:workbench_completions_response",
+                {"request_id": request_id, "error": str(exc)},
+                room=sid,
+            )
+
+    async def on_editor_workbench_semantic_tokens(self, sid, data):
+        """Semantic tokens request via workbench adapter (stdio pipe)."""
+        payload = data if isinstance(data, dict) else {}
+        request_id = payload.get("request_id", f"st_{int(time.time() * 1000)}")
+        abs_path = payload.get("path", "")
+        print(f"[editor_ws] semanticTokens request_id={request_id} path={abs_path} lang={payload.get('languageId')} prevResultId={payload.get('previousResultId')}", flush=True)
+
+        project = _active_project()
+        if not project or not abs_path:
+            await self.emit(
+                "editor:workbench_semantic_tokens_response",
+                {"request_id": request_id, "error": "missing_path_or_project"},
+                room=sid,
+            )
+            return
+
+        try:
+            from ..workbench_adapter_shell_manager import adapter_rpc
+
+            resp = await adapter_rpc(
+                "vscode.semanticTokens",
+                {
+                    "path": abs_path,
+                    "languageId": payload.get("languageId", ""),
+                    "previousResultId": payload.get("previousResultId", "0"),
+                },
+            )
+            result = resp.get("result", resp)
+            await self.emit(
+                "editor:workbench_semantic_tokens_response",
+                {"request_id": request_id, "result": result},
+                room=sid,
+            )
+        except Exception as exc:
+            _wb_log.error("[workbench] semanticTokens failed: %s", exc)
+            await self.emit(
+                "editor:workbench_semantic_tokens_response",
+                {"request_id": request_id, "error": str(exc)},
+                room=sid,
+            )
+
+    async def on_editor_workbench_semantic_tokens_legend(self, sid, data):
+        """Get semantic tokens legend for a language."""
+        payload = data if isinstance(data, dict) else {}
+        request_id = payload.get("request_id", f"stl_{int(time.time() * 1000)}")
+        lang_id = payload.get("languageId", "")
+
+        try:
+            from ..workbench_adapter_shell_manager import adapter_rpc
+
+            resp = await adapter_rpc(
+                "vscode.semanticTokensLegend",
+                {"languageId": lang_id},
+            )
+            result = resp.get("result", resp)
+            await self.emit(
+                "editor:workbench_semantic_tokens_legend_response",
+                {"request_id": request_id, "result": result},
+                room=sid,
+            )
+        except Exception as exc:
+            _wb_log.error("[workbench] semanticTokensLegend failed: %s", exc)
+            await self.emit(
+                "editor:workbench_semantic_tokens_legend_response",
+                {"request_id": request_id, "error": str(exc)},
+                room=sid,
+            )
+
+    async def on_editor_workbench_semantic_tokens_range(self, sid, data):
+        """Semantic tokens range request via workbench adapter (stdio pipe)."""
+        payload = data if isinstance(data, dict) else {}
+        request_id = payload.get("request_id", f"str_{int(time.time() * 1000)}")
+        abs_path = payload.get("path", "")
+        range_obj = payload.get("range", None)
+        print(f"[editor_ws] semanticTokensRange request_id={request_id} path={abs_path} lang={payload.get('languageId')} range={range_obj}", flush=True)
+
+        project = _active_project()
+        if not project or not abs_path or not range_obj:
+            await self.emit(
+                "editor:workbench_semantic_tokens_range_response",
+                {"request_id": request_id, "error": "missing_path_or_project_or_range"},
+                room=sid,
+            )
+            return
+
+        try:
+            from ..workbench_adapter_shell_manager import adapter_rpc
+
+            resp = await adapter_rpc(
+                "vscode.semanticTokensRange",
+                {
+                    "path": abs_path,
+                    "languageId": payload.get("languageId", ""),
+                    "range": range_obj,
+                },
+            )
+            result = resp.get("result", resp)
+            await self.emit(
+                "editor:workbench_semantic_tokens_range_response",
+                {"request_id": request_id, "result": result},
+                room=sid,
+            )
+        except Exception as exc:
+            _wb_log.error("[workbench] semanticTokensRange failed: %s", exc)
+            await self.emit(
+                "editor:workbench_semantic_tokens_range_response",
+                {"request_id": request_id, "error": str(exc)},
+                room=sid,
+            )
+
     async def on_editor_workbench_symbols(self, sid, data):
         """Document symbols request via workbench adapter (stdio pipe)."""
         payload = data if isinstance(data, dict) else {}

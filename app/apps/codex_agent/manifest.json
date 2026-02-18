@@ -1,0 +1,17 @@
+{
+  "name": "Codex Agent",
+  "id": "codex_agent",
+  "icon_emoji": "🤖",
+  "icon_src": "icon.svg",
+  "version": "0.1.0",
+  "description": "Hosts the Codex Agent UI inside an iframe.",
+  "shellspec": {
+    "app_worker": "shellspec/app_worker.yaml#app-worker"
+  },
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  },
+  "fullscreen": true
+}

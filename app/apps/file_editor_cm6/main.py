@@ -23,7 +23,7 @@ from .explorer_ws import explorer_websocket
 from .history_store import HistoryStore
 from .preferences_store import PreferencesStore
 from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
-from .vscode_api_shell_manager import ensure_vscode_api_shell
+# vscode_api_shell_manager import removed — shell is deprecated (see endpoints below)
 from .code_server_shell_manager import ensure_code_server_shell
 from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
 from .git_helper import (
@@ -443,72 +443,27 @@ async def api_start_lsp(payload: dict = Body(...)):
 async def vscode_api_discover():
     """Discover the browser-facing WS URL for vscode_api.
 
-    This endpoint is intentionally "read-only": it will not start the shell.
-    Use /vscode_api/start to start and wait for readiness.
+    DEPRECATED: vscode_api shell is superseded by the workbench adapter.
     """
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    try:
-        from app.apps.file_editor_cm6.vscode_api_shell_manager import (
-            get_vscode_api_shell_if_running,
-        )
-
-        record = await get_vscode_api_shell_if_running(project_root)
-        if not record:
-            return JSONResponse(
-                {"ok": False, "error": "vscode_api not running (call /vscode_api/start)"},
-                status_code=503,
-            )
-    except Exception as exc:
-        print(f"[vscode_api][discover] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
-
-    ws_url = f"/vscode_api_ws?shell_id={record.id}"
-    return {
-        "ok": True,
-        "data": {
-            "project_root": project_root,
-            # Future-proofing: support multiple backend instances per project.
-            # For now we run a single instance and fan out to multiple clients.
-            "instance_id": "primary",
-            "ws_url": ws_url,
-            "token": "",
-            "expires_at": 0,
-            "shell_id": record.id,
-        },
-    }
+    print("[vscode_api][discover] DEPRECATED — vscode_api shell superseded by workbench adapter", flush=True)
+    return JSONResponse(
+        {"ok": False, "deprecated": True, "error": "vscode_api shell is deprecated; use workbench adapter"},
+        status_code=410,
+    )
 
 
 @file_editor_cm6_bp.get("/vscode_api/start")
 async def vscode_api_start():
-    """Start/adopt vscode_api and wait for readiness."""
+    """Start/adopt vscode_api and wait for readiness.
 
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    try:
-        record = await ensure_vscode_api_shell(project_root)
-    except Exception as exc:
-        print(f"[vscode_api][start] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
-
-    return {
-        "ok": True,
-        "data": {
-            "project_root": project_root,
-            "shell_id": record.id,
-        },
-    }
+    DEPRECATED: vscode_api shell is superseded by the workbench adapter.
+    Grammar/theme fallbacks handle syntax highlighting without it.
+    """
+    print("[vscode_api][start] DEPRECATED — vscode_api shell superseded by workbench adapter", flush=True)
+    return JSONResponse(
+        {"ok": False, "deprecated": True, "error": "vscode_api shell is deprecated; use workbench adapter"},
+        status_code=410,
+    )
 
 
 @file_editor_cm6_bp.get("/workbench_adapter/discover")
@@ -888,54 +843,16 @@ async def workbench_adapter_cmd(request: Request):
 
 
 @file_editor_cm6_bp.get("/vscode_api/resolve")
-async def vscode_api_resolve(path: str):
+async def vscode_api_resolve(path: str = ""):
     """Resolve the correct vscode_api instance for an absolute file path.
 
-    Today TE2 has a single active project, so this is a strict check:
-    - if the path is under the active project root, return the running/adopted shell
-    - otherwise return 404
-
-    This keeps the contract stable so we can later support multiple projects and/or
-    multiple instances per project (code-server session registry pattern).
+    DEPRECATED: vscode_api shell is superseded by the workbench adapter.
     """
-
-    if not path:
-        raise HTTPException(status_code=400, detail="Missing required query param: path")
-
-    project_root_raw = _history_store.get_active_project() or str(get_project_root())
-    if not project_root_raw:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    try:
-        project_root_path = Path(project_root_raw).expanduser().resolve(strict=False)
-        abs_path = Path(str(path)).expanduser().resolve(strict=False)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid path")
-
-    if not str(abs_path).startswith(str(project_root_path)):
-        raise HTTPException(status_code=404, detail="No vscode_api instance for path (outside active project)")
-
-    try:
-        record = await ensure_vscode_api_shell(str(project_root_path))
-    except Exception as exc:
-        print(f"[vscode_api][resolve] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
-
-    ws_url = f"/vscode_api_ws?shell_id={record.id}"
-    return {
-        "ok": True,
-        "data": {
-            "project_root": str(project_root_path),
-            "instance_id": "primary",
-            "ws_url": ws_url,
-            "token": "",
-            "expires_at": 0,
-            "shell_id": record.id,
-        },
-    }
+    print(f"[vscode_api][resolve] DEPRECATED — vscode_api shell superseded by workbench adapter (path={path})", flush=True)
+    return JSONResponse(
+        {"ok": False, "deprecated": True, "error": "vscode_api shell is deprecated; use workbench adapter"},
+        status_code=410,
+    )
 
 
 @file_editor_cm6_bp.get("/vscode_api/extensions/enabled")

@@ -525,6 +525,19 @@ const wb = new WorkbenchClient({
     const safeEv = _truncateEvent(ev);
     emitTe2Event(safeEv);
 
+    // Push semantic tokens provider registration to frontend via stdout pipe
+    if (safeEv?.type === "provider/semanticTokens") {
+      const pushPayload = {
+        event: "semantic_tokens_provider_registered",
+        handle: safeEv.handle,
+        language: safeEv.language,
+        legend: safeEv.legend,
+        range: !!safeEv.range,
+      };
+      console.error(`[server] PUSH semantic_tokens_provider_registered lang=${safeEv.language} handle=${safeEv.handle} range=${!!safeEv.range} legendTypes=${safeEv.legend?.tokenTypes?.length ?? 0}`);
+      process.stdout.write("<<<PUSH>>> " + JSON.stringify(pushPayload) + "\n");
+    }
+
     if (safeEv?.type === "diagnostics/changeMany" && Array.isArray(safeEv?.args)) {
       const norm = diagnosticsFromChangeMany(safeEv.args);
       console.log(`[server] diagnostics/changeMany -> norm=${norm ? `owner=${norm.owner} items=${norm.items.length} markerCounts=[${norm.items.map(i => (i.markers||[]).length).join(',')}]` : 'null'}`);
@@ -871,6 +884,71 @@ async function handleJsonRpc(reqObj) {
       column: p.column,
       timeoutMs: p.timeoutMs,
     });
+    return { jsonrpc: "2.0", id, result };
+  }
+
+  if (method === "vscode.completions") {
+    const p = (params && typeof params === "object") ? params : {};
+    const resolvedPath = normalizePathParam(p);
+    if (!resolvedPath) {
+      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
+    }
+    const authority = normalizeAuthorityParam(p, DEFAULT_REMOTE_AUTHORITY);
+    const result = await wb.completions({
+      path: resolvedPath,
+      authority,
+      providerHandle: p.providerHandle,
+      languageId: p.languageId,
+      lineNumber: p.lineNumber,
+      column: p.column,
+      triggerKind: p.triggerKind,
+      triggerCharacter: p.triggerCharacter,
+      timeoutMs: p.timeoutMs,
+    });
+    return { jsonrpc: "2.0", id, result };
+  }
+
+  if (method === "vscode.semanticTokens") {
+    const p = (params && typeof params === "object") ? params : {};
+    const resolvedPath = normalizePathParam(p);
+    if (!resolvedPath) {
+      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
+    }
+    const authority = normalizeAuthorityParam(p, DEFAULT_REMOTE_AUTHORITY);
+    const result = await wb.semanticTokens({
+      path: resolvedPath,
+      authority,
+      providerHandle: p.providerHandle,
+      languageId: p.languageId,
+      previousResultId: p.previousResultId,
+      timeoutMs: p.timeoutMs,
+    });
+    return { jsonrpc: "2.0", id, result };
+  }
+
+  if (method === "vscode.semanticTokensLegend") {
+    const p = (params && typeof params === "object") ? params : {};
+    const languageId = String(p.languageId || "");
+    const legend = await wb.getSemanticTokensLegend(languageId);
+    return { jsonrpc: "2.0", id, result: { ok: !!legend, legend } };
+  }
+
+  if (method === "vscode.semanticTokensRange") {
+    const p = (params && typeof params === "object") ? params : {};
+    const resolvedPath = normalizePathParam(p);
+    if (!resolvedPath) {
+      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
+    }
+    const authority = normalizeAuthorityParam(p, DEFAULT_REMOTE_AUTHORITY);
+    const result = await wb.semanticTokensRange({
+      path: resolvedPath,
+      authority,
+      providerHandle: p.providerHandle,
+      languageId: p.languageId,
+      range: p.range,
+      timeoutMs: p.timeoutMs,
+    });
+    console.error(`[semanticTokensRange_reply] ok=${result?.ok} hasData=${!!(result?.result?.data?.length)} dataLen=${result?.result?.data?.length ?? 0}`);
     return { jsonrpc: "2.0", id, result };
   }
 

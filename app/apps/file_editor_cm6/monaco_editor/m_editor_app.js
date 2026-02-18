@@ -942,6 +942,21 @@
 
       try { setDebugDiag('diag=rx' + _diagState.rx + '/ap' + _diagState.apply + '/np' + _diagState.drop_no_path + '/nm' + _diagState.drop_no_model + '/mm' + _diagState.drop_mismatch); } catch (_) {}
 
+      // Diagnostics-gated semantic token registration: diagnostics prove the
+      // language server has analyzed the file. Register any waiting providers now.
+      if (didApply) {
+        try {
+          var diagLang = model && model.getLanguageId ? String(model.getLanguageId()) : '';
+          console.log('[semanticTokens] diag-gate check: lang=' + diagLang + ' gatedSet=[' + Array.from(languageBridge.semanticTokensDiagGated).join(',') + '] registered=[' + Array.from(languageBridge.registeredSemanticTokens).join(',') + '] hasCachedLegend=' + !!languageBridge.semanticTokensLegendCache[diagLang]);
+          if (diagLang && languageBridge.semanticTokensDiagGated.has(diagLang) &&
+              !languageBridge.registeredSemanticTokens.has(diagLang) &&
+              languageBridge.semanticTokensLegendCache[diagLang]) {
+            console.log('[semanticTokens] diagnostics landed for ' + diagLang + ' — registering semantic token provider now');
+            languageBridge.semanticTokensDiagGated.delete(diagLang);
+            _registerSemanticTokensWithLegend(diagLang, languageBridge.semanticTokensLegendCache[diagLang], !!languageBridge.semanticTokensRangeFlag[diagLang]);
+          }
+        } catch (_) {}
+      }
       if (!didApply) {
         try { _applyCachedDiagnosticsForActive(); } catch (_) {}
         // Mobile/WebView timing: diagnostics can land before the model swap completes.
@@ -1076,8 +1091,16 @@
   var languageBridge = {
     hoverSeq: 0,
     symbolsSeq: 0,
+    completionsSeq: 0,
+    semanticTokensSeq: 0,
     registeredHover: new Set(),
     registeredSymbols: new Set(),
+    registeredCompletions: new Set(),
+    registeredSemanticTokens: new Set(),
+    semanticTokensLegendCache: {}, // languageId -> legend
+    semanticTokensRangeFlag: {},   // languageId -> true if range-only provider
+    semanticTokensResultId: {}, // languageId -> last resultId (for delta requests)
+    semanticTokensDiagGated: new Set(), // languages waiting for diagnostics before registering
   };
 
   function _isContextCurrent(ctx) {
@@ -1308,6 +1331,7 @@
       }
 
       var payload = Object.assign({}, params || {}, { request_id: requestId });
+      console.log('[editorWorkbenchCall] EMIT ' + eventName + ' reqId=' + requestId + ' connected=' + editorSocket.connected);
       editorSocket.emit(eventName, payload);
     });
   }
@@ -1318,11 +1342,13 @@
     var seq = 0;
     if (kind === 'hover') seq = ++languageBridge.hoverSeq;
     else if (kind === 'symbols') seq = ++languageBridge.symbolsSeq;
+    else if (kind === 'completions') seq = ++languageBridge.completionsSeq;
     return editorWorkbenchCall(kind, params, { timeoutMs: timeoutMs }).then(function (res) {
       if (cancelToken && cancelToken.isCancellationRequested) return { ok: false, stale: true, canceled: true };
       if (!_isContextCurrent(ctx)) return { ok: false, stale: true };
       if (kind === 'hover' && seq !== languageBridge.hoverSeq) return { ok: false, stale: true };
       if (kind === 'symbols' && seq !== languageBridge.symbolsSeq) return { ok: false, stale: true };
+      if (kind === 'completions' && seq !== languageBridge.completionsSeq) return { ok: false, stale: true };
       return { ok: true, result: res };
     }).catch(function (e) {
       return { ok: false, error: String(e && e.message ? e.message : e || 'error') };
@@ -1347,6 +1373,147 @@
       };
     };
     return raw.map(mapOne);
+  }
+
+  function _monacoRangeFromCompletionRange(range, pos) {
+    if (!range || !window.monaco) return undefined;
+    // Range can be {insert: {...}, replace: {...}} or a simple range object
+    if (range.insert || range.replace) {
+      return {
+        insert: _monacoRangeFromProtoRange(range.insert) || new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
+        replace: _monacoRangeFromProtoRange(range.replace) || new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
+      };
+    }
+    return _monacoRangeFromProtoRange(range) || new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column);
+  }
+
+  function _mapCompletionItemKind(kind) {
+    // VS Code CompletionItemKind → Monaco CompletionItemKind (they're the same enum values)
+    if (!window.monaco || !monaco.languages || !monaco.languages.CompletionItemKind) return kind || 0;
+    return kind || 0;
+  }
+
+  // Core registration: given a legend, register the Monaco provider immediately
+  function _registerSemanticTokensWithLegend(langId, legend, isRange) {
+    if (languageBridge.registeredSemanticTokens.has(langId)) return;
+    languageBridge.registeredSemanticTokens.add(langId);
+
+    if (isRange && monaco.languages.registerDocumentRangeSemanticTokensProvider) {
+      console.log('[semanticTokens] registering RANGE provider for ' + langId + ' types=' + legend.tokenTypes.length + ' mods=' + legend.tokenModifiers.length);
+      monaco.languages.registerDocumentRangeSemanticTokensProvider(langId, {
+        getLegend: function () {
+          return legend;
+        },
+        provideDocumentRangeSemanticTokens: function (m, range, token) {
+          try {
+            if (!m || !m.uri || !range) return null;
+            var uri = String(m.uri.toString());
+            var p = currentPath ? String(currentPath) : _pathFromUriString(uri);
+            var lang = String(m.getLanguageId ? m.getLanguageId() : langId);
+            console.log('[semanticTokens] RANGE REQUEST ' + lang + ' path=' + p + ' range=' + range.startLineNumber + ':' + range.startColumn + '-' + range.endLineNumber + ':' + range.endColumn);
+            return editorWorkbenchCall('semantic_tokens_range', {
+              uri: uri,
+              path: p,
+              languageId: lang,
+              range: {
+                startLineNumber: range.startLineNumber,
+                startColumn: range.startColumn,
+                endLineNumber: range.endLineNumber,
+                endColumn: range.endColumn,
+              },
+              timeoutMs: 10000,
+            }, { timeoutMs: 12000 }).then(function (out) {
+              if (!out || out.ok === false) { console.log('[semanticTokens] RANGE RESPONSE not ok', out); return null; }
+              var payload = out.result || out;
+              if (!payload) { console.log('[semanticTokens] RANGE RESPONSE no payload'); return null; }
+              var data = payload.data;
+              if (!data || !data.length) { console.log('[semanticTokens] RANGE RESPONSE no data, payload keys=' + Object.keys(payload).join(','), 'type=' + payload.type, 'resultId=' + payload.resultId); return null; }
+              console.log('[semanticTokens] RANGE RESPONSE OK tokens=' + (data.length / 5) + ' resultId=' + (payload.resultId || '') + ' first5=[' + Array.from(data).slice(0, 5).join(',') + ']');
+              return {
+                resultId: payload.resultId || '',
+                data: new Uint32Array(data),
+              };
+            }).catch(function (e) {
+              console.warn('[semanticTokens] range request failed', e);
+              return null;
+            });
+          } catch (_) {
+            return null;
+          }
+        },
+      });
+      return;
+    }
+
+    console.log('[semanticTokens] registering FULL provider for ' + langId + ' types=' + legend.tokenTypes.length + ' mods=' + legend.tokenModifiers.length);
+    monaco.languages.registerDocumentSemanticTokensProvider(langId, {
+      getLegend: function () {
+        return legend;
+      },
+      provideDocumentSemanticTokens: function (m, lastResultId, token) {
+        try {
+          if (!m || !m.uri) return null;
+          var uri = String(m.uri.toString());
+          var p = currentPath ? String(currentPath) : _pathFromUriString(uri);
+          var lang = String(m.getLanguageId ? m.getLanguageId() : langId);
+          console.log('[semanticTokens] FULL REQUEST ' + lang + ' path=' + p + ' prevResultId=' + (lastResultId || '0'));
+          return editorWorkbenchCall('semantic_tokens', {
+            uri: uri,
+            path: p,
+            languageId: lang,
+            previousResultId: lastResultId || '0',
+            timeoutMs: 10000,
+          }, { timeoutMs: 12000 }).then(function (out) {
+            if (!out || out.ok === false) return null;
+            var payload = out.result || out;
+            if (!payload) return null;
+            if (payload.type === 'delta' && payload.edits) {
+              return {
+                resultId: payload.resultId || '',
+                edits: payload.edits.map(function (e) {
+                  return {
+                    start: e.start || 0,
+                    deleteCount: e.deleteCount || 0,
+                    data: e.data ? new Uint32Array(e.data) : undefined,
+                  };
+                }),
+              };
+            }
+            var data = payload.data;
+            if (!data || !data.length) return null;
+            return {
+              resultId: payload.resultId || '',
+              data: new Uint32Array(data),
+            };
+          }).catch(function (e) {
+            console.warn('[semanticTokens] request failed', e);
+            return null;
+          });
+        } catch (_) {
+          return null;
+        }
+      },
+      releaseDocumentSemanticTokens: function (resultId) {},
+    });
+  }
+
+  // Pull-based fallback: fetch legend then register (used from baton/doRegister)
+  function _registerSemanticTokensForLanguage(langId) {
+    if (languageBridge.registeredSemanticTokens.has(langId)) return;
+
+    editorWorkbenchCall('semantic_tokens_legend', { languageId: langId }, { timeoutMs: 8000 })
+      .then(function (res) {
+        var legend = res && res.legend;
+        if (!legend || !legend.tokenTypes || !legend.tokenModifiers) {
+          console.warn('[semanticTokens] no legend for ' + langId, res);
+          return;
+        }
+        languageBridge.semanticTokensLegendCache[langId] = legend;
+        _registerSemanticTokensWithLegend(langId, legend);
+      })
+      .catch(function (e) {
+        console.warn('[semanticTokens] legend fetch failed for ' + langId, e);
+      });
   }
 
   function installVscodeApiLanguageBridgeProviders() {
@@ -1423,6 +1590,85 @@
               });
               languageBridge.registeredSymbols.add(langId);
             }
+
+            if (!languageBridge.registeredCompletions.has(langId) && monaco.languages.registerCompletionItemProvider) {
+              monaco.languages.registerCompletionItemProvider(langId, {
+                triggerCharacters: ['.', ':', '<', '"', "'", '/', '@', '#'],
+                provideCompletionItems: function (m, pos, token, context) {
+                  try {
+                    var ctx = _currentLanguageContext();
+                    if (!ctx || !m || !m.uri || String(m.uri.toString()) !== String(ctx.uri)) return { suggestions: [] };
+                    var triggerKind = 0;
+                    var triggerCharacter = undefined;
+                    if (context && context.triggerKind === monaco.languages.CompletionTriggerKind.TriggerCharacter) {
+                      triggerKind = 1;
+                      triggerCharacter = context.triggerCharacter || undefined;
+                    } else if (context && context.triggerKind === monaco.languages.CompletionTriggerKind.TriggerForIncompleteCompletions) {
+                      triggerKind = 2;
+                    }
+                    return _callVscodeApiGuarded(
+                      'completions',
+                      'vscode.completions',
+                      {
+                        uri: ctx.uri,
+                        path: ctx.path,
+                        languageId: ctx.languageId,
+                        lineNumber: Number(pos && pos.lineNumber ? pos.lineNumber : 1),
+                        column: Number(pos && pos.column ? pos.column : 1),
+                        triggerKind: triggerKind,
+                        triggerCharacter: triggerCharacter,
+                        timeoutMs: 8000,
+                      },
+                      ctx,
+                      { timeoutMs: 10000, cancelToken: token },
+                    ).then(function (out) {
+                      if (!out || !out.ok || !out.result || out.result.ok === false) return { suggestions: [] };
+                      var payload = out.result.result || out.result;
+                      var rawItems = payload.items || payload.suggestions || [];
+                      if (!Array.isArray(rawItems)) return { suggestions: [] };
+                      var suggestions = rawItems.map(function (item) {
+                        if (!item) return null;
+                        var range = _monacoRangeFromCompletionRange(item.range, pos);
+                        var suggestion = {
+                          label: item.label || '',
+                          kind: _mapCompletionItemKind(item.kind),
+                          detail: item.detail || undefined,
+                          documentation: item.documentation || undefined,
+                          sortText: item.sortText || undefined,
+                          filterText: item.filterText || undefined,
+                          preselect: item.preselect || undefined,
+                          insertText: item.insertText || (typeof item.label === 'string' ? item.label : ''),
+                          insertTextRules: item.insertTextRules || undefined,
+                          range: range,
+                          commitCharacters: item.commitCharacters || undefined,
+                          additionalTextEdits: item.additionalTextEdits || undefined,
+                          tags: item.tags || undefined,
+                        };
+                        if (item.command) {
+                          suggestion.command = {
+                            id: item.command.id || '',
+                            title: item.command.title || item.command.id || '',
+                            arguments: item.command.arguments || undefined,
+                          };
+                        }
+                        return suggestion;
+                      }).filter(Boolean);
+                      return {
+                        suggestions: suggestions,
+                        incomplete: !!payload.isIncomplete,
+                      };
+                    });
+                  } catch (_) {
+                    return { suggestions: [] };
+                  }
+                },
+              });
+              languageBridge.registeredCompletions.add(langId);
+            }
+
+            // Semantic tokens: NOT registered eagerly — gated by diagnostics arrival.
+            // Legend is cached by the push handler; registration happens in
+            // _applyDiagnosticsUpdate when diagnostics first land for this language.
           });
         } catch (_) {}
       };
@@ -1525,6 +1771,43 @@
     } catch (_) {}
   }
 
+  // Force-enable semantic highlighting on the standalone theme object.
+  // Monaco standalone hardcodes semanticHighlighting=false on the theme class;
+  // this patches it at runtime so isSemanticColoringEnabled() returns true.
+  function _forceSemanticHighlighting() {
+    try {
+      if (!editor) return;
+      // Try direct access (unminified builds)
+      var svc = editor._themeService;
+      // Try finding it via the services container
+      if (!svc && editor._instantiationService) {
+        try { svc = editor._instantiationService.invokeFunction(function(a) { return a.get && a.get({ toString: function() { return 'standaloneThemeService'; }}); }); } catch (_) {}
+      }
+      // Brute-force: scan editor properties for an object with getColorTheme
+      if (!svc) {
+        var keys = Object.keys(editor);
+        for (var ki = 0; ki < keys.length; ki++) {
+          try {
+            var v = editor[keys[ki]];
+            if (v && typeof v === 'object' && typeof v.getColorTheme === 'function') {
+              svc = v;
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+      if (!svc || typeof svc.getColorTheme !== 'function') {
+        console.log('[semanticTokens] could not find themeService on editor');
+        return;
+      }
+      var theme = svc.getColorTheme();
+      if (theme && !theme.semanticHighlighting) {
+        Object.defineProperty(theme, 'semanticHighlighting', { value: true, writable: true, configurable: true });
+        console.log('[semanticTokens] forced semanticHighlighting=true on theme');
+      }
+    } catch (e) { console.warn('[semanticTokens] _forceSemanticHighlighting error', e); }
+  }
+
   function ensureEditor() {
     if (editor) return;
     var el = getEditorContainer();
@@ -1532,6 +1815,7 @@
     // Editor creation MUST be driven by SSOT (HistoryStore/PreferencesStore).
     // This function is only used as a last-resort guard; prefer ensureEditorWithPrefs().
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
+    try { _forceSemanticHighlighting(); } catch (_) {}
     try { _installMarkerNavBindings(editor); } catch (_) {}
     try {
       var dom = editor.getDomNode();
@@ -1689,7 +1973,7 @@
       //
       // VS Code accepts: true | false | "configuredByTheme". The pinned Monaco/VSCode
       // build supports the same option shape.
-      'semanticHighlighting.enabled': 'configuredByTheme',
+      'semanticHighlighting.enabled': true,
       automaticLayout: true,
       contextmenu: false,
       readOnly: readOnly,
@@ -1738,221 +2022,23 @@
   }
 
   function ensureTe2Themes() {
-    try {
-      if (!window.monaco || !window.monaco.editor || !window.monaco.editor.defineTheme) return;
-      if (ensureTe2Themes._done) return;
-      ensureTe2Themes._done = true;
-
-      // TE2-local themes (hand-tuned). These are NOT part of the monaco-editor-themes SSOT,
-      // but we keep them available for TE2-specific UI/contrast needs.
-      //
-      // `te2-dark` / `te2-light` are GitHub-inspired and intentionally match the diff
-      // colors from GitHub Dark/Light Default so diffs remain consistent.
-      window.monaco.editor.defineTheme('te2-dark', {
-        base: 'vs-dark',
-        inherit: true,
-        rules: [
-          { token: 'comment', foreground: '8B949E' },
-          { token: 'string', foreground: 'A5D6FF' },
-          { token: 'keyword', foreground: 'FF7B72' },
-          { token: 'number', foreground: 'FFA657' },
-          { token: 'type', foreground: '79C0FF' },
-          { token: 'delimiter', foreground: 'E6EDF3' },
-        ],
-        colors: {
-          'editor.background': '#06080cff',
-          'editor.foreground': '#e6edf3',
-          'editorLineNumber.foreground': '#6e7681',
-          'editorLineNumber.activeForeground': '#e6edf3',
-          'editorCursor.foreground': '#2f81f7',
-          'editor.selectionBackground': '#264f78',
-          'editor.inactiveSelectionBackground': '#264f7840',
-          'editorIndentGuide.background': '#30363d',
-          'editorIndentGuide.activeBackground': '#6e7681',
-          'editorWhitespace.foreground': '#484f58',
-          'editorGutter.background': '#0d1117',
-          'editorWidget.background': '#161b22',
-          'editorHoverWidget.background': '#161b22',
-          'editorSuggestWidget.background': '#161b22',
-          'editorSuggestWidget.border': '#30363d',
-          'editorSuggestWidget.foreground': '#e6edf3',
-          'dropdown.background': '#161b22',
-          'dropdown.border': '#30363d',
-          'input.background': '#0d1117',
-          'input.border': '#30363d',
-          'input.foreground': '#e6edf3',
-          'scrollbar.shadow': '#00000000',
-          'scrollbarSlider.background': '#484f5833',
-          'scrollbarSlider.hoverBackground': '#484f5866',
-          'scrollbarSlider.activeBackground': '#484f5899',
-
-          // Git diff colors: match GitHub Dark Default.
-          'diffEditor.insertedLineBackground': '#23863626',
-          'diffEditor.insertedTextBackground': '#3fb9504d',
-          'diffEditor.removedLineBackground': '#da363326',
-          'diffEditor.removedTextBackground': '#ff7b724d',
-        },
-      });
-
-      window.monaco.editor.defineTheme('te2-light', {
-        base: 'vs',
-        inherit: true,
-        rules: [
-          { token: 'comment', foreground: '6E7781' },
-          { token: 'string', foreground: '0A3069' },
-          { token: 'keyword', foreground: 'CF222E' },
-          { token: 'number', foreground: '953800' },
-          { token: 'type', foreground: '0550AE' },
-          { token: 'delimiter', foreground: '24292F' },
-        ],
-        colors: {
-          'editor.background': '#ffffff',
-          'editor.foreground': '#24292f',
-          'editorLineNumber.foreground': '#8c959f',
-          'editorLineNumber.activeForeground': '#24292f',
-          'editorCursor.foreground': '#0969da',
-          'editor.selectionBackground': '#add6ff',
-          'editor.inactiveSelectionBackground': '#add6ff66',
-          'editorIndentGuide.background': '#d0d7de',
-          'editorIndentGuide.activeBackground': '#8c959f',
-          'editorWhitespace.foreground': '#d0d7de',
-          'editorGutter.background': '#ffffff',
-          'editorWidget.background': '#f6f8fa',
-          'editorHoverWidget.background': '#f6f8fa',
-          'editorSuggestWidget.background': '#f6f8fa',
-          'editorSuggestWidget.border': '#d0d7de',
-          'editorSuggestWidget.foreground': '#24292f',
-          'dropdown.background': '#ffffff',
-          'dropdown.border': '#d0d7de',
-          'input.background': '#ffffff',
-          'input.border': '#d0d7de',
-          'input.foreground': '#24292f',
-          'scrollbar.shadow': '#00000000',
-          'scrollbarSlider.background': '#8c959f33',
-          'scrollbarSlider.hoverBackground': '#8c959f66',
-          'scrollbarSlider.activeBackground': '#8c959f99',
-
-          // Git diff colors: match GitHub Light Default.
-          'diffEditor.insertedLineBackground': '#aceebb4d',
-          'diffEditor.insertedTextBackground': '#6fdd8b80',
-          'diffEditor.removedLineBackground': '#ffcecb4d',
-          'diffEditor.removedTextBackground': '#ff818266',
-        },
-      });
-
-      // Extra dark theme option (quick win): Dracula-ish.
-      window.monaco.editor.defineTheme('te2-dracula', {
-        base: 'vs-dark',
-        inherit: true,
-        rules: [
-          { token: 'comment', foreground: '6272A4' },
-          { token: 'string', foreground: 'F1FA8C' },
-          { token: 'keyword', foreground: 'FF79C6' },
-          { token: 'number', foreground: 'BD93F9' },
-          { token: 'type', foreground: '8BE9FD' },
-          { token: 'delimiter', foreground: 'F8F8F2' },
-        ],
-        colors: {
-          'editor.background': '#282A36',
-          'editor.foreground': '#F8F8F2',
-          'editorLineNumber.foreground': '#6272A4',
-          'editorLineNumber.activeForeground': '#F8F8F2',
-          'editorCursor.foreground': '#F8F8F2',
-          'editor.selectionBackground': '#44475A',
-          'editorIndentGuide.background': '#44475A',
-          'editorIndentGuide.activeBackground': '#6272A4',
-          'editorGutter.background': '#282A36',
-          'editorWidget.background': '#21222C',
-          'editorHoverWidget.background': '#21222C',
-          'editorSuggestWidget.background': '#21222C',
-          'editorSuggestWidget.border': '#44475A',
-          'scrollbar.shadow': '#00000000',
-          'scrollbarSlider.background': '#6272A433',
-          'scrollbarSlider.hoverBackground': '#6272A466',
-          'scrollbarSlider.activeBackground': '#6272A499',
-        },
-      });
-    } catch (e) {
-      console.warn('[Monaco] ensureTe2Themes failed', e);
-    }
+    // All themes now loaded from code-server extension folder via loadVscodeTextmateThemes().
+    // No hardcoded theme definitions needed.
   }
 
-  function _getThemeJsonUrl(themeId) {
-    return '/api/app/file_editor_cm6/ui/monaco_editor/themes/' + encodeURIComponent(themeId) + '.json';
-  }
-
-  function sanitizeMonacoThemeJson(themeId, json) {
-    try {
-      if (!json || typeof json !== 'object') return json;
-      var colors = json.colors;
-      if (colors && typeof colors === 'object') {
-        for (var k in colors) {
-          if (!Object.prototype.hasOwnProperty.call(colors, k)) continue;
-          var v = colors[k];
-          if (typeof v === 'string') continue;
-          if (Array.isArray(v) && v.length && typeof v[0] === 'string') {
-            // Some VS Code theme exports contain palette arrays for certain keys
-            // (e.g. symbolIcon.*Foreground). Monaco expects a single color string.
-            colors[k] = v[0];
-            continue;
-          }
-          // Drop unsupported values to avoid hard failures in Monaco's color parser.
-          delete colors[k];
-        }
-      }
-    } catch (e) {
-      console.warn('[MonacoTheme] sanitize failed', themeId, e);
-    }
-    return json;
-  }
+  // _getThemeJsonUrl removed — legacy static theme JSON no longer served
+  // sanitizeMonacoThemeJson removed — no longer needed without legacy themes
 
   async function loadOfficialThemes() {
-    if (loadOfficialThemes._done) return;
-    // Don't memoize a "no-op" run before Monaco exists. Monaco is created by
-    // `await import(.../editor.main.js)` later in bootMonaco().
-    if (!window.monaco || !window.monaco.editor || !window.monaco.editor.defineTheme) return;
-    if (loadOfficialThemes._promise) return loadOfficialThemes._promise;
-    loadOfficialThemes._promise = (async function () {
-      try {
-        var themeIds = [
-          // Legacy ids (kept for backwards compatibility with old prefs)
-          'github-dark',
-          'github-light',
-          'atom-dark',
-          'atom-light',
-          'material-dark',
-          'material-light',
-          'darcula',
-          'monokai-pro',
-          'one-dark-pro',
-        ];
-        for (var i = 0; i < themeIds.length; i++) {
-          var id = themeIds[i];
-          try {
-            var res = await fetch(_getThemeJsonUrl(id), { cache: 'no-cache' });
-            if (!res.ok) {
-              console.warn('[MonacoTheme] missing', id, res.status);
-              continue;
-            }
-            var json = await res.json();
-            json = sanitizeMonacoThemeJson(id, json);
-            window.monaco.editor.defineTheme(id, json);
-          } catch (e) {
-            console.warn('[MonacoTheme] failed to load', id, e);
-          }
-        }
-        loadOfficialThemes._done = true;
-      } catch (e) {
-        console.warn('[MonacoTheme] loadOfficialThemes failed', e);
-      }
-    })();
-    return loadOfficialThemes._promise;
+    // All themes now loaded from code-server extension folder via loadVscodeTextmateThemes().
   }
 
   function _getVscodeThemeJsonUrl(themeId) {
     var id = String(themeId || '');
-    if (id === 'github-dark-default') return _uiUrl('monaco_editor/textmate/themes/github-dark-default.vscode.json');
-    if (id === 'github-light-default') return _uiUrl('monaco_editor/textmate/themes/github-light-default.vscode.json');
+    // Serve directly from code-server's installed extension themes on disk
+    var csExt = 'github.github-vscode-theme-6.3.5-universal';
+    if (id === 'github-dark-default') return _uiUrl('monaco_editor/cs_themes/' + csExt + '/dark-default.json');
+    if (id === 'github-light-default') return _uiUrl('monaco_editor/cs_themes/' + csExt + '/light-default.json');
     return null;
   }
 
@@ -2062,47 +2148,13 @@
   var vscodeApiNextId = 1;
   var vscodeApiPending = new Map();
   var vscodeApiHandlers = new Map(); // method -> (params)=>void
-  var vscodeThemeIdMap = new Map(); // themeKey -> monacoThemeId
-  var vscodeThemeLoaded = new Set(); // monacoThemeId
+  // vscodeThemeIdMap, vscodeThemeLoaded, _vscodeThemeKeyToMonacoId removed — no vscode: theme loading
   // VSIX language contributions (per-project enablement).
   var vscodeLanguagesInstalled = false;
   var vscodeLanguageIds = new Set();
   var vscodeLanguageByExtension = new Map(); // ".py" -> "python"
   var vscodeLanguageByFilename = new Map(); // "Dockerfile" -> "dockerfile"
 
-  function _vscodeThemeKeyToMonacoId(themeKey) {
-    try {
-      if (vscodeThemeIdMap.has(themeKey)) return vscodeThemeIdMap.get(themeKey);
-      var id = String(themeKey || '');
-      if (id.startsWith('vscode:')) id = id.slice('vscode:'.length);
-      // Monaco standalone theme names are restricted to /^[a-z0-9\\-]+$/i.
-      // Keep them lowercase and hyphen-only to avoid "Illegal theme name!"
-      // from StandaloneThemeService.defineTheme().
-      id = id
-        .replace(/\\/g, '/')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-+|-+$/g, '');
-
-      // Keep names reasonably short to avoid pathological theme keys.
-      if (id.length > 120) {
-        var h = 0;
-        for (var i = 0; i < id.length; i++) {
-          h = ((h << 5) - h) + id.charCodeAt(i);
-          h |= 0;
-        }
-        var suffix = String(Math.abs(h));
-        id = id.slice(0, 100).replace(/-+$/g, '') + '-' + suffix;
-      }
-
-      var monacoId = 'vscode-theme-' + (id || 'unknown');
-      vscodeThemeIdMap.set(themeKey, monacoId);
-      return monacoId;
-    } catch (_) {
-      return 'vscode-theme-unknown';
-    }
-  }
 
   async function ensureVscodeApiWs() {
     if (vscodeApiWs && vscodeApiWs.readyState === WebSocket.OPEN) return vscodeApiWs;
@@ -2230,34 +2282,7 @@
     }
   }
 
-  async function ensureVscodeApiThemeLoaded(themeKey) {
-    if (!themeKey || typeof themeKey !== 'string' || !themeKey.startsWith('vscode:')) return null;
-    if (!window.monaco || !window.monaco.editor || !window.monaco.editor.defineTheme) return null;
-
-    var monacoThemeId = _vscodeThemeKeyToMonacoId(themeKey);
-    if (vscodeThemeLoaded.has(monacoThemeId)) return monacoThemeId;
-
-    var themeId = themeKey.slice('vscode:'.length);
-    var res = await vscodeApiCall('vscode.themes.load', { id: themeId });
-    if (!res || res.ok === false) throw new Error((res && (res.error || res.detail)) || 'theme load failed');
-
-    var raw = res.raw;
-    if (!raw) throw new Error('theme missing raw');
-    var vscodeJson = null;
-    try { vscodeJson = _parseJsonc(String(raw)); } catch (e) { throw new Error('theme json parse failed'); }
-
-    // Preserve uiTheme hint if the extension provided it.
-    try {
-      if (res.uiTheme && typeof res.uiTheme === 'string') {
-        vscodeJson.uiTheme = res.uiTheme;
-      }
-    } catch (_) {}
-
-    var monacoTheme = _vscodeThemeToMonacoTheme(themeId, vscodeJson);
-    window.monaco.editor.defineTheme(monacoThemeId, monacoTheme);
-    vscodeThemeLoaded.add(monacoThemeId);
-    return monacoThemeId;
-  }
+  // ensureVscodeApiThemeLoaded removed — vscode: theme loading via vscode_api deprecated
 
   function _parseJsonc(text) {
     // Minimal JSONC parser (supports // and /* */ comments + trailing commas).
@@ -2382,105 +2407,6 @@
           var monacoTheme = _vscodeThemeToMonacoTheme(id, json);
           window.monaco.editor.defineTheme(id, monacoTheme);
           console.log('[MonacoTheme] loaded vscode theme', id, 'rules=', monacoTheme.rules.length);
-
-          // Also (re)define TE2 themes to use the same TextMate scope rule-set as
-          // GitHub Dark/Light Default, while preserving TE2 UI colors (esp. the
-          // editor background). This gives TE2 themes "real" VS Code scope coloring.
-          //
-          // NOTE: We intentionally do not attempt to map VS Code semanticTokenColors
-          // here; semantic tokens remain theme-controlled via
-          // `editor.semanticHighlighting.enabled = "configuredByTheme"`.
-          try {
-            if (id === 'github-dark-default') {
-              var rules = (monacoTheme.rules || []).slice();
-              // Ensure function identifiers stay purple.
-              rules.push({ token: 'entity.name.function', foreground: 'D2A8FF' });
-              window.monaco.editor.defineTheme('te2-dark', {
-                base: 'vs-dark',
-                inherit: true,
-                rules: rules,
-                colors: {
-                  'editor.background': '#06080cff',
-                  'editor.foreground': '#e6edf3',
-                  'editorLineNumber.foreground': '#6e7681',
-                  'editorLineNumber.activeForeground': '#e6edf3',
-                  'editorCursor.foreground': '#2f81f7',
-                  'editor.selectionBackground': '#264f78',
-                  'editor.inactiveSelectionBackground': '#264f7840',
-                  'editorIndentGuide.background': '#30363d',
-                  'editorIndentGuide.activeBackground': '#6e7681',
-                  'editorWhitespace.foreground': '#484f58',
-                  'editorGutter.background': '#0d1117',
-                  'editorWidget.background': '#161b22',
-                  'editorHoverWidget.background': '#161b22',
-                  'editorSuggestWidget.background': '#161b22',
-                  'editorSuggestWidget.border': '#30363d',
-                  'editorSuggestWidget.foreground': '#e6edf3',
-                  'dropdown.background': '#161b22',
-                  'dropdown.border': '#30363d',
-                  'input.background': '#0d1117',
-                  'input.border': '#30363d',
-                  'input.foreground': '#e6edf3',
-                  'scrollbar.shadow': '#00000000',
-                  'scrollbarSlider.background': '#484f5833',
-                  'scrollbarSlider.hoverBackground': '#484f5866',
-                  'scrollbarSlider.activeBackground': '#484f5899',
-
-                  // Git diff colors: match GitHub Dark Default.
-                  'diffEditor.insertedLineBackground': '#23863626',
-                  'diffEditor.insertedTextBackground': '#3fb9504d',
-                  'diffEditor.removedLineBackground': '#da363326',
-                  'diffEditor.removedTextBackground': '#ff7b724d',
-                },
-              });
-            }
-
-            if (id === 'github-light-default') {
-              var rulesL = (monacoTheme.rules || []).slice();
-              // Ensure function identifiers stay purple (light).
-              rulesL.push({ token: 'entity.name.function', foreground: '8250DF' });
-              window.monaco.editor.defineTheme('te2-light', {
-                base: 'vs',
-                inherit: true,
-                rules: rulesL,
-                colors: {
-                  'editor.background': '#ffffff',
-                  'editor.foreground': '#24292f',
-                  'editorLineNumber.foreground': '#8c959f',
-                  'editorLineNumber.activeForeground': '#24292f',
-                  'editorCursor.foreground': '#0969da',
-                  'editor.selectionBackground': '#add6ff',
-                  'editor.inactiveSelectionBackground': '#add6ff66',
-                  'editorIndentGuide.background': '#d0d7de',
-                  'editorIndentGuide.activeBackground': '#8c959f',
-                  'editorWhitespace.foreground': '#d0d7de',
-                  'editorGutter.background': '#ffffff',
-                  'editorWidget.background': '#f6f8fa',
-                  'editorHoverWidget.background': '#f6f8fa',
-                  'editorSuggestWidget.background': '#f6f8fa',
-                  'editorSuggestWidget.border': '#d0d7de',
-                  'editorSuggestWidget.foreground': '#24292f',
-                  'dropdown.background': '#ffffff',
-                  'dropdown.border': '#d0d7de',
-                  'input.background': '#ffffff',
-                  'input.border': '#d0d7de',
-                  'input.foreground': '#24292f',
-                  'scrollbar.shadow': '#00000000',
-                  'scrollbarSlider.background': '#8c959f33',
-                  'scrollbarSlider.hoverBackground': '#8c959f66',
-                  'scrollbarSlider.activeBackground': '#8c959f99',
-
-                  // Git diff colors: match GitHub Light Default.
-                  'diffEditor.insertedLineBackground': '#aceebb4d',
-                  'diffEditor.insertedTextBackground': '#6fdd8b80',
-                  'diffEditor.removedLineBackground': '#ffcecb4d',
-                  'diffEditor.removedTextBackground': '#ff818266',
-                },
-              });
-            }
-          } catch (e3) {
-            console.warn('[MonacoTheme] failed to sync te2 themes from github defaults', e3);
-          }
         } catch (e) {
           console.warn('[MonacoTheme] failed vscode theme', id, e);
         }
@@ -2493,50 +2419,20 @@
   function _resolveMonacoThemeId(themeKey) {
     try {
       var t = String(themeKey || '').toLowerCase();
-      if (t.startsWith('vscode:')) return _vscodeThemeKeyToMonacoId(String(themeKey || ''));
-      var official = [
-        'github-dark-default',
-        'github-light-default',
-        'github-dark',
-        'github-light',
-        'atom-dark',
-        'atom-light',
-        'material-dark',
-        'material-light',
-        'darcula',
-        'monokai-pro',
-        'one-dark-pro',
-      ];
-      if (t === 'github-dark') return 'github-dark-default';
-      if (t === 'github-light') return 'github-light-default';
-      if (official.includes(t)) return t;
-      if (t === 'te2-dark' || t.includes('te2-dark')) return 'te2-dark';
-      if (t === 'te2-light' || t.includes('te2-light')) return 'te2-light';
-      if (t === 'te2-dracula' || t.includes('te2-dracula') || t === 'dracula') return 'te2-dracula';
-      if (t === 'vs' || t === 'vs-dark') return t;
-      if (t.includes('light')) return 'vs';
-      return 'vs-dark';
+      if (t.includes('light')) return 'github-light-default';
+      return 'github-dark-default';
     } catch (_) {
-      return 'vs-dark';
+      return 'github-dark-default';
     }
   }
 
   async function applyMonacoTheme(themeKey) {
     try {
       if (!window.monaco || !window.monaco.editor || !window.monaco.editor.setTheme) return;
-      ensureTe2Themes();
       ensureTe2DiffTheme();
       try { await loadVscodeTextmateThemes(); } catch (_) {}
-      try { await loadOfficialThemes(); } catch (_) {}
-      var tk = String(themeKey || '');
-      if (tk.startsWith('vscode:')) {
-        var monacoId = await ensureVscodeApiThemeLoaded(tk);
-        if (monacoId) {
-          window.monaco.editor.setTheme(monacoId);
-          return;
-        }
-      }
       window.monaco.editor.setTheme(_resolveMonacoThemeId(themeKey));
+      _forceSemanticHighlighting();
     } catch (e) {
       console.warn('[Monaco] applyMonacoTheme failed', e);
     }
@@ -2849,6 +2745,7 @@
     }
 
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
+    try { _forceSemanticHighlighting(); } catch (_) {}
     try { _installMarkerNavBindings(editor); } catch (_) {}
     try {
       var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
@@ -2890,6 +2787,7 @@
     if (!el || !window.monaco) return null;
 
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
+    try { _forceSemanticHighlighting(); } catch (_) {}
     try { _installMarkerNavBindings(editor); } catch (_) {}
     try {
       var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
@@ -3708,6 +3606,8 @@
           // Replay initial open_file now that the adapter is confirmed ready.
           // This gates diagnostics/symbols to AFTER the full readiness chain.
           _replayOpenFileAfterBaton();
+          // Semantic tokens: push-based flow handles registration via
+          // editor:semantic_tokens_provider_registered event — no eager pull needed.
         }
       });
 
@@ -4289,6 +4189,79 @@
           clearTimeout(entry.timer);
           if (data.error) entry.reject(new Error(String(data.error)));
           else entry.resolve(data.result || data);
+        } catch (_) {}
+      });
+
+      editorSocket.on('editor:workbench_completions_response', function (data) {
+        try {
+          var rid = data && data.request_id;
+          var entry = _wbPending.get(rid);
+          if (!entry) return;
+          _wbPending.delete(rid);
+          clearTimeout(entry.timer);
+          if (data.error) entry.reject(new Error(String(data.error)));
+          else entry.resolve(data.result || data);
+        } catch (_) {}
+      });
+
+      editorSocket.on('editor:workbench_semantic_tokens_response', function (data) {
+        try {
+          var rid = data && data.request_id;
+          var entry = _wbPending.get(rid);
+          if (!entry) return;
+          _wbPending.delete(rid);
+          clearTimeout(entry.timer);
+          if (data.error) entry.reject(new Error(String(data.error)));
+          else entry.resolve(data.result || data);
+        } catch (_) {}
+      });
+
+      editorSocket.on('editor:workbench_semantic_tokens_legend_response', function (data) {
+        try {
+          var rid = data && data.request_id;
+          var entry = _wbPending.get(rid);
+          if (!entry) return;
+          _wbPending.delete(rid);
+          clearTimeout(entry.timer);
+          if (data.error) entry.reject(new Error(String(data.error)));
+          else entry.resolve(data.result || data);
+        } catch (_) {}
+      });
+
+      editorSocket.on('editor:workbench_semantic_tokens_range_response', function (data) {
+        try {
+          var rid = data && data.request_id;
+          var entry = _wbPending.get(rid);
+          if (!entry) return;
+          _wbPending.delete(rid);
+          clearTimeout(entry.timer);
+          if (data.error) entry.reject(new Error(String(data.error)));
+          else entry.resolve(data.result || data);
+        } catch (_) {}
+      });
+
+      // Push-based: adapter notifies when a semantic tokens provider registers.
+      // Cache the legend but DON'T register the Monaco provider yet — wait for
+      // diagnostics to prove the language server has analyzed the file first.
+      editorSocket.on('editor:semantic_tokens_provider_registered', function (data) {
+        try {
+          var lang = data && data.language;
+          var legend = data && data.legend;
+          if (!lang || !legend || !legend.tokenTypes || !legend.tokenModifiers) return;
+          if (languageBridge.registeredSemanticTokens.has(lang)) return;
+          console.log('[semanticTokens] push cached legend for ' + lang + ' types=' + legend.tokenTypes.length + ' mods=' + legend.tokenModifiers.length + ' range=' + !!data.range);
+          languageBridge.semanticTokensLegendCache[lang] = legend;
+          if (data.range) languageBridge.semanticTokensRangeFlag[lang] = true;
+          // If diagnostics already landed for this language, register immediately.
+          // Otherwise, gate registration until diagnostics arrive.
+          var diagLang = model && model.getLanguageId ? String(model.getLanguageId()) : '';
+          if (diagLang === lang && _diagState && _diagState.apply > 0) {
+            console.log('[semanticTokens] diagnostics already received — registering provider for ' + lang + ' now');
+            _registerSemanticTokensWithLegend(lang, legend, !!data.range);
+          } else {
+            console.log('[semanticTokens] waiting for diagnostics to gate registration for ' + lang);
+            languageBridge.semanticTokensDiagGated.add(lang);
+          }
         } catch (_) {}
       });
 
@@ -4916,8 +4889,8 @@
 
       window.monaco = monacoNs;
       ensureTe2DiffTheme();
-      try { await loadOfficialThemes(); } catch (_) {}
-      try { await applyMonacoTheme('vs-dark'); } catch (_) {}
+      try { await loadVscodeTextmateThemes(); } catch (_) {}
+      try { await applyMonacoTheme('github-dark-default'); } catch (_) {}
 
       // Initialize editor strictly from SSOT.
       await ensureEditorWithPrefs();

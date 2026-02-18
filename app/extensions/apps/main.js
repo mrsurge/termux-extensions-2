@@ -3,6 +3,18 @@ export default function(container) {
   const refreshBtn = container.querySelector('#apps-refresh-btn');
 
   const state = { apps: [], loading: false };
+  
+  function resolveIconSrc(app) {
+    const raw = typeof app.icon_src === 'string' ? app.icon_src.trim() : '';
+    if (!raw) return '';
+    if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('/')) {
+      return raw;
+    }
+    if (app._dir) {
+      return `/apps/${app._dir}/${raw}`;
+    }
+    return raw;
+  }
 
   function render() {
     if (state.loading) {
@@ -22,9 +34,21 @@ export default function(container) {
 
       const icon = document.createElement('div');
       icon.className = 'app-icon';
-      // Use icon_emoji if available, otherwise fallback to first letter
-      const label = app.icon_emoji || ((app.name || app.id || '?').trim()[0] || '📦');
-      icon.textContent = label;
+      const iconSrc = resolveIconSrc(app);
+      if (iconSrc) {
+        const img = document.createElement('img');
+        img.className = 'app-icon-img';
+        img.alt = `${app.name || app.id || 'app'} icon`;
+        img.src = iconSrc;
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.referrerPolicy = 'no-referrer';
+        icon.appendChild(img);
+      } else {
+        // No explicit icon file: use icon_emoji or first letter.
+        const label = app.icon_emoji || ((app.name || app.id || '?').trim()[0] || '📦');
+        icon.textContent = label;
+      }
 
       const title = document.createElement('div');
       title.className = 'app-title';

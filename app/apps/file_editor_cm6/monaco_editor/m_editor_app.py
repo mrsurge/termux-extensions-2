@@ -108,6 +108,19 @@ export default href;
             return Response("not found", status_code=404, media_type="text/plain")
         return FileResponse(str(target), media_type="application/json")
 
+    # Serve theme JSON directly from code-server's installed extensions folder.
+    _cs_ext_themes = Path.home() / ".config" / "code-server" / "extensions"
+
+    @fastapi_app.get(mount_path + "/monaco_editor/cs_themes/{ext_id}/{theme_file:path}", include_in_schema=False)
+    async def _serve_cs_extension_theme(ext_id: str, theme_file: str):
+        base = (_cs_ext_themes / ext_id / "themes").resolve()
+        target = (base / theme_file).resolve()
+        if not str(target).startswith(str(base) + "/") and target != base:
+            return Response("not found", status_code=404, media_type="text/plain")
+        if not target.exists() or not target.is_file():
+            return Response("not found", status_code=404, media_type="text/plain")
+        return FileResponse(str(target), media_type="application/json")
+
     @fastapi_app.get(mount_path + "/monaco_editor/textmate/{file_path:path}", include_in_schema=False)
     async def _serve_monaco_editor_textmate(file_path: str):
         # TextMate grammars + Oniguruma WASM used by the Monaco iframe (client-side tokenization).
