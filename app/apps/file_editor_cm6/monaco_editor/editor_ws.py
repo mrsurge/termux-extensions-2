@@ -1272,6 +1272,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                     "languageId": payload.get("languageId", ""),
                     "triggerKind": payload.get("triggerKind", 0),
                     "triggerCharacter": payload.get("triggerCharacter"),
+                    "text": payload.get("text"),
                 },
             )
             result = resp.get("result", resp)

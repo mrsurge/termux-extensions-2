@@ -201,12 +201,8 @@
   function _applyThemeToTextmateRegistry(vscodeThemeJson) {
     try {
       if (!tmRegistry || !vscodeThemeJson) return;
-      // vscode-textmate expects IRawTheme: { name, settings }
-      // VS Code theme JSON has tokenColors as the settings array.
-      // Prepend a global defaults entry if the first item has no scope.
       var settings = [];
       var colors = vscodeThemeJson.colors || {};
-      // Global defaults entry (foreground + background from editor colors)
       var editorFg = colors['editor.foreground'] || colors['foreground'] || '#e6edf3';
       var editorBg = colors['editor.background'] || colors['editorPane.background'] || '#0d1117';
       settings.push({ settings: { foreground: editorFg, background: editorBg } });
@@ -221,6 +217,9 @@
         if (colorMap && colorMap.length > 0) {
           window.monaco.languages.setColorMap(colorMap);
           console.log('[TextMate] color map synced to Monaco, colors=' + colorMap.length);
+          // After setColorMap overrides the rendering palette, patch semantic
+          // token metadata to translate indices to the new palette.
+          try { _patchSemanticTokenColorIndices(); } catch (_) {}
         }
       }
     } catch (e) {
@@ -401,6 +400,9 @@
 
       tmInstalled[lang] = true;
       console.log('[TextMate] installed', lang, '->', scopeName);
+      // Now that tmRegistry exists and setColorMap has been called, patch
+      // semantic token color indices (editor should exist by now too).
+      try { _patchSemanticTokenColorIndices(); } catch (_) {}
       return true;
     } catch (e) {
       console.warn('[TextMate] install failed', languageId, e);
@@ -1528,6 +1530,8 @@
       },
       releaseDocumentSemanticTokens: function (resultId) {},
     });
+    // Ensure semantic token color indices are patched for the TextMate color map.
+    try { _patchSemanticTokenColorIndices(); } catch (_) {}
   }
 
   // Pull-based fallback: fetch legend then register (used from baton/doRegister)
@@ -1629,6 +1633,9 @@
                 triggerCharacters: ['.', ':', '<', '"', "'", '/', '@', '#'],
                 provideCompletionItems: function (m, pos, token, context) {
                   try {
+                    // Flush pending didChange so the ext host has the latest text
+                    // before we ask for completions (debounce can lag behind typing).
+                    _flushMirrorDebounce();
                     var ctx = _currentLanguageContext();
                     if (!ctx || !m || !m.uri || String(m.uri.toString()) !== String(ctx.uri)) return { suggestions: [] };
                     var triggerKind = 0;
@@ -1650,6 +1657,7 @@
                         column: Number(pos && pos.column ? pos.column : 1),
                         triggerKind: triggerKind,
                         triggerCharacter: triggerCharacter,
+                        text: m && m.getValue ? m.getValue() : undefined,
                         timeoutMs: 8000,
                       },
                       ctx,
@@ -1659,6 +1667,13 @@
                       var payload = out.result.result || out.result;
                       var rawItems = payload.items || payload.suggestions || [];
                       if (!Array.isArray(rawItems)) return { suggestions: [] };
+                      // Debug: log first 3 items' range and filterText
+                      try {
+                        for (var di = 0; di < Math.min(3, rawItems.length); di++) {
+                          var dbg = rawItems[di];
+                          if (dbg) console.log('[completions] item[' + di + '] label=' + JSON.stringify(dbg.label) + ' filterText=' + JSON.stringify(dbg.filterText) + ' range=' + JSON.stringify(dbg.range) + ' insertText=' + JSON.stringify(dbg.insertText ? dbg.insertText.substring(0, 40) : ''));
+                        }
+                      } catch (_) {}
                       var suggestions = rawItems.map(function (item) {
                         if (!item) return null;
                         var range = _monacoRangeFromCompletionRange(item.range, pos);
@@ -1810,13 +1825,27 @@
   function _forceSemanticHighlighting() {
     try {
       if (!editor) return;
-      // Try direct access (unminified builds)
+      var svc = _getThemeService();
+      if (!svc || typeof svc.getColorTheme !== 'function') {
+        console.log('[semanticTokens] could not find themeService on editor');
+        return;
+      }
+      var theme = svc.getColorTheme();
+      if (theme && !theme.semanticHighlighting) {
+        Object.defineProperty(theme, 'semanticHighlighting', { value: true, writable: true, configurable: true });
+        console.log('[semanticTokens] forced semanticHighlighting=true on theme');
+      }
+    } catch (e) { console.warn('[semanticTokens] _forceSemanticHighlighting error', e); }
+  }
+
+  // Get the Monaco standalone theme service from the editor instance.
+  function _getThemeService() {
+    try {
+      if (!editor) return null;
       var svc = editor._themeService;
-      // Try finding it via the services container
       if (!svc && editor._instantiationService) {
         try { svc = editor._instantiationService.invokeFunction(function(a) { return a.get && a.get({ toString: function() { return 'standaloneThemeService'; }}); }); } catch (_) {}
       }
-      // Brute-force: scan editor properties for an object with getColorTheme
       if (!svc) {
         var keys = Object.keys(editor);
         for (var ki = 0; ki < keys.length; ki++) {
@@ -1829,16 +1858,91 @@
           } catch (_) {}
         }
       }
-      if (!svc || typeof svc.getColorTheme !== 'function') {
-        console.log('[semanticTokens] could not find themeService on editor');
+      return svc || null;
+    } catch (_) { return null; }
+  }
+
+  // After setColorMap() overrides the rendering palette with the TextMate color
+  // map, semantic token foreground indices (from tokenTheme._match) reference
+  // the WRONG palette. This patches getTokenStyleMetadata on the active theme
+  // to translate indices: tokenTheme palette → hex color → TextMate palette index.
+  function _patchSemanticTokenColorIndices() {
+    try {
+      if (!tmRegistry) return;
+      var svc = _getThemeService();
+      if (!svc) return;
+      var theme = svc.getColorTheme();
+      if (!theme || !theme.tokenTheme) return;
+
+      // Build the tokenTheme's internal color map (index → hex string).
+      var themeColorMap = theme.tokenTheme.getColorMap(); // Color[] objects
+      if (!themeColorMap || !themeColorMap.length) return;
+
+      // Build the TextMate color map (index → lowercase hex string).
+      var tmColorMap = tmRegistry.getColorMap(); // string[] like ["#000000", "#e6edf3", ...]
+      if (!tmColorMap || !tmColorMap.length) return;
+
+      // Build TextMate hex → index reverse lookup.
+      var tmHexToIdx = {};
+      for (var i = 0; i < tmColorMap.length; i++) {
+        if (!tmColorMap[i]) continue;
+        tmHexToIdx[String(tmColorMap[i]).toLowerCase()] = i;
+      }
+
+      // Build tokenTheme index → hex string lookup.
+      var themeIdxToHex = [];
+      for (var j = 0; j < themeColorMap.length; j++) {
+        try {
+          // Color objects have toString() that returns '#rrggbb' or similar.
+          var hex = themeColorMap[j].toString().toLowerCase();
+          themeIdxToHex[j] = hex;
+        } catch (_) {
+          themeIdxToHex[j] = null;
+        }
+      }
+
+      // Build translation table: tokenTheme index → TextMate index.
+      var indexTranslation = [];
+      var translatedCount = 0;
+      for (var k = 0; k < themeIdxToHex.length; k++) {
+        var h = themeIdxToHex[k];
+        if (h && tmHexToIdx[h] !== undefined) {
+          indexTranslation[k] = tmHexToIdx[h];
+          if (indexTranslation[k] !== k) translatedCount++;
+        } else {
+          indexTranslation[k] = k; // no translation available, keep original
+        }
+      }
+
+      if (translatedCount === 0) {
+        console.log('[semanticTokens] no index translation needed (themeColors=' + themeColorMap.length + ', tmColors=' + tmColorMap.length + ')');
+        // Log a sample to debug format mismatches
+        if (themeIdxToHex.length > 1 && tmColorMap.length > 1) {
+          console.log('[semanticTokens] DEBUG themeHex[1]=' + themeIdxToHex[1] + ' tmHex[1]=' + tmColorMap[1].toLowerCase());
+        }
         return;
       }
-      var theme = svc.getColorTheme();
-      if (theme && !theme.semanticHighlighting) {
-        Object.defineProperty(theme, 'semanticHighlighting', { value: true, writable: true, configurable: true });
-        console.log('[semanticTokens] forced semanticHighlighting=true on theme');
-      }
-    } catch (e) { console.warn('[semanticTokens] _forceSemanticHighlighting error', e); }
+
+      // Monkey-patch getTokenStyleMetadata to translate foreground indices.
+      // Always get the ORIGINAL unpatched method (unwrap if already patched).
+      var origMethod = theme._te2OrigGetTokenStyleMetadata || theme.getTokenStyleMetadata;
+      if (!origMethod) return;
+      theme._te2OrigGetTokenStyleMetadata = origMethod;
+      theme._te2PatchedGetTokenStyleMetadata = true;
+      theme.getTokenStyleMetadata = function(type, modifiers, modelLanguage) {
+        var result = origMethod.call(this, type, modifiers, modelLanguage);
+        if (result && typeof result.foreground === 'number') {
+          var orig = result.foreground;
+          if (orig >= 0 && orig < indexTranslation.length) {
+            result.foreground = indexTranslation[orig];
+          }
+        }
+        return result;
+      };
+      console.log('[semanticTokens] patched getTokenStyleMetadata, translated ' + translatedCount + ' color indices');
+    } catch (e) {
+      console.warn('[semanticTokens] _patchSemanticTokenColorIndices failed', e);
+    }
   }
 
   function ensureEditor() {
@@ -2563,6 +2667,7 @@
         _applyThemeToTextmateRegistry(tmActiveThemeJson);
       }
       _forceSemanticHighlighting();
+      try { _patchSemanticTokenColorIndices(); } catch (_) {}
     } catch (e) {
       console.warn('[Monaco] applyMonacoTheme failed', e);
     }
@@ -3044,6 +3149,29 @@
 
     bindUIIPCEditorHooks();
     return diffEditor;
+  }
+
+  // Force-flush the mirror/didChange debounce so the ext host has the latest
+  // document content before we make an RPC call (e.g., completions).
+  function _flushMirrorDebounce() {
+    try {
+      if (!mirrorDebounceT) return;
+      clearTimeout(mirrorDebounceT);
+      mirrorDebounceT = null;
+      if (!model || !currentPath || !editorSocket || !editorSocket.connected) return;
+      var content = model.getValue();
+      editorSocket.emit('editor_mirror', {
+        path: currentPath,
+        content: content,
+        base_sha256: baseSha256,
+      });
+      _wbPublishDidChange(
+        currentPath,
+        content,
+        model.getLanguageId ? model.getLanguageId() : '',
+        _wbCurrentGeneration()
+      );
+    } catch (_) {}
   }
 
   function installMirrorPublisher() {

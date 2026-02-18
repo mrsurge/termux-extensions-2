@@ -2349,6 +2349,18 @@ export class WorkbenchClient {
 
     console.log(`[completions] path=${path} lang=${languageId} line=${lineNumber} col=${column} trigger=${triggerKind}`);
 
+    // Pre-flight: sync document content so the ext host has the latest text.
+    // The frontend's didChange may still be in-flight via Socket.IO when the
+    // completion request arrives, causing the ext host to compute completions
+    // against stale content (wrong ranges, wrong context).
+    if (params.text != null && path) {
+      try {
+        this.didChange({ path, text: String(params.text), languageId, authority });
+      } catch (e) {
+        console.warn(`[completions] pre-flight didChange failed`, e.message);
+      }
+    }
+
     let providerHandle = params.providerHandle ?? this._findProviderHandle("completions", languageId);
     if (typeof providerHandle !== "number") {
       await waitFor(() => this._findProviderHandle("completions", languageId) != null, { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 });
@@ -2400,6 +2412,11 @@ export class WorkbenchClient {
     const completions = dto.b;
     if (!Array.isArray(completions)) return [];
     const defaultRanges = dto.a;
+    console.log(`[completions] _inflate defaultRanges(dto.a)=${JSON.stringify(defaultRanges)} completions.length=${completions.length}`);
+    if (completions.length > 0) {
+      const c0 = completions[0];
+      console.log(`[completions] _inflate item[0] a=${JSON.stringify(c0?.a)} j=${JSON.stringify(c0?.j)} f=${JSON.stringify(c0?.f)}`);
+    }
     const items = [];
     for (const c of completions) {
       if (!c) continue;

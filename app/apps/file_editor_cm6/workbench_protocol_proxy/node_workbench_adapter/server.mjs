@@ -911,6 +911,7 @@ async function handleJsonRpc(reqObj) {
       column: p.column,
       triggerKind: p.triggerKind,
       triggerCharacter: p.triggerCharacter,
+      text: p.text,
       timeoutMs: p.timeoutMs,
     });
     return { jsonrpc: "2.0", id, result };
