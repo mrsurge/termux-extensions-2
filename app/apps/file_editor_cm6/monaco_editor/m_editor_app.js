@@ -104,6 +104,7 @@
   var tmGrammarIndex = null; // { scopes: { scopeName: fileName } }
   var tmInstalled = Object.create(null); // languageId -> true
   var tmGrammarByLang = Object.create(null); // languageId -> vscode-textmate grammar (debug use)
+  var tmActiveThemeJson = null; // cached VS Code theme JSON for registry.setTheme()
   // TextMate grammar index from installed VSIX (via vscode_api).
   // Structure:
   // - byScope: {scopeName -> {id, scopeName, language}}
@@ -191,6 +192,40 @@
     tmRegistry = registry;
     console.log('[TextMate] ready');
     return tmRegistry;
+  }
+
+  /**
+   * Apply a VS Code theme JSON to the TextMate registry so tokenizeLine2()
+   * produces correctly colored binary tokens, and sync the color map to Monaco.
+   */
+  function _applyThemeToTextmateRegistry(vscodeThemeJson) {
+    try {
+      if (!tmRegistry || !vscodeThemeJson) return;
+      // vscode-textmate expects IRawTheme: { name, settings }
+      // VS Code theme JSON has tokenColors as the settings array.
+      // Prepend a global defaults entry if the first item has no scope.
+      var settings = [];
+      var colors = vscodeThemeJson.colors || {};
+      // Global defaults entry (foreground + background from editor colors)
+      var editorFg = colors['editor.foreground'] || colors['foreground'] || '#e6edf3';
+      var editorBg = colors['editor.background'] || colors['editorPane.background'] || '#0d1117';
+      settings.push({ settings: { foreground: editorFg, background: editorBg } });
+      var tc = vscodeThemeJson.tokenColors || [];
+      for (var i = 0; i < tc.length; i++) {
+        settings.push(tc[i]);
+      }
+      tmRegistry.setTheme({ name: vscodeThemeJson.name || 'te2-theme', settings: settings });
+      // Sync color map to Monaco so encoded token color indices resolve correctly.
+      if (window.monaco && window.monaco.languages && window.monaco.languages.setColorMap) {
+        var colorMap = tmRegistry.getColorMap();
+        if (colorMap && colorMap.length > 0) {
+          window.monaco.languages.setColorMap(colorMap);
+          console.log('[TextMate] color map synced to Monaco, colors=' + colorMap.length);
+        }
+      }
+    } catch (e) {
+      console.warn('[TextMate] _applyThemeToTextmateRegistry failed', e);
+    }
   }
 
   function _scopeNameForLanguage(languageId, filePath) {
@@ -328,8 +363,23 @@
       }
       try { tmGrammarByLang[lang] = grammar; } catch (_) {}
 
+      // Apply theme to registry if not done yet, so tokenizeLine2 resolves colors.
+      if (tmActiveThemeJson) {
+        _applyThemeToTextmateRegistry(tmActiveThemeJson);
+      }
+
       window.monaco.languages.setTokensProvider(lang, {
         getInitialState: function () { return _makeTextmateState(window.vscodetextmate.INITIAL); },
+        // Encoded tokenization: vscode-textmate resolves full scope stack against
+        // the theme and returns a Uint32Array with pre-computed color indices.
+        // This matches code-server's VS Code engine behavior exactly.
+        tokenizeEncoded: function (line, state) {
+          var rs = state && state._rs ? state._rs : window.vscodetextmate.INITIAL;
+          var res = grammar.tokenizeLine2(String(line || ''), rs);
+          return { tokens: res.tokens, endState: _makeTextmateState(res.ruleStack) };
+        },
+        // Text-mode fallback (used by EncodedTokenizationSupportAdapter.tokenize
+        // and by debug tooling).
         tokenize: function (line, state) {
           var rs = state && state._rs ? state._rs : window.vscodetextmate.INITIAL;
           var res = grammar.tokenizeLine(String(line || ''), rs);
@@ -340,8 +390,6 @@
             var last = scopes.length ? scopes[scopes.length - 1] : '';
             try {
               if (window.__debugTextmateScopes) {
-                // Keep Monaco behavior unchanged (we still return last scope as token class),
-                // but expose full scope stacks for debugging.
                 if (!t._te2_scopeStack) t._te2_scopeStack = scopes.slice();
               }
             } catch (_) {}
@@ -942,21 +990,6 @@
 
       try { setDebugDiag('diag=rx' + _diagState.rx + '/ap' + _diagState.apply + '/np' + _diagState.drop_no_path + '/nm' + _diagState.drop_no_model + '/mm' + _diagState.drop_mismatch); } catch (_) {}
 
-      // Diagnostics-gated semantic token registration: diagnostics prove the
-      // language server has analyzed the file. Register any waiting providers now.
-      if (didApply) {
-        try {
-          var diagLang = model && model.getLanguageId ? String(model.getLanguageId()) : '';
-          console.log('[semanticTokens] diag-gate check: lang=' + diagLang + ' gatedSet=[' + Array.from(languageBridge.semanticTokensDiagGated).join(',') + '] registered=[' + Array.from(languageBridge.registeredSemanticTokens).join(',') + '] hasCachedLegend=' + !!languageBridge.semanticTokensLegendCache[diagLang]);
-          if (diagLang && languageBridge.semanticTokensDiagGated.has(diagLang) &&
-              !languageBridge.registeredSemanticTokens.has(diagLang) &&
-              languageBridge.semanticTokensLegendCache[diagLang]) {
-            console.log('[semanticTokens] diagnostics landed for ' + diagLang + ' — registering semantic token provider now');
-            languageBridge.semanticTokensDiagGated.delete(diagLang);
-            _registerSemanticTokensWithLegend(diagLang, languageBridge.semanticTokensLegendCache[diagLang], !!languageBridge.semanticTokensRangeFlag[diagLang]);
-          }
-        } catch (_) {}
-      }
       if (!didApply) {
         try { _applyCachedDiagnosticsForActive(); } catch (_) {}
         // Mobile/WebView timing: diagnostics can land before the model swap completes.
@@ -2104,6 +2137,94 @@
     return rules;
   }
 
+  // ---------------------------------------------------------------------------
+  // Semantic-token-type → TextMate-scope mapping (mirrors VS Code's
+  // tokenClassificationRegistry in tokenClassificationRegistry.ts).
+  // Monaco standalone's getTokenStyleMetadata() matches semantic token types
+  // directly against theme rules, but themes only define TextMate scopes.
+  // This bridge resolves each semantic type to the correct TextMate colour.
+  // ---------------------------------------------------------------------------
+  var _SEMANTIC_TO_TM_SCOPES = {
+    'comment':       ['comment'],
+    'string':        ['string'],
+    'keyword':       ['keyword.control', 'keyword'],
+    'number':        ['constant.numeric', 'constant'],
+    'regexp':        ['constant.regexp', 'constant'],
+    'operator':      ['keyword.operator', 'keyword'],
+    'namespace':     ['entity.name.namespace', 'entity.name', 'entity'],
+    'type':          ['entity.name.type', 'support.type', 'entity.name', 'entity'],
+    'struct':        ['entity.name.type.struct', 'entity.name.type', 'entity.name', 'entity'],
+    'class':         ['entity.name.type.class', 'entity.name.type', 'support.class', 'entity.name', 'entity'],
+    'interface':     ['entity.name.type.interface', 'entity.name.type', 'entity.name', 'entity'],
+    'enum':          ['entity.name.type.enum', 'entity.name.type', 'entity.name', 'entity'],
+    'typeParameter': ['entity.name.type.parameter', 'entity.name.type', 'entity.name', 'entity'],
+    'function':      ['entity.name.function', 'support.function', 'entity.name', 'entity'],
+    'method':        ['entity.name.function.member', 'entity.name.function', 'support.function', 'entity.name', 'entity'],
+    'macro':         ['entity.name.function.preprocessor', 'entity.name.function', 'entity.name', 'entity'],
+    'variable':      ['variable.other.readwrite', 'entity.name.variable', 'variable.other', 'variable'],
+    'parameter':     ['variable.parameter', 'variable'],
+    'property':      ['variable.other.property', 'variable.other', 'variable'],
+    'enumMember':    ['variable.other.enummember', 'variable.other', 'variable'],
+    'event':         ['variable.other.event', 'variable.other', 'variable'],
+    'decorator':     ['entity.name.decorator', 'entity.name.function', 'entity.name', 'entity'],
+  };
+  // Modifier-qualified overrides (semantic type.modifier → TextMate scope)
+  var _SEMANTIC_MOD_TO_TM_SCOPES = {
+    'variable.readonly':           ['variable.other.constant', 'variable.other', 'variable'],
+    'property.readonly':           ['variable.other.constant.property', 'variable.other.constant', 'variable.other', 'variable'],
+    'variable.defaultLibrary':     ['support.variable', 'support'],
+    'variable.defaultLibrary.readonly': ['support.constant', 'support'],
+    'property.defaultLibrary':     ['support.variable.property', 'support.variable', 'support'],
+    'function.defaultLibrary':     ['support.function', 'support'],
+  };
+
+  function _buildSemanticTokenRules(tokenColors) {
+    // Build a scope → settings lookup from the VS Code theme tokenColors
+    var scopeSettings = {};
+    if (!Array.isArray(tokenColors)) return [];
+    for (var i = 0; i < tokenColors.length; i++) {
+      var tc = tokenColors[i];
+      if (!tc || !tc.settings) continue;
+      var scopes = tc.scope;
+      var scopeList = Array.isArray(scopes) ? scopes
+        : typeof scopes === 'string' ? scopes.split(',') : [];
+      for (var j = 0; j < scopeList.length; j++) {
+        var s = String(scopeList[j] || '').trim();
+        if (s) scopeSettings[s] = tc.settings;
+      }
+    }
+
+    // Resolve a list of candidate TM scopes (most-specific first) to settings
+    function resolve(tmScopes) {
+      for (var k = 0; k < tmScopes.length; k++) {
+        if (scopeSettings[tmScopes[k]]) return scopeSettings[tmScopes[k]];
+      }
+      return null;
+    }
+
+    var rules = [];
+    function addRule(token, settings) {
+      if (!settings) return;
+      var r = { token: token };
+      var fg = _toMonacoColorHex(settings.foreground);
+      if (fg) r.foreground = fg;
+      if (typeof settings.fontStyle === 'string') r.fontStyle = settings.fontStyle.trim();
+      if (r.foreground || r.fontStyle) rules.push(r);
+    }
+
+    // Base types
+    for (var semType in _SEMANTIC_TO_TM_SCOPES) {
+      if (!Object.prototype.hasOwnProperty.call(_SEMANTIC_TO_TM_SCOPES, semType)) continue;
+      addRule(semType, resolve(_SEMANTIC_TO_TM_SCOPES[semType]));
+    }
+    // Modifier-qualified overrides
+    for (var semMod in _SEMANTIC_MOD_TO_TM_SCOPES) {
+      if (!Object.prototype.hasOwnProperty.call(_SEMANTIC_MOD_TO_TM_SCOPES, semMod)) continue;
+      addRule(semMod, resolve(_SEMANTIC_MOD_TO_TM_SCOPES[semMod]));
+    }
+    return rules;
+  }
+
   function _vscodeThemeToMonacoTheme(themeId, vscodeJson) {
     var themeKey = String(themeId || '');
     var uiTheme = null;
@@ -2133,7 +2254,7 @@
     return {
       base: isLight ? 'vs' : 'vs-dark',
       inherit: true,
-      rules: _vscodeTokenColorsToMonacoRules(tokenColors),
+      rules: _vscodeTokenColorsToMonacoRules(tokenColors).concat(_buildSemanticTokenRules(tokenColors)),
       colors: colors,
     };
   }
@@ -2393,6 +2514,7 @@
     if (loadVscodeTextmateThemes._promise) return loadVscodeTextmateThemes._promise;
     loadVscodeTextmateThemes._promise = (async function () {
       var themeIds = ['github-dark-default', 'github-light-default'];
+      if (!loadVscodeTextmateThemes._jsonCache) loadVscodeTextmateThemes._jsonCache = {};
       for (var i = 0; i < themeIds.length; i++) {
         var id = themeIds[i];
         var url = _getVscodeThemeJsonUrl(id);
@@ -2404,6 +2526,7 @@
             continue;
           }
           var json = await res.json();
+          loadVscodeTextmateThemes._jsonCache[id] = json;
           var monacoTheme = _vscodeThemeToMonacoTheme(id, json);
           window.monaco.editor.defineTheme(id, monacoTheme);
           console.log('[MonacoTheme] loaded vscode theme', id, 'rules=', monacoTheme.rules.length);
@@ -2431,7 +2554,14 @@
       if (!window.monaco || !window.monaco.editor || !window.monaco.editor.setTheme) return;
       ensureTe2DiffTheme();
       try { await loadVscodeTextmateThemes(); } catch (_) {}
-      window.monaco.editor.setTheme(_resolveMonacoThemeId(themeKey));
+      var resolvedId = _resolveMonacoThemeId(themeKey);
+      window.monaco.editor.setTheme(resolvedId);
+      // Apply theme to TextMate registry so tokenizeLine2 resolves colors correctly.
+      var cache = loadVscodeTextmateThemes._jsonCache || {};
+      if (cache[resolvedId]) {
+        tmActiveThemeJson = cache[resolvedId];
+        _applyThemeToTextmateRegistry(tmActiveThemeJson);
+      }
       _forceSemanticHighlighting();
     } catch (e) {
       console.warn('[Monaco] applyMonacoTheme failed', e);
@@ -4252,16 +4382,8 @@
           console.log('[semanticTokens] push cached legend for ' + lang + ' types=' + legend.tokenTypes.length + ' mods=' + legend.tokenModifiers.length + ' range=' + !!data.range);
           languageBridge.semanticTokensLegendCache[lang] = legend;
           if (data.range) languageBridge.semanticTokensRangeFlag[lang] = true;
-          // If diagnostics already landed for this language, register immediately.
-          // Otherwise, gate registration until diagnostics arrive.
-          var diagLang = model && model.getLanguageId ? String(model.getLanguageId()) : '';
-          if (diagLang === lang && _diagState && _diagState.apply > 0) {
-            console.log('[semanticTokens] diagnostics already received — registering provider for ' + lang + ' now');
-            _registerSemanticTokensWithLegend(lang, legend, !!data.range);
-          } else {
-            console.log('[semanticTokens] waiting for diagnostics to gate registration for ' + lang);
-            languageBridge.semanticTokensDiagGated.add(lang);
-          }
+          // Register immediately — no need to wait for diagnostics.
+          _registerSemanticTokensWithLegend(lang, legend, !!data.range);
         } catch (_) {}
       });
 

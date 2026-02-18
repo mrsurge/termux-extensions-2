@@ -1,1 +1,0 @@
-{"version":3,"file":"sequence.js","sourceRoot":"file:///data/data/com.termux/files/home/mrselect6/worktrees/vscode-te2-diff/out-editor-src","sources":["vs/base/common/sequence.ts"],"names":[],"mappings":"","sourcesContent":["\n\nexport interface ISpliceable<T> {\n\tsplice(start: number, deleteCount: number, toInsert: readonly T[]): void;\n}\n"]}

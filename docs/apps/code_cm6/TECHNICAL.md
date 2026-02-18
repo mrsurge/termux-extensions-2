@@ -6,11 +6,11 @@
 **Last Updated:** 2025-12-21  
 **Target Audience:** Framework contributors, extension developers, and technical users
 
-This document provides a comprehensive technical overview of Code CM6's internal architecture, focusing on the frameworks, patterns, and implementation details that make the editor function.
+This document provides a comprehensive technical overview of Code CM6's internal architecture, focusing on the frameworks, patterns, and implementation details that make the editor function. fasdfa
 
 ---
 
-## Table of Contents
+## Table of Contents f
 
 1. [Architecture Overview](#1-architecture-overview)
    - [Framework Context: Termux Extensions 2](#10-framework-context-termux-extensions-2)

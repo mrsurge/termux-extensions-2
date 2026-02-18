@@ -44,7 +44,7 @@ Known limitation (expected right now):
 We will validate at least 2 deterministic features (hover + symbols + diagnostics) per language:
 - Python: `ms-pyright` (baseline) — **validated**: open file, document symbols, hover, diagnostics.
 - TypeScript/JavaScript: built-in TS language service — **validated**: diagnostics working for `.ts`, `.js`, `.mjs`, `.tsx`, `.jsx` files. JS files get JavaScript-level strictness (lenient), TS files get full type checking.
-- C++: `ms-vscode.cpptools` — pending.
+- C++: `llvm-vs-code-extensions.vscode-clangd` — **validated**: diagnostics on open + live diagnostics on edit (after endColumn fix). Clangd is strict about UTF-16 range validity — sentinel endColumn values like INT32_MAX cause `"utf-16 offset ... is invalid for line N"` rejection and break subsequent analysis.
 - Rust: `rust-lang.rust-analyzer` — pending.
 
 ---
@@ -66,7 +66,8 @@ Main framework process (app/main.py)
   ├─ Loads app services declared in manifest.json
   ├─ Explorer transport service (WS proxy): /explorer_ws/socket.io → worker
   ├─ LSP transport service (Socket.IO)    : /lsp_ws/socket.io
-  └─ Editor transport service (WS proxy)  : /editor_ws/socket.io  → worker
+  ├─ Editor transport service (WS proxy)  : /editor_ws/socket.io  → worker
+  └─ UI IPC transport service (WS proxy)  : /ui_ipc_ws/socket.io  → worker
 
 App worker process (app/apps/file_editor_cm6/main.py)
   ├─ HTTP routes: /api/app/file_editor_cm6/*
@@ -74,6 +75,7 @@ App worker process (app/apps/file_editor_cm6/main.py)
   ├─ Monaco iframe routes under /ui/*
   ├─ Worker Socket.IO: /editor_ws/socket.io (EDITOR_ASGI_APP)
   ├─ Worker Socket.IO: /explorer_ws/socket.io (EXPLORER_ASGI_APP)
+  ├─ Worker Socket.IO: /ui_ipc_ws/socket.io (UI_IPC_ASGI_APP)
   └─ SSOT stores: _history_store (project sidecar), _preferences_store
 
 Framework shells (service processes owned by the framework_shells orchestrator)
@@ -106,6 +108,15 @@ File watcher pipeline (IPC — triple fallback):
     → main.js dispatch → explorer.js handleExplorerEvent
     → git:status refresh + directory re-listing + parent dir decoration propagation
   Fallbacks: raise inotify limit → watchexec --poll -- cat → none (manual refresh)
+
+UI IPC pipeline (frontend-to-frontend relay via Python):
+  iframe m_editor_app.js ─┬─ Ctrl+S → ui_event {type:"save"}
+                          └─ editor focus → ui_event {type:"focus"}
+    → Socket.IO /ui_ipc namespace (path: /ui_ipc_ws/socket.io)
+    → ui_ipc_ws.py UIIPCNamespace (logs + rebroadcasts, skip sender)
+    → main.js receives ui_event
+      ├─ type:"save"  → synthetic Ctrl+S keydown → existing saveFile() handler
+      └─ type:"focus" → synthetic click on body → existing closeAllMenus() handler
 ```
 
 ---
@@ -201,6 +212,9 @@ Spinner ownership (host UI):
   - Previously ran explorer business logic in-process (architectural violation, fixed)
 - `app/apps/file_editor_cm6/services/vscode_rpc_transport.py`
   - Proxies `/vscode_rpc_ws` websocket frames to vscode_rpc framework shell
+- `app/apps/file_editor_cm6/services/ui_ipc_transport.py`
+  - Proxies `/ui_ipc_ws/socket.io` websocket frames to worker port
+  - Frontend-to-frontend relay (iframe ↔ main page communication)
 - All transports: bidirectional WS frame forwarding, no SSOT access, no payload parsing
 
 ### Host shell (browser, worker-served)
@@ -588,6 +602,8 @@ emit('editor_workbench_did_change', {
 Server forwards to adapter via stdio pipe. The adapter calls `$acceptModelChanged` (rpcId 85, `isFlush: true`) on the extension host. Diagnostics flow back through the bridge.
 Safety invariant: `didChange` and symbols are accepted only after `openFile` baseline exists for the same `(path, generation)`.
 
+**Range correctness (critical for clangd):** The `$acceptModelChanged` change event contains a `range` that must span the entire previous document. The `endColumn` must be the **actual length of the last line + 1** (1-based columns). Using sentinel values like `2147483647` (INT32_MAX) or `1000000` causes the VS Code mirror model to clamp silently, but clangd's LSP server rejects the invalid UTF-16 offset: `"Failed to update ... utf-16 offset 2147483646 is invalid for line N"`. After rejection, clangd loses track of the document (`"trying to get AST for non-added document"`). The adapter tracks `_docLastLineLength` per path and uses it for correct range construction.
+
 ### Relay events (UI commands)
 ```js
 // Marker navigation (next/prev issue)
@@ -708,7 +724,7 @@ There are **two** build outputs that must exist, otherwise `/api/app/file_editor
 
 1) **Pinned Monaco ESM** (VS Code fork)
 - Output dir: `worktrees/vscode-te2-diff/out-monaco-editor-core/esm/`
-- Produced by: `gulp editor-distro` inside `worktrees/vscode-te2-diff`
+- Produced by: `NODE_OPTIONS="--max-old-space-size=4096" npx gulp editor-distro` inside `worktrees/vscode-te2-diff`
 
 2) **TE2 language bundles + language-service workers**
 - Output dir: `worktrees/vscode-te2-diff/out-monaco-editor-core/te2-lang/`
@@ -718,7 +734,6 @@ Recommended build command (does both):
 ```
 cd worktrees/vscode-te2-diff && ./build_monaco_te2.sh
 ```
-
 ### Common failure mode: `/ui/nc` 404 but worker is “running”
 Symptom:
 - Browser requests `GET /api/app/file_editor_cm6/ui/nc?...` and gets 404 or falls back to a NiceGUI HTML page.
@@ -1466,7 +1481,14 @@ Current status (facts observed in adapter runs):
 - **All built-in language extensions** are loaded and activated (TypeScript, JavaScript, Python, CSS, HTML, JSON, etc.)
 - Python provider flow is validated with `ms-pyright.pyright` in the current dev setup.
 - TS/JS provider flow validated via built-in `typescript-language-features` — diagnostics, hover, symbols all working.
+- C++ (clangd): validated — diagnostics on open and **live diagnostics on edit** working after endColumn fix.
 - Keepalive/ack handling is stable enough for iterative feature validation.
+
+Per-document tracking maps (in `workbench_client.mjs`):
+- `_docVersions`: path → versionId (monotonically increasing, reset to 1 on openFile)
+- `_docLineCount`: path → number of lines
+- `_docCharCount`: path → total character count (for `rangeLength`)
+- `_docLastLineLength`: path → character length of the last line (for valid `endColumn`)
 
 ### Extension host protocol findings (important for future work)
 
@@ -1484,11 +1506,15 @@ Current status (facts observed in adapter runs):
 
 #### Extension host RPC reply requirements
 Not all ext host requests can be answered with `ReplyOkEmpty`. Key methods that need typed replies:
-- `$initializeExtensionStorage` → `ReplyOkJson({})` (empty storage object; `undefined` causes silent activation failure)
+- `$initializeExtensionStorage` → `ReplyOkJson("{}")` (JSON string — ext host calls `JSON.parse()` on the deserialized result, then `safeParseValue` calls `JSON.parse("{}")` → `{}`)
 - `$getTools` → `ReplyOkJson([])` (empty tools array)
 - `$getInitialState` → `ReplyOkJson({ isFocused: true, isActive: true })`
 - `$checkExists` → `ReplyOkJson(false)`
 - `$requestWorkspaceTrust` → `ReplyOkJson(true)` (followed by `$onDidGrantWorkspaceTrust`)
+- `$register` (rpcId 29, MainThreadOutputService) → `ReplyOkJson("<channelId>")` (string — clangd blocks waiting for this; returns a synthetic channel ID like `"te2-output-<req>"`)
+- `$startFileSearch` → `ReplyOkJson([])`
+- `$startTextSearch` → `ReplyOkJson(null)`
+- `$executeCommand` → `ReplyOkEmpty`
 
 #### Activation events
 - `$activateByEvent("*")` must NOT be sent — it activates problematic non-language extensions.
@@ -1517,8 +1543,11 @@ Execution reference:
    - validated: diagnostics for `.ts`, `.js`, `.mjs`, `.jsx`, `.tsx` files
    - JS files receive JavaScript-level strictness (lenient); TS files receive full type checking
    - pending: hover, symbols, completions verification
-3. C++ (candidate extension under test) - pending
-   - target checks: provider registration, document symbols, hover, diagnostics
+3. C++ (`llvm-vs-code-extensions.vscode-clangd`) - **validated**
+   - validated: diagnostics on open, live diagnostics on edit
+   - required fix: `endColumn` must use actual last-line length (clangd rejects INT32_MAX as invalid UTF-16 offset)
+   - required fix: `$register` (rpcId 29, OutputService) must return a string channel ID (clangd blocks on this)
+   - pending: hover, symbols verification
 4. Rust (candidate extension under test) - pending
    - target checks: provider registration, document symbols, hover, diagnostics
 
@@ -1552,7 +1581,8 @@ RPC features use **editor Socket.IO → stdio pipe** (no separate WS):
 
 Live diagnostics data flow:
 - User types in Monaco → 120ms debounce → `editor_workbench_did_change` → `editor_ws.py` → adapter stdin → `$acceptModelChanged` (rpcId 85, full text replace via `isFlush: true`) → extension host re-analyzes → `$changeMany` → diagnostics bridge → browser
-- The adapter tracks per-document `versionId` (monotonically increasing, reset to 1 on `openFile`) and previous line/char counts for correct range replacement
+- The adapter tracks per-document `versionId` (monotonically increasing, reset to 1 on `openFile`), previous line count, char count, and **last line length** for correct range replacement
+- **endColumn tracking**: `_docLastLineLength` map stores the character length of each document's last line. Initialized on `openFile()` from `lines[lines.length - 1].length`, updated on every `didChange()` after splitting the new text. Used as `endColumn: prevLastLineLen + 1` in the change range. Fallback is `10000` for documents opened before tracking was added (safe for clangd, clamped by the mirror model).
 - File watchers (Section 19) handle post-save diagnostics automatically — code-server's parcel watcher detects disk changes and feeds `$onFileEvent` to the extension host; TE2 subscribes to the same IPC channel for explorer updates
 
 Document-symbol ordering hardening (validated):
@@ -1821,6 +1851,18 @@ When a watcher event (IPC or watchexec) reports a change to the **currently acti
 - `watchexec_shell_manager.py`: watchexec path hook (schedules `handle_external_file_change` via `loop.create_task`)
 - `m_editor_app.js`: `model.applyEdits()` for external changes, scroll save/restore in `ensureDiffEditorWithPrefs`/`ensurePlainEditorWithPrefs`/`applyGitBaselines`
 
+### VS Code watcher settings sync (dual-watcher suppression)
+
+When the custom watcher (watchexec) is active, both it AND VS Code's built-in IPC watcher would fire simultaneously on file changes, causing double-refresh and cursor jumps. Fix: `sync_vscode_watcher_settings(watcher_mode)` writes `"files.watcherExclude": {"**": true}` to code-server's `User/settings.json` when custom watcher is active, suppressing VS Code's watcher entirely. When mode is `ipc`, the key is removed so VS Code's watcher resumes.
+
+Called from:
+1. `ensure_code_server_shell()` — before shell launch (code-server reads settings on boot)
+2. `handle_watcher_setMode()` in `explorer_ws.py` — on runtime mode changes
+3. `_ensure_workbench_json_sync()` in `main.py` — called from `_eager_start_code_server()` before shell launch
+
+**Key files**:
+- `code_server_shell_manager.py`: `sync_vscode_watcher_settings()` (~line 48-73), `_CODE_SERVER_DATA_DIR`, `_USER_SETTINGS_PATH`
+
 ## 20) Cursor Stability Hardening (Autosave + Git Diff)
 
 This section documents the stabilization work that removed full-page thrash and significantly reduced cursor jumps under rapid typing.
@@ -1902,3 +1944,233 @@ Verification checks:
   - autosave-gated TE2 diff control flow (`te2AutosaveMode`)
 - `worktrees/vscode-te2-diff/src/vs/editor/common/editorCommon.ts`
   - `IDiffEditorModel.te2AutosaveMode?: boolean`
+
+---
+
+## 21) UI IPC — Frontend-to-Frontend Communication
+
+### Problem
+
+The editor runs in an iframe with its own document context. UI actions in the iframe (Ctrl+S, editor focus) need to trigger behavior on the main page (save file, close menus). Direct function calls are impossible across iframe boundaries, and `postMessage` lacks observability.
+
+### Architecture
+
+A dedicated Socket.IO namespace (`/ui_ipc`) acts as a thin relay. Python logs all traffic for observability but contains no business logic — it just rebroadcasts events to all other clients in the room (skip sender).
+
+```
+Editor iframe (m_editor_app.js)           Main page (main.js)
+  │                                          │
+  ├─ Ctrl+S keybinding ──┐                   │
+  ├─ editor focus ────────┤                   │
+  │                       ▼                   │
+  │              ui_event {type:...}          │
+  │                       │                   │
+  │              ┌────────▼────────┐          │
+  │              │  /ui_ipc namespace │        │
+  │              │  ui_ipc_ws.py      │        │
+  │              │  (log + rebroadcast)│       │
+  │              └────────┬────────┘          │
+  │                       │                   │
+  │                       ▼                   │
+  │              ui_event {type:...}          │
+  │                       │                   │
+  │                       ├─ type:"save"  → synthetic Ctrl+S keydown
+  │                       └─ type:"focus" → synthetic click on body
+```
+
+### Event types
+
+| `type`   | Source         | Effect on main page                     |
+|----------|----------------|-----------------------------------------|
+| `save`   | Ctrl+S in iframe | Dispatches synthetic `Ctrl+S` keydown → existing `saveFile()` handler |
+| `focus`  | Editor widget focus | Dispatches synthetic click on `document.body` → existing `closeAllMenus()` handler |
+
+### Why synthetic DOM events?
+
+The `ui_event` handler runs in the `connectUIIPC()` closure, which is defined early in `main.js` (line ~995). Functions like `saveFile()` and `closeAllMenus()` are defined later. Rather than dealing with hoisting/scope issues in an ES module, the handler dispatches native DOM events that trigger the same `document.addEventListener` handlers those functions are already wired to.
+
+### Key files
+
+- `app/apps/file_editor_cm6/ui_ipc/__init__.py` — empty package init
+- `app/apps/file_editor_cm6/ui_ipc/ui_ipc_ws.py` — `UIIPCNamespace`: logs event type + sender sid, rebroadcasts to room (skip sender)
+- `app/apps/file_editor_cm6/ui_ipc/ui_ipc_socketio.py` — creates `UI_IPC_SIO` server + `UI_IPC_ASGI_APP`
+- `app/apps/file_editor_cm6/services/ui_ipc_transport.py` — main-process websocket proxy at `/ui_ipc_ws/socket.io`
+- `app/apps/file_editor_cm6/manifest.json` — `ui_ipc_transport` in services modules list
+- `app/apps/file_editor_cm6/main.py` — `UI_IPC_ASGI_APP` mounted in SUBAPPS
+- `app/apps/file_editor_cm6/main.js` — `connectUIIPC()`, `ui_event` listener with synthetic event dispatch
+- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js` — `connectUIIPC()`, `bindUIIPCEditorHooks()`, `_bindEditorSaveKey()`, `_bindEditorFocusRelay()`
+
+### Extending
+
+To add a new IPC event type:
+1. Emit `ui_event` with a new `type` string from either page
+2. Add a handler in the receiving page's `ui_event` listener
+3. Python relay requires no changes — it rebroadcasts all `ui_event` payloads
+
+## 22) Extension Configuration Auto-Extraction
+
+### Problem
+
+VS Code extensions read settings during `activate()` via `workspace.getConfiguration("section").get("key")`.
+This reads from the ext host's in-memory configuration model, which is populated by the
+`$initializeConfiguration` RPC (rpcId=80) sent from the workbench adapter at boot.
+
+If an extension's config keys are missing from the data we send, `get()` returns `undefined`.
+Extensions that gate on enable flags (e.g. clangd checks `clangd.enable`) silently skip
+starting their language server — no error, no crash, just no providers registered.
+
+Previously `_buildConfigurationInitData()` hardcoded per-extension configs (Python only).
+Every new extension required manual additions. This doesn't scale and is fragile.
+
+### Solution — automatic defaults from `package.json`
+
+Every VS Code extension declares its settings in `package.json` under
+`contributes.configuration.properties`. Each property has a dotted key and a schema with a
+`"default"` value:
+
+```json
+{
+  "contributes": {
+    "configuration": {
+      "properties": {
+        "clangd.enable": { "type": "boolean", "default": true },
+        "clangd.path":   { "type": "string",  "default": "clangd" }
+      }
+    }
+  }
+}
+```
+
+`_buildConfigurationInitData(folder, authority, scannedExtensions)` now:
+
+1. Iterates ALL `scannedExtensions` (already available from mgmt scan)
+2. For each extension, reads `packageJSON.contributes.configuration.properties`
+3. For each property with a `"default"` value, splits the key at dots
+   (e.g. `"clangd.enable"` → section `clangd`, prop `enable`) and nests it into a
+   `contents` object — handles deeply nested keys like `"python.analysis.autoSearchPaths"`
+4. After scanning all extensions, applies TE2-specific overrides on top
+   (forces `python.languageServer: "Jedi"` and the interpreter path)
+5. Sends the whole thing as the `defaults` field of `IConfigurationInitData`
+
+The result: any installed extension gets its declared defaults automatically. No hardcoding.
+
+### Wire format
+
+The `$initializeConfiguration` payload is `IConfigurationInitData`:
+
+```
+{ defaults, policy, application, userLocal, userRemote, workspace, folders, configurationScopes }
+```
+
+Each section is an `IConfigurationModel`:
+
+```
+{ contents: { section: { key: value, ... } }, overrides: [], keys: ["section.key", ...] }
+```
+
+`defaults` carries the extension-contributed defaults. `userRemote` carries TE2 overrides.
+All other sections are empty.
+
+After `$initializeConfiguration`, we also send `$acceptConfigurationChanged` with the same
+data and the full key list so extensions that listen for config changes pick up the values.
+
+### TE2 overrides (applied after scan)
+
+| Key | Value | Reason |
+|-----|-------|--------|
+| `python.languageServer` | `"Jedi"` | Headless mode — Pylance unavailable |
+| `python.defaultInterpreterPath` | Auto-detected | Termux/system Python path |
+
+To add a new forced override, set it on `allContents` after the scan loop in
+`_buildConfigurationInitData()`.
+
+### Key file
+
+`workbench_client.mjs` → `_buildConfigurationInitData()` (~line 1032)
+
+
+## 23) Semantic Tokens Pipeline (End-to-End)
+
+### Problem
+
+Monaco standalone has no built-in semantic token support from VS Code's extension host. Three barriers had to be overcome:
+
+1. **CancellationToken argument bug** — VS Code's RPC layer auto-pushes a real `CancellationToken` onto the args array. Passing `{}` as a placeholder shifted all parameters, causing `n.onCancellationRequested is not a function` errors on every semantic token request.
+
+2. **Uint32Array alignment crash** — Node.js Buffer pool uses a shared ArrayBuffer. `buf.byteOffset` isn't guaranteed to be 4-byte aligned, so `new Uint32Array(buf.buffer, buf.byteOffset, ...)` throws RangeError. This crash was caught silently and returned as a JSON-RPC error to the frontend.
+
+3. **Monaco `semanticHighlighting = false`** — `standaloneThemeService.ts` hardcodes this flag to `false`, so `isSemanticColoringEnabled()` always returns false and Monaco never applies semantic tokens even when data arrives.
+
+4. **No semantic-to-TextMate scope mapping** — Monaco standalone's `getTokenStyleMetadata()` matches semantic token type names directly against theme rules, but themes only define TextMate scope names. Without a bridge, `function` tokens get white instead of purple, `variable` tokens get orange instead of white, etc.
+
+### Solution
+
+1. **CancellationToken fix**: Never include `{}` in args for cancellable requests. The `cancellable: true` flag sets wire type 2/4, and the RPC layer handles the rest. See `WORKBENCH_SEMANTIC_COMPLETIONS_KNOWLEDGE.md` for the full arg patterns table.
+
+2. **Alignment fix**: Copy buffer to a fresh aligned `Uint8Array` before creating `Uint32Array`. Applied to both `semanticTokens()` and `semanticTokensRange()` in `workbench_client.mjs`.
+
+3. **semanticHighlighting source fix**: Changed `standaloneThemeService.ts:182` from `false` to `true` in the TE2 Monaco build. A runtime monkey-patch (`_forceSemanticHighlighting()`) also exists as a fallback.
+
+4. **Semantic token color mapping**: `_buildSemanticTokenRules()` in `m_editor_app.js` mirrors VS Code's `TokenClassificationRegistry` by mapping each semantic token type (e.g., `function`, `variable`, `parameter`) to its equivalent TextMate scope (e.g., `entity.name.function`, `variable.other.readwrite`, `variable.parameter`), resolves the color from the theme's `tokenColors`, and injects the rules into the Monaco theme.
+
+### Data flow
+
+```
+ext host ($provideDocumentRangeSemanticTokens)
+  → workbench_client.mjs (decode Uint32Array, attach legend)
+  → server.mjs (vscode.semanticTokensRange route)
+  → Socket.IO (editor_workbench_semantic_tokens_range)
+  → editor_ws.py (adapter_rpc bridge)
+  → m_editor_app.js (DocumentRangeSemanticTokensProvider)
+  → Monaco getTokenStyleMetadata() → theme rules → rendered colors
+```
+
+### Token data format
+
+5-element tuples in a flat Uint32Array: `[deltaLine, deltaStartChar, length, tokenTypeIndex, tokenModifiersMask]`
+
+- `tokenTypeIndex` indexes into `legend.tokenTypes` (e.g., 0 = "namespace", 7 = "variable", 11 = "function")
+- `tokenModifiersMask` is a bitmask indexing into `legend.tokenModifiers` (e.g., bit 0 = "declaration", bit 3 = "readonly")
+
+### Monaco build required
+
+The `semanticHighlighting = true` source change requires a Monaco rebuild:
+
+```bash
+cd worktrees/vscode-te2-diff
+NODE_OPTIONS="--max-old-space-size=4096" npx gulp editor-distro
+# Copy ESM artifacts
+VENDOR_DIR="../../app/static/vendor/monaco-editor-core"
+rm -rf "$VENDOR_DIR/esm" && mkdir -p "$VENDOR_DIR/esm"
+cd out-monaco-editor-core/esm
+find . \( -name "*.js" -o -name "*.css" -o -name "*.ttf" \) \
+  -exec sh -c 'mkdir -p "'"$VENDOR_DIR"'/esm/$(dirname "$1")" && cp "$1" "'"$VENDOR_DIR"'/esm/$1"' _ {} \;
+# Rebuild bootstrap bundle
+cd ../.. && node ../../scripts/build_monaco_iframe_bootstrap_bundle.mjs
+```
+
+### Key files
+
+| File | Role |
+|---|---|
+| `workbench_client.mjs` | CancellationToken fix, Uint32Array alignment fix, legend extraction, semantic token RPC, `resync()` |
+| `server.mjs` | `vscode.semanticTokensRange` route, `te2.resync` RPC |
+| `editor_ws.py` | Socket.IO ↔ adapter bridge for semantic tokens, resync trigger in readiness check |
+| `m_editor_app.js` | `_buildSemanticTokenRules()`, `_forceSemanticHighlighting()`, provider registration |
+| `standaloneThemeService.ts` | Source fix: `semanticHighlighting = true` |
+| `tokenClassificationRegistry.ts` | VS Code's semantic-to-TextMate mapping (reference) |
+
+### Page reload / multi-client: `te2.resync`
+
+Provider registrations are one-time events from ext host boot. A fresh frontend (page reload) or second client never sees them. The `te2.resync` RPC solves this:
+
+1. Python's `on_editor_readiness_check()` finds adapter already running
+2. Calls `te2.resync` → adapter replays cached provider events via `onEvent`
+3. Events flow through stdout pipe → Python → Socket.IO → frontend
+4. Frontend registers providers with legends — semantic tokens work immediately
+
+Properties:
+- No adapter restart — ext host stays hot, baton sequence untouched
+- Multi-client safe — each client gets its own resync
+- Idempotent — `registeredSemanticTokens` set guards against duplicates
+- First step toward Option 3 architecture (adapter as stateful backend)

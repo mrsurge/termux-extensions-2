@@ -2832,4 +2832,30 @@ export class WorkbenchClient {
     }
     return null;
   }
+
+  /**
+   * Replay cached provider registrations and session state via onEvent.
+   * Called when a new frontend connects to an already-running adapter so it
+   * receives the same events it would have seen during initial ext host boot.
+   */
+  resync() {
+    const replayed = { semanticTokens: 0, hover: 0, completions: 0, documentSymbols: 0 };
+    // Replay semantic token provider registrations
+    for (const entry of this._providers.semanticTokens.values()) {
+      const language = entry.selector?.[0]?.language ?? null;
+      if (!language || !entry.legend) continue;
+      this.onEvent({
+        type: "provider/semanticTokens",
+        ts_ms: Date.now(),
+        handle: entry.handle,
+        language,
+        legend: entry.legend,
+        range: !!entry.range,
+        resync: true,
+      });
+      replayed.semanticTokens++;
+    }
+    console.error(`[resync] replayed providers: semTok=${replayed.semanticTokens}`);
+    return { ok: true, ts_ms: Date.now(), replayed };
+  }
 }

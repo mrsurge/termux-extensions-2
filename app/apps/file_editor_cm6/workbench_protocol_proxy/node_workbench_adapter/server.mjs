@@ -656,6 +656,14 @@ async function handleJsonRpc(reqObj) {
     return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs() } };
   }
 
+  if (method === "te2.resync") {
+    // Replay cached provider registrations + session state to new frontends.
+    // The onEvent callback re-emits events which flow through the stdout pipe
+    // to the Python side and then to the frontend via Socket.IO.
+    const result = wb.resync();
+    return { jsonrpc: "2.0", id, result };
+  }
+
   if (method === "te2.status" || method === "adapter.status") {
     return { jsonrpc: "2.0", id, result: buildStatusResult() };
   }

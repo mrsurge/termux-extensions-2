@@ -119672,7 +119672,7 @@ var init_standaloneThemeService = __esm({
     themingRegistry2 = Registry.as(Extensions7.ThemingContribution);
     StandaloneTheme = class {
       constructor(name, standaloneThemeData) {
-        this.semanticHighlighting = false;
+        this.semanticHighlighting = true;
         this.themeData = standaloneThemeData;
         const base = standaloneThemeData.base;
         if (name.length > 0) {

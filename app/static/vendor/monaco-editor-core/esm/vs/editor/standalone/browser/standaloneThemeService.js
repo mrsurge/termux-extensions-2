@@ -26,7 +26,7 @@ const colorRegistry = Registry.as(Extensions.ColorContribution);
 const themingRegistry = Registry.as(ThemingExtensions.ThemingContribution);
 class StandaloneTheme {
     constructor(name, standaloneThemeData) {
-        this.semanticHighlighting = false;
+        this.semanticHighlighting = true;
         this.themeData = standaloneThemeData;
         const base = standaloneThemeData.base;
         if (name.length > 0) {

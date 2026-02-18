@@ -1583,6 +1583,20 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             except Exception:
                 pass
 
+            # Resync: replay cached provider registrations to the new frontend.
+            # This ensures semantic tokens legends etc. reach clients that connect
+            # after the ext host has already booted (e.g. page reload).
+            if state in ("ready", "connected"):
+                try:
+                    import httpx
+                    async with httpx.AsyncClient(timeout=5.0) as client:
+                        await client.post(
+                            f"http://127.0.0.1:{port}/cmd",
+                            json={"jsonrpc": "2.0", "id": 2, "method": "te2.resync", "params": {}},
+                        )
+                except Exception:
+                    pass
+
         # Fan out the baton: readiness complete.
         await self.emit("editor:readiness_step", {
             "step": "baton",
