@@ -4995,13 +4995,97 @@
       });
       uiIpcSocket.on('connect', function() {
         console.log('[UI_IPC] editor iframe connected');
+        // Register as a console worker on the same socket
+        uiIpcSocket.emit('console:register', { workerId: 'editor_iframe', role: 'worker' });
       });
       uiIpcSocket.on('ui_event', function(data) {
         // Handle events from the main page if needed in the future
       });
+
+      // Console bridge — monkey-patch console.* to emit on the ui_ipc bus
+      _initEditorConsoleBridge(uiIpcSocket);
     } catch (e) {
       console.warn('[UI_IPC] connect failed', e);
     }
+  }
+
+  // ─── Console bridge (inline for non-module iframe) ────────
+  var _consoleBridgeActive = false;
+
+  function _initEditorConsoleBridge(sock) {
+    if (_consoleBridgeActive) return;
+    var LEVELS = ['log', 'info', 'warn', 'error', 'debug'];
+    var originals = {};
+    var workerId = 'editor_iframe';
+
+    function safeSerialize(x) {
+      var seen = typeof WeakSet !== 'undefined' ? new WeakSet() : null;
+      return JSON.stringify(x, function(_k, v) {
+        if (typeof v === 'bigint') return 'BigInt(' + v.toString() + ')';
+        if (v instanceof Error) return { name: v.name, message: v.message, stack: v.stack };
+        if (typeof v === 'object' && v !== null && seen) {
+          if (seen.has(v)) return '[Circular]';
+          seen.add(v);
+        }
+        return v;
+      });
+    }
+
+    function serializeArg(a) {
+      try { return JSON.parse(safeSerialize(a)); }
+      catch(_) { return String(a); }
+    }
+
+    function emitLog(level, rawArgs) {
+      if (!sock || !sock.connected) return;
+      sock.emit('console:log', {
+        workerId: workerId,
+        level: level,
+        ts: Date.now(),
+        args: rawArgs.map(serializeArg),
+      });
+    }
+
+    for (var i = 0; i < LEVELS.length; i++) {
+      (function(level) {
+        originals[level] = console[level].bind(console);
+        console[level] = function() {
+          var args = Array.prototype.slice.call(arguments);
+          try { emitLog(level, args); } catch(_) {}
+          return originals[level].apply(console, args);
+        };
+      })(LEVELS[i]);
+    }
+
+    // Capture uncaught errors
+    window.addEventListener('error', function(e) {
+      emitLog('error', [e.message, e.filename, e.lineno, e.colno, e.error || null]);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      emitLog('error', ['UnhandledRejection', e.reason]);
+    });
+
+    // Remote eval support
+    sock.on('console:eval', function(msg) {
+      if (!msg || !msg.reqId || !msg.code) return;
+      try {
+        var result = (0, eval)(msg.code);
+        Promise.resolve(result).then(function(value) {
+          sock.emit('console:evalResult', {
+            workerId: workerId, reqId: msg.reqId, ok: true,
+            value: serializeArg(value),
+          });
+        });
+      } catch(err) {
+        sock.emit('console:evalResult', {
+          workerId: workerId, reqId: msg.reqId, ok: false,
+          error: serializeArg(err),
+        });
+      }
+    });
+
+    _consoleBridgeActive = true;
+    console.log('[console_bridge] editor iframe bridge active');
   }
 
   /** Call after editor/diffEditor is created to bind Ctrl+S and focus relay. */

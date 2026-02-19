@@ -2093,7 +2093,7 @@ To add a new forced override, set it on `allContents` after the scan loop in
 
 ### Problem
 
-Monaco standalone has no built-in semantic token support from VS Code's extension host. Three barriers had to be overcome:
+Monaco standalone has no built-in semantic token support from VS Code's extension host. Five barriers had to be overcome:
 
 1. **CancellationToken argument bug** — VS Code's RPC layer auto-pushes a real `CancellationToken` onto the args array. Passing `{}` as a placeholder shifted all parameters, causing `n.onCancellationRequested is not a function` errors on every semantic token request.
 
@@ -2102,6 +2102,8 @@ Monaco standalone has no built-in semantic token support from VS Code's extensio
 3. **Monaco `semanticHighlighting = false`** — `standaloneThemeService.ts` hardcodes this flag to `false`, so `isSemanticColoringEnabled()` always returns false and Monaco never applies semantic tokens even when data arrives.
 
 4. **No semantic-to-TextMate scope mapping** — Monaco standalone's `getTokenStyleMetadata()` matches semantic token type names directly against theme rules, but themes only define TextMate scope names. Without a bridge, `function` tokens get white instead of purple, `variable` tokens get orange instead of white, etc.
+
+5. **`setColorMap` palette conflict** — Encoded TextMate tokenization (`tokenizeLine2`) requires `setColorMap()` to sync the ~300-color TextMate palette to Monaco. But this replaces the rendering palette, making semantic token foreground indices (compiled against the ~20-color theme palette from `defineTheme`) point to wrong colors. E.g., index 7 = orange in the theme palette but some random blue in the TextMate palette.
 
 ### Solution
 
@@ -2113,6 +2115,17 @@ Monaco standalone has no built-in semantic token support from VS Code's extensio
 
 4. **Semantic token color mapping**: `_buildSemanticTokenRules()` in `m_editor_app.js` mirrors VS Code's `TokenClassificationRegistry` by mapping each semantic token type (e.g., `function`, `variable`, `parameter`) to its equivalent TextMate scope (e.g., `entity.name.function`, `variable.other.readwrite`, `variable.parameter`), resolves the color from the theme's `tokenColors`, and injects the rules into the Monaco theme.
 
+5. **Palette index translation**: `_patchSemanticTokenColorIndices()` monkey-patches `getTokenStyleMetadata` on the active theme object. After `setColorMap` overrides the rendering palette, the patch translates foreground indices: tokenTheme index → hex color (via `Color.toString()`) → find matching hex in TextMate color map → return TextMate index. This ensures semantic tokens render the correct color even when the rendering palette has been overridden.
+
+### Encoded TextMate tokenization
+
+TE2 uses vscode-textmate's encoded mode (`tokenizeLine2`) instead of text mode (`tokenizeLine`). Text mode only provides the innermost scope string per token — Monaco matching this single scope against theme rules produces different colors than code-server, which evaluates the full scope stack.
+
+Encoded mode resolves the full scope stack against the theme internally and returns a `Uint32Array` with pre-computed color indices, matching code-server exactly. Requirements:
+- `registry.setTheme(IRawTheme)` must be called before tokenization
+- `monaco.languages.setColorMap(registry.getColorMap())` syncs the rendering palette
+- Provider exposes `tokenizeEncoded(line, state)` — Monaco auto-detects this via `isEncodedTokensProvider()`
+
 ### Data flow
 
 ```
@@ -2122,7 +2135,7 @@ ext host ($provideDocumentRangeSemanticTokens)
   → Socket.IO (editor_workbench_semantic_tokens_range)
   → editor_ws.py (adapter_rpc bridge)
   → m_editor_app.js (DocumentRangeSemanticTokensProvider)
-  → Monaco getTokenStyleMetadata() → theme rules → rendered colors
+  → Monaco getTokenStyleMetadata() → _patchSemanticTokenColorIndices translation → rendered colors
 ```
 
 ### Token data format
@@ -2156,7 +2169,7 @@ cd ../.. && node ../../scripts/build_monaco_iframe_bootstrap_bundle.mjs
 | `workbench_client.mjs` | CancellationToken fix, Uint32Array alignment fix, legend extraction, semantic token RPC, `resync()` |
 | `server.mjs` | `vscode.semanticTokensRange` route, `te2.resync` RPC |
 | `editor_ws.py` | Socket.IO ↔ adapter bridge for semantic tokens, resync trigger in readiness check |
-| `m_editor_app.js` | `_buildSemanticTokenRules()`, `_forceSemanticHighlighting()`, provider registration |
+| `m_editor_app.js` | `_buildSemanticTokenRules()`, `_forceSemanticHighlighting()`, `_patchSemanticTokenColorIndices()`, encoded TextMate provider (`tokenizeEncoded`), `_applyThemeToTextmateRegistry()` |
 | `standaloneThemeService.ts` | Source fix: `semanticHighlighting = true` |
 | `tokenClassificationRegistry.ts` | VS Code's semantic-to-TextMate mapping (reference) |
 
@@ -2174,3 +2187,198 @@ Properties:
 - Multi-client safe — each client gets its own resync
 - Idempotent — `registeredSemanticTokens` set guards against duplicates
 - First step toward Option 3 architecture (adapter as stateful backend)
+
+### Known limitations
+
+- **Hover tooltip colors**: Hover code blocks use `colorize()` (TextMate tokenization), not semantic tokens. Parameter colors in hovers may be a slightly different shade than the editor's semantic token color (TextMate-resolved vs semantic-resolved for the same scope).
+- **Python semantic tokens**: Pyright (open-source) does not register a semantic token provider. Only TypeScript/JavaScript get semantic tokens from the ext host. Python semantic tokens require Pylance (proprietary, unavailable for code-server). Python coloring is purely TextMate-based.
+- **Palette patch timing**: `_patchSemanticTokenColorIndices()` must run after editor creation + tmRegistry initialization + setColorMap. Multiple call sites ensure at least one hits the right timing window.
+
+## 24) Completions Pipeline (End-to-End)
+
+### Overview
+
+Completions flow from the frontend through the same 4-layer RPC pipeline as other language features. The user types → Monaco fires `provideCompletionItems` → frontend serializes the request → Python bridge relays it → adapter calls `$provideCompletionItems` on the ext host → results come back as a minified `ISuggestResultDto` → adapter inflates the DTO → results propagate back to Monaco.
+
+### Data flow
+
+```
+Monaco CompletionItemProvider.provideCompletionItems()
+  → m_editor_app.js: serialize (path, language, line, col, trigger)
+  → editor_ws.py: relay via adapter_rpc("vscode.completions", ...)
+  → server.mjs: route to wb.completions()
+  → workbench_client.mjs: $provideCompletionItems(handle, resource, position, context, token)
+  → ext host: language server computes completions
+  ← ISuggestResultDto (minified wire format)
+  ← workbench_client.mjs: _inflateCompletionItems() → Monaco suggestions
+  ← server.mjs → editor_ws.py → m_editor_app.js → Monaco widget
+```
+
+### The debounce race condition
+
+The ext host computes completions against its internal document model. `didChange` events are debounced at 180ms (`_localMirrorDebounceMs`) before being sent to the ext host. Completion requests fire immediately on every keystroke. Result: the ext host's document is 1 keystroke behind.
+
+**Symptoms**:
+- First character after trigger: zero-width completion range (ext host has no word yet)
+- Second character: range covers only 1 char, results are generic globals instead of contextual
+- Third character: finally correct (previous didChange has arrived)
+- Deleting back makes results work for the position that previously failed
+
+### Solution: pre-flight document sync
+
+Two-part fix ensures the ext host always has the latest document content:
+
+**Part 1 — Frontend (`m_editor_app.js`)**:
+- `_flushMirrorDebounce()` force-fires the pending debounce timer before each completion request
+- `text: m.getValue()` is included in every completion RPC as the authoritative full document content
+
+**Part 2 — Adapter (`workbench_client.mjs`)**:
+- `completions()` checks for `params.text`; if present, calls `this.didChange()` synchronously before `$provideCompletionItems`
+- `didChange()` writes `$acceptModelChanged` directly to the ext host's stdin pipe — synchronous, no transport delay
+- The ext host processes the didChange before the completion request because both run in the same Node.js event loop tick
+
+### Wire format — `ISuggestResultDto`
+
+The ext host returns a minified DTO with single-letter field names for wire efficiency:
+
+**Top-level `ISuggestResultDto`**:
+- `a`: defaultRanges (applied to items without their own range)
+- `b`: completions array (`ISuggestDataDto[]`)
+- `c`: isIncomplete flag
+- `d`: duration
+- `x`: cache ID for `$releaseCompletionItems`
+
+**Per-item `ISuggestDataDto`**:
+- `a`: label, `b`: kind, `c`: detail, `d`: documentation
+- `e`: sortText, `f`: filterText, `g`: preselect
+- `h`: insertText, `i`: insertTextRules
+- `j`: range (overrides defaultRanges), `k`: commitCharacters
+- `l`: additionalTextEdits, `m`: kindModifier (tags)
+- `n/o/p`: command (ident/id/arguments), `x`: item cache ID
+
+### Key files
+
+| File | Role |
+|---|---|
+| `m_editor_app.js` | `provideCompletionItems`, `_flushMirrorDebounce()`, sends `text` param |
+| `editor_ws.py` | `on_editor_workbench_completions()` — passes text to adapter RPC |
+| `server.mjs` | `vscode.completions` route — passes text to `wb.completions()` |
+| `workbench_client.mjs` | `completions()` — pre-flight didChange, `$provideCompletionItems`, `_inflateCompletionItems()` |
+
+### Inflation and range handling
+
+`_inflateCompletionItems()` in `workbench_client.mjs`:
+1. Reads `dto.a` as `defaultRanges` (insert + replace ranges for all items)
+2. For each item in `dto.b`: maps minified fields to Monaco's `CompletionItem` shape
+3. If an item has its own `c.j` range, uses that; otherwise uses `defaultRanges`
+4. Ranges are `{ insert: { startLineNumber, startColumn, endLineNumber, endColumn }, replace: {...} }` (1-based, Monaco convention)
+
+### Resolve and release
+
+- `$resolveCompletionItem(handle, id, token)` — lazily loads full documentation for a selected item
+- `$releaseCompletionItems(handle, id)` — frees the cached completion set when the widget closes
+
+## 25) Console Observability System (vConsole + Socket.IO)
+
+A browser-side console log viewer built on [Tencent vConsole](https://github.com/Tencent/vConsole), integrated into the terminal drawer as a second tab.  Multiple frontends (main page, editor iframe, future apps) ship serialized `console.*` output through the existing `ui_ipc` Socket.IO namespace to a single vConsole drawer UI.
+
+### Architecture overview
+
+```
+┌─────────────┐  console:log   ┌──────────────┐  console:log   ┌────────────────┐
+│  main page  │───────────────▸│              │───────────────▸│  Console tab   │
+│  (bridge)   │                │  Python      │                │  (vConsole UI) │
+├─────────────┤  console:log   │  relay       │  replay on     │  in drawer     │
+│  editor     │───────────────▸│  + disk      │  connect       │                │
+│  iframe     │                │  append      │───────────────▸│  origin filter │
+│  (bridge)   │                └──────────────┘                └────────────────┘
+└─────────────┘                  ▼
+                          ~/.cache/cm6_editor/
+                          console_log.jsonl
+```
+
+- **No in-memory log buffer** on the Python side — relay is pass-through + disk append.
+- Disk log is **wiped on server boot** (one session per Python process lifetime).
+- New drawer connections get a **full replay** from disk before switching to live.
+
+### Files
+
+| File | Role |
+|------|------|
+| `static/js/console_bridge.js` | Agnostic console monkey-patcher — patches `console.*`, serializes args, emits `console:log` on ui_ipc. Reusable on any frontend. |
+| `static/js/console.js` | Drawer UI module — loads vConsole dynamically, connects as `role: 'drawer'`, renders incoming `console:log` events via `vConsole.log.<level>()` plugin API. |
+| `static/vendor/vconsole/vconsole.min.js` | Vendored vConsole 3.x dist (MIT). |
+| `ui_ipc/console_ws.py` | Python event handlers — `console:register`, `console:log`, `console:eval`, `console:evalResult`. Disk-backed JSONL append + replay. |
+| `ui_ipc/ui_ipc_ws.py` | Delegates `console:*` events to `console_ws.py`. |
+| `template.html` | Drawer tab bar (Terminal \| Console), console header (origin dropdown + clear), `#console-container`, vConsole CSS overrides. |
+| `main.js` | Imports bridge + console modules, wires tab switching, View menu toggle. |
+| `monaco_editor/m_editor_app.js` | Inline bridge for the editor iframe — reuses `uiIpcSocket`, registers as `editor_iframe` worker. |
+
+### Event protocol (all on `/ui_ipc` namespace)
+
+| Event | Direction | Payload | Notes |
+|-------|-----------|---------|-------|
+| `console:register` | client → server | `{ role: 'drawer' \| 'worker', workerId? }` | Drawer joins `console:drawers` room + gets replay. Worker joins `console:<workerId>` room. |
+| `console:log` | worker → server → drawers | `{ workerId, level, ts, args[] }` | `args` are JSON-safe (pre-serialized by bridge via `safeSerialize()`). Appended to disk. |
+| `console:eval` | drawer → server → worker | `{ targetWorkerId, reqId, code }` | Routed to `console:<workerId>` room only. |
+| `console:evalResult` | worker → server → drawers | `{ workerId, reqId, ok, value\|error }` | Forwarded to `console:drawers` room. |
+
+### Room layout
+
+- `console:drawers` — all drawer clients (receives fan-out of every `console:log`)
+- `console:<workerId>` — per-worker room (used for targeted `console:eval` routing)
+
+### Console bridge (`console_bridge.js`)
+
+The bridge is **not** a vConsole instance — it's a lightweight monkey-patcher + serializer:
+
+1. Wraps `console.log/info/warn/error/debug` — captures method name (categorization) + args
+2. `safeSerialize()` handles circular refs, BigInt, Error objects, DOM elements → JSON-safe output
+3. Adds `Date.now()` timestamp and `workerId`
+4. Emits over socket as `console:log`
+5. Captures `window.onerror` and `unhandledrejection` as error-level entries
+6. Supports `console:eval` for remote code execution from the drawer
+
+vConsole is only needed on the **drawer side** for rendering. The bridge just ships data.
+
+### Origin filter (drawer header)
+
+The console tab header contains a "Source" dropdown (uses `fe-menu` / `fe-dropdown` CSS classes) that filters incoming logs by `workerId`:
+- **All** — shows everything with `[workerId]` prefix tags
+- **\<workerId\>** — shows only that origin's logs
+
+Workers are discovered dynamically from incoming `console:log` events and added to the dropdown. A "Clear" button calls `vConsole.log.clear()`.
+
+### Disk persistence
+
+- **Path**: `~/.cache/cm6_editor/console_log.jsonl`
+- **Format**: Newline-delimited JSON, one `console:log` payload per line
+- **Lifecycle**: Wiped on Python server boot → accumulates for session → wiped next boot
+- **Replay**: On drawer `console:register`, the entire file is streamed line-by-line via `ns.emit("console:log", entry, to=sid)`
+- **No memory buffer**: Python holds zero log data in RAM — reads from disk for replay, appends via open file handle with per-write flush
+
+### Script loading
+
+Template HTML is injected via `innerHTML` (app_shell.html line 547–549), which **does not execute `<script>` tags**. vConsole and Socket.IO are loaded dynamically via `document.createElement('script')`:
+
+```js
+function ensureVConsoleLoaded() {
+  if (window.VConsole) return Promise.resolve(window.VConsole);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = '/apps/file_editor_cm6/static/vendor/vconsole/vconsole.min.js';
+    script.onload = () => resolve(window.VConsole);
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+```
+
+Same pattern as `ensureSocketIoLoaded()` in main.js. Both must resolve before their dependents initialize.
+
+### vConsole integration notes
+
+- vConsole keeps **raw JS references** (`origData: any`) in its internal log store — not serializable. The pretty-printing happens in Svelte render components, not in the data model.
+- `vConsole.log.log()` / `.info()` / `.warn()` / `.error()` write to the Log panel **only** (no browser console echo) — this prevents infinite loops when the bridge is also active.
+- `vConsole.hideSwitch()` hides the floating toggle button; `vConsole.show()` opens the panel. We control visibility from the drawer tab, not vConsole's own UI.
+- CSS overrides in template.html force `#__vconsole` into relative positioning to fill `#console-container` instead of using vConsole's default fixed overlay.

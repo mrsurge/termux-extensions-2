@@ -539,6 +539,106 @@
     display: flex;
     flex-direction: column;
   }
+
+  /* Drawer tab bar (Terminal | Console) */
+  .drawer-tab-bar {
+    display: flex;
+    gap: 0;
+    background: var(--bg, #0b0f1a);
+    border-bottom: 1px solid var(--border, #333);
+    flex-shrink: 0;
+  }
+  .drawer-tab {
+    padding: 5px 16px;
+    font-size: 12px;
+    font-family: inherit;
+    color: var(--fg-dim, #6e7681);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .drawer-tab:hover { color: var(--fg, #e6edf3); }
+  .drawer-tab.active {
+    color: var(--fg, #e6edf3);
+    border-bottom-color: var(--accent, #58a6ff);
+  }
+
+  /* Console container */
+  #console-container {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg, #0b0f1a);
+  }
+  #console-container .vc-mask { display: none !important; }
+  #console-container .vc-switch { display: none !important; }
+  /* Make vConsole panel fill the container instead of using fixed positioning */
+  #console-container #__vconsole {
+    position: relative !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: auto !important;
+  }
+  #console-container .vc-panel {
+    position: relative !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    transform: none !important;
+    transition: none !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  #console-container .vc-content {
+    flex: 1 !important;
+    min-height: 0 !important;
+    overflow: auto !important;
+  }
+  #console-container .vc-tabbar {
+    flex-shrink: 0 !important;
+  }
+
+  /* Console header bar (origin dropdown + controls) */
+  .console-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 8px;
+    background: var(--bg, #0b0f1a);
+    border-bottom: 1px solid var(--border, #333);
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+  .console-header .fe-menu { position: relative; }
+  .console-header .fe-menu-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    min-width: 80px;
+    text-align: left;
+  }
+  .console-header .fe-dropdown {
+    min-width: 140px;
+    top: calc(100% + 2px);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .console-header .console-clear-btn {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--border, #333);
+    color: var(--fg-dim, #6e7681);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .console-header .console-clear-btn:hover {
+    color: var(--fg, #e6edf3);
+    border-color: var(--fg-dim, #6e7681);
+  }
   .terminal-drawer.open {
     transform: translateY(0);
   }
@@ -2105,6 +2205,7 @@
         <div class="fe-dd-item" id="mi-track-edits" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Auto-Jump to Edits</span></div>
         <div class="fe-dd-item" id="mi-toggle-autosave" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Save</span></div>
         <div class="fe-dd-item" id="mi-toggle-terminal"><span>Toggle Terminal</span><span class="fe-kbd">Ctrl/Cmd+`</span></div>
+        <div class="fe-dd-item" id="mi-toggle-console"><span>Toggle Console</span></div>
         <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
         <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
       </div>
@@ -2135,7 +2236,11 @@
 
   <!-- Terminal Drawer -->
   <div id="terminal-drawer" class="terminal-drawer">
-    <div class="terminal-header">
+    <div class="drawer-tab-bar">
+      <button class="drawer-tab active" data-tab="terminal">Terminal</button>
+      <button class="drawer-tab" data-tab="console">Console</button>
+    </div>
+    <div class="terminal-header" data-drawer-panel="terminal">
       <div class="terminal-shell-dropdown">
         <button id="terminal-shell-toggle" class="terminal-shell-toggle" aria-haspopup="listbox" aria-expanded="false">Terminal</button>
         <div id="terminal-shell-menu" class="terminal-shell-menu" role="listbox" aria-label="Terminal shells"></div>
@@ -2148,6 +2253,15 @@
       <button id="terminal-new" title="New terminal" aria-label="New terminal">＋</button>
     </div>
     <div id="terminal-container"></div>
+    <div id="console-header" class="console-header" data-drawer-panel="console" style="display:none;">
+      <span style="color:var(--fg-dim,#6e7681);">Source:</span>
+      <div class="fe-menu" id="console-origin-menu">
+        <button class="fe-menu-btn" id="console-origin-toggle" aria-haspopup="listbox" aria-expanded="false">All</button>
+        <div id="console-origin-dd" class="fe-dropdown" role="listbox" aria-label="Console origin"></div>
+      </div>
+      <button class="console-clear-btn" id="console-clear-btn" title="Clear console">Clear</button>
+    </div>
+    <div id="console-container" data-drawer-panel="console" style="display:none; width:100%; height:100%; overflow:auto;"></div>
   </div>
 
   <!-- Resize handle for agent (desktop only) -->

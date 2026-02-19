@@ -15,6 +15,8 @@ import { initAgentDrawer } from './extensions/chat_drawer_extension/static/js/ag
 import { initAgentIframe } from './extensions/chat_drawer_extension/static/js/agent_iframe.js';
 import ReconnectingWebSocket from './static/js/reconnecting_websocket.js'; // used by other WS helpers (not explorer)
 import { initLspModal } from './static/js/lsp-modal/index.js';
+import { createConsoleDrawer } from './static/js/console.js';
+import { initConsoleBridge } from './static/js/console_bridge.js';
 
 function ensureSocketIoLoaded() {
   if (window.io) return Promise.resolve(window.io);
@@ -24,6 +26,18 @@ function ensureSocketIoLoaded() {
     script.async = true;
     script.onload = () => resolve(window.io);
     script.onerror = () => reject(new Error('Failed to load Socket.IO client'));
+    document.head.appendChild(script);
+  });
+}
+
+function ensureVConsoleLoaded() {
+  if (window.VConsole) return Promise.resolve(window.VConsole);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = '/apps/file_editor_cm6/static/vendor/vconsole/vconsole.min.js';
+    script.async = true;
+    script.onload = () => resolve(window.VConsole);
+    script.onerror = () => reject(new Error('Failed to load vConsole'));
     document.head.appendChild(script);
   });
 }
@@ -292,61 +306,6 @@ async function resolveAgentIframeSettings(uiPrefs) {
   const isDefaultCodexTarget = noProto === '127.0.0.1:12359/codex-agent';
   return { enabled, url, hideDrawerHeader: isDefaultCodexTarget };
 }
-
-// =============================================================================
-// Debug Console WebSocket - forwards ALL console output to server file
-// =============================================================================
-let _debugWs = null;
-let _debugWsReady = false;
-const _originalConsole = {
-  log: console.log.bind(console),
-  warn: console.warn.bind(console),
-  error: console.error.bind(console),
-  info: console.info.bind(console),
-};
-
-function initDebugConsole() {
-  const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  // Use the framework's WebSocket proxy for apps
-  const wsUrl = `${wsProto}//${window.location.host}/ws/app/file_editor_cm6/ws/debug_console`;
-  try {
-    _debugWs = new WebSocket(wsUrl);
-    _debugWs.onopen = () => { _debugWsReady = true; };
-    _debugWs.onclose = () => { _debugWsReady = false; };
-    _debugWs.onerror = () => { _debugWsReady = false; };
-  } catch (e) {
-    // Silent fail
-  }
-}
-
-function sendToDebugWs(level, args) {
-  if (!_debugWsReady || !_debugWs) return;
-  try {
-    const msg = JSON.stringify({
-      ts: Date.now(),
-      level,
-      args: args.map(a => {
-        try {
-          return typeof a === 'object' ? JSON.stringify(a) : String(a);
-        } catch {
-          return String(a);
-        }
-      })
-    });
-    _debugWs.send(msg);
-  } catch (e) {
-    // Silent fail
-  }
-}
-
-// Override console methods
-console.log = (...args) => { _originalConsole.log(...args); sendToDebugWs('log', args); };
-console.warn = (...args) => { _originalConsole.warn(...args); sendToDebugWs('warn', args); };
-console.error = (...args) => { _originalConsole.error(...args); sendToDebugWs('error', args); };
-console.info = (...args) => { _originalConsole.info(...args); sendToDebugWs('info', args); };
-
-// Initialize debug console
-initDebugConsole();
 
 let explorerSocket = null;
 const explorerPending = [];
@@ -1015,6 +974,9 @@ function connectUIIPC() {
         document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       }
     });
+
+    // Console bridge — reuse this socket, no second connection
+    initConsoleBridge({ workerId: 'main_page', socket: uiIpcSocket });
   }).catch((err) => {
     console.warn('[UI_IPC] connect failed', err);
   });
@@ -5634,11 +5596,62 @@ const terminal = createTerminalDrawer({
   onReady: () => console.log('Terminal drawer ready'),
 });
 
+// Initialize console drawer (tab alongside terminal in the drawer)
+const consoleDrawer = createConsoleDrawer();
+
+// Initialize console bridge — patches console.* on the main page
+// and sends logs to the ui_ipc bus so the console drawer can receive them.
+// Actual init happens inside connectUIIPC() after the socket is created.
+
+// ─── Drawer tab switching (Terminal ↔ Console) ────────────────
+{
+  const tabBar = document.querySelector('.drawer-tab-bar');
+  const terminalHeader = document.querySelector('.terminal-header');
+  const terminalContainer = document.getElementById('terminal-container');
+  const consoleContainer = document.getElementById('console-container');
+
+  if (tabBar) {
+    tabBar.addEventListener('click', (e) => {
+      const tab = e.target.closest('.drawer-tab');
+      if (!tab) return;
+      const target = tab.dataset.tab;
+
+      // Update active tab
+      tabBar.querySelectorAll('.drawer-tab').forEach(t => t.classList.toggle('active', t === tab));
+
+      if (target === 'terminal') {
+        if (terminalHeader) terminalHeader.style.display = '';
+        if (terminalContainer) terminalContainer.style.display = '';
+        if (consoleContainer) consoleContainer.style.display = 'none';
+        consoleDrawer.hide();
+      } else if (target === 'console') {
+        if (terminalHeader) terminalHeader.style.display = 'none';
+        if (terminalContainer) terminalContainer.style.display = 'none';
+        consoleDrawer.show();
+      }
+    });
+  }
+}
+
 // Bind terminal toggle menu item
 const miToggleTerminal = requireEl('#mi-toggle-terminal');
 bindMenuToggle(miToggleTerminal, () => {
   terminal.toggle();
 });
+
+// Bind console toggle menu item (opens drawer to console tab)
+const miToggleConsole = document.getElementById('mi-toggle-console');
+if (miToggleConsole) {
+  bindMenuToggle(miToggleConsole, () => {
+    const drawer = document.getElementById('terminal-drawer');
+    const isOpen = drawer && drawer.classList.contains('open');
+    // Switch to console tab
+    const consoleTab = document.querySelector('.drawer-tab[data-tab="console"]');
+    if (consoleTab) consoleTab.click();
+    // Open the drawer if it's closed
+    if (!isOpen) terminal.toggle();
+  });
+}
 
 // NEW: Font scale radio buttons
 const miFontSmall = document.getElementById('mi-font-small');
