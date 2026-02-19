@@ -1,14 +1,14 @@
 {
   "name": "Code TE2",
   "id": "file_editor_cm6",
-  "icon_emoji": "\ud83d\udcd1",
+  "icon_src": "/static/CODE_TE2.png",
   "version": "0.1.0",
   "description": "A full-page CodeMirror 6 editor running inside the NiceGUI shell.",
   "author": "mrSurge",
   "entrypoints": {
     "backend_blueprint": "main.py",
     "frontend_template": "template.html",
-    "frontend_script": "main.js?v=ws_sio_1"
+    "frontend_script": "main.js?v=vconsole_3"
   },
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"

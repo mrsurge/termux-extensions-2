@@ -47,6 +47,18 @@ export function createConsoleDrawer(options = {}) {
     return load.then((VC) => {
       if (vConsoleInstance) return vConsoleInstance;
 
+      // Save console methods BEFORE vConsole patches them.
+      // At this point they are our bridge wrappers — restoring after
+      // vConsole init prevents vConsole's own capture layer so logs
+      // only arrive through the socket round-trip (no duplicates).
+      const saved = {
+        log: console.log,
+        info: console.info,
+        warn: console.warn,
+        error: console.error,
+        debug: console.debug,
+      };
+
       vConsoleInstance = new VC({
         target: container,
         theme: 'dark',
@@ -57,14 +69,83 @@ export function createConsoleDrawer(options = {}) {
         defaultPlugins: ['system'],
       });
 
+      // Restore bridge wrappers — removes vConsole's capture layer
+      console.log = saved.log;
+      console.info = saved.info;
+      console.warn = saved.warn;
+      console.error = saved.error;
+      console.debug = saved.debug;
+
       vConsoleInstance.hideSwitch();
       vConsoleInstance.show();
+
+      // Monkey-patch vConsole's evalCommand to route through our socket
+      // instead of doing local eval. This makes the command bar target
+      // whichever worker is selected in the origin dropdown.
+      _patchEvalCommand();
 
       return vConsoleInstance;
     }).catch((err) => {
       console.warn('[console] failed to load vConsole:', err);
       return null;
     });
+  }
+
+  function _patchEvalCommand() {
+    // Try multiple paths to find the log model singleton
+    let model = null;
+
+    // Path 1: pluginList dict
+    const logPlugin = vConsoleInstance && vConsoleInstance.pluginList &&
+      vConsoleInstance.pluginList['default'];
+    if (logPlugin && logPlugin.model) {
+      model = logPlugin.model;
+    }
+
+    // Path 2: vConsole.log exporter has a .model ref
+    if (!model && vConsoleInstance && vConsoleInstance.log && vConsoleInstance.log.model) {
+      model = vConsoleInstance.log.model;
+    }
+
+    if (!model || typeof model.evalCommand !== 'function') {
+      console.warn('[console] could not patch evalCommand — remote eval unavailable');
+      return;
+    }
+
+    const origEval = model.evalCommand.bind(model);
+
+    model.evalCommand = function(cmd) {
+      const target = activeFilter === 'all' ? 'main_page' : activeFilter;
+
+      // Show the input in the log panel
+      model.addLog({ type: 'log', origData: [cmd] }, { cmdType: 'input' });
+
+      if (!socket || !socket.connected) {
+        // Fallback to local eval if no socket
+        origEval(cmd);
+        return;
+      }
+
+      const reqId = crypto.randomUUID();
+      socket.emit('console:eval', { targetWorkerId: target, reqId, code: cmd });
+
+      // Listen for the result
+      const handler = (res) => {
+        if (!res || res.reqId !== reqId) return;
+        socket.off('console:evalResult', handler);
+        clearTimeout(timeout);
+        if (res.ok) {
+          model.addLog({ type: 'log', origData: [res.value] }, { cmdType: 'output' });
+        } else {
+          model.addLog({ type: 'error', origData: [res.error] }, { cmdType: 'output' });
+        }
+      };
+      const timeout = setTimeout(() => {
+        socket.off('console:evalResult', handler);
+        model.addLog({ type: 'error', origData: ['eval timeout (10s)'] }, { cmdType: 'output' });
+      }, 10000);
+      socket.on('console:evalResult', handler);
+    };
   }
 
   // ─── Origin dropdown ───────────────────────────────────────
@@ -76,19 +157,33 @@ export function createConsoleDrawer(options = {}) {
     for (const id of items) {
       const el = document.createElement('div');
       el.className = 'fe-dd-item';
+      el.dataset.checkable = 'true';
       el.dataset.value = id;
       el.textContent = id === 'all' ? 'All' : id;
       if (id === activeFilter) el.classList.add('fe-menu-item-checked');
-      el.addEventListener('click', () => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const prev = activeFilter;
         activeFilter = id;
         if (originToggle) originToggle.textContent = id === 'all' ? 'All' : id;
         originDropdown.classList.remove('show');
-        // update checked state
         originDropdown.querySelectorAll('.fe-dd-item').forEach(item => {
           item.classList.toggle('fe-menu-item-checked', item.dataset.value === id);
         });
+        // Re-request full transcript so filter applies to history
+        if (prev !== id) _replayFromDisk();
       });
       originDropdown.appendChild(el);
+    }
+  }
+
+  function _replayFromDisk() {
+    // Clear current display, then ask server to re-stream the log
+    if (vConsoleInstance && vConsoleInstance.log) {
+      vConsoleInstance.log.clear();
+    }
+    if (socket && socket.connected) {
+      socket.emit('console:replay', {});
     }
   }
 
@@ -103,11 +198,18 @@ export function createConsoleDrawer(options = {}) {
     originToggle.addEventListener('click', (e) => {
       e.stopPropagation();
       const isOpen = originDropdown.classList.contains('show');
-      // close any open fe-dropdowns first
       document.querySelectorAll('.fe-dropdown.show').forEach(d => d.classList.remove('show'));
-      if (!isOpen) originDropdown.classList.add('show');
+      if (!isOpen) {
+        _rebuildOriginDropdown();
+        originDropdown.classList.add('show');
+      }
     });
-    document.addEventListener('click', () => originDropdown.classList.remove('show'));
+    // Close on any outside click
+    document.addEventListener('click', (e) => {
+      if (!originDropdown.contains(e.target) && e.target !== originToggle) {
+        originDropdown.classList.remove('show');
+      }
+    });
   }
 
   // Wire clear button
@@ -139,6 +241,12 @@ export function createConsoleDrawer(options = {}) {
 
     socket.on('console:log', _handleLog);
     socket.on('console:evalResult', _handleEvalResult);
+
+    // Server pushes the worker list on register changes
+    socket.on('console:workers', (workers) => {
+      if (!Array.isArray(workers)) return;
+      for (const w of workers) _trackWorker(w);
+    });
   }
 
   // ─── Log rendering via vConsole plugin API ────────────────
@@ -181,8 +289,10 @@ export function createConsoleDrawer(options = {}) {
 
   function evalInWorker(targetWorkerId, code) {
     if (!socket || !socket.connected) return Promise.reject(new Error('not connected'));
+    // Default to main_page when no specific target or "all" selected
+    const target = targetWorkerId || (activeFilter === 'all' ? 'main_page' : activeFilter);
     const reqId = crypto.randomUUID();
-    socket.emit('console:eval', { targetWorkerId, reqId, code });
+    socket.emit('console:eval', { targetWorkerId: target, reqId, code });
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         _evalCallbacks.delete(reqId);

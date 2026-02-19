@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException, WebSocket, Body
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from app.libs.app_manager import ensure_app_running
 from app.libs import app_lifecycle
+from app.libs import app_manager
 from framework_shells import FrameworkShellManager, get_manager as _get_framework_shell_manager
 
 async def get_framework_shell_manager() -> FrameworkShellManager:
@@ -130,6 +131,8 @@ async def get_running_apps(manager: FrameworkShellManager = Depends(get_framewor
         if manifest_data:
             app['name'] = manifest_data.get('name')
             app['icon_emoji'] = manifest_data.get('icon_emoji')
+            app['icon_src'] = manifest_data.get('icon_src')
+            app['_dir'] = manifest_data.get('_dir')
         augmented_apps.append(app)
         
     return {"ok": True, "data": augmented_apps}
@@ -141,6 +144,21 @@ def get_apps():
     The actual loading and blueprint registration still happens at startup in app/main.py.
     """
     return {"ok": True, "data": get_loaded_apps()}
+
+
+@apps_bp.post('/api/apps/reload')
+def reload_apps():
+    """
+    Reload app manifests from disk without re-registering services/routers.
+    Safe for launcher refresh use-cases where manifest metadata changed.
+    """
+    from app.extensions.apps import loader as apps_loader
+    import app.main as main_app
+
+    manifests = apps_loader.load_apps()
+    main_app.loaded_apps = manifests
+    app_manager._LOADED_APPS = manifests
+    return {"ok": True, "data": {"count": len(manifests)}}
 
 @apps_bp.get("/app/{app_id}", response_class=HTMLResponse)
 async def app_shell(app_id: str, request: Request):

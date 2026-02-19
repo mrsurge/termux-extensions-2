@@ -61,6 +61,15 @@ async def _replay_to_sid(ns, sid):
         pass
 
 
+# ---------- worker registry ----------
+_registered_workers: set[str] = set()
+
+
+async def _broadcast_workers(ns):
+    """Emit the current worker list to all drawers."""
+    await ns.emit("console:workers", sorted(_registered_workers), room="console:drawers")
+
+
 # ---------- event handlers ----------
 
 async def on_console_register(ns, sid, data):
@@ -77,11 +86,28 @@ async def on_console_register(ns, sid, data):
     if role == "drawer":
         await ns.enter_room(sid, "console:drawers")
         print(f"[console] drawer registered sid={sid} — replaying log", flush=True)
+        # Send current worker list first, then replay logs
+        await ns.emit("console:workers", sorted(_registered_workers), to=sid)
         await _replay_to_sid(ns, sid)
     elif worker_id:
         await ns.enter_room(sid, f"console:{worker_id}")
         await ns.save_session(sid, {"consoleWorkerId": worker_id})
+        _registered_workers.add(worker_id)
         print(f"[console] worker registered sid={sid} workerId={worker_id}", flush=True)
+        await _broadcast_workers(ns)
+
+
+async def on_console_disconnect(ns, sid):
+    """Remove worker from registry on disconnect and notify drawers."""
+    try:
+        session = await ns.get_session(sid)
+        worker_id = session.get("consoleWorkerId") if session else None
+    except Exception:
+        worker_id = None
+    if worker_id and worker_id in _registered_workers:
+        _registered_workers.discard(worker_id)
+        print(f"[console] worker disconnected sid={sid} workerId={worker_id}", flush=True)
+        await _broadcast_workers(ns)
 
 
 async def on_console_log(ns, sid, data):
@@ -90,6 +116,11 @@ async def on_console_log(ns, sid, data):
         return
     _append_log(data)
     await ns.emit("console:log", data, room="console:drawers", skip_sid=sid)
+
+
+async def on_console_replay(ns, sid, data):
+    """Drawer requests a full transcript replay (e.g. after filter change)."""
+    await _replay_to_sid(ns, sid)
 
 
 async def on_console_eval(ns, sid, data):

@@ -34,6 +34,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
 
     async def on_disconnect(self, sid):
         print(f"[ui_ipc] disconnect sid={sid}", flush=True)
+        await console_ws.on_console_disconnect(self, sid)
 
     async def on_ui_event(self, sid, data):
         """Generic UI event relay.
@@ -59,3 +60,6 @@ class UIIPCNamespace(socketio.AsyncNamespace):
 
     async def on_console_evalResult(self, sid, data):
         await console_ws.on_console_eval_result(self, sid, data)
+
+    async def on_console_replay(self, sid, data):
+        await console_ws.on_console_replay(self, sid, data)

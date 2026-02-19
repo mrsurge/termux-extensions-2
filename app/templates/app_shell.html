@@ -65,6 +65,7 @@
             border-bottom: 1px solid var(--border);
         }
         .app-modal-header h3 { margin: 0; }
+        .app-modal-actions { display: flex; align-items: center; gap: 8px; }
         .app-modal-body {
             padding: 15px;
             overflow-y: auto;
@@ -81,7 +82,19 @@
             border-radius: 2px;
             border: 1px solid var(--border);
         }
-        .recents-icon { font-size: 1.5rem; }
+        .recents-icon {
+            font-size: 1.5rem;
+            width: 36px;
+            height: 36px;
+            display: grid;
+            place-items: center;
+        }
+        .recents-icon-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
         .recents-info { flex: 1; }
         .recents-name { font-weight: 600; }
         .recents-stats {
@@ -199,7 +212,10 @@
         <div class="app-modal-content">
             <div class="app-modal-header">
                 <h3>Recent Apps</h3>
-                <button id="recents-close-btn" class="app-btn">&times;</button>
+                <div class="app-modal-actions">
+                    <button id="recents-settings-btn" class="app-btn" title="Open Settings">🎛️</button>
+                    <button id="recents-close-btn" class="app-btn">&times;</button>
+                </div>
             </div>
             <div id="recents-list" class="app-modal-body"></div>
         </div>
@@ -370,6 +386,7 @@
         const recentsModal = document.getElementById('recents-modal');
         const recentsList = document.getElementById('recents-list');
         const recentsCloseBtn = document.getElementById('recents-close-btn');
+        const recentsSettingsBtn = document.getElementById('recents-settings-btn');
 
 
         let isLocked = false; // Assume default is unlocked
@@ -419,6 +436,27 @@
                 if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
                 return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
             };
+            const withGvNative = (url) => {
+                try {
+                    if (!document.documentElement.classList.contains('gv-native')) return url;
+                    const u = new URL(url, location.origin);
+                    u.searchParams.set('gv_native', '1');
+                    return u.pathname + u.search;
+                } catch (e) {
+                    return url;
+                }
+            };
+            const resolveIconSrc = (app) => {
+                const raw = typeof app.icon_src === 'string' ? app.icon_src.trim() : '';
+                if (!raw) return '';
+                if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('/')) {
+                    return raw;
+                }
+                if (app._dir) {
+                    return `/apps/${app._dir}/${raw}`;
+                }
+                return raw;
+            };
 
             btnRecents.addEventListener('click', async () => {
                 try {
@@ -436,17 +474,6 @@
                             card.style.position = 'relative'; // For positioning the quit button
 
                             // Add main click listener for app switching
-                            const withGvNative = (url) => {
-                                try {
-                                    if (!document.documentElement.classList.contains('gv-native')) return url;
-                                    const u = new URL(url, location.origin);
-                                    u.searchParams.set('gv_native', '1');
-                                    return u.pathname + u.search;
-                                } catch (e) {
-                                    return url;
-                                }
-                            };
-
                             card.addEventListener('click', () => {
                                 const targetAppId = card.dataset.appId;
                                 if (targetAppId) {
@@ -457,7 +484,7 @@
 
                             card.innerHTML = `
                                 <button class="recents-card-quit-btn" title="Quit App">❌</button>
-                                <div class="recents-icon">${app.icon_emoji || '⚙️'}</div>
+                                <div class="recents-icon"></div>
                                 <div class="recents-info">
                                     <div class="recents-name">${app.name || app.app_id}</div>
                                     <div class="recents-stats">
@@ -468,6 +495,22 @@
                                 </div>
                                 <button class="recents-card-lock-btn" title="Toggle Lock">🔒</button>
                             `;
+                            const iconContainer = card.querySelector('.recents-icon');
+                            const iconSrc = resolveIconSrc(app);
+                            if (iconContainer) {
+                                if (iconSrc) {
+                                    const img = document.createElement('img');
+                                    img.className = 'recents-icon-img';
+                                    img.alt = `${app.name || app.app_id || 'app'} icon`;
+                                    img.src = iconSrc;
+                                    img.loading = 'lazy';
+                                    img.decoding = 'async';
+                                    img.referrerPolicy = 'no-referrer';
+                                    iconContainer.appendChild(img);
+                                } else {
+                                    iconContainer.textContent = app.icon_emoji || '⚙️';
+                                }
+                            }
                             recentsList.appendChild(card);
                         });
 
@@ -531,6 +574,10 @@
 
             recentsCloseBtn.addEventListener('click', () => {
                 recentsModal.style.display = 'none';
+            });
+            recentsSettingsBtn?.addEventListener('click', () => {
+                recentsModal.style.display = 'none';
+                window.location.href = withGvNative('/app/settings');
             });
         }
 

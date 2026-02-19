@@ -94,7 +94,16 @@ export default function(container) {
     }
   }
 
-  refreshBtn?.addEventListener('click', loadApps);
+  refreshBtn?.addEventListener('click', async () => {
+    try {
+      await window.teFetch('/api/apps/reload', { method: 'POST' });
+      await loadApps();
+      window.teUI?.toast?.('App list refreshed');
+    } catch (e) {
+      console.error('Failed to refresh app manifests:', e);
+      window.teUI?.toast?.(`Refresh failed: ${e.message || e}`);
+    }
+  });
 
   // Initial fetch
   loadApps();

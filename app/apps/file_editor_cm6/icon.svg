@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7bb3ff"/>
+      <stop offset="100%" stop-color="#5a94ee"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#b8cbe7"/>
+      <stop offset="100%" stop-color="#b0c3df"/>
+    </linearGradient>
+    <linearGradient id="code" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#71a7ff"/>
+      <stop offset="100%" stop-color="#4d87eb"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="20" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0.55 0 1 0 0 0.68 0 0 1 0 1 0 0 0 0.5 0"/>
+    </filter>
+  </defs>
+
+  <rect x="36" y="36" width="440" height="440" rx="70" fill="#8ab6ff" opacity="0.2" filter="url(#glow)"/>
+
+  <rect x="64" y="64" width="384" height="384" rx="56" fill="url(#bg)"/>
+  <rect x="64" y="160" width="384" height="288" rx="0" fill="url(#panel)"/>
+
+  <rect x="106" y="94" width="68" height="28" rx="14" fill="#b8d4fb"/>
+  <rect x="202" y="94" width="68" height="28" rx="14" fill="#b8d4fb"/>
+
+  <path d="M166 276 L122 312 L166 348" fill="none" stroke="url(#code)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M346 276 L390 312 L346 348" fill="none" stroke="url(#code)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M286 258 L238 366" fill="none" stroke="url(#code)" stroke-width="22" stroke-linecap="round"/>
+</svg>

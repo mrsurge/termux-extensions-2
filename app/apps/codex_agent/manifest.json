@@ -1,7 +1,6 @@
 {
   "name": "Codex Agent",
   "id": "codex_agent",
-  "icon_emoji": "🤖",
   "icon_src": "icon.svg",
   "version": "0.1.0",
   "description": "Hosts the Codex Agent UI inside an iframe.",

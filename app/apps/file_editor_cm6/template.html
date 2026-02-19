@@ -572,6 +572,7 @@
     min-height: 0;
     overflow: hidden;
     background: var(--bg, #0b0f1a);
+    z-index: 0;
   }
   #console-container .vc-mask { display: none !important; }
   #console-container .vc-switch { display: none !important; }
@@ -580,7 +581,7 @@
     position: relative !important;
     width: 100% !important;
     height: 100% !important;
-    z-index: auto !important;
+    z-index: 0 !important;
   }
   #console-container .vc-panel {
     position: relative !important;
@@ -611,6 +612,8 @@
     border-bottom: 1px solid var(--border, #333);
     flex-shrink: 0;
     font-size: 12px;
+    position: relative;
+    z-index: 10;
   }
   .console-header .fe-menu { position: relative; }
   .console-header .fe-menu-btn {
@@ -624,6 +627,7 @@
     top: calc(100% + 2px);
     max-height: 200px;
     overflow-y: auto;
+    z-index: 9999 !important;
   }
   .console-header .console-clear-btn {
     margin-left: auto;
