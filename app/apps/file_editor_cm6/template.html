@@ -2782,8 +2782,13 @@
       <button class="fe-btn" id="editor-settings-close" aria-label="Close">✕</button>
     </div>
     <div class="fe-modal-body">
-      <div style="font-weight: 600; margin-bottom: 6px;">Theme (global)</div>
-      <div id="editor-settings-theme-list"></div>
+      <div id="editor-settings-theme-strip" style="display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:10px; cursor:pointer;">
+        <div style="flex:1;">
+          <div style="font-weight:600;">Color Themes</div>
+          <div id="editor-settings-theme-summary" style="font-size:12px; opacity:0.7; margin-top:2px;">Loading…</div>
+        </div>
+        <span style="opacity:0.5; font-size:1.2rem;">›</span>
+      </div>
 
       <div class="fe-dd-separator" style="margin: 12px 0;"></div>
 
@@ -2961,6 +2966,20 @@
           <button class="fe-btn fe-btn-primary" id="agent-shortcut-save">Save</button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Color Themes Modal (2nd level — theme selection) -->
+<div id="editor-themes-modal" class="fe-modal" aria-hidden="true" style="z-index: 345;">
+  <div class="fe-modal-card" style="max-width: 760px;">
+    <div class="fe-modal-header">
+      <strong>Color Themes</strong>
+      <span style="flex:1"></span>
+      <button class="fe-btn" id="editor-themes-close" aria-label="Close">✕</button>
+    </div>
+    <div class="fe-modal-body">
+      <div id="editor-themes-list"></div>
     </div>
   </div>
 </div>

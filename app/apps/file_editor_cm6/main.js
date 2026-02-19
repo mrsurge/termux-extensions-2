@@ -1464,7 +1464,11 @@ const editorSettingsModal = requireEl('#editor-settings-modal');
 const editorSettingsClose = requireEl('#editor-settings-close');
 const editorSettingsExtStrip = requireEl('#editor-settings-ext-strip');
 const editorSettingsExtSummary = requireEl('#editor-settings-ext-summary');
-const editorSettingsThemeList = requireEl('#editor-settings-theme-list');
+const editorSettingsThemeStrip = requireEl('#editor-settings-theme-strip');
+const editorSettingsThemeSummary = requireEl('#editor-settings-theme-summary');
+const editorThemesModal = requireEl('#editor-themes-modal');
+const editorThemesClose = requireEl('#editor-themes-close');
+const editorThemesList = requireEl('#editor-themes-list');
 const editorSettingsAgentIframeToggle = requireEl('#editor-settings-agent-iframe');
 const editorSettingsAgentIframeUrlInput = requireEl('#editor-settings-agent-iframe-url');
 const editorSettingsAgentToggleText = requireEl('#editor-settings-agent-toggle-text');
@@ -1737,6 +1741,112 @@ miEditorSettings.addEventListener('click', () => {
   openEditorSettingsModal();
 });
 
+// --- Color Themes Modal (2nd level) ---
+function openEditorThemesModal() {
+  editorThemesModal.classList.add('show');
+  editorThemesModal.setAttribute('aria-hidden', 'false');
+  void refreshEditorThemesModal();
+}
+function closeEditorThemesModal() {
+  editorThemesModal.classList.remove('show');
+  editorThemesModal.setAttribute('aria-hidden', 'true');
+}
+editorThemesClose.addEventListener('click', closeEditorThemesModal);
+editorThemesModal.addEventListener('click', (ev) => {
+  if (ev.target === editorThemesModal) closeEditorThemesModal();
+});
+editorSettingsThemeStrip.addEventListener('click', () => {
+  openEditorThemesModal();
+});
+
+async function refreshEditorThemesModal() {
+  editorThemesList.textContent = 'Loading…';
+  let themes = [];
+  try {
+    const res = await fetch('/api/app/file_editor_cm6/ui/monaco_editor/available_themes', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      themes = data?.themes || [];
+    }
+  } catch (_) {}
+
+  // Also add VS Code built-in fallbacks
+  themes.push({ id: 'vs-dark', label: 'VS Code Dark', uiTheme: 'vs-dark', source: 'builtin', sourceLabel: 'Built-in' });
+  themes.push({ id: 'vs', label: 'VS Code Light', uiTheme: 'vs', source: 'builtin', sourceLabel: 'Built-in' });
+
+  const currentTheme = editorViewState?.theme || 'github-dark-default';
+  editorThemesList.innerHTML = '';
+
+  // Group by source
+  const vendored = themes.filter((t) => t.source === 'vendored');
+  const fromExts = themes.filter((t) => t.source === 'extension');
+  const builtins = themes.filter((t) => t.source === 'builtin');
+
+  function renderSection(title, items) {
+    if (!items.length) return;
+    const heading = document.createElement('div');
+    heading.style.cssText = 'font-weight:600; margin:12px 0 8px; font-size:13px; opacity:0.7; text-transform:uppercase; letter-spacing:0.5px;';
+    heading.textContent = title;
+    editorThemesList.appendChild(heading);
+
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px;';
+
+    items.forEach((t) => {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--border, #333); border-radius:8px; cursor:pointer;';
+
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = 'te2-theme-radio';
+      input.value = t.id;
+      input.checked = String(currentTheme) === String(t.id);
+      if (input.checked) {
+        row.style.borderColor = 'var(--accent, #58a6ff)';
+        row.style.background = 'rgba(88, 166, 255, 0.08)';
+      }
+
+      const isDark = (t.uiTheme || '').includes('dark') || (t.uiTheme || '').includes('hc-black');
+      const swatch = document.createElement('span');
+      swatch.style.cssText = `display:inline-block; width:16px; height:16px; border-radius:50%; border:1px solid var(--border,#444); background:${isDark ? '#1a1a2e' : '#f0f0f0'};`;
+
+      const text = document.createElement('div');
+      text.style.flex = '1';
+      text.textContent = t.label;
+
+      input.addEventListener('change', async () => {
+        if (!input.checked) return;
+        const ok = await updatePreference('theme', t.id);
+        if (!ok) host.toast('Failed to change theme');
+        try { editorViewState = editorViewState || {}; editorViewState.theme = t.id; } catch {}
+        // Update strip summary
+        editorSettingsThemeSummary.textContent = t.label;
+        // Highlight selected row
+        editorThemesList.querySelectorAll('label').forEach((l) => {
+          l.style.borderColor = 'var(--border, #333)';
+          l.style.background = '';
+        });
+        row.style.borderColor = 'var(--accent, #58a6ff)';
+        row.style.background = 'rgba(88, 166, 255, 0.08)';
+      });
+
+      row.appendChild(input);
+      row.appendChild(swatch);
+      row.appendChild(text);
+      grid.appendChild(row);
+    });
+    editorThemesList.appendChild(grid);
+  }
+
+  renderSection('Bundled', vendored);
+  renderSection('From Extensions', fromExts);
+  renderSection('Built-in', builtins);
+
+  if (!themes.length) {
+    editorThemesList.textContent = 'No themes available';
+  }
+}
+
 function openEditorExtManagerModal() {
   editorExtManagerModal.classList.add('show');
   editorExtManagerModal.setAttribute('aria-hidden', 'false');
@@ -1928,86 +2038,22 @@ editorExtManagerInstallBtn.addEventListener('click', async () => {
 });
 
 async function refreshEditorSettingsModal() {
-  // Themes
-  editorSettingsThemeList.textContent = 'Loading…';
-
-  let vscodeThemes = [];
+  // Theme strip summary
+  const currentTheme = editorViewState?.theme || 'github-dark-default';
   try {
-    const themesRes = await vscodeApiCall('vscode.themes.list', {});
-    vscodeThemes = themesRes?.themes || [];
-  } catch (_) {}
-
-  const currentTheme = editorViewState?.theme || 'vs-dark';
-  const themeOptions = [
-    { id: 'te2-dark', label: 'TE2 Dark (GitHub-ish)' },
-    { id: 'te2-light', label: 'TE2 Light (GitHub-ish)' },
-    { id: 'te2-dracula', label: 'TE2 Dracula' },
-    { id: 'github-dark-default', label: 'GitHub Dark Default' },
-    { id: 'github-light-default', label: 'GitHub Light Default' },
-    { id: 'atom-dark', label: 'Atom One Dark' },
-    { id: 'atom-light', label: 'Atom One Light' },
-    { id: 'one-dark-pro', label: 'One Dark Pro' },
-    { id: 'darcula', label: 'Darcula' },
-    { id: 'material-dark', label: 'Material Theme Dark' },
-    { id: 'material-light', label: 'Material Theme Light' },
-    { id: 'monokai-pro', label: 'Monokai Pro' },
-    { id: 'vs-dark', label: 'VS Code Dark' },
-    { id: 'vs', label: 'VS Code Light' },
-  ];
-
-  try {
-    (vscodeThemes || []).forEach((t) => {
-      const tid = String(t?.id || '').trim();
-      if (!tid) return;
-      const label = String(t?.label || tid);
-      const extId = String(t?.extensionId || '').trim();
-      const suffix = extId ? ` — ${extId}` : '';
-      themeOptions.push({
-        id: `vscode:${tid}`,
-        label: `${label}${suffix}`,
-      });
-    });
-  } catch (_) {}
-
-  editorSettingsThemeList.innerHTML = '';
-  const themeWrap = document.createElement('div');
-  themeWrap.style.display = 'grid';
-  themeWrap.style.gridTemplateColumns = 'repeat(auto-fit, minmax(220px, 1fr))';
-  themeWrap.style.gap = '8px';
-
-  themeOptions.forEach((t) => {
-    const row = document.createElement('label');
-    row.style.display = 'flex';
-    row.style.alignItems = 'center';
-    row.style.gap = '10px';
-    row.style.padding = '8px 10px';
-    row.style.border = '1px solid var(--border, #333)';
-    row.style.borderRadius = '8px';
-    row.style.cursor = 'pointer';
-
-    const input = document.createElement('input');
-    input.type = 'radio';
-    input.name = 'te2-theme-radio';
-    input.value = t.id;
-    input.checked = String(currentTheme) === String(t.id);
-
-    const text = document.createElement('div');
-    text.textContent = t.label;
-    text.style.flex = '1';
-
-    row.appendChild(input);
-    row.appendChild(text);
-
-    input.addEventListener('change', async () => {
-      if (!input.checked) return;
-      const ok = await updatePreference('theme', t.id);
-      if (!ok) host.toast('Failed to change theme');
-      try { editorViewState = editorViewState || {}; editorViewState.theme = t.id; } catch {}
-    });
-
-    themeWrap.appendChild(row);
-  });
-  editorSettingsThemeList.appendChild(themeWrap);
+    const res = await fetch('/api/app/file_editor_cm6/ui/monaco_editor/available_themes', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      const themes = data?.themes || [];
+      const active = themes.find((t) => t.id === currentTheme);
+      const label = active ? active.label : currentTheme;
+      editorSettingsThemeSummary.textContent = `${label} — ${themes.length} available`;
+    } else {
+      editorSettingsThemeSummary.textContent = currentTheme;
+    }
+  } catch (_) {
+    editorSettingsThemeSummary.textContent = currentTheme;
+  }
 
   // Extension summary for the strip
   try {

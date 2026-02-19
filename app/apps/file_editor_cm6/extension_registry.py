@@ -132,6 +132,19 @@ def _parse_package_json(pkg_path: Path) -> Optional[dict]:
         if gl:
             grammar_langs.append(gl)
 
+    # Theme contributions
+    theme_entries = []
+    for t in contributes.get("themes", []):
+        label = t.get("label", "")
+        ui_theme = t.get("uiTheme", "vs-dark")
+        path_str = t.get("path", "")
+        if label and path_str:
+            theme_entries.append({
+                "label": label,
+                "uiTheme": ui_theme,
+                "path": path_str,
+            })
+
     publisher = data.get("publisher", "vscode")
     name = data.get("name", pkg_path.parent.name)
     ext_id = f"{publisher}.{name}"
@@ -143,6 +156,7 @@ def _parse_package_json(pkg_path: Path) -> Optional[dict]:
         "version": data.get("version", "0.0.0"),
         "languages": lang_ids,
         "grammar_languages": grammar_langs,
+        "themes": theme_entries,
         "configuration_schema": cfg_schema,
         "display_name": data.get("displayName", name),
         "description": data.get("description", ""),
@@ -169,13 +183,14 @@ def _scan_builtin_extensions() -> dict[str, dict]:
             continue
 
         # Only keep language-relevant builtins:
-        # grammar providers, language-features, or those with languages declared
+        # grammar providers, language-features, theme providers, or those with languages declared
         has_langs = bool(parsed["languages"])
         has_grammars = bool(parsed["grammar_languages"])
+        has_themes = bool(parsed.get("themes"))
         is_lang_features = d.name.endswith("-language-features")
         has_config_editing = d.name == "configuration-editing"
 
-        if not (has_langs or has_grammars or is_lang_features or has_config_editing):
+        if not (has_langs or has_grammars or has_themes or is_lang_features or has_config_editing):
             continue
 
         entry = {
@@ -186,6 +201,7 @@ def _scan_builtin_extensions() -> dict[str, dict]:
             "active": True,
             "languages": parsed["languages"],
             "grammar_languages": parsed["grammar_languages"],
+            "themes": parsed.get("themes", []),
             "is_language_features": is_lang_features,
             "display_name": parsed["display_name"],
             "description": parsed["description"],
@@ -237,6 +253,7 @@ def _scan_user_extensions() -> dict[str, dict]:
             "active": True,
             "languages": parsed["languages"] if parsed else [],
             "grammar_languages": parsed["grammar_languages"] if parsed else [],
+            "themes": parsed.get("themes", []) if parsed else [],
             "is_language_features": False,
             "display_name": parsed["display_name"] if parsed else ext_id,
             "description": parsed["description"] if parsed else "",

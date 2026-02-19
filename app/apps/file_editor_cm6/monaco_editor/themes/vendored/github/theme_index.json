@@ -1,0 +1,59 @@
+{
+  "source": "github.github-vscode-theme",
+  "vendored": [
+    {
+      "id": "github-dark-default",
+      "label": "GitHub Dark Default",
+      "uiTheme": "vs-dark",
+      "file": "dark-default.json"
+    },
+    {
+      "id": "github-light-default",
+      "label": "GitHub Light Default",
+      "uiTheme": "vs",
+      "file": "light-default.json"
+    },
+    {
+      "id": "github-dark",
+      "label": "GitHub Dark",
+      "uiTheme": "vs-dark",
+      "file": "dark.json"
+    },
+    {
+      "id": "github-light",
+      "label": "GitHub Light",
+      "uiTheme": "vs",
+      "file": "light.json"
+    },
+    {
+      "id": "github-dark-dimmed",
+      "label": "GitHub Dark Dimmed",
+      "uiTheme": "vs-dark",
+      "file": "dark-dimmed.json"
+    },
+    {
+      "id": "github-dark-high-contrast",
+      "label": "GitHub Dark High Contrast",
+      "uiTheme": "hc-black",
+      "file": "dark-high-contrast.json"
+    },
+    {
+      "id": "github-light-high-contrast",
+      "label": "GitHub Light High Contrast",
+      "uiTheme": "hc-light",
+      "file": "light-high-contrast.json"
+    },
+    {
+      "id": "github-dark-colorblind-beta",
+      "label": "GitHub Dark Colorblind (Beta)",
+      "uiTheme": "vs-dark",
+      "file": "dark-colorblind.json"
+    },
+    {
+      "id": "github-light-colorblind-beta",
+      "label": "GitHub Light Colorblind (Beta)",
+      "uiTheme": "vs",
+      "file": "light-colorblind.json"
+    }
+  ]
+}

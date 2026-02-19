@@ -2231,24 +2231,61 @@
     } catch (_) {}
   }
 
-  function ensureTe2Themes() {
-    // All themes now loaded from code-server extension folder via loadVscodeTextmateThemes().
-    // No hardcoded theme definitions needed.
-  }
+  // ensureTe2Themes / loadOfficialThemes — replaced by loadVscodeTextmateThemes() with dynamic registry.
 
-  // _getThemeJsonUrl removed — legacy static theme JSON no longer served
-  // sanitizeMonacoThemeJson removed — no longer needed without legacy themes
+  // Theme registry: fetched once from the available_themes endpoint.
+  // Maps theme ID → { serveUrl, label, uiTheme, source }.
+  var _themeRegistry = null;
+  var _themeRegistryPromise = null;
 
-  async function loadOfficialThemes() {
-    // All themes now loaded from code-server extension folder via loadVscodeTextmateThemes().
+  async function _ensureThemeRegistry() {
+    if (_themeRegistry) return _themeRegistry;
+    if (_themeRegistryPromise) return _themeRegistryPromise;
+    _themeRegistryPromise = (async function () {
+      try {
+        var res = await fetch(_uiUrl('monaco_editor/available_themes'), { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var data = await res.json();
+        var themes = data && data.themes ? data.themes : [];
+        var reg = {};
+        for (var i = 0; i < themes.length; i++) {
+          var t = themes[i];
+          if (t && t.id && t.serveUrl) reg[t.id] = t;
+        }
+        _themeRegistry = reg;
+        return reg;
+      } catch (e) {
+        console.warn('[MonacoTheme] _ensureThemeRegistry failed', e);
+        _themeRegistry = {};
+        return _themeRegistry;
+      } finally {
+        _themeRegistryPromise = null;
+      }
+    })();
+    return _themeRegistryPromise;
   }
 
   function _getVscodeThemeJsonUrl(themeId) {
     var id = String(themeId || '');
-    // Serve directly from code-server's installed extension themes on disk
-    var csExt = 'github.github-vscode-theme-6.3.5-universal';
-    if (id === 'github-dark-default') return _uiUrl('monaco_editor/cs_themes/' + csExt + '/dark-default.json');
-    if (id === 'github-light-default') return _uiUrl('monaco_editor/cs_themes/' + csExt + '/light-default.json');
+    // Look up in the dynamic theme registry
+    if (_themeRegistry && _themeRegistry[id] && _themeRegistry[id].serveUrl) {
+      return _uiUrl(_themeRegistry[id].serveUrl);
+    }
+    // Fallback: try vendored GitHub theme path directly
+    var vendoredMap = {
+      'github-dark-default': 'dark-default.json',
+      'github-light-default': 'light-default.json',
+      'github-dark': 'dark.json',
+      'github-light': 'light.json',
+      'github-dark-dimmed': 'dark-dimmed.json',
+      'github-dark-high-contrast': 'dark-high-contrast.json',
+      'github-light-high-contrast': 'light-high-contrast.json',
+      'github-dark-colorblind-beta': 'dark-colorblind.json',
+      'github-light-colorblind-beta': 'light-colorblind.json',
+    };
+    if (vendoredMap[id]) {
+      return _uiUrl('monaco_editor/themes/vendored/github/' + vendoredMap[id]);
+    }
     return null;
   }
 
@@ -2690,8 +2727,14 @@
     if (!window.monaco || !window.monaco.editor || !window.monaco.editor.defineTheme) return;
     if (loadVscodeTextmateThemes._promise) return loadVscodeTextmateThemes._promise;
     loadVscodeTextmateThemes._promise = (async function () {
-      var themeIds = ['github-dark-default', 'github-light-default'];
       if (!loadVscodeTextmateThemes._jsonCache) loadVscodeTextmateThemes._jsonCache = {};
+      // Fetch theme registry and load all available themes
+      var reg = await _ensureThemeRegistry();
+      var themeIds = Object.keys(reg);
+      if (!themeIds.length) {
+        // Fallback: try the two essential ones with vendored hardcoded paths
+        themeIds = ['github-dark-default', 'github-light-default'];
+      }
       for (var i = 0; i < themeIds.length; i++) {
         var id = themeIds[i];
         var url = _getVscodeThemeJsonUrl(id);
@@ -2718,7 +2761,14 @@
 
   function _resolveMonacoThemeId(themeKey) {
     try {
-      var t = String(themeKey || '').toLowerCase();
+      var key = String(themeKey || '').trim();
+      // If the theme was loaded from registry, use its ID directly
+      var cache = loadVscodeTextmateThemes._jsonCache || {};
+      if (cache[key]) return key;
+      // Known built-in Monaco themes
+      if (key === 'vs-dark' || key === 'vs' || key === 'hc-black' || key === 'hc-light') return key;
+      // Fallback heuristic
+      var t = key.toLowerCase();
       if (t.includes('light')) return 'github-light-default';
       return 'github-dark-default';
     } catch (_) {
@@ -2732,9 +2782,24 @@
       ensureTe2DiffTheme();
       try { await loadVscodeTextmateThemes(); } catch (_) {}
       var resolvedId = _resolveMonacoThemeId(themeKey);
+      var cache = loadVscodeTextmateThemes._jsonCache || {};
+      // Lazy-load single theme if not yet cached (e.g. installed after initial load)
+      if (!cache[resolvedId]) {
+        var url = _getVscodeThemeJsonUrl(resolvedId);
+        if (url) {
+          try {
+            var res = await fetch(url, { cache: 'no-store' });
+            if (res.ok) {
+              var json = await res.json();
+              cache[resolvedId] = json;
+              var monacoTheme = _vscodeThemeToMonacoTheme(resolvedId, json);
+              window.monaco.editor.defineTheme(resolvedId, monacoTheme);
+            }
+          } catch (_) {}
+        }
+      }
       window.monaco.editor.setTheme(resolvedId);
       // Apply theme to TextMate registry so tokenizeLine2 resolves colors correctly.
-      var cache = loadVscodeTextmateThemes._jsonCache || {};
       if (cache[resolvedId]) {
         tmActiveThemeJson = cache[resolvedId];
         _applyThemeToTextmateRegistry(tmActiveThemeJson);

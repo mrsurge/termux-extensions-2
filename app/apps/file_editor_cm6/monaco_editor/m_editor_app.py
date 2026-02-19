@@ -121,6 +121,68 @@ export default href;
             return Response("not found", status_code=404, media_type="text/plain")
         return FileResponse(str(target), media_type="application/json")
 
+    # Vendored theme index for the bundled themes dir.
+    _vendored_themes_dir = Path(__file__).with_name("themes") / "vendored"
+
+    @fastapi_app.get(mount_path + "/monaco_editor/available_themes", include_in_schema=False)
+    async def _available_themes():
+        """Return all available themes: vendored + extension-installed."""
+        import json as _json
+        themes: list[dict] = []
+
+        # 1) Vendored themes — scan subdirs for theme_index.json
+        if _vendored_themes_dir.is_dir():
+            for vendor_dir in sorted(_vendored_themes_dir.iterdir()):
+                idx_file = vendor_dir / "theme_index.json"
+                if not idx_file.is_file():
+                    continue
+                try:
+                    idx = _json.loads(idx_file.read_text("utf-8"))
+                    for t in idx.get("vendored", []):
+                        themes.append({
+                            "id": t["id"],
+                            "label": t["label"],
+                            "uiTheme": t.get("uiTheme", "vs-dark"),
+                            "source": "vendored",
+                            "sourceLabel": idx.get("source", vendor_dir.name),
+                            "serveUrl": f"monaco_editor/themes/vendored/{vendor_dir.name}/{t['file']}",
+                        })
+                except Exception:
+                    pass
+
+        # 2) Extension-installed themes — scan registry
+        try:
+            from ..extension_registry import get_extension_list
+            exts = get_extension_list()
+            for ext in exts:
+                ext_themes = ext.get("themes", [])
+                if not ext_themes:
+                    continue
+                ext_id = ext.get("id", "")
+                ext_path = ext.get("path", "")
+                if not ext_id or not ext_path:
+                    continue
+                for t in ext_themes:
+                    # path is like "./themes/dark-default.json" — extract filename
+                    raw_path = t.get("path", "")
+                    fname = raw_path.rsplit("/", 1)[-1] if "/" in raw_path else raw_path
+                    label = t.get("label", fname)
+                    tid = label.lower().replace(" ", "-").replace("(", "").replace(")", "")
+                    # Serve via cs_themes route using the extension directory name
+                    ext_dir_name = Path(ext_path).name
+                    themes.append({
+                        "id": f"ext:{ext_id}:{tid}",
+                        "label": label,
+                        "uiTheme": t.get("uiTheme", "vs-dark"),
+                        "source": "extension",
+                        "sourceLabel": ext.get("display_name", ext_id),
+                        "serveUrl": f"monaco_editor/cs_themes/{ext_dir_name}/{fname}",
+                    })
+        except Exception as exc:
+            print(f"[themes] extension theme scan failed: {exc}", flush=True)
+
+        return {"themes": themes}
+
     @fastapi_app.get(mount_path + "/monaco_editor/textmate/{file_path:path}", include_in_schema=False)
     async def _serve_monaco_editor_textmate(file_path: str):
         # TextMate grammars + Oniguruma WASM used by the Monaco iframe (client-side tokenization).
