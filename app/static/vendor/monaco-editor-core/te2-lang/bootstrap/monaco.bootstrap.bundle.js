@@ -119232,6 +119232,7 @@ var init_tokenization = __esm({
         this._colorMap = colorMap;
         this._root = root;
         this._cache = /* @__PURE__ */ new Map();
+        this._colorIndexTranslation = null;
       }
       getColorMap() {
         return this._colorMap.getColorMap();
@@ -119245,6 +119246,15 @@ var init_tokenization = __esm({
           const rule = this._match(token);
           const standardToken = toStandardTokenType(token);
           result = (rule.metadata | standardToken << 8) >>> 0;
+          if (this._colorIndexTranslation) {
+            const fg = (result & 16744448) >>> 15;
+            if (fg >= 0 && fg < this._colorIndexTranslation.length) {
+              const mapped = this._colorIndexTranslation[fg];
+              if (mapped !== fg) {
+                result = (result & ~16744448 | mapped << 15) >>> 0;
+              }
+            }
+          }
           this._cache.set(token, result);
         }
         return (result | languageId << 0) >>> 0;
@@ -119689,6 +119699,8 @@ var init_standaloneThemeService = __esm({
         this.colors = null;
         this.defaultColors = /* @__PURE__ */ Object.create(null);
         this._tokenTheme = null;
+        this._colorMapOverride = null;
+        this._colorIndexTranslation = null;
       }
       get base() {
         return this.themeData.base;
@@ -119785,8 +119797,11 @@ var init_standaloneThemeService = __esm({
       getTokenStyleMetadata(type, modifiers, modelLanguage) {
         const style = this.tokenTheme._match([type].concat(modifiers).join("."));
         const metadata = style.metadata;
-        const foreground2 = TokenMetadata.getForeground(metadata);
+        let foreground2 = TokenMetadata.getForeground(metadata);
         const fontStyle = TokenMetadata.getFontStyle(metadata);
+        if (this._colorIndexTranslation && foreground2 >= 0 && foreground2 < this._colorIndexTranslation.length) {
+          foreground2 = this._colorIndexTranslation[foreground2];
+        }
         return {
           foreground: foreground2,
           italic: Boolean(
@@ -119901,6 +119916,9 @@ ${this._themeCSS}`;
       }
       setColorMapOverride(colorMapOverride) {
         this._colorMapOverride = colorMapOverride;
+        if (this._theme && typeof this._theme.setColorMapOverride === "function") {
+          this._theme.setColorMapOverride(colorMapOverride);
+        }
         this._updateThemeOrColorMap();
       }
       setTheme(themeName) {

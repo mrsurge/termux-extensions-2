@@ -141,6 +141,7 @@ export class TokenTheme {
         this._colorMap = colorMap;
         this._root = root;
         this._cache = new Map();
+        this._colorIndexTranslation = null;
     }
     getColorMap() {
         return this._colorMap.getColorMap();
@@ -156,6 +157,16 @@ export class TokenTheme {
             const standardToken = toStandardTokenType(token);
             result = (rule.metadata
                 | (standardToken << 8 /* MetadataConsts.TOKEN_TYPE_OFFSET */)) >>> 0;
+            // TE2: translate foreground index if override palette is active
+            if (this._colorIndexTranslation) {
+                const fg = (result & 16744448 /* MetadataConsts.FOREGROUND_MASK */) >>> 15 /* MetadataConsts.FOREGROUND_OFFSET */;
+                if (fg >= 0 && fg < this._colorIndexTranslation.length) {
+                    const mapped = this._colorIndexTranslation[fg];
+                    if (mapped !== fg) {
+                        result = ((result & ~16744448 /* MetadataConsts.FOREGROUND_MASK */) | (mapped << 15 /* MetadataConsts.FOREGROUND_OFFSET */)) >>> 0;
+                    }
+                }
+            }
             this._cache.set(token, result);
         }
         return (result

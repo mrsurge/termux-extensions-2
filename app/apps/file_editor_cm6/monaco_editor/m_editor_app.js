@@ -216,10 +216,11 @@
         var colorMap = tmRegistry.getColorMap();
         if (colorMap && colorMap.length > 0) {
           window.monaco.languages.setColorMap(colorMap);
-          console.log('[TextMate] color map synced to Monaco, colors=' + colorMap.length);
+          var installedLangs = Object.keys(tmInstalled).filter(function(k) { return tmInstalled[k]; });
+          console.log('[TextMate:DIAG] setColorMap called, colors=' + colorMap.length + ', already installed langs: [' + installedLangs.join(', ') + ']');
           // After setColorMap overrides the rendering palette, patch semantic
           // token metadata to translate indices to the new palette.
-          try { _patchSemanticTokenColorIndices(); } catch (_) {}
+          try { _patchSemanticTokenColorIndices('setColorMap'); } catch (_) {}
         }
       }
     } catch (e) {
@@ -227,13 +228,14 @@
     }
   }
 
-  function _scopeNameForLanguage(languageId, filePath) {
+  async function _scopeNameForLanguage(languageId, filePath) {
     var lang = normalizeLanguage(languageId);
     try {
       if (!tmVscodeIndex) {
-        // Don't block: refresh lazily.
-        _refreshVscodeGrammarIndex().then(function (idx) { tmVscodeIndex = idx; }).catch(function () {});
-      } else if (tmVscodeIndex.byLanguage && tmVscodeIndex.byLanguage[lang]) {
+        // Await the index on first call so ext-host grammars are available.
+        try { tmVscodeIndex = await _refreshVscodeGrammarIndex(); } catch (_) {}
+      }
+      if (tmVscodeIndex && tmVscodeIndex.byLanguage && tmVscodeIndex.byLanguage[lang]) {
         // Prefer extension-specific scopes when present.
         var entry = tmVscodeIndex.byLanguage[lang];
         if (entry && entry.scopes && filePath) {
@@ -273,7 +275,9 @@
     if (lang === 'cpp') return 'source.cpp';
     if (lang === 'java') return 'source.java';
     if (lang === 'rust') return 'source.rust';
-    return null;
+    // Generic fallback: most TextMate scopes follow "source.<lang>" convention.
+    // If the grammar doesn't exist, registry.loadGrammar() returns null and we bail.
+    return 'source.' + lang;
   }
 
   async function _refreshVscodeGrammarIndex() {
@@ -349,13 +353,18 @@
     try {
       if (!window.monaco || !window.monaco.languages || !window.monaco.languages.setTokensProvider) return false;
       var lang = normalizeLanguage(languageId);
+      console.log('[TextMate:DIAG] ensureTextmateTokenization called: lang=' + lang + ' filePath=' + filePath + ' alreadyInstalled=' + !!tmInstalled[lang]);
       if (tmInstalled[lang]) return true;
 
-      var scopeName = _scopeNameForLanguage(lang, filePath);
+      var scopeName = await _scopeNameForLanguage(lang, filePath);
+      console.log('[TextMate:DIAG] scopeName for ' + lang + ' = ' + scopeName);
       if (!scopeName) return false;
 
       var registry = await ensureTextmateReady();
+      var cmBefore = registry.getColorMap ? registry.getColorMap().length : '?';
       var grammar = await registry.loadGrammar(scopeName);
+      var cmAfter = registry.getColorMap ? registry.getColorMap().length : '?';
+      console.log('[TextMate:DIAG] loadGrammar(' + scopeName + ') colorMap: ' + cmBefore + ' -> ' + cmAfter);
       if (!grammar) {
         console.warn('[TextMate] missing grammar for', lang, scopeName);
         return false;
@@ -402,7 +411,7 @@
       console.log('[TextMate] installed', lang, '->', scopeName);
       // Now that tmRegistry exists and setColorMap has been called, patch
       // semantic token color indices (editor should exist by now too).
-      try { _patchSemanticTokenColorIndices(); } catch (_) {}
+      try { _patchSemanticTokenColorIndices('tmInstall:' + lang); } catch (_) {}
       return true;
     } catch (e) {
       console.warn('[TextMate] install failed', languageId, e);
@@ -1531,7 +1540,7 @@
       releaseDocumentSemanticTokens: function (resultId) {},
     });
     // Ensure semantic token color indices are patched for the TextMate color map.
-    try { _patchSemanticTokenColorIndices(); } catch (_) {}
+    try { _patchSemanticTokenColorIndices('semanticProvider'); } catch (_) {}
   }
 
   // Pull-based fallback: fetch legend then register (used from baton/doRegister)
@@ -1866,21 +1875,27 @@
   // map, semantic token foreground indices (from tokenTheme._match) reference
   // the WRONG palette. This patches getTokenStyleMetadata on the active theme
   // to translate indices: tokenTheme palette → hex color → TextMate palette index.
-  function _patchSemanticTokenColorIndices() {
+  function _patchSemanticTokenColorIndices(caller) {
+    var tag = '[semanticTokens:patch' + (caller ? ':' + caller : '') + ']';
     try {
-      if (!tmRegistry) return;
+      if (!tmRegistry) { console.log(tag, 'SKIP: no tmRegistry'); return; }
       var svc = _getThemeService();
-      if (!svc) return;
+      if (!svc) { console.log(tag, 'SKIP: no themeService'); return; }
       var theme = svc.getColorTheme();
-      if (!theme || !theme.tokenTheme) return;
+      if (!theme) { console.log(tag, 'SKIP: no theme'); return; }
+      if (!theme.tokenTheme) { console.log(tag, 'SKIP: no theme.tokenTheme'); return; }
+
+      console.log(tag, 'theme obj id=', theme.id || '?', 'already patched=', !!theme._te2PatchedGetTokenStyleMetadata);
 
       // Build the tokenTheme's internal color map (index → hex string).
       var themeColorMap = theme.tokenTheme.getColorMap(); // Color[] objects
-      if (!themeColorMap || !themeColorMap.length) return;
+      if (!themeColorMap || !themeColorMap.length) { console.log(tag, 'SKIP: empty themeColorMap'); return; }
 
       // Build the TextMate color map (index → lowercase hex string).
       var tmColorMap = tmRegistry.getColorMap(); // string[] like ["#000000", "#e6edf3", ...]
-      if (!tmColorMap || !tmColorMap.length) return;
+      if (!tmColorMap || !tmColorMap.length) { console.log(tag, 'SKIP: empty tmColorMap'); return; }
+
+      console.log(tag, 'themeColorMap.length=' + themeColorMap.length, 'tmColorMap.length=' + tmColorMap.length);
 
       // Build TextMate hex → index reverse lookup.
       var tmHexToIdx = {};
@@ -1901,24 +1916,63 @@
         }
       }
 
+      // Log first few entries from both palettes for comparison
+      var sampleTheme = themeIdxToHex.slice(0, 6).map(function(h, i) { return i + ':' + h; }).join(' ');
+      var sampleTm = tmColorMap.slice(0, 6).map(function(h, i) { return i + ':' + (h || '').toLowerCase(); }).join(' ');
+      console.log(tag, 'themeHex sample:', sampleTheme);
+      console.log(tag, 'tmHex sample:', sampleTm);
+
+      // Helper: parse "#rrggbb" to [r, g, b]
+      function hexToRgb(hex) {
+        var h = hex.replace('#', '');
+        if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+        return [parseInt(h.substr(0,2),16), parseInt(h.substr(2,2),16), parseInt(h.substr(4,2),16)];
+      }
+      // Helper: find nearest color in TextMate palette by Euclidean RGB distance
+      function findNearestTmIndex(hex) {
+        var rgb = hexToRgb(hex);
+        var bestIdx = 1; // skip index 0 (null/transparent)
+        var bestDist = Infinity;
+        for (var ti = 1; ti < tmColorMap.length; ti++) {
+          if (!tmColorMap[ti]) continue;
+          var trgb = hexToRgb(String(tmColorMap[ti]).toLowerCase());
+          var dr = rgb[0]-trgb[0], dg = rgb[1]-trgb[1], db = rgb[2]-trgb[2];
+          var dist = dr*dr + dg*dg + db*db;
+          if (dist < bestDist) { bestDist = dist; bestIdx = ti; }
+          if (dist === 0) break;
+        }
+        return bestIdx;
+      }
+
       // Build translation table: tokenTheme index → TextMate index.
       var indexTranslation = [];
       var translatedCount = 0;
+      var unmatchedHexes = [];
+      var nearestMapped = [];
       for (var k = 0; k < themeIdxToHex.length; k++) {
         var h = themeIdxToHex[k];
         if (h && tmHexToIdx[h] !== undefined) {
           indexTranslation[k] = tmHexToIdx[h];
           if (indexTranslation[k] !== k) translatedCount++;
+        } else if (h) {
+          // No exact match — find nearest color in TextMate palette
+          var nearest = findNearestTmIndex(h);
+          indexTranslation[k] = nearest;
+          translatedCount++;
+          if (nearestMapped.length < 5) nearestMapped.push(k + ':' + h + '->' + nearest + ':' + (tmColorMap[nearest] || '?').toLowerCase());
         } else {
-          indexTranslation[k] = k; // no translation available, keep original
+          indexTranslation[k] = k;
         }
       }
 
+      if (nearestMapped.length > 0) {
+        console.log(tag, 'nearest-color mapped:', nearestMapped.join(' '));
+      }
+
       if (translatedCount === 0) {
-        console.log('[semanticTokens] no index translation needed (themeColors=' + themeColorMap.length + ', tmColors=' + tmColorMap.length + ')');
-        // Log a sample to debug format mismatches
+        console.log(tag, 'no index translation needed (themeColors=' + themeColorMap.length + ', tmColors=' + tmColorMap.length + ')');
         if (themeIdxToHex.length > 1 && tmColorMap.length > 1) {
-          console.log('[semanticTokens] DEBUG themeHex[1]=' + themeIdxToHex[1] + ' tmHex[1]=' + tmColorMap[1].toLowerCase());
+          console.log(tag, 'DEBUG themeHex[1]=' + themeIdxToHex[1] + ' tmHex[1]=' + tmColorMap[1].toLowerCase());
         }
         return;
       }
@@ -1926,7 +1980,7 @@
       // Monkey-patch getTokenStyleMetadata to translate foreground indices.
       // Always get the ORIGINAL unpatched method (unwrap if already patched).
       var origMethod = theme._te2OrigGetTokenStyleMetadata || theme.getTokenStyleMetadata;
-      if (!origMethod) return;
+      if (!origMethod) { console.log(tag, 'SKIP: no getTokenStyleMetadata method'); return; }
       theme._te2OrigGetTokenStyleMetadata = origMethod;
       theme._te2PatchedGetTokenStyleMetadata = true;
       theme.getTokenStyleMetadata = function(type, modifiers, modelLanguage) {
@@ -1939,9 +1993,28 @@
         }
         return result;
       };
-      console.log('[semanticTokens] patched getTokenStyleMetadata, translated ' + translatedCount + ' color indices');
+      console.log(tag, 'PATCHED getTokenStyleMetadata, translated ' + translatedCount + '/' + themeIdxToHex.length + ' color indices');
+
+      // TE2: Also set translation on tokenTheme so Monarch match() translates
+      // foreground indices too (not just semantic tokens).
+      try {
+        if (theme.tokenTheme) {
+          if (typeof theme.tokenTheme.setColorIndexTranslation === 'function') {
+            theme.tokenTheme.setColorIndexTranslation(indexTranslation);
+          } else {
+            // Direct field set if method was tree-shaken from bundle
+            theme.tokenTheme._colorIndexTranslation = indexTranslation;
+            if (theme.tokenTheme._cache && typeof theme.tokenTheme._cache.clear === 'function') {
+              theme.tokenTheme._cache.clear();
+            }
+          }
+          console.log(tag, 'SET tokenTheme colorIndexTranslation for Monarch fix (' + indexTranslation.length + ' entries)');
+        }
+      } catch (monarchErr) {
+        console.warn(tag, 'tokenTheme colorIndexTranslation failed', monarchErr);
+      }
     } catch (e) {
-      console.warn('[semanticTokens] _patchSemanticTokenColorIndices failed', e);
+      console.warn(tag, 'FAILED', e);
     }
   }
 
@@ -2667,7 +2740,7 @@
         _applyThemeToTextmateRegistry(tmActiveThemeJson);
       }
       _forceSemanticHighlighting();
-      try { _patchSemanticTokenColorIndices(); } catch (_) {}
+      try { _patchSemanticTokenColorIndices('applyMonacoTheme'); } catch (_) {}
     } catch (e) {
       console.warn('[Monaco] applyMonacoTheme failed', e);
     }
