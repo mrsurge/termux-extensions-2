@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.TermuxExtensions.Gecko" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorAccent">@color/te_selection_handle</item>
+        <item name="colorControlActivated">@color/te_selection_handle</item>
+
+        <item name="android:textSelectHandle">@drawable/te_text_select_handle</item>
+        <item name="android:textSelectHandleLeft">@drawable/te_text_select_handle_left</item>
+        <item name="android:textSelectHandleRight">@drawable/te_text_select_handle_right</item>
+    </style>
+</resources>

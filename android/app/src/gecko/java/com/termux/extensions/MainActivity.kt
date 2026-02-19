@@ -19,6 +19,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import android.net.Uri
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -35,6 +36,7 @@ import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.StorageController
 import org.mozilla.geckoview.WebExtension
 
 class MainActivity : AppCompatActivity() {
@@ -69,6 +71,8 @@ class MainActivity : AppCompatActivity() {
     private var inAppShell: Boolean = true
     private var persistentNetworkNotificationEnabled: Boolean = false
     private var pendingSurfaceRecover: Boolean = false
+    private var notificationPermissionRequestInFlight: Boolean = false
+    private var pendingPersistentServiceStart: Boolean = false
 
     private fun prefs() = getSharedPreferences("gecko_session_state", Context.MODE_PRIVATE)
 
@@ -447,6 +451,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updatePersistentNetworkService() {
         if (!persistentNetworkNotificationEnabled || !inAppShell) {
+            pendingPersistentServiceStart = false
             stopService(Intent(this, PersistentNetworkService::class.java))
             return
         }
@@ -457,21 +462,73 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
             if (!granted) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    9301
-                )
+                pendingPersistentServiceStart = true
+                if (!notificationPermissionRequestInFlight) {
+                    notificationPermissionRequestInFlight = true
+                    ActivityCompat.requestPermissions(
+                        this,
+                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                        9301
+                    )
+                }
                 return
             }
         }
 
-        val intent = Intent(this, PersistentNetworkService::class.java)
-        if (android.os.Build.VERSION.SDK_INT >= 26) {
-            ContextCompat.startForegroundService(this, intent)
-        } else {
-            startService(intent)
+        pendingPersistentServiceStart = false
+        try {
+            val intent = Intent(this, PersistentNetworkService::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                ContextCompat.startForegroundService(this, intent)
+            } else {
+                startService(intent)
+            }
+        } catch (_: Exception) {
+            disablePersistentNetworkNotificationSetting()
         }
+    }
+
+    private fun disablePersistentNetworkNotificationSetting() {
+        persistentNetworkNotificationEnabled = false
+        pendingPersistentServiceStart = false
+        notificationPermissionRequestInFlight = false
+        stopService(Intent(this, PersistentNetworkService::class.java))
+
+        Thread {
+            try {
+                val settingsUrl = frameworkBaseUrl.trimEnd('/') + "/api/settings"
+                val merged = JSONObject()
+
+                // Merge patch instead of clobbering full settings.
+                try {
+                    val getReq = Request.Builder().url(settingsUrl).get().build()
+                    httpClient.newCall(getReq).execute().use { resp ->
+                        val body = resp.body?.string().orEmpty()
+                        if (resp.isSuccessful && body.isNotBlank()) {
+                            val json = JSONObject(body)
+                            val data = json.optJSONObject("data")
+                            if (data != null) {
+                                val keys = data.keys()
+                                while (keys.hasNext()) {
+                                    val key = keys.next()
+                                    merged.put(key, data.opt(key))
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+
+                merged.put("persistent_network_notification", false)
+
+                val postReq = Request.Builder()
+                    .url(settingsUrl)
+                    .post(merged.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+                httpClient.newCall(postReq).execute().close()
+            } catch (_: Exception) {
+            }
+        }.start()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -498,11 +555,11 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnConsole).setOnClickListener { toggleConsoleOverlay() }
 
         btnConsoleBack.setOnClickListener { hideConsoleOverlay() }
-        btnConsoleStart.setOnClickListener { startConsoleCapture() }
-        btnConsoleStop.setOnClickListener { stopConsoleCapture() }
+        btnConsoleStart.setOnClickListener { flushBrowserCache() }
+        btnConsoleStop.visibility = View.GONE
+        consoleScroll.visibility = View.GONE
 
-        // Default: console capture OFF until user enables it.
-        updateConsoleControls()
+        // Console transport controls are intentionally dormant; overlay is now a simple tools palette.
 
         // Clicking the dimmed backdrop closes; the panel consumes clicks.
         consoleOverlay.setOnClickListener { hideConsoleOverlay() }
@@ -843,7 +900,42 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 9301) {
-            updatePersistentNetworkService()
+            notificationPermissionRequestInFlight = false
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                if (pendingPersistentServiceStart) {
+                    updatePersistentNetworkService()
+                }
+            } else {
+                disablePersistentNetworkNotificationSetting()
+            }
+        }
+    }
+
+    private fun flushBrowserCache() {
+        if (!::runtime.isInitialized) return
+        try {
+            runtime.storageController
+                .clearData(StorageController.ClearFlags.ALL_CACHES)
+                .accept(
+                    {
+                        runOnUiThread {
+                            Toast.makeText(this, "Browser cache flushed", Toast.LENGTH_SHORT).show()
+                            try {
+                                if (::geckoSession.isInitialized) geckoSession.reload()
+                            } catch (_: Exception) {
+                            }
+                            hideConsoleOverlay()
+                        }
+                    },
+                    {
+                        runOnUiThread {
+                            Toast.makeText(this, "Cache flush failed", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                )
+        } catch (_: Exception) {
+            Toast.makeText(this, "Cache flush failed", Toast.LENGTH_SHORT).show()
         }
     }
 

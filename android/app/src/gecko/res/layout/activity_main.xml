@@ -50,7 +50,7 @@
                 android:id="@+id/btnConsole"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="⧉" />
+                android:text="⚙️" />
         </LinearLayout>
 
         <org.mozilla.geckoview.GeckoView
@@ -94,7 +94,7 @@
                     android:gravity="center_vertical"
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp"
-                    android:text="Console"
+                    android:text="Tools"
                     android:textColor="#FFFFFF"
                     android:textStyle="bold" />
 
@@ -102,7 +102,7 @@
                     android:id="@+id/btnConsoleStart"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Start" />
+                    android:text="Flush Cache" />
 
                 <Button
                     android:id="@+id/btnConsoleStop"
