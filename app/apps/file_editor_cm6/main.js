@@ -964,6 +964,7 @@ function connectUIIPC() {
     });
     uiIpcSocket.on('ui_event', (data) => {
       if (!data || typeof data !== 'object') return;
+      console.log('[focus_relay] main got ui_event', data.type);
       if (data.type === 'save') {
         // Dispatch synthetic Ctrl+S to trigger the existing keydown handler.
         document.dispatchEvent(new KeyboardEvent('keydown', {
@@ -971,6 +972,7 @@ function connectUIIPC() {
         }));
       } else if (data.type === 'focus') {
         // Dispatch synthetic click to trigger the existing document click handler.
+        console.log('[focus_relay] dispatching synthetic click');
         document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       }
     });

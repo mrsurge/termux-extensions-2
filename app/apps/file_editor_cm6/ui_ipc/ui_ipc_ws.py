@@ -32,8 +32,8 @@ class UIIPCNamespace(socketio.AsyncNamespace):
         await self.enter_room(sid, "ui_ipc")
         print(f"[ui_ipc] connect sid={sid}", flush=True)
 
-    async def on_disconnect(self, sid):
-        print(f"[ui_ipc] disconnect sid={sid}", flush=True)
+    async def on_disconnect(self, sid, reason=None):
+        print(f"[ui_ipc] disconnect sid={sid} reason={reason}", flush=True)
         await console_ws.on_console_disconnect(self, sid)
 
     async def on_ui_event(self, sid, data):

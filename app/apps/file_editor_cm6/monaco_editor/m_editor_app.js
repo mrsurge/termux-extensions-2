@@ -2806,6 +2806,16 @@
       }
       _forceSemanticHighlighting();
       try { _patchSemanticTokenColorIndices('applyMonacoTheme'); } catch (_) {}
+      // Force retokenization on all open models so cached line tokens
+      // pick up the new theme's color map and translation table.
+      try {
+        var models = window.monaco.editor.getModels();
+        for (var mi = 0; mi < models.length; mi++) {
+          if (models[mi] && typeof models[mi].resetTokenization === 'function') {
+            models[mi].resetTokenization();
+          }
+        }
+      } catch (_) {}
     } catch (e) {
       console.warn('[Monaco] applyMonacoTheme failed', e);
     }
@@ -3137,6 +3147,8 @@
     ensureTouchSelection('boot');
     updateDebug('ssot=ok');
     ensureLayoutObserver();
+
+    bindUIIPCEditorHooks();
     return editor;
   }
 
@@ -5258,13 +5270,21 @@
       var ed = (diffEditor && diffEditor.getModifiedEditor)
         ? diffEditor.getModifiedEditor()
         : editor;
-      if (!ed) return;
+      if (!ed) {
+        console.warn('[focus_relay] no editor instance — skipping bind');
+        return;
+      }
       _uiIpcFocusDisposable = ed.onDidFocusEditorWidget(function() {
+        console.log('[focus_relay] onDidFocusEditorWidget fired, socket=' +
+          (uiIpcSocket ? (uiIpcSocket.connected ? 'connected' : 'disconnected') : 'null'));
         if (uiIpcSocket) {
           uiIpcSocket.emit('ui_event', { type: 'focus' });
         }
       });
-    } catch (_) {}
+      console.log('[focus_relay] bound to editor widget');
+    } catch (e) {
+      console.warn('[focus_relay] bind failed', e);
+    }
   }
   // ─── End UI IPC ─────────────────────────────────────────
 

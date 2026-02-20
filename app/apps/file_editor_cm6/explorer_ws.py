@@ -2186,11 +2186,11 @@ class ExplorerSocketIONamespace(socketio.AsyncNamespace):
         self.dispatchers[sid] = dispatcher
         logger.info(f"[ExplorerSIO] client connected sid={sid}")
 
-    async def on_disconnect(self, sid):
+    async def on_disconnect(self, sid, reason=None):
         disp = self.dispatchers.pop(sid, None)
         if disp:
             await disp.cleanup()
-        logger.info(f"[ExplorerSIO] client disconnected sid={sid}")
+        logger.info(f"[ExplorerSIO] client disconnected sid={sid} reason={reason}")
 
     async def on_explorer_send(self, sid, data):
         disp = self.dispatchers.get(sid)

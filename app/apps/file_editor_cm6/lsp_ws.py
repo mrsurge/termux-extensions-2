@@ -916,8 +916,8 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
         self.pending_messages[sid] = []
         self.session_ready[sid] = asyncio.Event()
     
-    async def on_disconnect(self, sid):
-        _lsp_debug(f"[LSP WS] Client disconnected: {sid}")
+    async def on_disconnect(self, sid, reason=None):
+        _lsp_debug(f"[LSP WS] Client disconnected: {sid} reason={reason}")
         key = self.sid_to_key.pop(sid, None)
         if key is not None:
             session = self.backend_sessions.get(key)

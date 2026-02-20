@@ -529,7 +529,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         except Exception:
             pass
 
-    async def on_disconnect(self, sid):
+    async def on_disconnect(self, sid, reason=None):
         try:
             await self.leave_room(sid, "file_editor_cm6")
         except Exception:
