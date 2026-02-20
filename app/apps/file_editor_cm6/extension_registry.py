@@ -24,13 +24,49 @@ _EXTENSIONS_DIR = _CODE_SERVER_DATA_DIR / "extensions"
 _USER_SETTINGS_PATH = _CODE_SERVER_DATA_DIR / "User" / "settings.json"
 _REGISTRY_PATH = _CODE_SERVER_DATA_DIR / "te2_extension_registry.json"
 
-# Builtin extensions shipped with code-server
-_BUILTIN_EXTENSIONS_DIR = Path(
-    os.environ.get(
-        "TE2_BUILTIN_EXTENSIONS_DIR",
-        "/data/data/com.termux/files/usr/lib/code-server/lib/vscode/extensions",
-    )
-)
+# Builtin extensions shipped with code-server.
+# Derive from `which code-server` → resolve to install root → lib/vscode/extensions
+def _find_builtin_extensions_dir() -> str:
+    env = os.environ.get("TE2_BUILTIN_EXTENSIONS_DIR")
+    if env:
+        return env
+    try:
+        cs_bin = shutil.which("code-server")
+        if cs_bin:
+            # code-server may be a wrapper script that `exec`s the real binary.
+            # Read the script to find the actual install path.
+            try:
+                text = Path(cs_bin).read_text(errors="ignore")
+                for line in text.splitlines():
+                    line = line.strip()
+                    if line.startswith("exec ") and "code-server" in line:
+                        # e.g. "exec /usr/lib/code-server/bin/code-server "$@""
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            real = Path(parts[1].strip('"').strip("'"))
+                            if real.exists():
+                                # .../lib/code-server/bin/code-server → .../lib/code-server
+                                install_root = real.parent.parent
+                                candidate = install_root / "lib" / "vscode" / "extensions"
+                                if candidate.is_dir():
+                                    return str(candidate)
+            except Exception:
+                pass
+            # Fallback: resolve symlinks and walk up
+            real = Path(cs_bin).resolve()
+            for depth in range(1, 4):
+                root = real
+                for _ in range(depth):
+                    root = root.parent
+                candidate = root / "lib" / "vscode" / "extensions"
+                if candidate.is_dir():
+                    return str(candidate)
+    except Exception:
+        pass
+    # Last-resort fallback
+    return str(Path.home() / ".local" / "lib" / "code-server" / "lib" / "vscode" / "extensions")
+
+_BUILTIN_EXTENSIONS_DIR = Path(_find_builtin_extensions_dir())
 
 # Extensions we never load — they spawn processes or do filesystem ops
 # that hang in our headless environment
