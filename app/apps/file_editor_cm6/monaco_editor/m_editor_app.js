@@ -190,6 +190,22 @@
     });
 
     tmRegistry = registry;
+    // Apply the active theme immediately so the color map is correct
+    // before any grammar is loaded (avoids boot race where applyMonacoTheme
+    // no-ops because tmRegistry didn't exist yet).
+    if (tmActiveThemeJson) {
+      _applyThemeToTextmateRegistry(tmActiveThemeJson);
+      // setColorMap just overrode the rendering palette — existing Monarch
+      // tokens in the model have stale foreground indices.  Force retokenize.
+      try {
+        var models = window.monaco.editor.getModels();
+        for (var mi = 0; mi < models.length; mi++) {
+          if (models[mi] && typeof models[mi].resetTokenization === 'function') {
+            models[mi].resetTokenization();
+          }
+        }
+      } catch (_) {}
+    }
     console.log('[TextMate] ready');
     return tmRegistry;
   }
@@ -2289,6 +2305,18 @@
     return null;
   }
 
+  // Expand CSS shorthand hex (#fff → #ffffff, #abcd → #aabbccdd).
+  // Monaco's tokenization parser rejects 3/4-char hex values.
+  function _expandShortHex(color) {
+    if (!color || typeof color !== 'string') return color;
+    var m = color.match(/^#([0-9a-fA-F]{3,4})$/);
+    if (!m) return color;
+    var s = m[1];
+    if (s.length === 3) return '#' + s[0]+s[0]+s[1]+s[1]+s[2]+s[2];
+    if (s.length === 4) return '#' + s[0]+s[0]+s[1]+s[1]+s[2]+s[2]+s[3]+s[3];
+    return color;
+  }
+
   function _toMonacoColorHex(hex) {
     if (!hex) return null;
     var s = String(hex).trim();
@@ -2297,6 +2325,9 @@
     if (s[0] === '#') s = s.slice(1);
     // VS Code themes sometimes use 8-digit ARGB; Monaco supports 8-digit too.
     if (!/^[0-9a-fA-F]{3,8}$/.test(s)) return null;
+    // Expand 3-char shorthand (#fff → FFFFFF) — Monaco tokenization rejects 3-char.
+    if (s.length === 3) s = s[0]+s[0]+s[1]+s[1]+s[2]+s[2];
+    if (s.length === 4) s = s[0]+s[0]+s[1]+s[1]+s[2]+s[2]+s[3]+s[3];
     return s.toUpperCase();
   }
 
@@ -2461,7 +2492,7 @@
         if (!Object.prototype.hasOwnProperty.call(colorsIn, k)) continue;
         var v = colorsIn[k];
         if (typeof v === 'string') {
-          colors[k] = v;
+          colors[k] = _expandShortHex(v);
         }
       }
     } catch (_) {}
@@ -2765,8 +2796,10 @@
       // If the theme was loaded from registry, use its ID directly
       var cache = loadVscodeTextmateThemes._jsonCache || {};
       if (cache[key]) return key;
-      // Known built-in Monaco themes
-      if (key === 'vs-dark' || key === 'vs' || key === 'hc-black' || key === 'hc-light') return key;
+      // Built-in Monaco themes are disabled — redirect to closest vendored theme.
+      // They lack a TextMate color map so semantic tokens get wrong palette indices.
+      if (key === 'vs-dark' || key === 'hc-black') return 'github-dark-default';
+      if (key === 'vs' || key === 'hc-light') return 'github-light-default';
       // Fallback heuristic
       var t = key.toLowerCase();
       if (t.includes('light')) return 'github-light-default';

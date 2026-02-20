@@ -2376,9 +2376,207 @@ function ensureVConsoleLoaded() {
 
 Same pattern as `ensureSocketIoLoaded()` in main.js. Both must resolve before their dependents initialize.
 
+### Duplicate suppression (vConsole capture bypass)
+
+vConsole monkey-patches `console.*` on instantiation, which would double-display main-page logs (once from vConsole's own capture, once from our bridge round-trip). To prevent this, `console.js` saves the current `console.*` methods — which are already our bridge wrappers — **before** calling `new VConsole()`, then restores them immediately after:
+
+```js
+// Before vConsole init:
+const saved = { log: console.log, info: console.info, ... };
+
+// After new VConsole():
+console.log = saved.log;  // restore bridge wrappers
+```
+
+This neuters vConsole's built-in capture layer. All log traffic flows exclusively through the bridge → Python → drawer socket path, where each entry carries a `workerId` label and is persisted to disk. vConsole only renders what we explicitly feed it via `vConsole.log.<level>()`.
+
+### Remote eval via vConsole command bar
+
+The vConsole command bar normally calls `eval.call(window, cmd)` locally. Since our console is a remote viewer, `console.js` monkey-patches `evalCommand` on the log model singleton to route through the socket:
+
+1. User types command in vConsole's input bar
+2. Patched `evalCommand` emits `console:eval` to the worker selected in the origin dropdown
+3. Worker's bridge calls `eval()` locally and emits `console:evalResult`
+4. Result is displayed in vConsole via `model.addLog()` with `cmdType: 'output'`
+
+The log model singleton is accessed via `vConsoleInstance.pluginList['default'].model` (`pluginList` is a dict keyed by plugin id in the minified build).
+
+### Filter-triggered replay
+
+When the user changes the origin dropdown selection, the drawer:
+1. Calls `vConsole.log.clear()` to wipe the current display
+2. Emits `console:replay` to Python, which re-streams the entire disk log
+3. `_handleLog()` applies the new `activeFilter`, showing only matching entries
+
+This ensures users see the complete filtered history, not just logs from the moment of filter change.
+
 ### vConsole integration notes
 
 - vConsole keeps **raw JS references** (`origData: any`) in its internal log store — not serializable. The pretty-printing happens in Svelte render components, not in the data model.
 - `vConsole.log.log()` / `.info()` / `.warn()` / `.error()` write to the Log panel **only** (no browser console echo) — this prevents infinite loops when the bridge is also active.
 - `vConsole.hideSwitch()` hides the floating toggle button; `vConsole.show()` opens the panel. We control visibility from the drawer tab, not vConsole's own UI.
 - CSS overrides in template.html force `#__vconsole` into relative positioning to fill `#console-container` instead of using vConsole's default fixed overlay.
+
+## 26) Monarch Palette Corruption Fix (Universal)
+
+### Problem
+
+Monaco has two independent tokenization systems:
+
+| System   | Path | Token encoding |
+|----------|------|---------------|
+| TextMate | `vscode-textmate` registry → `tokenizeLine2()` | `Uint32Array` with foreground indices from the TextMate color map (~300 colors) |
+| Monarch  | Regex rules → `tokenTheme.match(languageId, scopes)` | Packed metadata with foreground indices from tokenTheme's internal palette (~20 colors) |
+
+When `setColorMap()` overrides the rendering palette with TextMate's color map, Monarch-only languages (Kotlin, TOML, Makefile, etc.) resolve their foreground indices against the wrong palette, producing incorrect colors.
+
+### Root cause
+
+`TokenTheme.match()` returns metadata containing foreground indices from its own small palette. After `setColorMap()`, the renderer uses the TextMate color map (which is much larger and has different index→color mappings). The Monarch indices now point to the wrong colors.
+
+### Fix: `_colorIndexTranslation` in `TokenTheme`
+
+**File**: `worktrees/vscode-te2-diff/src/vs/editor/common/languages/supports/tokenization.ts`
+
+A translation array is added to `TokenTheme`:
+
+```
+_colorIndexTranslation: Uint32Array | null = null;
+```
+
+In `match()`, when `_colorIndexTranslation` is set, the foreground index is extracted from the metadata, looked up in the translation table, and repacked:
+
+```
+const fg = (metadata & 0x00FFFF80) >>> 15;
+if (fg < this._colorIndexTranslation.length) {
+    const mapped = this._colorIndexTranslation[fg];
+    metadata = ((metadata & ~0x00FFFF80) | (mapped << 15)) >>> 0;
+}
+```
+
+**MetadataConsts bit layout** (from `encodedTokenAttributes.ts`):
+- `FOREGROUND_MASK`: `0x00FF8000` → bits 15–22
+- `FOREGROUND_OFFSET`: 15
+
+### Wiring
+
+`_patchSemanticTokenColorIndices()` in `m_editor_app.js` builds the translation table by matching colors from tokenTheme's small palette to their indices in the TextMate color map, then sets it directly on the tokenTheme object:
+
+```js
+theme.tokenTheme._colorIndexTranslation = indexTranslation;
+theme.tokenTheme._cache.clear();
+```
+
+The cache must be cleared because previously cached metadata has stale foreground indices.
+
+**Tree-shaking note**: The `setColorIndexTranslation()` method was tree-shaken from the Monaco build because it was only called through `as any` casts. The field `_colorIndexTranslation` and the `match()` logic survive because they execute in the hot path.
+
+### Key files
+
+| File | Role |
+|------|------|
+| `tokenization.ts` (patched source) | `_colorIndexTranslation` field + translation logic in `match()` |
+| `standaloneThemeService.ts` (patched source) | `setColorMapOverride()` builds translation + forwards |
+| `m_editor_app.js` `_patchSemanticTokenColorIndices()` | App-layer: sets field directly on tokenTheme |
+| `monaco.bootstrap.bundle.js` | Built bundle containing the fix (~line 164490) |
+
+## 27) Dynamic Theme System
+
+### Architecture overview
+
+Themes are discovered from two sources:
+
+1. **Vendored themes** — shipped in `monaco_editor/themes/vendored/{vendor}/`
+2. **Extension themes** — discovered via `contributes.themes[]` in installed VSIX extensions
+
+Both sources are merged by `GET /monaco_editor/available_themes` and returned as:
+
+```json
+{
+  "id": "github-dark-default",
+  "label": "GitHub Dark Default",
+  "uiTheme": "vs-dark",
+  "source": "vendored",
+  "sourceLabel": "GitHub Theme (Bundled)",
+  "serveUrl": "/api/app/file_editor_cm6/ui/monaco_editor/themes/vendored/github/github-dark-default.json"
+}
+```
+
+### Vendored themes
+
+Located at `monaco_editor/themes/vendored/github/`:
+- `theme_index.json` — manifest mapping theme IDs to filenames
+- 9 theme JSON files (GitHub Dark Default, GitHub Light, Dimmed, High Contrast, etc.)
+
+### Extension `contributes.themes` parsing
+
+`extension_registry.py` → `_parse_extension_package()` extracts `contributes.themes[]` entries from each extension's `package.json`:
+
+```python
+themes = pkg.get("contributes", {}).get("themes", [])
+```
+
+Each entry yields `{id, label, uiTheme, path}`. These appear in the `available_themes` response with `source: "extension"`.
+
+### Frontend registry
+
+`m_editor_app.js`:
+- `_ensureThemeRegistry()` — fetches `available_themes` once, builds a `Map<id, entry>`
+- `_getVscodeThemeJsonUrl(themeId)` — looks up serve URL from registry; fallback to vendored path map
+- `loadVscodeTextmateThemes()` — loads ALL themes from registry into `_jsonCache`, calls `defineTheme()` for each
+- `_resolveMonacoThemeId(themeKey)` — normalizes theme key to Monaco-registered theme ID
+- `applyMonacoTheme(themeKey)` — applies theme + lazy load + TextMate sync + palette patch + retokenization
+
+### Theme submodal (UI)
+
+| Element | Purpose |
+|---------|---------|
+| `#editor-themes-modal` (z-index 345) | Full theme browser, fe-modal pattern |
+| `#editor-settings-theme-strip` | Clickable strip in settings modal → opens theme browser |
+
+Sections: **Bundled** (vendored), **From Extensions** (installed).
+
+> **Built-in Monaco themes disabled** — `vs`, `vs-dark`, `hc-black`, `hc-light` are hidden from the theme picker and their IDs redirect to the closest GitHub vendored theme. These built-in themes lack a `tokenColors` array, so after `setColorMap()` overrides the rendering palette for TextMate, semantic tokens resolve foreground indices against the wrong palette (producing black or invisible text). Only vscode-style themes with full `tokenColors` JSON are supported. This will be revisited when a proper `setColorMap(null)` → retokenize pipeline is implemented.
+
+### Key files
+
+| File | Role |
+|------|------|
+| `m_editor_app.js` | Theme registry, loading, application |
+| `m_editor_app.py` | `GET /available_themes` endpoint, vendored theme serving |
+| `extension_registry.py` | `contributes.themes[]` parsing |
+| `main.js` | Theme submodal open/close/refresh logic |
+| `template.html` | `#editor-themes-modal` markup |
+| `themes/vendored/github/theme_index.json` | Vendored theme manifest |
+
+## 28) Theme-Switch Retokenization
+
+### Problem
+
+After `applyMonacoTheme()` calls `setTheme()` + `setColorMap()` + `_patchSemanticTokenColorIndices()`, the already-tokenized lines in the editor model still contain cached token data from the **old** theme. Colors only update after a full page reload.
+
+### Fix
+
+At the end of `applyMonacoTheme()`, after all theme/palette/translation updates are complete, force retokenization on every open model:
+
+```js
+var models = window.monaco.editor.getModels();
+for (var mi = 0; mi < models.length; mi++) {
+  if (models[mi] && typeof models[mi].resetTokenization === 'function') {
+    models[mi].resetTokenization();
+  }
+}
+```
+
+`resetTokenization()` invalidates the model's line-level token cache, causing Monaco to re-run all tokenizers (TextMate `tokenizeLine2` and Monarch `match()`) against the updated color map and translation table.
+
+### Execution order in `applyMonacoTheme()`
+
+1. `loadVscodeTextmateThemes()` — ensure all themes defined
+2. `_resolveMonacoThemeId()` — normalize theme key
+3. Lazy-load single theme if not cached
+4. `monaco.editor.setTheme(resolvedId)` — activates theme, rebuilds `tokenTheme`
+5. `_applyThemeToTextmateRegistry(tmActiveThemeJson)` — updates TextMate color map via `setColorMap()`
+6. `_forceSemanticHighlighting()` — ensures semantic tokens enabled
+7. `_patchSemanticTokenColorIndices()` — rebuilds `_colorIndexTranslation` on new tokenTheme + clears cache
+8. **`resetTokenization()` on all models** — flushes stale line tokens, triggers full retokenization

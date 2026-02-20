@@ -1772,9 +1772,10 @@ async function refreshEditorThemesModal() {
     }
   } catch (_) {}
 
-  // Also add VS Code built-in fallbacks
-  themes.push({ id: 'vs-dark', label: 'VS Code Dark', uiTheme: 'vs-dark', source: 'builtin', sourceLabel: 'Built-in' });
-  themes.push({ id: 'vs', label: 'VS Code Light', uiTheme: 'vs', source: 'builtin', sourceLabel: 'Built-in' });
+  // Built-in Monaco themes (vs, vs-dark, hc-black, hc-light) are disabled —
+  // they don't carry a TextMate color map so semantic tokens resolve to wrong
+  // palette indices.  Only vscode-style themes with tokenColors are supported.
+  // TODO: revisit when we have a setColorMap(null) → retokenize pipeline.
 
   const currentTheme = editorViewState?.theme || 'github-dark-default';
   editorThemesList.innerHTML = '';
@@ -1842,7 +1843,6 @@ async function refreshEditorThemesModal() {
 
   renderSection('Bundled', vendored);
   renderSection('From Extensions', fromExts);
-  renderSection('Built-in', builtins);
 
   if (!themes.length) {
     editorThemesList.textContent = 'No themes available';
