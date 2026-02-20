@@ -20,3 +20,4 @@ markdown2
 pygments
 docutils
 python-fasthtml
+ifaddr
