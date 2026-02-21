@@ -531,10 +531,15 @@ def rebuild_settings_gate(registry: Optional[dict] = None) -> dict:
         overrides = dict(_LANGUAGE_SLOT_OVERRIDES)
 
         # Merge extension-specific configuration values
+        # editor.* keys go into the language override; extension-namespaced
+        # keys (e.g. basedpyright.*, python.*) go top-level.
         ext_id = slot.get("extension", "")
         ext = extensions.get(ext_id, {})
         for cfg_key, cfg_val in ext.get("configuration_values", {}).items():
-            overrides[cfg_key] = cfg_val
+            if cfg_key.startswith("editor."):
+                overrides[cfg_key] = cfg_val
+            else:
+                settings[cfg_key] = cfg_val
 
         settings[lang_key] = overrides
 

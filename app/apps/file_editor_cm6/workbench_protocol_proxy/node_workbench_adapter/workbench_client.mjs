@@ -1,7 +1,16 @@
 import crypto from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+
+// ╔═══════════════════════════════════════════════════════════════════════╗
+// ║  DO NOT HARDCODE CONFIGURATION VALUES IN THIS FILE.                 ║
+// ║  All extension / editor settings belong in User/settings.json       ║
+// ║  (managed by the extension registry gate or the Custom Settings     ║
+// ║  UI).  The adapter reads that file and relays it to the extension   ║
+// ║  host.  No agent may add hardcoded config overrides here without    ║
+// ║  the user's explicit, expressed permission.                         ║
+// ╚═══════════════════════════════════════════════════════════════════════╝
 
 import { VSBuffer } from "./vscode_oss_runtime/base/common/buffer.mjs";
 import { NodeSocketFactory } from "./vscode_oss_runtime/platform/remote/browser/browserSocketFactory.mjs";
@@ -1113,43 +1122,79 @@ export class WorkbenchClient {
 
     // Use pre-extracted extension config defaults (extracted before sanitization).
     const extracted = this._rawExtensionConfigs || { contents: {}, keys: [] };
-    const allContents = { ...extracted.contents };
-    const allKeys = [...extracted.keys];
+    const defaults = { contents: { ...extracted.contents }, overrides: [], keys: [...extracted.keys] };
 
-    // Apply overrides: force specific values for TE2 headless mode.
-    const pythonPathCandidates = [
-      String(process.env.TE2_PYTHON_PATH || ""),
-      "/data/data/com.termux/files/usr/bin/python",
-      "/data/data/com.termux/files/usr/bin/python3",
-      "/usr/bin/python3",
-      "/usr/bin/python",
-    ].map((p) => p.trim()).filter(Boolean);
-    let defaultInterpreterPath = "python";
-    for (const p of pythonPathCandidates) {
+    // ── Read User/settings.json and populate userRemote ──────────────
+    // code-server runs in remote mode, so extensions see userRemote as the
+    // effective user-level config.  All settings are managed externally via
+    // the extension registry gate or the Custom Settings UI — nothing is
+    // hardcoded here (see banner at top of file).
+    const userRemoteContents = {};
+    const userRemoteKeys = [];
+
+    const userRemoteOverrides = [];
+
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    const settingsPath = process.env.TE2_USER_SETTINGS_PATH ||
+      (home ? path.join(home, ".config/code-server/User/settings.json") : "");
+    if (settingsPath) {
       try {
-        if (existsSync(p)) {
-          defaultInterpreterPath = p;
-          break;
+        const raw = readFileSync(settingsPath, "utf8");
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          for (const [flatKey, value] of Object.entries(parsed)) {
+            // Language-scoped overrides like "[python]" → IOverrides format
+            if (flatKey.startsWith("[") && flatKey.endsWith("]")) {
+              if (value && typeof value === "object" && !Array.isArray(value)) {
+                const lang = flatKey.slice(1, -1);
+                const oKeys = Object.keys(value);
+                const oContents = {};
+                for (const [oKey, oVal] of Object.entries(value)) {
+                  const oDotIdx = oKey.indexOf(".");
+                  if (oDotIdx > 0) {
+                    const oSec = oKey.substring(0, oDotIdx);
+                    const oProp = oKey.substring(oDotIdx + 1);
+                    if (!oContents[oSec]) oContents[oSec] = {};
+                    const oParts = oProp.split(".");
+                    let oTarget = oContents[oSec];
+                    for (let j = 0; j < oParts.length - 1; j++) {
+                      if (!oTarget[oParts[j]] || typeof oTarget[oParts[j]] !== "object") oTarget[oParts[j]] = {};
+                      oTarget = oTarget[oParts[j]];
+                    }
+                    oTarget[oParts[oParts.length - 1]] = oVal;
+                  } else {
+                    oContents[oKey] = oVal;
+                  }
+                }
+                userRemoteOverrides.push({ identifiers: [lang], keys: oKeys, contents: oContents });
+              }
+              continue;
+            }
+            const dotIdx = flatKey.indexOf(".");
+            if (dotIdx <= 0) continue;
+            const section = flatKey.substring(0, dotIdx);
+            const prop = flatKey.substring(dotIdx + 1);
+            if (!userRemoteContents[section]) userRemoteContents[section] = {};
+            const parts = prop.split(".");
+            let target = userRemoteContents[section];
+            for (let i = 0; i < parts.length - 1; i++) {
+              if (!target[parts[i]] || typeof target[parts[i]] !== "object") target[parts[i]] = {};
+              target = target[parts[i]];
+            }
+            target[parts[parts.length - 1]] = value;
+            if (!userRemoteKeys.includes(flatKey)) userRemoteKeys.push(flatKey);
+          }
+          console.log(`[config] loaded ${userRemoteKeys.length} user settings from ${settingsPath}`);
         }
-      } catch {}
+      } catch (e) {
+        console.log(`[config] could not read user settings (${settingsPath}): ${e?.message ?? e}`);
+      }
     }
-    if (!allContents.python) allContents.python = {};
-    allContents.python.languageServer = "Jedi";
-    allContents.python.defaultInterpreterPath = defaultInterpreterPath;
-    if (!allKeys.includes("python.languageServer")) allKeys.push("python.languageServer");
-    if (!allKeys.includes("python.defaultInterpreterPath")) allKeys.push("python.defaultInterpreterPath");
 
-    const defaults = { contents: allContents, overrides: [], keys: allKeys };
-    // userRemote only needs the forced overrides, not all defaults
     const userRemote = {
-      contents: {
-        python: {
-          languageServer: "Jedi",
-          defaultInterpreterPath,
-        },
-      },
-      overrides: [],
-      keys: ["python.languageServer", "python.defaultInterpreterPath"],
+      contents: userRemoteContents,
+      overrides: userRemoteOverrides,
+      keys: userRemoteKeys,
     };
 
     const data = {
@@ -1823,7 +1868,8 @@ export class WorkbenchClient {
       try {
         // In a real workbench session, configuration is then synced via `$acceptConfigurationChanged`.
         // Some extensions (including ms-python.python) appear to rely on this to observe settings.
-        this._sendExt(80, "$acceptConfigurationChanged", [configInit, { keys: configInit.defaults.keys, overrides: [] }], false);
+        const allChangedKeys = [...new Set([...configInit.defaults.keys, ...configInit.userRemote.keys])];
+        this._sendExt(80, "$acceptConfigurationChanged", [configInit, { keys: allChangedKeys, overrides: [] }], false);
       } catch {}
 
       // Mirror the browser workbench bootstrap sequence that appears to gate provider registration
