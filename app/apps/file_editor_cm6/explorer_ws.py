@@ -2102,6 +2102,29 @@ class ExplorerDispatcher:
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
+    async def handle_ext_custom_settings_get(self, payload: dict, msg_id: str):
+        """Return user-defined custom settings JSON."""
+        from .extension_registry import get_custom_settings
+        await self.emit_personal("ext:custom_settings_get", {
+            "ok": True,
+            "settings": get_custom_settings(),
+        }, msg_id)
+
+    async def handle_ext_custom_settings_set(self, payload: dict, msg_id: str):
+        """Save user-defined custom settings JSON and rebuild gate."""
+        from .extension_registry import set_custom_settings
+        settings = payload.get("settings", {})
+        if not isinstance(settings, dict):
+            return await self.send_error("settings must be a JSON object", msg_id)
+        try:
+            await asyncio.to_thread(set_custom_settings, settings)
+            await self.emit_personal("ext:custom_settings_set", {
+                "ok": True,
+                "count": len(settings),
+            }, msg_id)
+        except Exception as e:
+            await self.send_error(str(e), msg_id)
+
     async def handle_ext_toggle(self, payload: dict, msg_id: str):
         """Activate/deactivate an extension or language slot."""
         from .extension_registry import toggle_extension, toggle_language_slot

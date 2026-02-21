@@ -450,15 +450,36 @@ def scan_and_rebuild() -> dict:
         if lang in old_slots:
             slot["active"] = old_slots[lang].get("active", True)
 
+    # Preserve custom_settings from old registry
+    custom = old_registry.get("custom_settings", {})
+
     registry = {
         "version": 1,
         "updated_at": 0,
         "extensions": all_exts,
         "language_slots": slots,
+        "custom_settings": custom,
     }
 
     save_registry(registry)
     return registry
+
+
+# ── Custom settings (user-defined JSON overrides) ─────────────────────
+
+def get_custom_settings() -> dict:
+    """Return user-defined custom settings dict."""
+    registry = load_registry()
+    return registry.get("custom_settings", {})
+
+
+def set_custom_settings(settings: dict) -> None:
+    """Persist user-defined custom settings and rebuild the gate."""
+    registry = load_registry()
+    registry["custom_settings"] = settings
+    save_registry(registry)
+    rebuild_settings_gate(registry)
+    print(f"[ext_registry] custom settings saved: {len(settings)} keys", flush=True)
 
 
 # ── Settings gate generation ──────────────────────────────────────────
@@ -516,6 +537,11 @@ def rebuild_settings_gate(registry: Optional[dict] = None) -> dict:
             overrides[cfg_key] = cfg_val
 
         settings[lang_key] = overrides
+
+    # Merge custom user settings (highest priority — applied last)
+    custom = registry.get("custom_settings", {})
+    for k, v in custom.items():
+        settings[k] = v
 
     # Write
     _USER_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)

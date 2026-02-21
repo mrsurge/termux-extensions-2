@@ -2995,6 +2995,20 @@
     </div>
     <div class="fe-modal-body">
       <div id="editor-ext-manager-list"></div>
+      <hr style="border-color: var(--fe-border); margin: 16px 0 12px;">
+      <details id="editor-ext-custom-settings-section">
+        <summary style="cursor:pointer; font-weight:600; font-size:0.9rem;">⚙ Custom Settings (JSON)</summary>
+        <p style="font-size:12px; opacity:0.6; margin:6px 0 8px;">
+          Arbitrary key–value pairs merged into code-server User/settings.json.
+          Requires code-server restart to take effect.
+        </p>
+        <textarea id="editor-ext-custom-settings-input" class="lsp-rootrel-input"
+          rows="6" style="width:100%; font-family:monospace; font-size:12px; resize:vertical;"
+          placeholder='{ "editor.semanticHighlighting.enabled": true }'></textarea>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+          <button class="fe-btn fe-btn-primary" id="editor-ext-custom-settings-save">Save</button>
+        </div>
+      </details>
     </div>
   </div>
 </div>

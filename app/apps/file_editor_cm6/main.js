@@ -1497,6 +1497,8 @@ const editorExtManagerModal = requireEl('#editor-ext-manager-modal');
 const editorExtManagerClose = requireEl('#editor-ext-manager-close');
 const editorExtManagerInstallBtn = requireEl('#editor-ext-manager-install');
 const editorExtManagerList = requireEl('#editor-ext-manager-list');
+const extCustomSettingsInput = requireEl('#editor-ext-custom-settings-input');
+const extCustomSettingsSave = requireEl('#editor-ext-custom-settings-save');
 
 const extConfigModal = requireEl('#ext-config-modal');
 const extConfigTitle = requireEl('#ext-config-title');
@@ -1853,6 +1855,7 @@ function openEditorExtManagerModal() {
   editorExtManagerModal.classList.add('show');
   editorExtManagerModal.setAttribute('aria-hidden', 'false');
   void refreshEditorExtManagerModal();
+  void loadCustomSettings();
 }
 function closeEditorExtManagerModal() {
   editorExtManagerModal.classList.remove('show');
@@ -2036,6 +2039,54 @@ editorExtManagerInstallBtn.addEventListener('click', async () => {
   } finally {
     editorExtManagerInstallBtn.disabled = false;
     editorExtManagerInstallBtn.textContent = '+ Install';
+  }
+});
+
+// --- Custom Settings (JSON textarea) ---
+async function loadCustomSettings() {
+  try {
+    const res = await window.__explorerBusRequest('ext:custom_settings_get', {}, 8000);
+    const settings = res?.payload?.settings || {};
+    const keys = Object.keys(settings);
+    extCustomSettingsInput.value = keys.length
+      ? JSON.stringify(settings, null, 2)
+      : '';
+  } catch (_) {
+    extCustomSettingsInput.value = '';
+  }
+}
+
+extCustomSettingsSave.addEventListener('click', async () => {
+  const raw = extCustomSettingsInput.value.trim();
+  let parsed = {};
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      host.toast('Invalid JSON: ' + e.message);
+      return;
+    }
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+      host.toast('Settings must be a JSON object');
+      return;
+    }
+  }
+  extCustomSettingsSave.disabled = true;
+  extCustomSettingsSave.textContent = 'Saving…';
+  try {
+    const res = await window.__explorerBusRequest('ext:custom_settings_set', {
+      settings: parsed,
+    }, 15000);
+    if (res?.payload?.ok) {
+      host.toast(`Custom settings saved (${res.payload.count} keys). Restart code-server to apply.`);
+    } else {
+      host.toast(res?.payload?.error || 'Save failed');
+    }
+  } catch (e) {
+    host.toast(e?.message || 'Save failed');
+  } finally {
+    extCustomSettingsSave.disabled = false;
+    extCustomSettingsSave.textContent = 'Save';
   }
 });
 
