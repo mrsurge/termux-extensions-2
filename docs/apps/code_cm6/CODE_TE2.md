@@ -2549,6 +2549,11 @@ Sections: **Bundled** (vendored), **From Extensions** (installed).
 | `template.html` | `#editor-themes-modal` markup |
 | `themes/vendored/github/theme_index.json` | Vendored theme manifest |
 
+### Gotchas
+
+- **Short hex colors**: Monaco's tokenization parser rejects 3/4-char CSS shorthand hex (`#fff`, `#0008`). The converter functions `_expandShortHex()` and `_toMonacoColorHex()` in `m_editor_app.js` expand these to 6/8-char before passing to `defineTheme()`.
+- **Built-in themes disabled**: `vs`, `vs-dark`, `hc-black`, `hc-light` are hidden from the picker. They lack `tokenColors` so semantic tokens resolve to wrong palette indices after `setColorMap()`. IDs redirect to closest GitHub vendored theme via `_resolveMonacoThemeId()`. See §28 for related retokenization details.
+
 ## 28) Theme-Switch Retokenization
 
 ### Problem
