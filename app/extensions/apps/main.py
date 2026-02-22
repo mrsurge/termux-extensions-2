@@ -1,6 +1,7 @@
 import os
 import json
 import aiofiles
+import contextlib
 
 # Get project root reliably - app module's parent
 import app
@@ -11,8 +12,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Request, HTTPException, WebSocket, Body
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from app.libs.app_manager import ensure_app_running
-from app.libs import app_lifecycle
 from app.libs import app_manager
+from app.libs import app_lifecycle
 from framework_shells import FrameworkShellManager, get_manager as _get_framework_shell_manager
 
 async def get_framework_shell_manager() -> FrameworkShellManager:
@@ -27,6 +28,17 @@ def get_loaded_apps():
     return app.main.loaded_apps
 
 apps_bp = APIRouter()
+
+
+async def _is_local_port_open(port: int, timeout: float = 0.4) -> bool:
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", int(port)), timeout=timeout)
+    except Exception:
+        return False
+    writer.close()
+    with contextlib.suppress(Exception):
+        await writer.wait_closed()
+    return True
 
 @apps_bp.post('/api/apps/{app_id}/open')
 async def open_app(app_id: str, payload: dict = Body(...)):
@@ -168,14 +180,30 @@ async def app_shell(app_id: str, request: Request):
         raise HTTPException(status_code=404, detail="App not found")
 
     entrypoints = manifest.get('entrypoints', {})
+    backend_required = bool(entrypoints.get('backend_blueprint'))
+
+    # Strict stale-session handling:
+    # If this app requires a backend worker and the worker is not running,
+    # redirect to framework root instead of attempting to auto-start.
+    if backend_required and not entrypoints.get('nicegui_shell'):
+        running_apps = await app_manager.get_running_apps()
+        if app_id not in running_apps:
+            return RedirectResponse(url="/")
+        if app_id == "file_editor_cm6":
+            app_info = running_apps.get(app_id) or {}
+            port = app_info.get("port")
+            if not port:
+                return RedirectResponse(url="/")
+            if not await _is_local_port_open(int(port)):
+                return RedirectResponse(url="/")
+
     if entrypoints.get('nicegui_shell'):
-        print(f"[AppsExtension] app_shell launching nicegui app {app_id}")
-        app_info = await ensure_app_running(app_id)
+        running_apps = await app_manager.get_running_apps()
+        app_info = running_apps.get(app_id)
         port = app_info.get('port') if isinstance(app_info, dict) else None
         if not port:
-            raise HTTPException(status_code=502, detail="App worker not running")
+            return RedirectResponse(url="/")
 
-        await asyncio.sleep(2.0)
         host_only = request.url.hostname
         scheme = request.url.scheme
         redirect_url = f"{scheme}://{host_only}:{port}/"

@@ -11,6 +11,7 @@ settings.json is an OUTPUT of the registry (one-way flow, never read back).
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -23,6 +24,7 @@ _CODE_SERVER_DATA_DIR = Path.home() / ".config" / "code-server"
 _EXTENSIONS_DIR = _CODE_SERVER_DATA_DIR / "extensions"
 _USER_SETTINGS_PATH = _CODE_SERVER_DATA_DIR / "User" / "settings.json"
 _REGISTRY_PATH = _CODE_SERVER_DATA_DIR / "te2_extension_registry.json"
+_RPC_CONFIG_PATH = _CODE_SERVER_DATA_DIR / "te2_rpc_config.json"
 
 # Builtin extensions shipped with code-server.
 # Derive from `which code-server` → resolve to install root → lib/vscode/extensions
@@ -67,6 +69,179 @@ def _find_builtin_extensions_dir() -> str:
     return str(Path.home() / ".local" / "lib" / "code-server" / "lib" / "vscode" / "extensions")
 
 _BUILTIN_EXTENSIONS_DIR = Path(_find_builtin_extensions_dir())
+
+# ── RPC Config (nid auto-discovery) ───────────────────────────────────
+#
+# The workbench adapter hardcodes ~13 numeric rpcIds (protocol identifiers)
+# from VS Code's extHost.protocol.ts.  These shift when VS Code adds/removes
+# createProxyIdentifier() calls.  We auto-extract them from the installed
+# code-server bundle and cache in te2_rpc_config.json.
+
+_ADAPTER_REQUIRED_NIDS = frozenset({
+    "MainThreadOutputService",
+    "ExtHostConfiguration",
+    "ExtHostDocumentsAndEditors",
+    "ExtHostDocuments",
+    "ExtHostEditors",
+    "ExtHostFileSystemInfo",
+    "ExtHostLanguages",
+    "ExtHostLanguageFeatures",
+    "ExtHostStatusBar",
+    "ExtHostExtensionService",
+    "ExtHostWorkspace",
+    "ExtHostEditorTabs",
+    "ExtHostOutputService",
+})
+
+
+def _find_ext_host_bundle() -> Optional[str]:
+    """Locate extensionHostProcess.js from the installed code-server."""
+    # _BUILTIN_EXTENSIONS_DIR = .../lib/vscode/extensions
+    # bundle = .../lib/vscode/out/vs/workbench/api/node/extensionHostProcess.js
+    bundle = (
+        _BUILTIN_EXTENSIONS_DIR.parent
+        / "out" / "vs" / "workbench" / "api" / "node" / "extensionHostProcess.js"
+    )
+    if bundle.exists():
+        return str(bundle)
+    return None
+
+
+def _get_code_server_version() -> Optional[dict]:
+    """Run ``code-server --version`` and return version + commit."""
+    try:
+        out = subprocess.check_output(
+            ["code-server", "--version"], text=True, timeout=5, stderr=subprocess.DEVNULL
+        )
+        # Output may be multi-line or single-line:
+        #   "4.109.2\n9184b645...\nwith Code 1.109.2"      (multi-line)
+        #   "4.109.2 9184b645... with Code 1.109.2"        (single-line)
+        text = out.strip()
+        parts = text.split()
+        if len(parts) >= 2:
+            return {"version": parts[0], "commit": parts[1]}
+    except Exception:
+        pass
+    return None
+
+
+def _extract_nids_from_bundle(bundle_path: str) -> Optional[dict]:
+    """Block-scoped extraction of rpcId nids from the minified extension host bundle.
+
+    Finds the single ``var X={MainThread...:N("MainThread..."),...};`` object
+    literal, discovers the minified function name dynamically, then extracts
+    **property keys** (not string arguments) with positional nids.
+    """
+    try:
+        content = Path(bundle_path).read_text(errors="ignore")
+    except Exception:
+        return None
+
+    # Step 1 — isolate the proxy declaration block
+    block_match = re.search(r"var\s+[A-Za-z0-9_]+=\{MainThread[^;]+", content)
+    if not block_match:
+        return None
+    block = block_match.group(0)
+
+    # Step 2 — discover the minified createProxyIdentifier function name
+    func_match = re.search(r':([A-Za-z0-9_]+)\("MainThread', block)
+    if not func_match:
+        return None
+    func_name = func_match.group(1)
+
+    # Step 3 — extract key:func("string") pairs; position = nid (1-based)
+    pattern = re.compile(r"(\w+):" + re.escape(func_name) + r'\("\w+"\)')
+    nids: dict[str, int] = {}
+    for i, m in enumerate(pattern.finditer(block), start=1):
+        nids[m.group(1)] = i
+
+    return nids if nids else None
+
+
+def ensure_rpc_config() -> dict:
+    """Version-gated rpc-config.json generation.
+
+    Returns the nids dict (from cache or freshly extracted).
+    Returns empty dict on failure (adapter falls back to hardcoded defaults).
+    """
+    version_info = _get_code_server_version()
+    if not version_info:
+        print("[rpc-config] code-server not found, skipping", flush=True)
+        return {}
+
+    # Check existing config
+    if _RPC_CONFIG_PATH.exists():
+        try:
+            existing = json.loads(_RPC_CONFIG_PATH.read_text())
+            if (
+                existing.get("code_server_version") == version_info["version"]
+                and existing.get("code_server_commit") == version_info["commit"]
+            ):
+                nids = existing.get("nids", {})
+                print(
+                    f"[rpc-config] cache hit — {len(nids)} nids (code-server {version_info['version']})",
+                    flush=True,
+                )
+                return nids
+            print(
+                f"[rpc-config] version mismatch: cached={existing.get('code_server_version')} installed={version_info['version']} — regenerating",
+                flush=True,
+            )
+        except Exception:
+            print("[rpc-config] corrupt config file, regenerating", flush=True)
+
+    # Locate the bundle
+    bundle = _find_ext_host_bundle()
+    if not bundle:
+        print("[rpc-config] extensionHostProcess.js not found", flush=True)
+        return {}
+
+    # Extract
+    nids = _extract_nids_from_bundle(bundle)
+    if not nids:
+        print(f"[rpc-config] extraction failed — no proxy block found in {bundle}", flush=True)
+        return {}
+
+    # Validate: all 13 adapter-required names must be present
+    missing = _ADAPTER_REQUIRED_NIDS - set(nids.keys())
+    if missing:
+        print(f"[rpc-config] ABORT — missing required nids: {missing}", flush=True)
+        return _load_stale_nids()
+
+    # Validate: entry count in reasonable range
+    count = len(nids)
+    if not (100 <= count <= 300):
+        print(f"[rpc-config] ABORT — suspicious entry count {count} (expected 100-300)", flush=True)
+        return _load_stale_nids()
+
+    # Write config
+    config = {
+        "code_server_version": version_info["version"],
+        "code_server_commit": version_info["commit"],
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "nids": nids,
+    }
+    try:
+        _RPC_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _RPC_CONFIG_PATH.write_text(json.dumps(config, indent=2))
+        print(
+            f"[rpc-config] wrote {count} nids → {_RPC_CONFIG_PATH} (code-server {version_info['version']})",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[rpc-config] failed to write config: {exc}", flush=True)
+
+    return nids
+
+
+def _load_stale_nids() -> dict:
+    """Try to return nids from an existing (possibly stale) config file."""
+    if _RPC_CONFIG_PATH.exists():
+        try:
+            return json.loads(_RPC_CONFIG_PATH.read_text()).get("nids", {})
+        except Exception:
+            pass
+    return {}
 
 # Extensions we never load — they spawn processes or do filesystem ops
 # that hang in our headless environment
@@ -519,6 +694,7 @@ def rebuild_settings_gate(registry: Optional[dict] = None) -> dict:
     # Apply per-language overrides for active slots
     slots = registry.get("language_slots", {})
     extensions = registry.get("extensions", {})
+    ext_managed_keys: set = set()  # keys written by extension config UI
 
     for lang_id, slot in slots.items():
         if not slot.get("active", True):
@@ -536,6 +712,7 @@ def rebuild_settings_gate(registry: Optional[dict] = None) -> dict:
         ext_id = slot.get("extension", "")
         ext = extensions.get(ext_id, {})
         for cfg_key, cfg_val in ext.get("configuration_values", {}).items():
+            ext_managed_keys.add(cfg_key)
             if cfg_key.startswith("editor."):
                 overrides[cfg_key] = cfg_val
             else:
@@ -543,10 +720,12 @@ def rebuild_settings_gate(registry: Optional[dict] = None) -> dict:
 
         settings[lang_key] = overrides
 
-    # Merge custom user settings (highest priority — applied last)
+    # Merge custom user settings — skip keys already managed by the
+    # extension config UI so that per-extension settings always win.
     custom = registry.get("custom_settings", {})
     for k, v in custom.items():
-        settings[k] = v
+        if k not in ext_managed_keys:
+            settings[k] = v
 
     # Write
     _USER_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)

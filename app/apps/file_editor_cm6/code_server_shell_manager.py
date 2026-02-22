@@ -240,7 +240,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         # Sync watcher exclusion settings before launch so code-server
         # reads the correct files.watcherExclude on boot.
         try:
-            from .preferences_store import ProjectSidecar
+            from .project_sidecar import ProjectSidecar
             sc = ProjectSidecar.load_or_create(str(repo_root))
             wmode = sc._data.get("watcher", {}).get("mode", "ipc")
             sync_vscode_watcher_settings(wmode)

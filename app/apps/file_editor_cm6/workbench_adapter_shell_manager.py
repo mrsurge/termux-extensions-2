@@ -89,6 +89,8 @@ async def _stdout_reader_loop(proc: asyncio.subprocess.Process) -> None:
                     except json.JSONDecodeError:
                         log.warning("[adapter_stdio] bad PUSH JSON: %s", payload[:200])
                 else:
+                    if line.startswith("[rpc-config]"):
+                        print(f"[adapter_stdout] {line[:500]}", flush=True)
                     log.debug("[adapter_stdout] %s", line[:500])
     except asyncio.CancelledError:
         pass
@@ -161,6 +163,14 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
     """
 
     global _active_shell_id, _pipe_state, _stdout_reader_task
+
+    # Generate / validate rpc-config.json before launching the adapter.
+    # The adapter reads this file synchronously on startup.
+    try:
+        from .extension_registry import ensure_rpc_config
+        ensure_rpc_config()
+    except Exception as exc:
+        log.warning("[adapter] ensure_rpc_config failed: %s", exc)
 
     mgr = await get_manager()
     orch = Orchestrator(mgr)

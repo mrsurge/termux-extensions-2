@@ -110,6 +110,55 @@ const EXT_MSG_TRACE = String(process.env.TE2_EXT_MSG_TRACE || "") === "1";
 const EXT_MSG_TRACE_EVERY = Number(process.env.TE2_EXT_MSG_TRACE_EVERY ?? "100");
 const EXT_MSG_TRACE_MAX = Number(process.env.TE2_EXT_MSG_TRACE_MAX ?? "2000");
 
+// ── RPC nid config ───────────────────────────────────────────────────
+// Hardcoded fallback nids (current as of code-server 4.109.2 / VS Code 1.109.2).
+// If te2_rpc_config.json exists, values are overridden from it.
+const _RPC_DEFAULTS = {
+  MainThreadOutputService: 29,
+  ExtHostConfiguration: 80,
+  ExtHostDocumentsAndEditors: 84,
+  ExtHostDocuments: 85,
+  ExtHostEditors: 88,
+  ExtHostFileSystemInfo: 91,
+  ExtHostLanguages: 93,
+  ExtHostLanguageFeatures: 94,
+  ExtHostStatusBar: 97,
+  ExtHostExtensionService: 99,
+  ExtHostWorkspace: 106,
+  ExtHostEditorTabs: 113,
+  ExtHostOutputService: 122,
+};
+const _rpcIds = { ..._RPC_DEFAULTS };
+let _rpcConfigSource = "hardcoded-defaults";
+{
+  const rpcConfigPath = process.env.TE2_RPC_CONFIG_PATH ||
+    path.join(process.env.HOME || "", ".config/code-server/te2_rpc_config.json");
+  try {
+    const raw = readFileSync(rpcConfigPath, "utf8");
+    const cfg = JSON.parse(raw);
+    if (cfg.nids && typeof cfg.nids === "object") {
+      let applied = 0;
+      for (const name of Object.keys(_RPC_DEFAULTS)) {
+        if (typeof cfg.nids[name] === "number") {
+          _rpcIds[name] = cfg.nids[name];
+          applied++;
+        }
+      }
+      _rpcConfigSource = `rpc-config.json (code-server ${cfg.code_server_version || "?"}, ${applied}/${Object.keys(_RPC_DEFAULTS).length} applied)`;
+      console.log(`[rpc-config] loaded from ${rpcConfigPath} — ${_rpcConfigSource}`);
+    } else {
+      console.log(`[rpc-config] ${rpcConfigPath} present but missing nids object, using defaults`);
+    }
+  } catch (err) {
+    if (err?.code === "ENOENT") {
+      console.log(`[rpc-config] no config file at ${rpcConfigPath}, using hardcoded defaults`);
+    } else {
+      console.log(`[rpc-config] failed to load ${rpcConfigPath}: ${err?.message || err}, using hardcoded defaults`);
+    }
+  }
+}
+// ── end RPC nid config ───────────────────────────────────────────────
+
 // Derived from a real code-server workbench session trace. This is used to bootstrap the
 // remote extension host with a language id universe so onLanguage:* activation works.
 const BOOTSTRAP_LANGUAGE_IDS = [
@@ -1780,7 +1829,7 @@ export class WorkbenchClient {
           } else if (msg.method === "$requestWorkspaceTrust") {
             replyPayload = encodeExtReplyOkJson(msg.req, true);
             try {
-              this._sendExt(106, "$onDidGrantWorkspaceTrust", [], false);
+              this._sendExt(_rpcIds.ExtHostWorkspace, "$onDidGrantWorkspaceTrust", [], false);
             } catch {}
           } else if (msg.method === "$getTools") {
             // The real workbench returns a large list (built-in + extension tools). Empty array is acceptable for our TE2 use-cases.
@@ -1800,7 +1849,7 @@ export class WorkbenchClient {
             replyPayload = encodeExtReplyOkJson(msg.req, null);
           } else if (msg.method === "$executeCommand") {
             replyPayload = encodeExtReplyOkEmpty(msg.req);
-          } else if (msg.method === "$register" && msg.rpcId === 29) {
+          } else if (msg.method === "$register" && msg.rpcId === _rpcIds.MainThreadOutputService) {
             // MainThreadOutputService.$register returns Promise<string> (channel ID).
             // Clangd blocks waiting for this. Return a synthetic channel ID.
             const channelId = `te2-output-${msg.req}`;
@@ -1862,14 +1911,16 @@ export class WorkbenchClient {
       // Wait for the real Extension Host handshake (Ready -> init JSON -> Initialized).
       await extHandshakeReady;
 
+      console.log(`[rpc-config] source: ${_rpcConfigSource}`);
+
       // Minimal ExtHost bootstrap (enough to get language providers registered).
       const configInit = spanTrace("connect.buildConfigurationInitData", () => this._buildConfigurationInitData(workspaceRoot, useRemote ? authority : null));
-      this._sendExt(80, "$initializeConfiguration", [configInit], false);
+      this._sendExt(_rpcIds.ExtHostConfiguration, "$initializeConfiguration", [configInit], false);
       try {
         // In a real workbench session, configuration is then synced via `$acceptConfigurationChanged`.
         // Some extensions (including ms-python.python) appear to rely on this to observe settings.
         const allChangedKeys = [...new Set([...configInit.defaults.keys, ...configInit.userRemote.keys])];
-        this._sendExt(80, "$acceptConfigurationChanged", [configInit, { keys: allChangedKeys, overrides: [] }], false);
+        this._sendExt(_rpcIds.ExtHostConfiguration, "$acceptConfigurationChanged", [configInit, { keys: allChangedKeys, overrides: [] }], false);
       } catch {}
 
       // Mirror the browser workbench bootstrap sequence that appears to gate provider registration
@@ -1895,34 +1946,34 @@ export class WorkbenchClient {
           ["chat-editing-notebook-snapshot-model", 18434],
         ];
         for (const [scheme, caps] of providerInfos) {
-          this._sendExt(91, "$acceptProviderInfos", [{ $mid: 1, path: "/dummy", scheme }, caps], false);
+          this._sendExt(_rpcIds.ExtHostFileSystemInfo, "$acceptProviderInfos", [{ $mid: 1, path: "/dummy", scheme }, caps], false);
         }
       } catch {}
       try {
         const regexSource = "(-?\\d*\\.\\d\\w*)|([^\\`\\~\\!\\@\\#\\$\\%\\^\\&\\*\\(\\)\\-\\=\\+\\[\\{\\]\\}\\\\\\|\\;\\:\\'\\\"\\,\\.\\<\\>\\/\\?\\s]+)";
         const defs = BOOTSTRAP_LANGUAGE_IDS.map((languageId) => ({ languageId, regexSource, regexFlags: "g" }));
-        this._sendExt(94, "$setWordDefinitions", [defs], false);
+        this._sendExt(_rpcIds.ExtHostLanguageFeatures, "$setWordDefinitions", [defs], false);
       } catch {}
       try {
-        this._sendExt(94, "$acceptInlineCompletionsUnificationState", [{ codeUnification: false, modelUnification: false, extensionUnification: false, expAssignments: [] }], false);
+        this._sendExt(_rpcIds.ExtHostLanguageFeatures, "$acceptInlineCompletionsUnificationState", [{ codeUnification: false, modelUnification: false, extensionUnification: false, expAssignments: [] }], false);
       } catch {}
       // Provide language ids early so onLanguage:* activation works like in a real workbench.
-      this._sendExt(93, "$acceptLanguageIds", [BOOTSTRAP_LANGUAGE_IDS], false);
+      this._sendExt(_rpcIds.ExtHostLanguages, "$acceptLanguageIds", [BOOTSTRAP_LANGUAGE_IDS], false);
       try {
-        this._sendExt(122, "$setVisibleChannel", [null], false);
+        this._sendExt(_rpcIds.ExtHostOutputService, "$setVisibleChannel", [null], false);
       } catch {}
       try {
-        this._sendExt(97, "$acceptStaticEntries", [[]], false);
+        this._sendExt(_rpcIds.ExtHostStatusBar, "$acceptStaticEntries", [[]], false);
       } catch {}
       try {
         // Mirror trace: workbench clears active editor before restoring tabs/editors.
-        this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [{ newActiveEditor: null }], false);
+        this._sendExt(_rpcIds.ExtHostDocumentsAndEditors, "$acceptDocumentsAndEditorsDelta", [{ newActiveEditor: null }], false);
       } catch {}
       try {
-        this._sendExt(113, "$acceptEditorTabModel", [[{ groupId: 0, isActive: true, viewColumn: 0, tabs: [] }]], false);
+        this._sendExt(_rpcIds.ExtHostEditorTabs, "$acceptEditorTabModel", [[{ groupId: 0, isActive: true, viewColumn: 0, tabs: [] }]], false);
       } catch {}
       try {
-        this._sendExt(99, "$activateByEvent", ["onLanguage", 0], false);
+        this._sendExt(_rpcIds.ExtHostExtensionService, "$activateByEvent", ["onLanguage", 0], false);
       } catch {}
       // NOTE: removed $activateByEvent("*") — it activates non-language extensions
       // (emmet, git-base, etc.) that try filesystem ops our adapter can't handle,
@@ -1939,9 +1990,9 @@ export class WorkbenchClient {
           name,
           transient: false,
         };
-        this._sendExt(106, "$initializeWorkspace", [workspace, workspaceTrusted], false);
+        this._sendExt(_rpcIds.ExtHostWorkspace, "$initializeWorkspace", [workspace, workspaceTrusted], false);
         if (workspaceTrusted) {
-          this._sendExt(106, "$onDidGrantWorkspaceTrust", [], false);
+          this._sendExt(_rpcIds.ExtHostWorkspace, "$onDidGrantWorkspaceTrust", [], false);
         }
       }
 
@@ -2035,25 +2086,25 @@ export class WorkbenchClient {
     try {
       if (shouldClosePrev && prevTab) {
         spanTrace("openFile.send.tabOp.closePrev", () =>
-          this._sendExt(113, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: prevTab, kind: 1 }], false)
+          this._sendExt(_rpcIds.ExtHostEditorTabs, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: prevTab, kind: 1 }], false)
         );
         console.log(`[openFile] ts=${Date.now()} tabOp kind=1 closePrev tab=${String(prevTab?.label || "")}`);
       }
     } catch {}
     try {
       spanTrace("openFile.send.tabOp.addInactive", () =>
-        this._sendExt(113, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: tabInactive, kind: 0 }], false)
+        this._sendExt(_rpcIds.ExtHostEditorTabs, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: tabInactive, kind: 0 }], false)
       );
       console.log(`[openFile] ts=${Date.now()} tabOp kind=0 addInactive tab=${String(tabInactive?.label || "")}`);
     } catch {}
     try {
       spanTrace("openFile.send.tabOp.activate", () =>
-        this._sendExt(113, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: tabActive, kind: 2 }], false)
+        this._sendExt(_rpcIds.ExtHostEditorTabs, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: tabActive, kind: 2 }], false)
       );
       console.log(`[openFile] ts=${Date.now()} tabOp kind=2 activate tab=${String(tabActive?.label || "")}`);
     } catch {}
 
-    spanTrace("openFile.send.tabModel", () => this._sendExt(113, "$acceptEditorTabModel", [tabModel], false));
+    spanTrace("openFile.send.tabModel", () => this._sendExt(_rpcIds.ExtHostEditorTabs, "$acceptEditorTabModel", [tabModel], false));
     try {
       const prevPath = (prevUriObj && typeof prevUriObj === "object") ? String(prevUriObj.fsPath || prevUriObj.path || "") : "";
       console.log(`[openFile] ts=${Date.now()} path=${path} lang=${languageId} editorId=${editorId} forceRefresh=${forceRefresh ? 1 : 0} shouldClosePrev=${shouldClosePrev} prevEditorId=${prevEditorId || ""} prevPath=${prevPath}`);
@@ -2063,7 +2114,7 @@ export class WorkbenchClient {
 	    if (shouldClosePrev) {
 	      try {
 	        spanTrace("openFile.send.delta.removedDocuments", () =>
-	          this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [{ removedDocuments: [prevUriObj] }], false)
+	          this._sendExt(_rpcIds.ExtHostDocumentsAndEditors, "$acceptDocumentsAndEditorsDelta", [{ removedDocuments: [prevUriObj] }], false)
 	        );
         try {
           const prevPath = (prevUriObj && typeof prevUriObj === "object") ? String(prevUriObj.fsPath || prevUriObj.path || "") : "";
@@ -2083,7 +2134,7 @@ export class WorkbenchClient {
       const prevCharCount = this._docCharCount.get(path) || 0;
       const prevLastLineLen = this._docLastLineLength.get(path) ?? 10000;
       console.log(`[openFile] ts=${Date.now()} same-file reopen, sending $didChange instead of remove+add (v${prevVersion}→v${newVersion})`);
-      this._sendExt(85, "$acceptModelChanged", [
+      this._sendExt(_rpcIds.ExtHostDocuments, "$acceptModelChanged", [
         uriObj,
         {
           changes: [{
@@ -2116,7 +2167,7 @@ export class WorkbenchClient {
     const docDelta = spanTrace("openFile.buildDelta.addedDocuments", () => ({
       addedDocuments: [{ uri: uriObj, versionId: 1, lines, EOL: "\n", languageId, isDirty: false, encoding: "utf8" }],
     }));
-    spanTrace("openFile.send.delta.addedDocuments", () => this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [docDelta], false));
+    spanTrace("openFile.send.delta.addedDocuments", () => this._sendExt(_rpcIds.ExtHostDocumentsAndEditors, "$acceptDocumentsAndEditorsDelta", [docDelta], false));
     try { console.log(`[openFile] ts=${Date.now()} addedDocuments=[${path}] lineCount=${lines.length}`); } catch {}
     this._docVersions.set(path, 1); // reset version tracking for didChange
     this._docLineCount.set(path, lines.length);
@@ -2153,13 +2204,13 @@ export class WorkbenchClient {
 	        },
 	      ],
     }));
-    const reqDocs = spanTrace("openFile.send.delta.addedEditors", () => this._sendExt(84, "$acceptDocumentsAndEditorsDelta", [editorDelta], false));
+    const reqDocs = spanTrace("openFile.send.delta.addedEditors", () => this._sendExt(_rpcIds.ExtHostDocumentsAndEditors, "$acceptDocumentsAndEditorsDelta", [editorDelta], false));
     try { console.log(`[openFile] ts=${Date.now()} addedEditors=[${editorId}] newActiveEditor=${editorId}`); } catch {}
 
     spanTrace("openFile.send.editorState", () => {
-      this._sendExt(88, "$acceptEditorDiffInformation", [editorId, []], false);
+      this._sendExt(_rpcIds.ExtHostEditors, "$acceptEditorDiffInformation", [editorId, []], false);
 	      this._sendExt(
-        88,
+        _rpcIds.ExtHostEditors,
         "$acceptEditorPropertiesChanged",
         [
           editorId,
@@ -2186,12 +2237,12 @@ export class WorkbenchClient {
         false
       );
       // Editor position metadata (seen in the real workbench trace).
-      this._sendExt(88, "$acceptEditorPositionData", [{ [editorId]: 0 }], false);
-      this._sendExt(85, "$acceptDirtyStateChanged", [uriObj, false], false);
+      this._sendExt(_rpcIds.ExtHostEditors, "$acceptEditorPositionData", [{ [editorId]: 0 }], false);
+      this._sendExt(_rpcIds.ExtHostDocuments, "$acceptDirtyStateChanged", [uriObj, false], false);
     });
     // Trigger activation for deterministic provider registration.
     // In the workbench trace this is sent as a normal JSON-args request.
-    spanTrace("openFile.send.activateByEvent", () => this._sendExt(99, "$activateByEvent", [`onLanguage:${languageId}`, 0], false));
+    spanTrace("openFile.send.activateByEvent", () => this._sendExt(_rpcIds.ExtHostExtensionService, "$activateByEvent", [`onLanguage:${languageId}`, 0], false));
     this._activeEditorId = editorId;
     this._activeUriObj = uriObj;
     this._activeTab = tabActive;
@@ -2200,7 +2251,7 @@ export class WorkbenchClient {
 
   /**
    * Push a full-text buffer update to the extension host for live diagnostics.
-   * Uses $acceptModelChanged on ExtHostDocuments (rpcId 85) with isFlush:true.
+   * Uses $acceptModelChanged on ExtHostDocuments with isFlush:true.
    */
   didChange(params = {}) {
     if (!this.ext?.protocol) throw new Error("not connected");
@@ -2254,8 +2305,8 @@ export class WorkbenchClient {
       isEolChange: false,
     };
 
-    // rpcId 85 = ExtHostDocuments, $acceptModelChanged(uri, event, isDirty)
-    this._sendExt(85, "$acceptModelChanged", [uriObj, event, true], false);
+    // rpcId ExtHostDocuments, $acceptModelChanged(uri, event, isDirty)
+    this._sendExt(_rpcIds.ExtHostDocuments, "$acceptModelChanged", [uriObj, event, true], false);
     this._docCharCount.set(path, text.length);
     console.log(`[didChange] ts=${Date.now()} path=${path} ver=${nextVersion} bytes=${text.length} prevLines=${prevLines} prevLastLineLen=${prevLastLineLen} newLines=${newLines.length}`);
     return { ok: true, versionId: nextVersion };

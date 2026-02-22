@@ -181,8 +181,18 @@ async def ensure_app_running(app_id):
         # App is already running, verify the shell is alive
         app_info = _RUNNING_APPS[app_id]
         print(f"[AppManager] Found in _RUNNING_APPS: shell_id={app_info.get('shell_id')}, port={app_info.get('port')}")
+        cached_port = _parse_port(app_info.get('port'))
+        if cached_port and await _wait_for_port(cached_port, host="127.0.0.1", timeout=0.75, interval=0.15):
+            print(f"[AppManager] Cached worker port is reachable, returning existing app_info")
+            await app_lifecycle.register_app(app_id, app_info.get('shell_id'), app_info.get('port'))
+            return app_info
+
         manager = await get_framework_shell_manager()
-        shell = await manager.get_shell(app_info.get('shell_id'))
+        try:
+            shell = await asyncio.wait_for(manager.get_shell(app_info.get('shell_id')), timeout=1.5)
+        except asyncio.TimeoutError:
+            print(f"[AppManager] Timed out while checking shell {app_info.get('shell_id')}; treating as stale")
+            shell = None
         if shell:
             print(f"[AppManager] Shell found with status: {shell.status}")
         else:

@@ -1213,7 +1213,7 @@ except Exception:
 def _ensure_workbench_json_sync(project_root_str: str) -> None:
     """Sync code-server User/settings.json watcher exclusion at boot."""
     try:
-        from .preferences_store import ProjectSidecar
+        from .project_sidecar import ProjectSidecar
         from .code_server_shell_manager import sync_vscode_watcher_settings
         sc = ProjectSidecar.load_or_create(project_root_str)
         wmode = sc._data.get("watcher", {}).get("mode", "ipc")

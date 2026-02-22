@@ -40,19 +40,21 @@ async def _background_cleanup():
         async with _get_lock():
             now = time.time()
             stale_apps = []
+            tracked_count = len(_running_apps)
             for shell_id, app_info in list(_running_apps.items()):
-                if not app_info.get("locked"):
-                    age = now - app_info.get("created_at", now)
-                    if age > app_ttl_seconds:
-                        stale_apps.append(shell_id)
-            
-            if stale_apps:
-                print(
-                    f"[AppLifecycle] Cleanup tick {tick}: cleaning up {len(stale_apps)} stale app(s) "
-                    f"(tracking {len(_running_apps)}; TTL: {app_ttl_seconds}s)..."
-                )
-                for shell_id in stale_apps:
-                    await terminate_app(manager, shell_id)
+                if app_info.get("locked"):
+                    continue
+                age = now - app_info.get("created_at", now)
+                if age > app_ttl_seconds:
+                    stale_apps.append(shell_id)
+
+        if stale_apps:
+            print(
+                f"[AppLifecycle] Cleanup tick {tick}: cleaning up {len(stale_apps)} stale app(s) "
+                f"(tracking {tracked_count}; TTL: {app_ttl_seconds}s)..."
+            )
+            for shell_id in stale_apps:
+                await terminate_app(manager, shell_id)
 
 def start_background_tasks():
     """Kick off background lifecycle tasks inside the current event loop."""
@@ -104,22 +106,30 @@ async def get_running_apps(manager) -> List[Dict]:
     This will be used by the 'Recents' UI.
     """
     apps_with_stats = []
-    async with _get_lock():
-        # Iterate over a copy of the items to avoid issues if the dict changes
-        for shell_id, app_info in list(_running_apps.items()):
-            shell_record = await manager.get_shell(shell_id)
-            if not shell_record or shell_record.status != 'running':
-                # Clean up stale entries
-                _running_apps.pop(shell_id, None)
-                continue
+    stale_shell_ids = []
 
-            stats = (await manager.describe(shell_record)).get("stats", {})
-            apps_with_stats.append({
-                **app_info,
-                "uptime": time.time() - app_info["created_at"],
-                "cpu": stats.get("cpu_percent", 0),
-                "ram": stats.get("memory_rss", 0),
-            })
+    # Take a fast snapshot under lock, then do shell-manager I/O without holding it.
+    async with _get_lock():
+        tracked_items = list(_running_apps.items())
+
+    for shell_id, app_info in tracked_items:
+        shell_record = await manager.get_shell(shell_id)
+        if not shell_record or shell_record.status != 'running':
+            stale_shell_ids.append(shell_id)
+            continue
+
+        stats = (await manager.describe(shell_record)).get("stats", {})
+        apps_with_stats.append({
+            **app_info,
+            "uptime": time.time() - app_info["created_at"],
+            "cpu": stats.get("cpu_percent", 0),
+            "ram": stats.get("memory_rss", 0),
+        })
+
+    if stale_shell_ids:
+        async with _get_lock():
+            for shell_id in stale_shell_ids:
+                _running_apps.pop(shell_id, None)
     # Sort by creation time, oldest first
     return sorted(apps_with_stats, key=lambda x: x["created_at"])
 

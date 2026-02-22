@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 (function() {
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
   // You can disable at runtime in the iframe console with:
