@@ -2048,9 +2048,8 @@ Every VS Code extension declares its settings in `package.json` under
 3. For each property with a `"default"` value, splits the key at dots
    (e.g. `"clangd.enable"` → section `clangd`, prop `enable`) and nests it into a
    `contents` object — handles deeply nested keys like `"python.analysis.autoSearchPaths"`
-4. After scanning all extensions, applies TE2-specific overrides on top
-   (forces `python.languageServer: "Jedi"` and the interpreter path)
-5. Sends the whole thing as the `defaults` field of `IConfigurationInitData`
+4. Sends the whole thing as the `defaults` field of `IConfigurationInitData`
+5. User/extension overrides come from `User/settings.json` via `userRemote` (see §29)
 
 The result: any installed extension gets its declared defaults automatically. No hardcoding.
 
@@ -2076,17 +2075,118 @@ data and the full key list so extensions that listen for config changes pick up 
 
 ### TE2 overrides (applied after scan)
 
-| Key | Value | Reason |
-|-----|-------|--------|
-| `python.languageServer` | `"Jedi"` | Headless mode — Pylance unavailable |
-| `python.defaultInterpreterPath` | Auto-detected | Termux/system Python path |
+No hardcoded overrides remain in `_buildConfigurationInitData()`. All extension
+settings now flow from two external sources:
 
-To add a new forced override, set it on `allContents` after the scan loop in
-`_buildConfigurationInitData()`.
+1. **Extension config UI** → `configuration_values` in the registry
+2. **Custom Settings textarea** → `custom_settings` in the registry
+
+Both are written to `User/settings.json` by `rebuild_settings_gate()`, and the
+adapter reads that file into `userRemote` at boot (see §29).
+
+To add a forced override, use the Custom Settings UI in the extension manager
+or set keys directly in `User/settings.json` (non-managed keys are preserved).
 
 ### Key file
 
-`workbench_client.mjs` → `_buildConfigurationInitData()` (~line 1032)
+`workbench_client.mjs` → `_buildConfigurationInitData()` (~line 1120)
+
+
+## 29) Settings Pipeline — Extension Config, Custom Settings, and Adapter Relay
+
+### Overview
+
+TE2 has three layers that produce the final `User/settings.json` that the
+workbench adapter reads at boot:
+
+```
+┌──────────────────────┐   ┌──────────────────────────┐
+│  Extension Config UI │   │  Custom Settings textarea │
+│  (per-extension)     │   │  (global JSON)            │
+└──────────┬───────────┘   └─────────┬────────────────┘
+           │ configuration_values     │ custom_settings
+           ▼                          ▼
+┌─────────────────────────────────────────────────────┐
+│              te2_extension_registry.json             │
+└──────────────────────┬──────────────────────────────┘
+                       │ rebuild_settings_gate()
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│              User/settings.json                      │
+│  (global gate + per-language overrides + ext config  │
+│   + custom settings)                                 │
+└──────────────────────┬──────────────────────────────┘
+                       │ readFileSync() at boot
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│  workbench_client.mjs  _buildConfigurationInitData() │
+│  → $initializeConfiguration (rpcId=80) userRemote    │
+└─────────────────────────────────────────────────────┘
+```
+
+### Merge priority in `rebuild_settings_gate()`
+
+Applied in this order (later wins, with one exception):
+
+1. **Preserved keys** — non-managed keys from the existing `settings.json`
+   (e.g. `files.watcherExclude` set by watcher sync)
+2. **Global gate** — `_GLOBAL_GATE` dict (disables smart features globally)
+3. **Per-language overrides** — `_LANGUAGE_SLOT_OVERRIDES` for active slots
+   (re-enables smart features per language)
+4. **Extension `configuration_values`** — keys set via the per-extension config
+   modal. `editor.*` keys go into the `[lang]` override block; all others go
+   top-level.
+5. **Custom settings** — keys from the "Custom Settings (JSON)" textarea.
+   **Exception:** keys already managed by extension `configuration_values` are
+   skipped. This ensures the extension config UI always wins over the raw
+   JSON escape hatch.
+
+### Adapter relay (`workbench_client.mjs`)
+
+`_buildConfigurationInitData()` (~line 1120) reads `User/settings.json` and
+populates the `userRemote` section of `IConfigurationInitData`:
+
+- Flat keys like `basedpyright.analysis.typeCheckingMode` are split at dots and
+  nested: `{ basedpyright: { analysis: { typeCheckingMode: "off" } } }`
+- Language-scoped overrides like `[python]` become `IOverrides` entries with
+  `identifiers: ["python"]`
+- Sent via `$initializeConfiguration` (rpcId=80), then immediately followed by
+  `$acceptConfigurationChanged` so extensions listening for config changes pick
+  up the values
+
+### Project config files override everything
+
+Extensions like basedpyright read their own project config files directly from
+disk (e.g. `pyrightconfig.json`, `pyproject.toml [tool.basedpyright]`). These
+**always take priority** over VS Code settings. If a `pyrightconfig.json` sets
+`typeCheckingMode: "strict"`, it overrides `settings.json`'s `"off"` regardless
+of what the UI shows. If the project config has an invalid value, the extension
+falls back to its **compiled-in default** (not `settings.json`).
+
+### Custom Settings UI
+
+Accessible from the extension manager modal (collapsible "⚙ Custom Settings
+(JSON)" section). Accepts arbitrary JSON key-value pairs:
+
+```json
+{
+  "editor.semanticHighlighting.enabled": true,
+  "basedpyright.analysis.diagnosticMode": "workspace"
+}
+```
+
+Values are persisted in the registry under `custom_settings` and merged into
+`settings.json` on save. Requires code-server restart to take effect.
+
+### Key files
+
+| File | Role |
+|------|------|
+| `extension_registry.py` | `rebuild_settings_gate()`, `get/set_custom_settings()` |
+| `explorer_ws.py` | `handle_ext_configure`, `handle_ext_custom_settings_get/set` |
+| `workbench_client.mjs` | `_buildConfigurationInitData()` reads `settings.json` |
+| `main.js` | Extension config modal, Custom Settings textarea UI |
+| `template.html` | Modal markup for ext config + custom settings |
 
 
 ## 23) Semantic Tokens Pipeline (End-to-End)
@@ -2585,3 +2685,130 @@ for (var mi = 0; mi < models.length; mi++) {
 6. `_forceSemanticHighlighting()` — ensures semantic tokens enabled
 7. `_patchSemanticTokenColorIndices()` — rebuilds `_colorIndexTranslation` on new tokenTheme + clears cache
 8. **`resetTokenization()` on all models** — flushes stale line tokens, triggers full retokenization
+
+---
+
+## 30) RPC Protocol IDs (`rpcId`) — How They Work and Auto-Discovery
+
+### How VS Code assigns rpcIds
+
+The extension-host ↔ renderer protocol uses numeric IDs (`rpcId`) to route
+messages to the correct service (LanguageFeatures, OutputService, Configuration,
+etc.).  These IDs are **not negotiated at runtime** — they are determined by
+**declaration order** of `createProxyIdentifier()` calls in a single file:
+
+```
+src/vs/workbench/api/common/extHost.protocol.ts
+```
+
+`ProxyIdentifier` has a static counter (`ProxyIdentifier.count`) that starts at 0
+and auto-increments with each call.  All ~150 identifiers (both `MainContext.*`
+and `ExtHostContext.*`) share the same counter, so the nid is simply the 1-based
+position in the file.
+
+**There are no other files that call `createProxyIdentifier()`** — the mapping
+is fully contained in `extHost.protocol.ts`.
+
+### How the real front end resolves them
+
+Both sides (renderer and extension host) import the same `MainContext` /
+`ExtHostContext` objects from `extHost.protocol.ts`.  When either side calls
+`getProxy(identifier)`, it reads `identifier.nid` and uses that as the `rpcId`
+for all `_remoteCall()` invocations:
+
+```typescript
+// rpcProtocol.ts:243
+public getProxy<T>(identifier: ProxyIdentifier<T>): Proxied<T> {
+    const { nid: rpcId, sid } = identifier;
+    if (!this._proxies[rpcId]) {
+        this._proxies[rpcId] = this._createProxy(rpcId, sid);
+    }
+    return this._proxies[rpcId];
+}
+```
+
+Because both sides import the same module, the nids always agree.  There is no
+handshake or discovery step.
+
+### How TE2 handles them — `rpc-config.json` auto-discovery
+
+The workbench adapter (`workbench_client.mjs`) replaces the real renderer.
+Since it doesn't import `extHost.protocol.ts`, the rpcIds are resolved via a
+**cached config file** (`te2_rpc_config.json`) that is auto-generated by
+grepping the installed code-server bundle.
+
+**The 13 rpcIds the adapter uses** (out of ~150 total):
+
+| nid  | `ProxyIdentifier` name         | TE2 usage |
+|------|--------------------------------|-----------|
+| 29   | `MainThreadOutputService`      | Reply to `$register` with synthetic channel ID (unblocks clangd) |
+| 80   | `ExtHostConfiguration`         | `$initializeConfiguration`, `$acceptConfigurationChanged` |
+| 84   | `ExtHostDocumentsAndEditors`   | `$acceptDocumentsAndEditorsDelta` |
+| 85   | `ExtHostDocuments`             | `$acceptModelChanged`, `$acceptDirtyStateChanged` |
+| 88   | `ExtHostEditors`               | `$acceptEditorDiffInformation`, `$acceptEditorPropertiesChanged`, `$acceptEditorPositionData` |
+| 91   | `ExtHostFileSystemInfo`        | `$acceptProviderInfos` |
+| 93   | `ExtHostLanguages`             | `$acceptLanguageIds` |
+| 94   | `ExtHostLanguageFeatures`      | `$setWordDefinitions`, `$acceptInlineCompletionsUnificationState` |
+| 97   | `ExtHostStatusBar`             | `$acceptStaticEntries` |
+| 99   | `ExtHostExtensionService`      | `$activateByEvent` |
+| 106  | `ExtHostWorkspace`             | `$initializeWorkspace`, `$onDidGrantWorkspaceTrust` |
+| 113  | `ExtHostEditorTabs`            | `$acceptEditorTabModel`, `$acceptTabOperation` |
+| 122  | `ExtHostOutputService`         | `$setVisibleChannel` |
+
+### Auto-discovery pipeline
+
+The nid extraction is **version-gated** and runs automatically at boot:
+
+1. **Python helper** (`extension_registry.py: ensure_rpc_config()`) runs before
+   the adapter launches (called from `workbench_adapter_shell_manager.py`).
+
+2. **Version check** — runs `code-server --version`, compares against the cached
+   `te2_rpc_config.json`.  If version + commit match → cache hit, skip.
+
+3. **Block-scoped extraction** — if regeneration is needed, reads the installed
+   minified bundle (`extensionHostProcess.js`) and:
+   - Isolates the single `var Q={MainThread...:N("MainThread..."),...};` block
+   - Discovers the minified `createProxyIdentifier` function name dynamically
+     (it's `N` in the current build but could change across bundler versions)
+   - Extracts **property keys** (not string arguments — there are 9 known
+     key≠string mismatches in VS Code's source) with positional nids
+
+4. **Validation** — aborts and keeps stale config if entry count is outside
+   100–300 range or any of the 13 required names are missing.
+
+5. **Writes** `~/.config/code-server/te2_rpc_config.json` with all ~150 nids.
+
+6. **Adapter loads** the config synchronously at startup into `_rpcIds`.
+   All `_sendExt()` calls use named lookups (`_rpcIds.ExtHostConfiguration`
+   instead of literal `80`).  If the config file is missing, hardcoded
+   defaults remain as fallback.
+
+### Logging
+
+- Python side: `[rpc-config] wrote 150 nids → ...` or `[rpc-config] cache hit — 150 nids ...`
+- Adapter side: `[rpc-config] source: rpc-config.json (code-server 4.109.2, 13/13 applied)`
+  or `[rpc-config] source: hardcoded-defaults` (logged during `connect()`)
+
+### Grep pattern details
+
+The minified bundle contains a single object literal with all proxy declarations:
+```
+var Q={MainThreadAuthentication:N("MainThreadAuthentication"),MainThreadBulkEdits:N("MainThreadBulkEdits"),...};
+```
+
+String identifiers survive minification (they're runtime values, not type annotations).
+The block-scoped approach (extract the `var X={MainThread...` block first, then
+parse within it) avoids false hits elsewhere in the 1.7MB file (e.g., `tN("module")`
+where `N(` is a substring of a different function name).
+
+### Key files
+
+| File | Role |
+|------|------|
+| `extHost.protocol.ts` (code-server) | Single source of all `createProxyIdentifier()` calls |
+| `proxyIdentifier.ts` (code-server) | `ProxyIdentifier` class with static counter |
+| `rpcProtocol.ts` (code-server) | `getProxy()` / `_remoteCall()` — wires nid to RPC |
+| `workbench_client.mjs` (TE2) | Named `_rpcIds` lookups, config loader, hardcoded fallback defaults |
+| `extension_registry.py` (TE2) | `ensure_rpc_config()` — version-gated extraction and caching |
+| `workbench_adapter_shell_manager.py` (TE2) | Calls `ensure_rpc_config()` before adapter launch |
+| `~/.config/code-server/te2_rpc_config.json` | Cached nid map (auto-generated, version-gated) |
