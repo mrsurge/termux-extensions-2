@@ -161,12 +161,17 @@ Workbench adapter baton (deterministic startup):
   - **Requires** header `x-te2-baton: <token>` (or `?token=` query).
   - Prevents early 502/500 races by ensuring the adapter is up before commands.
 
-Spinner ownership (host UI):
-- The host UI uses a single spinner element (`#fe-lsp-spinner`) for multiple async flows.
+Spinner / Status indicator (host UI):
+- The host UI uses a **3-state status indicator** (`#fe-lsp-spinner`) that is always visible:
+  - **busy** (CSS `fe-lsp-status--busy`): animated spinner — adapter starting, readiness chain running, or diagnostics in progress.
+  - **ok** (CSS `fe-lsp-status--ok`): green check — adapter connected and operational.
+  - **error** (CSS `fe-lsp-status--error`): red X — adapter not connected (default on page load).
+- State is managed by `_feUpdateLspSpinner()` which reads `window.__adapterConnected` (set by `_spinnerHide(true)` after baton completes) and `window.__feLspSpinnerUi.busyShow` to decide which class to apply.
 - To avoid competing writers, the spinner has an explicit "activity owner" (`window.__feLspSpinnerUi.busyActivity`):
   - `workbench_adapter`: `ensureWorkbenchAdapterReady()` owns the spinner while starting/polling the adapter.
   - `diagnostics`: the diagnostics baton owns the spinner while waiting for per-file analysis.
 - `ensureWorkbenchAdapterReady()` must not overwrite the spinner title while `busyActivity === 'diagnostics'`.
+- Long-press / right-click on the indicator opens the adapter context menu (`#fe-adapter-dd`) with a "Reload Extension Adapter" option.
 
 ## 1) Key files (where to look)
 
@@ -2812,3 +2817,71 @@ where `N(` is a substring of a different function name).
 | `extension_registry.py` (TE2) | `ensure_rpc_config()` — version-gated extraction and caching |
 | `workbench_adapter_shell_manager.py` (TE2) | Calls `ensure_rpc_config()` before adapter launch |
 | `~/.config/code-server/te2_rpc_config.json` | Cached nid map (auto-generated, version-gated) |
+
+## 31) Adapter Auto-Restart & Status Indicator
+
+### Problem
+
+When extensions are installed, uninstalled, toggled, or reconfigured, the workbench adapter (and sometimes code-server) must be restarted for changes to take effect. Previously this required a full page reload. There was also no persistent visual indicator showing whether the adapter was connected.
+
+### Solution: auto-restart pipeline
+
+Extension operations trigger automatic shell termination and iframe reload:
+
+| Operation | Shells killed | Handler |
+|-----------|--------------|---------|
+| Install / Uninstall | code-server + adapter | `_restart_code_server_and_adapter()` |
+| Toggle / Configure / Custom Settings | adapter only | `_restart_adapter_only()` |
+| Manual restart (UI menu) | adapter only | `handle_ext_restart_adapter()` |
+
+### Restart flow
+
+1. **Backend**: extension handler (e.g. `handle_ext_configure`) calls `_restart_adapter_only()`
+2. **Backend**: `terminate_adapter_shell()` kills the Node process, clears pipe/reader/RPC state, cancels pending futures
+3. **Backend**: emits `ext:adapter_restarting` to frontend via explorer WS
+4. **Frontend**: save handler calls `_reloadEditorIframe()` which:
+   - Resets `window.__adapterConnected = false`
+   - Sets spinner to busy state
+   - Reloads the iframe after 1.5 s delay (let shell terminate)
+   - Re-invokes `ensureWorkbenchAdapterReady()` after 2 s (let iframe connect)
+5. **Iframe**: loads → emits `editor_readiness_check` → backend launches new adapter → baton completes → spinner goes green
+
+The `ext:adapter_restarting` event handler in `connectExplorerSocket()` is a safety-net backup. The primary reload is triggered directly by the save/install handlers. The event handler uses `typeof` guards because those functions are defined later in main.js (not hoisted).
+
+### 3-state status indicator
+
+The spinner element (`#fe-lsp-spinner`) is always visible with three CSS states:
+
+| State | CSS class | Visual | Meaning |
+|-------|-----------|--------|---------|
+| busy | `fe-lsp-status--busy` | Animated spinner | Adapter starting or diagnostics running |
+| ok | `fe-lsp-status--ok` | Green check (✓) | Adapter connected |
+| error | `fe-lsp-status--error` | Red X (✗) | Adapter not connected |
+
+State is managed by `_feUpdateLspSpinner()` which reads:
+- `window.__feLspSpinnerUi.busyShow` — true while an activity is in progress
+- `window.__adapterConnected` — set to true by `_spinnerHide()` after baton completes
+
+### Adapter context menu
+
+Long-press (touch) or right-click (desktop) on the status indicator opens a dropdown (`#fe-adapter-dd`) with:
+- **Reload Extension Adapter** — sends `ext:restart_adapter` to backend, triggers full restart flow
+
+Uses the `fe-menubar` dropdown pattern (not native browser menus).
+
+### Shell termination helpers
+
+- `terminate_adapter_shell()` in `workbench_adapter_shell_manager.py`: kills adapter process, clears `_adapter_pipe`, `_pipe_reader_task`, `_rpc_pending` futures, resets `_adapter_ready`
+- `terminate_code_server_shell()` in `code_server_shell_manager.py`: kills code-server process, resets `_code_server_ready` event
+
+Both use the framework-shells `terminate` endpoint to kill the underlying shell.
+
+### Key files
+
+| File | Role |
+|------|------|
+| `workbench_adapter_shell_manager.py` | `terminate_adapter_shell()` — adapter teardown |
+| `code_server_shell_manager.py` | `terminate_code_server_shell()` — code-server teardown |
+| `explorer_ws.py` | `_restart_adapter_only()`, `_restart_code_server_and_adapter()`, restart handlers |
+| `template.html` | 3-state CSS classes, `#fe-adapter-dd` dropdown, spinner default class |
+| `main.js` | `_reloadEditorIframe()`, `_feUpdateLspSpinner()`, adapter dropdown, event handlers |
