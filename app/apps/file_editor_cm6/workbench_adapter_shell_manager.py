@@ -155,6 +155,39 @@ async def adapter_rpc(method: str, params: Optional[dict] = None, timeout: float
         raise RuntimeError(f"adapter_rpc timeout: method={method} id={rid} after {timeout}s")
 
 
+async def terminate_adapter_shell() -> bool:
+    """Kill the active workbench adapter shell and clean up pipe/reader state.
+
+    Returns True if a shell was terminated, False if nothing was running.
+    Safe to call even if no adapter is active.
+    """
+    global _active_shell_id, _pipe_state, _stdout_reader_task, _rpc_counter, _rpc_write_lock
+
+    if not _active_shell_id:
+        return False
+
+    try:
+        mgr = await get_manager()
+        await mgr.terminate_shell(_active_shell_id, force=True)
+        print(f"[adapter_shell_mgr] terminated adapter shell {_active_shell_id}", flush=True)
+    except Exception as exc:
+        log.warning("[adapter_shell_mgr] terminate error: %s", exc)
+
+    _active_shell_id = None
+    _pipe_state = None
+    if _stdout_reader_task and not _stdout_reader_task.done():
+        _stdout_reader_task.cancel()
+    _stdout_reader_task = None
+    # Clear pending RPC futures so callers don't hang
+    for fut in _rpc_pending.values():
+        if not fut.done():
+            fut.set_exception(RuntimeError("adapter shell terminated"))
+    _rpc_pending.clear()
+    _rpc_counter = 0
+    _rpc_write_lock = None
+    return True
+
+
 async def ensure_workbench_adapter_shell(project_root: str, code_server_http: str) -> ShellRecord:
     """Ensure the Node workbench adapter framework shell is running.
 

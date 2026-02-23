@@ -476,18 +476,9 @@ async def reset_project_session(new_project_path: str) -> bool:
     # 2. Kill the workbench adapter shell so it respawns with the new PROJECT_ROOT.
     #    The ext host behind it holds the old project's watcher subs + LSP workspace.
     try:
-        from .workbench_adapter_shell_manager import _active_shell_id, _pipe_state
-        from .workbench_adapter_shell_manager import _stdout_reader_task
-        import app.apps.file_editor_cm6.workbench_adapter_shell_manager as _wa_mod
-        if _active_shell_id:
-            from framework_shells import get_manager
-            mgr = await get_manager()
-            await mgr.terminate_shell(_active_shell_id, force=True)
-            _wa_mod._active_shell_id = None
-            _wa_mod._pipe_state = None
-            if _wa_mod._stdout_reader_task and not _wa_mod._stdout_reader_task.done():
-                _wa_mod._stdout_reader_task.cancel()
-            _wa_mod._stdout_reader_task = None
+        from .workbench_adapter_shell_manager import terminate_adapter_shell
+        killed = await terminate_adapter_shell()
+        if killed:
             print(f"[reset_project_session] workbench adapter shell terminated", flush=True)
     except Exception as exc:
         print(f"[reset_project_session] adapter teardown error: {exc}", flush=True)
@@ -2067,6 +2058,8 @@ class ExplorerDispatcher:
                 "config_schema": config_schema,
                 "registry_summary": result.get("registry_summary", {}),
             }, msg_id)
+            # Kill code-server + adapter so ext host picks up the new extension
+            await self._restart_code_server_and_adapter("ext_install")
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
@@ -2083,6 +2076,8 @@ class ExplorerDispatcher:
                 "uninstalled_id": ext_id,
                 "registry_summary": result.get("registry_summary", {}),
             }, msg_id)
+            # Kill code-server + adapter so ext host drops the removed extension
+            await self._restart_code_server_and_adapter("ext_uninstall")
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
@@ -2099,6 +2094,8 @@ class ExplorerDispatcher:
                 "ok": True,
                 "ext_id": ext_id,
             }, msg_id)
+            # Kill adapter directly — settings need a reload to take effect
+            await self._restart_adapter_only("ext_configure")
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
@@ -2122,6 +2119,8 @@ class ExplorerDispatcher:
                 "ok": True,
                 "count": len(settings),
             }, msg_id)
+            # Kill adapter directly — custom settings need a reload
+            await self._restart_adapter_only("custom_settings")
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
@@ -2137,6 +2136,8 @@ class ExplorerDispatcher:
                 await self.emit_personal("ext:toggled", {
                     "ok": True, "ext_id": ext_id, "active": active,
                 }, msg_id)
+                # Kill adapter only — code-server already has the files
+                await self._restart_adapter_only("ext_toggle")
             elif lang_id:
                 toggle_language_slot(lang_id, active)
                 await self.emit_personal("ext:toggled", {
@@ -2158,6 +2159,48 @@ class ExplorerDispatcher:
             "ext_id": ext_id,
             "schema": schema,
         }, msg_id)
+
+    async def handle_ext_restart_adapter(self, payload: dict, msg_id: str):
+        """Manual restart of the workbench adapter from the UI."""
+        await self._restart_adapter_only("manual")
+        await self.emit_personal("ext:adapter_restarted", {"ok": True}, msg_id)
+
+    # ── Private restart helpers ──────────────────────────────────────────
+
+    async def _restart_adapter_only(self, reason: str):
+        """Kill adapter shell and notify frontend to reload iframe."""
+        try:
+            from .workbench_adapter_shell_manager import terminate_adapter_shell
+            killed = await terminate_adapter_shell()
+            print(f"[ext_restart] adapter terminated (reason={reason}, was_running={killed})", flush=True)
+        except Exception as exc:
+            print(f"[ext_restart] adapter terminate error: {exc}", flush=True)
+        try:
+            from .diagnostics_bridge import stop_bridge
+            stop_bridge()
+        except Exception:
+            pass
+        await self.emit_personal("ext:adapter_restarting", {"reason": reason})
+
+    async def _restart_code_server_and_adapter(self, reason: str):
+        """Kill both code-server and adapter, notify frontend."""
+        try:
+            from .workbench_adapter_shell_manager import terminate_adapter_shell
+            await terminate_adapter_shell()
+        except Exception as exc:
+            print(f"[ext_restart] adapter terminate error: {exc}", flush=True)
+        try:
+            from .diagnostics_bridge import stop_bridge
+            stop_bridge()
+        except Exception:
+            pass
+        try:
+            from .code_server_shell_manager import terminate_code_server_shell
+            killed = await terminate_code_server_shell()
+            print(f"[ext_restart] code-server terminated (reason={reason}, was_running={killed})", flush=True)
+        except Exception as exc:
+            print(f"[ext_restart] code-server terminate error: {exc}", flush=True)
+        await self.emit_personal("ext:adapter_restarting", {"reason": reason, "full_restart": True})
 
 
 # --- WebSocket Endpoint ---

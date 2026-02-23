@@ -159,6 +159,28 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
     return None
 
 
+async def terminate_code_server_shell() -> bool:
+    """Kill the active code-server shell and reset state.
+
+    Returns True if a shell was terminated, False if nothing was running.
+    """
+    global _active_shell_id, _ready_event
+
+    if not _active_shell_id:
+        return False
+
+    try:
+        mgr = await get_manager()
+        await mgr.terminate_shell(_active_shell_id, force=True)
+        print(f"[code_server] terminated shell {_active_shell_id}", flush=True)
+    except Exception as exc:
+        print(f"[code_server] terminate error: {exc}", flush=True)
+
+    _active_shell_id = None
+    _ready_event = None
+    return True
+
+
 async def ensure_code_server_shell(project_root: str) -> ShellRecord:
     """Ensure code-server is running as a framework shell.
 

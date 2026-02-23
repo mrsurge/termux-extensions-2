@@ -519,6 +519,27 @@
     box-sizing: border-box;
     animation: fe-lsp-spin 0.9s linear infinite;
   }
+  /* Status indicator states (replaces display:none when idle) */
+  .fe-lsp-status--ok {
+    width: 14px; height: 14px; display: inline-block; border-radius: 9999px;
+    box-sizing: border-box; animation: none;
+    border: 2px solid #22c55e; background: rgba(34, 197, 94, 0.25);
+    cursor: pointer;
+  }
+  .fe-lsp-status--error {
+    width: 14px; height: 14px; display: inline-block; border-radius: 9999px;
+    box-sizing: border-box; animation: none;
+    border: 2px solid #ef4444; background: rgba(239, 68, 68, 0.25);
+    cursor: pointer;
+  }
+  .fe-lsp-status--busy {
+    width: 14px; height: 14px; display: inline-block; border-radius: 9999px;
+    box-sizing: border-box;
+    border: 2px solid rgba(156, 163, 175, 0.35);
+    border-top-color: rgba(156, 163, 175, 0.95);
+    animation: fe-lsp-spin 0.9s linear infinite;
+    cursor: pointer;
+  }
   @keyframes fe-lsp-spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
@@ -2133,7 +2154,8 @@
     <div class="fe-menu" style="position: relative; margin-left: auto; display: flex; gap: 0.35rem; align-items: center;">
       <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
-      <span id="fe-lsp-spinner" class="fe-lsp-spinner" title="Language server starting…" aria-hidden="true" style="display: none;"></span>
+      <span id="fe-lsp-spinner" class="fe-lsp-status--error" title="Adapter not started" aria-label="Adapter status"></span>
+      <div id="fe-adapter-dd" class="fe-dropdown" style="right: 0; left: auto;"></div>
       <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Agent drawer">
         <span class="fe-agent-icon" data-default-icon="💬">💬</span>
       </button>

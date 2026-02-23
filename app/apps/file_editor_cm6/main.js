@@ -466,6 +466,17 @@ function connectExplorerSocket() {
         } else if (type === 'prefs:setUi') {
           try { window.__cm6PendingUiPrefs = payload; } catch (_) {}
         }
+        // Adapter restart/settings events from backend
+        // NOTE: _reloadEditorIframe / _requestAdapterRestart are defined later
+        // in the file (not hoisted), so we must defer via setTimeout.
+        if (type === 'ext:adapter_restarting') {
+          console.log('[adapter_restart] received', payload);
+          setTimeout(() => _reloadEditorIframe(), 0);
+        }
+        if (type === 'ext:settings_changed') {
+          console.log('[adapter_restart] settings changed', payload);
+          setTimeout(() => _requestAdapterRestart(), 0);
+        }
         // The explorer websocket is THE authority for which file is active.
         // Always update toolbar — no same-path guard so tracked edits
         // and rapid switches never get silently dropped.
@@ -855,14 +866,12 @@ function connectEditorSocket() {
               window.__feLspSpinnerUi.busyActivity = '';
               window.__feLspSpinnerUi.busyTitle = '';
             }
-            // Force-hide: bypass anti-flicker.
+            // Clear anti-flicker timer so _feUpdateLspSpinner gets clean state.
             try {
               if (window.__feLspSpinnerState && window.__feLspSpinnerState.hideTimer) {
                 clearTimeout(window.__feLspSpinnerState.hideTimer);
                 window.__feLspSpinnerState.hideTimer = null;
               }
-              var _sp = document.getElementById('fe-lsp-spinner');
-              if (_sp) { _sp.style.display = 'none'; _sp.title = ''; }
             } catch (_) {}
             _feUpdateLspSpinner();
           }, 45000);
@@ -894,14 +903,12 @@ function connectEditorSocket() {
               window.__feLspSpinnerUi.busyTitle = '';
             }
             console.log(_feTs(), '[spinner] STOP request_id=' + (readyRequestId || '-') + ' path=' + readyPath + ' reason=diagnostics_ready');
-            // Force-hide: bypass anti-flicker to avoid race where delayed hide gets cancelled.
+            // Clear anti-flicker timer so _feUpdateLspSpinner gets clean state.
             try {
               if (window.__feLspSpinnerState && window.__feLspSpinnerState.hideTimer) {
                 clearTimeout(window.__feLspSpinnerState.hideTimer);
                 window.__feLspSpinnerState.hideTimer = null;
               }
-              var _sp = document.getElementById('fe-lsp-spinner');
-              if (_sp) { _sp.style.display = 'none'; _sp.title = ''; }
             } catch (_) {}
             _feUpdateLspSpinner();
           }
@@ -1513,6 +1520,7 @@ const vscodeApiPending = new Map();
 let vscodeApiConnecting = null;
 let workbenchAdapterConnecting = null;
 let workbenchAdapterReadyOk = false;
+window.__adapterConnected = false;
 const _sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function _feHostTs() {
@@ -1558,14 +1566,13 @@ function _spinnerHide(ok) {
       ui.busyShow = false;
       ui.busyTitle = '';
       ui.busyActivity = '';
+      window.__adapterConnected = Boolean(ok);
       try { console.log(_feHostTs(), '[spinner] STOP request_id=- path=- reason=readiness_' + (ok ? 'ok' : 'fail')); } catch (_) {}
       try {
         if (window.__feLspSpinnerState && window.__feLspSpinnerState.hideTimer) {
           clearTimeout(window.__feLspSpinnerState.hideTimer);
           window.__feLspSpinnerState.hideTimer = null;
         }
-        var _sp = document.getElementById('fe-lsp-spinner');
-        if (_sp) { _sp.style.display = 'none'; _sp.title = ''; }
       } catch (_) {}
       _feUpdateLspSpinner();
     }
@@ -1888,7 +1895,16 @@ function openExtConfigModal(extId, displayName, schema, currentValues) {
     msg.textContent = 'This extension has no configurable settings.';
     extConfigForm.appendChild(msg);
   } else {
+    let lastGroup = null;
     propKeys.forEach((key) => {
+      // Add separator between different setting groups (first dot-segment)
+      const group = key.indexOf('.') > 0 ? key.slice(0, key.indexOf('.')) : '';
+      if (lastGroup !== null && group !== lastGroup) {
+        const sep = document.createElement('div');
+        sep.className = 'fe-hr-thin';
+        extConfigForm.appendChild(sep);
+      }
+      lastGroup = group;
       const prop = props[key] || {};
       const fieldRow = document.createElement('div');
       fieldRow.style.marginBottom = '12px';
@@ -1994,9 +2010,10 @@ extConfigSave.addEventListener('click', async () => {
       values: _extConfigValues,
     }, 15000);
     if (res?.payload?.ok) {
-      host.toast('Configuration saved');
+      host.toast('Configuration saved — reloading adapter\u2026');
       closeExtConfigModal();
       void refreshEditorExtManagerModal();
+      _reloadEditorIframe();
     } else {
       host.toast(res?.payload?.error || 'Save failed');
     }
@@ -2025,8 +2042,9 @@ editorExtManagerInstallBtn.addEventListener('click', async () => {
     if (payload.ok) {
       const ext = payload.extension || {};
       const schema = payload.config_schema || {};
-      host.toast(`Installed: ${ext.display_name || ext.id || 'ok'}`);
+      host.toast(`Installed: ${ext.display_name || ext.id || 'ok'} — reloading\u2026`);
       void refreshEditorExtManagerModal();
+      _reloadEditorIframe();
       // If extension has config, open config modal
       if (schema && Object.keys(schema.properties || schema || {}).length) {
         openExtConfigModal(ext.id, ext.display_name, schema, {});
@@ -2078,7 +2096,8 @@ extCustomSettingsSave.addEventListener('click', async () => {
       settings: parsed,
     }, 15000);
     if (res?.payload?.ok) {
-      host.toast(`Custom settings saved (${res.payload.count} keys). Restart code-server to apply.`);
+      host.toast(`Custom settings saved (${res.payload.count} keys) — reloading adapter\u2026`);
+      _reloadEditorIframe();
     } else {
       host.toast(res?.payload?.error || 'Save failed');
     }
@@ -2249,6 +2268,7 @@ async function refreshEditorExtManagerModal() {
             ext_id: extId,
             active: !isActive,
           }, 10000);
+          _reloadEditorIframe();
           void refreshEditorExtManagerModal();
         } catch (e) {
           host.toast(e?.message || 'Toggle failed');
@@ -2302,7 +2322,8 @@ async function refreshEditorExtManagerModal() {
               ext_id: extId,
             }, 30000);
             if (res?.payload?.ok) {
-              host.toast(`Uninstalled: ${label}`);
+              host.toast(`Uninstalled: ${label} — reloading\u2026`);
+              _reloadEditorIframe();
               void refreshEditorExtManagerModal();
             } else {
               host.toast(res?.payload?.error || 'Uninstall failed');
@@ -3377,6 +3398,44 @@ function _initAgentSettingsUI() {
       }, false);
     }
   } catch (_) {}
+
+  // ── Adapter status indicator: right-click + long-press context menu ──
+  try {
+    const spinnerEl = document.getElementById('fe-lsp-spinner');
+    if (spinnerEl) {
+      let adapterLpTimer = null;
+      let adapterSuppressUntil = 0;
+      spinnerEl.addEventListener('click', (ev) => {
+        if (Date.now() < adapterSuppressUntil) {
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          adapterSuppressUntil = 0;
+        }
+      }, true);
+      spinnerEl.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        _openAdapterDropdown();
+      });
+      spinnerEl.addEventListener('touchstart', (ev) => {
+        if (adapterLpTimer) clearTimeout(adapterLpTimer);
+        adapterLpTimer = setTimeout(() => {
+          adapterSuppressUntil = Date.now() + 900;
+          _openAdapterDropdown();
+        }, 520);
+      }, { passive: true });
+      const clearAdapterLp = () => { if (adapterLpTimer) { clearTimeout(adapterLpTimer); adapterLpTimer = null; } };
+      spinnerEl.addEventListener('touchend', clearAdapterLp, { passive: true });
+      spinnerEl.addEventListener('touchcancel', clearAdapterLp, { passive: true });
+      document.addEventListener('click', (ev) => {
+        const dd = document.getElementById('fe-adapter-dd');
+        if (!dd || !dd.classList.contains('show')) return;
+        if (ev.target.closest('#fe-lsp-spinner')) return;
+        if (ev.target.closest('#fe-adapter-dd')) return;
+        _closeAdapterDropdown();
+      }, false);
+    }
+  } catch (_) {}
 }
 
 window.__cm6HandleUiPrefs = function(payload) {
@@ -3441,6 +3500,57 @@ var lastScrollState = null;
 var scrollStateTimer = null;
 const CURSOR_STATE_DEBOUNCE = 1000; // ms
 
+// ── Adapter dropdown (context menu on status indicator) ──────────────
+
+function _closeAdapterDropdown() {
+  const dd = document.getElementById('fe-adapter-dd');
+  if (dd) dd.classList.remove('show');
+}
+
+function _openAdapterDropdown() {
+  const dd = document.getElementById('fe-adapter-dd');
+  if (!dd) return;
+  try { closeAllMenus(); } catch (_) {}
+  dd.innerHTML = '';
+  const item = document.createElement('div');
+  item.className = 'fe-dd-item';
+  item.textContent = 'Reload Extension Adapter';
+  item.addEventListener('click', () => {
+    _closeAdapterDropdown();
+    _requestAdapterRestart();
+  });
+  dd.appendChild(item);
+  dd.classList.add('show');
+}
+
+async function _requestAdapterRestart() {
+  try {
+    if (typeof window.__explorerBusRequest !== 'function') return;
+    _spinnerSetStep('Restarting adapter\u2026');
+    await window.__explorerBusRequest('ext:restart_adapter', {}, 15000);
+    _reloadEditorIframe();
+  } catch (e) {
+    console.warn('[adapter_restart] request failed:', e);
+  }
+}
+
+function _reloadEditorIframe() {
+  window.__adapterConnected = false;
+  workbenchAdapterReadyOk = false;
+  workbenchAdapterConnecting = null;
+  _spinnerSetStep('Reloading editor\u2026');
+  setTimeout(() => {
+    try {
+      const iframe = document.getElementById('editor-frame');
+      if (iframe) iframe.src = iframe.src;
+    } catch (_) {}
+    // Re-run readiness chain so spinner picks up new readiness steps
+    setTimeout(() => {
+      try { ensureWorkbenchAdapterReady(); } catch (_) {}
+    }, 2000);
+  }, 1500);
+}
+
 function _feUpdateLspSpinner() {
   try {
     const spinner = document.getElementById('fe-lsp-spinner');
@@ -3458,10 +3568,10 @@ function _feUpdateLspSpinner() {
     }
     const ui = window.__feLspSpinnerUi;
 
-    const anyShow = Boolean(ui.lspShow || ui.busyShow);
+    const anyBusy = Boolean(ui.lspShow || ui.busyShow);
     const title = ui.busyShow ? (ui.busyTitle || ui.lspTitle) : ui.lspTitle;
 
-    // Anti-flicker: if we show, keep visible for a minimum window.
+    // Anti-flicker: keep busy state visible for a minimum window.
     const MIN_VISIBLE_MS = 650;
     const now = Date.now();
     if (!window.__feLspSpinnerState) {
@@ -3469,49 +3579,44 @@ function _feUpdateLspSpinner() {
     }
     const st = window.__feLspSpinnerState;
 
-    if (anyShow) {
+    if (anyBusy) {
       if (st.hideTimer) {
         clearTimeout(st.hideTimer);
         st.hideTimer = null;
       }
-      if (spinner.style.display === 'none') {
-        spinner.style.display = 'inline-block';
-        st.shownAtMs = now;
-      } else if (!spinner.style.display) {
-        spinner.style.display = 'inline-block';
-        st.shownAtMs = now;
-      }
-      spinner.title = title || '';
+      _setSpinnerClass(spinner, 'fe-lsp-status--busy');
+      spinner.title = title || 'Working…';
+      st.shownAtMs = now;
       return;
     }
 
-    // anyShow === false
+    // Not busy — transition to ok/error after anti-flicker
     const elapsed = now - (st.shownAtMs || 0);
     const wait = Math.max(0, MIN_VISIBLE_MS - elapsed);
+    const applyIdle = () => {
+      try {
+        st.hideTimer = null;
+        const statusClass = window.__adapterConnected
+          ? 'fe-lsp-status--ok' : 'fe-lsp-status--error';
+        const statusTitle = window.__adapterConnected
+          ? 'Adapter connected' : 'Adapter disconnected';
+        _setSpinnerClass(spinner, statusClass);
+        spinner.title = statusTitle;
+      } catch { }
+    };
     if (wait > 0) {
-      if (st.hideTimer) return; // already scheduled
-      st.hideTimer = setTimeout(() => {
-        try {
-          st.hideTimer = null;
-          spinner.style.display = 'none';
-          // Clear title on hide; otherwise stale titles (e.g. "Starting workbench adapter...")
-          // persist and make debugging impossible.
-          spinner.title = title || '';
-        } catch { }
-      }, wait);
+      if (st.hideTimer) return;
+      st.hideTimer = setTimeout(applyIdle, wait);
       return;
     }
-
-    spinner.style.display = 'none';
-    spinner.title = title || '';
-    try {
-      const ui = window.__feLspSpinnerUi || {};
-      const computed = (typeof getComputedStyle === 'function') ? getComputedStyle(spinner).display : '';
-      if (computed && computed !== 'none') {
-        console.log(_feHostTs(), '[spinner] WARN hide_failed anyShow=0 lspShow=' + (ui.lspShow ? '1' : '0') + ' busyShow=' + (ui.busyShow ? '1' : '0') + ' busyActivity=' + String(ui.busyActivity || '') + ' style=' + String(spinner.style.display || '') + ' computed=' + String(computed || '') + ' title=' + String(spinner.title || ''));
-      }
-    } catch (_) {}
+    applyIdle();
   } catch { }
+}
+
+function _setSpinnerClass(el, cls) {
+  el.classList.remove('fe-lsp-spinner', 'fe-lsp-status--ok', 'fe-lsp-status--error', 'fe-lsp-status--busy');
+  el.classList.add(cls);
+  el.style.display = 'inline-block';
 }
 
 // No host↔iframe postMessage bridge: all editor telemetry uses /editor Socket.IO.
