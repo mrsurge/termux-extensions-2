@@ -21,15 +21,15 @@ logger = logging.getLogger(__name__)
 ADAPTER_PORT = 18181
 DIAG_CACHE_MAX = 100
 
-# Server-side diagnostics cache: abs_path -> {ts_ms, owner, markers}
-_diag_cache: Dict[str, Dict[str, Any]] = {}
+# Server-side diagnostics cache: (abs_path, owner) -> {ts_ms, owner, path, markers, type}
+_diag_cache: Dict[tuple, Dict[str, Any]] = {}
 
 # Diagnostics gating state (single-doc model).
 # The editor (Monaco iframe) emits consumer_pending/consumer_ready over Socket.IO.
 _consumer_expected_path: Optional[str] = None
 _consumer_expected_request_id: str = ""
 _consumer_ready: bool = False
-_pending_entry: Optional[Dict[str, Any]] = None
+_pending_entries: list = []  # Buffered entries per-owner while consumer not ready
 
 # Keep an sio ref so consumer_ready can flush without waiting for a new adapter frame.
 _SIO_REF = None
@@ -73,12 +73,13 @@ def _abs_path_from_vscode_uri(raw: Any) -> str:
     return ""
 
 
-def get_cached_diagnostics(abs_path: str) -> Optional[Dict[str, Any]]:
-    """Return cached diagnostics for a path, or None."""
-    return _diag_cache.get(abs_path)
+def get_cached_diagnostics(abs_path: str) -> Optional[list]:
+    """Return list of cached diagnostics entries for a path (one per owner), or None."""
+    entries = [v for (p, o), v in _diag_cache.items() if p == abs_path]
+    return entries if entries else None
 
 
-def get_all_cached_diagnostics() -> Dict[str, Dict[str, Any]]:
+def get_all_cached_diagnostics() -> Dict[tuple, Dict[str, Any]]:
     """Return the full cache (read-only snapshot)."""
     return dict(_diag_cache)
 
@@ -104,14 +105,14 @@ async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bo
 
 
 async def send_cached_diagnostics_to_sid(sio, sid: str, abs_path: str):
-    """Send cached diagnostics for a specific file to a specific Socket.IO client."""
-    cached = _diag_cache.get(abs_path)
-    if not cached:
-        return
-    try:
-        await sio.emit("editor:diagnostics", cached, room=sid, namespace="/editor")
-    except Exception as exc:
-        logger.debug("[diag_bridge] send_cached to %s failed: %s", sid, exc)
+    """Send cached diagnostics for a specific file to a specific Socket.IO client (all owners)."""
+    for (cached_path, cached_owner), cached in _diag_cache.items():
+        if cached_path != abs_path:
+            continue
+        try:
+            await sio.emit("editor:diagnostics", cached, room=sid, namespace="/editor")
+        except Exception as exc:
+            logger.debug("[diag_bridge] send_cached owner=%s to %s failed: %s", cached_owner, sid, exc)
 
 
 def _process_diagnostics_update(params: dict):
@@ -142,7 +143,7 @@ def _process_diagnostics_update(params: dict):
             "path": abs_path,
             "markers": markers,
         }
-        _diag_cache[abs_path] = entry
+        _diag_cache[(abs_path, owner)] = entry
         result.append(entry)
 
     # Evict oldest if cache too large
@@ -155,11 +156,11 @@ def _process_diagnostics_update(params: dict):
 
 def set_consumer_pending(abs_path: str, request_id: str = ""):
     """Set the expected active document and mark consumer not-ready yet."""
-    global _consumer_expected_path, _consumer_expected_request_id, _consumer_ready, _pending_entry
+    global _consumer_expected_path, _consumer_expected_request_id, _consumer_ready, _pending_entries
     _consumer_expected_path = abs_path or None
     _consumer_expected_request_id = str(request_id or "")
     _consumer_ready = False
-    _pending_entry = None
+    _pending_entries = []
     try:
         print(
             f"[diag_bridge] consumer_pending path={_consumer_expected_path or '?'} request_id={_consumer_expected_request_id or '-'}",
@@ -171,38 +172,38 @@ def set_consumer_pending(abs_path: str, request_id: str = ""):
 
 async def set_consumer_ready(sio, abs_path: str, request_id: str = ""):
     """Mark the consumer as ready; flush any buffered diagnostics for the expected file."""
-    global _consumer_expected_path, _consumer_expected_request_id, _consumer_ready, _pending_entry
+    global _consumer_expected_path, _consumer_expected_request_id, _consumer_ready, _pending_entries
     _consumer_expected_path = abs_path or None
     _consumer_expected_request_id = str(request_id or "")
     _consumer_ready = True
     try:
         print(
-            f"[diag_bridge] consumer_ready path={_consumer_expected_path or '?'} request_id={_consumer_expected_request_id or '-'} pending={'1' if _pending_entry else '0'}",
+            f"[diag_bridge] consumer_ready path={_consumer_expected_path or '?'} request_id={_consumer_expected_request_id or '-'} pending={len(_pending_entries)}",
             flush=True,
         )
     except Exception:
         pass
 
-    if not _pending_entry or not _consumer_expected_path:
-        return
-    if str(_pending_entry.get("path", "")) != str(_consumer_expected_path):
+    if not _pending_entries or not _consumer_expected_path:
         return
 
-    try:
-        await sio.emit(
-            "editor:diagnostics",
-            _pending_entry,
-            room="file_editor_cm6",
-            namespace="/editor",
-        )
-        print(
-            f"[diag_bridge] flush OK path={_pending_entry.get('path','?')} markers={len(_pending_entry.get('markers',[]) or [])}",
-            flush=True,
-        )
-    except Exception as exc:
-        print(f"[diag_bridge] flush FAIL: {exc}", flush=True)
-    finally:
-        _pending_entry = None
+    for pending in _pending_entries:
+        if str(pending.get("path", "")) != str(_consumer_expected_path):
+            continue
+        try:
+            await sio.emit(
+                "editor:diagnostics",
+                pending,
+                room="file_editor_cm6",
+                namespace="/editor",
+            )
+            print(
+                f"[diag_bridge] flush OK owner={pending.get('owner','?')} path={pending.get('path','?')} markers={len(pending.get('markers',[]) or [])}",
+                flush=True,
+            )
+        except Exception as exc:
+            print(f"[diag_bridge] flush FAIL: {exc}", flush=True)
+    _pending_entries = []
 
 
 async def _adapter_ws_loop(sio):
@@ -404,11 +405,13 @@ async def _adapter_ws_loop(sio):
                                         flush=True,
                                     )
                                 else:
-                                    # Buffer only the latest entry for the expected file.
-                                    global _pending_entry
-                                    _pending_entry = entry
+                                    # Buffer per-owner entries for the expected file.
+                                    global _pending_entries
+                                    # Replace any existing entry for the same owner.
+                                    _pending_entries = [e for e in _pending_entries if e.get("owner") != entry.get("owner")]
+                                    _pending_entries.append(entry)
                                     print(
-                                        f"[diag_bridge] buffer path={path} markers={len(entry.get('markers',[]) or [])}",
+                                        f"[diag_bridge] buffer owner={entry.get('owner','?')} path={path} markers={len(entry.get('markers',[]) or [])} buffered={len(_pending_entries)}",
                                         flush=True,
                                     )
                             else:

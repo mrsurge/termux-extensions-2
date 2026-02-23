@@ -926,8 +926,7 @@
       if (!_diagState) _diagState = { rx: 0, apply: 0, drop_no_path: 0, drop_no_model: 0, drop_mismatch: 0 };
       _diagState.rx += 1;
 
-      // Diagnostics may arrive in file:// or vscode-remote:// form depending on backend.
-      // Normalize to an absolute path key so we can apply markers to the active model.
+      var owner = (params && params.owner) ? String(params.owner) : 'workbench';
       var activeUri = (model && model.uri) ? String(model.uri.toString()) : '';
       var activePath = currentPath ? String(currentPath) : (activeUri ? _absPathFromVscodeUri(activeUri) : '');
       var items = params && Array.isArray(params.items) ? params.items : [];
@@ -973,10 +972,13 @@
           });
         }
 
-        // Cache per-path (so we can apply after model/currentPath is ready).
+        // Cache per-path per-owner (so we can replay all owners after model/currentPath is ready).
         try {
           if (!_diagCache) _diagCache = new Map();
-          _diagCache.set(itemPath, { ts_ms: Date.now(), markers: outMarkers });
+          var pathOwnerMap = _diagCache.get(itemPath);
+          if (!pathOwnerMap) { pathOwnerMap = new Map(); _diagCache.set(itemPath, pathOwnerMap); }
+          pathOwnerMap.set(owner, { ts_ms: Date.now(), markers: outMarkers });
+          // Evict oldest paths if cache too large.
           while (_diagCache.size > DIAG_CACHE_MAX) {
             var firstKey = _diagCache.keys().next().value;
             _diagCache.delete(firstKey);
@@ -986,23 +988,16 @@
         // Apply to active model if it matches.
         if (model && model.uri && activePath && itemPath === activePath) {
           try {
-            console.log('[vscode_api] setModelMarkers count=' + outMarkers.length + ' sevs=[' + outMarkers.map(function(m){ return m.severity; }).join(',') + '] lines=[' + outMarkers.map(function(m){ return m.startLineNumber; }).join(',') + ']');
+            if (!_diagKnownOwners) _diagKnownOwners = new Set();
+            _diagKnownOwners.add(owner);
+            console.log('[vscode_api] setModelMarkers owner=' + owner + ' count=' + outMarkers.length + ' sevs=[' + outMarkers.map(function(m){ return m.severity; }).join(',') + '] lines=[' + outMarkers.map(function(m){ return m.startLineNumber; }).join(',') + ']');
             if (outMarkers.length > 0) console.log('[vscode_api] marker[0]:', JSON.stringify(outMarkers[0]));
-            monaco.editor.setModelMarkers(model, 'vscode_api', outMarkers);
-            // Verify markers actually stuck
+            monaco.editor.setModelMarkers(model, owner, outMarkers);
+            // Verify markers actually stuck (across all owners).
             var verify = monaco.editor.getModelMarkers({ resource: model.uri });
             console.log('[vscode_api] verify getModelMarkers count=' + (verify ? verify.length : 'null'));
-            // Emit marker counts to host for toolbar badges.
-            try {
-              var errors = 0, warnings = 0, hints = 0;
-              for (var k = 0; k < outMarkers.length; k++) {
-                var s = outMarkers[k].severity;
-                if (s === monaco.MarkerSeverity.Error) errors++;
-                else if (s === monaco.MarkerSeverity.Warning) warnings++;
-                else hints++;
-              }
-              emitToHost('editor_diagnostics_counts', { errors: errors, warnings: warnings, hints: hints, total: outMarkers.length, path: itemPath });
-            } catch (_) {}
+            // Emit aggregated marker counts to host for toolbar badges.
+            _emitAggregatedDiagCounts(itemPath);
           } catch (ex) { console.error('[vscode_api] setModelMarkers THREW:', ex); }
           didApply = true;
           _diagState.apply += 1;
@@ -1027,9 +1022,29 @@
     } catch (_) {}
   }
 
-  var _diagCache = null; // Map(absPath -> {ts_ms, markers})
+  var _diagCache = null; // Map(absPath -> Map(owner -> {ts_ms, markers}))
   var _diagState = null; // counters
   var DIAG_CACHE_MAX = 50;
+  var _diagKnownOwners = null; // Set of owner strings seen for active path
+
+  /** Aggregate marker counts across all owners from the model and emit to host toolbar. */
+  function _emitAggregatedDiagCounts(path) {
+    try {
+      if (!model || !model.uri || !window.monaco || !window.monaco.editor) return;
+      var all = monaco.editor.getModelMarkers({ resource: model.uri });
+      var errors = 0, warnings = 0, hints = 0;
+      if (all && all.length) {
+        for (var k = 0; k < all.length; k++) {
+          var s = all[k].severity;
+          if (s === monaco.MarkerSeverity.Error) errors++;
+          else if (s === monaco.MarkerSeverity.Warning) warnings++;
+          else hints++;
+        }
+      }
+      emitToHost('editor_diagnostics_counts', { errors: errors, warnings: warnings, hints: hints, total: (all ? all.length : 0), path: path || currentPath || '' });
+    } catch (_) {}
+  }
+
   var _diagReapplyScheduled = false;
   function _scheduleDiagReapply() {
     if (_diagReapplyScheduled) return;
@@ -1045,12 +1060,19 @@
     try { setTimeout(function () { _diagReapplyScheduled = false; }, 300); } catch (_) { _diagReapplyScheduled = false; }
   }
 
-  /** Clear markers and emit zero diagnostic counts (used on file switch). */
+  /** Clear markers for all known owners and emit zero diagnostic counts (used on file switch). */
   function _clearDiagnosticsForSwitch() {
     try {
       if (model && window.monaco && window.monaco.editor) {
+        if (_diagKnownOwners && _diagKnownOwners.size) {
+          _diagKnownOwners.forEach(function(own) {
+            try { monaco.editor.setModelMarkers(model, own, []); } catch (_) {}
+          });
+        }
+        // Also clear the legacy owner in case older cached markers used it.
         monaco.editor.setModelMarkers(model, 'vscode_api', []);
       }
+      _diagKnownOwners = new Set();
       emitToHost('editor_diagnostics_counts', { errors: 0, warnings: 0, hints: 0, total: 0, path: currentPath || '' });
     } catch (_) {}
   }
@@ -1063,11 +1085,18 @@
       var activeUri = String(model.uri.toString());
       var activePath = currentPath ? String(currentPath) : _absPathFromVscodeUri(activeUri);
       if (!activePath) return;
-      var cached = _diagCache.get(activePath);
-      if (!cached) return;
-      var markers = Array.isArray(cached.markers) ? cached.markers : [];
-      monaco.editor.setModelMarkers(model, 'vscode_api', markers);
+      var pathOwnerMap = _diagCache.get(activePath);
+      if (!pathOwnerMap || !pathOwnerMap.size) return;
+      if (!_diagKnownOwners) _diagKnownOwners = new Set();
+      var applied = 0;
+      pathOwnerMap.forEach(function(cached, own) {
+        var markers = Array.isArray(cached.markers) ? cached.markers : [];
+        monaco.editor.setModelMarkers(model, own, markers);
+        _diagKnownOwners.add(own);
+        applied += markers.length;
+      });
       if (_diagState) _diagState.apply += 1;
+      _emitAggregatedDiagCounts(activePath);
       try { setDebugDiag('diag=rx' + (_diagState ? _diagState.rx : 0) + '/ap' + (_diagState ? _diagState.apply : 0) + '/np' + (_diagState ? _diagState.drop_no_path : 0) + '/nm' + (_diagState ? _diagState.drop_no_model : 0) + '/mm' + (_diagState ? _diagState.drop_mismatch : 0)); } catch (_) {}
     } catch (_) {}
   }
@@ -3409,38 +3438,7 @@
       // If Monaco rebuilt the editor DOM (common on language switches), re-install.
       var hasUI = !!dom.querySelector('.monaco-editor-touch-selections');
       if (!hasUI) {
-        window['monaco-touch-selection'].editorTouchSelectionHelp(editor, {
-          tools: function (ctx) {
-            try {
-              var defaultTools = ctx && ctx.defaultTools ? ctx.defaultTools : null;
-              if (!defaultTools || typeof defaultTools.set !== 'function') return defaultTools && defaultTools.values ? defaultTools.values() : undefined;
-              if (!defaultTools.has('hover')) {
-                defaultTools.set('hover', {
-                  name: 'hover',
-                  innerHTML: 'Hover',
-                  action: async function () {
-                    try { if (ctx && ctx.closeMenu) ctx.closeMenu(); } catch (_) {}
-                    try {
-                      if (!editor) return true;
-                      var sel = editor.getSelection ? editor.getSelection() : null;
-                      if (sel && sel.getStartPosition) {
-                        try { editor.setPosition(sel.getStartPosition()); } catch (_) {}
-                      }
-                      var action = editor.getAction ? editor.getAction('editor.action.showHover') : null;
-                      if (action && action.run) action.run();
-                      else editor.trigger('touch', 'editor.action.showHover', null);
-                      updateDebug('touch=hover:menu');
-                    } catch (_) {}
-                    return true;
-                  },
-                });
-              }
-              return defaultTools.values();
-            } catch (_) {
-              return ctx && ctx.defaultTools && ctx.defaultTools.values ? ctx.defaultTools.values() : undefined;
-            }
-          },
-        });
+        window['monaco-touch-selection'].editorTouchSelectionHelp(editor);
         updateDebug('touch=reinit' + (reason ? ':' + reason : ''));
       }
       // Long-press hover path disabled (use touch menu Hover instead).

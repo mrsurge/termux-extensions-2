@@ -1,0 +1,89 @@
+(function(A,D){typeof exports=="object"&&typeof module<"u"?D(exports):typeof define=="function"&&define.amd?define(["exports"],D):(A=typeof globalThis<"u"?globalThis:A||self,D(A["monaco-touch-selection"]={}))})(this,(function(A){"use strict";var q=(e=>(e.Copy="copy",e.Cut="cut",e.Paste="paste",e.SelectWord="selectWord",e.SelectAll="selectAll",e.Undo="undo",e.Redo="redo",e.Close="close",e))(q||{});const te=(e,u)=>({startLineNumber:u.lineNumber,startColumn:u.column,endLineNumber:e.endLineNumber,endColumn:e.endColumn}),ne=(e,u)=>({startLineNumber:e.startLineNumber,startColumn:e.startColumn,endLineNumber:u.lineNumber,endColumn:u.column}),oe=(e,u,h)=>{const w=e.getScrollTop(),O=e.getScrollHeight(),I=e.getLayoutInfo().height,y=Math.max(0,O-I),B=w>0,p=w<y,E=e.getTargetAtClientPoint(u.clientX,u.clientY-h),C=e.getTargetAtClientPoint(u.clientX,u.clientY+h);if(E===null&&C!==null&&B){const S=Math.max(0,w-h);e.setScrollTop(S,0)}else if(E!==null&&C===null&&p){const S=Math.min(y,w+h);e.setScrollTop(S,0)}},se=(e,u,h)=>{const w=e.getScrollLeft(),O=e.getScrollWidth(),I=e.getLayoutInfo().width,y=Math.max(0,O-I),B=w>0,p=w<y,E=e.getTargetAtClientPoint(u.clientX-h,u.clientY),C=e.getTargetAtClientPoint(u.clientX+h,u.clientY);if(E===null&&C!==null&&B){const S=Math.max(0,w-h);e.setScrollLeft(S,0)}else if(E!==null&&C===null&&p){const S=Math.min(y,w+h);e.setScrollLeft(S,0)}},le=(e,u)=>{const{tools:h,selectionSyncTimeout:w=300,toolActionErrorHandler:O=(t,n)=>{console.error(`tool ${t} cause error: `,n)}}=u??{};if(!e)throw new Error("editor not existed");const I=globalThis.monaco?.editor?.EditorOption,y=I?.fontSize??52,B=I?.lineHeight??67,p=e.getDomNode();if(!p||!(p instanceof HTMLElement))throw new Error("editor container element not existed or it is not a HTMLElement");const E=p.querySelector(".overflow-guard");if(!E||!(E instanceof HTMLElement))throw new Error("no overlay guard or it is not a HTMLElement");const C=p.querySelector(".monaco-editor .margin");let S=0;C&&C instanceof HTMLElement&&(S=C.offsetWidth);let V=!1,d=null,i=null,r=null;const ie=()=>{d&&(V||(V=!0,d.classList.add("show")))},G=()=>{d&&V&&(V=!1,d.classList.remove("show"))};let X=!1,c=null;const R=()=>{c&&(X||(X=!0,c.classList.add("show")))},P=()=>{c&&X&&(X=!1,c.classList.remove("show"))};let j=new ResizeObserver(()=>{G(),P();const t=e.getSelection();t&&W(t)});j.observe(p),e.onDidDispose(()=>{j?.disconnect(),j=null,d?.remove(),i?.remove(),r?.remove(),c?.remove(),d=null,i=null,r=null,c=null});const re=()=>{e.focus();const t=e.getModel();if(t){const n=t.getFullModelRange();e.setSelection(n)}},ce=async()=>{try{const t=e.getSelection();if(!t)return!1;const n=e.getModel()?.getValueInRange(t);return n?(await navigator.clipboard.writeText(n),!0):!1}catch(t){return await O(`copy fail: ${t}`,t),!1}},ae=async()=>{try{const t=e.getSelection();if(!t)return!1;const n=e.getModel()?.getValueInRange(t);return n?(await navigator.clipboard.writeText(n),e.executeEdits("cut",[{range:t,text:""}]),!0):!1}catch(t){return await O("cut",t),!1}},ue=async()=>{try{const t=e.getSelection();if(!t)return!1;const n=await navigator.clipboard.readText();return n.length===0?!1:(e.executeEdits("paste",[{range:t,text:n}]),!0)}catch(t){return await O("paste",t),!1}},de=()=>{e.trigger("keyboard","undo",null)},me=()=>{e.trigger("keyboard","redo",null)},J="translateX(-50%) translateY(25%) rotate(45deg)",fe="translateX(-100%) rotate(90deg)",he="",Q=t=>{if(!i||!r)return;const n={lineNumber:t.startLineNumber,column:t.startColumn},o={lineNumber:t.endLineNumber,column:t.endColumn},L=e.getScrollLeft(),x=e.getScrolledVisiblePosition(n),Y=e.getScrolledVisiblePosition(o);if(!x||!Y)return;const F=e.getTopForPosition(n.lineNumber,n.column),U=e.getTopForPosition(o.lineNumber,o.column),a=x.left+L-S,H=F,g=Y.left+L-S,_=U;i.style.opacity="1",r.style.opacity="1",i.style.transform=`translateX(${a}px) translateY(${H}px)`,r.style.transform=`translateX(${g}px) translateY(${_}px)`,a===g&&H===_?(i.bottomCursor.style.transform=J,r.bottomCursor.style.transform=J):(i.bottomCursor.style.transform=fe,r.bottomCursor.style.transform=he)};let z=0,Z;const W=t=>{if(clearTimeout(Z),!i||!r)return;const n=Date.now();if(n-z<w){z=n,i.style.opacity="0",r.style.opacity="0",Z=window.setTimeout(()=>{Q(t)},w);return}else z=n,Q(t)},ee=t=>{t.classList.add("selector");const n=document.createElement("div");n.classList.add("text-cursor"),t.appendChild(n);const o=document.createElement("div");o.classList.add("bottom-cursor"),t.appendChild(o);const L=t;return L.textCursor=n,L.bottomCursor=o,L},pe=()=>{d=document.createElement("div"),d.classList.add("monaco-editor-touch-selections");const t=document.createElement("div");t.classList.add("left"),i=ee(t),d.appendChild(t);const n=document.createElement("div");n.classList.add("right"),r=ee(n),d.appendChild(n);let o=e.getOption(B),L=e.getOption(y);const x=a=>{i&&(i.textCursor.style.height=`${a}px`,i.bottomCursor.style.top=`${a}px`,i.bottomCursor.style.marginTop="0"),r&&(r.textCursor.style.height=`${a}px`,r.bottomCursor.style.top=`${a}px`,r.bottomCursor.style.marginTop="0")};x(o),e.onDidChangeConfiguration(a=>{o=e.getOption(B),x(o),a.hasChanged(y)&&(L=e.getOption(y))}),E.append(d),e.onDidScrollChange(a=>{d&&(d.style.top=`-${a.scrollTop}px`,d.style.left=`-${a.scrollLeft}px`)});const Y=(a,H)=>{const g=T=>{if(T&&c&&i&&r){R();const v=i.getBoundingClientRect(),m=r.getBoundingClientRect(),K=Math.pow(T.clientX-(v.left+v.width/2),2)+Math.pow(T.clientY-(v.top+v.height/2),2),$=Math.pow(T.clientX-(m.left+m.width/2),2)+Math.pow(T.clientY-(m.top+m.height/2),2),b=K<=$?v:m,M=p.getBoundingClientRect(),f=c.getBoundingClientRect();let l=b.left-f.width/2;l+f.width>M.width+M.left&&(l=M.width+M.left-f.width),l<0&&(l=0);let s=b.top-f.height;if(s+f.height>M.height+M.top&&(s=M.height+M.top-f.height),s<0&&(s=b.top+o),window.visualViewport){const N=window.visualViewport.width+window.visualViewport.offsetLeft-f.width,k=window.visualViewport.height+window.visualViewport.offsetTop-f.height;l<window.visualViewport.offsetLeft?l=window.visualViewport.offsetLeft:l>N&&(l=N),s<window.visualViewport.offsetTop?s=window.visualViewport.offsetTop:s>k&&(s=k)}else{const N=document.body.clientWidth+document.documentElement.offsetLeft-f.width,k=document.body.clientHeight+document.documentElement.offsetTop-f.height;l<document.documentElement.offsetLeft?l=document.documentElement.offsetLeft:l>N&&(l=N),s<document.body.offsetTop?s=document.body.offsetTop:s>k&&(s=k)}c.style.transform=`translateX(${l}px) translateY(${s}px)`}};let _=0;a.addEventListener("touchstart",T=>{const v=e.getSelection();if(!v)return;let m=T.changedTouches[0]??T.touches[0];const K=v.isEmpty();let $=0;try{const s=a.classList.contains("left")?{lineNumber:v.startLineNumber,column:v.startColumn}:{lineNumber:v.endLineNumber,column:v.endColumn},N=e.getScrolledVisiblePosition(s);N&&($=p.getBoundingClientRect().top+N.top+N.height/2-m.clientY)}catch{}let b=null;const M=()=>{b===null&&(b=setInterval(()=>{oe(e,m,o),se(e,m,L);const s=e.getTargetAtClientPoint(m.clientX,m.clientY+$-o*1.5);s&&s.position&&(K?e.setPosition(s.position):e.setSelection(H(v,s.position)))},50))},f=s=>{s.preventDefault(),m=s.changedTouches[0]??s.touches[0],M()},l=s=>{if(b!==null&&clearInterval(b),b=null,Date.now()-_>100){document.removeEventListener("touchmove",f),document.removeEventListener("touchend",l),document.removeEventListener("touchcancel",l);return}s.preventDefault(),m=s.changedTouches[0]??s.touches[0],c&&e.getSelection()!==null&&g(m),document.removeEventListener("touchmove",f),document.removeEventListener("touchend",l),document.removeEventListener("touchcancel",l)};_=Date.now(),document.addEventListener("touchmove",f,{passive:!1}),document.addEventListener("touchend",l),document.addEventListener("touchcancel",l)},{passive:!0})};Y(i,te),Y(r,ne);const F=a=>{let H=0;a.addEventListener("touchstart",()=>{H=Date.now()},{passive:!0}),a.addEventListener("touchend",()=>{if(Date.now()-H>1e3)return;const g=e.getSelection();if(!g||g?.startColumn!==g.endColumn||g.startLineNumber!==g.endLineNumber)return;const _=e.getModel();if(!_)return;const T=_.getWordAtPosition(g.getStartPosition());T&&(e.setSelection({startLineNumber:g.startLineNumber,startColumn:T.startColumn,endLineNumber:g.endLineNumber,endColumn:T.endColumn}),setTimeout(()=>{e.focus()}))},{passive:!0})};F(i.textCursor),F(r.textCursor);const U=e.getSelection();U&&W(U)};e.onDidChangeCursorSelection(t=>{P(),setTimeout(()=>{W(t.selection)},0)}),pe();const ge=t=>{const n=new Map([["copy",{name:"copy",innerHTML:`
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    class="icon"
+    viewBox="0 0 24 24"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    style="fill: none;"
+>
+    <path d="M 5 8 m 0 2 a 2 2 0 0 1 2 -2 h 8 a 2 2 0 0 1 2 2 v 8 a 2 2 0 0 1 -2 2 h -8 a 2 2 0 0 1 -2 -2 z M 9 6 a 2 2 0 0 1 2 -2 h 8 a 2 2 0 0 1 2 2 v 8 a 2 2 0 0 1 -2 2"/>
+</svg>`,action:async()=>{await ce()&&P()}}],["cut",{name:"cut",innerHTML:`
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    class="icon"
+    viewBox="0 0 24 24"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    style="fill: none;"
+>
+    <path d="M7 17m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
+    <path d="M17 17m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
+    <path d="M9.15 14.85l8.85 -10.85" />
+    <path d="M6 4l8.85 10.85" />
+</svg>`,action:async()=>{await ae()&&P()}}],["paste",{name:"paste",innerHTML:`
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    class="icon"
+    viewBox="0 0 24 24"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    style="fill: none;"
+>
+    <path d="M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h3m9 -9v-5a2 2 0 0 0 -2 -2h-2" />
+    <path d="M13 17v-1a1 1 0 0 1 1 -1h1m3 0h1a1 1 0 0 1 1 1v1m0 3v1a1 1 0 0 1 -1 1h-1m-3 0h-1a1 1 0 0 1 -1 -1v-1" />
+    <path d="M9 3m0 2a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v0a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z" />
+</svg>`,action:async()=>{await ue()&&P()}}],["undo",{name:"undo",innerHTML:`
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    class="icon"
+    viewBox="0 0 24 24"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    style="fill: none;"
+>
+    <path d="M9 14l-4 -4l4 -4"/>
+    <path d="M5 10h11a4 4 0 1 1 0 8h-1"/>
+</svg>`,action:()=>{de(),R()}}],["redo",{name:"redo",innerHTML:`
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    class="icon"
+    viewBox="0 0 24 24"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    style="fill: none;"
+>
+    <path d="M15 14l4 -4l-4 -4"/>
+    <path d="M19 10h-11a4 4 0 1 0 0 8h1"/>
+</svg>`,action:()=>{me(),R()}}],["selectWord",{name:"select",innerHTML:`
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    class="icon"
+    viewBox="0 0 24 24"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    style="fill: none;"
+>
+    <path d="M5 3h2m4 0h2m4 0h2M3 7v2m18-2v2M3 13v2m18-2v2M5 21h2m4 0h2m4 0h2"/>
+</svg>`,action:()=>{const o=e.getSelection();if(!o)return;const L=e.getModel();if(!L)return;const x=L.getWordAtPosition(o.getStartPosition());x&&(e.setSelection({startLineNumber:o.startLineNumber,startColumn:x.startColumn,endLineNumber:o.endLineNumber,endColumn:x.endColumn}),setTimeout(()=>{e.focus()})),R()}}],["selectAll",{name:"select all",innerHTML:`
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    class="icon"
+    viewBox="0 0 24 24"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    style="fill: none;"
+>
+    <path d="M 2 6 v 12 M 17 16 l 4 -4 l -4 -4 M 7 16 l -4 -4 l 4 -4 M 22 6 v 12 M 5 12 h 14"/>
+</svg>`,action:()=>{re(),R()}}],["close",{name:"close",innerHTML:`
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    class="icon"
+    viewBox="0 0 24 24"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    style="fill: none;"
+>
+    <path d="M18 6l-12 12" />
+    <path d="M6 6l12 12" />
+</svg>`,action:()=>(P(),!0)}]]);if(h===void 0)return n.values();if(typeof h=="function"){const o=h({editor:e,selectorMenu:t,defaultTools:n,openMenu:R,closeMenu:P});return o===void 0?n.values():o}return n.values()};(()=>{c=document.createElement("div"),c.classList.add("monaco-editor-touch-selector-menu");for(const t of ge(c)){const n=document.createElement("div");if(n.classList.add("menu-item"),typeof t.innerHTML=="function"){const o=t.innerHTML();typeof o=="string"?n.innerHTML=o:n.appendChild(o)}else typeof t.innerHTML=="string"?n.innerHTML=t.innerHTML:n.appendChild(t.innerHTML);n.addEventListener("touchend",async()=>{try{await t.action()}catch(o){await O(t.name,o)}}),c.appendChild(n)}c.addEventListener("touchstart",t=>{t.preventDefault()},{passive:!1}),c.addEventListener("touchmove",t=>{t.preventDefault()},{passive:!1}),c.addEventListener("touchend",t=>{t.preventDefault()},{passive:!1}),document.documentElement.append(c)})(),p.addEventListener("touchstart",()=>{ie()},{passive:!0}),e.onDidBlurEditorWidget(()=>{G(),P()}),p.addEventListener("click",t=>{t.stopPropagation()})};A.DefaultToolName=q,A.editorTouchSelectionHelp=le,Object.defineProperty(A,Symbol.toStringTag,{value:"Module"})}));

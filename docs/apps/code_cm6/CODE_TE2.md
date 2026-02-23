@@ -2885,3 +2885,118 @@ Both use the framework-shells `terminate` endpoint to kill the underlying shell.
 | `explorer_ws.py` | `_restart_adapter_only()`, `_restart_code_server_and_adapter()`, restart handlers |
 | `template.html` | 3-state CSS classes, `#fe-adapter-dd` dropdown, spinner default class |
 | `main.js` | `_reloadEditorIframe()`, `_feUpdateLspSpinner()`, adapter dropdown, event handlers |
+
+## 32) Touch Selection Extension (`monaco-touch-selection`)
+
+Mobile touch handling (teardrops, selection handles, context menu) is provided by
+a **vendored, patched fork** of the
+[monaco-touch-selection](https://github.com/nicepkg/monaco-collection) library
+(upstream v1.1.1 by _potmot_).  The fork lives in a local worktree, is built from
+TypeScript source, and the UMD output is deployed into the editor's static vendor
+directory.
+
+### Overview
+
+The extension hooks into a Monaco `ICodeEditor` and adds:
+
+- **Teardrop cursor indicator** — a draggable handle below the cursor.
+- **Selection handle bars** — left/right draggable handles around a selection range.
+- **Touch context menu** — a floating toolbar with clipboard, selection, hover, and undo/redo tools.
+- **Drag-to-reveal** — while dragging a handle, the editor auto-scrolls to keep the cursor visible.
+- **Touch offset** — during drag, the target position is shifted up by 1.5 line-heights so the user's finger doesn't occlude the text.
+
+### TE2-specific patches (on top of upstream)
+
+| Patch | What it does |
+|-------|-------------|
+| **Dynamic `EditorOption` lookup** | Resolves `fontSize` / `lineHeight` enum IDs at call-time via `globalThis.monaco`, not at UMD-load-time (avoids wrong fallback values in TE2's Monaco build) |
+| **`bottomCursor` positioning fix** | Uses `top` + `marginTop` instead of `bottom` so the teardrop renders at the correct vertical offset |
+| **Config-change listener** | Re-reads `fontSize` / `lineHeight` on `editor.onDidChangeConfiguration` so teardrop position updates after settings changes |
+| **Touch offset correction** | During drag, targets `clientY + touchOffsetY - lineHeight * 1.5` for finger clearance |
+| **Drag debounce** | `setInterval` for cursor tracking only starts on the first `touchmove`, not `touchstart` — so taps on the teardrop open the menu instead of repositioning the cursor |
+| **Select Word tool** | Built-in tool that selects the word at the cursor position |
+| **Hover tool** | Built-in tool (🚁) that closes the menu and triggers `editor.action.showHover` at the cursor |
+
+> **Critical timing note**: `EditorOption` enum lookup **must** happen inside
+> `editorTouchSelectionHelp()` at call-time, not at module/UMD-load-time.
+> `globalThis.monaco` is not yet available when the UMD script is first evaluated.
+> Placing the lookup at module scope causes fallback values (52/67) to be used,
+> which breaks teardrop positioning.
+
+### Build process
+
+```bash
+# 1. Source lives in the local worktree
+cd worktrees/monaco-touch-selection/
+
+# 2. Compile TypeScript
+npx tsc
+
+# 3. Build UMD bundle with Vite
+npx vite build
+#    → dist/index.umd.cjs   (deployed file)
+#    → dist/index.js         (ESM, not used)
+
+# 4. Back up the existing vendored file
+cp app/apps/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js \
+   app/apps/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js.bak
+
+# 5. Deploy
+cp dist/index.umd.cjs \
+   app/apps/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js
+```
+
+The CSS file (`monaco-touch-selection.css`) is **manually patched** in the vendor
+directory (larger touch targets, bigger menu, `::before` pseudo-elements for hit area).
+It is NOT built from source — do not overwrite it during deploy.
+
+### Gesture reference
+
+| Gesture | Target | Action |
+|---------|--------|--------|
+| **Tap** | Editor surface | Set cursor position |
+| **Double-tap** | Editor surface | Select word at tap position |
+| **Tap** | Teardrop (cursor handle) | Open touch context menu |
+| **Drag** | Teardrop (cursor handle) | Reposition cursor (with 1.5-line vertical offset for finger clearance) |
+| **Drag** | Selection handle bar | Adjust selection range boundary |
+| **Tap** | Line number gutter | Select entire line above the tapped line |
+| **Tap then drag** | Line number gutter | Change line range selection |
+
+### Touch menu tools
+
+Tools appear in the context menu in the order listed below.
+
+| # | Tool | Icon | Action | Menu after |
+|---|------|------|--------|------------|
+| 1 | **Copy** | 📋 (clipboard SVG) | Copy selection to clipboard | Stays open |
+| 2 | **Cut** | ✂️ (scissors SVG) | Cut selection to clipboard | Stays open |
+| 3 | **Paste** | 📥 (paste SVG) | Paste from clipboard at cursor | Stays open |
+| 4 | **Undo** | ↩ (undo SVG) | Undo last edit | Stays open |
+| 5 | **Redo** | ↪ (redo SVG) | Redo last edit | Stays open |
+| 6 | **Select Word** | ⬚ (dashed box SVG) | Select the word at cursor position | Stays open |
+| 7 | **Select All** | ↔ (expand arrows SVG) | Select all text in editor | Stays open |
+| 8 | **Hover** | 🚁 (helicopter emoji) | Close menu, show hover info at cursor position | Closes |
+| 9 | **Close** | ✕ (X SVG) | Dismiss the touch menu | Closes |
+
+### Initialization
+
+The extension is loaded in `m_editor_app.js` as a UMD global:
+
+```js
+// Called after editor DOM is ready (and on re-init after language switches)
+window['monaco-touch-selection'].editorTouchSelectionHelp(editor);
+```
+
+No options object is passed — all tools (including Hover) are built into the
+extension source.  The `tools` callback is available for external consumers who
+need to add custom tools, but TE2 does not use it.
+
+### Key files
+
+| File | Role |
+|------|------|
+| `worktrees/monaco-touch-selection/src/index.ts` | TypeScript source — all patches, tools, and logic |
+| `worktrees/monaco-touch-selection/dist/index.umd.cjs` | Build output (UMD) |
+| `app/.../vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js` | Deployed vendored UMD (copy of build output) |
+| `app/.../vendor/monaco-touch-selection/monaco-touch-selection.css` | Manually patched CSS (do NOT overwrite) |
+| `app/.../monaco_editor/m_editor_app.js` | Initialization call (`editorTouchSelectionHelp(editor)`) |

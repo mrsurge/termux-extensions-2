@@ -467,15 +467,16 @@ function connectExplorerSocket() {
           try { window.__cm6PendingUiPrefs = payload; } catch (_) {}
         }
         // Adapter restart/settings events from backend
-        // NOTE: _reloadEditorIframe / _requestAdapterRestart are defined later
-        // in the file (not hoisted), so we must defer via setTimeout.
+        // These functions are defined later and may not be in scope during
+        // initial connect. The primary restart path is the direct call from
+        // the save handler — these are a safety net only.
         if (type === 'ext:adapter_restarting') {
           console.log('[adapter_restart] received', payload);
-          setTimeout(() => _reloadEditorIframe(), 0);
+          if (typeof _reloadEditorIframe === 'function') setTimeout(() => _reloadEditorIframe(), 0);
         }
         if (type === 'ext:settings_changed') {
           console.log('[adapter_restart] settings changed', payload);
-          setTimeout(() => _requestAdapterRestart(), 0);
+          if (typeof _requestAdapterRestart === 'function') setTimeout(() => _requestAdapterRestart(), 0);
         }
         // The explorer websocket is THE authority for which file is active.
         // Always update toolbar — no same-path guard so tracked edits
