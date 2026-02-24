@@ -46,6 +46,7 @@ const AGENT_EXTENSION_MANIFEST = '/apps/file_editor_cm6/extensions/chat_drawer_e
 const AGENT_HOST_CWD_ENDPOINT = '/api/host/project/cwd';
 const UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT = 'agentActiveShortcutId';
 const UI_PREF_KEY_AGENT_TOGGLE_DISPLAY = 'agentToggleDisplay';
+const UI_PREF_KEY_AGENT_HEADER_DISPLAY = 'agentHeaderDisplay';
 const UI_PREF_KEY_AGENT_SHORTCUTS = 'agentShortcuts';
 
 let _latestUiPrefs = {};
@@ -54,6 +55,9 @@ const _uiPrefsWaiters = [];
 let _agentRuntimeConfig = null;
 let _agentRuntimeMode = null;
 let _agentConfigApplySeq = 0;
+let agentShortcutLoadBtn = null;
+let agentShortcutLoadLabel = null;
+let agentShortcutLoadDD = null;
 
 function _resolveUiPrefsWaiters(ui) {
   if (!_uiPrefsWaiters.length) return;
@@ -109,10 +113,12 @@ async function fetchAgentExtensionManifest() {
 
 function applyAgentIcon(manifest) {
   const iconEl = document.querySelector('#fe-agent-toggle .fe-agent-icon');
-  if (!iconEl) return;
+  const headerIconEl = document.getElementById('agent-drawer-icon');
+  if (!iconEl && !headerIconEl) return;
 
   const iconPath = typeof manifest.icon === 'string' ? manifest.icon.trim() : '';
   const iconEmoji = typeof manifest.icon_emoji === 'string' ? manifest.icon_emoji.trim() : '';
+  const targets = [iconEl, headerIconEl].filter(Boolean);
 
   if (iconPath) {
     const img = document.createElement('img');
@@ -122,15 +128,29 @@ function applyAgentIcon(manifest) {
     img.src = resolvedPath;
     img.alt = '';
     img.setAttribute('aria-hidden', 'true');
-    iconEl.textContent = '';
-    iconEl.appendChild(img);
+    targets.forEach((el) => {
+      el.textContent = '';
+      el.appendChild(img.cloneNode(true));
+      el.dataset.manifestKind = 'image';
+      el.dataset.manifestValue = resolvedPath;
+    });
     return;
   }
 
   if (iconEmoji) {
-    iconEl.textContent = iconEmoji;
-  } else if (iconEl.dataset?.defaultIcon) {
-    iconEl.textContent = iconEl.dataset.defaultIcon;
+    targets.forEach((el) => {
+      el.textContent = iconEmoji;
+      el.dataset.manifestKind = 'emoji';
+      el.dataset.manifestValue = iconEmoji;
+    });
+  } else {
+    targets.forEach((el) => {
+      if (el.dataset?.defaultIcon) {
+        el.textContent = el.dataset.defaultIcon;
+      }
+      el.dataset.manifestKind = '';
+      el.dataset.manifestValue = '';
+    });
   }
 }
 
@@ -264,6 +284,8 @@ function _collectSidebarShortcuts(uiPrefs) {
       url,
       icon: sc.icon || null,
       load: _normalizeShortcutLoad(sc.load),
+      header: !!sc.header,
+      last_used: Number.isFinite(Number(sc.last_used)) ? Number(sc.last_used) : 0,
     });
   });
   return out;
@@ -1470,9 +1492,10 @@ const agentShortcutsList = requireEl('#agent-shortcuts-list');
 const agentShortcutsEditor = requireEl('#agent-shortcuts-editor');
 const agentShortcutLabel = requireEl('#agent-shortcut-label');
 const agentShortcutUrl = requireEl('#agent-shortcut-url');
-const agentShortcutLoadBtn = requireEl('#agent-shortcut-load-btn');
-const agentShortcutLoadLabel = requireEl('#agent-shortcut-load-label');
-const agentShortcutLoadDD = requireEl('#agent-shortcut-load-dd');
+const agentShortcutHeader = requireEl('#agent-shortcut-header');
+agentShortcutLoadBtn = requireEl('#agent-shortcut-load-btn');
+agentShortcutLoadLabel = requireEl('#agent-shortcut-load-label');
+agentShortcutLoadDD = requireEl('#agent-shortcut-load-dd');
 const agentShortcutEmoji = requireEl('#agent-shortcut-emoji');
 const agentShortcutIconBrowse = requireEl('#agent-shortcut-icon-browse');
 const agentShortcutIconClear = requireEl('#agent-shortcut-icon-clear');
@@ -2728,11 +2751,27 @@ let _agentShortcutsCache = [];
 let _agentShortcutEditingId = null;
 let _agentShortcutEditingAssetName = null;
 let _agentShortcutIframeMap = new Map();
+let _lastShortcutUsageKey = '';
+let _lastShortcutUsageStamp = 0;
 
 function _agentIconUrlFromName(name) {
   const safe = String(name || '').trim();
   if (!safe) return '';
   return `/api/app/file_editor_cm6/agent_icons/${encodeURIComponent(safe)}`;
+}
+
+function _firstGrapheme(text) {
+  const value = String(text || '').trim();
+  if (!value) return '';
+  try {
+    if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+      const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+      const it = seg.segment(value)[Symbol.iterator]();
+      const first = it.next();
+      if (first && first.value && first.value.segment) return first.value.segment;
+    }
+  } catch (_) {}
+  return Array.from(value)[0] || '';
 }
 
 function _renderAgentIconInto(el, icon) {
@@ -2742,13 +2781,17 @@ function _renderAgentIconInto(el, icon) {
   const kind = i && typeof i.kind === 'string' ? i.kind : '';
   if (kind === 'emoji') {
     const emoji = typeof i.emoji === 'string' ? i.emoji.trim() : '';
-    el.textContent = emoji || (el.dataset?.defaultIcon || '💬');
+    if (emoji) {
+      el.textContent = emoji;
+    } else {
+      _restoreAgentToggleIcon(el);
+    }
     return;
   }
   if (kind === 'asset') {
     const name = typeof i.name === 'string' ? i.name.trim() : '';
     if (!name) {
-      el.textContent = el.dataset?.defaultIcon || '💬';
+      _restoreAgentToggleIcon(el);
       return;
     }
     const img = document.createElement('img');
@@ -2758,36 +2801,181 @@ function _renderAgentIconInto(el, icon) {
     el.appendChild(img);
     return;
   }
-  // Fallback: keep whatever is already there (manifest icon) if possible.
-  el.textContent = el.dataset?.defaultIcon || '💬';
+  _restoreAgentToggleIcon(el);
 }
 
-function _applyAgentToggleToolbar(uiPrefs) {
+function _restoreAgentToggleIcon(el) {
+  if (!el) return;
+  const kind = el.dataset?.manifestKind || '';
+  const value = el.dataset?.manifestValue || '';
+  el.textContent = '';
+  if (kind === 'image' && value) {
+    const img = document.createElement('img');
+    img.src = value;
+    img.alt = '';
+    img.setAttribute('aria-hidden', 'true');
+    el.appendChild(img);
+    return;
+  }
+  if (kind === 'emoji' && value) {
+    el.textContent = value;
+    return;
+  }
+  el.textContent = el.dataset?.defaultIcon || '';
+}
+
+function _applyAgentHeaderDisplay(uiPrefs, overrides = {}) {
+  const iconEl = document.getElementById('agent-drawer-icon');
+  const textEl = document.getElementById('agent-drawer-title-text');
+  if (!iconEl || !textEl) return;
+  const display = typeof uiPrefs?.[UI_PREF_KEY_AGENT_HEADER_DISPLAY] === 'string'
+    ? uiPrefs[UI_PREF_KEY_AGENT_HEADER_DISPLAY].trim()
+    : 'text';
+  if (display === 'icon') {
+    iconEl.style.display = 'inline-flex';
+    textEl.style.display = 'none';
+  } else if (display === 'text') {
+    iconEl.style.display = 'none';
+    textEl.style.display = '';
+  } else {
+    iconEl.style.display = 'inline-flex';
+    textEl.style.display = '';
+  }
+
+  const shortcuts = Array.isArray(overrides.shortcuts)
+    ? overrides.shortcuts
+    : _collectSidebarShortcuts(uiPrefs);
+  const active = overrides.active || _resolveActiveShortcut(uiPrefs, shortcuts);
+  const shortcutIcon = active && active.icon && typeof active.icon === 'object' ? active.icon : null;
+  const headerLabel = active && typeof active.label === 'string' && active.label.trim()
+    ? active.label.trim()
+    : 'Sidebar';
+  textEl.textContent = headerLabel;
+  if (shortcutIcon && shortcutIcon.kind && shortcutIcon.kind !== 'default') {
+    _renderAgentIconInto(iconEl, shortcutIcon);
+  } else {
+    const fallbackText = _firstGrapheme(headerLabel);
+    if (fallbackText) {
+      iconEl.textContent = fallbackText;
+      return;
+    }
+    _restoreAgentToggleIcon(iconEl);
+  }
+}
+
+function _maybeUpdateShortcutLastUsed(uiPrefs, active, shortcuts) {
+  if (!active || !active.key) return;
+  const now = Date.now();
+  if (_lastShortcutUsageKey === active.key && (now - _lastShortcutUsageStamp) < 800) return;
+  const raw = Array.isArray(uiPrefs?.[UI_PREF_KEY_AGENT_SHORTCUTS])
+    ? uiPrefs[UI_PREF_KEY_AGENT_SHORTCUTS]
+    : [];
+  const idx = raw.findIndex((sc) => sc && typeof sc === 'object'
+    && (sc.id === active.key || sc.url === active.key || sc.id === active.id || sc.url === active.url));
+  if (idx < 0) return;
+  const prevTs = Number(raw[idx]?.last_used || 0);
+  if (Number.isFinite(prevTs) && (now - prevTs) < 800) {
+    _lastShortcutUsageKey = active.key;
+    _lastShortcutUsageStamp = now;
+    return;
+  }
+  const next = raw.map((sc, i) => {
+    if (i !== idx || !sc || typeof sc !== 'object') return sc;
+    return { ...sc, last_used: now };
+  });
+  _lastShortcutUsageKey = active.key;
+  _lastShortcutUsageStamp = now;
+  _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_SHORTCUTS, next);
+}
+
+function _renderSidebarHeaderIconList(uiPrefs, overrides = {}) {
+  const listEl = document.getElementById('agent-drawer-icon-list');
+  if (!listEl) return;
+  const shortcuts = Array.isArray(overrides.shortcuts)
+    ? overrides.shortcuts
+    : _collectSidebarShortcuts(uiPrefs);
+  const active = overrides.active || _resolveActiveShortcut(uiPrefs, shortcuts);
+  const activeKey = active?.key || '';
+  const now = Date.now();
+
+  const headerItems = shortcuts
+    .filter((sc) => sc && sc.header && ((sc.icon && sc.icon.kind && sc.icon.kind !== 'default') || (sc.label && sc.label.trim())))
+    .map((sc, idx) => ({
+      ...sc,
+      _sortTs: sc.last_used || (sc.key === activeKey ? now : 0),
+      _idx: idx,
+    }))
+    .sort((a, b) => (b._sortTs - a._sortTs) || (a._idx - b._idx));
+
+  listEl.innerHTML = '';
+  if (!headerItems.length) {
+    listEl.style.display = 'none';
+    return;
+  }
+  listEl.style.display = 'flex';
+
+  headerItems.forEach((sc) => {
+    const btn = document.createElement('button');
+    btn.className = 'agent-drawer__icon-btn';
+    if (sc.key && sc.key === activeKey) {
+      btn.classList.add('is-active');
+    }
+    btn.title = sc.label || sc.url || 'Shortcut';
+    const fallbackText = _firstGrapheme(sc.label);
+    const iconNode = _renderShortcutIconNode(sc.icon, 16, fallbackText);
+    if (!iconNode.textContent && !iconNode.childNodes.length) {
+      return;
+    }
+    btn.appendChild(iconNode);
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const targetId = sc.id || sc.url || sc.key;
+      if (targetId) {
+        _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT, targetId);
+        setTimeout(() => { try { agentDrawerHandle?.open?.(); } catch (_) {} }, 120);
+      }
+    });
+    listEl.appendChild(btn);
+  });
+}
+
+function _ensureActiveShortcutSelection(uiPrefs, shortcuts) {
+  const activeId = typeof uiPrefs?.[UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT] === 'string'
+    ? uiPrefs[UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT].trim()
+    : '';
+  const list = Array.isArray(shortcuts) ? shortcuts : _collectSidebarShortcuts(uiPrefs);
+  if (!list.length) {
+    return { active: null, activeId: '' };
+  }
+  const active = _resolveActiveShortcut(uiPrefs, list);
+  if (active) {
+    return { active, activeId: activeId || active.key };
+  }
+  const fallback = list[0];
+  const nextId = fallback?.id || fallback?.url || fallback?.key || '';
+  if (nextId && nextId !== activeId) {
+    _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT, nextId);
+  }
+  return { active: fallback || null, activeId: nextId };
+}
+
+function _applyAgentToggleToolbar(uiPrefs, overrides = {}) {
   const btn = document.getElementById('fe-agent-toggle');
   if (!btn) return;
   const iconEl = btn.querySelector('.fe-agent-icon');
   if (!iconEl) return;
 
-  const activeId = typeof uiPrefs?.[UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT] === 'string'
-    ? uiPrefs[UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT].trim()
-    : '';
-
-  // If the active shortcut has an icon, that icon wins.
-  const shortcuts = Array.isArray(uiPrefs?.[UI_PREF_KEY_AGENT_SHORTCUTS])
-    ? uiPrefs[UI_PREF_KEY_AGENT_SHORTCUTS]
-    : [];
-  let shortcutIcon = null;
-  if (activeId) {
-    const match = shortcuts.find((sc) => sc && typeof sc === 'object'
-      && (sc.id === activeId || sc.url === activeId));
-    if (match && match.icon && typeof match.icon === 'object') {
-      shortcutIcon = match.icon;
-    }
-  }
+  const shortcuts = Array.isArray(overrides.shortcuts)
+    ? overrides.shortcuts
+    : _collectSidebarShortcuts(uiPrefs);
+  const active = overrides.active || _resolveActiveShortcut(uiPrefs, shortcuts);
+  const shortcutIcon = active && active.icon && typeof active.icon === 'object' ? active.icon : null;
 
   if (shortcutIcon && typeof shortcutIcon === 'object' && shortcutIcon.kind && shortcutIcon.kind !== 'default') {
     _renderAgentIconInto(iconEl, shortcutIcon);
+    return;
   }
+  _restoreAgentToggleIcon(iconEl);
 }
 
 function _applyAgentSettingsControls(uiPrefs) {
@@ -2798,6 +2986,10 @@ function _applyAgentSettingsControls(uiPrefs) {
     ? uiPrefs[UI_PREF_KEY_AGENT_SHORTCUTS]
     : [];
 
+  const headerDisplay = typeof uiPrefs?.[UI_PREF_KEY_AGENT_HEADER_DISPLAY] === 'string'
+    ? uiPrefs[UI_PREF_KEY_AGENT_HEADER_DISPLAY].trim()
+    : 'text';
+
   _agentSettingsUiMutating = true;
   try {
     // Toggle display radios
@@ -2806,13 +2998,24 @@ function _applyAgentSettingsControls(uiPrefs) {
       radios.forEach((r) => { r.checked = (r.value === display); });
     } catch (_) {}
 
+    // Header display radios
+    try {
+      const headerRadios = document.querySelectorAll('input[name="agent-header-display"]');
+      headerRadios.forEach((r) => { r.checked = (r.value === headerDisplay); });
+    } catch (_) {}
+
     _agentShortcutsCache = shortcuts.slice();
   } finally {
     _agentSettingsUiMutating = false;
   }
 
-  _applyAgentToggleToolbar(uiPrefs);
-  _syncSidebarIframes(uiPrefs);
+  const normalized = _collectSidebarShortcuts(uiPrefs);
+  const ensured = _ensureActiveShortcutSelection(uiPrefs, normalized);
+  _maybeUpdateShortcutLastUsed(uiPrefs, ensured.active, normalized);
+  _applyAgentToggleToolbar(uiPrefs, { shortcuts: normalized, active: ensured.active });
+  _applyAgentHeaderDisplay(uiPrefs, { shortcuts: normalized, active: ensured.active });
+  _renderSidebarHeaderIconList(uiPrefs, { shortcuts: normalized, active: ensured.active });
+  _syncSidebarIframes(uiPrefs, normalized, ensured.active);
 }
 
 function _updateSidebarSetupPlaceholder(uiPrefs, hasActiveOverride) {
@@ -2861,10 +3064,12 @@ function _setActiveSidebarIframe(activeKey, activeUrl, uiPrefs) {
   return hasActive;
 }
 
-function _syncSidebarIframes(uiPrefs) {
+function _syncSidebarIframes(uiPrefs, shortcutsOverride, activeOverride) {
   const stack = document.getElementById('sidebar-iframe-stack');
   if (!stack) return;
-  const shortcuts = _collectSidebarShortcuts(uiPrefs);
+  const shortcuts = Array.isArray(shortcutsOverride)
+    ? shortcutsOverride
+    : _collectSidebarShortcuts(uiPrefs);
   const desiredKeys = new Set(shortcuts.map((sc) => sc.key));
 
   _agentShortcutIframeMap.forEach((entry, key) => {
@@ -2899,13 +3104,13 @@ function _syncSidebarIframes(uiPrefs) {
     }
   });
 
-  const active = _resolveActiveShortcut(uiPrefs, shortcuts);
+  const active = activeOverride || _resolveActiveShortcut(uiPrefs, shortcuts);
   const activeKey = active ? active.key : '';
   const activeUrl = active ? active.url : '';
   _setActiveSidebarIframe(activeKey, activeUrl, uiPrefs);
 }
 
-function _renderShortcutIconNode(icon, sizePx = 16) {
+function _renderShortcutIconNode(icon, sizePx = 16, fallbackText = '') {
   const wrap = document.createElement('span');
   wrap.style.display = 'inline-flex';
   wrap.style.alignItems = 'center';
@@ -2913,14 +3118,20 @@ function _renderShortcutIconNode(icon, sizePx = 16) {
   wrap.style.width = `${sizePx}px`;
   wrap.style.height = `${sizePx}px`;
   const i = icon && typeof icon === 'object' ? icon : null;
-  if (!i) return wrap;
+  if (!i) {
+    if (fallbackText) wrap.textContent = fallbackText;
+    return wrap;
+  }
   if (i.kind === 'emoji') {
     wrap.textContent = String(i.emoji || '').trim();
     return wrap;
   }
   if (i.kind === 'asset') {
     const name = String(i.name || '').trim();
-    if (!name) return wrap;
+    if (!name) {
+      if (fallbackText) wrap.textContent = fallbackText;
+      return wrap;
+    }
     const img = document.createElement('img');
     img.src = _agentIconUrlFromName(name);
     img.alt = '';
@@ -2928,6 +3139,9 @@ function _renderShortcutIconNode(icon, sizePx = 16) {
     img.style.height = `${sizePx}px`;
     img.style.objectFit = 'contain';
     wrap.appendChild(img);
+  }
+  if (!wrap.textContent && !wrap.childNodes.length && fallbackText) {
+    wrap.textContent = fallbackText;
   }
   return wrap;
 }
@@ -3029,6 +3243,7 @@ function _hideAgentShortcutEditor() {
   _agentShortcutEditingAssetName = null;
   agentShortcutLabel.value = '';
   agentShortcutUrl.value = '';
+  agentShortcutHeader.checked = false;
   _setAgentShortcutLoadValue('lazy');
   agentShortcutEmoji.value = '';
   agentShortcutIconPreview.textContent = '';
@@ -3041,6 +3256,7 @@ function _showAgentShortcutEditor(entry) {
   _agentShortcutEditingId = typeof e.id === 'string' && e.id.trim() ? e.id.trim() : null;
   agentShortcutLabel.value = typeof e.label === 'string' ? e.label : '';
   agentShortcutUrl.value = typeof e.url === 'string' ? e.url : '';
+  agentShortcutHeader.checked = !!e.header;
   _setAgentShortcutLoadValue(e.load);
 
   const icon = e.icon && typeof e.icon === 'object' ? e.icon : null;
@@ -3214,7 +3430,6 @@ function _createAgentController(config) {
   _agentRuntimeMode = 'iframe';
   return initAgentIframe({
     url: config.url,
-    title: 'Sidebar',
     allowAnyOrigin: true,
     hideDrawerHeader: false,
   });
@@ -3296,6 +3511,18 @@ function _initAgentSettingsUI() {
     });
   } catch (_) {}
 
+  // Header display radios
+  try {
+    const headerRadios = document.querySelectorAll('input[name="agent-header-display"]');
+    headerRadios.forEach((r) => {
+      r.addEventListener('change', () => {
+        if (_agentSettingsUiMutating) return;
+        if (!r.checked) return;
+        _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_HEADER_DISPLAY, r.value);
+      });
+    });
+  } catch (_) {}
+
   editorSettingsAgentShortcutsBtn.addEventListener('click', () => {
     _openAgentShortcutsModal();
   });
@@ -3351,6 +3578,7 @@ function _initAgentSettingsUI() {
     const label = (agentShortcutLabel.value || '').trim();
     const url = (agentShortcutUrl.value || '').trim();
     const load = _getAgentShortcutLoadValue();
+    const header = !!agentShortcutHeader.checked;
     if (!label || !url) {
       host.toast('Label and URL are required');
       return;
@@ -3365,7 +3593,9 @@ function _initAgentSettingsUI() {
     }
     const next = Array.isArray(_agentShortcutsCache) ? _agentShortcutsCache.slice() : [];
     const idx = next.findIndex((x) => x && x.id === id);
-    const entry = { id, label, url, icon, load };
+    const existing = idx >= 0 ? next[idx] : null;
+    const lastUsed = Number.isFinite(Number(existing?.last_used)) ? Number(existing.last_used) : 0;
+    const entry = { id, label, url, icon, load, header, last_used: lastUsed };
     if (idx >= 0) next[idx] = entry;
     else next.push(entry);
     _persistAgentShortcuts(next);
@@ -6085,9 +6315,17 @@ async function main() {
   branchMenuHandle = initBranchMenu();
   const agentExtensionManifest = await fetchAgentExtensionManifest();
   applyAgentIcon(agentExtensionManifest);
+  try {
+    _applyAgentSettingsControls(_latestUiPrefs || {});
+  } catch (_) {}
   const initialUiPrefs = await waitForInitialUiPrefs(2200);
   const agentIframeConfig = await _applyAgentRuntimeConfigFromUi(initialUiPrefs);
   agentDrawerHandle = _createAgentController(agentIframeConfig);
+  try {
+    const normalizedShortcuts = _collectSidebarShortcuts(initialUiPrefs);
+    const ensured = _ensureActiveShortcutSelection(initialUiPrefs, normalizedShortcuts);
+    _applyAgentHeaderDisplay(initialUiPrefs, { shortcuts: normalizedShortcuts, active: ensured.active });
+  } catch (_) {}
 
   const serverState = await syncEditorState(true);
   

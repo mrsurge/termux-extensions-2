@@ -1,7 +1,7 @@
 {
   "name": "Code TE2",
   "id": "file_editor_cm6",
-  "icon_src": "/static/CODE_TE2.png",
+  "icon_src": "/apps/file_editor_cm6/static/icons/CODE_TE2.png",
   "version": "0.1.0",
   "description": "A full-page CodeMirror 6 editor running inside the NiceGUI shell.",
   "author": "mrSurge",

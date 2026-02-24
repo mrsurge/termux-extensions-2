@@ -3000,3 +3000,81 @@ need to add custom tools, but TE2 does not use it.
 | `app/.../vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js` | Deployed vendored UMD (copy of build output) |
 | `app/.../vendor/monaco-touch-selection/monaco-touch-selection.css` | Manually patched CSS (do NOT overwrite) |
 | `app/.../monaco_editor/m_editor_app.js` | Initialization call (`editorTouchSelectionHelp(editor)`) |
+
+## 33) Diagnostics Owner-Keyed Markers (Multi-Source Fix)
+
+### Problem
+
+Diagnostics from different extension-host sources (ESLint, TypeScript, etc.) were
+being set on the Monaco model with a **single hardcoded owner** (`'vscode_api'`).
+Because `monaco.editor.setModelMarkers(model, owner, markers)` is a
+**replace-all-for-this-owner** operation, each `$changeMany` from a new source
+would overwrite the previous source's markers.
+
+Typical sequence:
+
+1. ESLint `$changeMany` arrives → `setModelMarkers(model, 'vscode_api', [332 markers])` ✅
+2. TypeScript `$changeMany` arrives 400ms later → `setModelMarkers(model, 'vscode_api', [16 markers])` ❌
+3. Result: 332 ESLint markers gone, only 16 TypeScript markers remain.
+
+This caused the "flash then disappear" symptom — ESLint squiggles briefly visible
+then wiped out by the TypeScript push.
+
+### Fix
+
+Each diagnostic source now uses its **original owner string** (`eslint0`,
+`typescript`, etc.) as the Monaco marker owner. Markers from different owners
+coexist independently.
+
+#### Frontend (`m_editor_app.js`)
+
+| Component | Before | After |
+|-----------|--------|-------|
+| `setModelMarkers` owner | Hardcoded `'vscode_api'` | `params.owner` from adapter (`eslint0`, `typescript`, …) |
+| `_diagCache` | `Map(path → {markers})` | `Map(path → Map(owner → {markers}))` — preserves all owners |
+| `_applyCachedDiagnosticsForActive` | Replays single cached entry | Iterates all cached owners, sets markers for each |
+| `_clearDiagnosticsForSwitch` | Clears `'vscode_api'` only | Iterates `_diagKnownOwners` Set, clears each owner + legacy fallback |
+| Toolbar counts | Counted from latest `setModelMarkers` call only | `_emitAggregatedDiagCounts()` reads `getModelMarkers({resource})` across all owners |
+
+#### Backend (`diagnostics_bridge.py`)
+
+| Component | Before | After |
+|-----------|--------|-------|
+| `_diag_cache` key | `abs_path` (single entry per file) | `(abs_path, owner)` tuple — both ESLint and TS entries coexist |
+| `_pending_entry` | Single buffered entry (last-write-wins) | `_pending_entries` list, deduped by owner — all sources buffered |
+| `send_cached_diagnostics_to_sid` | Sends one cached entry | Iterates all `(path, owner)` entries matching path |
+| `set_consumer_ready` flush | Flushes one entry | Flushes all buffered entries for the expected path |
+
+### Data flow
+
+```
+Extension Host ($changeMany owner=eslint0, markers=332)
+  → workbench_client.mjs (preserves owner in event)
+  → server.mjs emitTe2Event({ type: "diagnostics/update", owner: "eslint0", items: [...] })
+  → diagnostics_bridge.py caches at key ("path", "eslint0"), forwards entry
+  → m_editor_app.js _applyDiagnosticsUpdate({ owner: "eslint0", items: [...] })
+  → monaco.editor.setModelMarkers(model, "eslint0", [332 markers])
+
+Extension Host ($changeMany owner=typescript, markers=16)
+  → same pipeline, owner="typescript"
+  → monaco.editor.setModelMarkers(model, "typescript", [16 markers])
+  → both owner's markers coexist: getModelMarkers() returns 348 total
+```
+
+### File switch behavior
+
+When the user switches files (`openPathFromBackend`):
+
+1. `_clearDiagnosticsForSwitch()` iterates all known owners → `setModelMarkers(model, owner, [])` for each
+2. Toolbar counts zeroed immediately
+3. `_diagKnownOwners` reset to empty Set
+4. Spinner/baton starts for the new file
+5. New diagnostics arrive per-owner → markers accumulate correctly
+
+### Key files
+
+| File | Role |
+|------|------|
+| `m_editor_app.js` | `_applyDiagnosticsUpdate()`, `_emitAggregatedDiagCounts()`, `_clearDiagnosticsForSwitch()`, `_applyCachedDiagnosticsForActive()` |
+| `diagnostics_bridge.py` | `_process_diagnostics_update()`, `set_consumer_ready()`, `send_cached_diagnostics_to_sid()`, `_pending_entries` buffer |
+| `server.mjs` | `diagnosticsFromChangeMany()` — extracts owner from `$changeMany` args, passes through in `diagnostics/update` event |

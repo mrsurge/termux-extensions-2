@@ -135,8 +135,8 @@ export function initAgentIframe(options = {}) {
 
   drawer.classList.add('agent-drawer--iframe');
   applyHeaderMode();
-  if (title) {
-    title.textContent = options.title || 'Sidebar';
+  if (title && typeof options.title === 'string' && options.title.trim()) {
+    title.textContent = options.title.trim();
   }
 
   refreshOriginsAndEndpoints();

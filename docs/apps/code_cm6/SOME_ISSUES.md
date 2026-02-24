@@ -1,55 +1,66 @@
-1. get ready to merge with main branch.
-- clone on other devices with dependencies not installed and see what kind of issues we've run into. What kind of dependencies that we've missed.
-- Make suresure everything looks the same as does on this device.
-- Make debian apt dependency list and install script 
-- Make a good install script... platform agnostic
+# Known Issues & TODO
 
-2. convert run_framework.sh to mostly python
-- make a loader python script that doesn't need run_framework.sh as a dependency (currently The entire framework requires a bash script as a dependency, blah.)
+## 1. Merge readiness
+- [ ] Clone on other devices with dependencies not installed — identify missing deps
+- [ ] Verify everything looks the same as on primary device
+- [ ] Make Debian apt dependency list and install script
+- [ ] Make a good install script — platform agnostic
 
-3. flesh out right click/teardrop tap.
-- fix teardrop touch space (lower So the user can see the cursor while dragging the handle)
-- re-add right click
-- add features to touch menu 
-- bundle in some editor quirk fixes
-    A. 1st line deletion widget should appear ABOVE first line, not below it.
-    B. saving blank documents (doesn't work)
-    C. Creating empty document in explorer -> open empty document
+## 2. Convert `run_framework.sh` to mostly Python
+- [ ] Make a loader Python script that doesn't need `run_framework.sh` as a dependency
+  (currently the entire framework requires a bash script as a dependency)
 
-4. think about issues mentions/dumps
-- add mention to issue dialogs
-- add cli insert/mention (dtach)
+## 3. Touch menu & editor quirks
+### Touch (done ✅)
+- [x] Fix teardrop touch space — lower so user can see cursor while dragging handle
+- [x] Re-add right click (touch context menu via teardrop tap)
+- [x] Add features to touch menu (Select Word, Hover 🚁)
+- [x] Drag debounce — defer interval to first touchmove so taps open the menu
+- [x] Drag offset — 1.5 line-heights for finger clearance
+- [x] Port all patches from minified to TypeScript source
 
-5. figure out hterm
-- native mobile select (contenteditable swap?)
+### Editor quirks (open)
+- [ ] A. 1st line deletion widget should appear ABOVE first line, not below it
+- [ ] B. Saving blank documents (doesn't work)
+- [ ] C. Creating empty document in explorer → open empty document
 
-# 6. fix side bar <--- important 
-- framework app launch
-- fix lable (remove 'agent')
-- fix drop down leaking off screen
-- create worktree "app harness"
+## 4. Issue mentions / dumps
+- [ ] Add mention to issue dialogs
+- [ ] Add CLI insert/mention (dtach)
 
-7. console mcp
-- search
-- mention
+## 5. Figure out hterm
+- [ ] Native mobile select (contenteditable swap?)
 
-8. fix double hover on js
-- remove monaco hovers
+## 6. Fix side bar ⚠️ important
+- [ ] Framework app launch
+- [ ] Fix label (remove 'agent')
+- [ ] Fix dropdown leaking off screen
+- [ ] Create worktree "app harness"
 
-9. fix file name truncation
-- on small screens
-- make debug overlay a flaggable setting
+## 7. Console MCP
+- [ ] Search
+- [ ] Mention
 
-x 10. reload theme change with correct monarch/ textmate semantic tokens color map 
+## 8. Fix double hover on JS
+- [ ] Remove Monaco hovers
 
-result: done
+## 9. Fix file name truncation
+- [ ] On small screens
+- [ ] Make debug overlay a flaggable setting
 
-11. disable zoom in android app.
+## ~~10. Reload theme change with correct Monarch / TextMate semantic tokens color map~~ ✅ done
 
-12. figure out and publish a good set of system requirements (so far it looks like a gigabytes minimum system memory for Android 4G linux and fuck windows)
+## 11. Disable zoom in Android app
+- [ ] Pending
 
-13. allow tap on deletion line in diff editor
+## 12. System requirements
+- [ ] Figure out and publish a good set of system requirements
+  (so far: 4 GB minimum system memory for Android, Linux — and forget Windows)
 
-x 14. fix settings.json relaunch workbench
+## 13. Diff editor tap
+- [ ] Allow tap on deletion line in diff editor
 
-result: done
+## ~~14. Fix settings.json relaunch workbench~~ ✅ done
+
+## 15. User-friendly README for code_te2 app worker
+- [ ] Create a concise, non-technical, user-friendly README for the code_te2 app worker

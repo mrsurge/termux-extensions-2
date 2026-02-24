@@ -1427,10 +1427,10 @@ class ExplorerDispatcher:
                     msg_id,
                 )
             value = value.strip()
-            if key == "agentToggleDisplay":
+            if key in ("agentToggleDisplay", "agentHeaderDisplay"):
                 if value not in ("icon", "text", "both"):
                     return await self.send_error(
-                        "agentToggleDisplay must be one of: icon, text, both",
+                        f"{key} must be one of: icon, text, both",
                         msg_id,
                     )
         elif isinstance(expected, list):
@@ -1493,6 +1493,13 @@ class ExplorerDispatcher:
                                 f"agentShortcuts[{idx}].icon.kind must be 'emoji' or 'asset'",
                                 msg_id,
                             )
+                    header_flag = raw.get("header")
+                    header_clean = bool(header_flag) if header_flag is not None else False
+                    last_used = raw.get("last_used")
+                    last_used_clean = 0
+                    if isinstance(last_used, (int, float)):
+                        if last_used >= 0:
+                            last_used_clean = int(last_used)
                     cleaned.append(
                         {
                             "id": sid,
@@ -1500,6 +1507,8 @@ class ExplorerDispatcher:
                             "url": url.strip(),
                             "icon": icon_clean,
                             "load": load,
+                            "header": header_clean,
+                            "last_used": last_used_clean,
                         }
                     )
                 value = cleaned

@@ -3798,7 +3798,7 @@
               },
             });
             zones.push({
-              after: Math.max(1, anchor - 1),
+              after: anchor - 1,
               text: delBlock.join('\n'),
               lines: delBlock.length,
             });

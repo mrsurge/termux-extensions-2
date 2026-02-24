@@ -44,7 +44,8 @@ DEFAULT_UI_PREFS: Dict[str, Any] = {
     # Side-bar (iframe) shortcuts + toggle chrome (global).
     "agentActiveShortcutId": "",
     "agentToggleDisplay": "icon",  # "icon" | "text" | "both"
-    # Shortcuts list: [{"id": "...", "label": "...", "url": "...", "icon": {...}}]
+    "agentHeaderDisplay": "text",  # "icon" | "text" | "both"
+    # Shortcuts list: [{"id": "...", "label": "...", "url": "...", "icon": {...}, "load": "...", "header": bool, "last_used": int}]
     "agentShortcuts": [],
 }
 

@@ -116,7 +116,7 @@
     grid-column: 3;
     grid-row: 3 / 5;
     border-left: 1px solid var(--border);
-    transition: opacity 0.2s ease, visibility 0.2s ease;
+    transition: none !important;
     overflow-y: auto;
     z-index: 50;
   }
@@ -951,8 +951,8 @@
 
   .agent-drawer__header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 12px;
     padding: 12px 18px;
     border-bottom: 1px solid var(--border);
     background: rgba(4, 7, 12, 0.9);
@@ -961,11 +961,67 @@
   .agent-drawer__title {
     font-size: 1rem;
     font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .agent-drawer__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.1rem;
+    height: 1.1rem;
+    line-height: 0;
+  }
+
+  .agent-drawer__icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
   }
 
   .agent-drawer__actions {
     display: flex;
     gap: 8px;
+    margin-left: auto;
+  }
+
+  .agent-drawer__icon-list {
+    display: none;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .agent-drawer__icon-btn {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 0;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--foreground, #e5e7eb);
+  }
+
+  .agent-drawer__icon-btn:hover {
+    border-color: rgba(255, 255, 255, 0.35);
+  }
+
+  .agent-drawer__icon-btn.is-active {
+    border-color: var(--primary, #3b82f6);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3);
+  }
+
+  .agent-drawer__icon-btn img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
   }
 
   .agent-drawer__body {
@@ -2224,7 +2280,7 @@
       <span id="fe-lsp-spinner" class="fe-lsp-status--error" title="Adapter not started" aria-label="Adapter status"></span>
       <div id="fe-adapter-dd" class="fe-dropdown" style="right: 0; left: auto;"></div>
       <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Sidebar drawer">
-        <span class="fe-agent-icon" data-default-icon="💬">💬</span>
+        <span class="fe-agent-icon" data-default-icon=""></span>
       </button>
       <div id="fe-agent-dd" class="fe-dropdown"></div>
     </div>
@@ -2363,7 +2419,11 @@
   <!-- Agent Drawer -->
   <aside id="agent-drawer" class="agent-drawer" aria-hidden="true">
     <header class="agent-drawer__header">
-      <div class="agent-drawer__title">Sidebar</div>
+      <div class="agent-drawer__title">
+        <span class="agent-drawer__icon" id="agent-drawer-icon" data-default-icon=""></span>
+        <span class="agent-drawer__title-text" id="agent-drawer-title-text">Sidebar</span>
+      </div>
+      <div class="agent-drawer__icon-list" id="agent-drawer-icon-list" aria-label="Side-bar header shortcuts"></div>
       <div class="agent-drawer__actions">
         <button class="fe-btn" id="agent-new-session">New Session</button>
         <button class="fe-btn" id="agent-close">✕</button>
@@ -2976,6 +3036,24 @@
           </label>
         </div>
 
+        <div class="fe-dd-separator" style="margin: 10px 0;"></div>
+
+        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Side-bar header</div>
+        <div style="display:flex; flex-direction: column; gap: 8px;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="radio" name="agent-header-display" value="icon" />
+            <span>Icon only</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="radio" name="agent-header-display" value="text" checked />
+            <span>Text only</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="radio" name="agent-header-display" value="both" />
+            <span>Icon + text</span>
+          </label>
+        </div>
+
         <div style="display:flex; gap:8px; align-items:center; margin-top: 12px;">
           <button class="fe-btn" id="editor-settings-agent-shortcuts">Shortcuts…</button>
         </div>
@@ -3024,6 +3102,11 @@
             </div>
           </div>
         </div>
+
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom: 10px;">
+          <input type="checkbox" id="agent-shortcut-header" />
+          <span>Add icon to header</span>
+        </label>
 
         <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom: 10px;">
           <div style="flex:1;">
